@@ -55,6 +55,14 @@ bearer token on the socket, so the client first calls `POST /api/auth/ws-ticket`
 dials with the ticket in a subprotocol. Tickets live about thirty seconds and are consumed by the
 dial: every reconnect mints a fresh one. Reusing a ticket is a bug, not an optimisation.
 
+## Dial plan
+
+Everything one WebSocket dial needs, minted immediately before it: the URL, the subprotocols and any
+extra headers. It exists as its own thing because a ticket is single-use and short-lived, so the
+credentials for a socket cannot be computed once and reused. The socket factory is _armed_ with a
+plan, consumes it when the socket is built, and refuses to dial without one — which turns ticket
+reuse into an error at the call site instead of a puzzling 4401.
+
 ## Session token
 
 The credential for an **ungated** gateway — one with authentication disabled. It is a long-lived
@@ -69,6 +77,15 @@ loopback redirect URI. The gateway exposes it at `/auth/native/authorize` and
 authorisation page in an in-app web view and intercepts the loopback redirect before it is loaded —
 nothing actually listens on that port. Password-based providers run through the same flow and end at
 the same redirect, so there is one code path rather than two.
+
+## Fake gateway
+
+The stand-in for `hermes serve` in `packages/fake-gateway`, used by the tests and by anyone
+developing without a real agent. It answers the public status endpoints, both authentication flows,
+the native PKCE round trip and the JSON-RPC surface, and exposes hooks a real gateway has no business
+having: forcing a close code, dropping a socket without a close frame, or refusing the next upgrade.
+It is a test double, not a second implementation — where behaviour matters, it follows the upstream
+source.
 
 ## Turn
 

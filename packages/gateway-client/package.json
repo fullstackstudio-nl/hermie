@@ -7,6 +7,24 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./connection": "./src/connection.ts",
+    "./credentials": "./src/credentials.ts",
+    "./http": "./src/http.ts",
+    "./native-auth": "./src/native-auth.ts",
+    "./pkce": "./src/pkce.ts",
+    "./probe": "./src/probe.ts",
+    "./socket-factory": "./src/socket-factory.ts",
+    "./types": "./src/types.ts",
+    "./url": "./src/url.ts"
+  },
+  "dependencies": {
+    "@hermes/shared": "*",
+    "@noble/hashes": "2.4.0"
+  },
+  "devDependencies": {
+    "@hermie/fake-gateway": "*",
+    "@types/ws": "^8.5.13",
+    "ws": "^8.18.0"
   }
 }

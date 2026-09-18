@@ -9,11 +9,13 @@ new record supersedes it, and the old one gets a line at the top pointing forwar
 
 ## Index
 
-| #                                            | Title                                                     | Status   |
-| -------------------------------------------- | --------------------------------------------------------- | -------- |
-| [0001](0001-expo-sdk-54-rn-081.md)           | Expo SDK 54 and React Native 0.81                         | Accepted |
-| [0002](0002-macos-via-react-native-macos.md) | macOS through react-native-macos, in the same app package | Accepted |
-| [0003](0003-vendor-hermes-shared.md)         | Vendor the Hermes protocol sources with a sync script     | Accepted |
+| #                                            | Title                                                        | Status   |
+| -------------------------------------------- | ------------------------------------------------------------ | -------- |
+| [0001](0001-expo-sdk-54-rn-081.md)           | Expo SDK 54 and React Native 0.81                            | Accepted |
+| [0002](0002-macos-via-react-native-macos.md) | macOS through react-native-macos, in the same app package    | Accepted |
+| [0003](0003-vendor-hermes-shared.md)         | Vendor the Hermes protocol sources with a sync script        | Accepted |
+| [0004](0004-native-pkce-via-webview.md)      | Native PKCE sign-in through an intercepted web view redirect | Accepted |
+| [0005](0005-ticket-per-websocket-dial.md)    | A fresh ticket per WebSocket dial, offered as a subprotocol  | Accepted |
 
 ## Template
 

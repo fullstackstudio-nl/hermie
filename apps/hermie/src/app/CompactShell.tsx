@@ -1,9 +1,11 @@
-import { NavigationContainer } from '@react-navigation/native'
-import { createNativeStackNavigator } from '@react-navigation/native-stack'
+import { NavigationContainer, useNavigation } from '@react-navigation/native'
+import { createNativeStackNavigator, type NativeStackNavigationProp } from '@react-navigation/native-stack'
+import { Pressable } from 'react-native'
 
 import { ChatScreen, ChatsScreen } from '../features/chats'
 import { CronScreen } from '../features/cron'
 import { SettingsScreen } from '../features/settings'
+import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
 
 export type CompactStackParamList = {
@@ -14,6 +16,19 @@ export type CompactStackParamList = {
 }
 
 const Stack = createNativeStackNavigator<CompactStackParamList>()
+
+/** The only way into Settings on a phone; the regular shell has a sidebar instead. */
+function SettingsLink() {
+  const navigation = useNavigation<NativeStackNavigationProp<CompactStackParamList>>()
+
+  return (
+    <Pressable accessibilityRole="button" onPress={() => navigation.navigate('Settings')} hitSlop={8}>
+      <Text variant="callout" color="accent">
+        Settings
+      </Text>
+    </Pressable>
+  )
+}
 
 export function CompactShell() {
   const theme = useTheme()
@@ -30,7 +45,11 @@ export function CompactShell() {
           contentStyle: { backgroundColor: theme.colors.bg }
         }}
       >
-        <Stack.Screen name="Chats" component={ChatsScreen} options={{ title: 'Bots' }} />
+        <Stack.Screen
+          name="Chats"
+          component={ChatsScreen}
+          options={{ title: 'Bots', headerRight: () => <SettingsLink /> }}
+        />
         <Stack.Screen
           name="Chat"
           component={ChatScreen}

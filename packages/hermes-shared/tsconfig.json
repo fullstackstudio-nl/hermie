@@ -1,6 +1,16 @@
 {
+  // Mirrors upstream's apps/shared/tsconfig.json so the vendored sources compile
+  // under the same rules they were written against; only the project-reference
+  // output settings are ours.
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["DOM", "DOM.Iterable", "ES2023"],
+    "useDefineForClassFields": true,
+    "noUncheckedIndexedAccess": false,
+    "noImplicitOverride": false,
+    "noFallthroughCasesInSwitch": false,
+    "types": [],
     "outDir": "./dist",
     "rootDir": "./src"
   },

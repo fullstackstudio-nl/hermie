@@ -16,15 +16,17 @@ this repository. Software that is merely installed from npm keeps its own licenc
 
 A subset of the pure-TypeScript sources that define the gateway protocol — the generated contract,
 the event types, the JSON-RPC channel and gateway client, WebSocket URL handling, reconnect backoff,
-slash-command parsing and a few small helpers — together with their tests.
+slash-command parsing and a few small helpers — together with their tests. The exact file list is in
+`packages/hermes-shared/upstream.json`.
 
 The copy is produced by `scripts/sync-hermes-shared.mjs`, which pulls the files at the pinned commit
 and applies a small set of mechanical rewrites so they run under React Native. Each vendored file
 carries an attribution banner naming the project, the commit and the licence. The full upstream
 licence text is kept at `packages/hermes-shared/LICENSE`.
 
-The vendoring itself is introduced together with the gateway client; the decision and its rationale
-are recorded in [docs/adr/0003-vendor-hermes-shared.md](docs/adr/0003-vendor-hermes-shared.md).
+The decision and its rationale are recorded in
+[docs/adr/0003-vendor-hermes-shared.md](docs/adr/0003-vendor-hermes-shared.md), and the rewrites are
+documented in [packages/hermes-shared/README.md](packages/hermes-shared/README.md).
 
 ## React Native macOS — project template
 

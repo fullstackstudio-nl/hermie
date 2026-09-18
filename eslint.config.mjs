@@ -33,6 +33,25 @@ export default config(
     }
   },
   {
+    // @hermie/gateway-client has to run on Hermes (React Native) as well as in
+    // Node, so it may never reach for a Node built-in.
+    files: ['packages/gateway-client/src/**/*.ts'],
+    ignores: ['packages/gateway-client/src/**/*.test.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['node:*'],
+              message: 'packages/gateway-client runs on React Native; Node built-ins are not available there.'
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
     // Build tooling and repo scripts run in Node, not in the app runtime.
     files: [
       'scripts/**/*.mjs',

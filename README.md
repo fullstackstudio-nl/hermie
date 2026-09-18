@@ -12,8 +12,10 @@ Website: [hermie.dev](https://hermie.dev)
 
 ## Status
 
-Early development. The project skeleton, the shells and the platform abstractions are in place; the
-gateway client, onboarding and the chat engine are being built. See [CHANGELOG.md](CHANGELOG.md).
+Early development. The project skeleton, the shells and the platform abstractions are in place, and
+so is the transport: the vendored protocol sources, the connection state machine with both
+authentication flows, and a gateway stand-in to develop against. Onboarding and the chat engine are
+next. See [CHANGELOG.md](CHANGELOG.md).
 
 ## What you need to run it
 
@@ -60,6 +62,9 @@ npm run macos           # macOS
 `npm run ios` and `npm run android` generate the native projects on first run; `ios/` and
 `android/` are not committed. `macos/` is committed and maintained by hand — see
 [CONTRIBUTING.md](CONTRIBUTING.md) before changing it.
+
+You do not need a real gateway to start. `npm run fake-gateway` stands one up on port 9119, and
+Settings → Connection test in the app points a connection at it and reports what happens.
 
 The repository is an npm workspace:
 

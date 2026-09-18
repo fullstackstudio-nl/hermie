@@ -7,6 +7,16 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./fuzzy": "./src/fuzzy.ts",
+    "./gateway-contract": "./src/gateway-contract.generated.ts",
+    "./gateway-events": "./src/gateway-events.ts",
+    "./json-rpc-channel": "./src/json-rpc-channel.ts",
+    "./json-rpc-gateway": "./src/json-rpc-gateway.ts",
+    "./model-search-text": "./src/model-search-text.ts",
+    "./reasoning-effort": "./src/reasoning-effort.ts",
+    "./reconnect-backoff": "./src/reconnect-backoff.ts",
+    "./slash": "./src/slash.ts",
+    "./websocket-url": "./src/websocket-url.ts"
   }
 }

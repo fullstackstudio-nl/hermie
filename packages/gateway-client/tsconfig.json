@@ -1,8 +1,12 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    // DOM is here only for the ambient WebSocket / fetch / URL types; nothing in
+    // this package touches the document.
+    "lib": ["ES2023", "DOM"],
     "outDir": "./dist",
     "rootDir": "./src"
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  "references": [{ "path": "../hermes-shared" }, { "path": "../fake-gateway" }]
 }

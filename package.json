@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
-  "description": "Hermie — a mobile and desktop client for Hermes Agent",
+  "description": "Hermie \u2014 a mobile and desktop client for Hermes Agent",
   "homepage": "https://hermie.dev",
   "workspaces": [
     "apps/*",
@@ -23,7 +23,7 @@
     "test:app": "npm run test --workspace @hermie/app",
     "sync:hermes-shared": "node scripts/sync-hermes-shared.mjs",
     "sync:hermes-shared:check": "node scripts/sync-hermes-shared.mjs --check",
-    "fake-gateway": "npm run start --workspace @hermie/fake-gateway",
+    "fake-gateway": "tsx packages/fake-gateway/src/cli.ts",
     "ios": "npm run ios --workspace @hermie/app",
     "android": "npm run android --workspace @hermie/app",
     "macos": "npm run macos --workspace @hermie/app",
@@ -39,6 +39,7 @@
     "globals": "^16.5.0",
     "husky": "^9.1.7",
     "prettier": "^3.4.2",
+    "tsx": "^4.23.13",
     "typescript": "~5.9.2",
     "typescript-eslint": "^8.20.0",
     "vitest": "^3.0.0"

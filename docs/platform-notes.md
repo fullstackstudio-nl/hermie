@@ -204,7 +204,17 @@ iPhone 17 Pro simulator with `xcodebuild`.
 
 Verified on 2026-09-19 on the iPhone 17 Pro simulator (iOS 26.5): the app installs, launches, loads
 its bundle from Metro and renders the compact shell — native stack with a "Bots" header and the
-placeholder screen below it, in light mode.
+placeholder screen below it, in light mode. Re-verified after the gateway client landed: Settings →
+Connection test probes the fake gateway, connects in session-token mode through
+`disconnected → authenticating → connecting → ready`, and lists its two bots.
+
+Two things about this machine rather than about the project:
+
+- `pod install` aborts with `Unicode Normalization not appropriate for ASCII-8BIT` unless the
+  locale is UTF-8. Run it as `LANG=en_US.UTF-8 pod install`, or export that in your shell profile —
+  CocoaPods says as much in its own warning.
+- An `xcodebuild` destination of `name=iPhone 17 Pro` resolves `OS:latest` to a runtime that device
+  does not exist on. Pass the simulator's UDID (`-destination 'id=<udid>'`) instead.
 
 ## Android
 

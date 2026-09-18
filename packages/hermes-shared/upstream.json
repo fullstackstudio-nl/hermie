@@ -1,0 +1,30 @@
+{
+  "$comment": "Pin and file list for scripts/sync-hermes-shared.mjs. Bump `commit`, re-run the sync, read the diff.",
+  "repo": "NousResearch/hermes-agent",
+  "commit": "b9c2660ca479d9a2cf000d1d45ac9aadd1b7e3bd",
+  "sourceDir": "apps/shared/src",
+  "rawBaseUrl": "https://raw.githubusercontent.com",
+  "license": "MIT",
+  "files": [
+    "gateway-contract.generated.ts",
+    "gateway-events.ts",
+    "json-rpc-channel.ts",
+    "json-rpc-channel.test.ts",
+    "json-rpc-gateway.ts",
+    "json-rpc-gateway-replay.test.ts",
+    "websocket-url.ts",
+    "reconnect-backoff.ts",
+    "reconnect-backoff.test.ts",
+    "slash.ts",
+    "slash.test.ts",
+    "reasoning-effort.ts",
+    "reasoning-effort.test.ts",
+    "model-search-text.ts",
+    "model-search-text.test.ts",
+    "fuzzy.ts"
+  ],
+  "notes": {
+    "fuzzy.ts": "Not used by Hermie directly; model-search-text.test.ts imports it, so the vendored test suite needs it.",
+    "excluded": "i18n.ts and skin.ts stay upstream: Hermie ships its own strings and its own theme tokens."
+  }
+}

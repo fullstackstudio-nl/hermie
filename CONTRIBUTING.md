@@ -54,11 +54,39 @@ The Metro bundler is shared: `npm run start --workspace @hermie/app` starts it o
 Android and macOS. macOS uses the `macos` platform, which is configured in
 `apps/hermie/metro.config.js`.
 
-To work without a gateway, start the stand-in:
+## The fake gateway
+
+`packages/fake-gateway` stands in for `hermes serve`. It speaks the public status endpoints, both
+authentication flows, the native PKCE round trip, single-use WebSocket tickets and the JSON-RPC
+surface the app calls, with two scripted bots.
 
 ```sh
-npm run fake-gateway
+npm run fake-gateway                       # port 9119, no authentication
+npm run fake-gateway -- --auth token       # session-token gateway; prints the token
+npm run fake-gateway -- --auth native      # gated: PKCE sign-in and WebSocket tickets
+npm run fake-gateway -- --port 9200 --close-code 4403 --scenario ./replies.json
 ```
+
+```sh
+curl localhost:9119/api/status
+```
+
+In `--auth native` the authorize page renders an "Approve as tester" button; adding `?auto=1` to the
+authorize URL redirects straight to the loopback callback, which is what the tests use. A scenario
+file is `{ "replies": [{ "match": "...", "deltas": ["..."], "tool": { "name": "...", "result": "..." } }] }`.
+
+The same server is importable, so tests drive it in-process:
+
+```ts
+import { startFakeGateway } from '@hermie/fake-gateway'
+
+const gateway = await startFakeGateway({ auth: 'token' })
+gateway.closeSockets(4403) // or dropSockets() for an abrupt 1006
+```
+
+From the app, Settings → **Connection test** is a developer screen that probes an address and opens
+a real connection to it in session-token mode. On an Android emulator the host machine is
+`http://10.0.2.2:9119`, never `localhost`.
 
 To work against a real gateway, [docs/test-gateway.md](docs/test-gateway.md) sets one up from
 scratch.
@@ -75,8 +103,18 @@ scratch.
 ## Vendored protocol sources
 
 `packages/hermes-shared` holds files copied from NousResearch/hermes-agent at a pinned commit. Do
-not edit them directly. Change `scripts/sync-hermes-shared.mjs` — which owns both the pin and the
-rewrites — and re-run it.
+not edit them directly — ESLint and Prettier skip the directory, and
+`npm run sync:hermes-shared:check` fails on any difference.
+
+The pin and the file list live in `packages/hermes-shared/upstream.json`; the rewrites live in
+`scripts/sync-hermes-shared.mjs`. To take a newer upstream commit: bump `commit`, run
+`npm run sync:hermes-shared`, read the diff, run `npm test`. Both sync modes fetch from
+`raw.githubusercontent.com`, so they need network access.
+
+A rewrite marked required that stops matching fails the sync loudly rather than producing a file
+that silently no longer works. When that happens, read the upstream file before touching the
+pattern. [packages/hermes-shared/README.md](packages/hermes-shared/README.md) documents each
+rewrite and why it exists.
 
 ## Commits
 
