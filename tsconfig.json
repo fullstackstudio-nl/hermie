@@ -4,6 +4,7 @@
     { "path": "./packages/hermes-shared" },
     { "path": "./packages/gateway-client" },
     { "path": "./packages/fake-gateway" },
+    { "path": "./packages/transcript" },
     { "path": "./apps/hermie" }
   ]
 }

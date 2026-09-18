@@ -1,0 +1,129 @@
+import { describe, expect, it } from 'vitest'
+
+import { CACHE_ITEM_LIMIT, snapshotForCache, stateFromCache } from './cache'
+import { reconcile } from './reconcile'
+import { applyEvent, applyServerRequest, beginLocalTurn } from './reducer'
+import { rowsToItems } from './rows-to-items'
+import { visibleItems } from './selectors'
+import { approvalRequest, delegationEvents, dmDispatchTurn } from './__fixtures__/events'
+import { rpcHistoryRows } from './__fixtures__/rows'
+import { type BotDmOutItem, type ChatState, createChatState, type TranscriptItem } from './types'
+
+const NOW = 1_700_000_000_000
+const IDS = { storedSessionId: 'stored-1', resolvedSessionId: 'resolved-1' }
+
+const fresh = () => createChatState('researcher', IDS.storedSessionId, IDS.resolvedSessionId)
+const hydrated = () => reconcile(fresh(), rowsToItems(rpcHistoryRows, 'rpc'))
+const roundTrip = (state: ChatState) => stateFromCache('researcher', IDS, snapshotForCache(state, NOW))
+
+describe('cache round trip', () => {
+  it('restores the same items in the same order with the same ids', () => {
+    const before = hydrated()
+    const after = roundTrip(before)
+
+    expect(after.order).toEqual(before.order)
+    expect(after.botName).toBe('researcher')
+    expect(after.storedSessionId).toBe('stored-1')
+  })
+
+  it('restores every index the reducer needs to keep working', () => {
+    const before = reconcile(
+      { ...applyEvent(fresh(), { type: 'message.start', seq: 1 }, NOW), turn: { ...fresh().turn } },
+      rowsToItems(rpcHistoryRows, 'rpc')
+    )
+    const after = roundTrip(before)
+
+    expect(after.byRowId).toEqual(before.byRowId)
+    expect(after.byToolId).toEqual(before.byToolId)
+  })
+
+  it('restores the delivery process index so a late reply still lands', () => {
+    const live = dmDispatchTurn.reduce((state, event) => applyEvent(state, event, NOW), fresh())
+    const after = roundTrip(live)
+    const dispatch = after.order.map(id => after.items[id]).find(item => item?.kind === 'bot_dm_out') as BotDmOutItem
+
+    expect(after.byProcessId['proc-2f9c']).toBe(dispatch.id)
+  })
+
+  it('restores subagents and the delegation index', () => {
+    const live = delegationEvents.reduce((state, event) => applyEvent(state, event, NOW), fresh())
+    const after = roundTrip(live)
+
+    expect(Object.keys(after.subagents)).toEqual(['child-0', 'child-1', 'child-2'])
+    expect(after.byDelegationId['del-9']).toBeDefined()
+  })
+
+  it('paints identically from cache and from the live state', () => {
+    const before = hydrated()
+    const view = (state: ChatState) =>
+      visibleItems(state, { level: 'normal', showBotToBot: true, showThinking: true }).map(entry => entry.item.id)
+
+    expect(view(roundTrip(before))).toEqual(view(before))
+  })
+
+  it('reports itself as cached, not live', () => {
+    expect(roundTrip(hydrated()).hydration).toBe('cached')
+  })
+
+  it('remembers how far the transcript was read', () => {
+    const snapshot = snapshotForCache(hydrated(), NOW)
+
+    expect(snapshot.lastRowId).toBe(15)
+    expect(stateFromCache('researcher', IDS, snapshot).lastSeenRowId).toBe(15)
+  })
+})
+
+describe('what the cache refuses to keep', () => {
+  it('drops an optimistic message the gateway never acknowledged', () => {
+    const state = beginLocalTurn(hydrated(), 'never sent', undefined, NOW)
+
+    expect(snapshotForCache(state, NOW).items.some(item => item.origin === 'optimistic')).toBe(false)
+  })
+
+  it('drops a foreign placeholder', () => {
+    const state = applyEvent(hydrated(), { type: 'message.start', seq: 1 }, NOW)
+
+    expect(snapshotForCache(state, NOW).items.some(item => item.origin === 'foreign')).toBe(false)
+  })
+
+  it('drops an unanswered request, which only the gateway may re-open', () => {
+    const state = applyServerRequest(hydrated(), approvalRequest, NOW)
+
+    expect(snapshotForCache(state, NOW).items.some(item => item.kind === 'approval')).toBe(false)
+  })
+
+  it('seals a bubble that was mid-stream when the app went away', () => {
+    const state = applyEvent(
+      applyEvent(hydrated(), { type: 'message.start', seq: 1 }, NOW),
+      { type: 'message.delta', seq: 2, payload: { text: 'half' } },
+      NOW
+    )
+    const assistant = snapshotForCache(state, NOW)
+      .items.filter(item => item.kind === 'assistant')
+      .at(-1)
+
+    expect(assistant).toMatchObject({ streaming: false })
+  })
+
+  it('keeps only the last window of items', () => {
+    const many: TranscriptItem[] = Array.from({ length: CACHE_ITEM_LIMIT + 20 }, (_value, index) => ({
+      id: `r:${index}`,
+      kind: 'user',
+      seq: index * 1000,
+      version: 0,
+      origin: 'history',
+      rowId: index,
+      text: `message ${index}`
+    }))
+    const snapshot = snapshotForCache(reconcile(fresh(), many), NOW)
+
+    expect(snapshot.items).toHaveLength(CACHE_ITEM_LIMIT)
+    expect(snapshot.items[0]?.id).toBe('r:20')
+  })
+
+  it('returns an empty chat for a snapshot written by another format', () => {
+    const snapshot = { ...snapshotForCache(hydrated(), NOW), format: 99 }
+
+    expect(stateFromCache('researcher', IDS, snapshot).order).toEqual([])
+  })
+})

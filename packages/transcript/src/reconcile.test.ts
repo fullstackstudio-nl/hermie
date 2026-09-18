@@ -1,0 +1,186 @@
+import { describe, expect, it } from 'vitest'
+
+import { reconcile, reconcileTail } from './reconcile'
+import { applyEvent, applyServerRequest, beginLocalTurn } from './reducer'
+import { rowsToItems, type TranscriptRow } from './rows-to-items'
+import { approvalRequest, dmDispatchTurn, streamedTurn } from './__fixtures__/events'
+import { dmReplyProcessText, rpcHistoryRows } from './__fixtures__/rows'
+import {
+  type ApprovalItem,
+  type BotDmOutItem,
+  type ChatState,
+  createChatState,
+  type ToolItem,
+  type UserItem
+} from './types'
+
+const NOW = 1_700_000_000_000
+
+const fresh = () => createChatState('researcher', 'stored-1', 'resolved-1')
+const list = (state: ChatState) => state.order.map(id => state.items[id]!)
+const run = (events: readonly { type: string; seq?: number; payload?: unknown }[], start: ChatState = fresh()) =>
+  events.reduce((state, event) => applyEvent(state, event, NOW), start)
+
+describe('reconcile', () => {
+  it('keeps ids stable across a second hydration of the same rows', () => {
+    const first = reconcile(fresh(), rowsToItems(rpcHistoryRows, 'rpc'))
+    const second = reconcile(first, rowsToItems(rpcHistoryRows, 'rpc'))
+
+    expect(second.order).toEqual(first.order)
+  })
+
+  it('keeps ids stable when the same rows arrive over the other transport', () => {
+    const rpc = reconcile(fresh(), rowsToItems(rpcHistoryRows, 'rpc'))
+    const asRest: TranscriptRow[] = rpcHistoryRows.map(({ text, row_id, ...rest }) => ({
+      ...rest,
+      ...(text !== undefined ? { content: text } : {}),
+      ...(row_id !== undefined ? { id: row_id } : {})
+    }))
+    const rest = reconcile(rpc, rowsToItems(asRest, 'rest'))
+
+    expect(rest.order).toEqual(rpc.order)
+  })
+
+  it('renumbers items densely so a later live item still sorts last', () => {
+    const state = reconcile(fresh(), rowsToItems(rpcHistoryRows, 'rpc'))
+
+    expect(list(state).map(item => item.seq)).toEqual(list(state).map((_item, index) => index * 1000))
+    expect(state.turn.nextSeq).toBe(state.order.length * 1000)
+  })
+
+  it('carries live tool results onto the history row that has none', () => {
+    const live = run(streamedTurn)
+    const historyRows: TranscriptRow[] = [
+      { role: 'user', row_id: 1, text: 'read the changelog' },
+      { role: 'tool', tool_id: 'call_1', name: 'read_file', context: 'read_file(CHANGELOG.md)' },
+      { role: 'assistant', row_id: 2, text: 'Version 1.2.0 ships three fixes.' }
+    ]
+    const state = reconcile(live, rowsToItems(historyRows, 'rpc'))
+    const tool = list(state).find(item => item.kind === 'tool') as ToolItem
+
+    expect(tool.resultKnown).toBe(true)
+    expect(tool.resultText).toBe('# 1.2.0')
+    expect(tool.durationS).toBe(0.42)
+  })
+
+  it('carries a live dispatch outcome onto the history row', () => {
+    const live = run(dmDispatchTurn)
+    const state = reconcile(
+      live,
+      rowsToItems(
+        [
+          {
+            role: 'tool',
+            tool_id: 'call_dm_1',
+            name: 'message_agent',
+            args: { target: '@writer', message: 'Can you draft the announcement?' }
+          }
+        ],
+        'rpc'
+      )
+    )
+    const dispatch = list(state).find(item => item.kind === 'bot_dm_out') as BotDmOutItem
+
+    expect(dispatch.dispatch).toMatchObject({ status: 'queued', processId: 'proc-2f9c' })
+    expect(state.byProcessId['proc-2f9c']).toBe(dispatch.id)
+  })
+
+  it('keeps an optimistic tail the backend has not persisted yet', () => {
+    const local = beginLocalTurn(
+      reconcile(fresh(), rowsToItems(rpcHistoryRows, 'rpc')),
+      'one more thing',
+      undefined,
+      NOW
+    )
+    const state = reconcile(local, rowsToItems(rpcHistoryRows, 'rpc'))
+    const tail = list(state).at(-1) as UserItem
+
+    expect(tail.text).toBe('one more thing')
+    expect(tail.origin).toBe('optimistic')
+  })
+
+  it('keeps an open approval, which history can never re-supply', () => {
+    const withRequest = applyServerRequest(reconcile(fresh(), rowsToItems(rpcHistoryRows, 'rpc')), approvalRequest, NOW)
+    const state = reconcile(withRequest, rowsToItems(rpcHistoryRows, 'rpc'))
+    const approval = list(state).find(item => item.kind === 'approval') as ApprovalItem
+
+    expect(approval.state).toBe('open')
+    expect(state.byRequestId['srq-7']).toBe(approval.id)
+  })
+
+  it('drops a live bubble once the persisted row replaces it', () => {
+    const live = run([
+      { type: 'message.start', seq: 1 },
+      { type: 'message.delta', seq: 2, payload: { text: 'hello there' } },
+      { type: 'message.complete', seq: 3, payload: { text: 'hello there', status: 'complete' } }
+    ])
+    const state = reconcile(live, rowsToItems([{ role: 'assistant', row_id: 9, text: 'hello there' }], 'rpc'))
+
+    expect(list(state).filter(item => item.kind === 'assistant')).toHaveLength(1)
+    expect(list(state).find(item => item.kind === 'assistant')?.rowId).toBe(9)
+  })
+
+  it('marks the transcript live', () => {
+    expect(reconcile(fresh(), rowsToItems(rpcHistoryRows, 'rpc')).hydration).toBe('live')
+  })
+})
+
+describe('reconcileTail', () => {
+  it('fills the placeholder a foreign turn left behind', () => {
+    const live = run(streamedTurn)
+    const placeholder = list(live)[0] as UserItem
+
+    expect(placeholder.unknownAuthor).toBe(true)
+
+    const tail = rowsToItems(
+      [{ role: 'user', row_id: 21, text: 'Message from 🤖 Writer (@writer): can you check the changelog?' }],
+      'rest'
+    )
+    const state = reconcileTail(live, tail)
+    const filled = state.items[placeholder.id]
+
+    expect(filled).toMatchObject({ kind: 'bot_dm_in', senderHandle: 'writer', rowId: 21 })
+    expect(state.turn.foreignReconcilePending).toBeUndefined()
+  })
+
+  it('never drops the bubbles of the turn it is describing', () => {
+    const live = run([
+      { type: 'message.start', seq: 1 },
+      { type: 'message.delta', seq: 2, payload: { text: 'still typing' } }
+    ])
+    const state = reconcileTail(live, rowsToItems([{ role: 'user', row_id: 30, text: 'ping' }], 'rest'))
+
+    expect(list(state).some(item => item.kind === 'assistant')).toBe(true)
+    expect(state.turn.assistantId).toBeDefined()
+  })
+
+  it('joins a delivery reply onto the dispatch it belongs to', () => {
+    const live = run(dmDispatchTurn)
+    const tail = rowsToItems(
+      [{ role: 'user', row_id: 31, display_kind: 'process_complete', text: dmReplyProcessText }],
+      'rest'
+    )
+    const state = reconcileTail(live, tail)
+    const dispatch = list(state).find(item => item.kind === 'bot_dm_out') as BotDmOutItem
+
+    expect(dispatch.reply?.text).toBe('Draft is ready, I pushed it to the shared folder.')
+    // The completion was consumed by the join, so it adds no notice of its own.
+    expect(list(state).some(item => item.kind === 'notice')).toBe(false)
+  })
+
+  it('appends rows it has never seen', () => {
+    const live = reconcile(fresh(), rowsToItems(rpcHistoryRows, 'rpc'))
+    const state = reconcileTail(live, rowsToItems([{ role: 'user', row_id: 99, text: 'and one more' }], 'rest'))
+
+    expect((list(state).at(-1) as UserItem).text).toBe('and one more')
+    expect(state.byRowId['99']).toBeDefined()
+  })
+
+  it('merges a row it already shows instead of duplicating it', () => {
+    const live = reconcile(fresh(), rowsToItems(rpcHistoryRows, 'rpc'))
+    const before = live.order.length
+    const state = reconcileTail(live, rowsToItems(rpcHistoryRows.slice(-2), 'rpc'))
+
+    expect(state.order.length).toBe(before)
+  })
+})

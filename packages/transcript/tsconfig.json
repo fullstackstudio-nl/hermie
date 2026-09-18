@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Pure data transforms: no DOM, no Node, no React. Keeping the lib this
+    // narrow is what stops a browser-only or Node-only API sneaking in.
+    "lib": ["ES2023"],
+    "types": [],
+    "outDir": "./dist",
+    "rootDir": "./src"
+  },
+  "include": ["src/**/*.ts"],
+  "references": [{ "path": "../hermes-shared" }]
+}

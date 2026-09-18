@@ -1,0 +1,384 @@
+/**
+ * The transcript item model.
+ *
+ * One chat with one bot is a normalised `ChatState`: an id-keyed `items` map, an
+ * `order` array and a handful of indices. History rows and live gateway events
+ * are projected into the SAME item kinds (see `rows-to-items.ts` and
+ * `reducer.ts`), so a loaded transcript and a streamed one render identically.
+ *
+ * Nothing here filters. Verbosity and the bot-to-bot toggle are selectors
+ * (`selectors.ts`); the reducer always keeps the full truth.
+ */
+import type { ErrorSurface, SessionLiveInfo, Usage } from '@hermes/shared/gateway-events'
+
+/** Client-side verbosity filter. Purely a read-time concern. */
+export type Verbosity = 'quiet' | 'normal' | 'verbose'
+
+/**
+ * Where an item came from, which decides what reconciliation may drop.
+ * `history` is persisted, `live` arrived on the socket, `optimistic` is a local
+ * submit not yet echoed, `inflight` was rebuilt from a resume snapshot and
+ * `foreign` is a placeholder for a turn somebody else (a teammate bot, another
+ * surface) started in this session.
+ */
+export type ItemOrigin = 'history' | 'live' | 'optimistic' | 'inflight' | 'foreign'
+
+/** One emoji reaction on a persisted row. */
+export interface ItemReaction {
+  emoji: string
+  [key: string]: unknown
+}
+
+export interface ItemBase {
+  /** Stable across re-hydration — see `reconcile.ts`. */
+  id: string
+  /** Sort key within `order`; history rows get `index * 1000` so live items fit between. */
+  seq: number
+  /** Unix seconds, when the wire carried one. */
+  ts?: number
+  /** Durable `messages.id` once the row is persisted. */
+  rowId?: number
+  origin: ItemOrigin
+  /** Bumped on every mutation; lets a UI memoize per item and per state cheaply. */
+  version: number
+  reactions?: ItemReaction[]
+}
+
+/** A human turn (or the bot's own steer / skill invocation projection). */
+export interface UserItem extends ItemBase {
+  kind: 'user'
+  text: string
+  /** `@image:` / `@file:` reference strings pulled out of the persisted text. */
+  attachments?: string[]
+  /** Submitted locally, not yet acknowledged by the gateway. */
+  pending?: boolean
+  displayKind?: 'skill_invocation' | 'steer'
+  /** A foreign turn started before we know who spoke; filled by `reconcileTail`. */
+  unknownAuthor?: boolean
+}
+
+/** An inbound bot-to-bot message: a `role:user` row that is NOT the human speaking. */
+export interface BotDmInItem extends ItemBase {
+  kind: 'bot_dm_in'
+  senderName: string
+  senderHandle?: string
+  text: string
+  /** True when this chat dispatched a `message_agent` to that sender in the current exchange. */
+  answersOurDispatch?: boolean
+}
+
+export interface AssistantFailure {
+  message: string
+  /** `text` is streamed partial output worth keeping, not the error string. */
+  partial: boolean
+  /** The backend retained the failed turn; a resume will replay it. */
+  recoverable?: boolean
+  surface?: ErrorSurface
+}
+
+export interface AssistantItem extends ItemBase {
+  kind: 'assistant'
+  text: string
+  reasoning?: string
+  reasoningVerbose?: boolean
+  streaming: boolean
+  /** Sealed mid-turn commentary: rendered without the turn's action footer. */
+  interim: boolean
+  status?: 'complete' | 'error' | 'interrupted'
+  error?: AssistantFailure
+  usage?: Usage
+  durationS?: number
+  /** Set when this reply answers an inbound DM rather than the human. */
+  replyToBotHandle?: string
+}
+
+export type ToolStatus = 'generating' | 'running' | 'complete' | 'error' | 'unknown'
+
+export interface ToolItem extends ItemBase {
+  kind: 'tool'
+  toolId: string
+  name: string
+  /** The gateway's ~80 char call preview. */
+  context?: string
+  args?: Record<string, unknown>
+  /** Only sent when the gateway runs at `display.tool_progress verbose`. */
+  argsText?: string
+  status: ToolStatus
+  /** False for a history row: the gateway does not persist tool results. */
+  resultKnown: boolean
+  result?: unknown
+  resultText?: string
+  summary?: string
+  inlineDiff?: string
+  durationS?: number
+  isError?: boolean
+  outputRisk?: ToolOutputRisk
+}
+
+export interface ToolOutputRisk {
+  risk: string
+  findings: string[]
+  redacted: boolean
+}
+
+export type DispatchStatus = 'sending' | 'queued' | 'failed' | 'ambiguous' | 'unknown'
+
+export interface BotDmDispatch {
+  status: DispatchStatus
+  deliveryId?: string
+  /** Background delivery process; the reply lands as a `process_complete` row with this id. */
+  processId?: string
+  to?: string
+  error?: string
+  reason?: string
+}
+
+export interface BotDmReply {
+  text: string
+  ts?: number
+  rowId?: number
+  error?: string
+  reason?: string
+}
+
+/** An outbound `message_agent` call plus, later, the teammate's answer. */
+export interface BotDmOutItem extends ItemBase {
+  kind: 'bot_dm_out'
+  toolId: string
+  /** The target exactly as the model wrote it. */
+  target: string
+  /** The routing alias: `@`-stripped, connection-stripped, last path segment, lowercased. */
+  targetHandle: string
+  message: string
+  dispatch: BotDmDispatch
+  reply?: BotDmReply
+}
+
+export type SubagentGroupStatus = 'dispatched' | 'running' | 'done' | 'failed'
+
+/** One `delegate_task` fan-out. The children live in `ChatState.subagents`. */
+export interface SubagentGroupItem extends ItemBase {
+  kind: 'subagent_group'
+  delegationId?: string
+  toolId?: string
+  goals: string[]
+  /** Subagent ids belonging to this fan-out. */
+  rootIds: string[]
+  status: SubagentGroupStatus
+  completion?: string
+}
+
+export type SubagentStatus = 'queued' | 'running' | 'completed' | 'failed' | 'interrupted'
+export type SubagentStreamKind = 'progress' | 'tool' | 'thinking' | 'summary'
+
+export interface SubagentStreamEntry {
+  at: number
+  kind: SubagentStreamKind
+  text: string
+  isError?: boolean
+}
+
+export interface Subagent {
+  id: string
+  parentId: string | null
+  delegationId?: string
+  /** The child's own stored session id, so a UI can open its transcript. */
+  childSessionId?: string
+  goal: string
+  model?: string
+  depth?: number
+  taskIndex: number
+  taskCount: number
+  status: SubagentStatus
+  startedAt: number
+  updatedAt: number
+  durationSeconds?: number
+  toolCount?: number
+  inputTokens?: number
+  outputTokens?: number
+  filesRead: string[]
+  filesWritten: string[]
+  /** Capped at `SUBAGENT_STREAM_CAP` entries. */
+  stream: SubagentStreamEntry[]
+  summary?: string
+  currentTool?: string
+  acceptingSteer?: boolean
+}
+
+/** Transient one-liner (`status.update`): compaction, goals, lifecycle, process. */
+export interface StatusItem extends ItemBase {
+  kind: 'status'
+  statusKind: string
+  text: string
+}
+
+export type NoticeKind =
+  | 'model_switch'
+  | 'personality_switch'
+  | 'auto_continue'
+  | 'process_complete'
+  | 'async_delegation_complete'
+  | 'internal_notification'
+  | 'error'
+  | 'notice'
+  | 'reclaimed'
+  | 'unknown_display_kind'
+
+/** One `[IMPORTANT: Background process <sid> …]` block, kept so a later tail
+ *  reconcile can still join a DM reply onto the dispatch that spawned it. */
+export interface ProcessCompletionBlock {
+  sid: string
+  command: string
+  output: string
+}
+
+export interface NoticeItem extends ItemBase {
+  kind: 'notice'
+  noticeKind: NoticeKind
+  title: string
+  body?: string
+  /** Only on `noticeKind: 'process_complete'`: the blocks not yet attributed. */
+  completions?: ProcessCompletionBlock[]
+}
+
+export type RequestState = 'open' | 'answered' | 'cancelled'
+
+export interface ApprovalItem extends ItemBase {
+  kind: 'approval'
+  /** JSON-RPC server-request id (`srq-N`). */
+  requestId: string
+  /** The approval queue's own id, which `approval.respond` addresses. */
+  approvalId: string
+  command: string
+  description?: string
+  toolName?: string
+  choices: string[]
+  allowPermanent?: boolean
+  allowSession?: boolean
+  smartDenied?: boolean
+  state: RequestState
+  answer?: string
+  cancelReason?: string
+}
+
+export interface ClarifyQuestionItem {
+  qid: string
+  question: string
+  choices?: string[]
+  multiSelect: boolean
+}
+
+export interface ClarifyItem extends ItemBase {
+  kind: 'clarify'
+  requestId: string
+  questions: ClarifyQuestionItem[]
+  /** qid → answer. */
+  answers: Record<string, string>
+  /** qid set the server already accepted (locked); those may not be edited. */
+  locked: string[]
+  state: RequestState
+  cancelReason?: string
+}
+
+export type TranscriptItem =
+  | ApprovalItem
+  | AssistantItem
+  | BotDmInItem
+  | BotDmOutItem
+  | ClarifyItem
+  | NoticeItem
+  | StatusItem
+  | SubagentGroupItem
+  | ToolItem
+  | UserItem
+
+export type TranscriptItemKind = TranscriptItem['kind']
+
+/** Authoritative todo snapshot (`tool_progress._normalize_todo_state`). */
+export interface TodoSnapshot {
+  todos: unknown[]
+  revision: number
+}
+
+export interface TurnState {
+  active: boolean
+  startedAt?: number
+  /** The assistant item currently receiving deltas. */
+  assistantId?: string
+  /** True when WE submitted this turn; false means a foreign turn. */
+  local: boolean
+  /** Next `seq` to hand out. */
+  nextSeq: number
+  /** A foreign turn started; the tail needs a REST reconcile to learn who spoke. */
+  foreignReconcilePending?: boolean
+  interrupted?: boolean
+  /** `tool.generating` announced a name before the call's id existed. */
+  draftingTool?: string
+}
+
+export type HydrationState = 'cold' | 'cached' | 'hydrating' | 'live' | 'stale' | 'error'
+
+export interface ChatState {
+  botName: string
+  /** The durable id we persist and resume on. Never the runtime id. */
+  storedSessionId: string
+  /** The lineage tip; REST rows are read under this id. */
+  resolvedSessionId: string
+  /** The gateway's runtime session id for the current attachment. */
+  runtimeSessionId?: string
+  items: Record<string, TranscriptItem>
+  order: string[]
+  /** tool_id → item id. */
+  byToolId: Record<string, string>
+  /** String(rowId) → item id; string-keyed so the cache round-trips as JSON. */
+  byRowId: Record<string, string>
+  /** Server-request id → item id. */
+  byRequestId: Record<string, string>
+  /** Background delivery process id → `bot_dm_out` item id. */
+  byProcessId: Record<string, string>
+  /** delegation_id → `subagent_group` item id. */
+  byDelegationId: Record<string, string>
+  subagents: Record<string, Subagent>
+  turn: TurnState
+  /** A prompt the backend parked behind the running turn. */
+  queued?: { text: string }
+  todo?: TodoSnapshot
+  usage?: Usage
+  info?: SessionLiveInfo
+  /** Highest event `seq` applied; anything at or below it is a replay. */
+  lastSeq: number
+  /** `replay_epoch` from `gateway.ready`; a change forces full re-hydration. */
+  epoch?: string
+  hydration: HydrationState
+  unreadCount: number
+  lastSeenRowId?: number
+  draft: string
+  compacting?: boolean
+}
+
+/** Upstream's `MAX_STREAM` (`apps/desktop/src/store/subagents.ts`). */
+export const SUBAGENT_STREAM_CAP = 24
+
+/** The gap between history seqs; live items are handed the next multiple. */
+export const SEQ_STEP = 1000
+
+export function createChatState(botName: string, storedSessionId: string, resolvedSessionId: string): ChatState {
+  return {
+    botName,
+    storedSessionId,
+    resolvedSessionId,
+    items: {},
+    order: [],
+    byToolId: {},
+    byRowId: {},
+    byRequestId: {},
+    byProcessId: {},
+    byDelegationId: {},
+    subagents: {},
+    turn: { active: false, local: false, nextSeq: SEQ_STEP },
+    lastSeq: 0,
+    hydration: 'cold',
+    unreadCount: 0,
+    draft: ''
+  }
+}
