@@ -9,6 +9,7 @@
 module.exports = {
   dependencies: {
     'react-native-screens': { platforms: { macos: null } },
-    'react-native-safe-area-context': { platforms: { macos: null } }
+    'react-native-safe-area-context': { platforms: { macos: null } },
+    '@react-native-community/netinfo': { platforms: { macos: null } }
   }
 }

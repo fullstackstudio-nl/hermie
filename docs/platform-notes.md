@@ -17,8 +17,9 @@ npm 11.19.1, CocoaPods 1.17.0, Expo SDK 54.0.37, React Native 0.81.5, react-nati
 | Is `TextDecoder` present at runtime?        | Not verified; the guard ships either way     | 2026-09-18 |
 | Is expo-secure-store available on macOS?    | No                                           | 2026-09-18 |
 | Is expo-sqlite available on macOS?          | Yes, links and compiles                      | 2026-09-18 |
-| Is expo-crypto available on macOS?          | Yes, links and compiles                      | 2026-09-18 |
-| Is react-native-webview available on macOS? | Yes, links and compiles                      | 2026-09-18 |
+| Is expo-crypto available on macOS?          | Yes, and it runs                             | 2026-09-19 |
+| Is react-native-webview available on macOS? | Native module loads; rendering unverified    | 2026-09-19 |
+| Is NetInfo available on macOS?              | No — importing it crashes the app            | 2026-09-19 |
 
 "Links and compiles" is exactly that: the pod is linked into the macOS app and the app builds. It is
 not a statement that the module behaves correctly at runtime — that gets verified when the feature
@@ -140,6 +141,7 @@ shipping macOS.
 | `@react-native-async-storage/async-storage` 2.2.0 | yes                              | declares `:osx`                                                                                        |
 | `react-native-safe-area-context` 5.6.x            | podspec says yes, sources say no | it declares an `osx` deployment target but has no `macos/` source directory; the iOS sources are UIKit |
 | `react-native-screens` 4.16.x                     | **no**                           | no `:osx` platform at all                                                                              |
+| `@react-native-community/netinfo` 11.4.1          | podspec says yes, not linked     | its podspec declares `:osx`, but Expo's autolinking produces no macOS pod for it                       |
 
 **react-native-screens has no macOS support**, which means `@react-navigation/native-stack` cannot be
 used there. This is why the regular (sidebar plus detail) shell deliberately uses plain views instead
@@ -154,11 +156,58 @@ returns zero insets, which is correct for a Mac window anyway.
 
 The macOS bundle is 611 modules against 1009 for iOS, which is the difference these exclusions make.
 
+## macOS: what M2 measured at runtime
+
+The table above used to say "links and compiles" for three modules, which is a statement about
+`pod install` and nothing else. Onboarding is the first feature that uses them, so they were measured
+in the running macOS app on 2026-09-19 by evaluating expressions against it over Metro's inspector.
+
+**`@react-native-community/netinfo` has no native module on macOS, and importing it is fatal.** The
+app died on launch with `[runtime not ready]: Error: @react-native-community/netinfo:
+NativeModule.RNCNetInfo is null`, before rendering anything. The package's podspec declares
+`:osx => 10.14` and it ships a `macos/` directory, but that directory holds only a legacy
+`.xcodeproj` and the podspec's `source_files` are `ios/**` — and in practice Expo's autolinking
+resolver produces no entry for it at all, so `macos/Podfile.lock` has never contained it. The
+package's JavaScript throws the moment it is imported, so a runtime `Platform.OS` check is too late:
+the import itself has to be kept out of the bundle.
+
+The fix follows the pattern the navigation libraries already use: `src/platform/net-info.ts` is the
+seam, and `net-info.macos.ts` reports "always online" without importing the package. That is not a
+loss of behaviour — the offline state exists to stop a phone burning battery on the dial ladder with
+no signal, and a desktop losing its link is already covered by the connection's own reconnect ladder.
+The package is also listed in `react-native.config.js` alongside the other macOS exclusions.
+
+**`expo-crypto` works.** Not just linked: `expo.modules.ExpoCrypto.getRandomBase64String(16)`
+returns real bytes in the running macOS app. PKCE therefore uses the same entropy source on macOS as
+everywhere else. `src/platform/random.ts` still probes it once and falls back to the runtime's
+`crypto.getRandomValues`, because a module that links is not a module that runs and the cost of
+finding that out the hard way is a sign-in with a predictable verifier.
+
+**`expo-secure-store` is confirmed absent.** The Expo module registry in the running macOS app lists
+`ExpoFetchModule`, `ExpoCrypto`, `ExpoKeepAwake`, `ExpoAsset`, `ExpoWebBrowser`, `ExpoFontLoader`,
+`ExpoModulesCoreJSLogger`, `ExponentConstants`, `ExponentFileSystem`, `ExpoFontUtils`, `FileSystem`
+and `ExpoSQLite` — and no `ExpoSecureStore`. The AsyncStorage-backed shim in
+`src/platform/secret-store.macos.ts` is load-bearing, and the warning above it stands: a macOS build
+stores its tokens unencrypted and must not be pointed at a production gateway.
+
+**`react-native-webview` is half-verified.** Its native module `RNCWebViewModule` is present in the
+running macOS app, so the package's native side does load, and it is in `macos/Podfile.lock`. Whether
+the view itself renders was **not** established: the onboarding screens could not be driven on macOS
+from this environment, and the lazy view-manager registry gives no answer before a view is mounted.
+`NativeSignInWebView` is therefore built so that the answer does not have to be known in advance — an
+error boundary around the web view falls back to the system browser plus a pasted redirect, and that
+fallback is also reachable deliberately from a link that is always visible while the web view is
+open. The parser is shared, so the fallback is a text field rather than a second implementation.
+
 ## macOS runtime
 
 Verified on 2026-09-19: the app launches, fetches its bundle from Metro over the `macos` platform and
 renders the regular shell — sidebar with the section list, detail pane, and colours following the
 system appearance (dark, in the run that was checked). Window title "Hermie".
+
+Re-verified after onboarding landed, once the NetInfo crash above was fixed: a macOS build with no
+stored gateway opens the setup wizard, in dark mode, with the form as a centred column capped at its
+maximum width rather than stretched across the window.
 
 The one runtime wrinkle worth knowing: a Debug build shows "Downloading 100%..." indefinitely if
 Metro is not reachable at `localhost:8081`, with no error and no red box. Start Metro before

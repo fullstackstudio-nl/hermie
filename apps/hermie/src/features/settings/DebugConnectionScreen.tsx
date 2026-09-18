@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Platform, ScrollView, TextInput, View } from 'react-native'
 
 import { createGatewayConnection } from '../../gateway'
+import { entropySource } from '../../platform/random'
 import { Button, Screen, Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 
@@ -151,6 +152,13 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
             </Text>
           </View>
         ) : null}
+
+        <View style={{ gap: theme.space.xxs }}>
+          <Text variant="heading">Runtime</Text>
+          <Text color="textMuted" testID="debug-entropy">
+            random bytes: {entropySource()}
+          </Text>
+        </View>
 
         <View style={{ gap: theme.space.xxs }}>
           <Text variant="heading">Status</Text>

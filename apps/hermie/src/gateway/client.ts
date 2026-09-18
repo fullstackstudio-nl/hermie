@@ -1,4 +1,3 @@
-import NetInfo from '@react-native-community/netinfo'
 import {
   DialPlanSocketFactory,
   GatewayConnection,
@@ -12,16 +11,10 @@ import {
 } from '@hermie/gateway-client'
 import { AppState, Platform } from 'react-native'
 
+import { subscribeToConnectivity } from '../platform/net-info'
 import { secretStore } from '../platform/secret-store'
 import { PlatformWebSocket } from '../platform/socket'
-
-/** Secret-store keys. The non-secret gateway config lives in the key-value store. */
-export const SECRET_KEYS = {
-  accessToken: 'hermie.auth.access_token',
-  refreshToken: 'hermie.auth.refresh_token',
-  tokenMeta: 'hermie.auth.token_meta',
-  sessionToken: 'hermie.auth.session_token'
-} as const
+import { SECRET_KEYS } from './config'
 
 interface TokenMeta {
   expiresAt: number
@@ -82,25 +75,68 @@ export function createSecretTokenStore(): TokenStore {
   }
 }
 
+/**
+ * A token store that never touches disk. The onboarding wizard signs in and
+ * tests the connection before it is allowed to persist anything, so the tokens
+ * it is holding have to live somewhere that an abandoned wizard simply forgets.
+ */
+export function createMemoryTokenStore(initial: TokenSet | null = null): TokenStore {
+  let tokens = initial
+
+  return {
+    async load() {
+      return tokens
+    },
+    async save(next: TokenSet) {
+      tokens = next
+    },
+    async clear() {
+      tokens = null
+    }
+  }
+}
+
+export interface CreateTokenCoordinatorOptions {
+  baseUrl: string
+  extraHeaders?: Record<string, string>
+  /** Defaults to the secret store; the wizard hands in a memory store. */
+  store?: TokenStore
+}
+
+/**
+ * The single owner of token rotation for one gateway. It is created outside the
+ * connection because the reauthentication banner has to hand it a freshly minted
+ * token set — writing to the secret store behind its back would leave its cache
+ * holding the signed-out state.
+ */
+export function createTokenCoordinator(options: CreateTokenCoordinatorOptions): TokenCoordinator {
+  const extraHeaders = options.extraHeaders ?? {}
+
+  return new TokenCoordinator({
+    store: options.store ?? createSecretTokenStore(),
+    refresh: tokens => refreshTokens(options.baseUrl, tokens, { extraHeaders })
+  })
+}
+
 export interface CreateConnectionOptions {
   config: GatewayConfig
-  /** Only for `authMode: 'session_token'`; the native flow reads the secret store. */
+  /** Only for `authMode: 'session_token'`; the native flow uses the coordinator. */
   sessionToken?: string
-  tokenStore?: TokenStore
+  /** Only for `authMode: 'native_pkce'`; one is built over the secret store if omitted. */
+  coordinator?: TokenCoordinator
 }
 
 /** Build a connection for one configured gateway. The caller owns `start()` / `stop()`. */
 export function createGatewayConnection(options: CreateConnectionOptions): GatewayConnection {
   const { config } = options
+  const extraHeaders = config.extraHeaders ?? {}
   const credentials =
     config.authMode === 'session_token'
       ? new SessionTokenCredentials({ token: options.sessionToken ?? '' })
       : new NativePkceCredentials({
           baseUrl: config.baseUrl,
-          coordinator: new TokenCoordinator({
-            store: options.tokenStore ?? createSecretTokenStore(),
-            refresh: tokens => refreshTokens(config.baseUrl, tokens, { extraHeaders: config.extraHeaders ?? {} })
-          })
+          coordinator: options.coordinator ?? createTokenCoordinator({ baseUrl: config.baseUrl, extraHeaders }),
+          extraHeaders
         })
 
   return new GatewayConnection({
@@ -130,11 +166,7 @@ export function attachLifecycle(connection: GatewayConnection): () => void {
     subscriptions.push(() => appState.remove())
   }
 
-  subscriptions.push(
-    NetInfo.addEventListener(state => {
-      connection.setOnline(state.isConnected !== false)
-    })
-  )
+  subscriptions.push(subscribeToConnectivity(online => connection.setOnline(online)))
 
   return () => {
     for (const unsubscribe of subscriptions) {

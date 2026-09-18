@@ -1,0 +1,156 @@
+import { Children, isValidElement, type ReactNode } from 'react'
+import { Pressable, type PressableProps, View, type ViewProps } from 'react-native'
+
+import { useTheme } from '../theme'
+import { CONTROL_MIN_HEIGHT } from '../tokens'
+import { Text } from './Text'
+
+export type InsetGroupProps = ViewProps & {
+  /** Small capitalised label above the card, as iOS grouped tables use. */
+  header?: string
+  /** Explanatory line under the card. */
+  footer?: ReactNode
+}
+
+/**
+ * The iOS inset grouped section: a rounded card of rows on a tinted background,
+ * with a quiet header above and an explanation below. Rows are separated by a
+ * hairline that stops short of the leading edge, so the group reads as one
+ * object rather than as a stack of boxes.
+ */
+export function InsetGroup({ header, footer, children, style, ...rest }: InsetGroupProps) {
+  const theme = useTheme()
+  const rows = Children.toArray(children).filter(child => isValidElement(child) || typeof child === 'string')
+
+  return (
+    <View {...rest} style={[{ gap: theme.space.sm }, style]}>
+      {header ? (
+        <Text variant="caption" color="textMuted" style={{ marginLeft: theme.space.lg, letterSpacing: 0.6 }}>
+          {header}
+        </Text>
+      ) : null}
+
+      <View
+        style={{
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radii.lg,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          overflow: 'hidden'
+        }}
+      >
+        {rows.map((row, index) => (
+          // The wrapper only carries the separator; rows a caller builds
+          // dynamically carry their own keys on the row itself.
+          <View key={index}>
+            {index > 0 ? (
+              <View style={{ height: 1, marginLeft: theme.space.lg, backgroundColor: theme.colors.border }} />
+            ) : null}
+            {row}
+          </View>
+        ))}
+      </View>
+
+      {footer ? (
+        typeof footer === 'string' ? (
+          <Text variant="caption" color="textMuted" style={{ marginHorizontal: theme.space.lg }}>
+            {footer}
+          </Text>
+        ) : (
+          <View style={{ marginHorizontal: theme.space.lg }}>{footer}</View>
+        )
+      ) : null}
+    </View>
+  )
+}
+
+export type InsetRowProps = ViewProps & { compact?: boolean }
+
+/** One row inside an `InsetGroup`. */
+export function InsetRow({ compact = false, style, ...rest }: InsetRowProps) {
+  const theme = useTheme()
+
+  return (
+    <View
+      {...rest}
+      style={[
+        {
+          paddingHorizontal: theme.space.lg,
+          paddingVertical: compact ? theme.space.sm : theme.space.md,
+          minHeight: CONTROL_MIN_HEIGHT,
+          justifyContent: 'center',
+          gap: theme.space.xxs
+        },
+        style
+      ]}
+    />
+  )
+}
+
+export type InsetButtonRowProps = Omit<PressableProps, 'children'> & {
+  title: string
+  /** Destructive rows are red, the way iOS marks "Sign out" and "Delete". */
+  tone?: 'accent' | 'danger' | 'text'
+  detail?: string
+}
+
+/** A tappable row: the inset-group equivalent of a link. */
+export function InsetButtonRow({ title, tone = 'accent', detail, disabled, style, ...rest }: InsetButtonRowProps) {
+  const theme = useTheme()
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled: Boolean(disabled) }}
+      disabled={disabled}
+      style={style}
+      {...rest}
+    >
+      {({ pressed }) => (
+        <View
+          style={{
+            paddingHorizontal: theme.space.lg,
+            paddingVertical: theme.space.md,
+            minHeight: CONTROL_MIN_HEIGHT,
+            justifyContent: 'center',
+            gap: theme.space.xxs,
+            backgroundColor: pressed ? theme.colors.surfaceRaised : 'transparent',
+            opacity: disabled ? 0.4 : 1
+          }}
+        >
+          <Text variant="body" color={tone}>
+            {title}
+          </Text>
+          {detail ? (
+            <Text variant="caption" color="textMuted">
+              {detail}
+            </Text>
+          ) : null}
+        </View>
+      )}
+    </Pressable>
+  )
+}
+
+export type InsetValueRowProps = { label: string; value: string; mono?: boolean }
+
+/** A read-only label/value row, used by Settings to show the configured gateway. */
+export function InsetValueRow({ label, value, mono = false }: InsetValueRowProps) {
+  const theme = useTheme()
+
+  return (
+    <InsetRow style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.md }}>
+      <Text variant="body" style={{ flexShrink: 0 }}>
+        {label}
+      </Text>
+      <Text
+        variant={mono ? 'mono' : 'body'}
+        color="textMuted"
+        numberOfLines={1}
+        style={{ flex: 1, textAlign: 'right' }}
+      >
+        {value}
+      </Text>
+    </InsetRow>
+  )
+}

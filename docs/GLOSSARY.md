@@ -78,6 +78,31 @@ authorisation page in an in-app web view and intercepts the loopback redirect be
 nothing actually listens on that port. Password-based providers run through the same flow and end at
 the same redirect, so there is one code path rather than two.
 
+## Loopback redirect
+
+The address the native PKCE flow ends on: `http://127.0.0.1:38007/callback?code=…&state=…`. Nothing
+listens on it. It is a value the sign-in web view reads out of a navigation it then refuses to
+perform, not a request anything serves. The gateway only accepts loopback **IP literals** here —
+`localhost` is rejected, because a public route that honoured an arbitrary host would be an open
+redirect leaking a live authorisation code.
+
+## Extra headers
+
+Request headers the operator configures during setup, sent with every REST call, every WebSocket
+dial and the sign-in page's initial request. They exist for an access proxy in front of the gateway,
+Cloudflare Access most commonly. Names must be valid HTTP tokens, CR and LF are stripped from values
+so a pasted secret cannot smuggle a second header in behind it, and the headers the transport owns
+(`Authorization`, `Host`, `X-Hermes-Session-Token`, …) cannot be overridden. They are stored in the
+secret store rather than with the rest of the gateway configuration, because they usually are one.
+
+## Connection test
+
+The step in setup that has to pass before anything is written to disk: one authenticated REST call,
+then a full WebSocket dial through to `gateway.ready` and a `profiles.list`, then a disconnect. Its
+result is tied to a **payload key** — a fingerprint of the address, the extra headers, the
+authentication mode, the provider and the credential — so that changing any of them invalidates the
+result instead of leaving a stale "it worked" on screen.
+
 ## Fake gateway
 
 The stand-in for `hermes serve` in `packages/fake-gateway`, used by the tests and by anyone

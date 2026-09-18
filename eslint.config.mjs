@@ -70,5 +70,16 @@ export default config(
       '@typescript-eslint/no-require-imports': 'off'
     }
   },
+  {
+    // Test suites and their setup run under Jest, which supplies `jest` and a
+    // CommonJS `require` that mock factories are expected to use.
+    files: ['apps/*/jest.setup.js', '**/__tests__/**', '**/*.test.ts', '**/*.test.tsx'],
+    languageOptions: {
+      globals: { ...globals.node, ...globals.jest }
+    },
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off'
+    }
+  },
   prettierConfig
 )
