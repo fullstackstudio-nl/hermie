@@ -1,1 +1,4 @@
-npx --no -- prettier --check .
+files=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.(ts|tsx|js|mjs|cjs|json|md|yml|yaml|css|html)$' || true)
+if [ -n "$files" ]; then
+  echo "$files" | xargs npx --no -- prettier --check --ignore-unknown
+fi

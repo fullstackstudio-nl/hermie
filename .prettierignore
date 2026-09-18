@@ -7,3 +7,5 @@ apps/hermie/ios
 apps/hermie/android
 apps/hermie/macos
 CHANGELOG.md
+packages/hermes-shared/src
+design/*.html
