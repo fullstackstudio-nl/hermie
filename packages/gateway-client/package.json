@@ -1,0 +1,12 @@
+{
+  "name": "@hermie/gateway-client",
+  "version": "0.0.0",
+  "private": true,
+  "description": "React-free client for the Hermes gateway: connection state machine, credentials, PKCE",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

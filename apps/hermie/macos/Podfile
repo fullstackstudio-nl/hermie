@@ -1,0 +1,88 @@
+require 'pathname'
+
+# npm workspaces hoist to the repo root, so walk up until react-native-macos is found.
+ws_dir = Pathname.new(__dir__)
+ws_dir = ws_dir.parent until
+  File.exist?("#{ws_dir}/node_modules/react-native-macos/scripts/react_native_pods.rb") ||
+  ws_dir.expand_path.to_s == '/'
+require "#{ws_dir}/node_modules/react-native-macos/scripts/react_native_pods.rb"
+
+# Expo autolinking, per the react-native-macos "Installing Expo modules" guide.
+require File.join(File.dirname(`node --print "require.resolve('expo/package.json')"`), 'scripts/autolinking')
+
+# Expo modules that ship no macOS slice in SDK 54. Linking them makes `pod install`
+# fail outright, so they are excluded here and shimmed in JavaScript instead.
+# Re-check this list on every SDK bump; docs/platform-notes.md tracks the impact.
+EXPO_MODULES_WITHOUT_MACOS = %w[
+  expo-dev-client
+  expo-dev-launcher
+  expo-dev-menu
+  expo-dev-menu-interface
+  expo-json-utils
+  expo-secure-store
+  expo-splash-screen
+  expo-system-ui
+].freeze
+
+prepare_react_native_project!
+
+target 'Hermie-macOS' do
+  # react-native-macos 0.81 sets its own floor at macOS 14; the Expo pods declare
+  # 11.0 but build fine above it.
+  platform :macos, '14.0'
+
+  use_expo_modules!(exclude: EXPO_MODULES_WITHOUT_MACOS)
+
+  # Expo's autolinking resolver knows about the workspace layout; the community
+  # CLI resolver does not. `--platform ios` is correct here: Expo has no macOS
+  # platform of its own and the Apple linker output is what react-native-macos
+  # consumes.
+  config_command = [
+    'node',
+    '--no-warnings',
+    '--eval',
+    "require('expo/bin/autolinking')",
+    'expo-modules-autolinking',
+    'react-native-config',
+    '--json',
+    '--platform',
+    'ios'
+  ]
+  config = use_native_modules!(config_command)
+
+  use_react_native!(
+    :path => "#{config[:reactNativePath]}-macos",
+    :fabric_enabled => ENV['RCT_NEW_ARCH_ENABLED'] == '1',
+    :app_path => "#{Pod::Config.instance.installation_root}/.."
+  )
+
+  post_install do |installer|
+    react_native_post_install(installer)
+
+    # CocoaPods writes REACT_NATIVE_PATH as a path relative to the app directory
+    # and pointing at `react-native`. Neither holds here: npm workspaces hoist the
+    # package to the repo root, and the macOS build needs react-native-macos. The
+    # Hermes and codegen script phases both read this setting, so correct it.
+    react_native_macos_path = File.expand_path("#{ws_dir}/node_modules/react-native-macos")
+    installer.pods_project.build_configurations.each do |build_configuration|
+      build_configuration.build_settings['REACT_NATIVE_PATH'] = react_native_macos_path
+    end
+    installer.pods_project.targets.each do |pod_target|
+      pod_target.build_configurations.each do |build_configuration|
+        next unless build_configuration.build_settings.key?('REACT_NATIVE_PATH')
+        build_configuration.build_settings['REACT_NATIVE_PATH'] = react_native_macos_path
+      end
+    end
+
+    # A handful of pods still declare a macOS minimum below what the current
+    # Xcode accepts, and CocoaPods copies that onto the resource bundles it
+    # generates. Raise the floor to the deployment target of the app itself.
+    installer.pods_project.targets.each do |pod_target|
+      pod_target.build_configurations.each do |build_configuration|
+        declared = build_configuration.build_settings['MACOSX_DEPLOYMENT_TARGET']
+        next if declared.nil? || Gem::Version.new(declared) >= Gem::Version.new('14.0')
+        build_configuration.build_settings['MACOSX_DEPLOYMENT_TARGET'] = '14.0'
+      end
+    end
+  end
+end

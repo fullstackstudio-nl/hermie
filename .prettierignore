@@ -1,0 +1,9 @@
+package-lock.json
+node_modules
+dist
+coverage
+.expo
+apps/hermie/ios
+apps/hermie/android
+apps/hermie/macos
+CHANGELOG.md

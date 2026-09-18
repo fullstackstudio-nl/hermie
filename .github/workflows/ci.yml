@@ -1,0 +1,147 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Static checks and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # check-commit-messages needs the branch history, not just the tip.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Formatting
+        run: npm run format
+
+      - name: Unit tests
+        run: npm test
+
+      - name: App tests
+        run: npm run test:app
+
+      - name: Vendored sources are in sync
+        run: npm run sync:hermes-shared:check
+
+      - name: Commit messages
+        if: github.event_name == 'pull_request'
+        run: node scripts/check-no-trailers.mjs origin/${{ github.base_ref }}..HEAD
+
+  # The native build jobs are run on demand while the app is still a skeleton;
+  # they become required checks once there is something worth catching. Keeping
+  # them here means the recipe is reviewed and maintained rather than written
+  # from scratch under pressure.
+  android:
+    name: Android debug build
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install
+        run: npm ci
+
+      - name: Generate the native project
+        run: npx expo prebuild --platform android --no-install
+        working-directory: apps/hermie
+
+      - name: Assemble
+        run: ./gradlew assembleDebug --no-daemon
+        working-directory: apps/hermie/android
+
+  ios:
+    name: iOS simulator build
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Generate the native project
+        run: npx expo prebuild --platform ios --no-install
+        working-directory: apps/hermie
+
+      - name: Pods
+        run: pod install
+        working-directory: apps/hermie/ios
+
+      - name: Build
+        working-directory: apps/hermie/ios
+        run: |
+          xcodebuild \
+            -workspace Hermie.xcworkspace \
+            -scheme Hermie \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            build
+
+  macos:
+    name: macOS build
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Pods
+        run: pod install
+        working-directory: apps/hermie/macos
+
+      - name: Build
+        working-directory: apps/hermie/macos
+        run: |
+          xcodebuild \
+            -workspace Hermie.xcworkspace \
+            -scheme Hermie-macOS \
+            -configuration Debug \
+            build

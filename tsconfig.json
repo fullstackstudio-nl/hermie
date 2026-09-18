@@ -1,0 +1,9 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/hermes-shared" },
+    { "path": "./packages/gateway-client" },
+    { "path": "./packages/fake-gateway" },
+    { "path": "./apps/hermie" }
+  ]
+}

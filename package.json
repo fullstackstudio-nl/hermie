@@ -1,0 +1,50 @@
+{
+  "name": "hermie",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Hermie — a mobile and desktop client for Hermes Agent",
+  "homepage": "https://hermie.dev",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "tsc -b",
+    "typecheck:clean": "tsc -b --clean",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --check .",
+    "format:write": "prettier --write .",
+    "test": "vitest run",
+    "test:app": "npm run test --workspace @hermie/app",
+    "sync:hermes-shared": "node scripts/sync-hermes-shared.mjs",
+    "sync:hermes-shared:check": "node scripts/sync-hermes-shared.mjs --check",
+    "fake-gateway": "npm run start --workspace @hermie/fake-gateway",
+    "ios": "npm run ios --workspace @hermie/app",
+    "android": "npm run android --workspace @hermie/app",
+    "macos": "npm run macos --workspace @hermie/app",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.6.1",
+    "@commitlint/config-conventional": "^19.6.0",
+    "@types/node": "^22.10.5",
+    "eslint": "^9.18.0",
+    "eslint-config-expo": "^10.0.0",
+    "eslint-config-prettier": "^10.0.1",
+    "globals": "^16.5.0",
+    "husky": "^9.1.7",
+    "prettier": "^3.4.2",
+    "typescript": "~5.9.2",
+    "typescript-eslint": "^8.20.0",
+    "vitest": "^3.0.0"
+  },
+  "overrides": {
+    "react-native": "0.81.5",
+    "react": "19.1.0"
+  }
+}

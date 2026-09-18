@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+coverage/
+*.tsbuildinfo
+
+# Expo / continuous native generation — regenerate with `npx expo prebuild`
+.expo/
+apps/hermie/ios/
+apps/hermie/android/
+
+# macOS native project: sources and Podfile.lock are committed, build products are not
+apps/hermie/macos/Pods/
+apps/hermie/macos/build/
+apps/hermie/macos/*.xcworkspace/xcuserdata/
+apps/hermie/macos/*.xcodeproj/xcuserdata/
+apps/hermie/macos/*.xcodeproj/project.xcworkspace/xcuserdata/
+apps/hermie/macos/.xcode.env.local
+DerivedData/
+
+# Logs and local state
+*.log
+npm-debug.log*
+yarn-error.log*
+.env
+.env.local
+
+# Editors and OS
+.DS_Store
+.idea/
+*.swp
