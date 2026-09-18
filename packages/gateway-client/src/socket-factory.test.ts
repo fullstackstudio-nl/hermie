@@ -80,7 +80,8 @@ describe('DialPlanSocketFactory', () => {
     factory.arm({ url: 'ws://a/api/ws' })
     const socket = factory.create('ws://a/api/ws') as unknown as RecordingSocket
 
-    socket.dispatchEvent(new CloseEvent('close', { code: 4401, reason: 'unauthorized' }))
+    // `CloseEvent` is not a global before Node 23; a plain Event with the same fields is enough here.
+    socket.dispatchEvent(Object.assign(new Event('close'), { code: 4401, reason: 'unauthorized' }))
 
     expect(onClose).toHaveBeenCalledWith({ code: 4401, reason: 'unauthorized' })
   })
