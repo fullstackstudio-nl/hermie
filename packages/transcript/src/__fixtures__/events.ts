@@ -112,7 +112,7 @@ export const delegationEvents: TranscriptEvent[] = [
       goal: ['Audit deps', 'Write tests', 'Update docs'][index],
       task_index: index,
       task_count: 3,
-      model: 'claude-haiku-4-5',
+      model: 'example-small-model',
       status: 'running'
     }),
     event('subagent.progress', 12 + index * 4, {

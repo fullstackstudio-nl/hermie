@@ -326,7 +326,7 @@ describe('delegation', () => {
       goal: 'Write tests',
       status: 'completed',
       childSessionId: 'sub-1',
-      model: 'claude-haiku-4-5',
+      model: 'example-small-model',
       taskIndex: 1,
       taskCount: 3,
       durationSeconds: 12.5,
@@ -452,12 +452,12 @@ describe('session-level events', () => {
       {
         type: 'session.info',
         seq: 2,
-        payload: { model: 'claude-sonnet-4-6', running: false, stored_session_id: 'stored-9' }
+        payload: { model: 'example-large-model', running: false, stored_session_id: 'stored-9' }
       },
       NOW
     )
 
-    expect(state.info?.model).toBe('claude-sonnet-4-6')
+    expect(state.info?.model).toBe('example-large-model')
     expect(state.storedSessionId).toBe('stored-9')
     expect(state.turn.active).toBe(false)
   })
