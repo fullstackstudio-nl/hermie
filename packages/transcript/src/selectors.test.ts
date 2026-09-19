@@ -10,6 +10,8 @@ import {
   openRequests,
   runningSubagents,
   subagentTree,
+  unreadBadgeLabel,
+  unreadCountSince,
   type VisibilityOptions,
   visibleItems
 } from './selectors'
@@ -228,5 +230,40 @@ describe('itemsVersion', () => {
     expect(itemsVersion(applyEvent(state, { type: 'notice', seq: 6, payload: { message: 'hi' } }, NOW))).not.toBe(
       before
     )
+  })
+})
+
+describe('unreadCountSince', () => {
+  const at = (ts: number, text: string) => ({
+    type: 'message.complete',
+    seq: ts,
+    payload: { text, status: 'complete' }
+  })
+
+  it('counts replies that landed after the watermark and nothing else', () => {
+    const state = run([
+      { type: 'message.start', seq: 1, payload: {} },
+      at(2, 'First.'),
+      { type: 'message.start', seq: 3, payload: {} },
+      at(4, 'Second.')
+    ])
+
+    // Both bubbles are stamped with the injected NOW, so a watermark before it
+    // counts both and one after it counts none.
+    expect(unreadCountSince(state, NOW / 1000 - 1)).toBe(2)
+    expect(unreadCountSince(state, NOW / 1000 + 1)).toBe(0)
+  })
+
+  it('ignores tool rows, notices and the turns the user typed', () => {
+    const state = run(streamedTurn)
+
+    expect(unreadCountSince(state, 0)).toBe(1)
+  })
+
+  it('caps the badge label rather than widening it', () => {
+    expect(unreadBadgeLabel(0)).toBe('')
+    expect(unreadBadgeLabel(3)).toBe('3')
+    expect(unreadBadgeLabel(99)).toBe('99')
+    expect(unreadBadgeLabel(1200)).toBe('99+')
   })
 })

@@ -18,6 +18,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { FlatList, Pressable, RefreshControl, TextInput, View } from 'react-native'
 
+import { unreadBadgeLabel, unreadCountSince } from '@hermie/transcript'
+
 import { Avatar, formatListTime, formatPreview } from '../../chat-ui'
 import { useGateway } from '../../gateway'
 import { strings } from '../../i18n/strings'
@@ -294,7 +296,21 @@ function BotRow({
   const theme = useTheme()
   const running = useBotsStore(state => Boolean(state.running[bot.name]))
   const unread = useBotsStore(state => isUnread(state, bot.name))
+  const lastSeen = useBotsStore(state => state.lastSeen[bot.name] ?? 0)
   const avatar = useBotsStore(state => state.avatars[bot.name])
+  /**
+   * How many messages arrived since the user last looked.
+   *
+   * Only countable when the chat is actually loaded — opened once, or pulled in
+   * by the Activity screen's background load. The gateway reports `last_active`
+   * and nothing else, so a chat this app has never read can only say THAT it
+   * moved, and the badge stays a dot rather than inventing a number.
+   */
+  const unreadCount = useChatsStore(state => {
+    const chat = state.chats[bot.name]
+
+    return chat ? unreadCountSince(chat, lastSeen) : 0
+  })
   // "Needs input" is not a roster field: it is an open approval or clarify in
   // the chat this app already holds, which is why it survives a roster refresh.
   const needsInput = useChatsStore(state => {
@@ -318,7 +334,7 @@ function BotRow({
 
   const label = [
     bot.displayName,
-    unread ? strings.bots.unread : '',
+    unreadCount > 0 ? strings.bots.unreadLabel(unreadCount) : unread ? strings.bots.unread : '',
     needsInput ? strings.bots.needsInput : '',
     running ? strings.bots.running : ''
   ]
@@ -360,7 +376,7 @@ function BotRow({
               {stamp}
             </Text>
           ) : null}
-          {unread ? <UnreadBadge /> : null}
+          {unread || unreadCount > 0 ? <UnreadBadge count={unreadCount} /> : null}
         </View>
 
         <Text color="textMuted" numberOfLines={compact ? 1 : 2} style={{ fontSize: compact ? 13 : 15 }}>
@@ -392,27 +408,53 @@ function BotRow({
 }
 
 /**
- * A dot rather than a number.
+ * A number when the app can count, a dot when it cannot.
  *
- * The gateway only reports `last_active` for a canonical chat — it never says
- * how many messages went by — so a count here would be invented. The design
- * board's numbered badge is what this becomes the day the protocol carries one.
+ * The gateway reports `last_active` for a canonical chat and nothing more, so a
+ * chat this app has never read can only be shown as "it moved". A chat it HAS
+ * read is counted from the transcript itself — replies and inbound teammate
+ * messages since the watermark — and capped, because a badge wider than the
+ * row's stamp stops being a badge.
  */
-function UnreadBadge() {
+function UnreadBadge({ count }: { count: number }) {
   const theme = useTheme()
+  const label = unreadBadgeLabel(count)
+
+  if (!label) {
+    return (
+      <View
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        style={{
+          backgroundColor: theme.colors.bubbleBlue,
+          borderRadius: 5,
+          height: 10,
+          width: 10
+        }}
+        testID="bot-unread"
+      />
+    )
+  }
 
   return (
     <View
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
       style={{
+        alignItems: 'center',
         backgroundColor: theme.colors.bubbleBlue,
-        borderRadius: 5,
-        height: 10,
-        width: 10
+        borderRadius: 10,
+        justifyContent: 'center',
+        minWidth: 20,
+        paddingHorizontal: 6,
+        paddingVertical: 1
       }}
       testID="bot-unread"
-    />
+    >
+      <Text color="onAccent" style={{ fontSize: 12, fontWeight: '700' }}>
+        {label}
+      </Text>
+    </View>
   )
 }
 

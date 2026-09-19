@@ -11,7 +11,7 @@ import { useTheme } from '../ui/theme'
 
 export type CompactStackParamList = {
   Bots: undefined
-  Chat: { bot: string }
+  Chat: { bot: string; focusItemId?: string }
   Activity: undefined
   Cron: undefined
   Settings: undefined
@@ -40,11 +40,31 @@ function ChatRoute({
   route,
   navigation
 }: {
-  route: { params?: { bot?: string } }
+  route: { params?: { bot?: string; focusItemId?: string } }
   navigation: NativeStackNavigationProp<CompactStackParamList>
 }) {
   return (
-    <ChatScreen onBack={() => navigation.goBack()} onOpenBot={bot => navigation.push('Chat', { bot })} route={route} />
+    <ChatScreen
+      onBack={() => navigation.goBack()}
+      // Pushed rather than replaced: following a DM across chats is a path, and
+      // Back has to walk it in reverse.
+      onOpenBot={(bot, options) =>
+        navigation.push('Chat', { bot, ...(options?.focusItemId ? { focusItemId: options.focusItemId } : {}) })
+      }
+      route={route}
+    />
+  )
+}
+
+function ActivityRoute() {
+  const navigation = useNavigation<NativeStackNavigationProp<CompactStackParamList>>()
+
+  return (
+    <ActivityScreen
+      onOpenBot={(bot, options) =>
+        navigation.navigate('Chat', { bot, ...(options?.focusItemId ? { focusItemId: options.focusItemId } : {}) })
+      }
+    />
   )
 }
 
@@ -74,7 +94,7 @@ export function CompactShell() {
       >
         <Stack.Screen component={BotsRoute} name="Bots" options={{ headerShown: false }} />
         <Stack.Screen component={ChatRoute} name="Chat" options={{ headerShown: false }} />
-        <Stack.Screen component={ActivityScreen} name="Activity" options={{ title: strings.tabs.activity }} />
+        <Stack.Screen component={ActivityRoute} name="Activity" options={{ title: strings.tabs.activity }} />
         <Stack.Screen component={CronScreen} name="Cron" options={{ title: strings.tabs.routines }} />
         <Stack.Screen component={SettingsScreen} name="Settings" options={{ title: strings.tabs.settings }} />
       </Stack.Navigator>

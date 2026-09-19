@@ -43,6 +43,15 @@ export interface FakeGatewayOptions {
   replayRingSize?: number
   /** Delay between streamed frames, in ms. */
   streamDelayMs?: number
+  /**
+   * Delay between two frames of a delegation, in ms.
+   *
+   * Deliberately its own knob and deliberately slow by default: the agents bar,
+   * the sheet's stream lines and Steer/Stop only exist while children are
+   * RUNNING, and a fan-out that finishes inside one frame cannot be looked at,
+   * let alone steered. A test that only cares about the end state passes 1.
+   */
+  subagentStepMs?: number
 }
 
 export interface FakeSession {
@@ -117,6 +126,37 @@ export interface FakeGatewayState {
   pendingApprovals: Map<string, { session_id: string; payload: Record<string, unknown> }>
   /** Images accepted through `image.attach_bytes`, newest last. */
   attachedImages: { session_id: string; filename: string; bytes: number }[]
+  /**
+   * Children a delegation has spawned and not yet finished, by subagent id.
+   *
+   * `subagent.list` and `delegation.status` both read this. A real gateway only
+   * knows about LIVE children — a finished one is dropped from the registry and
+   * lives on only in the transcript — so a completed child is deleted here too,
+   * which is exactly the case a client's reconcile has to survive.
+   */
+  liveSubagents: Map<string, LiveSubagent>
+  /**
+   * Background processes `agents.list` reports. A queued `message_agent` puts a
+   * `bot_mode_dm.py --run-delivery` row in here until the reply lands.
+   */
+  agentProcesses: Map<string, { session_id: string; command: string; status: string; startedAt: number }>
+}
+
+/** One live delegated child, in the shape `subagent.list` projects. */
+export interface LiveSubagent {
+  subagent_id: string
+  parent_id: string | null
+  depth: number
+  goal: string
+  delegation_id: string
+  model: string
+  started_at: number
+  status: string
+  tool_count: number
+  last_tool: string | null
+  accepting_steer: boolean
+  child_session_id: string
+  owner_session_id: string
 }
 
 interface ProfileRow {
@@ -201,6 +241,9 @@ const WS_PATH = '/api/ws'
 const GATEWAY_WS_PROTOCOL = 'hermes-gateway-v1'
 const TICKET_PROTOCOL_PREFIX = 'hermes-gateway-ticket.'
 const TICKET_TTL_SECONDS = 30
+
+/** Frames one delegated child runs through: requested, start, thinking, tool, progress, complete. */
+const FRAMES_PER_CHILD = 6
 
 const DEFAULT_SCENARIO: Scenario = {
   replies: [
@@ -466,6 +509,8 @@ function initialState(options: FakeGatewayOptions): FakeGatewayState {
     sessionConfig: new Map<string, Record<string, string>>(),
     pendingApprovals: new Map<string, { session_id: string; payload: Record<string, unknown> }>(),
     attachedImages: [],
+    liveSubagents: new Map<string, LiveSubagent>(),
+    agentProcesses: new Map<string, { session_id: string; command: string; status: string; startedAt: number }>(),
     cronGatewayRunning: true,
     cronJobs
   }
@@ -567,6 +612,7 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
   const scenario = options.scenario ?? DEFAULT_SCENARIO
   const ringSize = options.replayRingSize ?? 512
   const streamDelayMs = options.streamDelayMs ?? 2
+  const subagentStepMs = options.subagentStepMs ?? 900
   const version = options.version ?? '0.21.3-fake'
 
   const tickets = new Map<string, { expiresAt: number; userId: string; provider: string }>()
@@ -675,6 +721,13 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
 
   function resolveRuntimeId(id: string): string {
     return resolveSession(id)?.id ?? id
+  }
+
+  /** The live children owned by one session, in spawn order. */
+  function liveSubagentsFor(storedId: string | undefined): LiveSubagent[] {
+    return [...state.liveSubagents.values()]
+      .filter(child => !storedId || child.owner_session_id === storedId)
+      .sort((a, b) => a.started_at - b.started_at || a.goal.localeCompare(b.goal))
   }
 
   // ---------------------------------------------------------------- HTTP ---
@@ -1567,22 +1620,117 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       case 'clarify.lock':
         return { status: 'ok', remaining: [] }
 
-      case 'subagent.list':
-        return { subagents: [], delegations: [] }
+      case 'subagent.list': {
+        const session = resolveSession(String(params.session_id ?? ''))
+        const children = liveSubagentsFor(session?.storedId)
 
-      case 'subagent.steer':
-        return { status: 'queued', subagent_id: String(params.subagent_id ?? ''), text: String(params.text ?? '') }
-
-      case 'subagent.interrupt':
-        return { found: true, subagent_id: String(params.subagent_id ?? '') }
-
-      case 'subagent.tail':
         return {
-          subagent_id: String(params.subagent_id ?? ''),
+          subagents: children,
+          delegations: [...new Set(children.map(child => child.delegation_id))].map(id => ({
+            delegation_id: id,
+            child_count: children.filter(child => child.delegation_id === id).length
+          }))
+        }
+      }
+
+      case 'delegation.status': {
+        // Addressed at a PROFILE, not a session: it answers for the bot's whole
+        // backend, which is what makes it the right source for a cross-bot
+        // counter.
+        const profile = typeof params.profile === 'string' ? params.profile : null
+        const owned = [...state.liveSubagents.values()].filter(child => {
+          const owner = state.sessions.get(child.owner_session_id)
+
+          return !profile || owner?.profile === profile
+        })
+
+        return {
+          active: owned.map(child => ({
+            subagent_id: child.subagent_id,
+            parent_id: child.parent_id,
+            depth: child.depth,
+            goal: child.goal,
+            delegation_id: child.delegation_id,
+            model: child.model,
+            started_at: child.started_at,
+            status: child.status,
+            tool_count: child.tool_count,
+            owner_agent_session_id: child.owner_session_id
+          })),
+          paused: false,
+          max_spawn_depth: 3,
+          max_concurrent_children: 4
+        }
+      }
+
+      case 'agents.list': {
+        const profile = typeof params.profile === 'string' ? params.profile : null
+        const processes = [...state.agentProcesses.values()]
+          .filter(entry => {
+            const owner = state.sessions.get(entry.session_id)
+
+            return !profile || owner?.profile === profile
+          })
+          .map(entry => ({
+            session_id: entry.session_id,
+            command: entry.command,
+            status: entry.status,
+            uptime: Math.max(0, nowSeconds() - entry.startedAt)
+          }))
+
+        return { processes }
+      }
+
+      case 'subagent.steer': {
+        const id = String(params.subagent_id ?? '')
+        const child = state.liveSubagents.get(id)
+
+        if (child) {
+          child.last_tool = 'steer'
+        }
+
+        return { status: child ? 'queued' : 'rejected', subagent_id: id, text: String(params.text ?? '') }
+      }
+
+      case 'subagent.interrupt': {
+        const id = String(params.subagent_id ?? '')
+        const child = state.liveSubagents.get(id)
+
+        if (child) {
+          state.liveSubagents.delete(id)
+          publish('subagent.complete', child.owner_session_id, {
+            subagent_id: id,
+            delegation_id: child.delegation_id,
+            parent_id: child.parent_id,
+            goal: child.goal,
+            depth: child.depth,
+            status: 'interrupted',
+            summary: 'Stopped by the user.'
+          })
+        }
+
+        return { found: Boolean(child), subagent_id: id }
+      }
+
+      case 'subagent.tail': {
+        const id = String(params.subagent_id ?? '')
+        const child = state.liveSubagents.get(id)
+
+        if (!child) {
+          return { subagent_id: id, available: false, text: '', truncated: false }
+        }
+
+        return {
+          subagent_id: id,
           available: true,
-          text: 'child transcript tail',
+          text: [
+            `> ${child.goal}`,
+            `· ${child.last_tool ?? 'thinking'}`,
+            `· ${child.tool_count} tool call${child.tool_count === 1 ? '' : 's'} so far`
+          ].join('\n'),
           truncated: false
         }
+      }
 
       default:
         throw new Error(`Unknown method: ${method}`)
@@ -1739,6 +1887,10 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       at = streamSubagents(sid, at)
     }
 
+    if (/\bdm\b/i.test(prompt)) {
+      at = streamBotDm(session, prompt, at)
+    }
+
     const finish = () => {
       state.runningSessions.delete(sid)
       session.messages.push({ role: 'assistant', text, row_id: session.messages.length + 1, timestamp: nowSeconds() })
@@ -1763,35 +1915,284 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     later(finish, at)
   }
 
-  /** One `delegate_task` fan-out, start to finish. */
+  /**
+   * One `delegate_task` fan-out, start to finish.
+   *
+   * Three children rather than one, staggered over `subagentStepMs` per frame,
+   * and the third one FAILS. All three properties are load-bearing for what a
+   * client has to get right: a tree with siblings, a window in which the bar,
+   * the sheet, Steer and Stop actually exist, and a failure that has to reach
+   * the group card without taking the other two down with it.
+   *
+   * The fan-out is wrapped in a real `delegate_task` tool call, because that is
+   * how the group card learns its goals before any child has reported and how
+   * it gets a completion summary at the end.
+   */
   function streamSubagents(sid: string, startAt: number): number {
-    const subagentId = `sub-${randomUUID().slice(0, 6)}`
     const delegationId = `del-${randomUUID().slice(0, 6)}`
-    const common = {
-      subagent_id: subagentId,
-      delegation_id: delegationId,
-      parent_id: null,
-      goal: 'Audit the dependencies',
-      task_index: 0,
-      task_count: 1,
-      depth: 1,
-      model: 'example-provider/example-model'
-    }
-    let at = startAt
+    const toolId = `tool-${randomUUID().slice(0, 8)}`
+    const children = [
+      {
+        goal: 'Audit the dependencies',
+        thinking: 'Reading the lockfile.',
+        tool: { tool_name: 'read_file', text: 'package-lock.json' },
+        progress: 'Two packages behind.',
+        status: 'completed',
+        summary: 'Two packages behind; no advisories.'
+      },
+      {
+        goal: 'Summarize the changelog',
+        thinking: 'Skimming the last three releases.',
+        tool: { tool_name: 'read_file', text: 'CHANGELOG.md' },
+        progress: 'Nine entries since the last tag.',
+        status: 'completed',
+        summary: 'Nine entries since the last tag; two are breaking.'
+      },
+      {
+        goal: 'Check the licence headers',
+        thinking: 'Walking src/.',
+        tool: { tool_name: 'run_command', text: 'rg -l "SPDX"' },
+        progress: 'The scanner is not installed here.',
+        status: 'failed',
+        summary: 'Could not run the scanner: rg is not installed.'
+      }
+    ]
 
-    for (const [type, payload] of [
-      ['subagent.spawn_requested', {}],
-      ['subagent.start', { status: 'running' }],
-      ['subagent.thinking', { text: 'Reading the lockfile.' }],
-      ['subagent.tool', { tool_name: 'read_file', text: 'package-lock.json' }],
-      ['subagent.progress', { text: 'Two packages behind.' }],
-      ['subagent.complete', { status: 'completed', summary: 'Two packages behind; no advisories.' }]
-    ] as [string, Record<string, unknown>][]) {
-      at += streamDelayMs
-      later(() => publish(type, sid, { ...common, ...payload }), at)
-    }
+    const tasks = children.map(child => ({ goal: child.goal }))
+    let at = startAt + subagentStepMs
+
+    later(
+      () =>
+        publish('tool.start', sid, {
+          tool_id: toolId,
+          name: 'delegate_task',
+          context: `delegate_task(${children.length} tasks)`,
+          args: { tasks }
+        }),
+      at
+    )
+
+    children.forEach((child, index) => {
+      const subagentId = `sub-${randomUUID().slice(0, 6)}`
+      const common = {
+        subagent_id: subagentId,
+        delegation_id: delegationId,
+        parent_id: null,
+        goal: child.goal,
+        task_index: index,
+        task_count: children.length,
+        depth: 1,
+        model: 'example-provider/example-model',
+        child_session_id: `child-${subagentId}`
+      }
+
+      const frames: [string, Record<string, unknown>][] = [
+        ['subagent.spawn_requested', {}],
+        ['subagent.start', { status: 'running' }],
+        ['subagent.thinking', { text: child.thinking }],
+        ['subagent.tool', { ...child.tool, status: 'running' }],
+        ['subagent.progress', { text: child.progress }],
+        [
+          'subagent.complete',
+          {
+            status: child.status,
+            summary: child.summary,
+            duration_seconds: (FRAMES_PER_CHILD + index) * (subagentStepMs / 1000),
+            ...(child.status === 'failed' ? { error: child.summary } : {})
+          }
+        ]
+      ]
+
+      // Children are staggered: the second starts a step after the first, so
+      // the bar counts up rather than jumping from nothing to three.
+      frames.forEach(([type, payload], frame) => {
+        const when = at + (frame + 1 + index) * subagentStepMs
+
+        later(() => {
+          if (type === 'subagent.start' || type === 'subagent.spawn_requested') {
+            state.liveSubagents.set(subagentId, {
+              subagent_id: subagentId,
+              parent_id: null,
+              depth: 1,
+              goal: child.goal,
+              delegation_id: delegationId,
+              model: 'example-provider/example-model',
+              started_at: nowSeconds(),
+              status: type === 'subagent.start' ? 'running' : 'queued',
+              tool_count: 0,
+              last_tool: null,
+              accepting_steer: true,
+              child_session_id: `child-${subagentId}`,
+              owner_session_id: sid
+            })
+            ensureChildSession(`child-${subagentId}`, child.goal, child.summary)
+          }
+
+          const live = state.liveSubagents.get(subagentId)
+
+          if (live && type === 'subagent.tool') {
+            live.tool_count += 1
+            live.last_tool = String(child.tool.tool_name)
+          }
+
+          if (type === 'subagent.complete') {
+            // A real gateway drops a finished child from the live registry.
+            state.liveSubagents.delete(subagentId)
+          }
+
+          publish(type, sid, { ...common, ...payload })
+        }, when)
+      })
+    })
+
+    // One step past the last child's completion, so the card's summary lands
+    // after every row it summarizes.
+    at += (FRAMES_PER_CHILD + children.length) * subagentStepMs
+
+    later(
+      () =>
+        publish('tool.complete', sid, {
+          tool_id: toolId,
+          name: 'delegate_task',
+          args: { tasks },
+          duration_s: ((FRAMES_PER_CHILD + children.length) * subagentStepMs) / 1000,
+          error: true,
+          summary: `${children.length - 1} of ${children.length} finished; the licence check failed.`
+        }),
+      at
+    )
 
     return at
+  }
+
+  /**
+   * One live `message_agent` hand-off, end to end.
+   *
+   * Fire-and-forget on purpose, because that is what the real tool is: the call
+   * answers `queued` with a `process_id` and the teammate's reply lands much
+   * later as a `process_complete` ROW, joined back onto the dispatch by that id.
+   * While the delivery is out, a `bot_mode_dm.py --run-delivery` process sits in
+   * `agents.list` — which is the only place a client can count deliveries that
+   * are in flight.
+   *
+   * The recipient's own chat gets the inbound row too, so both sides of the
+   * conversation are real and the Activity timeline has something to dedupe.
+   */
+  function streamBotDm(session: FakeSession, prompt: string, startAt: number): number {
+    const target = session.profile === 'writer' ? 'researcher' : 'writer'
+    const recipient = [...state.sessions.values()].find(entry => entry.profile === target && entry.title === 'Bot Chat')
+    const message = prompt.replace(/^.*?\bdm\b[:\s]*/iu, '').trim() || 'Can you take a look at this?'
+    const toolId = `tool-${randomUUID().slice(0, 8)}`
+    const processId = `proc-${randomUUID().slice(0, 6)}`
+    const sid = session.storedId
+    const senderName = session.profile[0]?.toUpperCase() + session.profile.slice(1)
+    const command = DM_DELIVERY_COMMAND.replace('-p writer', `-p ${target}`)
+    let at = startAt + streamDelayMs
+
+    later(
+      () =>
+        publish('tool.start', sid, {
+          tool_id: toolId,
+          name: 'message_agent',
+          context: `message_agent(${target})`,
+          args: { target: `@${target}`, message }
+        }),
+      at
+    )
+
+    at += streamDelayMs
+    later(() => {
+      publish('tool.complete', sid, {
+        tool_id: toolId,
+        name: 'message_agent',
+        args: { target: `@${target}`, message },
+        duration_s: 0.1,
+        result: { status: 'queued', delivery_id: `dlv-${processId}`, to: target, process_id: processId }
+      })
+
+      state.agentProcesses.set(processId, {
+        session_id: sid,
+        command,
+        status: 'running',
+        startedAt: nowSeconds()
+      })
+    }, at)
+
+    // The recipient's side: an inbound row, and its reply.
+    const reply = `Got it — ${message.slice(0, 48)}${message.length > 48 ? '…' : ''} is in hand.`
+
+    at += subagentStepMs
+    later(() => {
+      if (recipient) {
+        recipient.messages.push({
+          role: 'user',
+          text: `Message from 🤖 ${senderName} (@${session.profile}): ${message}`,
+          row_id: recipient.messages.length + 1,
+          timestamp: nowSeconds()
+        })
+        recipient.messages.push({
+          role: 'assistant',
+          text: reply,
+          row_id: recipient.messages.length + 1,
+          timestamp: nowSeconds()
+        })
+      }
+
+      publish('sessions.changed', undefined, {})
+    }, at)
+
+    // …and the sender's side: the background process reporting back.
+    at += subagentStepMs
+    later(() => {
+      state.agentProcesses.delete(processId)
+      session.messages.push({
+        role: 'user',
+        text: [
+          `[IMPORTANT: Background process ${processId} completed (exit code 0).`,
+          `Command: ${command}`,
+          'Output:',
+          `Message from 🤖 ${target[0]?.toUpperCase()}${target.slice(1)} (@${target}): ${reply}]`
+        ].join('\n'),
+        row_id: session.messages.length + 1,
+        timestamp: nowSeconds(),
+        display_kind: 'process_complete',
+        display_metadata: { display_text: 'Background Process Finished: bot_mode_dm.py' }
+      })
+
+      publish('sessions.changed', undefined, {})
+    }, at)
+
+    return at
+  }
+
+  /**
+   * A stand-in transcript for a delegated child, so "Open transcript" has
+   * something real to read through `session.history`.
+   */
+  function ensureChildSession(id: string, goal: string, summary: string): void {
+    if (state.sessions.has(id)) {
+      return
+    }
+
+    state.sessions.set(id, {
+      id,
+      storedId: id,
+      profile: 'subagent',
+      title: goal,
+      seq: 0,
+      ring: [],
+      messages: [
+        { role: 'user', text: goal, row_id: 1, timestamp: nowSeconds() },
+        {
+          role: 'tool',
+          name: 'read_file',
+          tool_id: `${id}-call-1`,
+          context: 'read_file(package-lock.json)',
+          args: { path: 'package-lock.json' }
+        },
+        { role: 'assistant', text: summary, row_id: 2, timestamp: nowSeconds() + 1 }
+      ]
+    })
   }
 
   /** Raise an approval and wait for the answer, the way the queue does. */

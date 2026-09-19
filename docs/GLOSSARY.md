@@ -257,3 +257,45 @@ which is the whole binding between a job and its history — `GET /api/cron/jobs
 id range, and the transcript comes back from plain `session.history`. That is why a run renders
 through the same engine as a conversation and why it has no composer: the session is finished and
 there is no agent behind it to send anything to.
+
+## Activity
+
+The cross-bot timeline: every message one bot sent another, every reply that came back, and every
+`delegate_task` fan-out, in one list. It exists because bot-to-bot traffic is invisible in any single
+conversation — a delivery is written into the sender's transcript as a dispatch and into the
+recipient's as an inbound message, and neither chat shows both halves.
+
+Activity is a **view**, never a second store. Its rows are derived from the same `ChatState`s the
+chat screens read, which is what lets a row open the conversation it came from and land on the exact
+message rather than at the bottom of it. Bots nobody has opened are filled in by a background load:
+the newest rows of each canonical chat, read through the same `rowsToItems` as everything else, so
+opening that chat afterwards reconciles onto the items instead of duplicating them.
+
+Because both halves of a delivery are on the wire, one delivery would otherwise appear twice. The
+sender-side dispatch wins: it is the row that knows whether the message was queued, delivered or
+failed. An inbound row is only shown when no dispatch matches it — which is exactly the case where
+the sender's chat is not loaded.
+
+The three counters above the list each come from a different call, and none of them is transcript
+state: **bots working** from `session.active_list`, **sub-agents** from `delegation.status` per
+profile, and **deliveries out** from `agents.list` filtered to the `bot_mode_dm.py --run-delivery`
+runner. They are polled while the screen is on top and dropped when it is not.
+
+## Delivery process
+
+The background process a `message_agent` hand-off spawns to carry the message to the other bot. The
+tool call itself returns `queued` with a `process_id` and nothing else — it is fire-and-forget — and
+the teammate's reply arrives much later as a `process_complete` row that is joined back onto the
+dispatch by that id. While it is out, the process is listed by `agents.list`, which is the only place
+a client can count deliveries that have left but not landed.
+
+## Subagent roster
+
+`subagent.list`, the gateway's snapshot of the children that are live right now. It exists because
+`subagent.*` events have no replay: a conversation opened halfway through a delegation never saw its
+children start, and the stream alone would leave them invisible until the next one reported. Hermie
+reads the roster when a chat opens and every five seconds while anything is delegating, and folds it
+in without ever resurrecting a child the stream already saw finish.
+
+It is a roster of LIVE children only. A child that has finished is dropped from it and lives on in
+the transcript, which is why a reconcile must add and refresh but never remove.

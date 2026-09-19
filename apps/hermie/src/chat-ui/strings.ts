@@ -53,7 +53,11 @@ export const chatStrings = {
     senderChip: (name: string) => `${name} · bot`,
     header: (from: string, to: string) => `@${from} → @${to}`,
     chip: (target: string) => `Message to ${target}`,
-    inChip: (name: string) => `Message from ${name}`
+    inChip: (name: string) => `Message from ${name}`,
+    /** Shown under a pending dispatch while the recipient's turn is running. */
+    targetTyping: (handle: string) => `@${handle} is writing…`,
+    openTarget: (target: string) => `Opens the chat with ${target}`,
+    openSender: (name: string) => `Opens the chat with ${name}`
   },
   subagents: {
     title: 'Agents',
@@ -64,6 +68,14 @@ export const chatStrings = {
     steerPlaceholder: 'Send a correction…',
     stop: 'Stop',
     openTranscript: 'Open transcript',
+    transcriptTitle: (goal: string) => `Transcript · ${goal}`,
+    transcriptLive: 'Live tail · refreshing every few seconds',
+    transcriptStored: 'The child’s own transcript, read-only.',
+    transcriptEmpty: 'This agent has not written anything readable yet.',
+    transcriptBack: 'Back to the agents',
+    steerQueued: 'Steer queued',
+    steerRejected: 'Too late to steer — the agent had already finished its last batch.',
+    stopped: 'Stopping…',
     status: {
       queued: 'Queued',
       running: 'Running',
@@ -109,6 +121,15 @@ export const chatStrings = {
     answeredElsewhere: 'Answered elsewhere',
     timedOut: 'Timed out',
     answered: (choice: string) => `Answered: ${choice}`,
+    // The receipt an answered approval leaves in the transcript. It names the
+    // decision, not the button: "once" on its own tells a reader nothing a week
+    // later, and `Answered: once` was worse — it did not even say allowed.
+    outcomes: {
+      once: 'Allowed once',
+      session: 'Allowed for the session',
+      always: 'Always allowed',
+      deny: 'Denied'
+    } as Record<string, string>,
     // The gateway's own vocabulary (`tools/approval_prompt.py`): once, session,
     // always, deny. An unknown choice keeps its own name rather than being
     // dropped — the buttons are exactly what the server offered.
@@ -129,6 +150,8 @@ export const chatStrings = {
     locked: 'Locked',
     submit: 'Submit',
     skip: 'Skip',
+    outcome: (answered: number, total: number) =>
+      answered >= total ? (total === 1 ? 'Answered' : `Answered all ${total}`) : `Answered ${answered} of ${total}`,
     next: 'Next',
     previous: 'Back',
     multiSelectHint: 'Choose as many as apply'

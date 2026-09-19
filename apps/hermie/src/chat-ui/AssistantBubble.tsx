@@ -27,14 +27,17 @@ export interface AssistantBubbleProps {
   onLinkPress?: (href: string) => void
 }
 
+/**
+ * The line under a finished reply: how long it took, what it cost, on what.
+ *
+ * A duration NEVER stands alone. `0.1s` under a bubble is a loose number with
+ * nothing to attach it to — it reads as a stray artifact rather than as part of
+ * the reply — so the clock only appears next to something that explains it. A
+ * gateway that reports no usage therefore shows no footer at all, which is the
+ * honest outcome.
+ */
 function footerParts(item: AssistantItem): string[] {
   const parts: string[] = []
-  const duration = formatDuration(item.durationS)
-
-  if (duration) {
-    parts.push(duration)
-  }
-
   const input = item.usage?.input
   const output = item.usage?.output
 
@@ -46,7 +49,13 @@ function footerParts(item: AssistantItem): string[] {
     parts.push(item.usage.model)
   }
 
-  return parts
+  if (!parts.length) {
+    return parts
+  }
+
+  const duration = formatDuration(item.durationS)
+
+  return duration ? [duration, ...parts] : parts
 }
 
 export function AssistantBubble({
@@ -87,8 +96,10 @@ export function AssistantBubble({
           background={theme.colors.surfaceRaised}
           side="other"
           // An interim note is mid-turn commentary, not the answer: the design
-          // mutes it rather than giving it a different shape.
-          style={item.interim ? { opacity: 0.72 } : undefined}
+          // mutes it rather than giving it a different shape. A reply addressed
+          // at a teammate bot is muted less far — it IS the answer, just not
+          // one the human asked for.
+          style={item.interim ? { opacity: 0.72 } : item.replyToBotHandle ? { opacity: 0.88 } : undefined}
           tail
         >
           <Markdown

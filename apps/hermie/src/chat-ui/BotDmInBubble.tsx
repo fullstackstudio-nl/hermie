@@ -13,6 +13,7 @@ import { Bubble } from './primitives/Bubble'
 import { Chip } from './primitives/Chip'
 import { formatClock } from './format'
 import { chatStrings } from './strings'
+import type { DmCounterpartQuery } from './TranscriptList'
 import type { BotDmInItem, Presentation } from './types'
 
 export interface BotDmInBubbleProps {
@@ -20,7 +21,7 @@ export interface BotDmInBubbleProps {
   presentation?: Presentation
   /** The handle of the bot whose chat this is, for the `@a → @b` header. */
   selfHandle?: string
-  onOpenBot?: (handle: string) => void
+  onOpenBot?: (handle: string, counterpart?: DmCounterpartQuery) => void
 }
 
 export function BotDmInBubble({ item, presentation = 'full', selfHandle, onOpenBot }: BotDmInBubbleProps) {
@@ -31,13 +32,15 @@ export function BotDmInBubble({ item, presentation = 'full', selfHandle, onOpenB
   }
 
   const handle = item.senderHandle ?? item.senderName.toLowerCase()
+  // The far side of an inbound message is the sender's own OUTBOUND dispatch.
+  const open = () => onOpenBot?.(handle, { kind: 'bot_dm_out', ...(item.ts ? { at: item.ts } : {}), text: item.text })
 
   if (presentation === 'chip') {
     return (
       <Chip
         centered
         label={chatStrings.botDm.inChip(item.senderName)}
-        onPress={onOpenBot ? () => onOpenBot(handle) : undefined}
+        onPress={onOpenBot ? open : undefined}
         testID={`bot-dm-in-chip-${item.id}`}
       />
     )
@@ -50,10 +53,10 @@ export function BotDmInBubble({ item, presentation = 'full', selfHandle, onOpenB
     <View style={{ marginVertical: theme.space.sm }}>
       <Bubble background={theme.colors.incoming} side="other" tail>
         <Pressable
-          accessibilityHint={onOpenBot ? `Opens the chat with ${item.senderName}` : undefined}
+          accessibilityHint={onOpenBot ? chatStrings.botDm.openSender(item.senderName) : undefined}
           accessibilityRole={onOpenBot ? 'button' : undefined}
           disabled={!onOpenBot}
-          onPress={onOpenBot ? () => onOpenBot(handle) : undefined}
+          onPress={onOpenBot ? open : undefined}
           testID={`bot-dm-in-header-${item.id}`}
         >
           <Text style={{ color: theme.colors.incomingText, fontSize: 12, fontWeight: '700' }}>

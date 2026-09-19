@@ -184,3 +184,54 @@ describe('reconcileTail', () => {
     expect(state.order.length).toBe(before)
   })
 })
+
+describe('a turn we sent ourselves coming back persisted', () => {
+  /** An optimistic user bubble plus the reply the stream built, neither persisted. */
+  const liveTurn = (): ChatState => {
+    const submitted = beginLocalTurn(fresh(), 'delegate the dependency audit', undefined, NOW)
+
+    return applyEvent(
+      applyEvent(submitted, { type: 'message.start', seq: 1, payload: {} }, NOW),
+      { type: 'message.complete', seq: 2, payload: { text: 'Looking that up for you.', status: 'ok' } },
+      NOW
+    )
+  }
+
+  const persistedRows: TranscriptRow[] = [
+    { role: 'user', text: 'delegate the dependency audit', row_id: 7, timestamp: 1_700_000_100 },
+    { role: 'assistant', text: 'Looking that up for you.', row_id: 8, timestamp: 1_700_000_101 }
+  ]
+
+  it('adopts the persisted rows onto the live bubbles instead of appending copies', () => {
+    const state = liveTurn()
+    const before = state.order.length
+
+    const next = reconcileTail(state, rowsToItems(persistedRows, 'rest'))
+
+    expect(next.order).toHaveLength(before)
+    expect(
+      list(next).filter(item => item.kind === 'user' && item.text === 'delegate the dependency audit')
+    ).toHaveLength(1)
+    expect(list(next).filter(item => item.kind === 'assistant')).toHaveLength(1)
+  })
+
+  it('gives them their durable row ids, so a second sweep is a no-op', () => {
+    const once = reconcileTail(liveTurn(), rowsToItems(persistedRows, 'rest'))
+
+    expect(list(once).map(item => item.rowId)).toEqual([7, 8])
+
+    const twice = reconcileTail(once, rowsToItems(persistedRows, 'rest'))
+
+    expect(twice.order).toHaveLength(once.order.length)
+  })
+
+  it('still appends a row that is genuinely new', () => {
+    const state = reconcileTail(liveTurn(), rowsToItems(persistedRows, 'rest'))
+    const next = reconcileTail(
+      state,
+      rowsToItems([...persistedRows, { role: 'assistant', text: 'One more thing.', row_id: 9 }], 'rest')
+    )
+
+    expect(next.order).toHaveLength(state.order.length + 1)
+  })
+})

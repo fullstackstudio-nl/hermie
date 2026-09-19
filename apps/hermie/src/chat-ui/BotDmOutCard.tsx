@@ -15,12 +15,21 @@ import type { ColorRole } from '../ui/tokens'
 import { Avatar } from './primitives/Avatar'
 import { Chip } from './primitives/Chip'
 import { chatStrings } from './strings'
+import type { DmCounterpartQuery } from './TranscriptList'
 import type { BotDmOutItem, DispatchStatus, Presentation } from './types'
 
 export interface BotDmOutCardProps {
   item: BotDmOutItem
   presentation?: Presentation
-  onOpenBot?: (handle: string) => void
+  onOpenBot?: (handle: string, counterpart?: DmCounterpartQuery) => void
+  /**
+   * The recipient's chat is live and its turn is running RIGHT NOW.
+   *
+   * Only a caller that holds both chats can know this — the dispatch itself
+   * says nothing about what happened to it — which is why it is a prop rather
+   * than something the card derives.
+   */
+  targetTyping?: boolean
 }
 
 const COLLAPSED_LINES = 4
@@ -74,7 +83,7 @@ function usePulse(active: boolean) {
   return value
 }
 
-export function BotDmOutCard({ item, presentation = 'collapsed', onOpenBot }: BotDmOutCardProps) {
+export function BotDmOutCard({ item, presentation = 'collapsed', onOpenBot, targetTyping = false }: BotDmOutCardProps) {
   const theme = useTheme()
   const [expanded, setExpanded] = useState(presentation === 'full')
 
@@ -86,7 +95,11 @@ export function BotDmOutCard({ item, presentation = 'collapsed', onOpenBot }: Bo
     return null
   }
 
-  const open = () => onOpenBot?.(item.targetHandle)
+  // The far side of this dispatch is an INBOUND row in the target's chat,
+  // carrying the same body; the stamp is close but never identical, because the
+  // delivery process queues between the two.
+  const open = () =>
+    onOpenBot?.(item.targetHandle, { kind: 'bot_dm_in', ...(item.ts ? { at: item.ts } : {}), text: item.message })
   const label = item.reply ? chatStrings.botDm.delivered : statusLabel(item.dispatch.status)
   const tone = statusTone(item.dispatch.status, delivered)
 
@@ -161,6 +174,18 @@ export function BotDmOutCard({ item, presentation = 'collapsed', onOpenBot }: Bo
       {item.dispatch.error ? (
         <Text color="danger" style={{ fontSize: 12, marginTop: theme.space.xs }}>
           {item.dispatch.error}
+        </Text>
+      ) : null}
+
+      {/* The delivery is out and the recipient is answering it. Only shown while
+          the reply has not landed: afterwards the reply itself is the answer. */}
+      {targetTyping && pending && !item.reply ? (
+        <Text
+          color="accent"
+          style={{ fontSize: 12, marginTop: theme.space.xs }}
+          testID={`bot-dm-out-typing-${item.id}`}
+        >
+          {chatStrings.botDm.targetTyping(item.targetHandle || item.target)}
         </Text>
       ) : null}
 

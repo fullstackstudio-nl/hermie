@@ -258,3 +258,49 @@ export function isBusy(state: ChatState): boolean {
     return Boolean(item && isRunningTool(item))
   })
 }
+
+/** The badge caps here; a number wider than the dot it replaces reads as noise. */
+export const UNREAD_BADGE_CAP = 99
+
+/**
+ * How many messages arrived in this chat since the user last looked at it.
+ *
+ * Only the two kinds a reader would call "a message" count: the bot's own
+ * replies and inbound teammate DMs. Tool rows, notices and the user's own turns
+ * are not unread mail, and counting them would make a badge that never settles.
+ *
+ * `since` is the watermark the roster keeps (unix seconds). A chat the app has
+ * not loaded has nothing to count, which is why the list still falls back to a
+ * dot rather than showing a confident zero.
+ */
+export function unreadCountSince(state: ChatState, since: number): number {
+  let count = 0
+
+  for (const id of state.order) {
+    const item = state.items[id]
+
+    if (!item || (item.kind !== 'assistant' && item.kind !== 'bot_dm_in')) {
+      continue
+    }
+
+    if (item.kind === 'assistant' && (item.interim || !item.text.trim())) {
+      // An empty or interim bubble is the turn in progress, not a message.
+      continue
+    }
+
+    if ((item.ts ?? 0) > since) {
+      count += 1
+    }
+  }
+
+  return count
+}
+
+/** `3`, `99+` — the badge label, or an empty string when nothing is unread. */
+export function unreadBadgeLabel(count: number): string {
+  if (count <= 0) {
+    return ''
+  }
+
+  return count > UNREAD_BADGE_CAP ? `${UNREAD_BADGE_CAP}+` : String(count)
+}

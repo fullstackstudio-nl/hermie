@@ -388,3 +388,72 @@ which imports the whole chat kit — so `marked`, `highlight.js/lib/core` with i
 and every component module are evaluated under react-native-macos at startup without throwing. What
 is _not_ proven on macOS is anything past the address step: the chat list, a conversation, sending,
 and the sidebar layout have not been seen running there.
+
+## Bot-to-bot and sub-agents (2026-09-19)
+
+### The blue "Refreshing…" bar over the chat header is Metro, not the app
+
+A screenshot from the M3 run showed a blue bar across the top of the chat, covering the header and
+the status bar, reading `Refreshing…`. It looks exactly like a pull-to-refresh spinner that escaped
+its list, and it is not: it is React Native's own Fast Refresh banner
+(`Libraries/Utilities/HMRClient.js` → `DevLoadingView.showMessage('Refreshing...', 'refresh')`),
+which every development build draws over the whole window while Metro pushes a new bundle. It cannot
+appear in a release build, and no app code can move it.
+
+The chat screen has no pull-to-refresh at all, so there was nothing to fix there. Where a refresh
+control genuinely exists (the chats list, Activity, Routines) it is a `refreshControl` on the list,
+which iOS draws inside the list's own bounds under whatever header sits above it.
+
+### `scrollToIndex` on a virtualised list has to handle failure
+
+Opening another bot's chat scrolled to the matching message is `scrollToIndex`, and on a `FlatList`
+that can fail outright: a row whose height has never been measured has no offset to scroll to. The
+documented recovery is `onScrollToIndexFailed` — scroll to the estimated offset, let a frame render,
+then try the index again — and without it the tap silently does nothing at all.
+
+The same call also only works for a row that is currently in the list. Verbosity is a read-time
+filter, so a chat on Quiet genuinely does not contain every item; `scrollToItem` reports that with a
+`false` rather than scrolling somewhere plausible.
+
+### Never call a parent's setter from inside a state updater
+
+`TranscriptList` reported "scrolled away from the bottom" by calling the screen's callback from
+inside its own `setAway(current => …)` updater. React runs updaters during the render phase, so that
+is a `setState` during another component's render: LogBox reports "Cannot update a component while
+rendering a different component", and the update can be dropped. The fix is an effect on the state
+that changed — the value is the trigger, not the call site.
+
+### A locally sent turn needs text matching, or it appears twice
+
+`prompt.submit` answers with a status, not a row id. The optimistic user bubble and the streamed
+reply therefore carry no `rowId`, and the rows the gateway persists carry no client id — nothing
+links them. The next `sessions.changed` sweep reads the tail, finds two rows it has never seen, and
+appends them: every sent message shows up a second time a moment after it was sent.
+
+`reconcile` (full re-hydration) already matched on normalised text for this reason; `reconcileTail`
+did not, and that is where the duplicate came from. The tail now pairs a fresh row against a live
+item of the same kind with the same text and no `rowId` yet, and adopts the durable id onto it.
+
+### iPadOS does not tell React Native whether a keyboard is physical
+
+Enter-to-send is safe on macOS and not on iPad: neither iOS nor iPadOS exposes whether the keyboard
+is hardware, so a bare Enter that sends would leave a touch user with no way to type a newline.
+Hermie therefore sends on a bare Enter only on macOS, and on `Cmd`/`Ctrl+Enter` everywhere —
+a modifier can only come from a physical keyboard — with `Escape` stopping a running turn.
+
+react-native-macos needs one extra thing for any of this to fire: AppKit swallows Return and Escape
+unless the field is told to pass them up, via the platform-only `keyDownEvents` prop on `TextInput`.
+Without it `onKeyPress` is simply never called for those keys on macOS.
+
+### U+21A9 renders as an emoji on iOS unless you ask for text
+
+The Activity timeline reads `writer ↩ researcher`. Written plainly, iOS gives U+21A9 its emoji
+presentation and the arrow comes out as a blue glyph in the middle of a sentence. Appending the text
+variation selector (U+FE0E) is what makes it render as text.
+
+### `expo-haptics` is not a dependency
+
+M4 asked for haptics on send, approve/deny and `message.complete`. `expo-haptics` is not in
+`apps/hermie/package.json` and no dependency was added for it, so no haptics were wired. Adding it
+later is a one-module change plus a macOS no-op wrapper — on macOS there is no haptic engine, and the
+module has no macOS slice, so it would have to be required lazily like `expo-document-picker`.

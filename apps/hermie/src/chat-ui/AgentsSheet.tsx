@@ -7,8 +7,9 @@
  * `subagent.steer` takes the words as written.
  */
 import { useState } from 'react'
-import { Pressable, View } from 'react-native'
+import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native'
 
+import { MONOSPACE } from '../markdown/context'
 import { BottomSheet } from '../ui/BottomSheet'
 import { Button, Text, TextField } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
@@ -16,6 +17,24 @@ import { formatDuration } from './format'
 import { statusGlyph, statusTone } from './SubagentGroupCard'
 import { chatStrings } from './strings'
 import type { SubagentNode } from './types'
+
+/**
+ * One agent's transcript as the sheet shows it.
+ *
+ * Two sources, deliberately labelled apart: `subagent.tail` is a LIVE tail that
+ * stops existing when the child does, and `session.history` under the child's
+ * own session id is the stored transcript that outlives it. A reader who cannot
+ * tell which one they are looking at cannot tell whether "nothing new" means
+ * finished or disconnected.
+ */
+export interface SubagentTranscript {
+  subagentId: string
+  goal: string
+  text: string
+  source: 'tail' | 'stored'
+  loading: boolean
+  error?: string
+}
 
 export interface AgentsSheetProps {
   visible: boolean
@@ -25,6 +44,11 @@ export interface AgentsSheetProps {
   onSteer?: (subagentId: string, text: string) => void
   onInterrupt?: (subagentId: string) => void
   onOpenTranscript?: (subagentId: string) => void
+  /** The transcript panel, when the caller has opened one. */
+  transcript?: SubagentTranscript | null
+  onCloseTranscript?: () => void
+  /** A one-line result of the last Steer or Stop, shown above the tree. */
+  notice?: string | null
 }
 
 function AgentRow({
@@ -172,7 +196,66 @@ function AgentRow({
   )
 }
 
-export function AgentsSheet({ visible, onClose, tree, onSteer, onInterrupt, onOpenTranscript }: AgentsSheetProps) {
+function TranscriptPanel({ transcript, onBack }: { transcript: SubagentTranscript; onBack?: () => void }) {
+  const theme = useTheme()
+
+  return (
+    <View style={{ gap: theme.space.sm }} testID="agent-transcript">
+      <Pressable accessibilityRole="button" onPress={onBack} testID="agent-transcript-back">
+        <Text color="accent" variant="callout">
+          {`‹ ${chatStrings.subagents.transcriptBack}`}
+        </Text>
+      </Pressable>
+
+      <Text style={{ fontWeight: '600' }} variant="body">
+        {chatStrings.subagents.transcriptTitle(transcript.goal)}
+      </Text>
+      <Text color="textMuted" variant="caption">
+        {transcript.source === 'tail' ? chatStrings.subagents.transcriptLive : chatStrings.subagents.transcriptStored}
+      </Text>
+
+      {transcript.error ? (
+        <Text color="danger" variant="callout">
+          {transcript.error}
+        </Text>
+      ) : null}
+
+      <ScrollView
+        style={{
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radii.lg,
+          maxHeight: 320,
+          padding: theme.space.md
+        }}
+      >
+        {transcript.loading && !transcript.text ? (
+          <ActivityIndicator />
+        ) : (
+          <Text
+            color={transcript.text ? 'text' : 'textMuted'}
+            selectable
+            style={{ fontFamily: MONOSPACE, fontSize: 12, lineHeight: 18 }}
+            testID="agent-transcript-text"
+          >
+            {transcript.text || chatStrings.subagents.transcriptEmpty}
+          </Text>
+        )}
+      </ScrollView>
+    </View>
+  )
+}
+
+export function AgentsSheet({
+  visible,
+  onClose,
+  tree,
+  onSteer,
+  onInterrupt,
+  onOpenTranscript,
+  transcript,
+  onCloseTranscript,
+  notice
+}: AgentsSheetProps) {
   const theme = useTheme()
 
   return (
@@ -191,7 +274,15 @@ export function AgentsSheet({ visible, onClose, tree, onSteer, onInterrupt, onOp
         </Pressable>
       </View>
 
-      {tree.length ? (
+      {notice ? (
+        <Text color="textMuted" testID="agents-sheet-notice" variant="callout">
+          {notice}
+        </Text>
+      ) : null}
+
+      {transcript ? (
+        <TranscriptPanel onBack={onCloseTranscript} transcript={transcript} />
+      ) : tree.length ? (
         <View style={{ gap: theme.space.sm }}>
           {tree.map(node => (
             <AgentRow

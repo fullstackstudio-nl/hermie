@@ -40,6 +40,10 @@ export function Chip({ label, tone = 'textMuted', leading, onPress, centered = f
         },
         style
       ]}
+      // On the body as well as on the Pressable: a chip without `onPress` has
+      // no Pressable, and a testID that silently disappears is a test that
+      // silently stops asserting.
+      testID={onPress ? undefined : testID}
     >
       {leading}
       <Text color={tone} variant="caption">

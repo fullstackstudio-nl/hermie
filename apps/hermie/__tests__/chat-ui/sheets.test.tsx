@@ -6,7 +6,8 @@
 import { act, fireEvent, screen } from '@testing-library/react-native'
 import { Text } from 'react-native'
 
-import { approvalItem, clarifyItem } from '../../src/chat-ui/fixtures'
+import { AgentsSheet } from '../../src/chat-ui'
+import { approvalItem, clarifyItem, subagentTree } from '../../src/chat-ui/fixtures'
 import { BottomSheet } from '../../src/ui/BottomSheet'
 import { ApprovalSheet, ChatOptionsSheet, ClarifySheet } from '../../src/ui/sheets'
 import { renderScreen } from '../support/render'
@@ -326,5 +327,81 @@ describe('ChatOptionsSheet', () => {
 
     expect(screen.queryByTestId('picker-option-default')).toBeNull()
     expect(screen.getByTestId('picker-option-example-model-large')).toBeTruthy()
+  })
+})
+
+describe('AgentsSheet', () => {
+  const render = (props: Partial<React.ComponentProps<typeof AgentsSheet>> = {}) =>
+    renderScreen(<AgentsSheet onClose={jest.fn()} tree={subagentTree} visible {...props} />)
+
+  it('draws the tree, parents before their children', () => {
+    render()
+
+    expect(screen.getByTestId('agent-row-sa-1')).toBeTruthy()
+    expect(screen.getByTestId('agent-row-sa-2')).toBeTruthy()
+    // sa-3 is nested under sa-1 and must still be reachable.
+    expect(screen.getByTestId('agent-row-sa-3')).toBeTruthy()
+  })
+
+  it('shows the stream lines of a running child', () => {
+    render()
+
+    expect(screen.getByText('Reading the changelog.')).toBeTruthy()
+    expect(screen.getByText('web_search "release changelog"')).toBeTruthy()
+  })
+
+  it('steers a running child with the words as typed', () => {
+    const onSteer = jest.fn()
+
+    render({ onSteer })
+
+    fireEvent.press(screen.getByTestId('agent-steer-sa-1'))
+    fireEvent.changeText(screen.getByTestId('agent-steer-input-sa-1'), 'check the 1.4 notes too')
+    fireEvent.press(screen.getByTestId('agent-steer-send-sa-1'))
+
+    expect(onSteer).toHaveBeenCalledWith('sa-1', 'check the 1.4 notes too')
+  })
+
+  it('offers Stop only while a child is live', () => {
+    const onInterrupt = jest.fn()
+
+    render({ onInterrupt })
+
+    fireEvent.press(screen.getByTestId('agent-stop-sa-1'))
+    expect(onInterrupt).toHaveBeenCalledWith('sa-1')
+    // sa-2 has completed: there is nothing left to stop.
+    expect(screen.queryByTestId('agent-stop-sa-2')).toBeNull()
+  })
+
+  it('offers Open transcript only for a child with a session behind it', () => {
+    const onOpenTranscript = jest.fn()
+
+    render({ onOpenTranscript })
+
+    fireEvent.press(screen.getByTestId('agent-transcript-sa-2'))
+    expect(onOpenTranscript).toHaveBeenCalledWith('sa-2')
+    expect(screen.queryByTestId('agent-transcript-sa-1')).toBeNull()
+  })
+
+  it('replaces the tree with the transcript panel and says which source it is', () => {
+    render({
+      transcript: {
+        goal: 'Check recovery',
+        loading: false,
+        source: 'stored',
+        subagentId: 'sa-2',
+        text: '> Check recovery\n· read_file(README.md)'
+      }
+    })
+
+    expect(screen.getByTestId('agent-transcript-text')).toHaveTextContent(/read_file\(README\.md\)/u)
+    expect(screen.getByText('The child’s own transcript, read-only.')).toBeTruthy()
+    expect(screen.queryByTestId('agent-row-sa-1')).toBeNull()
+  })
+
+  it('reports the outcome of a steer that came too late', () => {
+    render({ notice: 'Too late to steer — the agent had already finished its last batch.' })
+
+    expect(screen.getByTestId('agents-sheet-notice')).toBeTruthy()
   })
 })

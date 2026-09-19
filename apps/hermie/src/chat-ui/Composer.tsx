@@ -12,7 +12,17 @@
  *     paints what it is given; it never calls the gateway itself.
  */
 import { useEffect, useMemo, useRef } from 'react'
-import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, TextInput, View } from 'react-native'
+import {
+  Image,
+  KeyboardAvoidingView,
+  type NativeSyntheticEvent,
+  Platform,
+  Pressable,
+  ScrollView,
+  type TextInputKeyPressEventData,
+  TextInput,
+  View
+} from 'react-native'
 
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
@@ -38,6 +48,16 @@ export interface ComposerProps {
   queuedText?: string
   placeholder?: string
   botName?: string
+  /**
+   * A bare Enter sends instead of inserting a newline.
+   *
+   * Only on macOS by default, and deliberately not on iPad: neither iOS nor
+   * iPadOS tells React Native whether a keyboard is physical, and a bare Enter
+   * that sends would leave a touch user with no way to type a newline at all.
+   * Cmd/Ctrl+Enter and Escape work everywhere regardless — a software keyboard
+   * cannot produce either.
+   */
+  hardwareKeyboard?: boolean
   testID?: string
 }
 
@@ -65,6 +85,7 @@ export function Composer({
   queuedText,
   placeholder,
   botName,
+  hardwareKeyboard = Platform.OS === 'macos',
   testID = 'composer'
 }: ComposerProps) {
   const theme = useTheme()
@@ -99,6 +120,64 @@ export function Composer({
 
     onSend(value)
   }
+
+  /**
+   * Hardware-keyboard shortcuts.
+   *
+   * `onKeyPress` is the only hook RN gives a `TextInput` that fires BEFORE the
+   * character lands, which is what makes swallowing Enter possible at all. The
+   * modifier flags are on the native event on macOS; on iPadOS they are not, so
+   * Shift+Enter there is recognised by the newline the field has already
+   * accepted rather than by the flag — hence the `preventDefault` guard rather
+   * than an unconditional send.
+   */
+  const onKeyPress = (event: NativeSyntheticEvent<TextInputKeyPressEventData>) => {
+    const native = event.nativeEvent as TextInputKeyPressEventData & {
+      shiftKey?: boolean
+      metaKey?: boolean
+      ctrlKey?: boolean
+    }
+
+    if (native.key === 'Escape') {
+      if (running) {
+        event.preventDefault?.()
+        onStop?.()
+      }
+
+      return
+    }
+
+    if (native.key !== 'Enter') {
+      return
+    }
+
+    // Cmd/Ctrl+Enter sends everywhere: only a physical keyboard can produce a
+    // modifier, so this is safe on a phone too.
+    if (native.metaKey || native.ctrlKey) {
+      event.preventDefault?.()
+      submit()
+
+      return
+    }
+
+    // Shift+Enter is always the newline. A bare Enter only sends where a
+    // hardware keyboard is certain.
+    if (!hardwareKeyboard || native.shiftKey) {
+      return
+    }
+
+    event.preventDefault?.()
+    submit()
+  }
+
+  /**
+   * react-native-macos hands a key to JS only when the field was told to pass
+   * it up; without `keyDownEvents` AppKit swallows Return and Escape and
+   * `onKeyPress` never fires. The prop does not exist on the other platforms,
+   * so it is spread in rather than written inline.
+   */
+  const keyEvents =
+    Platform.OS === 'macos' ? ({ keyDownEvents: [{ key: 'Enter' }, { key: 'Escape' }] } as Record<string, unknown>) : {}
 
   const pick = (name: string) => {
     onChangeText(`/${name} `)
@@ -243,7 +322,9 @@ export function Composer({
             accessibilityLabel={botName ? `Message ${botName}` : chatStrings.composer.placeholder}
             multiline
             onChangeText={onChangeText}
+            onKeyPress={onKeyPress}
             placeholder={placeholder ?? chatStrings.composer.placeholder}
+            {...keyEvents}
             placeholderTextColor={theme.colors.textMuted}
             ref={inputRef}
             style={{

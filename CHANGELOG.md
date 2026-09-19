@@ -137,6 +137,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file, which is what the release workflow publishes.
 - Repository furniture for a public project: a Contributor Covenant code of conduct, issue forms for
   bugs and feature requests, and grouped weekly Dependabot updates for npm and the actions.
+- Activity: one timeline of everything the bots said to each other — `researcher → writer: …`, the
+  reply that came back, and every `delegate_task` fan-out — grouped by day, newest first, with a tap
+  that opens the conversation a row came from scrolled to that exact message. It is a view over the
+  transcripts the app already holds rather than a second copy, and bots nobody has opened are filled
+  in by a background load of their newest rows through the same projection, so opening one afterwards
+  reconciles onto those items instead of duplicating them. A delivery is written into both chats, so
+  the sender-side dispatch wins the dedupe: it is the row that knows whether the message was queued,
+  delivered or failed. Three counters sit above it, each from a different call — bots working from
+  `session.active_list`, live sub-agents from `delegation.status`, deliveries still in flight from
+  `agents.list` filtered to the `bot_mode_dm.py --run-delivery` runner — polled only while the screen
+  is on top.
+- Bot-to-bot traffic is now walkable in both directions. A dispatch card opens the recipient's chat on
+  the inbound message it produced, and an inbound message's header opens the sender's chat on the
+  dispatch that sent it; the two rows share a sender, a recipient and a body but no identifier, so the
+  match is handle plus nearest stamp and it refuses rather than guesses. While a dispatch is out and
+  the recipient's chat is mid-turn, the card says `@writer is writing…`.
+- `subagent.list`, folded in when a chat opens and every five seconds while anything is delegating.
+  `subagent.*` events have no replay, so a conversation opened halfway through a delegation never saw
+  its children start; the roster is the only way to learn about them. It adds and refreshes and never
+  resurrects a child the stream already saw finish.
+- The agents sheet gained a read-only transcript per child: the live `subagent.tail`, polled every
+  three seconds while the child runs, and — once it has a `child_session_id` — the child's own stored
+  session, which outlives the tail. Steer and Stop now report what the gateway answered, including a
+  steer that arrived after the child's last batch.
+- The unread badge counts. A chat the app has loaded shows how many replies and inbound teammate
+  messages arrived since it was last looked at, capped at `99+`; a chat it has never read keeps the
+  dot, because `last_active` is all the gateway reports and a number there would be invented.
+- The transcript can be asked to scroll to one item, with the `onScrollToIndexFailed` recovery a
+  virtualised list needs, and it reports honestly when the item is not in the visible set — a chat on
+  Quiet genuinely does not contain every row.
+- Hardware-keyboard shortcuts in the composer: `Cmd`/`Ctrl+Enter` sends and `Escape` stops a running
+  turn on every platform, and a bare `Enter` sends on macOS where a physical keyboard is certain.
+  `Shift+Enter` is always a newline.
+- The regular shell folds to a single pane when a macOS window is dragged below the two-pane
+  threshold, with a way back to the list, instead of squeezing a 320pt sidebar against an unreadable
+  chat.
+- The fake gateway's delegation is now three children over several seconds with one of them failing,
+  wrapped in a real `delegate_task` call, plus `subagent.list`, `delegation.status`, `agents.list` and
+  a live `message_agent` hand-off whose reply comes back as a `process_complete` row. A fan-out that
+  finished inside one frame could not be looked at, let alone steered.
 
 ### Changed
 
@@ -152,6 +192,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gradient.
 - The macOS bundle knows what it is: the compiled app icon, a display name, an application category,
   a copyright line, and the version the rest of the repository is on rather than the template's 1.0.
+- An answered approval leaves a receipt that says what was decided and about what — `Allowed once ·
+  rm -rf ./build`, with the command truncated — instead of `Answered: once`, which said neither.
+- A finished reply only shows its duration next to something that explains it. A bare `0.1s` under a
+  bubble read as a stray artifact rather than as part of the message.
+- The typing dots follow the turn rather than the chat being busy. A chat whose turn has ended while a
+  sub-agent keeps working is not about to say anything, and three dots there promise a sentence that
+  is not coming.
+- A reply addressed at another bot is drawn slightly quieter than one addressed at you.
+- Dragging the transcript down now lowers the keyboard with the finger.
 
 ### Fixed
 
@@ -168,5 +217,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   field now offers to show its value.
 - `expo-image-picker` needs an explicit photo-library usage string; without one iOS terminates the
   app the moment the permission is requested, with no dialog and no crash report.
+- Every message you sent appeared twice a moment later. `prompt.submit` answers with a status and no
+  row id, so the optimistic bubble and the streamed reply had nothing linking them to the rows the
+  gateway persisted; the next `sessions.changed` sweep read the tail, found two rows it had never
+  seen, and appended them. The tail reconcile now pairs a fresh row against a live item of the same
+  kind and text, the way a full re-hydration already did.
+- The transcript told the screen it had scrolled away from the bottom from inside a state updater,
+  which React runs during another component's render. That is a "cannot update a component while
+  rendering a different component" error and an update that can be dropped; it is an effect now.
+- The Activity timeline's `↩` rendered as an emoji on iOS, which is what U+21A9 means without an
+  explicit text variation selector.
 
 [Unreleased]: https://github.com/fullstackstudio/hermie/compare/main...HEAD

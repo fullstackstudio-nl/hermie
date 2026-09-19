@@ -22,13 +22,16 @@
  */
 import { assertDesktopContract, type ConnectionStatus } from '@hermie/gateway-client'
 import {
+  applySubagentSnapshot,
   type ChatState,
   type ResumeSnapshot,
   type RowShape,
   rowsToItems,
   snapshotForCache,
   stateFromCache,
+  type SubagentSnapshotRow,
   type TranscriptEvent,
+  type TranscriptItem,
   type TranscriptRow
 } from '@hermie/transcript'
 import type {
@@ -42,7 +45,7 @@ import type { ServerRequest as GatewayServerRequest } from '@hermes/shared/json-
 
 import type { ChatGateway } from '../../gateway/link'
 import type { ChatCache } from '../../platform/chat-cache'
-import type { Bot, BotsState } from '../../store/bots'
+import type { Bot, BotCanonicalSession, BotsState } from '../../store/bots'
 import type { ChatsState } from '../../store/chats'
 import { liveChatNames } from '../../store/chats'
 import type { BotsController } from '../bots/bots-controller'
@@ -61,6 +64,21 @@ export const SESSIONS_CHANGED_DEBOUNCE_MS = 500
 
 /** Approval poll cadence while a turn is running and the app is in front. */
 export const APPROVAL_POLL_MS = 30_000
+
+/**
+ * How often a chat with live children re-reads `subagent.list`.
+ *
+ * `subagent.*` has no replay, so a chat opened halfway through a delegation
+ * never saw the children start. The roster is the only way to learn about them,
+ * and once it has, the events carry the rest.
+ */
+export const SUBAGENT_RECONCILE_MS = 5_000
+
+/** Rows the Activity screen's background load asks for per bot. */
+export const ACTIVITY_TAIL_LIMIT = 50
+
+/** The delivery runner a `message_agent` hand-off spawns (`tools/bot_mode_dm.py`). */
+export const DM_DELIVERY_MARKER = 'bot_mode_dm.py --run-delivery'
 
 type StoreApi<T> = {
   getState: () => T
@@ -112,6 +130,7 @@ export class ChatController {
   private readonly slashCatalogs = new Map<string, CommandsCatalogResult>()
   private sessionsChangedTimer: ReturnType<typeof setTimeout> | undefined
   private approvalPollTimer: ReturnType<typeof setInterval> | undefined
+  private subagentPollTimer: ReturnType<typeof setInterval> | undefined
   private foregrounded = true
   private sawReady = false
   private started = false
@@ -149,6 +168,7 @@ export class ChatController {
     this.started = false
     this.clearSessionsChangedTimer()
     this.stopApprovalPoll()
+    this.stopSubagentPoll()
     this.pending.clear()
     this.opening.clear()
     this.slashCatalogs.clear()
@@ -234,8 +254,14 @@ export class ChatController {
     await this.replaySince(bot.name, runtimeId)
 
     this.chats.getState().setHydration(bot.name, 'live')
-    this.bots.getState().markSeen(bot.name)
+    // Seen as of NOW, not as of the roster's `last_active`: the roster row can
+    // be a minute old, and a chat the user is looking at is read.
+    this.bots.getState().markSeen(bot.name, Math.floor(this.now() / 1000))
     this.syncApprovalPoll()
+
+    // A chat opened mid-delegation never saw its children start.
+    await this.reconcileSubagents(bot.name)
+    this.syncSubagentPoll()
   }
 
   private async paintFromCache(botName: string, storedId: string, resolvedId: string): Promise<void> {
@@ -411,6 +437,11 @@ export class ChatController {
 
     if (event.type === 'message.start' || event.type === 'message.complete') {
       this.syncApprovalPoll()
+      this.syncSubagentPoll()
+    }
+
+    if (event.type.startsWith('subagent.')) {
+      this.syncSubagentPoll()
     }
 
     if (event.type === 'message.complete') {
@@ -501,6 +532,7 @@ export class ChatController {
     if (status !== 'ready') {
       if (status === 'disconnected' || status === 'reconnecting' || status === 'paused' || status === 'offline') {
         this.stopApprovalPoll()
+        this.stopSubagentPoll()
       }
 
       return
@@ -821,6 +853,221 @@ export class ChatController {
     return result?.available === false ? '' : (result?.text ?? '')
   }
 
+  /**
+   * The child's OWN transcript, read the same way a chat is.
+   *
+   * `subagent.tail` is a live stream tail and stops existing the moment the
+   * child does. A child that reported a `child_session_id` has a real stored
+   * session behind it, and that one can still be read afterwards — which is
+   * what makes "Open transcript" worth offering on a finished child at all.
+   */
+  async childTranscript(botName: string, childSessionId: string): Promise<TranscriptItem[]> {
+    const rows = await this.gateway.fetchMessages(childSessionId, { limit: REST_HISTORY_LIMIT, order: 'latest' })
+
+    if (rows?.length) {
+      return [...rowsToItems(rows, 'rest')]
+    }
+
+    const result = await this.gateway.request('session.history', { session_id: childSessionId, profile: botName })
+
+    return [...rowsToItems((result?.messages ?? []) as TranscriptRow[], 'rpc')]
+  }
+
+  /**
+   * Fold the gateway's live-children roster into a chat.
+   *
+   * Cheap and idempotent: an empty roster is a no-op in the reducer, and a
+   * child the events already described is refreshed rather than duplicated.
+   */
+  async reconcileSubagents(botName: string): Promise<void> {
+    const chat = this.chats.getState().chats[botName]
+
+    if (!chat?.runtimeSessionId) {
+      return
+    }
+
+    try {
+      const result = await this.gateway.request('subagent.list', {
+        session_id: chat.runtimeSessionId,
+        profile: botName
+      })
+
+      const rows = (result?.subagents ?? []) as SubagentSnapshotRow[]
+
+      if (rows.length) {
+        this.chats.getState().update(botName, state => applySubagentSnapshot(state, rows, this.now()))
+      }
+    } catch {
+      // A gateway without `subagent.list` still streams `subagent.*`; the
+      // roster is a recovery path, never the only one.
+    }
+  }
+
+  /**
+   * Poll `subagent.list` while anything is delegating.
+   *
+   * Reference-free and idempotent: it turns itself off the moment no live chat
+   * has a running child or an active turn, so an idle app polls nothing.
+   */
+  private syncSubagentPoll(): void {
+    const busy = liveChatNames(this.chats.getState()).some(name => {
+      const chat = this.chats.getState().chats[name]
+
+      if (!chat) {
+        return false
+      }
+
+      return (
+        chat.turn.active ||
+        Object.values(chat.subagents).some(child => child.status === 'running' || child.status === 'queued')
+      )
+    })
+
+    if (busy && this.foregrounded) {
+      if (this.subagentPollTimer === undefined) {
+        this.subagentPollTimer = setInterval(() => {
+          for (const name of liveChatNames(this.chats.getState())) {
+            void this.reconcileSubagents(name)
+          }
+        }, SUBAGENT_RECONCILE_MS)
+      }
+
+      return
+    }
+
+    this.stopSubagentPoll()
+  }
+
+  private stopSubagentPoll(): void {
+    if (this.subagentPollTimer !== undefined) {
+      clearInterval(this.subagentPollTimer)
+      this.subagentPollTimer = undefined
+    }
+  }
+
+  // ── the activity timeline ──────────────────────────────────────────────────
+
+  /**
+   * Load one bot's recent transcript WITHOUT attaching to its session.
+   *
+   * The Activity screen is a view over the chat store, so a bot nobody has
+   * opened has nothing to show. This fills that gap with the cheapest read that
+   * exists — the REST tail under the canonical chat's resolved id — and puts
+   * the rows through the same `rowsToItems` every other path uses, so opening
+   * the chat afterwards reconciles onto the items rather than duplicating them.
+   *
+   * A chat that IS live is left alone: it has the truth on the socket already.
+   */
+  async prefetchTail(bot: Bot, limit = ACTIVITY_TAIL_LIMIT): Promise<void> {
+    const existing = this.chats.getState().chats[bot.name]
+
+    if (existing && (this.chats.getState().live[bot.name] || existing.turn.active)) {
+      return
+    }
+
+    let canonical: BotCanonicalSession
+
+    try {
+      canonical = await this.botsController.resolveCanonical(bot)
+    } catch {
+      // A bot whose chat cannot be resolved contributes nothing to the
+      // timeline; it must not take the whole screen down.
+      return
+    }
+
+    this.chats.getState().ensure(bot.name, {
+      storedSessionId: canonical.id,
+      resolvedSessionId: canonical.resolvedId
+    })
+
+    let rows = await this.gateway.fetchMessages(canonical.resolvedId, { limit, order: 'latest' })
+
+    if (rows === null) {
+      try {
+        const result = await this.gateway.request('session.history', {
+          session_id: canonical.id,
+          profile: bot.name
+        })
+
+        rows = ((result?.messages ?? []) as TranscriptRow[]).slice(-limit)
+      } catch {
+        return
+      }
+    }
+
+    if (!rows.length) {
+      return
+    }
+
+    this.chats.getState().applyTail(bot.name, rowsToItems(rows, 'rest'))
+
+    const chat = this.chats.getState().chats[bot.name]
+
+    if (chat?.hydration === 'cold') {
+      // Not `live`: nothing is attached. `stale` is the honest word for a
+      // transcript that was read once and is not being streamed.
+      this.chats.getState().setHydration(bot.name, 'stale')
+    }
+  }
+
+  /**
+   * The background load behind the Activity screen: every bot, in parallel.
+   *
+   * The roster is re-read FIRST. A bot's canonical id is the only key the tail
+   * can be fetched under, and a stale one (a gateway restarted under a running
+   * app, a chat recreated elsewhere) fails the fetch silently — which reads as
+   * "these bots never talked to each other" rather than as the stale key it is.
+   */
+  async loadActivity(limit = ACTIVITY_TAIL_LIMIT): Promise<void> {
+    const bots = await this.botsController.refresh().catch(() => this.bots.getState().bots)
+
+    await Promise.all(bots.map(bot => this.prefetchTail(bot, limit).catch(() => undefined)))
+  }
+
+  /** How many sub-agents each bot has running right now (`delegation.status`). */
+  async activeSubagentCount(): Promise<number> {
+    const bots = this.bots.getState().bots
+    const counts = await Promise.all(
+      bots.map(async bot => {
+        try {
+          const result = await this.gateway.request('delegation.status', { profile: bot.name })
+
+          return (result?.active ?? []).length
+        } catch {
+          // A gateway without delegation support reports none rather than
+          // failing the whole header.
+          return 0
+        }
+      })
+    )
+
+    return counts.reduce((sum, count) => sum + count, 0)
+  }
+
+  /**
+   * Bot-to-bot deliveries still in flight.
+   *
+   * `agents.list` reports every background process the gateway is running, of
+   * which a DM delivery is one shape: the `bot_mode_dm.py --run-delivery`
+   * runner. Anything else in that list is somebody else's work.
+   */
+  async inFlightDeliveries(): Promise<number> {
+    const bots = this.bots.getState().bots
+    const counts = await Promise.all(
+      bots.map(async bot => {
+        try {
+          const result = await this.gateway.request('agents.list', { profile: bot.name })
+
+          return (result?.processes ?? []).filter(row => String(row.command ?? '').includes(DM_DELIVERY_MARKER)).length
+        } catch {
+          return 0
+        }
+      })
+    )
+
+    return counts.reduce((sum, count) => sum + count, 0)
+  }
+
   // ── slash commands ─────────────────────────────────────────────────────────
 
   /**
@@ -1013,6 +1260,7 @@ export class ChatController {
   async onForeground(): Promise<void> {
     this.foregrounded = true
     this.syncApprovalPoll()
+    this.syncSubagentPoll()
 
     await Promise.all(liveChatNames(this.chats.getState()).map(name => this.refreshPendingApprovals(name)))
   }
@@ -1020,6 +1268,7 @@ export class ChatController {
   onBackground(): void {
     this.foregrounded = false
     this.stopApprovalPoll()
+    this.stopSubagentPoll()
   }
 
   /**
@@ -1120,7 +1369,7 @@ export class ChatController {
    * read; it deliberately does NOT detach, so bot-to-bot traffic keeps arriving.
    */
   async closeChat(botName: string): Promise<void> {
-    this.bots.getState().markSeen(botName)
+    this.bots.getState().markSeen(botName, Math.floor(this.now() / 1000))
     await this.persist(botName)
   }
 

@@ -17,6 +17,7 @@ import {
   clarifyItem,
   galleryTranscript,
   noticeItem,
+  pendingDmOutItem,
   searchToolItem,
   statusItem,
   subagentGroupItem,
@@ -99,7 +100,9 @@ describe('TranscriptList', () => {
     renderList([{ item: botDmInItem, presentation: 'chip' }], { onOpenBot })
 
     fireEvent.press(screen.getByTestId(`bot-dm-in-chip-${botDmInItem.id}`))
-    expect(onOpenBot).toHaveBeenCalledWith('writer')
+    // The second argument describes the row to look for on the far side, so the
+    // sender's chat opens on the dispatch rather than at its bottom.
+    expect(onOpenBot).toHaveBeenCalledWith('writer', expect.objectContaining({ kind: 'bot_dm_out' }))
   })
 
   it('shows the receipt under the last own bubble only', () => {
@@ -139,5 +142,56 @@ describe('TranscriptList', () => {
     renderList(galleryTranscript, { typing: true })
 
     expect(screen.getByTestId('typing-indicator')).toBeTruthy()
+  })
+})
+
+describe('answered questions', () => {
+  it('leaves a receipt naming the decision AND the command, never a bare duration', () => {
+    renderList([
+      {
+        item: { ...approvalItem, answer: 'once', state: 'answered' },
+        presentation: 'full'
+      }
+    ])
+
+    expect(screen.getByText('Allowed once · git push origin release-notes')).toBeTruthy()
+  })
+
+  it('truncates a long command rather than pushing the decision off the row', () => {
+    renderList([
+      {
+        item: {
+          ...approvalItem,
+          answer: 'deny',
+          command: 'rm -rf ./build && rm -rf ./dist && rm -rf ./node_modules/.cache && echo done',
+          state: 'answered'
+        },
+        presentation: 'full'
+      }
+    ])
+
+    expect(screen.getByText(/^Denied · rm -rf \.\/build/u)).toBeTruthy()
+    expect(screen.getByText(/…$/u)).toBeTruthy()
+  })
+
+  it('says a question was answered elsewhere rather than inventing an outcome', () => {
+    renderList([{ item: { ...approvalItem, state: 'cancelled' }, presentation: 'full' }])
+
+    expect(screen.getByText('Answered elsewhere')).toBeTruthy()
+  })
+})
+
+describe('a dispatch whose recipient is answering', () => {
+  it('says so under the card while the reply has not landed', () => {
+    renderList([{ item: pendingDmOutItem, presentation: 'collapsed' }], { typingHandles: ['builder'] })
+
+    expect(screen.getByTestId(`bot-dm-out-typing-${pendingDmOutItem.id}`)).toBeTruthy()
+    expect(screen.getByText('@builder is writing…')).toBeTruthy()
+  })
+
+  it('stays quiet for a dispatch that already has its reply', () => {
+    renderList([{ item: botDmOutItem, presentation: 'collapsed' }], { typingHandles: ['writer'] })
+
+    expect(screen.queryByTestId(`bot-dm-out-typing-${botDmOutItem.id}`)).toBeNull()
   })
 })

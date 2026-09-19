@@ -6,7 +6,7 @@
  * literals, and what keeps the data layer free to change shape underneath.
  */
 export { AgentsBar, type AgentsBarProps } from './AgentsBar'
-export { AgentsSheet, type AgentsSheetProps } from './AgentsSheet'
+export { AgentsSheet, type AgentsSheetProps, type SubagentTranscript } from './AgentsSheet'
 export { AssistantBubble, type AssistantBubbleProps } from './AssistantBubble'
 export { BotDmInBubble, type BotDmInBubbleProps } from './BotDmInBubble'
 export { BotDmOutCard, type BotDmOutCardProps } from './BotDmOutCard'
@@ -21,7 +21,12 @@ export { ReasoningDisclosure, type ReasoningDisclosureProps } from './ReasoningD
 export { StatusRow, type StatusRowProps } from './StatusRow'
 export { SubagentGroupCard, type SubagentGroupCardProps } from './SubagentGroupCard'
 export { ToolCard, type ToolCardProps } from './ToolCard'
-export { TranscriptList, type TranscriptContext, type TranscriptListProps } from './TranscriptList'
+export {
+  TranscriptList,
+  type TranscriptContext,
+  type TranscriptListHandle,
+  type TranscriptListProps
+} from './TranscriptList'
 export { TypingIndicator, type TypingIndicatorProps } from './TypingIndicator'
 export { UserBubble, type UserBubbleProps } from './UserBubble'
 

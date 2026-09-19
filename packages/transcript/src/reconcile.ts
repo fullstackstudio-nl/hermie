@@ -260,6 +260,31 @@ export function reconcileTail(state: ChatState, tailItems: readonly TranscriptIt
   const appended: TranscriptItem[] = []
   let placeholderCursor = 0
 
+  /**
+   * The live tail, indexed by text.
+   *
+   * A turn we sent ourselves exists twice for a moment: as the optimistic
+   * bubble and the streamed reply the reducer built (no `rowId`, because
+   * nothing persisted them yet), and as the rows the gateway wrote. There is no
+   * id in common — `prompt.submit` does not answer with one — so text is the
+   * only thing that can pair them, exactly as `reconcile` already does for a
+   * full re-hydration. Without it the next `sessions.changed` sweep appends the
+   * persisted copies and every sent message shows up twice.
+   */
+  const liveByText = new Map<string, string[]>()
+
+  for (const item of list) {
+    if (item.rowId !== undefined || !normalizedItemText(item)) {
+      continue
+    }
+
+    const key = textKeyOf(item)
+
+    liveByText.set(key, [...(liveByText.get(key) ?? []), item.id])
+  }
+
+  const pairedLive = new Set<string>()
+
   for (const fresh of tailItems) {
     if (fresh.rowId !== undefined && knownRowIds.has(fresh.rowId)) {
       const existingId = state.byRowId[String(fresh.rowId)]
@@ -278,6 +303,16 @@ export function reconcileTail(state: ChatState, tailItems: readonly TranscriptIt
 
     if (toolMatch) {
       byId.set(toolMatch.id, mergeWithLive(fresh, toolMatch))
+
+      continue
+    }
+
+    const liveId = liveByText.get(textKeyOf(fresh))?.find(id => !pairedLive.has(id))
+    const liveMatch = liveId ? byId.get(liveId) : undefined
+
+    if (liveMatch) {
+      pairedLive.add(liveMatch.id)
+      byId.set(liveMatch.id, mergeWithLive(fresh, liveMatch))
 
       continue
     }

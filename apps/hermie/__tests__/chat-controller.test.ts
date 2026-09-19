@@ -88,7 +88,14 @@ describe('opening a chat', () => {
 
     await controller.openChat(RESEARCHER)
 
-    expect(gateway.methodOrder()).toEqual(['session.resume', 'session.history', 'session.events.since'])
+    // The roster read comes last on purpose: a chat opened halfway through a
+    // delegation has to learn about children the event stream never replayed.
+    expect(gateway.methodOrder()).toEqual([
+      'session.resume',
+      'session.history',
+      'session.events.since',
+      'subagent.list'
+    ])
     expect(gateway.lastCall('session.resume')).toMatchObject({
       session_id: 'stored-researcher',
       profile: 'researcher',

@@ -33,7 +33,14 @@ export interface UseChatResult {
   botName: string
   items: VisibleItem[]
   draft: string
+  /** Anything running: the turn, a tool, a child. Drives the header and composer. */
   busy: boolean
+  /**
+   * The TURN specifically. Narrower than `busy` on purpose: the typing dots
+   * mean "a reply is coming", and a chat whose turn ended while a sub-agent
+   * keeps working is not about to say anything.
+   */
+  turnActive: boolean
   hydration: 'cold' | 'cached' | 'hydrating' | 'live' | 'stale' | 'error'
   /** Approval and clarify cards still waiting on the user. */
   requests: TranscriptItem[]
@@ -56,6 +63,8 @@ export interface UseChatResult {
   steerSubagent: (subagentId: string, text: string) => Promise<string>
   interruptSubagent: (subagentId: string) => Promise<boolean>
   tailSubagent: (subagentId: string) => Promise<string>
+  /** The child's own stored transcript, for the full read-only view. */
+  childTranscript: (childSessionId: string) => Promise<TranscriptItem[]>
   querySlash: (prefix: string) => Promise<CompletionItem[]>
   runSlash: (command: string) => Promise<void>
   setOption: (
@@ -146,6 +155,7 @@ export function useChat(botName: string): UseChatResult {
     items,
     draft: chat?.draft ?? '',
     busy: chat ? isBusy(chat) : false,
+    turnActive: chat?.turn.active ?? false,
     hydration: chat?.hydration ?? 'cold',
     requests,
     subagents,
@@ -190,6 +200,10 @@ export function useChat(botName: string): UseChatResult {
     ),
     tailSubagent: useCallback(
       (subagentId: string) => (controller ? controller.tailSubagent(botName, subagentId) : notReady()),
+      [botName, controller, notReady]
+    ),
+    childTranscript: useCallback(
+      (childSessionId: string) => (controller ? controller.childTranscript(botName, childSessionId) : notReady()),
       [botName, controller, notReady]
     ),
     querySlash: useCallback(

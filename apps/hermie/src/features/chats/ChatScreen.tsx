@@ -16,7 +16,14 @@
  *    gateway can have several open at once, and a stack of sheets is how a user
  *    ends up answering the wrong one.
  */
-import type { ApprovalItem, ClarifyItem, Verbosity } from '@hermie/transcript'
+import {
+  findDmCounterpart,
+  normalizeAgentTarget,
+  type ApprovalItem,
+  type ClarifyItem,
+  type TranscriptItem,
+  type Verbosity
+} from '@hermie/transcript'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, View } from 'react-native'
 
@@ -24,11 +31,14 @@ import {
   AgentsBar,
   AgentsSheet,
   ChatHeader,
+  chatStrings,
   Composer,
   type ComposerAttachment,
   type PickerOption,
   type SlashSuggestion,
-  TranscriptList
+  type SubagentTranscript,
+  TranscriptList,
+  type TranscriptListHandle
 } from '../../chat-ui'
 import { useGateway } from '../../gateway'
 import { strings } from '../../i18n/strings'
@@ -42,15 +52,28 @@ import { attachmentKind, attachmentsSupported, pickAttachment, type PickedAttach
 import type { ModelChoice } from './chat-controller'
 import { useChat } from './useChat'
 
+export interface OpenChatOptions {
+  /**
+   * Land on this item instead of at the bottom.
+   *
+   * A tapped DM card should open the OTHER bot's chat on the message it is
+   * about — the whole point of showing bot-to-bot traffic is that a reader can
+   * follow it across chats without searching for where it went.
+   */
+  focusItemId?: string
+}
+
 export type ChatScreenProps = {
   /** The compact shell passes the bot through navigation params. */
-  route?: { params?: { bot?: string } }
+  route?: { params?: { bot?: string; focusItemId?: string } }
   /** The regular shell passes it directly. */
   bot?: string
+  /** Scroll here once the transcript is on screen. */
+  focusItemId?: string
   /** Shown as the header's back chevron; absent on the regular shell. */
   onBack?: () => void
   /** Open another bot's chat — a tapped DM card or sender chip. */
-  onOpenBot?: (botName: string) => void
+  onOpenBot?: (botName: string, options?: OpenChatOptions) => void
 }
 
 const REASONING_OPTIONS: PickerOption[] = [
@@ -64,8 +87,9 @@ const REASONING_OPTIONS: PickerOption[] = [
   { value: 'ultra', label: 'Ultra' }
 ]
 
-export function ChatScreen({ route, bot, onBack, onOpenBot }: ChatScreenProps) {
+export function ChatScreen({ route, bot, focusItemId, onBack, onOpenBot }: ChatScreenProps) {
   const botName = bot ?? route?.params?.bot ?? ''
+  const focus = focusItemId ?? route?.params?.focusItemId
 
   if (!botName) {
     return <NoBotSelected />
@@ -74,7 +98,7 @@ export function ChatScreen({ route, bot, onBack, onOpenBot }: ChatScreenProps) {
   // Keyed on the bot so that switching conversations in the regular shell
   // starts from a clean composer and closed sheets rather than inheriting the
   // previous chat's.
-  return <Conversation botName={botName} key={botName} onBack={onBack} onOpenBot={onOpenBot} />
+  return <Conversation botName={botName} focusItemId={focus} key={botName} onBack={onBack} onOpenBot={onOpenBot} />
 }
 
 function NoBotSelected() {
@@ -93,12 +117,14 @@ type SheetKind = 'none' | 'options' | 'agents'
 
 function Conversation({
   botName,
+  focusItemId,
   onBack,
   onOpenBot
 }: {
   botName: string
+  focusItemId?: string
   onBack?: () => void
-  onOpenBot?: (botName: string) => void
+  onOpenBot?: (botName: string, options?: OpenChatOptions) => void
 }) {
   const chat = useChat(botName)
   const { status } = useGateway()
@@ -116,7 +142,11 @@ function Conversation({
   const [away, setAway] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [pendingModel, setPendingModel] = useState<{ value: string; message?: string } | null>(null)
+  const [transcript, setTranscript] = useState<SubagentTranscript | null>(null)
+  const [agentsNotice, setAgentsNotice] = useState<string | null>(null)
 
+  const listRef = useRef<TranscriptListHandle>(null)
+  const focused = useRef<string | null>(null)
   const acknowledged = useRef<string | null>(null)
   const awayRef = useRef(false)
   const itemCount = chat.items.length
@@ -175,6 +205,187 @@ function Conversation({
     acknowledged.current = approval.id
     void chat.acknowledgeApproval(approval.requestId).catch(() => undefined)
   }, [approval, chat])
+
+  // Land on the item the caller asked for, once it is actually in the list.
+  // Hydration is asynchronous, so this retries as items arrive and gives up
+  // silently rather than scrolling somewhere plausible-looking.
+  useEffect(() => {
+    if (!focusItemId || focused.current === focusItemId || !chat.items.length) {
+      return
+    }
+
+    if (listRef.current?.scrollToItem(focusItemId)) {
+      focused.current = focusItemId
+    }
+  }, [chat.items, focusItemId])
+
+  /**
+   * Handles whose chat is live and mid-turn.
+   *
+   * This is what lets a pending dispatch say "@writer is writing…": the
+   * recipient's chat is resumed (every opened chat stays live) and its turn is
+   * running, which together mean the DM landed and is being answered.
+   */
+  const typingHandles = useChatsStore(
+    useCallback(
+      state =>
+        Object.keys(state.live)
+          .filter(name => name !== botName && state.chats[name]?.turn.active)
+          .map(name => normalizeAgentTarget(name) || name.toLowerCase())
+          .sort()
+          .join(','),
+      [botName]
+    )
+  )
+
+  const typing = useMemo(() => (typingHandles ? typingHandles.split(',') : []), [typingHandles])
+
+  /**
+   * Open another bot's chat on the message this one is about.
+   *
+   * The two rows are the same delivery seen from opposite sides and the gateway
+   * keys them by nothing in common, so the match is handle plus nearest stamp
+   * (`findDmCounterpart`). It refuses rather than guesses, and a refusal just
+   * means the chat opens at the bottom the way it always did.
+   */
+  const openBot = useCallback(
+    (handle: string, from?: { kind: 'bot_dm_in' | 'bot_dm_out'; at?: number; text?: string }) => {
+      const names = Object.keys(useBotsStore.getState().byName)
+      const target = resolveBot(handle, names)
+      const targetChat = useChatsStore.getState().chats[target]
+      const counterpart = from
+        ? findDmCounterpart(targetChat, {
+            kind: from.kind,
+            handle: botName,
+            ...(from.at === undefined ? {} : { at: from.at }),
+            ...(from.text === undefined ? {} : { text: from.text })
+          })
+        : undefined
+
+      onOpenBot?.(target, counterpart ? { focusItemId: counterpart } : undefined)
+    },
+    [botName, onOpenBot]
+  )
+
+  const subagents = useChatsStore(useCallback(state => state.chats[botName]?.subagents ?? EMPTY_SUBAGENTS, [botName]))
+
+  /**
+   * Open one child's transcript.
+   *
+   * While it is RUNNING, `subagent.tail` is the only live view and it is polled
+   * (see below). Once it has finished, the tail is gone but the child's own
+   * stored session is not — so a finished child is read through
+   * `session.history` instead, which is the difference between a button that
+   * works afterwards and one that shows an empty box.
+   */
+  const openTranscript = useCallback(
+    (subagentId: string) => {
+      const child = subagents[subagentId]
+
+      if (!child) {
+        return
+      }
+
+      const live = child.status === 'running' || child.status === 'queued'
+
+      setSheet('agents')
+      setTranscript({
+        subagentId,
+        goal: child.goal,
+        text: '',
+        source: live || !child.childSessionId ? 'tail' : 'stored',
+        loading: true
+      })
+    },
+    [subagents]
+  )
+
+  const steerChild = useCallback(
+    async (subagentId: string, text: string) => {
+      try {
+        const status = await chat.steerSubagent(subagentId, text)
+
+        setAgentsNotice(status === 'rejected' ? chatStrings.subagents.steerRejected : chatStrings.subagents.steerQueued)
+      } catch (error) {
+        setAgentsNotice(messageOf(error))
+      }
+    },
+    [chat]
+  )
+
+  const stopChild = useCallback(
+    async (subagentId: string) => {
+      try {
+        const found = await chat.interruptSubagent(subagentId)
+
+        setAgentsNotice(found ? chatStrings.subagents.stopped : chatStrings.subagents.status.completed)
+      } catch (error) {
+        setAgentsNotice(messageOf(error))
+      }
+    },
+    [chat]
+  )
+
+  /**
+   * Keep the open transcript fresh.
+   *
+   * `subagent.tail` is a tail, not a subscription, so a live child's output
+   * only moves if something asks. Three seconds is the plan's cadence; the poll
+   * stops the moment the child finishes, and then the STORED transcript is read
+   * once and left alone, because a finished session does not change.
+   */
+  useEffect(() => {
+    const open = transcript
+
+    if (!open) {
+      return
+    }
+
+    let cancelled = false
+    const child = subagents[open.subagentId]
+    const live = child?.status === 'running' || child?.status === 'queued'
+
+    const read = async () => {
+      try {
+        const text =
+          open.source === 'stored' && child?.childSessionId
+            ? (await chat.childTranscript(child.childSessionId)).map(transcriptLine).filter(Boolean).join('\n')
+            : await chat.tailSubagent(open.subagentId)
+
+        if (!cancelled) {
+          setTranscript(current =>
+            current && current.subagentId === open.subagentId ? { ...current, text, loading: false } : current
+          )
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setTranscript(current =>
+            current && current.subagentId === open.subagentId
+              ? { ...current, loading: false, error: messageOf(error) }
+              : current
+          )
+        }
+      }
+    }
+
+    void read()
+
+    if (!live || open.source === 'stored') {
+      return () => {
+        cancelled = true
+      }
+    }
+
+    const timer = setInterval(() => void read(), SUBAGENT_TAIL_POLL_MS)
+
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+    // Only the identity of the open transcript and the child's status may
+    // restart the poll; the text this effect writes must not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chat, subagents, transcript?.subagentId, transcript?.source])
 
   const busy = chat.busy
   const subtitle = subtitleFor({
@@ -318,9 +529,9 @@ function Conversation({
           items={chat.items}
           newMessageCount={newCount}
           onEndReached={noop}
-          onOpenBot={handle => onOpenBot?.(resolveBot(handle, Object.keys(byName)))}
+          onOpenBot={openBot}
           onOpenRequest={item => setDismissed(current => current.filter(id => id !== item.id))}
-          onOpenTranscript={id => void chat.tailSubagent(id).catch(() => undefined)}
+          onOpenTranscript={openTranscript}
           onScrolledAwayFromBottom={next => {
             setAway(next)
 
@@ -328,10 +539,14 @@ function Conversation({
               setNewCount(0)
             }
           }}
+          ref={listRef}
           selfHandle={botName}
-          subagents={useChatsStore.getState().chats[botName]?.subagents ?? {}}
-          // A turn is running and nothing has been said yet: three dots.
-          typing={busy && !hasStreamingText(chat.items)}
+          subagents={subagents}
+          // The TURN is running and nothing has been said yet: three dots. Not
+          // `busy` — that also covers a tool or a child still working, and dots
+          // under a finished reply promise a sentence that is not coming.
+          typing={chat.turnActive && !hasStreamingText(chat.items)}
+          typingHandles={typing}
         />
 
         <Composer
@@ -382,10 +597,16 @@ function Conversation({
       ) : null}
 
       <AgentsSheet
-        onClose={() => setSheet('none')}
-        onInterrupt={id => void chat.interruptSubagent(id).catch(() => undefined)}
-        onOpenTranscript={id => void chat.tailSubagent(id).catch(() => undefined)}
-        onSteer={(id, text) => void chat.steerSubagent(id, text).catch(error => setNotice(messageOf(error)))}
+        notice={agentsNotice}
+        onClose={() => {
+          setSheet('none')
+          setTranscript(null)
+        }}
+        onCloseTranscript={() => setTranscript(null)}
+        onInterrupt={id => void stopChild(id)}
+        onOpenTranscript={openTranscript}
+        onSteer={(id, text) => void steerChild(id, text)}
+        transcript={transcript}
         tree={chat.subagentTree}
         visible={sheet === 'agents'}
       />
@@ -427,6 +648,26 @@ function Conversation({
 
 /** `onEndReached`: the controller has no older-history page to fetch (yet). */
 const noop = () => undefined
+
+/** A stable empty map, so a chat without children does not churn the memo. */
+const EMPTY_SUBAGENTS: Record<string, never> = {}
+
+/** The plan's cadence for `subagent.tail` while a child is running. */
+const SUBAGENT_TAIL_POLL_MS = 3_000
+
+/** One stored transcript row as a plain line, for the read-only child view. */
+function transcriptLine(item: TranscriptItem): string {
+  switch (item.kind) {
+    case 'user':
+      return item.text ? `> ${item.text}` : ''
+    case 'assistant':
+      return item.text ?? ''
+    case 'tool':
+      return `· ${item.context || item.summary || item.name}`
+    default:
+      return ''
+  }
+}
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)

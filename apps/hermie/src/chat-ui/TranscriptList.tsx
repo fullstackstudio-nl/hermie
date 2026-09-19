@@ -16,7 +16,17 @@
  * board pins it under the chat header, and a header inside an inverted list
  * would scroll away with the oldest message.
  */
-import { memo, useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
+import {
+  forwardRef,
+  memo,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode
+} from 'react'
 import { FlatList, View, type NativeScrollEvent, type NativeSyntheticEvent, type ViewStyle } from 'react-native'
 
 import { Button, Text } from '../ui/primitives'
@@ -32,13 +42,32 @@ import { ToolCard } from './ToolCard'
 import { TypingIndicator } from './TypingIndicator'
 import { UserBubble } from './UserBubble'
 import { Chip } from './primitives/Chip'
+import { clipInline } from './format'
 import { chatStrings } from './strings'
 import type { ApprovalItem, ClarifyItem, Presentation, Receipt, Subagent, TranscriptItem, VisibleItem } from './types'
+
+/** What to look for in the chat being opened; see `TranscriptContext.onOpenBot`. */
+export interface DmCounterpartQuery {
+  kind: 'bot_dm_in' | 'bot_dm_out'
+  at?: number
+  text?: string
+}
 
 export interface TranscriptContext {
   selfHandle?: string
   subagents?: Record<string, Subagent>
-  onOpenBot?: (handle: string) => void
+  /**
+   * Handles whose chat is live and mid-turn right now, so a pending dispatch
+   * can say "@writer is writing…". A set rather than a flag per card: the
+   * screen knows this once, the cards read it many times.
+   */
+  typingHandles?: readonly string[]
+  /**
+   * Open another bot's chat. `counterpart` describes the row to look for on the
+   * far side, so the caller can land on the same message rather than at the
+   * bottom of a chat the reader then has to search.
+   */
+  onOpenBot?: (handle: string, counterpart?: DmCounterpartQuery) => void
   onRetry?: (itemId: string) => void
   onOpenTranscript?: (subagentId: string) => void
   /** Re-opens the sheet for a question still sitting in the transcript. */
@@ -63,10 +92,49 @@ export interface TranscriptListProps extends TranscriptContext {
   testID?: string
 }
 
+/** What a screen may ask the list to do; see `scrollToItem`. */
+export interface TranscriptListHandle {
+  /**
+   * Bring one item into view.
+   *
+   * This is how a tapped DM card lands on the matching message in the OTHER
+   * bot's chat rather than at the bottom of it. Returns false when that item is
+   * not in the visible set — a chat filtered to Quiet genuinely does not show
+   * every row, and silently scrolling somewhere else would be a lie.
+   */
+  scrollToItem: (itemId: string) => boolean
+  scrollToLatest: () => void
+}
+
 interface RowProps {
   entry: VisibleItem
   context: TranscriptContext
   receipt?: Receipt
+}
+
+/**
+ * The receipt an answered question leaves behind.
+ *
+ * `Allowed once · rm -rf ./build` — the decision AND what it was about, on one
+ * line, truncated so a long command cannot push the decision off the row. A
+ * question the user answered somewhere else says so instead; a withdrawn one
+ * says that.
+ */
+function outcomeLabel(item: ApprovalItem | ClarifyItem): string {
+  if (item.state === 'cancelled') {
+    return chatStrings.approval.answeredElsewhere
+  }
+
+  if (item.kind === 'clarify') {
+    const answered = Object.keys(item.answers).length
+
+    return chatStrings.clarify.outcome(answered, item.questions.length)
+  }
+
+  const decision = chatStrings.approval.outcomes[item.answer ?? ''] ?? chatStrings.approval.answered(item.answer ?? '')
+  const command = clipInline(item.command, 48)
+
+  return command ? `${decision} · ${command}` : decision
 }
 
 function RequestRow({
@@ -87,16 +155,16 @@ function RequestRow({
   const approval = item.kind === 'approval'
   const title = approval ? chatStrings.approval.title : chatStrings.clarify.title
 
+  // An answered question stays in the transcript as a one-line receipt, in the
+  // place the question was asked. "Answered: once" alone said nothing about
+  // WHAT was allowed, which is the only part worth keeping afterwards.
   if (item.state !== 'open') {
     return (
       <Chip
         centered
-        label={
-          item.state === 'answered'
-            ? chatStrings.approval.answered(('answer' in item && item.answer) || chatStrings.transcript.answered)
-            : chatStrings.approval.answeredElsewhere
-        }
+        label={outcomeLabel(item)}
         testID={`request-${item.id}`}
+        tone={item.state === 'answered' && item.kind === 'approval' && item.answer === 'deny' ? 'danger' : 'textMuted'}
       />
     )
   }
@@ -165,7 +233,14 @@ function RowView({ entry, context, receipt }: RowProps) {
       return <ToolCard item={item} presentation={presentation} />
 
     case 'bot_dm_out':
-      return <BotDmOutCard item={item} onOpenBot={context.onOpenBot} presentation={presentation} />
+      return (
+        <BotDmOutCard
+          item={item}
+          onOpenBot={context.onOpenBot}
+          presentation={presentation}
+          targetTyping={context.typingHandles?.includes(item.targetHandle) ?? false}
+        />
+      )
 
     case 'subagent_group':
       return (
@@ -204,18 +279,24 @@ const TranscriptRow = memo(
 
 const AWAY_THRESHOLD = 32
 
-export function TranscriptList({
-  items,
-  header,
-  typing = false,
-  newMessageCount = 0,
-  onScrolledAwayFromBottom,
-  onEndReached,
-  receipt,
-  contentStyle,
-  testID = 'transcript-list',
-  ...handlers
-}: TranscriptListProps) {
+/** A stable empty array, so the context memo does not churn on every render. */
+const EMPTY_HANDLES: readonly string[] = []
+
+export const TranscriptList = forwardRef<TranscriptListHandle, TranscriptListProps>(function TranscriptList(
+  {
+    items,
+    header,
+    typing = false,
+    newMessageCount = 0,
+    onScrolledAwayFromBottom,
+    onEndReached,
+    receipt,
+    contentStyle,
+    testID = 'transcript-list',
+    ...handlers
+  },
+  ref
+) {
   const theme = useTheme()
   const listRef = useRef<FlatList<VisibleItem>>(null)
   const [away, setAway] = useState(false)
@@ -228,7 +309,8 @@ export function TranscriptList({
       onOpenTranscript: handlers.onOpenTranscript,
       onRetry: handlers.onRetry,
       selfHandle: handlers.selfHandle,
-      subagents: handlers.subagents ?? {}
+      subagents: handlers.subagents ?? {},
+      typingHandles: handlers.typingHandles ?? EMPTY_HANDLES
     }),
     [
       handlers.onLinkPress,
@@ -237,7 +319,8 @@ export function TranscriptList({
       handlers.onOpenTranscript,
       handlers.onRetry,
       handlers.selfHandle,
-      handlers.subagents
+      handlers.subagents,
+      handlers.typingHandles
     ]
   )
 
@@ -255,27 +338,67 @@ export function TranscriptList({
     return undefined
   }, [data])
 
-  const handleScroll = useCallback(
-    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      // Inverted list: offset 0 IS the bottom of the conversation.
-      const next = event.nativeEvent.contentOffset.y > AWAY_THRESHOLD
+  const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    // Inverted list: offset 0 IS the bottom of the conversation.
+    setAway(event.nativeEvent.contentOffset.y > AWAY_THRESHOLD)
+  }, [])
 
-      setAway(current => {
-        if (current !== next) {
-          onScrolledAwayFromBottom?.(next)
-        }
+  /**
+   * Tell the screen about it in an EFFECT, not from inside the state updater.
+   *
+   * React runs an updater during the render phase, so calling the parent's
+   * setter from there is "cannot update a component while rendering a different
+   * component" — which React reports as an error and which really can drop the
+   * update on the floor.
+   */
+  const notifyAway = useRef(onScrolledAwayFromBottom)
 
-        return next
-      })
-    },
-    [onScrolledAwayFromBottom]
-  )
+  notifyAway.current = onScrolledAwayFromBottom
+
+  useEffect(() => {
+    notifyAway.current?.(away)
+  }, [away])
 
   const jump = useCallback(() => {
     listRef.current?.scrollToOffset({ animated: true, offset: 0 })
     setAway(false)
-    onScrolledAwayFromBottom?.(false)
-  }, [onScrolledAwayFromBottom])
+  }, [])
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      scrollToItem(itemId) {
+        const index = data.findIndex(entry => entry.item.id === itemId)
+
+        if (index < 0) {
+          return false
+        }
+
+        // `viewPosition: 0.5` centres the row: a message scrolled to the very
+        // edge of the screen reads as "the end of the chat", which is the one
+        // thing this is meant to disprove.
+        listRef.current?.scrollToIndex({ animated: true, index, viewPosition: 0.5 })
+
+        return true
+      },
+      scrollToLatest: jump
+    }),
+    [data, jump]
+  )
+
+  /**
+   * `scrollToIndex` on a virtualised list can fail: the row's height is not
+   * measured yet, so the list does not know where it is. The documented
+   * recovery is to scroll to the best guess, let a frame render, and try once
+   * more — not to leave the reader where they were with nothing having moved.
+   */
+  const recoverScroll = useCallback((info: { index: number; averageItemLength: number }) => {
+    listRef.current?.scrollToOffset({ animated: false, offset: info.averageItemLength * info.index })
+
+    setTimeout(() => {
+      listRef.current?.scrollToIndex({ animated: true, index: info.index, viewPosition: 0.5 })
+    }, 80)
+  }, [])
 
   const renderItem = useCallback(
     ({ item: entry }: { item: VisibleItem }) => (
@@ -301,11 +424,16 @@ export function TranscriptList({
         data={data}
         inverted
         keyExtractor={entry => entry.item.id}
+        // Dragging the transcript down lowers the keyboard with the finger,
+        // which is what every messenger does and what the inverted list makes
+        // possible without a gesture handler.
+        keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
         maintainVisibleContentPosition={{ autoscrollToTopThreshold: AWAY_THRESHOLD, minIndexForVisible: 0 }}
         onEndReached={onEndReached}
         onEndReachedThreshold={0.4}
         onScroll={handleScroll}
+        onScrollToIndexFailed={recoverScroll}
         ref={listRef}
         renderItem={renderItem}
         scrollEventThrottle={64}
@@ -319,4 +447,4 @@ export function TranscriptList({
       ) : null}
     </View>
   )
-}
+})

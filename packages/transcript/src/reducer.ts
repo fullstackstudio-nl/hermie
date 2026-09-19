@@ -1274,3 +1274,114 @@ export function applyProcessCompletion(state: ChatState, text: string, now: numb
 
   return next
 }
+
+/** One `subagent.list` row, as thin as the reconcile needs it. */
+export interface SubagentSnapshotRow {
+  subagent_id: string
+  parent_id?: string | null
+  depth?: number | null
+  goal?: string | null
+  delegation_id?: string | null
+  model?: string | null
+  started_at?: number | null
+  status?: string | null
+  tool_count?: number | null
+  last_tool?: string | null
+  accepting_steer?: boolean | null
+  child_session_id?: string | null
+}
+
+/**
+ * Fold a `subagent.list` snapshot into the chat.
+ *
+ * The `subagent.*` events are a stream, and a chat opened halfway through a
+ * delegation missed the beginning of it — there is no replay for children. The
+ * snapshot is the roster the gateway can still describe, so it CREATES children
+ * the events never announced and refreshes the ones they did.
+ *
+ * It deliberately does not remove anything: a child the gateway has forgotten
+ * (it only lists live ones) has usually just finished, and dropping the row
+ * would erase the summary the reader is looking at.
+ */
+export function applySubagentSnapshot(
+  state: ChatState,
+  rows: readonly SubagentSnapshotRow[],
+  now: number = Date.now()
+): ChatState {
+  if (!rows.length) {
+    return state
+  }
+
+  const next = editable(state)
+  let changed = false
+
+  for (const row of rows) {
+    const payload: Record<string, unknown> = {
+      subagent_id: row.subagent_id,
+      parent_id: row.parent_id ?? null,
+      goal: row.goal ?? '',
+      delegation_id: row.delegation_id ?? '',
+      model: row.model ?? '',
+      status: row.status ?? 'running',
+      ...(row.depth !== null && row.depth !== undefined ? { depth: row.depth } : {}),
+      ...(row.tool_count !== null && row.tool_count !== undefined ? { tool_count: row.tool_count } : {}),
+      ...(row.last_tool ? { tool_name: row.last_tool } : {}),
+      ...(row.child_session_id ? { child_session_id: row.child_session_id } : {})
+    }
+
+    const childId = subagentIdOf(payload)
+    const prev = next.subagents[childId]
+
+    if (prev && TERMINAL_SUBAGENT_STATUS.has(prev.status)) {
+      // The stream already saw this child finish; the roster is behind.
+      continue
+    }
+
+    // `subagent.list` is a roster, not a progress frame: it carries no stream
+    // line to append, so it is applied as a plain `start`-shaped update.
+    const child = toSubagent(payload, prev, 'subagent.start', prev?.startedAt ? prev.updatedAt : now)
+    const startedAt = prev?.startedAt ?? millisecondsOf(row.started_at) ?? child.startedAt
+
+    next.subagents[childId] = {
+      ...child,
+      startedAt,
+      ...(row.accepting_steer !== null && row.accepting_steer !== undefined
+        ? { acceptingSteer: row.accepting_steer }
+        : {})
+    }
+
+    changed = true
+
+    const groupId = groupForSubagent(next, child.delegationId, child.goal, now)
+
+    patchItem<SubagentGroupItem>(next, groupId, draft => {
+      if (!draft.rootIds.includes(childId)) {
+        draft.rootIds = [...draft.rootIds, childId]
+      }
+
+      if (child.goal && !draft.goals.includes(child.goal)) {
+        draft.goals = [...draft.goals, child.goal]
+      }
+
+      if (child.delegationId && !draft.delegationId) {
+        draft.delegationId = child.delegationId
+      }
+    })
+    refreshGroup(next, groupId)
+  }
+
+  return changed ? next : state
+}
+
+/**
+ * `started_at` on a roster row is unix SECONDS, while `Subagent.startedAt` is
+ * the millisecond clock the events are stamped with. A value already past the
+ * year-5138 mark in seconds is milliseconds somebody forgot to divide.
+ */
+function millisecondsOf(value: number | null | undefined): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return undefined
+  }
+
+  return value > 1e11 ? value : value * 1000
+}

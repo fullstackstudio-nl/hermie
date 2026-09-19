@@ -162,6 +162,41 @@ export const strings = {
     sidebarHeader: 'CHATS'
   },
 
+  activity: {
+    title: 'Activity',
+    subtitle: 'Messages between your bots, and the agents they put to work.',
+    empty:
+      'Your bots have not talked to each other yet. When one messages another or delegates a task, it shows up here.',
+    emptyOffline: 'Nothing to show while the gateway is out of reach.',
+    loading: 'Reading every conversation…',
+    failed: (message: string) => `The timeline could not be loaded: ${message}`,
+    today: 'Today',
+    yesterday: 'Yesterday',
+    counters: {
+      working: 'Bots working',
+      subagents: 'Sub-agents',
+      deliveries: 'Deliveries out'
+    },
+    /** `researcher → writer`. */
+    to: (from: string, to: string) => `${from} → ${to}`,
+    /**
+     * `writer ↩ researcher`.
+     *
+     * The variation selector is load-bearing: iOS gives U+21A9 an EMOJI
+     * presentation by default, so the arrow renders as a blue glyph in the
+     * middle of a sentence unless it is explicitly asked for as text.
+     */
+    reply: (from: string, to: string) => `${from} \u21a9\ufe0e ${to}`,
+    spawned: (bot: string, count: number) => `${bot} spawned ${count} ${count === 1 ? 'agent' : 'agents'}`,
+    groupStatus: {
+      dispatched: 'dispatched',
+      running: 'running',
+      done: 'done',
+      failed: 'failed'
+    } as Record<string, string>,
+    openChat: (bot: string) => `Open the chat with ${bot}`
+  },
+
   tabs: {
     chats: 'Chats',
     activity: 'Activity',

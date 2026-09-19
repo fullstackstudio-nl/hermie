@@ -6,9 +6,11 @@ import {
   applyProcessCompletion,
   applyResumeSnapshot,
   applyServerRequest,
+  applySubagentSnapshot,
   beginLocalTurn,
   confirmSubmit,
   markInterrupted,
+  type SubagentSnapshotRow,
   type TranscriptEvent
 } from './reducer'
 import { latestStatus } from './selectors'
@@ -730,5 +732,65 @@ describe('resume snapshots', () => {
     const assistant = list(failed).find(item => item.kind === 'assistant') as AssistantItem
 
     expect(assistant.error).toMatchObject({ message: 'provider down', partial: true, recoverable: true })
+  })
+})
+
+describe('applySubagentSnapshot', () => {
+  const row = (over: Partial<SubagentSnapshotRow> = {}): SubagentSnapshotRow => ({
+    subagent_id: 'child-9',
+    parent_id: null,
+    depth: 1,
+    goal: 'Audit deps',
+    delegation_id: 'del-9',
+    model: 'p/m',
+    started_at: 1_699_999_000,
+    status: 'running',
+    tool_count: 2,
+    last_tool: 'read_file',
+    accepting_steer: true,
+    child_session_id: 'child-session-9',
+    ...over
+  })
+
+  it('creates a child the event stream never announced', () => {
+    // The case this exists for: a chat opened halfway through a delegation.
+    // There is no replay for `subagent.*`, so the roster is all there is.
+    const state = applySubagentSnapshot(fresh(), [row()], NOW)
+    const child = state.subagents['child-9']
+
+    expect(child).toMatchObject({
+      goal: 'Audit deps',
+      status: 'running',
+      delegationId: 'del-9',
+      childSessionId: 'child-session-9',
+      acceptingSteer: true
+    })
+    expect(Object.values(state.items).some(item => item.kind === 'subagent_group')).toBe(true)
+  })
+
+  it('refreshes a child the stream already created without resetting its clock', () => {
+    const streamed = run(delegationEvents.filter(event => event.type !== 'subagent.complete'))
+    const before = streamed.subagents['child-0']
+    const after = applySubagentSnapshot(streamed, [row({ subagent_id: 'child-0', last_tool: 'grep' })], NOW + 60_000)
+
+    expect(after.subagents['child-0']?.startedAt).toBe(before?.startedAt)
+    expect(after.subagents['child-0']?.currentTool).toBe('grep')
+  })
+
+  it('never resurrects a child the stream saw finish', () => {
+    const streamed = run(delegationEvents)
+    const finished = Object.values(streamed.subagents).find(child => child.status === 'completed')
+
+    expect(finished).toBeDefined()
+
+    const after = applySubagentSnapshot(streamed, [row({ subagent_id: finished!.id, status: 'running' })], NOW)
+
+    expect(after.subagents[finished!.id]?.status).toBe('completed')
+  })
+
+  it('is a no-op for an empty roster, so a poll does not churn the state', () => {
+    const state = run(delegationEvents)
+
+    expect(applySubagentSnapshot(state, [], NOW)).toBe(state)
   })
 })

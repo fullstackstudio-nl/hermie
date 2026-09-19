@@ -7,7 +7,7 @@
  * same transcript reducer the app uses, so a break in either half shows up
  * without a simulator.
  */
-import { startFakeGateway, type FakeGateway } from '@hermie/fake-gateway'
+import { type FakeGateway, type FakeGatewayOptions, startFakeGateway } from '@hermie/fake-gateway'
 import {
   applyEvent,
   applyResumeSnapshot,
@@ -56,8 +56,8 @@ interface ChatHarness {
   waitFor: (predicate: (state: ChatState) => boolean, label: string) => Promise<void>
 }
 
-async function openBotChat(profile: string): Promise<ChatHarness> {
-  const gateway = await startFakeGateway({ auth: 'token', token: 'demo', streamDelayMs: 1 })
+async function openBotChat(profile: string, options: FakeGatewayOptions = {}): Promise<ChatHarness> {
+  const gateway = await startFakeGateway({ auth: 'token', token: 'demo', streamDelayMs: 1, ...options })
   const connection = new GatewayConnection({
     config: { baseUrl: gateway.url, authMode: 'session_token' },
     credentials: new SessionTokenCredentials({ token: 'demo' }),
@@ -301,8 +301,10 @@ describe('a Bot Chat end to end', () => {
     })
   }, 20_000)
 
-  it('shows a delegation as subagent activity', async () => {
-    const chat = await openBotChat('researcher')
+  it('shows a delegation as subagent activity, one failed child included', async () => {
+    // The fan-out is deliberately slow in normal use (a delegation nobody can
+    // look at cannot be steered); a test only cares about the end state.
+    const chat = await openBotChat('researcher', { subagentStepMs: 1 })
 
     await chat.connection.request('prompt.submit', {
       session_id: chat.runtimeSessionId,
@@ -310,14 +312,84 @@ describe('a Bot Chat end to end', () => {
     })
 
     await chat.waitFor(
-      state => Object.values(state.subagents).some(child => child.status === 'completed'),
-      'a subagent'
+      state => Object.values(state.subagents).filter(child => child.status !== 'running').length === 3,
+      'three finished subagents'
     )
 
-    const child = Object.values(chat.state().subagents)[0]
+    const children = Object.values(chat.state().subagents).sort((a, b) => a.taskIndex - b.taskIndex)
 
-    expect(child).toMatchObject({ goal: 'Audit the dependencies', status: 'completed' })
-    expect(child?.stream.length).toBeGreaterThan(0)
+    expect(children.map(child => child.goal)).toEqual([
+      'Audit the dependencies',
+      'Summarize the changelog',
+      'Check the licence headers'
+    ])
+    expect(children.map(child => child.status)).toEqual(['completed', 'completed', 'failed'])
+    expect(children[0]?.stream.length).toBeGreaterThan(0)
+    // Every child carries its own session id, which is what makes the full
+    // read-only transcript offer real rather than a dead button.
+    expect(children.every(child => Boolean(child.childSessionId))).toBe(true)
+
+    await chat.waitFor(
+      state => Object.values(state.items).some(item => item.kind === 'subagent_group' && Boolean(item.completion)),
+      'the group card to carry a completion summary'
+    )
+
+    const group = Object.values(chat.state().items).find(item => item.kind === 'subagent_group')
+
+    expect(group).toMatchObject({ status: 'failed' })
+    expect(group?.kind === 'subagent_group' ? group.completion : '').toContain('licence check failed')
+  }, 20_000)
+
+  it('answers subagent.list with the children that are still live', async () => {
+    const chat = await openBotChat('researcher', { subagentStepMs: 40 })
+
+    await chat.connection.request('prompt.submit', {
+      session_id: chat.runtimeSessionId,
+      text: 'delegate the dependency audit'
+    })
+
+    await chat.waitFor(
+      state => Object.values(state.subagents).some(child => child.status === 'running'),
+      'a running subagent'
+    )
+
+    const listed = await chat.connection.request('subagent.list', { session_id: chat.runtimeSessionId })
+    const status = await chat.connection.request('delegation.status', { profile: 'researcher' })
+
+    expect(listed.subagents?.length).toBeGreaterThan(0)
+    expect(status.active.length).toBe(listed.subagents?.length)
+    expect(listed.subagents?.[0]).toMatchObject({ status: expect.stringMatching(/queued|running/) })
+  }, 20_000)
+
+  it('hands a queued message_agent to a delivery process and joins the reply back onto it', async () => {
+    const chat = await openBotChat('researcher', { subagentStepMs: 300 })
+
+    await chat.connection.request('prompt.submit', {
+      session_id: chat.runtimeSessionId,
+      text: 'dm the release notes are merged'
+    })
+
+    await chat.waitFor(
+      // The seeded history already holds one dispatch; the LIVE one is the one
+      // carrying a background delivery process.
+      state => Object.values(state.items).some(item => item.kind === 'bot_dm_out' && Boolean(item.dispatch.processId)),
+      'a queued dispatch with a delivery process'
+    )
+
+    // While the delivery is out, it is a background process — the only place a
+    // client can count deliveries that have not landed.
+    const inFlight = await chat.connection.request('agents.list', { profile: 'researcher' })
+
+    expect(inFlight.processes?.some(row => row.command.includes('bot_mode_dm.py --run-delivery'))).toBe(true)
+
+    // The reply is not pushed: it lands as a persisted row, which is why a
+    // client has to tail-reconcile on `sessions.changed` to see it at all.
+    await new Promise(resolve => setTimeout(resolve, 900))
+
+    const reconciled = reconcileTail(chat.state(), rowsToItems(await chat.restRows(30), 'rest'))
+    const dispatch = Object.values(reconciled.items).find(item => item.kind === 'bot_dm_out' && item.dispatch.processId)
+
+    expect(dispatch?.kind === 'bot_dm_out' ? dispatch.reply?.text : '').toContain('is in hand')
   }, 20_000)
 
   it('stands a placeholder in for a foreign turn and fills it from the REST tail', async () => {

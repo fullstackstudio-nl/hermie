@@ -301,3 +301,119 @@ describe('ChatScreen', () => {
     expect(screen.getByText('Pick a conversation to start reading.')).toBeTruthy()
   })
 })
+
+describe('following a DM across chats', () => {
+  /** Writer's chat, holding the inbound view of a message researcher sent. */
+  function seedWriter(at: number, text: string) {
+    useChatsStore.getState().ensure('writer', { storedSessionId: 'stored-writer', resolvedSessionId: 'stored-writer' })
+    useChatsStore.getState().update('writer', state => ({
+      ...state,
+      items: {
+        'w:1': {
+          id: 'w:1',
+          kind: 'bot_dm_in',
+          origin: 'history',
+          senderHandle: 'researcher',
+          senderName: 'Researcher',
+          seq: 1000,
+          text,
+          ts: at,
+          version: 0
+        }
+      },
+      order: ['w:1']
+    }))
+  }
+
+  const dispatchDm = (text: string, ts: number) => {
+    const chats = useChatsStore.getState()
+
+    chats.dispatchEvent('researcher', {
+      type: 'tool.start',
+      session_id: 'runtime-1',
+      payload: { tool_id: 'call_dm_1', name: 'message_agent', args: { target: '@writer', message: text } }
+    })
+    chats.dispatchEvent('researcher', {
+      type: 'tool.complete',
+      session_id: 'runtime-1',
+      payload: {
+        tool_id: 'call_dm_1',
+        name: 'message_agent',
+        result: { status: 'queued', process_id: 'p-1', to: 'writer' }
+      }
+    })
+    chats.dispatchEvent('researcher', {
+      type: 'message.complete',
+      session_id: 'runtime-1',
+      payload: { text: 'Asked the writer.', status: 'ok', ts }
+    })
+  }
+
+  it('opens the recipient on the matching inbound message', async () => {
+    const onOpenBot = jest.fn()
+
+    act(() => {
+      useBotsStore.getState().setBots([BOT, { ...BOT, name: 'writer', displayName: 'Writer' }])
+      dispatchDm('Can you draft the announcement?', 1_700_000_000)
+      seedWriter(1_700_000_020, 'Can you draft the announcement?')
+    })
+
+    renderScreen(<ChatScreen bot="researcher" onOpenBot={onOpenBot} />)
+
+    await waitFor(() => expect(screen.getByTestId('bot-dm-out-header-t:call_dm_1')).toBeTruthy())
+    fireEvent.press(screen.getByTestId('bot-dm-out-header-t:call_dm_1'))
+
+    expect(onOpenBot).toHaveBeenCalledWith('writer', { focusItemId: 'w:1' })
+  })
+
+  it('still opens the chat when no counterpart can be matched', async () => {
+    const onOpenBot = jest.fn()
+
+    act(() => {
+      useBotsStore.getState().setBots([BOT, { ...BOT, name: 'writer', displayName: 'Writer' }])
+      dispatchDm('Can you draft the announcement?', 1_700_000_000)
+    })
+
+    renderScreen(<ChatScreen bot="researcher" onOpenBot={onOpenBot} />)
+
+    await waitFor(() => expect(screen.getByTestId('bot-dm-out-header-t:call_dm_1')).toBeTruthy())
+    fireEvent.press(screen.getByTestId('bot-dm-out-header-t:call_dm_1'))
+
+    // No focus target rather than a wrong one: the chat opens at its bottom.
+    expect(onOpenBot).toHaveBeenCalledWith('writer', undefined)
+  })
+})
+
+describe('the typing indicator', () => {
+  it('shows while the turn has said nothing and stops once a tool is the only thing running', async () => {
+    renderChat()
+
+    act(() => {
+      useChatsStore.getState().beginTurn('researcher', 'do a thing')
+      useChatsStore.getState().dispatchEvent('researcher', {
+        type: 'message.start',
+        session_id: 'runtime-1',
+        payload: {}
+      })
+    })
+
+    await waitFor(() => expect(screen.getByTestId('typing-indicator')).toBeTruthy())
+
+    act(() => {
+      useChatsStore.getState().dispatchEvent('researcher', {
+        type: 'message.complete',
+        session_id: 'runtime-1',
+        payload: { text: 'Done.', status: 'ok' }
+      })
+      // A child is still running: the chat is BUSY but nothing is about to be
+      // said, so the dots must be gone.
+      useChatsStore.getState().dispatchEvent('researcher', {
+        type: 'subagent.start',
+        session_id: 'runtime-1',
+        payload: { subagent_id: 'sa-1', goal: 'Audit deps', status: 'running', delegation_id: 'del-1' }
+      })
+    })
+
+    await waitFor(() => expect(screen.queryByTestId('typing-indicator')).toBeNull())
+  })
+})

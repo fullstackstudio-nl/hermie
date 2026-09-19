@@ -183,3 +183,122 @@ describe('BotsScreen', () => {
     expect(screen.getByTestId('bots-empty')).toBeTruthy()
   })
 })
+
+describe('the unread badge', () => {
+  beforeEach(() => {
+    seedRoster()
+    // Writer is caught up, so exactly one badge is on screen to assert on.
+    useBotsStore.getState().markSeen('writer', NOW)
+  })
+
+  /** Two replies and one inbound DM landing after the watermark. */
+  function seedUnread(sinceSeconds: number) {
+    const chats = useChatsStore.getState()
+
+    chats.ensure('researcher', { storedSessionId: 'stored-researcher', resolvedSessionId: 'stored-researcher' })
+    chats.update('researcher', state => ({
+      ...state,
+      items: {
+        a1: {
+          id: 'a1',
+          kind: 'assistant',
+          interim: false,
+          origin: 'live',
+          seq: 1000,
+          streaming: false,
+          text: 'One.',
+          ts: sinceSeconds + 1,
+          version: 0
+        },
+        a2: {
+          id: 'a2',
+          kind: 'assistant',
+          interim: false,
+          origin: 'live',
+          seq: 2000,
+          streaming: false,
+          text: 'Two.',
+          ts: sinceSeconds + 2,
+          version: 0
+        },
+        d1: {
+          id: 'd1',
+          kind: 'bot_dm_in',
+          origin: 'live',
+          senderName: 'Writer',
+          seq: 3000,
+          text: 'Ready.',
+          ts: sinceSeconds + 3,
+          version: 0
+        },
+        // Before the watermark: already read.
+        a0: {
+          id: 'a0',
+          kind: 'assistant',
+          interim: false,
+          origin: 'live',
+          seq: 500,
+          streaming: false,
+          text: 'Old.',
+          ts: sinceSeconds - 10,
+          version: 0
+        }
+      },
+      order: ['a0', 'a1', 'a2', 'd1']
+    }))
+  }
+
+  it('counts messages since the watermark once the chat is loaded', () => {
+    useBotsStore.getState().markSeen('researcher', NOW - 60)
+    seedUnread(NOW - 60)
+
+    renderScreen(<BotsScreen />)
+
+    // Hidden from the screen reader on purpose: the row's own label already
+    // says "3 unread messages", and a bare "3" after it would read twice.
+    expect(screen.getByTestId('bot-unread', { includeHiddenElements: true })).toHaveTextContent('3')
+    expect(screen.getByTestId('bot-row-researcher').props.accessibilityLabel).toContain('3 unread messages')
+  })
+
+  it('caps the number rather than widening the badge', () => {
+    useBotsStore.getState().markSeen('researcher', NOW - 60)
+
+    const items: Record<string, unknown> = {}
+    const order: string[] = []
+
+    for (let index = 0; index < 120; index += 1) {
+      const id = `a${index}`
+
+      items[id] = {
+        id,
+        kind: 'assistant',
+        interim: false,
+        origin: 'live',
+        seq: index * 10,
+        streaming: false,
+        text: `Line ${index}`,
+        ts: NOW - 59 + index,
+        version: 0
+      }
+      order.push(id)
+    }
+
+    useChatsStore
+      .getState()
+      .ensure('researcher', { storedSessionId: 'stored-researcher', resolvedSessionId: 'stored-researcher' })
+    useChatsStore.getState().update('researcher', state => ({ ...state, items: items as never, order }))
+
+    renderScreen(<BotsScreen />)
+
+    expect(screen.getByTestId('bot-unread', { includeHiddenElements: true })).toHaveTextContent('99+')
+  })
+
+  it('falls back to a dot for a chat this app has never read', () => {
+    renderScreen(<BotsScreen />)
+
+    // The roster says researcher moved since the watermark, but nothing is
+    // loaded, so there is nothing honest to count.
+    expect(screen.getByTestId('bot-unread', { includeHiddenElements: true })).toBeTruthy()
+    expect(screen.queryByText('3')).toBeNull()
+  })
+})

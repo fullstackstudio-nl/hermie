@@ -72,7 +72,10 @@ describe('bubbles', () => {
     expect(screen.getByText('@writer → @researcher')).toBeTruthy()
 
     fireEvent.press(screen.getByTestId(`bot-dm-in-header-${botDmInItem.id}`))
-    expect(onOpenBot).toHaveBeenCalledWith('writer')
+    expect(onOpenBot).toHaveBeenCalledWith(
+      'writer',
+      expect.objectContaining({ kind: 'bot_dm_out', text: botDmInItem.text })
+    )
   })
 
   it('nests the teammate reply inside the dispatch card', () => {
