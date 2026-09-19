@@ -8,10 +8,19 @@
  * some of those states (a failed delivery, an untrusted-output banner) are hard
  * to produce on purpose.
  *
+ * **Every section is ADDRESSABLE.** The list below is a registry keyed by id,
+ * and `--hermieOpen gallery:<id>` renders exactly one of them, alone, filling
+ * the screen (`src/dev/launch-intent.ts`). That is not a convenience: the
+ * simulators on this machine can be launched and photographed and nothing else,
+ * so a surface that is only reachable by tapping is a surface nobody has ever
+ * looked at. One launch, one screenshot. A section whose `sheet` field names a
+ * sheet opens that sheet as it mounts, which is how a blocking modal and an
+ * options page become photographable at all.
+ *
  * The streaming section appends to a real reply on an interval, so the
  * incremental Markdown path is exercised the way a live turn exercises it.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ScrollView, View } from 'react-native'
 
 import {
@@ -34,7 +43,6 @@ import {
   NoticePill,
   QueuedChip,
   ReasoningDisclosure,
-  rollupDmRuns,
   StatusRow,
   SubagentGroupCard,
   ToolCard,
@@ -73,6 +81,20 @@ import {
   userItem
 } from '../../chat-ui/fixtures'
 import type { ApprovalItem, ClarifyItem, PickerOption, Verbosity } from '../../chat-ui/types'
+import { ConnectionLine } from '../bots/ConnectionLine'
+import {
+  CronDetailScreen,
+  CronEditorSheet,
+  CronRunScreen,
+  cronJobFromRow,
+  cronRunFromRow,
+  ScheduleBuilder,
+  StatusDot,
+  DEFAULT_SCHEDULE_DRAFT,
+  type CronJob,
+  type ScheduleDraft
+} from '../cron'
+import { SignedOutPanel } from '../../gateway/SignedOutPanel'
 import { Button, InsetButtonRow, InsetGroup, Screen, Text } from '../../ui/primitives'
 import { ApprovalSheet, ChatOptionsSheet, ClarifySheet } from '../../ui/sheets'
 import { useTheme } from '../../ui/theme'
@@ -80,6 +102,12 @@ import type { AccentName } from '../../ui/tokens'
 
 export interface GalleryScreenProps {
   onClose?: () => void
+  /**
+   * Render only this section. Unknown ids fall back to the whole gallery, so a
+   * typo in a launch argument produces a screenshot of something rather than a
+   * blank screen with no clue in it.
+   */
+  section?: string
 }
 
 /** The Settings row that opens this screen; kept here so the two cannot drift. */
@@ -106,7 +134,59 @@ const MODEL_OPTIONS: PickerOption[] = [
   { detail: 'Long context', expensive: true, label: 'example-model-large', value: 'example-model-large' }
 ]
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+// ── cron fixtures ────────────────────────────────────────────────────────────
+// Built through the same row projections the gateway's answers go through, so a
+// change to either one breaks the gallery rather than letting it drift into
+// showing a shape the app no longer produces.
+
+const CRON_JOB: CronJob = cronJobFromRow({
+  job_id: 'job-scout',
+  name: 'Nightly domain scout',
+  schedule: 'every day at 04:22',
+  prompt: 'Check the watch list for newly available domains and summarise anything worth acting on.',
+  prompt_preview: 'Check the watch list for newly available domains…',
+  deliver: 'researcher',
+  enabled: true,
+  state: 'active',
+  next_run_at: new Date(Date.now() + 9_000_000).toISOString(),
+  last_run_at: new Date(Date.now() - 3_600_000).toISOString(),
+  last_status: 'ok',
+  profile: 'researcher'
+})
+
+const CRON_JOB_FAILED: CronJob = cronJobFromRow({
+  job_id: 'job-books',
+  name: 'Reconcile the ledger',
+  schedule: 'every Monday at 09:00',
+  prompt_preview: 'Pull yesterday’s transactions and reconcile.',
+  deliver: 'bookkeeper',
+  enabled: false,
+  state: 'paused',
+  paused_reason: 'Paused after three failures',
+  next_run_at: null,
+  last_run_at: new Date(Date.now() - 86_400_000).toISOString(),
+  last_status: 'failed',
+  last_error: 'The gateway refused the delivery target.',
+  profile: 'bookkeeper'
+})
+
+const CRON_RUN = cronRunFromRow({
+  session_id: 'run-4412',
+  started_at: Math.floor(Date.now() / 1000) - 3_600,
+  ended_at: Math.floor(Date.now() / 1000) - 3_540,
+  status: 'ok',
+  message_count: 6,
+  preview: '## Nightly domain scout\n\n- 2 domains dropped overnight',
+  title: 'Nightly domain scout'
+})
+
+const CRON_TARGETS = [
+  { id: 'local', name: 'Keep it in the routine', homeTargetSet: false },
+  { id: 'researcher', name: 'Researcher', homeTargetSet: true },
+  { id: 'writer', name: 'Writer', homeTargetSet: false }
+]
+
+function Section({ title, children }: { title: string; children: ReactNode }) {
   const theme = useTheme()
 
   return (
@@ -137,7 +217,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
  * table — and the screen would stop scrolling. Isolating the state is the same
  * discipline a real chat needs, which makes it the right thing to demonstrate.
  */
-function StreamingSection() {
+function StreamingBody() {
   const [streaming, setStreaming] = useState(true)
   const [length, setLength] = useState(0)
 
@@ -163,7 +243,7 @@ function StreamingSection() {
   )
 
   return (
-    <Section title="Streaming reply">
+    <>
       {/* Fixed height: the reply grows and resets several times a second, and a
           section that changes height would shove the whole gallery around
           under the reader's finger. */}
@@ -175,23 +255,476 @@ function StreamingSection() {
         title={streaming ? 'Pause stream' : 'Resume stream'}
         variant="secondary"
       />
-    </Section>
+    </>
   )
 }
 
-export function GalleryScreen({ onClose }: GalleryScreenProps) {
+/** A schedule builder with its own draft, so the section is self-contained. */
+function ScheduleBuilderBody() {
+  const [draft, setDraft] = useState<ScheduleDraft>(DEFAULT_SCHEDULE_DRAFT)
+
+  return <ScheduleBuilder draft={draft} onChange={setDraft} />
+}
+
+/** Which sheet a section wants open the moment it mounts. */
+type SheetName = 'agents' | 'approval' | 'approvalAnswered' | 'clarify' | 'options' | 'cronEditor'
+
+type OptionsPane = 'reasoning' | 'model' | 'colour'
+
+interface GalleryContext {
+  theme: ReturnType<typeof useTheme>
+  lastAction: string
+  say: (action: string) => void
+  draft: string
+  setDraft: (value: string) => void
+  running: boolean
+  setRunning: (value: boolean) => void
+  cronExpanded: boolean
+  toggleCron: () => void
+  openSheet: (sheet: SheetName, pane?: OptionsPane) => void
+  openChatDemo: () => void
+}
+
+interface GallerySection {
+  id: string
+  title: string
+  /** Opens a sheet as the section mounts. */
+  sheet?: SheetName
+  /** Which page of the options sheet, for the paged sections. */
+  pane?: OptionsPane
+  /**
+   * The section owns the whole screen instead of sitting in a bordered card —
+   * anything with its own header, list and footer.
+   */
+  full?: boolean
+  /**
+   * The section reads `useGateway()`, so it is addressable but is NOT part of the
+   * scrolling gallery.
+   *
+   * The scrolling gallery is rendered bare in component tests and has no
+   * provider above it; the addressable route always does, because it lands inside
+   * `GatewayProvider` in `App.tsx`. One crashing section would take the whole
+   * gallery with it, which is worse than reaching these two by name.
+   */
+  needsGateway?: boolean
+  render: (ctx: GalleryContext) => ReactNode
+}
+
+/**
+ * Every addressable surface, in the order the gallery scrolls.
+ *
+ * Adding a component to the kit means adding a row here, which is what keeps
+ * "one launch = one screenshot" true for the NEXT component rather than only for
+ * the ones that happened to be built when this was written.
+ */
+const SECTIONS: readonly GallerySection[] = [
+  {
+    id: 'chat-header',
+    title: 'Chat header',
+    render: ctx => (
+      <>
+        <ChatHeader
+          handle="researcher"
+          name="Researcher"
+          onOpenOptions={() => ctx.openSheet('options')}
+          presence="working"
+          testID="gallery-chat-header"
+        />
+        <ChatHeader
+          handle="writer"
+          lastSeenAt={1_767_000_000}
+          name="Writer"
+          onOpenOptions={() => ctx.openSheet('options')}
+          presence="offline"
+          testID="gallery-chat-header-offline"
+        />
+        <ChatHeader
+          handle="bookkeeper"
+          name="Bookkeeper"
+          onOpenOptions={() => ctx.openSheet('options')}
+          presence="needsInput"
+          testID="gallery-chat-header-needs-input"
+        />
+        <ChatHeader
+          handle="postman"
+          name="Postman"
+          onOpenOptions={() => ctx.openSheet('options')}
+          presence="online"
+          testID="gallery-chat-header-online"
+        />
+      </>
+    )
+  },
+  {
+    id: 'agents-bar',
+    title: 'Agents bar',
+    render: ctx => (
+      <AgentsBar count={3} elapsedSeconds={72} onPress={() => ctx.openSheet('agents')} testID="gallery-agents-bar" />
+    )
+  },
+  { id: 'streaming', title: 'Streaming reply', render: () => <StreamingBody /> },
+  {
+    id: 'bubbles',
+    title: 'Bubbles',
+    render: ctx => (
+      <>
+        <DateSeparator label="Yesterday" />
+        {/* Grouping: three own bubbles in a run, only the last with a tail. */}
+        <UserBubble grouped={false} item={userItem} tail={false} />
+        <UserBubble grouped item={{ ...userItem, id: 'u1b', text: 'And keep it short.' }} tail={false} />
+        <UserBubble grouped item={{ ...userItem, id: 'u1c', text: 'Thanks.' }} receipt="read" tail />
+        <AssistantBubble item={assistantItem} presentation="full" showFooter />
+        <AssistantBubble item={interimAssistantItem} presentation="full" />
+        <BotDmInBubble
+          answered
+          item={botDmInItem}
+          onOpenBot={handle => ctx.say(`Open bot @${handle}`)}
+          selfHandle="researcher"
+        />
+        <TypingIndicator />
+      </>
+    )
+  },
+  {
+    id: 'receipts',
+    title: 'Receipts',
+    render: () => (
+      <>
+        <UserBubble item={{ ...userItem, id: 'u-r1', text: 'Sending.' }} receipt="sending" />
+        <UserBubble item={{ ...userItem, id: 'u-r2', text: 'Sent.' }} receipt="sent" />
+        <UserBubble item={{ ...userItem, id: 'u-r3', text: 'Delivered.' }} receipt="delivered" />
+        <UserBubble item={{ ...userItem, id: 'u-r4', text: 'Read.' }} receipt="read" />
+      </>
+    )
+  },
+  {
+    id: 'long-reply',
+    title: 'Long reply — reading treatment and fold',
+    render: () => (
+      // The fold's state lives above the list, so the gallery provides one.
+      <ExpandedProvider>
+        <AssistantBubble item={longReportItem} presentation="full" showFooter />
+      </ExpandedProvider>
+    )
+  },
+  {
+    id: 'markdown-regressions',
+    title: 'Markdown regressions',
+    render: () => (
+      // The exact sentence the owner hit: a code span near a line end, and
+      // emphasis a model opened with a stray space.
+      <ExpandedProvider>
+        <AssistantBubble item={inlineCodeRegressionItem} presentation="full" />
+      </ExpandedProvider>
+    )
+  },
+  {
+    id: 'cron-card',
+    title: 'Cron delivery card',
+    render: ctx => (
+      <CronDeliveryCard
+        body={cronDeliveryItem.body}
+        expanded={ctx.cronExpanded}
+        name={cronDeliveryItem.jobName}
+        onOpenCron={() => ctx.say('Open cron')}
+        onRunNow={() => ctx.say('Run cron now')}
+        onToggle={ctx.toggleCron}
+        testID="gallery-cron-card"
+        ts={cronDeliveryItem.ts}
+      />
+    )
+  },
+  {
+    id: 'cron-card-actionless',
+    title: 'Cron delivery card — no actions resolvable',
+    render: ctx => (
+      <CronDeliveryCard
+        body={cronDeliveryItem.body}
+        expanded
+        name={cronDeliveryItem.jobName}
+        onToggle={ctx.toggleCron}
+        testID="gallery-cron-card-actionless"
+        ts={cronDeliveryItem.ts}
+      />
+    )
+  },
+  {
+    id: 'errors',
+    title: 'Errors',
+    render: ctx => (
+      <>
+        <AssistantBubble item={errorAssistantItem} onRetry={() => ctx.say('Retry pressed')} />
+        <AssistantBubble item={recoverableAssistantItem} />
+        <ErrorCard message="The gateway is unreachable." onRetry={() => ctx.say('Retry')} retryable />
+      </>
+    )
+  },
+  {
+    id: 'reasoning',
+    title: 'Reasoning',
+    render: () => (
+      <ReasoningDisclosure durationS={4} text="Compare the changelog with the docs, then hand off to Writer." />
+    )
+  },
+  {
+    id: 'tool-cards',
+    title: 'Tool cards',
+    render: () => (
+      <ExpandedProvider>
+        <ToolCard item={searchToolItem} presentation="collapsed" />
+        <ToolCard item={patchToolItem} presentation="full" />
+        <ToolCard item={failedToolItem} presentation="collapsed" />
+        <ToolCard item={runningToolItem} presentation="collapsed" />
+      </ExpandedProvider>
+    )
+  },
+  { id: 'diff', title: 'Diff', render: () => <DiffView diff={sampleDiff} /> },
+  {
+    id: 'dm-lines',
+    title: 'Bot-to-bot lines',
+    render: ctx => (
+      <ExpandedProvider>
+        <View style={{ gap: ctx.theme.space.sm + 1 }}>
+          <BotDmOutLine
+            item={botDmOutItem}
+            onOpenBot={handle => ctx.say(`Open bot @${handle}`)}
+            presentation="collapsed"
+          />
+          <BotDmOutLine item={pendingDmOutItem} presentation="collapsed" />
+          <BotDmOutLine item={failedDmOutItem} presentation="collapsed" />
+        </View>
+      </ExpandedProvider>
+    )
+  },
+  {
+    id: 'dm-rollup',
+    title: 'Bot-to-bot roll-up',
+    render: () => (
+      <ExpandedProvider>
+        <BotDmRollup run={{ handle: 'writer', id: dmRunItems[0]?.id ?? 'dm-run-0', items: dmRunItems, replies: 4 }} />
+      </ExpandedProvider>
+    )
+  },
+  {
+    id: 'agents-group',
+    title: 'Agents',
+    render: ctx => (
+      <SubagentGroupCard
+        item={subagentGroupItem}
+        onOpenTranscript={id => ctx.say(`Open transcript ${id}`)}
+        presentation="full"
+        subagents={[subagentMap['sa-1']!, subagentMap['sa-2']!, subagentMap['sa-3']!]}
+      />
+    )
+  },
+  {
+    id: 'rows-pills',
+    title: 'Rows and pills',
+    render: ctx => (
+      <>
+        <StatusRow item={statusItem} presentation="chip" />
+        <NoticePill item={noticeItem} presentation="collapsed" />
+        <NoticePill item={processNoticeItem} presentation="full" />
+        <QueuedChip text="Include source links" />
+        <JumpToLatestPill count={3} onPress={() => ctx.say('Jump to latest')} />
+      </>
+    )
+  },
+  {
+    id: 'file-chips',
+    title: 'File chips',
+    render: ctx => (
+      <View style={{ alignItems: 'flex-start', gap: ctx.theme.space.sm }}>
+        <FileChip name="quarterly-report-final-v4.xlsx" onRemove={() => ctx.say('Remove chip')} size={48210} />
+        <FileChip name="archive.zip" progress={0.4} size={98_000_000} status="uploading" />
+        <FileChip error="Too large · 100 MB max" name="capture.mov" size={420_000_000} status="error" />
+        <FileChip name="notes.md" onAccent size={1240} />
+      </View>
+    )
+  },
+  {
+    id: 'attach-menu',
+    title: 'Attach menu',
+    render: ctx => (
+      <AttachMenu
+        choices={[
+          { id: 'photo', label: 'Photo library' },
+          { busy: true, id: 'file', label: 'Choose file' }
+        ]}
+        onChoose={id => ctx.say(`Attach ${id}`)}
+        testID="gallery-attach-menu"
+      />
+    )
+  },
+  {
+    id: 'composer',
+    title: 'Composer',
+    render: ctx => (
+      <Composer
+        attachments={[
+          { id: 'att-1', kind: 'image', name: 'diagram.png' },
+          { id: 'att-2', kind: 'file', name: 'quarterly-report-final-v4.xlsx', size: 48210, status: 'uploaded' },
+          { error: 'Too large · 100 MB max', id: 'att-3', kind: 'file', name: 'capture.mov', status: 'error' }
+        ]}
+        botName="Researcher"
+        onAttach={() => ctx.say('Attach pressed')}
+        onChangeText={ctx.setDraft}
+        onRemoveAttachment={id => ctx.say(`Remove ${id}`)}
+        onSend={text => {
+          ctx.say(`Sent: ${text}`)
+          ctx.setDraft('')
+          ctx.setRunning(true)
+        }}
+        onStop={() => {
+          ctx.setRunning(false)
+          ctx.say('Stopped')
+        }}
+        queuedText="Include source links"
+        running={ctx.running}
+        suggestions={SLASH_SUGGESTIONS}
+        value={ctx.draft}
+      />
+    )
+  },
+  {
+    id: 'connection-line',
+    title: 'Connection line — every state',
+    needsGateway: true,
+    render: () => (
+      <>
+        {/* `ready` deliberately renders nothing: a row that only ever says
+            "Connected" is a row nobody reads (tokens §1.6). */}
+        <ConnectionLine status="ready" />
+        <ConnectionLine status="connecting" />
+        <ConnectionLine status="reconnecting" />
+        <ConnectionLine status="offline" />
+        <ConnectionLine status="needs_signin" />
+      </>
+    )
+  },
+  { id: 'signed-out', title: 'Signed out panel', full: true, needsGateway: true, render: () => <SignedOutPanel /> },
+  {
+    id: 'cron-status-dots',
+    title: 'Cron status dots',
+    render: ctx => (
+      <View style={{ flexDirection: 'row', gap: ctx.theme.space.lg }}>
+        <StatusDot status="ok" />
+        <StatusDot status="failed" />
+        <StatusDot status="paused" />
+        <StatusDot status="pending" />
+      </View>
+    )
+  },
+  { id: 'cron-schedule-builder', title: 'Cron schedule builder', render: () => <ScheduleBuilderBody /> },
+  {
+    id: 'cron-detail',
+    title: 'Cron detail',
+    full: true,
+    render: ctx => (
+      <CronDetailScreen
+        controller={null}
+        job={CRON_JOB}
+        onClose={() => ctx.say('Close cron detail')}
+        onDeleted={() => ctx.say('Cron deleted')}
+        onEdit={() => ctx.openSheet('cronEditor')}
+        onOpenRun={() => ctx.say('Open run')}
+      />
+    )
+  },
+  {
+    id: 'cron-detail-paused',
+    title: 'Cron detail — paused and failing',
+    full: true,
+    render: ctx => (
+      <CronDetailScreen
+        controller={null}
+        job={CRON_JOB_FAILED}
+        onClose={() => ctx.say('Close cron detail')}
+        onDeleted={() => ctx.say('Cron deleted')}
+        onEdit={() => ctx.openSheet('cronEditor')}
+        onOpenRun={() => ctx.say('Open run')}
+      />
+    )
+  },
+  {
+    id: 'cron-run',
+    title: 'Cron run transcript',
+    full: true,
+    render: ctx => (
+      <CronRunScreen controller={null} job={CRON_JOB} onClose={() => ctx.say('Close run')} run={CRON_RUN} />
+    )
+  },
+  {
+    id: 'sheets',
+    title: 'Sheets',
+    render: ctx => (
+      <InsetGroup>
+        <InsetButtonRow onPress={() => ctx.openSheet('approval')} title="Open approval sheet" />
+        <InsetButtonRow onPress={() => ctx.openSheet('clarify')} title="Open clarify sheet" />
+        <InsetButtonRow onPress={() => ctx.openSheet('options')} title="Open chat options" />
+        <InsetButtonRow onPress={() => ctx.openSheet('agents')} title="Open agents sheet" />
+        <InsetButtonRow onPress={() => ctx.openSheet('cronEditor')} title="Open the cron editor" />
+        <InsetButtonRow onPress={ctx.openChatDemo} title="Open the full chat screen" />
+      </InsetGroup>
+    )
+  },
+  { id: 'sheet-approval', title: 'Approval sheet', sheet: 'approval', render: () => null },
+  {
+    id: 'sheet-approval-answered',
+    title: 'Approval sheet — answered elsewhere',
+    sheet: 'approvalAnswered',
+    render: () => null
+  },
+  { id: 'sheet-clarify', title: 'Clarify sheet', sheet: 'clarify', render: () => null },
+  { id: 'sheet-agents', title: 'Agents sheet', sheet: 'agents', render: () => null },
+  { id: 'sheet-options', title: 'Chat options sheet', sheet: 'options', render: () => null },
+  {
+    id: 'sheet-options-model-page',
+    title: 'Chat options — model page',
+    sheet: 'options',
+    pane: 'model',
+    render: () => null
+  },
+  {
+    id: 'sheet-options-reasoning-page',
+    title: 'Chat options — reasoning page',
+    sheet: 'options',
+    pane: 'reasoning',
+    render: () => null
+  },
+  {
+    id: 'sheet-options-colour-page',
+    title: 'Chat options — colour picker',
+    sheet: 'options',
+    pane: 'colour',
+    render: () => null
+  },
+  { id: 'sheet-cron-editor', title: 'Cron editor sheet', sheet: 'cronEditor', render: () => null }
+]
+
+/** Every id `--hermieOpen gallery:<id>` accepts. Documented in CONTRIBUTING.md. */
+export const GALLERY_SECTION_IDS: readonly string[] = SECTIONS.map(section => section.id)
+
+/** `chat` is the whole chat screen, which is a mode rather than a section. */
+export const GALLERY_CHAT_SECTION = 'chat'
+
+export function GalleryScreen({ onClose, section }: GalleryScreenProps) {
   const theme = useTheme()
 
   const [draft, setDraft] = useState('')
   const [running, setRunning] = useState(false)
   const [lastAction, setLastAction] = useState('Nothing yet')
 
+  const target = SECTIONS.find(entry => entry.id === section)
+
   const [agentsOpen, setAgentsOpen] = useState(false)
   const [approval, setApproval] = useState<ApprovalItem>(approvalItem)
   const [approvalOpen, setApprovalOpen] = useState(false)
   const [clarifyOpen, setClarifyOpen] = useState(false)
   const [optionsOpen, setOptionsOpen] = useState(false)
-  const [transcriptOpen, setTranscriptOpen] = useState(false)
+  const [optionsPane, setOptionsPane] = useState<OptionsPane | undefined>(undefined)
+  const [cronEditorOpen, setCronEditorOpen] = useState(false)
+  const [transcriptOpen, setTranscriptOpen] = useState(section === GALLERY_CHAT_SECTION)
   const [cronExpanded, setCronExpanded] = useState(false)
 
   const [yolo, setYolo] = useState(false)
@@ -204,6 +737,55 @@ export function GalleryScreen({ onClose }: GalleryScreenProps) {
   const [showThinking, setShowThinking] = useState(false)
 
   const clarify: ClarifyItem = clarifyItem
+
+  const openSheet = (sheet: SheetName, pane?: OptionsPane) => {
+    setOptionsPane(pane)
+
+    switch (sheet) {
+      case 'agents':
+        return setAgentsOpen(true)
+      case 'approval':
+        setApproval(approvalItem)
+
+        return setApprovalOpen(true)
+      case 'approvalAnswered':
+        setApproval({ ...approvalItem, answer: 'once', state: 'answered', version: approvalItem.version + 1 })
+
+        return setApprovalOpen(true)
+      case 'clarify':
+        return setClarifyOpen(true)
+      case 'cronEditor':
+        return setCronEditorOpen(true)
+      default:
+        return setOptionsOpen(true)
+    }
+  }
+
+  // A section addressed by a launch argument opens its own sheet as it mounts.
+  // Without this every sheet, every options page and the colour picker are
+  // behind a tap that `xcrun simctl` cannot perform.
+  useEffect(() => {
+    if (target?.sheet) {
+      openSheet(target.sheet, target.pane)
+    }
+    // Once, for the addressed section. Re-running on every render would fight
+    // the reader closing the sheet by hand.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target?.id])
+
+  const ctx: GalleryContext = {
+    theme,
+    lastAction,
+    say: setLastAction,
+    draft,
+    setDraft,
+    running,
+    setRunning,
+    cronExpanded,
+    toggleCron: () => setCronExpanded(current => !current),
+    openSheet,
+    openChatDemo: () => setTranscriptOpen(true)
+  }
 
   // The transcript demo is its own screen rather than a section: a `FlatList`
   // inside a vertical `ScrollView` is a nested virtualized list, which React
@@ -253,6 +835,21 @@ export function GalleryScreen({ onClose }: GalleryScreenProps) {
     </Screen>
   )
 
+  // One addressed section, alone. `full` sections draw their own screen; the
+  // rest get the plain padded box, because a section boxed inside a bordered
+  // card is a screenshot of a card rather than of the component.
+  const single = target ? (
+    target.full ? (
+      <>{target.render(ctx)}</>
+    ) : (
+      <Screen edgeToEdgeTop={false} padded={false} testID={`gallery-section-${target.id}`}>
+        <ScrollView contentContainerStyle={{ gap: theme.space.md, padding: theme.space.lg }}>
+          {target.render(ctx)}
+        </ScrollView>
+      </Screen>
+    )
+  ) : null
+
   const componentList = (
     <Screen edgeToEdgeTop={false} padded={false}>
       <ScrollView contentContainerStyle={{ gap: theme.space.xl, padding: theme.space.lg }}>
@@ -264,217 +861,11 @@ export function GalleryScreen({ onClose }: GalleryScreenProps) {
           {onClose ? <Button onPress={onClose} title="Back to settings" variant="secondary" /> : null}
         </View>
 
-        <Section title="Chat header">
-          <ChatHeader
-            handle="researcher"
-            name="Researcher"
-            onOpenOptions={() => setOptionsOpen(true)}
-            presence="working"
-            testID="gallery-chat-header"
-          />
-          <ChatHeader
-            handle="writer"
-            lastSeenAt={1_767_000_000}
-            name="Writer"
-            onOpenOptions={() => setOptionsOpen(true)}
-            presence="offline"
-            testID="gallery-chat-header-offline"
-          />
-          <ChatHeader
-            handle="bookkeeper"
-            name="Bookkeeper"
-            onOpenOptions={() => setOptionsOpen(true)}
-            presence="needsInput"
-            testID="gallery-chat-header-needs-input"
-          />
-        </Section>
-
-        <Section title="Agents bar">
-          <AgentsBar count={3} elapsedSeconds={72} onPress={() => setAgentsOpen(true)} testID="gallery-agents-bar" />
-        </Section>
-
-        <StreamingSection />
-
-        <Section title="Bubbles">
-          <DateSeparator label="Yesterday" />
-          {/* Grouping: three own bubbles in a run, only the last with a tail. */}
-          <UserBubble grouped={false} item={userItem} tail={false} />
-          <UserBubble grouped item={{ ...userItem, id: 'u1b', text: 'And keep it short.' }} tail={false} />
-          <UserBubble grouped item={{ ...userItem, id: 'u1c', text: 'Thanks.' }} receipt="read" tail />
-          <AssistantBubble item={assistantItem} presentation="full" showFooter />
-          <AssistantBubble item={interimAssistantItem} presentation="full" />
-          <BotDmInBubble
-            answered
-            item={botDmInItem}
-            onOpenBot={handle => setLastAction(`Open bot @${handle}`)}
-            selfHandle="researcher"
-          />
-          <TypingIndicator />
-        </Section>
-
-        <Section title="Receipts">
-          <UserBubble item={{ ...userItem, id: 'u-r1', text: 'Sending.' }} receipt="sending" />
-          <UserBubble item={{ ...userItem, id: 'u-r2', text: 'Sent.' }} receipt="sent" />
-          <UserBubble item={{ ...userItem, id: 'u-r3', text: 'Delivered.' }} receipt="delivered" />
-          <UserBubble item={{ ...userItem, id: 'u-r4', text: 'Read.' }} receipt="read" />
-        </Section>
-
-        <Section title="Long reply — reading treatment and fold">
-          {/* The fold's state lives above the list, so the gallery provides one. */}
-          <ExpandedProvider>
-            <AssistantBubble item={longReportItem} presentation="full" showFooter />
-          </ExpandedProvider>
-        </Section>
-
-        <Section title="Markdown regressions">
-          {/* The exact sentence the owner hit: a code span near a line end, and
-              emphasis a model opened with a stray space. */}
-          <ExpandedProvider>
-            <AssistantBubble item={inlineCodeRegressionItem} presentation="full" />
-          </ExpandedProvider>
-        </Section>
-
-        <Section title="Cron delivery">
-          <CronDeliveryCard
-            body={cronDeliveryItem.body}
-            expanded={cronExpanded}
-            name={cronDeliveryItem.jobName}
-            onOpenCron={() => setLastAction('Open cron')}
-            onRunNow={() => setLastAction('Run cron now')}
-            onToggle={() => setCronExpanded(current => !current)}
-            testID="gallery-cron-card"
-            ts={cronDeliveryItem.ts}
-          />
-        </Section>
-
-        <Section title="Errors">
-          <AssistantBubble item={errorAssistantItem} onRetry={() => setLastAction('Retry pressed')} />
-          <AssistantBubble item={recoverableAssistantItem} />
-          <ErrorCard message="The gateway is unreachable." onRetry={() => setLastAction('Retry')} retryable />
-        </Section>
-
-        <Section title="Reasoning">
-          <ReasoningDisclosure durationS={4} text="Compare the changelog with the docs, then hand off to Writer." />
-        </Section>
-
-        <Section title="Tool cards">
-          <ToolCard item={searchToolItem} presentation="collapsed" />
-          <ToolCard item={patchToolItem} presentation="full" />
-          <ToolCard item={failedToolItem} presentation="collapsed" />
-          <ToolCard item={runningToolItem} presentation="collapsed" />
-        </Section>
-
-        <Section title="Diff">
-          <DiffView diff={sampleDiff} />
-        </Section>
-
-        <Section title="Bot-to-bot lines">
-          <ExpandedProvider>
-            <View style={{ gap: theme.space.sm + 1 }}>
-              <BotDmOutLine
-                item={botDmOutItem}
-                onOpenBot={handle => setLastAction(`Open bot @${handle}`)}
-                presentation="collapsed"
-              />
-              <BotDmOutLine item={pendingDmOutItem} presentation="collapsed" />
-              <BotDmOutLine item={failedDmOutItem} presentation="collapsed" />
-            </View>
-          </ExpandedProvider>
-        </Section>
-
-        <Section title="Bot-to-bot roll-up">
-          <ExpandedProvider>
-            <BotDmRollup
-              run={{
-                handle: 'writer',
-                id: dmRunItems[0]?.id ?? 'dm-run-0',
-                items: dmRunItems,
-                replies: 4
-              }}
-            />
-          </ExpandedProvider>
-          <Text color="textFaint" variant="micro">
-            {`${Object.values(rollupDmRuns(dmRunItems.map(item => ({ item, presentation: 'collapsed' as const })))).length} rows in the run`}
-          </Text>
-        </Section>
-
-        <Section title="Agents">
-          <SubagentGroupCard
-            item={subagentGroupItem}
-            onOpenTranscript={id => setLastAction(`Open transcript ${id}`)}
-            presentation="full"
-            subagents={[subagentMap['sa-1']!, subagentMap['sa-2']!, subagentMap['sa-3']!]}
-          />
-        </Section>
-
-        <Section title="Rows and pills">
-          <StatusRow item={statusItem} presentation="chip" />
-          <NoticePill item={noticeItem} presentation="collapsed" />
-          <NoticePill item={processNoticeItem} presentation="full" />
-          <QueuedChip text="Include source links" />
-          <JumpToLatestPill count={3} onPress={() => setLastAction('Jump to latest')} />
-        </Section>
-
-        <Section title="File chips">
-          <View style={{ alignItems: 'flex-start', gap: theme.space.sm }}>
-            <FileChip
-              name="quarterly-report-final-v4.xlsx"
-              onRemove={() => setLastAction('Remove chip')}
-              size={48210}
-            />
-            <FileChip name="archive.zip" progress={0.4} size={98_000_000} status="uploading" />
-            <FileChip error="Too large · 100 MB max" name="capture.mov" size={420_000_000} status="error" />
-            <FileChip name="notes.md" onAccent size={1240} />
-          </View>
-        </Section>
-
-        <Section title="Attach menu">
-          <AttachMenu
-            choices={[
-              { id: 'photo', label: 'Photo library' },
-              { busy: true, id: 'file', label: 'Choose file' }
-            ]}
-            onChoose={id => setLastAction(`Attach ${id}`)}
-            testID="gallery-attach-menu"
-          />
-        </Section>
-
-        <Section title="Composer">
-          <Composer
-            attachments={[
-              { id: 'att-1', kind: 'image', name: 'diagram.png' },
-              { id: 'att-2', kind: 'file', name: 'quarterly-report-final-v4.xlsx', size: 48210, status: 'uploaded' },
-              { error: 'Too large · 100 MB max', id: 'att-3', kind: 'file', name: 'capture.mov', status: 'error' }
-            ]}
-            botName="Researcher"
-            onAttach={() => setLastAction('Attach pressed')}
-            onChangeText={setDraft}
-            onRemoveAttachment={id => setLastAction(`Remove ${id}`)}
-            onSend={text => {
-              setLastAction(`Sent: ${text}`)
-              setDraft('')
-              setRunning(true)
-            }}
-            onStop={() => {
-              setRunning(false)
-              setLastAction('Stopped')
-            }}
-            queuedText="Include source links"
-            running={running}
-            suggestions={SLASH_SUGGESTIONS}
-            value={draft}
-          />
-        </Section>
-
-        <Section title="Sheets">
-          <InsetGroup>
-            <InsetButtonRow onPress={() => setApprovalOpen(true)} title="Open approval sheet" />
-            <InsetButtonRow onPress={() => setClarifyOpen(true)} title="Open clarify sheet" />
-            <InsetButtonRow onPress={() => setOptionsOpen(true)} title="Open chat options" />
-            <InsetButtonRow onPress={() => setAgentsOpen(true)} title="Open agents sheet" />
-            <InsetButtonRow onPress={() => setTranscriptOpen(true)} title="Open the full chat screen" />
-          </InsetGroup>
-        </Section>
+        {SECTIONS.filter(entry => !entry.full && !entry.sheet && !entry.needsGateway).map(entry => (
+          <Section key={entry.id} title={entry.title}>
+            {entry.render(ctx)}
+          </Section>
+        ))}
 
         <View style={{ height: theme.space.xxxl }} />
       </ScrollView>
@@ -486,7 +877,7 @@ export function GalleryScreen({ onClose }: GalleryScreenProps) {
   // animation with it.
   return (
     <>
-      {transcriptOpen ? chatDemo : componentList}
+      {transcriptOpen ? chatDemo : (single ?? componentList)}
 
       <AgentsSheet
         onClose={() => setAgentsOpen(false)}
@@ -527,18 +918,31 @@ export function GalleryScreen({ onClose }: GalleryScreenProps) {
         visible={clarifyOpen}
       />
 
+      <CronEditorSheet
+        job={null}
+        onCancel={() => setCronEditorOpen(false)}
+        onSave={input => {
+          setCronEditorOpen(false)
+          setLastAction(`Save cron ${input.name}`)
+        }}
+        profiles={['researcher', 'writer', 'bookkeeper']}
+        targets={CRON_TARGETS}
+        visible={cronEditorOpen}
+      />
+
       <ChatOptionsSheet
         accent={accent}
         botName="Researcher"
         fast={fast}
+        initialPane={optionsPane}
         model={model}
         modelOptions={MODEL_OPTIONS}
+        onChangeAccent={setAccent}
         onChangeFast={setFast}
         onChangeModel={setModel}
         onChangeReasoningEffort={setReasoning}
         onChangeShowBotToBot={setShowBotToBot}
         onChangeShowThinking={setShowThinking}
-        onChangeAccent={setAccent}
         onChangeVerbosity={setVerbosity}
         onChangeYolo={setYolo}
         onClose={() => setOptionsOpen(false)}

@@ -92,7 +92,7 @@ function AgentRow({
     <View style={{ gap: theme.space.xs, marginLeft: depth * theme.space.md }}>
       <View
         style={{
-          backgroundColor: theme.colors.surface,
+          backgroundColor: theme.elevation.e3c,
           borderRadius: theme.radii.lg,
           gap: theme.space.xs,
           padding: theme.space.md
@@ -117,7 +117,7 @@ function AgentRow({
           <View style={{ gap: 2 }}>
             {node.stream.slice(-4).map((entry, index) => (
               <Text
-                color={entry.isError ? 'danger' : 'textMuted'}
+                color={entry.isError ? 'dangerText' : 'textMuted'}
                 key={index}
                 numberOfLines={2}
                 style={{ fontSize: 12, lineHeight: 17 }}
@@ -144,7 +144,7 @@ function AgentRow({
               style={ACTION_STYLE}
               testID={`agent-steer-${node.id}`}
             >
-              <Text color="accent" variant="caption">
+              <Text color="accent" variant="meta">
                 {chatStrings.subagents.steer}
               </Text>
             </Pressable>
@@ -158,7 +158,7 @@ function AgentRow({
               style={ACTION_STYLE}
               testID={`agent-stop-${node.id}`}
             >
-              <Text color="danger" variant="caption">
+              <Text color="dangerText" variant="meta">
                 {chatStrings.subagents.stop}
               </Text>
             </Pressable>
@@ -172,7 +172,7 @@ function AgentRow({
               style={ACTION_STYLE}
               testID={`agent-transcript-${node.id}`}
             >
-              <Text color="accent" variant="caption">
+              <Text color="accent" variant="meta">
                 {chatStrings.subagents.openTranscript}
               </Text>
             </Pressable>
@@ -225,7 +225,7 @@ function TranscriptPanel({ transcript, onBack }: { transcript: SubagentTranscrip
         style={ACTION_STYLE}
         testID="agent-transcript-back"
       >
-        <Text color="accent" variant="callout">
+        <Text color="accent" variant="preview">
           {`‹ ${chatStrings.subagents.transcriptBack}`}
         </Text>
       </Pressable>
@@ -233,19 +233,19 @@ function TranscriptPanel({ transcript, onBack }: { transcript: SubagentTranscrip
       <Text style={{ fontWeight: '600' }} variant="body">
         {chatStrings.subagents.transcriptTitle(transcript.goal)}
       </Text>
-      <Text color="textMuted" variant="caption">
+      <Text color="textMuted" variant="meta">
         {transcript.source === 'tail' ? chatStrings.subagents.transcriptLive : chatStrings.subagents.transcriptStored}
       </Text>
 
       {transcript.error ? (
-        <Text color="danger" variant="callout">
+        <Text color="dangerText" variant="preview">
           {transcript.error}
         </Text>
       ) : null}
 
       <ScrollView
         style={{
-          backgroundColor: theme.colors.surface,
+          backgroundColor: theme.elevation.e3c,
           borderRadius: theme.radii.lg,
           maxHeight: 320,
           padding: theme.space.md
@@ -291,7 +291,7 @@ export function AgentsSheet({
       visible={visible}
     >
       <View style={{ alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' }}>
-        <Text variant="title">{chatStrings.subagents.title}</Text>
+        <Text variant="sheetTitle">{chatStrings.subagents.title}</Text>
         <Pressable
           accessibilityRole="button"
           hitSlop={TAP_SLOP}
@@ -306,7 +306,7 @@ export function AgentsSheet({
       </View>
 
       {notice ? (
-        <Text color="textMuted" testID="agents-sheet-notice" variant="callout">
+        <Text color="textMuted" testID="agents-sheet-notice" variant="preview">
           {notice}
         </Text>
       ) : null}

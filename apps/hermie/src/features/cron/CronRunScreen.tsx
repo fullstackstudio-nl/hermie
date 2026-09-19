@@ -67,7 +67,7 @@ export function CronRunScreen({ controller, job, run, onClose }: CronRunScreenPr
         subtitle={[job.name, started].filter(Boolean).join(' · ')}
       />
 
-      <Text color="textMuted" variant="caption" style={{ paddingHorizontal: theme.space.lg }}>
+      <Text color="textMuted" variant="meta" style={{ paddingHorizontal: theme.space.lg }}>
         {cronStrings.run.readOnly}
       </Text>
 
@@ -78,7 +78,7 @@ export function CronRunScreen({ controller, job, run, onClose }: CronRunScreenPr
         </View>
       ) : error ? (
         <View style={{ padding: theme.space.lg }}>
-          <Text color="danger">{cronStrings.run.failed(error)}</Text>
+          <Text color="dangerText">{cronStrings.run.failed(error)}</Text>
         </View>
       ) : items.length === 0 ? (
         <View style={{ padding: theme.space.lg }}>

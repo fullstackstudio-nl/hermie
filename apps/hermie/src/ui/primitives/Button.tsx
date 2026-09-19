@@ -18,7 +18,7 @@ export function Button({ title, variant = 'primary', busy = false, disabled, sty
   // `bubbleBlue` rather than `accent`: the accent is for links and focus rings,
   // and the filled action shade is the deeper one that keeps white text at AA.
   const background =
-    variant === 'primary' ? theme.colors.bubbleBlue : variant === 'danger' ? theme.colors.danger : theme.colors.surface
+    variant === 'primary' ? theme.colors.accent : variant === 'danger' ? theme.colors.danger : theme.elevation.e3c
   const label = variant === 'secondary' ? 'text' : 'onAccent'
 
   return (
@@ -35,7 +35,7 @@ export function Button({ title, variant = 'primary', busy = false, disabled, sty
             backgroundColor: background,
             borderRadius: theme.radii.lg,
             borderWidth: variant === 'secondary' ? 1 : 0,
-            borderColor: theme.colors.border,
+            borderColor: theme.hairline,
             minHeight: CONTROL_MIN_HEIGHT,
             paddingVertical: theme.space.md,
             paddingHorizontal: theme.space.lg,
@@ -47,7 +47,7 @@ export function Button({ title, variant = 'primary', busy = false, disabled, sty
           {busy ? (
             <ActivityIndicator color={variant === 'secondary' ? theme.colors.text : theme.colors.onAccent} />
           ) : (
-            <Text variant="heading" color={label}>
+            <Text variant="name" color={label}>
               {title}
             </Text>
           )}

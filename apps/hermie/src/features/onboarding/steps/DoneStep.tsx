@@ -38,7 +38,7 @@ export function DoneStep({ draft, error }: DoneStepProps) {
       </InsetGroup>
 
       {error ? (
-        <Text color="danger" testID="done-error">
+        <Text color="dangerText" testID="done-error">
           {error}
         </Text>
       ) : null}

@@ -21,7 +21,7 @@ export interface StatusDotProps {
 
 export function StatusDot({ status, size = 10 }: StatusDotProps) {
   const theme = useTheme()
-  const color = status === 'ok' ? theme.colors.success : status === 'failed' ? theme.colors.danger : AMBER
+  const color = status === 'ok' ? theme.colors.ok : status === 'failed' ? theme.colors.danger : AMBER
 
   return (
     <View

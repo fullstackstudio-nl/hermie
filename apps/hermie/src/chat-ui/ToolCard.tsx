@@ -66,7 +66,7 @@ function Truncatable({ value, testID }: { value: string; testID?: string }) {
           onPress={() => setOpen(current => !current)}
           style={{ justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT }}
         >
-          <Text color="accent" variant="caption">
+          <Text color="accent" variant="meta">
             {open ? chatStrings.tool.showLess : chatStrings.tool.showMore}
           </Text>
         </Pressable>
@@ -136,7 +136,7 @@ export function ToolCard({ item, presentation = 'collapsed', expanded, onToggleE
   return (
     <View
       style={{
-        backgroundColor: theme.colors.surfaceRaised,
+        backgroundColor: theme.elevation.e3c,
         borderLeftColor: failed ? theme.colors.danger : 'transparent',
         borderLeftWidth: failed ? 3 : 0,
         borderRadius: theme.radii.xl,
@@ -162,12 +162,12 @@ export function ToolCard({ item, presentation = 'collapsed', expanded, onToggleE
             padding: theme.space.md
           }}
         >
-          <Text color={failed ? 'danger' : 'textMuted'} style={{ fontSize: 15, width: 22 }}>
+          <Text color={failed ? 'dangerText' : 'textMuted'} style={{ fontSize: 15, width: 22 }}>
             {failed ? '!' : toolGlyph(family)}
           </Text>
 
           <View style={{ flex: 1, gap: 2 }}>
-            <Text color={failed ? 'danger' : 'text'} style={{ fontSize: 14, fontWeight: '600' }}>
+            <Text color={failed ? 'dangerText' : 'text'} style={{ fontSize: 14, fontWeight: '600' }}>
               {item.name}
             </Text>
             {summaryLine ? (
@@ -194,7 +194,7 @@ export function ToolCard({ item, presentation = 'collapsed', expanded, onToggleE
       {isExpanded ? (
         <View
           style={{
-            borderTopColor: theme.colors.border,
+            borderTopColor: theme.hairline,
             borderTopWidth: 1,
             padding: theme.space.md,
             paddingTop: theme.space.xs
@@ -204,7 +204,7 @@ export function ToolCard({ item, presentation = 'collapsed', expanded, onToggleE
           {item.outputRisk ? (
             <View
               style={{
-                backgroundColor: theme.colors.surface,
+                backgroundColor: theme.elevation.e3c,
                 borderColor: theme.colors.danger,
                 borderRadius: theme.radii.md,
                 borderWidth: 1,
@@ -214,7 +214,7 @@ export function ToolCard({ item, presentation = 'collapsed', expanded, onToggleE
               }}
               testID={`tool-risk-${item.id}`}
             >
-              <Text color="danger" style={{ fontSize: 12, fontWeight: '600' }}>
+              <Text color="dangerText" style={{ fontSize: 12, fontWeight: '600' }}>
                 {`${chatStrings.tool.riskTitle} · ${item.outputRisk.risk}`}
               </Text>
               {item.outputRisk.findings.map((finding, index) => (
@@ -249,7 +249,7 @@ export function ToolCard({ item, presentation = 'collapsed', expanded, onToggleE
           {failed ? (
             <>
               <SectionLabel>{chatStrings.tool.failed}</SectionLabel>
-              <Text color="danger" selectable style={{ fontSize: 13, lineHeight: 19 }}>
+              <Text color="dangerText" selectable style={{ fontSize: 13, lineHeight: 19 }}>
                 {errorText}
               </Text>
             </>

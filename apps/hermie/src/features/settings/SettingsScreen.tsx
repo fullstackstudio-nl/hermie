@@ -32,7 +32,17 @@ const WALLPAPER_OPTIONS: { value: WallpaperName; label: string }[] = WALLPAPER_O
   label: strings.settings.wallpaperOptions[name]
 }))
 
-export function SettingsScreen() {
+export interface SettingsScreenProps {
+  /**
+   * Open one of the pages Settings shows over itself.
+   *
+   * Development only (`--hermieOpen overlay:settings/licences`). Each of these
+   * is behind a tap, and a simulator this machine can only launch cannot tap.
+   */
+  initialPage?: 'connection' | 'gallery' | 'licences'
+}
+
+export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
   const theme = useTheme()
   const { config, status, signOut, changeGateway } = useGateway()
   const defaults = useSettingsStore(state => state.defaults)
@@ -41,9 +51,9 @@ export function SettingsScreen() {
   const setAppearance = useSettingsStore(state => state.setAppearance)
   const wallpaper = useSettingsStore(state => state.wallpaper)
   const setWallpaper = useSettingsStore(state => state.setWallpaper)
-  const [showConnectionTest, setShowConnectionTest] = useState(false)
-  const [showGallery, setShowGallery] = useState(false)
-  const [showLicences, setShowLicences] = useState(false)
+  const [showConnectionTest, setShowConnectionTest] = useState(initialPage === 'connection')
+  const [showGallery, setShowGallery] = useState(initialPage === 'gallery')
+  const [showLicences, setShowLicences] = useState(initialPage === 'licences')
   const [confirmingChange, setConfirmingChange] = useState(false)
 
   // Escape goes back ONE level: out of a screen Settings opened and into
@@ -86,7 +96,7 @@ export function SettingsScreen() {
           alignSelf: 'center'
         }}
       >
-        <Text variant="display">{strings.settings.title}</Text>
+        <Text variant="title">{strings.settings.title}</Text>
 
         <InsetGroup header={strings.settings.gateway}>
           <InsetValueRow label={strings.settings.address} value={config?.baseUrl ?? strings.settings.unknown} />

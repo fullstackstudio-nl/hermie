@@ -2,6 +2,7 @@ import { DefaultTheme, NavigationContainer, useNavigation, type Theme as NavThem
 import { createNativeStackNavigator, type NativeStackNavigationProp } from '@react-navigation/native-stack'
 import { useMemo } from 'react'
 
+import type { DevInitialView } from '../dev'
 import { ActivityScreen } from '../features/activity'
 import { BotsScreenOrSignedOut, type BotsSection } from '../features/bots'
 import { ChatScreen } from '../features/chats'
@@ -89,7 +90,7 @@ function ActivityRoute() {
  * native title bar can carry none of those. Every other route keeps the
  * platform header.
  */
-export function CompactShell() {
+export function CompactShell({ initial }: { initial?: DevInitialView } = {}) {
   const theme = useTheme()
 
   // A navigator paints its own background over everything, including the
@@ -101,7 +102,7 @@ export function CompactShell() {
       colors: {
         ...DefaultTheme.colors,
         background: 'transparent',
-        border: theme.colors.border,
+        border: theme.hairline,
         card: theme.elevation.e1,
         primary: theme.colors.accent,
         text: theme.colors.text
@@ -116,6 +117,10 @@ export function CompactShell() {
     <Wallpaper style={{ flex: 1 }} testID="wallpaper">
       <NavigationContainer theme={navTheme}>
         <Stack.Navigator
+          // A launch argument puts one route in the stack rather than pushing
+          // onto Bots: a screenshot wants the screen, not a back button to a
+          // list nobody asked for.
+          initialRouteName={initialRouteFor(initial)}
           screenOptions={{
             contentStyle: { backgroundColor: 'transparent' },
             headerStyle: { backgroundColor: theme.elevation.e1 },
@@ -123,12 +128,33 @@ export function CompactShell() {
           }}
         >
           <Stack.Screen component={BotsRoute} name="Bots" options={{ headerShown: false }} />
-          <Stack.Screen component={ChatRoute} name="Chat" options={{ headerShown: false }} />
+          <Stack.Screen
+            component={ChatRoute}
+            initialParams={initial?.bot ? { bot: initial.bot } : undefined}
+            name="Chat"
+            options={{ headerShown: false }}
+          />
           <Stack.Screen component={ActivityRoute} name="Activity" options={{ title: strings.tabs.activity }} />
           <Stack.Screen component={CronScreen} name="Cron" options={{ title: strings.tabs.routines }} />
-          <Stack.Screen component={SettingsScreen} name="Settings" options={{ title: strings.tabs.settings }} />
+          <Stack.Screen name="Settings" options={{ title: strings.tabs.settings }}>
+            {() => <SettingsScreen {...(initial?.page ? { initialPage: initial.page } : {})} />}
+          </Stack.Screen>
         </Stack.Navigator>
       </NavigationContainer>
     </Wallpaper>
   )
+}
+
+const SECTION_START: Record<string, keyof CompactStackParamList> = {
+  activity: 'Activity',
+  cron: 'Cron',
+  settings: 'Settings'
+}
+
+function initialRouteFor(initial: DevInitialView | undefined): keyof CompactStackParamList {
+  if (initial?.bot) {
+    return 'Chat'
+  }
+
+  return (initial?.section && SECTION_START[initial.section]) || 'Bots'
 }

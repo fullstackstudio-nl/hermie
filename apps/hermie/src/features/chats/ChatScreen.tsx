@@ -1099,8 +1099,8 @@ function Banner({
 
   if (error) {
     return (
-      <View style={{ backgroundColor: theme.colors.surfaceRaised, gap: theme.space.xs, padding: theme.space.md }}>
-        <Text color="danger" variant="callout">
+      <View style={{ backgroundColor: theme.elevation.e3c, gap: theme.space.xs, padding: theme.space.md }}>
+        <Text color="dangerText" variant="preview">
           {strings.chat.failed(error)}
         </Text>
         <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.lg }}>
@@ -1110,7 +1110,7 @@ function Banner({
             onPress={() => void onRetry()}
             style={{ justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT }}
           >
-            <Text color="accent" variant="callout">
+            <Text color="accent" variant="preview">
               {strings.chat.retry}
             </Text>
           </Pressable>
@@ -1122,7 +1122,7 @@ function Banner({
               style={{ justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT }}
               testID="chat-open-settings"
             >
-              <Text color="accent" variant="callout">
+              <Text color="accent" variant="preview">
                 {strings.chat.attach.openSettings}
               </Text>
             </Pressable>
@@ -1134,7 +1134,7 @@ function Banner({
             style={{ justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT }}
             testID="chat-error-dismiss"
           >
-            <Text color="textMuted" variant="callout">
+            <Text color="textMuted" variant="preview">
               {strings.common.done}
             </Text>
           </Pressable>
@@ -1154,7 +1154,7 @@ function Banner({
         }}
       >
         <ActivityIndicator />
-        <Text color="textMuted" variant="callout">
+        <Text color="textMuted" variant="preview">
           {strings.chat.hydrating}
         </Text>
       </View>
@@ -1163,8 +1163,8 @@ function Banner({
 
   if (hydration === 'cached' || hydration === 'stale') {
     return (
-      <View style={{ backgroundColor: theme.colors.surfaceRaised, padding: theme.space.md }}>
-        <Text color="textMuted" variant="callout">
+      <View style={{ backgroundColor: theme.elevation.e3c, padding: theme.space.md }}>
+        <Text color="textMuted" variant="preview">
           {hydration === 'cached' ? strings.chat.offlineCopy : strings.chat.stale}
         </Text>
       </View>
@@ -1185,7 +1185,7 @@ function Banner({
         testID="chat-waiting-for-connection"
       >
         <ActivityIndicator />
-        <Text color="textMuted" variant="callout">
+        <Text color="textMuted" variant="preview">
           {strings.chat.waitingForConnection}
         </Text>
       </View>

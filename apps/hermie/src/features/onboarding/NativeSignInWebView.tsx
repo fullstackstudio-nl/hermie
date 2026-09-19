@@ -184,11 +184,11 @@ export function NativeSignInWebView({
           paddingHorizontal: theme.space.lg,
           paddingVertical: theme.space.md,
           borderBottomWidth: 1,
-          borderBottomColor: theme.colors.border,
-          backgroundColor: theme.colors.surface
+          borderBottomColor: theme.hairline,
+          backgroundColor: theme.elevation.e3c
         }}
       >
-        <Text variant="heading">{strings.onboarding.signIn.webview.title}</Text>
+        <Text variant="name">{strings.onboarding.signIn.webview.title}</Text>
         <Pressable accessibilityRole="button" onPress={onCancel} hitSlop={12}>
           <Text variant="body" color="accent">
             {strings.common.cancel}
@@ -201,7 +201,7 @@ export function NativeSignInWebView({
 
   const body = () => {
     if (!attempt) {
-      return <Centred>{error ? <Text color="danger">{error}</Text> : <ActivityIndicator />}</Centred>
+      return <Centred>{error ? <Text color="dangerText">{error}</Text> : <ActivityIndicator />}</Centred>
     }
 
     if (phase === 'exchanging') {
@@ -216,7 +216,7 @@ export function NativeSignInWebView({
     if (phase === 'failed') {
       return (
         <Centred>
-          <Text color="danger" style={{ textAlign: 'center' }}>
+          <Text color="dangerText" style={{ textAlign: 'center' }}>
             {error}
           </Text>
           <Button title={strings.common.openInBrowser} variant="secondary" onPress={openInBrowser} />
@@ -283,7 +283,7 @@ export function NativeSignInWebView({
         {phase === 'signing-in' && attempt ? (
           <View style={{ padding: theme.space.lg }}>
             <Pressable accessibilityRole="button" onPress={openInBrowser} hitSlop={8}>
-              <Text variant="caption" color="accent" style={{ textAlign: 'center' }}>
+              <Text variant="meta" color="accent" style={{ textAlign: 'center' }}>
                 {strings.common.openInBrowser}
               </Text>
             </Pressable>

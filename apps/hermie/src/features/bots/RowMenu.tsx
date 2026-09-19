@@ -84,7 +84,7 @@ export function RowMenu({
                 onClose()
               }}
               testID={`row-menu-section-${section.id ?? 'top'}`}
-              title={strings.layout.moveToSection(section.name || strings.layout.newDividerName)}
+              title={strings.layout.moveToSection(section.name || strings.layout.unnamedSection)}
             />
           ))}
         </View>

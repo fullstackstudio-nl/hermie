@@ -87,18 +87,18 @@ describe('a resume during a running cron turn', () => {
   })
 
   /**
-   * A gap this file found and does not fix.
+   * The gap this file found, now closed.
    *
    * `message.start` for a turn this client did not author inserts an EMPTY
-   * placeholder user item — the "Someone else started a turn…" row. It then
-   * sits between the cron card and the assistant bubble, so `shownTurn` reads
-   * that empty text as the shown prompt, the comparison misses, and the resume
-   * stands a second card beside the first. It is pinned here as the current
-   * behaviour rather than asserted as correct: fixing it means teaching the
-   * resume to fill a placeholder prompt it can identify, which is a change to
-   * how foreign turns are reconciled and wants its own round.
+   * placeholder user item — the row standing in for an author a tail fetch has
+   * not named yet. A scheduler's turn is exactly that case, so the placeholder
+   * lands between the cron card history already carries and the reply being
+   * streamed. `shownTurn` used to read that blank text AS the shown prompt: the
+   * comparison against `inflight.user` missed and the resume stood a second card
+   * beside the first. A placeholder is a promise of a prompt, not a prompt, so it
+   * is now walked past — it neither counts as one nor hides the card that is one.
    */
-  it('KNOWN GAP: a foreign-author placeholder between card and reply defeats the match', () => {
+  it('sees past a foreign-author placeholder to the card behind it', () => {
     let state = historyWith(cronBotChatText, 23)
 
     state = applyEvent(state, { type: 'message.start', seq: 1 }, NOW)
@@ -106,7 +106,77 @@ describe('a resume during a running cron turn', () => {
 
     const resumed = applyResumeSnapshot(state, runningSnapshot(cronBotChatText, 'Reading the inbox'), LATER)
 
-    expect(cards(resumed)).toHaveLength(2)
+    expect(cards(resumed)).toHaveLength(1)
+    // And the blank bubble the placeholder was is gone with it, rather than
+    // sitting between the card and its reply for the reader to wonder about.
+    expect(kinds(resumed)).toEqual(['cron_delivery', 'assistant'])
+  })
+
+  it('fills the placeholder with the card, in place, on a chat that never saw the delivery', () => {
+    // The cold-open variant: no history at all, a foreign `message.start`, then
+    // the resume that is the only thing which knows the scheduler ran. The card
+    // has to land WHERE the placeholder stood — appended, it would sit under the
+    // reply it started.
+    let state = applyEvent(fresh(), { type: 'message.start', seq: 1 }, NOW)
+
+    expect(kinds(state)).toEqual(['user'])
+
+    state = applyEvent(state, { type: 'message.delta', seq: 2, payload: { text: 'Reading' } }, NOW)
+    state = applyResumeSnapshot(state, runningSnapshot(cronBotChatText, 'Reading the inbox'), LATER)
+
+    expect(kinds(state)).toEqual(['cron_delivery', 'assistant'])
+    expect(cards(state)[0]).toMatchObject({ jobName: 'Inbox scan', body: cronBotChatBody })
+  })
+})
+
+/**
+ * The same hole, for the other kind of turn nobody here authored.
+ *
+ * A teammate's message opens a turn in this chat (ADR-0009) and arrives as a
+ * `role: user` row whose text is `Message from 🤖 <name> (@<handle>): <body>`.
+ * The transcript draws only the BODY, in a tinted bubble — so a resume comparing
+ * `inflight.user` raw against that bubble missed for the same reason the cron
+ * card did, and projected the signature line as a plain user bubble on top of it.
+ */
+describe('a resume during a running teammate turn', () => {
+  const dmText = 'Message from 🤖 Writer (@writer): can you check the changelog?'
+
+  const historyWithDm = (rowId: number) =>
+    reconcile(fresh(), rowsToItems([{ role: 'user', row_id: rowId, text: dmText, timestamp: 1_700_000_050 }], 'rest'))
+
+  it('does not add a second bubble beside the inbound row history carries', () => {
+    const loaded = historyWithDm(40)
+
+    expect(kinds(loaded)).toEqual(['bot_dm_in'])
+
+    const resumed = applyResumeSnapshot(loaded, runningSnapshot(dmText, 'Looking'), LATER)
+
+    expect(kinds(resumed)).toEqual(['bot_dm_in', 'assistant'])
+  })
+
+  it('sees past the foreign-author placeholder to that bubble', () => {
+    let state = historyWithDm(41)
+
+    state = applyEvent(state, { type: 'message.start', seq: 1 }, NOW)
+    state = applyEvent(state, { type: 'message.delta', seq: 2, payload: { text: 'Look' } }, NOW)
+
+    const resumed = applyResumeSnapshot(state, runningSnapshot(dmText, 'Looking'), LATER)
+
+    expect(kinds(resumed)).toEqual(['bot_dm_in', 'assistant'])
+  })
+
+  it('projects the message as a DM bubble, not as the signature line in a user bubble', () => {
+    let state = applyEvent(fresh(), { type: 'message.start', seq: 1 }, NOW)
+
+    state = applyResumeSnapshot(state, runningSnapshot(dmText, ''), LATER)
+
+    expect(kinds(state)).toEqual(['bot_dm_in'])
+    expect(list(state)[0]).toMatchObject({
+      kind: 'bot_dm_in',
+      senderName: 'Writer',
+      senderHandle: 'writer',
+      text: 'can you check the changelog?'
+    })
   })
 
   it('still adds the card when the chat has never seen that delivery', () => {

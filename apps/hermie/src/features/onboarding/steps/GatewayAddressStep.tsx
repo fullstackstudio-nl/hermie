@@ -134,7 +134,7 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
           onPress={() => setAdvanced(current => !current)}
           hitSlop={8}
         >
-          <Text variant="callout" color="accent">
+          <Text variant="preview" color="accent">
             {advanced ? `− ${strings.onboarding.address.advanced}` : `+ ${strings.onboarding.address.advanced}`}
           </Text>
         </Pressable>
@@ -169,7 +169,7 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
                   onPress={() => update({ headers: draft.headers.filter(other => other.id !== row.id) })}
                   hitSlop={8}
                 >
-                  <Text variant="caption" color="danger">
+                  <Text variant="meta" color="dangerText">
                     {strings.common.remove}
                   </Text>
                 </Pressable>
@@ -197,7 +197,7 @@ function ProbeLine({ busy, error, draft }: { busy: boolean; error: string | null
 
   if (error) {
     return (
-      <Text color="danger" testID="probe-error">
+      <Text color="dangerText" testID="probe-error">
         {error}
       </Text>
     )
@@ -211,7 +211,7 @@ function ProbeLine({ busy, error, draft }: { busy: boolean; error: string | null
 
   if (!probe.authRequired) {
     return (
-      <Text color="success" testID="probe-result">
+      <Text color="ok" testID="probe-result">
         {strings.onboarding.address.sessionTokenRequired(probe.version)}
       </Text>
     )
@@ -219,14 +219,14 @@ function ProbeLine({ busy, error, draft }: { busy: boolean; error: string | null
 
   if (probe.providers.length === 0) {
     return (
-      <Text color="danger" testID="probe-result">
+      <Text color="dangerText" testID="probe-result">
         {strings.onboarding.address.signInRequiredNoProviders(probe.version)}
       </Text>
     )
   }
 
   return (
-    <Text color="success" testID="probe-result">
+    <Text color="ok" testID="probe-result">
       {strings.onboarding.address.signInRequired(
         probe.version,
         probe.providers.map(provider => provider.displayName)

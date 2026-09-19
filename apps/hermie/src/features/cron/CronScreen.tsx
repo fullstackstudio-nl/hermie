@@ -182,14 +182,14 @@ export function CronScreen() {
           <Text
             color="textMuted"
             style={{
-              backgroundColor: theme.colors.bg,
+              backgroundColor: theme.elevation.e0,
               fontWeight: '700',
               letterSpacing: 1.1,
               paddingHorizontal: theme.space.lg,
               paddingTop: theme.space.lg,
               paddingBottom: theme.space.xs
             }}
-            variant="caption"
+            variant="meta"
           >
             {section.title}
           </Text>
@@ -220,8 +220,8 @@ function ListHeader({ gatewayRunning, onCreate }: { gatewayRunning: boolean | nu
     <View style={{ gap: theme.space.sm, paddingHorizontal: theme.space.lg, paddingTop: theme.space.sm }}>
       <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.md }}>
         <View style={{ flex: 1, gap: theme.space.xxs }}>
-          <Text variant="display">{cronStrings.title}</Text>
-          <Text color="textMuted" variant="callout">
+          <Text variant="title">{cronStrings.title}</Text>
+          <Text color="textMuted" variant="preview">
             {cronStrings.subtitle}
           </Text>
         </View>
@@ -230,7 +230,7 @@ function ListHeader({ gatewayRunning, onCreate }: { gatewayRunning: boolean | nu
           accessibilityLabel={cronStrings.list.add}
           onPress={onCreate}
           style={{
-            backgroundColor: theme.colors.surfaceRaised,
+            backgroundColor: theme.elevation.e2,
             borderRadius: theme.radii.pill,
             justifyContent: 'center',
             minHeight: CONTROL_MIN_HEIGHT,
@@ -238,7 +238,7 @@ function ListHeader({ gatewayRunning, onCreate }: { gatewayRunning: boolean | nu
           }}
           testID="cron-create"
         >
-          <Text color="accent" variant="callout">
+          <Text color="accent" variant="preview">
             {`+ ${cronStrings.list.add}`}
           </Text>
         </Pressable>
@@ -247,7 +247,7 @@ function ListHeader({ gatewayRunning, onCreate }: { gatewayRunning: boolean | nu
       {gatewayRunning === false ? (
         <View
           style={{
-            backgroundColor: theme.colors.surface,
+            backgroundColor: theme.elevation.e3c,
             borderColor: theme.colors.danger,
             borderRadius: theme.radii.lg,
             borderWidth: 1,
@@ -255,7 +255,7 @@ function ListHeader({ gatewayRunning, onCreate }: { gatewayRunning: boolean | nu
           }}
           testID="cron-gateway-banner"
         >
-          <Text color="danger" variant="callout">
+          <Text color="dangerText" variant="preview">
             {cronStrings.gatewayBanner}
           </Text>
         </View>
@@ -269,7 +269,7 @@ function EmptyState({ loading, error }: { loading: boolean; error: string | null
 
   return (
     <View style={{ padding: theme.space.lg }}>
-      <Text color={error ? 'danger' : 'textMuted'}>
+      <Text color={error ? 'dangerText' : 'textMuted'}>
         {error ? cronStrings.list.failed(error) : loading ? cronStrings.list.loading : cronStrings.list.empty}
       </Text>
     </View>
@@ -292,8 +292,8 @@ function RoutineRow({ job, onPress, showProfile }: { job: CronJob; onPress: () =
       {({ pressed }) => (
         <View
           style={{
-            backgroundColor: pressed ? theme.colors.surfaceRaised : 'transparent',
-            borderBottomColor: theme.colors.border,
+            backgroundColor: pressed ? theme.elevation.e2 : 'transparent',
+            borderBottomColor: theme.hairline,
             borderBottomWidth: 1,
             gap: theme.space.xs,
             paddingHorizontal: theme.space.lg,
@@ -301,11 +301,11 @@ function RoutineRow({ job, onPress, showProfile }: { job: CronJob; onPress: () =
           }}
         >
           <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.sm }}>
-            <Text style={{ flex: 1 }} numberOfLines={1} variant="heading">
+            <Text style={{ flex: 1 }} numberOfLines={1} variant="name">
               {job.name}
             </Text>
             <StatusDot status={status} />
-            <Text color="textMuted" variant="caption">
+            <Text color="textMuted" variant="meta">
               {cronStatusLabel(status)}
             </Text>
           </View>
@@ -315,21 +315,21 @@ function RoutineRow({ job, onPress, showProfile }: { job: CronJob; onPress: () =
           </Text>
 
           <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.sm }}>
-            <Text color="textMuted" style={{ flex: 1 }} variant="caption">
+            <Text color="textMuted" style={{ flex: 1 }} variant="meta">
               {job.deliver ? `@${job.deliver}` : ''}
             </Text>
             {owner ? (
-              <Text color="textMuted" variant="caption" testID={`cron-profile-${job.id}`}>
+              <Text color="textMuted" variant="meta" testID={`cron-profile-${job.id}`}>
                 {cronStrings.list.profile(owner)}
               </Text>
             ) : null}
-            <Text color="textMuted" variant="caption">
+            <Text color="textMuted" variant="meta">
               {nextRun ? cronStrings.list.nextRun(nextRun) : cronStrings.list.noNextRun}
             </Text>
           </View>
 
           {summary ? (
-            <Text color="danger" numberOfLines={2} variant="caption" testID={`cron-error-${job.id}`}>
+            <Text color="dangerText" numberOfLines={2} variant="meta" testID={`cron-error-${job.id}`}>
               {summary}
             </Text>
           ) : null}

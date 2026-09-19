@@ -6,6 +6,7 @@
  */
 import {
   normalizeAgentTarget,
+  parseIncomingBotMessage,
   parseMessageAgentResult,
   parseProcessCompleteText,
   replyFromDeliveryOutput
@@ -21,7 +22,6 @@ import {
   type ChatState,
   type ClarifyItem,
   type ClarifyQuestionItem,
-  type CronDeliveryItem,
   type ItemOrigin,
   type ItemReaction,
   type NoticeItem,
@@ -129,6 +129,18 @@ function indexItem(next: ChatState, item: TranscriptItem): void {
 
 type NewItem<T extends TranscriptItem> = Omit<T, 'seq' | 'version' | 'origin'> & { origin?: ItemOrigin }
 
+/**
+ * A draft of ANY item kind.
+ *
+ * `NewItem<TranscriptItem>` is not that: `Omit` over a union keeps only the keys
+ * every member shares, so a cron card's `body` would not be assignable to it.
+ * Mapping over the discriminant distributes the `Omit` per kind instead, which is
+ * what a caller that picks a kind at runtime needs.
+ */
+type AnyNewItem = {
+  [K in TranscriptItem['kind']]: NewItem<Extract<TranscriptItem, { kind: K }>>
+}[TranscriptItem['kind']]
+
 function addItem<T extends TranscriptItem>(next: ChatState, draft: NewItem<T>, origin: ItemOrigin = 'live'): T {
   const seq = next.turn.nextSeq
   const item = { ...draft, seq, version: 0, origin: draft.origin ?? origin } as T
@@ -156,6 +168,46 @@ function patchItem<T extends TranscriptItem>(next: ChatState, id: string, apply:
   indexItem(next, updated)
 
   return updated
+}
+
+/**
+ * Turn the item already standing at `id` into a different item, in place.
+ *
+ * Used for exactly one thing: a resume that can identify the prompt a foreign
+ * `message.start` left a blank placeholder for. Appending the identified prompt
+ * instead would put it AFTER the reply it started, because the placeholder is
+ * already above the streaming bubble — so the item is replaced where it stands,
+ * keeping its id (a UI keyed on it does not remount) and its `seq` (the order
+ * does not move).
+ */
+function recastItem(next: ChatState, id: string, draft: AnyNewItem, origin: ItemOrigin): void {
+  const current = next.items[id]
+
+  if (!current) {
+    return
+  }
+
+  const item = {
+    ...draft,
+    id,
+    seq: current.seq,
+    version: current.version + 1,
+    origin: draft.origin ?? origin
+  } as TranscriptItem
+
+  next.items[id] = item
+  indexItem(next, item)
+}
+
+/** `addItem` for a draft whose kind was decided at runtime. */
+function addAnyItem(next: ChatState, draft: AnyNewItem, origin: ItemOrigin): void {
+  const seq = next.turn.nextSeq
+  const item = { ...draft, seq, version: 0, origin: draft.origin ?? origin } as TranscriptItem
+
+  next.turn.nextSeq = seq + SEQ_STEP
+  next.items[item.id] = item
+  next.order.push(item.id)
+  indexItem(next, item)
 }
 
 function dropItem(next: ChatState, id: string): void {
@@ -1127,12 +1179,35 @@ export interface ResumeSnapshot {
 }
 
 /**
+ * The empty bubble a foreign `message.start` stands up while we wait to be told
+ * who spoke.
+ *
+ * It is a PROMISE of a prompt, not a prompt. `message.start` carries no author,
+ * so the reducer adds a blank `unknownAuthor` user item and schedules a tail
+ * fetch to fill it. Until that lands the item holds no text at all, which makes
+ * it indistinguishable from a real prompt only if you ask "is there a user item
+ * here" and not "does it say anything".
+ */
+function isForeignPlaceholder(item: TranscriptItem | undefined): boolean {
+  return item?.kind === 'user' && item.unknownAuthor === true && !item.text.trim()
+}
+
+/**
  * The tail of the transcript as a resume has to read it: the newest turn's
  * prompt, and the persisted reply to it if there already is one.
  *
  * `authored` is the last user or inbound-DM item, whatever origin it has;
  * `settledReply` is the durable assistant row after it. Nothing else is needed,
  * because `session.resume`'s `inflight` describes exactly one turn — the newest.
+ *
+ * A foreign-author placeholder is walked PAST rather than returned. It used to
+ * be returned, and that was the one hole `duplicate-cron-turns.test.ts` pinned
+ * and could not close: a cron delivery already in history, then a
+ * `message.start` for the turn the scheduler triggered, puts a blank bubble
+ * between the card and its reply — so `authored` came back as the empty string,
+ * the comparison against `inflight.user` missed, and the resume stood a SECOND
+ * card beside the first. A placeholder must neither count as the shown prompt
+ * nor hide the item that really is it; skipping it is both halves of that.
  */
 function shownTurn(state: ChatState): { authored?: string; settledReply?: string } {
   let settledReply: string | undefined
@@ -1146,6 +1221,10 @@ function shownTurn(state: ChatState): { authored?: string; settledReply?: string
       continue
     }
 
+    if (isForeignPlaceholder(item)) {
+      continue
+    }
+
     if (item?.kind !== 'user' && item?.kind !== 'bot_dm_in' && item?.kind !== 'cron_delivery') {
       continue
     }
@@ -1154,6 +1233,62 @@ function shownTurn(state: ChatState): { authored?: string; settledReply?: string
   }
 
   return settledReply !== undefined ? { settledReply } : {}
+}
+
+/** The newest placeholder still waiting for an author, if the turn left one. */
+function foreignPlaceholderId(state: ChatState): string | undefined {
+  for (let index = state.order.length - 1; index >= 0; index -= 1) {
+    const id = state.order[index]
+
+    if (id && isForeignPlaceholder(state.items[id])) {
+      return id
+    }
+  }
+
+  return undefined
+}
+
+/**
+ * `inflight.user`, read the way the transcript shows it.
+ *
+ * The raw text of a turn's opening row is NOT what the transcript draws. A
+ * scheduled job's report is a card keyed on the job's name and body
+ * (ADR-0013), and a teammate's message is a tinted bubble holding only the body
+ * under its `Message from 🤖 <name> (@<handle>):` signature (ADR-0009). So both
+ * the comparison key and the item a resume projects are derived here, by the
+ * same parsers `rows-to-items` uses on the persisted row — otherwise the two
+ * describe one turn in two different shapes, the comparison misses, and the
+ * turn is painted twice.
+ *
+ * `raw` is kept because "was there a prompt at all" is a question about the
+ * payload, not about the parse.
+ */
+type InflightPrompt = {
+  raw: string
+  /** `normalizedItemText` of the item this prompt would become. */
+  key: string
+  kind: 'user' | 'cron_delivery' | 'bot_dm_in'
+  cron?: ReturnType<typeof parseCronDelivery>
+  incoming?: ReturnType<typeof parseIncomingBotMessage>
+}
+
+function readInflightPrompt(userText: string): InflightPrompt {
+  const cron = parseCronDelivery(userText)
+
+  if (cron) {
+    return { raw: userText, key: normalizeMatchText(`${cron.jobName}\n${cron.body}`), kind: 'cron_delivery', cron }
+  }
+
+  const incoming = parseIncomingBotMessage(userText)
+
+  if (incoming) {
+    return { raw: userText, key: normalizeMatchText(incoming.body), kind: 'bot_dm_in', incoming }
+  }
+
+  // `stripUserText` is what the persisted row goes through, directives and
+  // attached-context block included, so the optimistic and inflight projections
+  // of one prompt agree.
+  return { raw: userText, key: normalizeMatchText(stripUserText(userText).text), kind: 'user' }
 }
 
 /**
@@ -1176,16 +1311,12 @@ function shownTurn(state: ChatState): { authored?: string; settledReply?: string
  */
 function resumeOverlap(
   state: ChatState,
-  userText: string,
+  prompt: InflightPrompt,
   assistantText: string
 ): { promptShown: boolean; replyPersisted: boolean } {
   const shown = shownTurn(state)
-  // A scheduled job's prompt is shown as a card keyed on its name and body, not
-  // on the raw text, so it has to be compared in that form or every resume
-  // during a cron turn stands a second card beside the first.
-  const cron = parseCronDelivery(userText)
-  const promptKey = normalizeMatchText(cron ? `${cron.jobName}\n${cron.body}` : userText)
-  const promptShown = Boolean(userText) && shown.authored !== undefined && shown.authored === promptKey
+  const { raw, key: promptKey } = prompt
+  const promptShown = Boolean(raw) && shown.authored !== undefined && shown.authored === promptKey
 
   if (!promptShown) {
     return { promptShown: false, replyPersisted: false }
@@ -1230,36 +1361,61 @@ export function applyResumeSnapshot(state: ChatState, snapshot: ResumeSnapshot, 
   const inflight = rec(snapshot.inflight)
   const userText = str(inflight.user).trim()
   const assistantText = str(inflight.assistant)
-  const overlap = resumeOverlap(next, userText, assistantText)
+  const prompt = readInflightPrompt(userText)
+  const overlap = resumeOverlap(next, prompt, assistantText)
+
+  // Either way, the resume has named the author of the newest turn, and the
+  // placeholder exists only because `message.start` could not. It is filled
+  // below when the prompt is new to us; when the prompt is already on screen
+  // there is nothing left for it to become, and a blank bubble between a cron
+  // card and its reply is a row the reader has to explain to themselves.
+  const placeholder = userText ? foreignPlaceholderId(next) : undefined
 
   if (userText && !overlap.promptShown) {
-    // The turn a resume finds running may be a scheduled job's, not the owner's.
-    // Projecting it here rather than only in `rows-to-items` is what keeps the
-    // invariant: a cron delivery renders as the same card whether the chat was
-    // open when it landed or loaded from history afterwards.
-    const cron = parseCronDelivery(userText)
+    // The turn a resume finds running may be a scheduled job's or a teammate's,
+    // not the owner's. Projecting all three here rather than only in
+    // `rows-to-items` is what keeps the invariant: a delivery renders as the
+    // same card, and a teammate's message as the same tinted bubble, whether the
+    // chat was open when it landed or loaded from history afterwards.
+    const draft: AnyNewItem =
+      prompt.kind === 'cron_delivery' && prompt.cron
+        ? {
+            id: `i:${next.turn.nextSeq}`,
+            kind: 'cron_delivery',
+            jobName: prompt.cron.jobName,
+            ...(prompt.cron.nameRedacted ? { nameRedacted: true } : {}),
+            body: prompt.cron.body,
+            shape: prompt.cron.shape,
+            ts: now / 1000
+          }
+        : prompt.kind === 'bot_dm_in' && prompt.incoming
+          ? {
+              id: `i:${next.turn.nextSeq}`,
+              kind: 'bot_dm_in',
+              senderName: prompt.incoming.senderName,
+              ...(prompt.incoming.senderHandle ? { senderHandle: prompt.incoming.senderHandle } : {}),
+              text: prompt.incoming.body,
+              ts: now / 1000
+            }
+          : { id: `i:${next.turn.nextSeq}`, kind: 'user', text: stripUserText(userText).text, ts: now / 1000 }
 
-    if (cron) {
-      addItem<CronDeliveryItem>(
-        next,
-        {
-          id: `i:${next.turn.nextSeq}`,
-          kind: 'cron_delivery',
-          jobName: cron.jobName,
-          ...(cron.nameRedacted ? { nameRedacted: true } : {}),
-          body: cron.body,
-          shape: cron.shape,
-          ts: now / 1000
-        },
-        'inflight'
-      )
+    // Filling the placeholder rather than appending is the whole point:
+    // appended, the prompt would sit BELOW the reply it started, because the
+    // placeholder is already above the streaming bubble.
+    if (placeholder) {
+      recastItem(next, placeholder, draft, 'inflight')
     } else {
-      addItem<UserItem>(
-        next,
-        { id: `i:${next.turn.nextSeq}`, kind: 'user', text: userText, ts: now / 1000 },
-        'inflight'
-      )
+      addAnyItem(next, draft, 'inflight')
     }
+  } else if (placeholder) {
+    dropItem(next, placeholder)
+  }
+
+  if (placeholder) {
+    // Nothing is waiting for an author any more. The flag is diagnostics only —
+    // the tail fetch is scheduled by the caller — but a report that says "tail
+    // pending" with no placeholder to fill is a report that misleads.
+    next.turn.foreignReconcilePending = undefined
   }
 
   const inflightStatus = str(inflight.status)

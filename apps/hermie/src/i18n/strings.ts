@@ -192,10 +192,17 @@ export const strings = {
     done: 'Done',
     editHint: 'Reorder rows and move them between sections.',
     addDivider: 'Add divider',
-    newDividerName: 'New section',
+    // Never seeded INTO the field — only ever the placeholder, and only ever the
+    // heading a divider nobody has named yet shows. An older build pre-filled
+    // the field with "New section", so the first thing typed was appended to it
+    // and the owner's device still carries a section literally called
+    // "New sectionFinance".
+    unnamedSection: 'Untitled section',
     rename: 'Rename',
     remove: 'Remove',
+    removeSection: (name: string) => `Remove the ${name || 'untitled'} section`,
     dividerName: 'Section name',
+    editDividerHint: 'Type to rename this section.',
     sectionEmpty: 'No chats in this section',
     moveUp: 'Move up',
     moveDown: 'Move down',

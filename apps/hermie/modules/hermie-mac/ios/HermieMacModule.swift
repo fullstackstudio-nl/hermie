@@ -23,6 +23,14 @@ import UIKit
 
  Nothing here needs an entitlement or an Info.plist key; GameController only asks to be linked, which
  the podspec does.
+
+ **`devLaunchArguments`** is the fourth thing, and the only one that is not about keyboards. It is
+ this process's own `ProcessInfo.processInfo.arguments`, which is how `xcrun simctl launch` can tell a
+ running app to open on a particular screen — see `src/dev/launch-intent.ts` and the "Driving a
+ simulator" section of docs/platform-notes.md. It is inside `#if DEBUG`, so a Release build has no
+ such constant: the array is not merely empty, the key is absent, and `launch-intent.ts` then has
+ nothing to read even before `__DEV__` gates it. That is deliberate belt and braces — a screen-opening
+ back door is not something to leave one flag away from a shipped build.
  */
 public class HermieMacModule: Module {
   private var connectObserver: NSObjectProtocol?
@@ -32,9 +40,16 @@ public class HermieMacModule: Module {
 
     Events("onEscape")
 
-    Constants([
-      "isMac": ProcessInfo.processInfo.isiOSAppOnMac
-    ])
+    #if DEBUG
+      Constants([
+        "isMac": ProcessInfo.processInfo.isiOSAppOnMac,
+        "devLaunchArguments": ProcessInfo.processInfo.arguments
+      ])
+    #else
+      Constants([
+        "isMac": ProcessInfo.processInfo.isiOSAppOnMac
+      ])
+    #endif
 
     OnCreate {
       self.watchForKeyboards()

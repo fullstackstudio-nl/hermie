@@ -165,7 +165,7 @@ export function OnboardingNavigator({
           keyboardShouldPersistTaps="handled"
         >
           {counter >= 0 ? (
-            <Text variant="caption" color="textMuted" testID="step-counter">
+            <Text variant="meta" color="textMuted" testID="step-counter">
               {strings.onboarding.stepCounter(counter + 1, NUMBERED_STEPS.length)}
             </Text>
           ) : null}
@@ -191,7 +191,7 @@ export function OnboardingNavigator({
             maxWidth: FORM_MAX_WIDTH,
             alignSelf: 'center',
             borderTopWidth: 1,
-            borderTopColor: theme.colors.border
+            borderTopColor: theme.hairline
           }}
         >
           <Button title={primaryLabel} onPress={advance} disabled={!canAdvance()} busy={saving} />

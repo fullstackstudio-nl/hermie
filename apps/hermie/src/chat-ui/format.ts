@@ -1,4 +1,5 @@
 /** Small, dependency-free formatters shared by the chat components. */
+import { plainTextPreview } from '../markdown/plain-text'
 
 /** `12:48`, in the device's locale-independent 24h-or-not default. */
 export function formatClock(unixSeconds: number | undefined): string {
@@ -134,6 +135,19 @@ export function clipInline(value: string, max = 80): string {
   return collapsed.length > max ? `${collapsed.slice(0, max - 1)}…` : collapsed
 }
 
+/**
+ * One clipped line of a reply, with the markdown taken off.
+ *
+ * Every preview in the app is the raw text of a message, and a message from a
+ * model is markdown — the owner read `## Retry semantics: what actu…` off a chat
+ * row, where two hashes and a space bought nothing and the sentence was cut
+ * anyway. Anywhere a single line stands for a whole reply goes through here: the
+ * chat list row, an Activity row, and a bot-to-bot line and its quoted answer.
+ */
+export function previewLine(value: string, max = 80): string {
+  return clipInline(plainTextPreview(value), max)
+}
+
 /** The initial a generated avatar shows. */
 export function initialFor(name: string): string {
   const first = name.trim()[0]
@@ -210,10 +224,11 @@ export function formatPreview(preview: string): string {
   const match = preview.match(/^Message from\s+(?:🤖\s*)?([^(:]+?)(?:\s*\(@([^)]+)\))?\s*:\s*([\s\S]*)$/)
 
   if (!match) {
-    return clipInline(preview)
+    return previewLine(preview)
   }
 
   const handle = (match[2] ?? match[1] ?? '').trim()
 
-  return clipInline(`🤖 @${handle}: ${match[3] ?? ''}`)
+  // The handle is ours, not the message's, so only the body is markdown.
+  return clipInline(`🤖 @${handle}: ${plainTextPreview(match[3] ?? '')}`)
 }

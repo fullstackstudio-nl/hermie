@@ -54,7 +54,7 @@ export function SwitchRow({ label, hint, value, onChange, disabled = false, test
         <View style={{ flex: 1 }}>
           <Text variant="body">{label}</Text>
           {hint ? (
-            <Text color="textMuted" variant="caption">
+            <Text color="textMuted" variant="meta">
               {hint}
             </Text>
           ) : null}
@@ -62,7 +62,7 @@ export function SwitchRow({ label, hint, value, onChange, disabled = false, test
 
         <View
           style={{
-            backgroundColor: value ? theme.colors.switchGreen : theme.colors.textMuted,
+            backgroundColor: value ? theme.colors.ok : theme.colors.textMuted,
             borderRadius: 16,
             height: 31,
             justifyContent: 'center',
@@ -99,7 +99,7 @@ export function SegmentedRow<T extends string>({ label, options, value, onChange
   return (
     <View style={{ gap: theme.space.sm, paddingHorizontal: theme.space.lg, paddingVertical: theme.space.sm }}>
       {label ? (
-        <Text color="textMuted" variant="caption">
+        <Text color="textMuted" variant="meta">
           {label}
         </Text>
       ) : null}
@@ -107,7 +107,7 @@ export function SegmentedRow<T extends string>({ label, options, value, onChange
       <View
         accessibilityRole="radiogroup"
         style={{
-          backgroundColor: theme.colors.surfaceRaised,
+          backgroundColor: theme.tintSunk,
           borderRadius: 10,
           flexDirection: 'row',
           padding: 3
@@ -129,7 +129,7 @@ export function SegmentedRow<T extends string>({ label, options, value, onChange
               <View
                 style={{
                   alignItems: 'center',
-                  backgroundColor: selected ? theme.colors.surface : 'transparent',
+                  backgroundColor: selected ? theme.elevation.e3c : 'transparent',
                   borderRadius: 8,
                   paddingVertical: theme.space.sm
                 }}
@@ -162,7 +162,7 @@ export function DisclosureRow({ label, value, onPress, testID }: DisclosureRowPr
         <View
           style={{
             alignItems: 'center',
-            backgroundColor: pressed ? theme.colors.surfaceRaised : 'transparent',
+            backgroundColor: pressed ? theme.elevation.e2 : 'transparent',
             flexDirection: 'row',
             gap: theme.space.sm,
             minHeight: CONTROL_MIN_HEIGHT,

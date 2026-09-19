@@ -111,7 +111,7 @@ export function ApprovalSheet({
       visible={visible}
     >
       <SheetEyebrow>{chatStrings.approval.eyebrow(botHandle)}</SheetEyebrow>
-      <Text variant="title">{chatStrings.approval.title}</Text>
+      <Text variant="sheetTitle">{chatStrings.approval.title}</Text>
 
       {item.description ? (
         <Text color="textMuted" style={{ fontSize: 16, lineHeight: 22 }}>
@@ -121,7 +121,7 @@ export function ApprovalSheet({
 
       <View
         style={{
-          backgroundColor: theme.colors.surfaceRaised,
+          backgroundColor: theme.tintSunk,
           borderRadius: theme.radii.lg,
           padding: theme.space.md
         }}
@@ -138,12 +138,12 @@ export function ApprovalSheet({
       <View style={{ gap: 2 }}>
         <Text style={{ fontSize: 13, fontWeight: '600' }}>{chatStrings.approval.runsOn}</Text>
         {item.toolName ? (
-          <Text color="textMuted" variant="caption" testID="approval-tool-name">
+          <Text color="textMuted" variant="meta" testID="approval-tool-name">
             {item.toolName}
           </Text>
         ) : null}
         {workingDirectory ? (
-          <Text color="textMuted" variant="caption">
+          <Text color="textMuted" variant="meta">
             {workingDirectory}
           </Text>
         ) : null}
@@ -163,7 +163,7 @@ export function ApprovalSheet({
           ))}
 
           {item.choices.includes('always') ? (
-            <Text color="textMuted" variant="caption">
+            <Text color="textMuted" variant="meta">
               {chatStrings.approval.fine}
             </Text>
           ) : null}

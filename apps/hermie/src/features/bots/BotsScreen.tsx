@@ -113,6 +113,10 @@ export function BotsScreen({
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<ChatFilter>('all')
   const [editing, setEditing] = useState(false)
+  // Which divider was added by the button, so that one — and only that one —
+  // opens with the keyboard in it. Cleared when edit mode ends, so leaving and
+  // coming back does not steal focus for a section that already has a name.
+  const [addedDividerId, setAddedDividerId] = useState<string | null>(null)
   const [archiveOpen, setArchiveOpen] = useState(false)
   const [menuFor, setMenuFor] = useState<string | null>(null)
 
@@ -289,7 +293,10 @@ export function BotsScreen({
     <View style={sidebar ? { flex: 1 } : { flex: 1, paddingBottom: insets.bottom, paddingTop: insets.top }}>
       <Head
         editing={editing}
-        onToggleEdit={() => setEditing(current => !current)}
+        onToggleEdit={() => {
+          setEditing(current => !current)
+          setAddedDividerId(null)
+        }}
         sidebar={sidebar}
         {...(onOpenSection ? { onNewCron: () => onOpenSection('cron') } : {})}
       />
@@ -338,7 +345,7 @@ export function BotsScreen({
           }
 
           if (item.kind === 'divider') {
-            return <Divider editing={editing} id={item.id} name={item.name} />
+            return <Divider autoFocus={item.id === addedDividerId} editing={editing} id={item.id} name={item.name} />
           }
 
           if (item.kind === 'sectionEmpty') {
@@ -369,7 +376,7 @@ export function BotsScreen({
         testID="bots-list"
       />
 
-      {editing ? <EditBar /> : null}
+      {editing ? <EditBar onAddDivider={setAddedDividerId} /> : null}
 
       {onOpenSection ? <SidebarFooter current={currentTab} onOpenSection={onOpenSection} /> : null}
 
@@ -545,7 +552,17 @@ function Filters({ current, onChange }: { current: ChatFilter; onChange: (filter
  * dialog: the field is already the thing being renamed, and a dialog would be a
  * second modal on a screen that already has one for the row menu.
  */
-function Divider({ editing, id, name }: { editing: boolean; id: string | null; name: string }) {
+function Divider({
+  editing,
+  id,
+  name,
+  autoFocus
+}: {
+  editing: boolean
+  id: string | null
+  name: string
+  autoFocus?: boolean
+}) {
   const theme = useTheme()
 
   if (!id) {
@@ -566,19 +583,34 @@ function Divider({ editing, id, name }: { editing: boolean; id: string | null; n
     >
       {editing ? (
         <TextInput
+          accessibilityHint={strings.layout.editDividerHint}
           accessibilityLabel={strings.layout.dividerName}
+          // A divider that has just been added is focused straight into: the
+          // whole reason it exists is that it needs a name, and a section that
+          // stays untitled is what put two headings next to each other.
+          autoFocus={autoFocus === true}
           autoCapitalize="words"
           onChangeText={next => useChatLayoutStore.getState().renameDivider(id, next)}
-          placeholder={strings.layout.newDividerName}
+          // The PLACEHOLDER, never the value. Seeding the field is what left
+          // "New sectionFinance" on a real device.
+          placeholder={strings.layout.dividerName}
           placeholderTextColor={theme.colors.textFaint}
+          returnKeyType="done"
+          selectTextOnFocus
           style={{
             backgroundColor: theme.tintSunk,
-            borderRadius: theme.radii.md,
+            // A hairline is what says "this is a field": a sunk tint alone is
+            // nearly invisible on the light panel, so the one editable thing in
+            // edit mode did not look editable.
+            borderColor: theme.hairline,
+            borderRadius: theme.radii.inset,
+            borderWidth: 1,
             color: theme.colors.text,
             flex: 1,
-            fontSize: 13,
+            fontSize: 15,
+            minHeight: 34,
             paddingHorizontal: theme.space.sm,
-            paddingVertical: 4
+            paddingVertical: 6
           }}
           testID={`divider-name-${id}`}
           value={name}
@@ -586,7 +618,7 @@ function Divider({ editing, id, name }: { editing: boolean; id: string | null; n
       ) : (
         <>
           <Text color="textFaint" variant="micro">
-            {(name || strings.layout.newDividerName).toUpperCase()}
+            {(name || strings.layout.unnamedSection).toUpperCase()}
           </Text>
           <View style={{ backgroundColor: theme.hairlineSoft, flex: 1, height: 1 }} />
         </>
@@ -594,9 +626,21 @@ function Divider({ editing, id, name }: { editing: boolean; id: string | null; n
 
       {editing ? (
         <Pressable
+          accessibilityLabel={strings.layout.removeSection(name)}
           accessibilityRole="button"
           hitSlop={TAP_SLOP}
           onPress={() => useChatLayoutStore.getState().removeDivider(id)}
+          style={({ pressed }) => ({
+            // A bordered chip rather than a bare word: Remove sat as plain text
+            // beside a field that also looked like plain text, so neither of the
+            // two things edit mode is FOR looked like a control.
+            borderColor: theme.hairline,
+            borderRadius: theme.radii.pill,
+            borderWidth: 1,
+            opacity: pressed ? 0.6 : 1,
+            paddingHorizontal: theme.space.md,
+            paddingVertical: 6
+          })}
           testID={`divider-remove-${id}`}
         >
           <Text color="dangerText" variant="meta">
@@ -670,7 +714,7 @@ function ArchiveHeader({ count, onToggle, open }: { count: number; onToggle: () 
   )
 }
 
-function EditBar() {
+function EditBar({ onAddDivider }: { onAddDivider: (id: string) => void }) {
   const theme = useTheme()
 
   return (
@@ -700,7 +744,7 @@ function EditBar() {
         // Empty rather than pre-filled with "New section": the field is focused
         // straight into, and a seeded name means the first thing typed is
         // APPENDED to a word nobody asked for.
-        onPress={() => useChatLayoutStore.getState().addDivider('')}
+        onPress={() => onAddDivider(useChatLayoutStore.getState().addDivider(''))}
         testID="add-divider"
       >
         <Text color="accentText" style={{ fontWeight: '600' }} variant="meta">

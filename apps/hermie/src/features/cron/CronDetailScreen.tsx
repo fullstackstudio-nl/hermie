@@ -101,8 +101,8 @@ export function CronDetailScreen({ controller, job, onClose, onOpenRun, onEdit, 
       >
         <View
           style={{
-            backgroundColor: theme.colors.surface,
-            borderColor: theme.colors.border,
+            backgroundColor: theme.elevation.e3c,
+            borderColor: theme.hairline,
             borderRadius: theme.radii.xl,
             borderWidth: 1,
             gap: theme.space.xs,
@@ -111,22 +111,22 @@ export function CronDetailScreen({ controller, job, onClose, onOpenRun, onEdit, 
           testID="cron-detail-summary"
         >
           <SheetEyebrow>{cronStrings.detail.nextRun}</SheetEyebrow>
-          <Text variant="title">{nextRun ?? cronStrings.list.noNextRun}</Text>
+          <Text variant="sheetTitle">{nextRun ?? cronStrings.list.noNextRun}</Text>
           <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.sm }}>
             <StatusDot status={status} />
-            <Text color="textMuted" variant="callout">
+            <Text color="textMuted" variant="preview">
               {cronStatusLabel(status)}
             </Text>
           </View>
           {error ? (
-            <Text color="danger" variant="caption" testID="cron-detail-error">
+            <Text color="dangerText" variant="meta" testID="cron-detail-error">
               {error}
             </Text>
           ) : null}
         </View>
 
         <View style={{ gap: theme.space.sm }}>
-          <Text variant="heading">{cronStrings.detail.instructions}</Text>
+          <Text variant="name">{cronStrings.detail.instructions}</Text>
           <Text color="textMuted" testID="cron-detail-prompt">
             {detail.prompt || detail.promptPreview || cronStrings.detail.noPrompt}
           </Text>
@@ -187,18 +187,18 @@ export function CronDetailScreen({ controller, job, onClose, onOpenRun, onEdit, 
         </View>
 
         <View style={{ gap: theme.space.sm }}>
-          <Text color="textMuted" style={{ fontWeight: '700', letterSpacing: 1.1 }} variant="caption">
+          <Text color="textMuted" style={{ fontWeight: '700', letterSpacing: 1.1 }} variant="meta">
             {cronStrings.detail.runHistory}
           </Text>
 
           {runsError ? (
-            <Text color="danger" variant="caption">
+            <Text color="dangerText" variant="meta">
               {cronStrings.detail.runsFailed(runsError)}
             </Text>
           ) : runs === undefined ? (
             <View style={{ alignItems: 'flex-start', gap: theme.space.sm }}>
               <ActivityIndicator />
-              <Text color="textMuted" variant="caption">
+              <Text color="textMuted" variant="meta">
                 {cronStrings.detail.loadingRuns}
               </Text>
             </View>
@@ -223,7 +223,7 @@ export function CronDetailScreen({ controller, job, onClose, onOpenRun, onEdit, 
       >
         <View style={{ gap: theme.space.md }}>
           <SheetEyebrow>{cronStrings.confirmDelete.eyebrow}</SheetEyebrow>
-          <Text variant="title">{cronStrings.confirmDelete.title(detail.name)}</Text>
+          <Text variant="sheetTitle">{cronStrings.confirmDelete.title(detail.name)}</Text>
           <Text color="textMuted">{cronStrings.confirmDelete.body}</Text>
           <Button
             onPress={() => {
@@ -256,17 +256,17 @@ function RunRow({ run, onPress }: { run: CronRun; onPress: () => void }) {
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={run.title || run.id} onPress={onPress}>
       {({ pressed }) => (
-        <InsetRow style={{ backgroundColor: pressed ? theme.colors.surfaceRaised : 'transparent' }}>
+        <InsetRow style={{ backgroundColor: pressed ? theme.elevation.e2 : 'transparent' }}>
           <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.sm }}>
             <Text style={{ flex: 1 }} numberOfLines={1}>
               {started ?? run.id}
             </Text>
-            <Text color={ok ? 'success' : 'danger'} variant="caption">
+            <Text color={ok ? 'ok' : 'dangerText'} variant="meta">
               {run.status ?? cronStrings.status.ok}
             </Text>
           </View>
           {run.preview ? (
-            <Text color="textMuted" numberOfLines={1} variant="caption">
+            <Text color="textMuted" numberOfLines={1} variant="meta">
               {run.preview}
             </Text>
           ) : null}

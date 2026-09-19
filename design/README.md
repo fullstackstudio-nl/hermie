@@ -29,7 +29,9 @@ reply`. It is still one indicator and still static; it is strictly more informat
   removed.
 - **A cron card in a chat offers neither _Open cron_ nor _Run now_ yet.** §6.5 lists both and the
   component takes both; the chat screen does not pass them, so the card shows no actions rather than
-  dead ones. Wiring a chat row to the Crons feature is outstanding.
+  dead ones. Wiring a chat row to the Crons feature is outstanding. The card's own two states are
+  addressable in the gallery (`gallery:cron-card`, `gallery:cron-card-actionless`), so the decision
+  can now be judged on a screen rather than in a diff.
 - **The tab strip's icons are text glyphs, not the mockup's line art.** §6.8 draws four stroked
   SVG icons; the strip uses `◉ ⇄ ◷ ⚙︎`. They read as a monochrome set at strip size and cost
   no assets, but the chat glyph in particular is a filled circle where the mockup has a speech
@@ -37,7 +39,18 @@ reply`. It is still one indicator and still static; it is strictly more informat
 - **The crons list, its detail, the run transcript and Activity are still on the Part-1 surfaces.**
   §6.11's cron rows (schedule in words, next run, static status dot, profile chip, a `Paused`
   section) and the ledger language Activity is supposed to share with the transcript's DM lines are
-  not built yet.
+  not built yet. All four are now addressable (`gallery:cron-detail`, `gallery:cron-detail-paused`,
+  `gallery:cron-run`, `overlay:crons`, `overlay:activity`), which is what the restyle was waiting
+  for.
+- **The agents bar and the interiors of the four sheets are still Part-1 too.** This round brought
+  their TITLES onto §3's `sheetTitle` and the eyebrow onto `micro`; the bodies are unchanged.
+- **`ok` has no readable variant.** §1.1 gives `danger` a fill and `dangerText` an ink, and gives
+  `ok` only one value — which is used as ink and measures 3.47–4.54 : 1 on every surface but the dark
+  sunk tint. Either the mockup grows an `okText` or the app stops using `ok` as ink; until then a
+  `Success` line is below AA. Measurements are in docs/platform-notes.md.
+- **The colour page's Default swatch is an unlabelled hollow ring.** §1.3 says "eight curated
+  colours, or Default"; drawn as a ring with nothing in it on a dark sheet it reads as a hole rather
+  than as the ninth choice.
 - **The jump-to-latest pill carries the count as a badge**, not as its whole label. §6.10 says "with
   the count of messages that arrived since"; `3 new` alone stopped saying what tapping it does, so
   the pill keeps its name and the count rides beside it.

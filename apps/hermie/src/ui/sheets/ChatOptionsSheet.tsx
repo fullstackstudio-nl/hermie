@@ -10,14 +10,14 @@
  * (ADR-0008); the gateway's own `display.tool_progress` is deliberately not
  * here, because changing it writes global config shared with other surfaces.
  */
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Pressable, View } from 'react-native'
 
 import { chatStrings } from '../../chat-ui/strings'
 import type { PickerOption, Verbosity } from '../../chat-ui/types'
 import { strings } from '../../i18n/strings'
 import { AccentSwatches } from '../AccentSwatches'
-import { BottomSheet } from '../BottomSheet'
+import { BottomSheet, SheetEyebrow } from '../BottomSheet'
 import { Button, InsetGroup, Text, TextField } from '../primitives'
 import { useTheme } from '../theme'
 import { TAP_SLOP, type AccentName } from '../tokens'
@@ -79,6 +79,14 @@ export interface ChatOptionsSheetProps {
   onResetView?: () => void
 
   /** The gateway answered `confirm_required` for the model just picked. */
+  /**
+   * Which page the sheet opens on. Development only, and the reason it exists is
+   * that a page behind a tap cannot be photographed on a simulator this machine
+   * can only launch — see `src/dev/launch-intent.ts`. A tap still navigates
+   * normally from wherever it puts you.
+   */
+  initialPane?: 'reasoning' | 'model' | 'colour'
+
   pendingExpensiveModel?: string | null
   confirmMessage?: string
   onCancelExpensiveModel?: () => void
@@ -189,13 +197,13 @@ function PickerPane({
               <View style={{ flex: 1 }}>
                 <Text>{option.label}</Text>
                 {option.detail ? (
-                  <Text color="textMuted" variant="caption">
+                  <Text color="textMuted" variant="meta">
                     {option.detail}
                   </Text>
                 ) : null}
               </View>
               {option.expensive ? (
-                <Text color="danger" variant="caption">
+                <Text color="dangerText" variant="meta">
                   {'$$'}
                 </Text>
               ) : null}
@@ -210,7 +218,7 @@ function PickerPane({
 
 export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
   const theme = useTheme()
-  const [pane, setPane] = useState<Pane>('root')
+  const [pane, setPane] = useState<Pane>(props.initialPane ?? 'root')
 
   /**
    * Escape goes back exactly ONE level.
@@ -223,6 +231,19 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
    * whole reason the stack is a stack.
    */
   useEscapeKey(() => setPane('root'), props.visible && pane !== 'root')
+
+  // The sheet is mounted for the life of the screen, so `useState`'s initial
+  // value ran long before anyone asked for a page. Re-reading it as the sheet
+  // BECOMES visible is what makes `initialPane` mean anything — and it is right
+  // for an ordinary open too, which should never land on the page the last
+  // reader happened to leave.
+  const { visible, initialPane } = props
+
+  useEffect(() => {
+    if (visible) {
+      setPane(initialPane ?? 'root')
+    }
+  }, [visible, initialPane])
 
   const close = () => {
     setPane('root')
@@ -246,7 +267,7 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
         testID="chat-options-sheet"
         visible={props.visible}
       >
-        <Text variant="title">{chatStrings.options.expensiveTitle}</Text>
+        <Text variant="sheetTitle">{chatStrings.options.expensiveTitle}</Text>
         <Text color="textMuted">{props.confirmMessage || props.pendingExpensiveModel}</Text>
         <Button
           onPress={() => props.onConfirmExpensiveModel?.()}
@@ -313,16 +334,18 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
         />
       ) : (
         <View style={{ gap: theme.space.lg }}>
-          <View style={{ alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' }}>
-            <Text variant="title">{chatStrings.options.title}</Text>
-            <Pressable accessibilityRole="button" onPress={close} testID="chat-options-done">
-              <Text color="accent">{chatStrings.options.done}</Text>
-            </Pressable>
+          <View style={{ gap: theme.space.xs }}>
+            <SheetEyebrow>{chatStrings.options.eyebrow}</SheetEyebrow>
+            <View style={{ alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' }}>
+              <Text variant="sheetTitle">{chatStrings.options.title}</Text>
+              <Pressable accessibilityRole="button" hitSlop={TAP_SLOP} onPress={close} testID="chat-options-done">
+                <Text color="accentText">{chatStrings.options.done}</Text>
+              </Pressable>
+            </View>
+            <Text color="textMuted" variant="preview">
+              {chatStrings.options.subtitle(props.botName)}
+            </Text>
           </View>
-
-          <Text color="textMuted" variant="caption">
-            {chatStrings.options.subtitle(props.botName)}
-          </Text>
 
           <InsetGroup>
             <SwitchRow

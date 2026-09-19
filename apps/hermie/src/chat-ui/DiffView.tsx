@@ -57,7 +57,7 @@ export function DiffView({ diff, maxLines = 160, testID }: DiffViewProps) {
   return (
     <View
       style={{
-        borderColor: theme.colors.border,
+        borderColor: theme.hairline,
         borderRadius: theme.radii.lg,
         borderWidth: 1,
         marginTop: theme.space.sm,

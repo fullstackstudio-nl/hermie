@@ -29,7 +29,7 @@ export function ErrorCard({ message, retryable = false, recoverable = false, onR
     <View
       accessibilityRole="alert"
       style={{
-        backgroundColor: theme.colors.surface,
+        backgroundColor: theme.elevation.e3c,
         borderColor: theme.colors.danger,
         borderRadius: theme.radii.xl,
         borderWidth: 1,
@@ -39,7 +39,7 @@ export function ErrorCard({ message, retryable = false, recoverable = false, onR
       }}
       testID={testID}
     >
-      <Text color="danger" variant="heading">
+      <Text color="dangerText" variant="name">
         {chatStrings.assistant.errorTitle}
       </Text>
       <Text color="text" selectable style={{ fontSize: 15, lineHeight: 21 }}>
@@ -47,7 +47,7 @@ export function ErrorCard({ message, retryable = false, recoverable = false, onR
       </Text>
 
       {recoverable ? (
-        <Text color="textMuted" variant="caption">
+        <Text color="textMuted" variant="meta">
           {chatStrings.assistant.reconnecting}
         </Text>
       ) : null}

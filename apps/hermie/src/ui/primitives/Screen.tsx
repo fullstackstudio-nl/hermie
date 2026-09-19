@@ -45,7 +45,7 @@ export function Screen({ edgeToEdgeTop = false, padded = true, style, ...rest }:
       style={[
         {
           flex: 1,
-          backgroundColor: inPanel ? 'transparent' : theme.colors.bg,
+          backgroundColor: inPanel ? 'transparent' : theme.elevation.e0,
           paddingTop: inPanel || edgeToEdgeTop ? 0 : insets.top,
           paddingBottom: inPanel ? 0 : insets.bottom,
           paddingLeft: (inPanel ? 0 : insets.left) + (padded ? theme.space.lg : 0),

@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useMemo } from 'react'
 import { ActivityIndicator, View } from 'react-native'
 
+import { DEV_LAUNCH_INTENT, DevGallery } from '../dev'
 import { ChatRuntimeProvider } from '../features/chats'
 import { OnboardingNavigator } from '../features/onboarding'
 import { GatewayProvider, useGateway } from '../gateway'
@@ -27,7 +28,10 @@ export default function App() {
   return (
     <SafeArea>
       <QueryClientProvider client={queryClient}>
-        <ThemeProvider>
+        <ThemeProvider
+          {...(DEV_LAUNCH_INTENT?.scheme ? { forceScheme: DEV_LAUNCH_INTENT.scheme } : {})}
+          {...(DEV_LAUNCH_INTENT?.wallpaper ? { forceWallpaper: DEV_LAUNCH_INTENT.wallpaper } : {})}
+        >
           <GatewayProvider>
             <Root />
           </GatewayProvider>
@@ -43,6 +47,13 @@ export default function App() {
  */
 function Root() {
   const { phase, resumeConfig, reload } = useGateway()
+  const devOpen = DEV_LAUNCH_INTENT?.open
+
+  // Before the phase check on purpose: the component kit takes no gateway, so a
+  // screenshot of a sheet should not need a configured connection first.
+  if (devOpen?.kind === 'gallery') {
+    return <DevGallery section={devOpen.section} />
+  }
 
   if (phase === 'loading') {
     return <Booting />

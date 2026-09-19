@@ -117,8 +117,8 @@ export function ActivityScreen({ onOpenBot }: ActivityScreenProps) {
           <Row entry={item} label={label} onPress={() => onOpenBot?.(item.botName, { focusItemId: item.itemId })} />
         )}
         renderSectionHeader={({ section }) => (
-          <View style={{ backgroundColor: theme.colors.bg, paddingHorizontal: theme.space.lg }}>
-            <Text color="textMuted" style={{ fontWeight: '700', letterSpacing: 1.1 }} variant="caption">
+          <View style={{ backgroundColor: theme.elevation.e0, paddingHorizontal: theme.space.lg }}>
+            <Text color="textMuted" style={{ fontWeight: '700', letterSpacing: 1.1 }} variant="meta">
               {section.title.toUpperCase()}
             </Text>
           </View>
@@ -136,14 +136,14 @@ function Header({ counters }: { counters: ReturnType<typeof useActivity>['counte
 
   return (
     <View style={{ paddingHorizontal: theme.space.lg, paddingTop: theme.space.sm }}>
-      <Text variant="display">{strings.activity.title}</Text>
-      <Text color="textMuted" style={{ marginTop: theme.space.xs }} variant="callout">
+      <Text variant="title">{strings.activity.title}</Text>
+      <Text color="textMuted" style={{ marginTop: theme.space.xs }} variant="preview">
         {strings.activity.subtitle}
       </Text>
 
       <View
         style={{
-          borderBottomColor: theme.colors.border,
+          borderBottomColor: theme.hairline,
           borderBottomWidth: 1,
           flexDirection: 'row',
           gap: theme.space.lg,
@@ -218,7 +218,7 @@ function Row({
       accessibilityRole="button"
       onPress={onPress}
       style={({ pressed }) => ({
-        backgroundColor: pressed ? theme.colors.surfaceRaised : 'transparent',
+        backgroundColor: pressed ? theme.elevation.e2 : 'transparent',
         gap: 2,
         paddingHorizontal: theme.space.lg,
         paddingVertical: theme.space.md
@@ -230,7 +230,7 @@ function Row({
           {heading}
         </Text>
         {entry.at ? (
-          <Text color="textMuted" variant="caption">
+          <Text color="textMuted" variant="meta">
             {formatClock(entry.at)}
           </Text>
         ) : null}
@@ -244,7 +244,7 @@ function Row({
 
       {status ? (
         <Text
-          color={entry.failed ? 'danger' : entry.pending ? 'accent' : 'textMuted'}
+          color={entry.failed ? 'dangerText' : entry.pending ? 'accent' : 'textMuted'}
           style={{ fontSize: 11 }}
           testID={`activity-status-${entry.id}`}
         >
@@ -268,7 +268,7 @@ function EmptyState({ loading, error, offline }: { loading: boolean; error: stri
 
   return (
     <View style={{ padding: theme.space.lg }}>
-      <Text color={error ? 'danger' : 'textMuted'} testID="activity-empty">
+      <Text color={error ? 'dangerText' : 'textMuted'} testID="activity-empty">
         {message}
       </Text>
     </View>

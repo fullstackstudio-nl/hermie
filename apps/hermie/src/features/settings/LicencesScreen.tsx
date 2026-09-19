@@ -62,8 +62,8 @@ export function LicencesScreen({ onClose }: LicencesScreenProps) {
 
   const header = (
     <View style={{ gap: theme.space.sm, paddingBottom: theme.space.lg }}>
-      <Text variant="display">{strings.settings.licences}</Text>
-      <Text color="textMuted" variant="callout">
+      <Text variant="title">{strings.settings.licences}</Text>
+      <Text color="textMuted" variant="preview">
         {state.status === 'ready'
           ? strings.settings.licencesSummary(state.data.packages.length)
           : strings.settings.licencesHint}
@@ -84,13 +84,13 @@ export function LicencesScreen({ onClose }: LicencesScreenProps) {
               testID="licences-loading"
             >
               <ActivityIndicator color={theme.colors.accent} />
-              <Text color="textMuted" variant="callout">
+              <Text color="textMuted" variant="preview">
                 {strings.settings.licencesLoading}
               </Text>
             </View>
           ) : (
             <View style={{ gap: theme.space.md }} testID="licences-error">
-              <Text color="danger" variant="callout">
+              <Text color="dangerText" variant="preview">
                 {strings.settings.licencesFailed(state.message)}
               </Text>
               <Button onPress={() => setAttempt(count => count + 1)} title={strings.settings.licencesRetry} />
@@ -150,8 +150,8 @@ function PackageRow({
   return (
     <View
       style={{
-        backgroundColor: theme.colors.surface,
-        borderColor: theme.colors.border,
+        backgroundColor: theme.elevation.e3c,
+        borderColor: theme.hairline,
         borderRadius: theme.radii.lg,
         borderWidth: 1,
         marginBottom: theme.space.sm,
@@ -167,7 +167,7 @@ function PackageRow({
         {({ pressed }) => (
           <View
             style={{
-              backgroundColor: pressed ? theme.colors.surfaceRaised : 'transparent',
+              backgroundColor: pressed ? theme.elevation.e2 : 'transparent',
               gap: theme.space.xxs,
               justifyContent: 'center',
               minHeight: CONTROL_MIN_HEIGHT,
@@ -175,8 +175,8 @@ function PackageRow({
               paddingVertical: theme.space.md
             }}
           >
-            <Text variant="heading">{entry.name}</Text>
-            <Text color="textMuted" variant="caption">
+            <Text variant="name">{entry.name}</Text>
+            <Text color="textMuted" variant="meta">
               {detail}
             </Text>
           </View>
@@ -186,7 +186,7 @@ function PackageRow({
       {expanded ? (
         <View
           style={{
-            borderTopColor: theme.colors.border,
+            borderTopColor: theme.hairline,
             borderTopWidth: 1,
             gap: theme.space.sm,
             padding: theme.space.lg
@@ -194,11 +194,11 @@ function PackageRow({
           testID={`licence-text-${key}`}
         >
           {entry.repository ? (
-            <Text color="textMuted" variant="caption">
+            <Text color="textMuted" variant="meta">
               {entry.repository}
             </Text>
           ) : null}
-          <Text selectable variant="mono">
+          <Text selectable variant="code">
             {text ?? strings.settings.licencesNoText}
           </Text>
         </View>
@@ -213,10 +213,10 @@ function Footer({ data }: { data: LicenceData }) {
 
   return (
     <View style={{ gap: theme.space.sm, paddingTop: theme.space.lg }}>
-      <Text color="textMuted" variant="caption">
+      <Text color="textMuted" variant="meta">
         {strings.settings.licencesScope(data.excludesWorkspacePackages.length)}
       </Text>
-      <Text color="textMuted" variant="caption">
+      <Text color="textMuted" variant="meta">
         {strings.settings.licencesGeneratedBy(data.generatedBy)}
       </Text>
     </View>

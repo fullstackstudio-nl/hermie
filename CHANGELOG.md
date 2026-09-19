@@ -10,6 +10,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Every surface can be opened directly from the command line, in development.** The simulators on
+  this machine can be launched and photographed and nothing else, so three rounds in a row shipped
+  sheets and option pages nobody had ever seen. A Debug build now reads launch arguments —
+  `--hermieOpen gallery:sheet-options-model-page --hermieTheme dark` — and `GalleryScreen` is a
+  registry of addressable sections rather than a fixed scroll, so one launch is one screenshot. A
+  section that names a sheet opens it as it mounts, which is what makes a blocking modal
+  photographable at all. Three gates keep it out of a release build: the native constant is inside
+  `#if DEBUG`, the JavaScript is behind `__DEV__`, and nothing is registered with the system — no URL
+  scheme, no entitlement. CONTRIBUTING.md has the grammar; `__tests__/dev-launch-intent.test.ts`
+  pins the gate.
+- **The gallery reaches surfaces it never carried**: the cron detail, its paused-and-failing state,
+  the run transcript, the schedule builder, the status dots, the cron editor sheet, the connection
+  line in all four of its states, and the signed-out panel.
+- **A chat-list preview is plain text.** The owner read `## Retry semantics: what actu…` off a row on
+  a real device — two characters and a space spent on syntax, and the sentence cut anyway. One pure
+  function (`src/markdown/plain-text.ts`) takes headings, emphasis, fences and inline ticks, list and
+  task markers, blockquotes, thematic breaks, table pipes and link syntax off a reply and collapses
+  what is left to one line. It is used by the chat-list row, the bot-to-bot line and its quoted
+  reply, and by `formatPreview`.
+
 - **The wide layout, run and looked at.** Part 1 and Part 2 both shipped without anyone seeing the
   sidebar-plus-detail shell on a real device. It has now been built, installed and driven on an iPad
   Pro 13" simulator against the fake gateway, in both themes, and the notes in
@@ -36,12 +56,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A resume during a turn this client did not author no longer paints it twice.** `message.start`
+  carries no author, so the reducer stands a blank placeholder up and waits for a tail fetch to name
+  one. `shownTurn` read that blank text AS the newest prompt — so a cron delivery already in history,
+  with the scheduler's turn running over it, failed to match `inflight.user` and the resume stood a
+  SECOND card beside the first. That was pinned as a KNOWN GAP in
+  `packages/transcript/src/duplicate-cron-turns.test.ts` and is now a passing test. A placeholder is
+  a promise of a prompt, not a prompt: it is walked past, so it neither counts as the shown prompt
+  nor hides the item that is one, and the resume fills it in place (never appends, which would put
+  the prompt below the reply it started) or drops it when the prompt is already on screen.
+- **The same hole for a teammate's turn, which had no test at all.** An inbound bot message opens a
+  turn here and is drawn as a tinted bubble holding only the BODY under its `Message from 🤖 …`
+  signature, while `inflight.user` is the raw row. The comparison now runs through the same parsers
+  `rows-to-items` uses, and a resume mid-teammate-turn projects a DM bubble rather than the signature
+  line in a user bubble. The plain-user key goes through `stripUserText` for the same reason, so a
+  prompt carrying `@file:` directives matches the bubble standing for it.
+- **A sheet's title is `sheetTitle` (21/26), not the 28 pt sidebar title.** Every sheet had the
+  larger one; it is obvious on a device and invisible in a component test.
+- **Naming a page on the chat options sheet now opens it.** The sheet is mounted for the life of the
+  screen, so `useState`'s initial value ran long before anyone asked for a page. It re-reads as the
+  sheet becomes visible, which also stops an ordinary open landing on the page the last reader left.
 - **Every wide-layout panel was painting the wallpaper's own colour over its glass.** `Screen` fills
   with `colors.bg` and adds the safe-area inset, which is right on a phone and wrong inside a
   floating panel that has already done both. Measured on the iPad simulator in the dark theme, the
   chat column sampled `#0A1830` — `elevation.e0`, the wallpaper rung — while the sidebar beside it
   sampled `#1B2744`, the panel rung it should have; after the fix both sit on the panel rung. This
   is why dark mode read as one flat field rather than as an elevation ladder.
+
+### Changed
+
+- **The Part-1 token aliases are gone**, and their users migrated: `bg` → `elevation.e0`,
+  `surface` → `elevation.e3c`, `success` and `switchGreen` → `ok`, `border` → `hairline`,
+  `bubbleBlue` → `accent`, and `incoming` / `incomingText`, which nothing used. `surfaceRaised` was
+  not one rung — light `#E6EEFB` sits between `e2` and `e2s` while dark `#3E5480` IS `e3` — so each
+  of its seventeen users took the rung its ROLE names: `e2` for a pressed or hovered row, `e3c` for a
+  machine card, `tintSunk` for a code well, a command well and a segmented track. The type aliases
+  `display`, `heading`, `callout`, `caption` and `mono` are gone too, onto `title`, `name`,
+  `preview`, `meta` and `code`. `title` stays: §3 of the tokens document names it, so it was never an
+  alias.
+- **`danger` is the fill and `dangerText` is the ink.** `danger` held the ink's value, so the two
+  were interchangeable and a `Text` could ask for either. It now carries §1.1's fill (`#C0293A` /
+  `#D8465A`), every `Text` that asked for it asks for `dangerText`, and a Delete or Deny button is
+  the colour the mockup draws.
+- **Adding a divider opens an empty field, focused, whose placeholder is `Section name`.** An older
+  build seeded the field with `New section`, so the first thing typed landed after it and the owner's
+  device still carries a section called `New sectionFinance`. There is no migration for a build that
+  was never released; instead the field is now visibly a field (a hairline, 15 pt, a 34 pt minimum),
+  Remove is a bordered chip rather than a bare word beside it, and an unnamed section reads
+  `Untitled section` rather than borrowing the old seed as its heading.
+- **The sheet eyebrow is the `micro` token** rather than three numbers written out beside it, which
+  is how it had drifted to a heavier weight and nearly twice the tracking the scale asks for.
 
 ### Removed
 

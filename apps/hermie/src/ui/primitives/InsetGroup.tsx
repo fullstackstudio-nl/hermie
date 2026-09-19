@@ -25,17 +25,17 @@ export function InsetGroup({ header, footer, children, style, ...rest }: InsetGr
   return (
     <View {...rest} style={[{ gap: theme.space.sm }, style]}>
       {header ? (
-        <Text variant="caption" color="textMuted" style={{ marginLeft: theme.space.lg, letterSpacing: 0.6 }}>
+        <Text variant="meta" color="textMuted" style={{ marginLeft: theme.space.lg, letterSpacing: 0.6 }}>
           {header}
         </Text>
       ) : null}
 
       <View
         style={{
-          backgroundColor: theme.colors.surface,
+          backgroundColor: theme.elevation.e3c,
           borderRadius: theme.radii.lg,
           borderWidth: 1,
-          borderColor: theme.colors.border,
+          borderColor: theme.hairline,
           overflow: 'hidden'
         }}
       >
@@ -44,7 +44,7 @@ export function InsetGroup({ header, footer, children, style, ...rest }: InsetGr
           // dynamically carry their own keys on the row itself.
           <View key={index}>
             {index > 0 ? (
-              <View style={{ height: 1, marginLeft: theme.space.lg, backgroundColor: theme.colors.border }} />
+              <View style={{ height: 1, marginLeft: theme.space.lg, backgroundColor: theme.hairline }} />
             ) : null}
             {row}
           </View>
@@ -53,7 +53,7 @@ export function InsetGroup({ header, footer, children, style, ...rest }: InsetGr
 
       {footer ? (
         typeof footer === 'string' ? (
-          <Text variant="caption" color="textMuted" style={{ marginHorizontal: theme.space.lg }}>
+          <Text variant="meta" color="textMuted" style={{ marginHorizontal: theme.space.lg }}>
             {footer}
           </Text>
         ) : (
@@ -114,7 +114,7 @@ export function InsetButtonRow({ title, tone = 'accent', detail, disabled, style
             minHeight: CONTROL_MIN_HEIGHT,
             justifyContent: 'center',
             gap: theme.space.xxs,
-            backgroundColor: pressed ? theme.colors.surfaceRaised : 'transparent',
+            backgroundColor: pressed ? theme.elevation.e2 : 'transparent',
             opacity: disabled ? 0.4 : 1
           }}
         >
@@ -122,7 +122,7 @@ export function InsetButtonRow({ title, tone = 'accent', detail, disabled, style
             {title}
           </Text>
           {detail ? (
-            <Text variant="caption" color="textMuted">
+            <Text variant="meta" color="textMuted">
               {detail}
             </Text>
           ) : null}
@@ -144,7 +144,7 @@ export function InsetValueRow({ label, value, mono = false }: InsetValueRowProps
         {label}
       </Text>
       <Text
-        variant={mono ? 'mono' : 'body'}
+        variant={mono ? 'code' : 'body'}
         color="textMuted"
         numberOfLines={1}
         style={{ flex: 1, textAlign: 'right' }}

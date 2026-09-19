@@ -21,6 +21,7 @@
  *    and explains itself — but the sidebar stays usable while the panel is up,
  *    and the reader is looking at the sidebar.
  */
+import type { ConnectionStatus } from '@hermie/gateway-client'
 import { Pressable, View } from 'react-native'
 
 import { useGateway } from '../../gateway'
@@ -31,9 +32,22 @@ import { Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { BEAD_SIZE } from '../../ui/tokens'
 
-export function ConnectionLine() {
+export interface ConnectionLineProps {
+  /**
+   * Show this state instead of the live one.
+   *
+   * Development only: the four states that are not `ready` are each a network
+   * condition, and a gallery that could not name one would leave the line as the
+   * only surface in the app nobody has seen in more than one state. A real
+   * sidebar never passes it.
+   */
+  status?: ConnectionStatus
+}
+
+export function ConnectionLine({ status: forced }: ConnectionLineProps = {}) {
   const theme = useTheme()
-  const { status } = useGateway()
+  const gateway = useGateway()
+  const status = forced ?? gateway.status
   const reauth = useReauth()
 
   if (status === 'ready') {

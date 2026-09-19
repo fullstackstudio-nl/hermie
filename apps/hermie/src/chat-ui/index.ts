@@ -59,6 +59,7 @@ export {
   initialFor,
   middleTruncate,
   needsReadingTreatment,
+  previewLine,
   tintIndex
 } from './format'
 export { chatStrings } from './strings'

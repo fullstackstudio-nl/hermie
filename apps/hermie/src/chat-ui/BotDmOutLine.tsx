@@ -28,7 +28,7 @@ import { TAP_SLOP, type ColorRole } from '../ui/tokens'
 import { GlassSurface } from '../ui/glass'
 import { hasReply } from './dm-rollup'
 import { useExpanded } from './expanded'
-import { clipInline, formatClock } from './format'
+import { formatClock, previewLine } from './format'
 import { chatStrings } from './strings'
 import { Chip } from './primitives/Chip'
 import type { DmCounterpartQuery } from './TranscriptList'
@@ -147,7 +147,7 @@ export function BotDmOutLine({
   // Short. On a phone the row holds four things and the marker is the one that
   // must survive intact — a quoted reply that squeezes `Message to @writer` down
   // to "Ca…" has taken the row's whole point with it.
-  const replyPreview = hasReply(item) ? clipInline(item.reply?.text ?? '', 18) : ''
+  const replyPreview = hasReply(item) ? previewLine(item.reply?.text ?? '', 18) : ''
 
   return (
     <View style={{ gap: theme.space.xs }} testID={testID ?? `bot-dm-out-${item.id}`}>
@@ -179,7 +179,7 @@ export function BotDmOutLine({
             style={{ flexGrow: 1, flexShrink: 100, minWidth: 0 }}
             variant="meta"
           >
-            {clipInline(item.message, 60)}
+            {previewLine(item.message, 60)}
           </Text>
 
           {time ? (

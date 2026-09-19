@@ -9,9 +9,9 @@ export function WelcomeStep() {
 
   return (
     <View style={{ gap: theme.space.lg, paddingTop: theme.space.xxl }}>
-      <Text variant="display">{strings.onboarding.welcome.title}</Text>
+      <Text variant="title">{strings.onboarding.welcome.title}</Text>
       <Text color="textMuted">{strings.onboarding.welcome.body}</Text>
-      <Text variant="caption" color="textMuted">
+      <Text variant="meta" color="textMuted">
         {strings.onboarding.welcome.note}
       </Text>
     </View>

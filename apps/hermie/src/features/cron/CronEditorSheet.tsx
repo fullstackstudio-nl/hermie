@@ -122,7 +122,7 @@ export function CronEditorSheet({
       <View style={{ gap: theme.space.lg }}>
         <View style={{ gap: theme.space.xxs }}>
           <SheetEyebrow>{job ? cronStrings.editor.editEyebrow : cronStrings.editor.createEyebrow}</SheetEyebrow>
-          <Text variant="title">{job ? cronStrings.editor.editTitle : cronStrings.editor.createTitle}</Text>
+          <Text variant="sheetTitle">{job ? cronStrings.editor.editTitle : cronStrings.editor.createTitle}</Text>
         </View>
 
         <TextField
@@ -160,7 +160,7 @@ export function CronEditorSheet({
         />
 
         <View style={{ gap: theme.space.sm }}>
-          <Text variant="heading">{cronStrings.editor.schedule}</Text>
+          <Text variant="name">{cronStrings.editor.schedule}</Text>
           <ScheduleBuilder
             draft={draft.schedule}
             onChange={next => setDraft(current => ({ ...current, schedule: next }))}
@@ -168,12 +168,12 @@ export function CronEditorSheet({
           />
         </View>
 
-        <Text color="textMuted" variant="caption">
+        <Text color="textMuted" variant="meta">
           {cronStrings.editor.nextRunHint}
         </Text>
 
         {error ? (
-          <Text color="danger" variant="caption" testID="cron-editor-error">
+          <Text color="dangerText" variant="meta" testID="cron-editor-error">
             {cronStrings.editor.saveFailed(error)}
           </Text>
         ) : null}
@@ -246,11 +246,11 @@ function ProfilePicker({
   if (locked) {
     return (
       <View style={{ gap: theme.space.xxs }} testID="cron-editor-profile-locked">
-        <Text color="textMuted" variant="caption">
+        <Text color="textMuted" variant="meta">
           {cronStrings.editor.profile}
         </Text>
-        <Text variant="callout">{value || cronStrings.editor.profileDefault}</Text>
-        <Text color="textMuted" variant="caption">
+        <Text variant="preview">{value || cronStrings.editor.profileDefault}</Text>
+        <Text color="textMuted" variant="meta">
           {cronStrings.editor.profileLocked}
         </Text>
       </View>
@@ -292,7 +292,7 @@ function OptionPills({
 
   return (
     <View style={{ gap: theme.space.sm }} testID={testID}>
-      <Text color="textMuted" variant="caption">
+      <Text color="textMuted" variant="meta">
         {label}
       </Text>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.space.sm }}>
@@ -305,10 +305,10 @@ function OptionPills({
               accessibilityState={{ selected }}
               key={option.id}
               onPress={() => onChange(option.id)}
-              variant="callout"
+              variant="preview"
               color={selected ? 'onAccent' : 'text'}
               style={{
-                backgroundColor: selected ? theme.colors.bubbleBlue : theme.colors.surfaceRaised,
+                backgroundColor: selected ? theme.colors.accent : theme.elevation.e2,
                 borderRadius: theme.radii.pill,
                 overflow: 'hidden',
                 paddingHorizontal: theme.space.md,
@@ -322,7 +322,7 @@ function OptionPills({
         })}
       </View>
       {hint ? (
-        <Text color="textMuted" variant="caption">
+        <Text color="textMuted" variant="meta">
           {hint}
         </Text>
       ) : null}

@@ -273,11 +273,17 @@ export function BottomSheet({
   )
 }
 
-/** The small capitalised line the design board puts above a sheet's title. */
+/**
+ * The small capitalised line the design board puts above a sheet's title.
+ *
+ * It is the `micro` token — §3's uppercase label — rather than three numbers
+ * written out beside it, which is how it had drifted to a heavier weight and
+ * nearly twice the tracking the scale asks for.
+ */
 export function SheetEyebrow({ children }: { children: string }) {
   return (
-    <Text color="textMuted" style={{ fontSize: 11, fontWeight: '700', letterSpacing: 1.1 }}>
-      {children}
+    <Text color="textFaint" variant="micro">
+      {children.toUpperCase()}
     </Text>
   )
 }

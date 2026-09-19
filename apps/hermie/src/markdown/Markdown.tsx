@@ -100,10 +100,10 @@ export function Markdown({
 
   const context = useMemo<MarkdownContext>(
     () => ({
-      blockBackground: surface ?? theme.colors.surfaceRaised,
+      blockBackground: surface ?? theme.tintSunk,
       inlineCodeBackground: inlineCodeBackground ?? theme.tintSunk,
       inlineCodeBorderColor: inlineCodeBorderColor ?? theme.hairline,
-      borderColor: borderColor ?? theme.colors.border,
+      borderColor: borderColor ?? theme.hairline,
       color,
       fontSize: body,
       lineHeight: Math.round(body * 1.45),

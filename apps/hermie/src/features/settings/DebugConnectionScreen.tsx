@@ -89,8 +89,8 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
   const transcriptLines = Object.entries(chats).flatMap(([botName, chat]) => formatTranscriptDiagnostics(botName, chat))
 
   const inputStyle = {
-    backgroundColor: theme.colors.surface,
-    borderColor: theme.colors.border,
+    backgroundColor: theme.elevation.e3c,
+    borderColor: theme.hairline,
     borderWidth: 1,
     borderRadius: theme.radii.md,
     color: theme.colors.text,
@@ -101,14 +101,14 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
   return (
     <Screen>
       <ScrollView contentContainerStyle={{ gap: theme.space.md, paddingVertical: theme.space.lg }}>
-        <Text variant="display">Connection test</Text>
+        <Text variant="title">Connection test</Text>
         <Text color="textMuted">
           Points a raw gateway connection at an address and reports what happens. Session-token gateways only; signing
           in with a provider arrives with onboarding.
         </Text>
 
         <View style={{ gap: theme.space.xs }}>
-          <Text variant="caption" color="textMuted">
+          <Text variant="meta" color="textMuted">
             GATEWAY ADDRESS
           </Text>
           <TextInput
@@ -124,7 +124,7 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
         </View>
 
         <View style={{ gap: theme.space.xs }}>
-          <Text variant="caption" color="textMuted">
+          <Text variant="meta" color="textMuted">
             SESSION TOKEN
           </Text>
           <TextInput
@@ -136,7 +136,7 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
             style={inputStyle}
           />
           <Pressable accessibilityRole="button" hitSlop={8} onPress={() => setShowToken(current => !current)}>
-            <Text color="accent" variant="caption">
+            <Text color="accent" variant="meta">
               {showToken ? strings.onboarding.signIn.hideToken : strings.onboarding.signIn.showToken}
             </Text>
           </Pressable>
@@ -149,14 +149,14 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
         </View>
 
         {error ? (
-          <Text color="danger" testID="debug-error">
+          <Text color="dangerText" testID="debug-error">
             {error}
           </Text>
         ) : null}
 
         {probe ? (
           <View style={{ gap: theme.space.xxs }}>
-            <Text variant="heading">Probe</Text>
+            <Text variant="name">Probe</Text>
             <Text color="textMuted">version {probe.version || 'unknown'}</Text>
             <Text color="textMuted">auth required: {String(probe.authRequired)}</Text>
             <Text color="textMuted">flows: {probe.authFlows.join(', ') || 'none'}</Text>
@@ -168,7 +168,7 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
         ) : null}
 
         <View style={{ gap: theme.space.xxs }}>
-          <Text variant="heading">Runtime</Text>
+          <Text variant="name">Runtime</Text>
           <Text color="textMuted" testID="debug-runs-on-mac">
             iOS app on a Mac: {String(RUNS_ON_MAC)}
           </Text>
@@ -190,16 +190,16 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
         </View>
 
         <View style={{ gap: theme.space.xxs }}>
-          <Text variant="heading">Status</Text>
+          <Text variant="name">Status</Text>
           <Text testID="debug-status">{status}</Text>
-          <Text variant="caption" color="textMuted">
+          <Text variant="meta" color="textMuted">
             {transitions.join(' → ') || 'not started'}
           </Text>
         </View>
 
         {profiles.length > 0 ? (
           <View style={{ gap: theme.space.xxs }}>
-            <Text variant="heading">profiles.list</Text>
+            <Text variant="name">profiles.list</Text>
             <Text testID="debug-profiles">{profiles.join(', ')}</Text>
           </View>
         ) : null}
@@ -214,9 +214,9 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
         */}
         {transcriptLines.length > 0 ? (
           <View style={{ gap: theme.space.xxs }}>
-            <Text variant="heading">Transcripts</Text>
+            <Text variant="name">Transcripts</Text>
             {transcriptLines.map(line => (
-              <Text key={line} variant="caption" color="textMuted" testID="debug-transcript-line">
+              <Text key={line} variant="meta" color="textMuted" testID="debug-transcript-line">
                 {line}
               </Text>
             ))}

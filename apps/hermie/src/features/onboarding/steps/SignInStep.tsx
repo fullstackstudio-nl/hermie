@@ -67,14 +67,14 @@ export function SignInStep({ draft, update }: SignInStepProps) {
       ) : !probe?.supportsNativePkce ? (
         <InsetGroup>
           <InsetRow>
-            <Text variant="heading" color="danger" testID="signin-blocked">
+            <Text variant="name" color="dangerText" testID="signin-blocked">
               {strings.onboarding.signIn.blockedTitle}
             </Text>
             <Text color="textMuted">{strings.onboarding.signIn.blockedBody}</Text>
           </InsetRow>
         </InsetGroup>
       ) : providers.length === 0 ? (
-        <Text color="danger" testID="signin-blocked">
+        <Text color="dangerText" testID="signin-blocked">
           {strings.errors.providersUnavailable}
         </Text>
       ) : (
@@ -94,7 +94,7 @@ export function SignInStep({ draft, update }: SignInStepProps) {
 
           {draft.tokens ? (
             <View style={{ gap: theme.space.sm }}>
-              <Text color="success" testID="signin-result">
+              <Text color="ok" testID="signin-result">
                 {draft.tokens.userId
                   ? strings.onboarding.signIn.signedInAs(draft.tokens.userId)
                   : strings.onboarding.signIn.signedIn}

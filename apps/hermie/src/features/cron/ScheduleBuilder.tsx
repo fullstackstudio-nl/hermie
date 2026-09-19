@@ -83,11 +83,11 @@ export function ScheduleBuilder({ draft, onChange, showErrors = false }: Schedul
             onChangeText={time => patch({ time })}
             testID="schedule-time"
           />
-          <Text color="textMuted" variant="caption">
+          <Text color="textMuted" variant="meta">
             {cronStrings.schedule.days}
           </Text>
           <WeekdayChips weekdays={draft.weekdays} onChange={weekdays => patch({ weekdays })} />
-          <Text color="textMuted" variant="caption">
+          <Text color="textMuted" variant="meta">
             {cronStrings.schedule.daysHint}
           </Text>
         </View>
@@ -104,7 +104,7 @@ export function ScheduleBuilder({ draft, onChange, showErrors = false }: Schedul
             onChangeText={cronExpression => patch({ cronExpression })}
             testID="schedule-cron"
           />
-          <Text color="textMuted" variant="caption">
+          <Text color="textMuted" variant="meta">
             {cronStrings.schedule.cronHint}
           </Text>
         </View>
@@ -121,18 +121,18 @@ export function ScheduleBuilder({ draft, onChange, showErrors = false }: Schedul
             onChangeText={onceValue => patch({ onceValue })}
             testID="schedule-once"
           />
-          <Text color="textMuted" variant="caption">
+          <Text color="textMuted" variant="meta">
             {cronStrings.schedule.onceHint}
           </Text>
         </View>
       ) : null}
 
       {result.ok ? (
-        <Text color="textMuted" variant="caption" testID="schedule-preview">
+        <Text color="textMuted" variant="meta" testID="schedule-preview">
           {cronStrings.editor.preview(result.schedule)}
         </Text>
       ) : showErrors ? (
-        <Text color="danger" variant="caption" testID="schedule-error">
+        <Text color="dangerText" variant="meta" testID="schedule-error">
           {result.error}
         </Text>
       ) : null}
@@ -157,7 +157,7 @@ function WeekdayChips({ weekdays, onChange }: { weekdays: number[]; onChange: (w
             onPress={() => onChange(selected ? weekdays.filter(value => value !== day) : [...weekdays, day])}
             style={{
               alignItems: 'center',
-              backgroundColor: selected ? theme.colors.bubbleBlue : theme.colors.surfaceRaised,
+              backgroundColor: selected ? theme.colors.accent : theme.elevation.e2,
               borderRadius: theme.radii.pill,
               flex: 1,
               justifyContent: 'center',
@@ -165,7 +165,7 @@ function WeekdayChips({ weekdays, onChange }: { weekdays: number[]; onChange: (w
             }}
             testID={`schedule-weekday-${day}`}
           >
-            <Text color={selected ? 'onAccent' : 'text'} variant="callout">
+            <Text color={selected ? 'onAccent' : 'text'} variant="preview">
               {initial}
             </Text>
           </Pressable>

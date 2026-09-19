@@ -103,6 +103,48 @@ a real connection to it in session-token mode. On an Android emulator the host m
 To work against a real gateway, [docs/test-gateway.md](docs/test-gateway.md) sets one up from
 scratch.
 
+## Opening the app on one screen (development only)
+
+Most of the interface is behind a tap, and the simulators on this machine can be
+launched and photographed and nothing else — there is no `Simulator.app`, so
+`simctl` has no tap, swipe or rotate verb (see
+[docs/platform-notes.md](docs/platform-notes.md)). Launch arguments are the one
+channel that is left, so a Debug build reads them:
+
+```sh
+xcrun simctl launch <udid> nl.fullstackstudio.hermie \
+  --initialUrl http://localhost:8081 \
+  --hermieOpen gallery:sheet-options-model-page \
+  --hermieTheme dark --hermieWallpaper warm
+```
+
+| Argument                       | Opens                                                        |
+| ------------------------------ | ------------------------------------------------------------ |
+| `--hermieOpen gallery:<id>`    | one gallery section, alone, filling the screen               |
+| `--hermieOpen gallery:chat`    | the gallery's whole chat screen                              |
+| `--hermieOpen sheet:<name>`    | shorthand for that sheet's section                           |
+| `--hermieOpen chat:<handle>`   | the real chat screen for that bot                            |
+| `--hermieOpen overlay:<s>[/p]` | `activity`, `crons`, `settings`, and `settings/licences`     |
+| `--hermieTheme light\|dark`    | pin the scheme (a simulator's appearance cannot be set here) |
+| `--hermieWallpaper <name>`     | pin the wallpaper                                            |
+
+`--hermieOpen=<value>` works too. Section ids come from `GALLERY_SECTION_IDS` in
+`apps/hermie/src/features/settings/GalleryScreen.tsx`, which is the registry the
+gallery renders from — adding a component to the kit means adding a row there, and
+that is what keeps "one launch, one screenshot" true for the next component as
+well. `sheet:` shorthands are pinned against that list by
+`__tests__/dev-launch-intent.test.ts`.
+
+A gallery section needs no gateway and no onboarding: it is decided before the
+connection phase is, so a clean simulator is enough. `chat:` and `overlay:` do
+need a configured gateway.
+
+**None of this reaches a release build**, by three independent gates: the native
+constant it reads is inside `#if DEBUG` in `modules/hermie-mac/ios/HermieMacModule.swift`,
+the JavaScript is behind `__DEV__` (which Metro folds out of a production bundle),
+and nothing is registered with the system — no URL scheme, no `CFBundleURLTypes`,
+no entitlement. Launch arguments are visible only to the process itself.
+
 ## Native projects
 
 - `apps/hermie/ios` and `apps/hermie/android` are **generated**. They are not committed. Change

@@ -61,8 +61,8 @@ export function AgentsBar({ count, startedAtMs, elapsedSeconds, onPress, testID 
       <View
         style={{
           alignItems: 'center',
-          backgroundColor: theme.colors.surfaceRaised,
-          borderBottomColor: theme.colors.border,
+          backgroundColor: theme.elevation.e3c,
+          borderBottomColor: theme.hairline,
           borderBottomWidth: 1,
           flexDirection: 'row',
           gap: theme.space.sm,

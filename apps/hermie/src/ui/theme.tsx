@@ -185,7 +185,21 @@ function useAccessibilityPreferences(): { reduceTransparency: boolean; reduceMot
   return { reduceTransparency, reduceMotion }
 }
 
-export function ThemeProvider({ children }: { children: ReactNode }) {
+export interface ThemeProviderProps {
+  children: ReactNode
+  /**
+   * Pin the scheme, whatever the system and the stored preference say.
+   *
+   * Development only (`--hermieTheme dark`). A simulator's appearance is
+   * Simulator.app state and this machine has none, so without this the dark
+   * theme could not be photographed at all — see docs/platform-notes.md.
+   */
+  forceScheme?: Scheme
+  /** Pin the wallpaper, for the same reason (`--hermieWallpaper warm`). */
+  forceWallpaper?: WallpaperName
+}
+
+export function ThemeProvider({ children, forceScheme, forceWallpaper }: ThemeProviderProps) {
   // `useColorScheme` follows the system appearance on every platform, a Mac
   // window included. The stored appearance overrides it when the user pinned
   // one, which is why the preference is read here rather than in Settings: the
@@ -204,10 +218,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
   }, [loaded])
 
-  const scheme = appearance === 'system' ? system : appearance
+  const scheme = forceScheme ?? (appearance === 'system' ? system : appearance)
+  const wallpaperName = forceWallpaper ?? wallpaper
   const theme = useMemo(
-    () => buildTheme(scheme, wallpaper, reduceTransparency, reduceMotion),
-    [scheme, wallpaper, reduceTransparency, reduceMotion]
+    () => buildTheme(scheme, wallpaperName, reduceTransparency, reduceMotion),
+    [scheme, wallpaperName, reduceTransparency, reduceMotion]
   )
 
   // The status bar follows the PINNED appearance, not the system's, and it is

@@ -12,18 +12,20 @@
 //  - The dark rungs (`elevation`) are what the solid fallback falls back TO. A
 //    platform with no blur composites the same hierarchy out of flat colours, so
 //    a card on a panel on a wallpaper is still three distinguishable tones.
-//  - The `*Legacy` colour roles and the older type names are aliases kept only
-//    so the Part-2 files (chat transcript, bubbles, composer, sheets) keep
-//    working untouched. They are listed in the CHANGELOG and are meant to go.
+//  - `danger` is the FILL and `dangerText` is the readable one. They are not
+//    interchangeable and a `Text` always wants the second: the fill is chosen to
+//    carry white, so as ink on glass it fails AA in light mode. The Part-1
+//    aliases that blurred the two (and eight other Messenger-era colour names,
+//    and five older type names) are gone — see the CHANGELOG for the mapping.
 
 export type Scheme = 'light' | 'dark'
 
 /**
  * The colour roles a `Text` can ask for by name.
  *
- * Everything from `bg` down to `incomingText` is the older Messenger set, kept
- * as an alias onto its nearest Liquid Glass value so Part-2 components keep
- * rendering while they are restyled.
+ * Exactly §1.1 of the token document, and nothing else. A surface colour is not
+ * in here on purpose: it comes off the elevation ladder or a glass recipe, which
+ * is what keeps a component from inventing a rung.
  */
 export type ColorRole =
   | 'text'
@@ -36,16 +38,6 @@ export type ColorRole =
   | 'dangerText'
   | 'ok'
   | 'warnText'
-  // Aliases for Part 2.
-  | 'bg'
-  | 'surface'
-  | 'surfaceRaised'
-  | 'bubbleBlue'
-  | 'success'
-  | 'switchGreen'
-  | 'border'
-  | 'incoming'
-  | 'incomingText'
 
 export type ColorScale = Record<ColorRole, string>
 
@@ -56,20 +48,10 @@ export const lightColors: ColorScale = {
   onAccent: '#FFFFFF',
   accent: '#1668E3',
   accentText: '#0B57C4',
-  danger: '#A81F30',
+  danger: '#C0293A',
   dangerText: '#A81F30',
   ok: '#1C8547',
-  warnText: '#8A5A00',
-
-  bg: '#DCE8FB',
-  surface: '#F7FAFE',
-  surfaceRaised: '#E6EEFB',
-  bubbleBlue: '#2A72DC',
-  success: '#1C8547',
-  switchGreen: '#1C8547',
-  border: '#C9D6EA',
-  incoming: '#F3EEFF',
-  incomingText: '#5B3E97'
+  warnText: '#8A5A00'
 }
 
 export const darkColors: ColorScale = {
@@ -79,20 +61,10 @@ export const darkColors: ColorScale = {
   onAccent: '#FFFFFF',
   accent: '#2C7BEA',
   accentText: '#B4D6FF',
-  danger: '#FF9AA6',
+  danger: '#D8465A',
   dangerText: '#FF9AA6',
   ok: '#5CCB86',
-  warnText: '#FFC65C',
-
-  bg: '#0A1830',
-  surface: '#2F4066',
-  surfaceRaised: '#3E5480',
-  bubbleBlue: '#2A72DC',
-  success: '#5CCB86',
-  switchGreen: '#2E9E57',
-  border: '#4A5C80',
-  incoming: '#413470',
-  incomingText: '#D3BEFF'
+  warnText: '#FFC65C'
 }
 
 /**
@@ -183,8 +155,10 @@ export type TypeStyle = {
  * at both sizes and it is the same React Native code. Only the sidebar title has
  * a wide variant.
  *
- * `display`, `title`, `heading`, `callout`, `caption` and `mono` are the older
- * names, aliased onto their Liquid Glass equivalents for Part 2.
+ * Exactly §3 of the token document. The Part-1 aliases (`display`, `heading`,
+ * `callout`, `caption`, `mono`) are gone: two names for one size is two names to
+ * keep in step with the mockup, and `caption` in particular was being asked for
+ * where `meta` and `micro` mean different things.
  */
 export const type = {
   title: { fontSize: 28, lineHeight: 32, fontWeight: '700', letterSpacing: -0.62 },
@@ -197,14 +171,7 @@ export const type = {
   preview: { fontSize: 15, lineHeight: 20, fontWeight: '400' },
   meta: { fontSize: 13, lineHeight: 17, fontWeight: '400' },
   micro: { fontSize: 11, lineHeight: 14, fontWeight: '600', letterSpacing: 0.6 },
-  code: { fontSize: 13.5, lineHeight: 21, fontWeight: '400' },
-
-  // Aliases for Part 2.
-  display: { fontSize: 28, lineHeight: 32, fontWeight: '700', letterSpacing: -0.62 },
-  heading: { fontSize: 17, lineHeight: 22, fontWeight: '600', letterSpacing: -0.17 },
-  callout: { fontSize: 15, lineHeight: 20, fontWeight: '400' },
-  caption: { fontSize: 13, lineHeight: 17, fontWeight: '400' },
-  mono: { fontSize: 13.5, lineHeight: 21, fontWeight: '400' }
+  code: { fontSize: 13.5, lineHeight: 21, fontWeight: '400' }
 } as const satisfies Record<string, TypeStyle>
 
 export type TypeToken = keyof typeof type

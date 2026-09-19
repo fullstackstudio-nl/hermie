@@ -31,14 +31,14 @@ export function ScreenHeader({ back, onBack, title, subtitle, action }: ScreenHe
         onPress={onBack}
         style={{ justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT }}
       >
-        <Text color="accent" variant="callout">{`‹ ${back}`}</Text>
+        <Text color="accent" variant="preview">{`‹ ${back}`}</Text>
       </Pressable>
 
       <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.md }}>
         <View style={{ flex: 1, gap: theme.space.xxs }}>
-          <Text variant="display">{title}</Text>
+          <Text variant="title">{title}</Text>
           {subtitle ? (
-            <Text color="textMuted" variant="callout">
+            <Text color="textMuted" variant="preview">
               {subtitle}
             </Text>
           ) : null}

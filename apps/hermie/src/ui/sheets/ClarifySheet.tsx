@@ -83,7 +83,7 @@ export function ClarifySheet({ visible, item, onLock, onSubmit, onSkip, onClose,
         visible={visible}
       >
         <SheetEyebrow>{chatStrings.clarify.eyebrow}</SheetEyebrow>
-        <Text variant="title">{chatStrings.clarify.title}</Text>
+        <Text variant="sheetTitle">{chatStrings.clarify.title}</Text>
         <Text color="textMuted" testID="clarify-resolution">
           {item.state === 'answered'
             ? chatStrings.clarify.outcome(Object.keys(item.answers).length, item.questions.length)
@@ -115,17 +115,17 @@ export function ClarifySheet({ visible, item, onLock, onSubmit, onSkip, onClose,
       <SheetEyebrow>{chatStrings.clarify.eyebrow}</SheetEyebrow>
 
       {batch ? (
-        <Text color="textMuted" variant="caption" testID="clarify-step">
+        <Text color="textMuted" variant="meta" testID="clarify-step">
           {chatStrings.clarify.step(index + 1, item.questions.length)}
         </Text>
       ) : null}
 
-      <Text variant="title" testID="clarify-question">
+      <Text variant="sheetTitle" testID="clarify-question">
         {question.question}
       </Text>
 
       {question.multiSelect ? (
-        <Text color="textMuted" variant="caption">
+        <Text color="textMuted" variant="meta">
           {chatStrings.clarify.multiSelectHint}
         </Text>
       ) : null}
@@ -147,8 +147,8 @@ export function ClarifySheet({ visible, item, onLock, onSubmit, onSkip, onClose,
                 <View
                   style={{
                     alignItems: 'center',
-                    backgroundColor: theme.colors.surface,
-                    borderColor: selected ? theme.colors.accent : theme.colors.border,
+                    backgroundColor: theme.elevation.e3c,
+                    borderColor: selected ? theme.colors.accent : theme.hairline,
                     borderRadius: theme.radii.lg,
                     borderWidth: selected ? 2 : 1,
                     flexDirection: 'row',
@@ -192,7 +192,7 @@ export function ClarifySheet({ visible, item, onLock, onSubmit, onSkip, onClose,
         ) : null}
 
         {isLocked ? (
-          <Text color="success" variant="caption" testID="clarify-locked">
+          <Text color="ok" variant="meta" testID="clarify-locked">
             {chatStrings.clarify.locked}
           </Text>
         ) : null}

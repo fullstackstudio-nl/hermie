@@ -1274,3 +1274,121 @@ before this pass was a phone at depth 0, where the behaviour is correct.
   conversation, the approval sheet, Crons, Activity. All of it is covered by component tests and none
   of it has been looked at on a device.
 - **Android**, and **Reduce Transparency / Reduce Motion**, both still as Part 1 left them.
+
+## Driving a simulator without touching it (2026-09-20)
+
+Three design rounds in a row shipped sheets, option pages and a colour picker
+that nobody had seen, for one reason recorded in the section above: this machine
+has no `Simulator.app`, so `xcrun simctl` has no tap verb and every state behind a
+tap is out of reach. The fix is not a better workaround for tapping — it is to
+stop needing one.
+
+### Launch arguments are the channel that exists
+
+`xcrun simctl launch <udid> <bundle id> <args…>` puts everything after the bundle
+id into the app's own `ProcessInfo.processInfo.arguments`. That is already how
+Part 3 pointed the dev client at Metro (`--initialUrl`), because
+`expo-dev-launcher` reads the same array. React Native exposes nothing
+equivalent, so the local module answers it:
+`HermieMacModule.swift` publishes `devLaunchArguments`, and
+`apps/hermie/src/dev/launch-intent.ts` parses it. CONTRIBUTING.md has the
+grammar.
+
+Three gates keep it out of a shipped build, and it wants all three because what
+it does is open arbitrary screens:
+
+- the constant is inside `#if DEBUG`, so a Release binary does not define it —
+  the key is absent, not empty;
+- the JavaScript reads it behind `__DEV__`, which Metro's minifier folds to
+  `false` and then removes along with the branch;
+- nothing is registered with the system. No URL scheme, no `CFBundleURLTypes`, no
+  entitlement, no associated domain. Launch arguments cannot be set on a device
+  by anything but a debugger or `simctl`.
+
+`__tests__/dev-launch-intent.test.ts` pins the second gate by re-importing the
+module with `__DEV__` down.
+
+### One launch, one screenshot
+
+`GalleryScreen` is now a registry of addressable sections rather than a scroll of
+hard-coded ones, and `--hermieOpen gallery:<id>` renders exactly one of them
+filling the screen. A section may name a sheet, which it opens as it mounts —
+that is what makes a blocking modal photographable at all. The gallery branch is
+decided BEFORE the gateway phase, so a section needs no configured connection and
+no copied keychain; a clean simulator plus Metro is enough.
+
+What that immediately bought, on the iPhone 17 Pro (iOS 26.5):
+
+- Every sheet title was `title` (28/32) where §3 of the tokens document says
+  `sheetTitle` (21/26). It is obvious the moment you see the approval sheet and
+  invisible in a component test.
+- `initialPane` on the options sheet did nothing, because the sheet is mounted
+  for the life of the screen and `useState`'s initial value had run long before
+  anyone asked for a page. It now re-reads as the sheet BECOMES visible, which
+  also stops an ordinary open landing on the page the last reader left.
+- The Default swatch on the colour page is a hollow ring with no label, so on the
+  dark sheet it reads as an empty hole rather than as a choice. Unfixed.
+- `Last status` on the cron detail prints the gateway's raw `ok` two rows under a
+  humanised `Success`. Unfixed.
+
+### A `Screen` inside a glass panel has no safe-area inset, and that is correct
+
+The first cron-detail screenshot had its header under the clock. Not a bug in the
+screen: `Screen` deliberately adds no inset inside a `GlassSurface` (the section
+above says why), and in the app the inset comes from the navigator or from
+`RegularShell`'s window padding. `DevGallery` is neither, so it applies the inset
+itself. Worth knowing before reading a gallery screenshot as evidence about the
+app.
+
+### Contrast, measured on the composited surfaces
+
+Computed from the token values the way the mockup's author did — the alpha
+gradient over its rung over the wallpaper — and against the WORST of the three
+wallpapers (in dark, against the brightest bloom rather than the base, which is
+harsher than the numbers in §2 of the tokens document).
+
+Body text clears AA everywhere by a wide margin: light 15.03–16.48, dark
+6.54–11.26. What does not:
+
+| Surface           | Ink          | Light | Dark |
+| ----------------- | ------------ | ----- | ---- |
+| panel             | `ok`         | 3.84  | 6.01 |
+| card              | `ok`         | 3.91  | 4.54 |
+| incoming bubble   | `ok`         | 3.92  | 3.55 |
+| incoming bubble   | `dangerText` | 6.07  | 3.58 |
+| incoming bubble   | `textFaint`  | 4.79  | 3.56 |
+| reading bubble    | `ok`         | 4.20  | 3.49 |
+| sheet             | `ok`         | 4.21  | 4.12 |
+| sunk tint (light) | `ok`         | 3.47  | 7.72 |
+| sunk tint (light) | `textFaint`  | 4.23  | 7.74 |
+
+So `ok` fails AA as INK on almost everything, in both themes, and `dangerText`
+and `textFaint` fail on a dark bubble. None of these is body text and none is a
+regression from this round — `ok` and `dangerText` have always been used as ink —
+but §1.1 offers no readable variant of `ok` the way it does of `danger`, and that
+is the gap. The script is
+`/private/tmp/.../scratchpad/part4/contrast.mjs`; it belongs in `scripts/` next
+round so the numbers can be a check rather than a paragraph.
+
+White on the outgoing bubble's lighter (top) stop clears AA for all nine accents:
+4.56 (teal) to 6.30 (graphite).
+
+### What this pass did NOT verify
+
+- **The wide layout's bubble cap.** On the landscape-proportioned iPad window
+  (iPad Pro 13" M5, the installed bundle's `UISupportedInterfaceOrientations`
+  forced to landscape, ~1032 pt wide) the gallery's chat screen draws bubbles
+  ~324 pt wide, which is the COMPACT cap (`min(78%, 320)`) and not the regular one
+  (`min(68%, 640)`). `useBubbleWidth` branches on
+  `useWindowDimensions().width >= 700`, so either that window reports narrower
+  than it looks or the percentage resolves against something narrower than the
+  column. Measured, not explained.
+- **Two rendering bugs seen in the same screenshot**, both in markdown inside a
+  bubble: `**` around an inline code span is printed literally rather than
+  unwrapped, and a table cell that wraps mid-word puts the wrapped character
+  outside the row's background.
+- **The agents bar, the sheets' interiors, the cron list and Activity** were not
+  restyled this round; only the sheet titles and the eyebrow were brought onto the
+  type scale.
+- **Android**, **the Mac window**, **Reduce Transparency** and **Reduce Motion**,
+  all as the previous rounds left them.

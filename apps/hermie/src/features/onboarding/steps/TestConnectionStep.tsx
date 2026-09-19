@@ -51,20 +51,20 @@ export function TestConnectionStep({ draft, update }: TestConnectionStepProps) {
       />
 
       {error ? (
-        <Text color="danger" testID="test-error">
+        <Text color="dangerText" testID="test-error">
           {error}
         </Text>
       ) : null}
 
       {current && draft.test ? (
         <View style={{ gap: theme.space.xs }}>
-          <Text color="success" testID="test-result">
+          <Text color="ok" testID="test-result">
             {authModeOf(draft.probe) === 'native_pkce' && draft.test.userDisplayName
               ? strings.onboarding.test.connectedAs(draft.test.userDisplayName, draft.test.botCount)
               : strings.onboarding.test.connected(draft.test.botCount)}
           </Text>
           {draft.test.botCount === 0 ? (
-            <Text variant="caption" color="textMuted">
+            <Text variant="meta" color="textMuted">
               {strings.onboarding.test.noBots}
             </Text>
           ) : null}
@@ -72,7 +72,7 @@ export function TestConnectionStep({ draft, update }: TestConnectionStepProps) {
       ) : null}
 
       {!busy && !error && !current ? (
-        <Text variant="caption" color="textMuted" testID="test-required">
+        <Text variant="meta" color="textMuted" testID="test-required">
           {draft.test ? strings.onboarding.test.invalidated : strings.onboarding.test.required}
         </Text>
       ) : null}

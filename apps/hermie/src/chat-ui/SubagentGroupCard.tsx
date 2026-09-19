@@ -41,9 +41,9 @@ export function statusGlyph(status: SubagentStatus): string {
 export function statusTone(status: SubagentStatus): ColorRole {
   switch (status) {
     case 'completed':
-      return 'success'
+      return 'ok'
     case 'failed':
-      return 'danger'
+      return 'dangerText'
     case 'running':
       return 'accent'
     default:
@@ -75,7 +75,7 @@ export function SubagentGroupCard({
   return (
     <View
       style={{
-        backgroundColor: theme.colors.surfaceRaised,
+        backgroundColor: theme.elevation.e3c,
         borderRadius: theme.radii.xl,
         gap: theme.space.xs,
         marginRight: 26,

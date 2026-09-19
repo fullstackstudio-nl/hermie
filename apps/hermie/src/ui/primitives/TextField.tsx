@@ -27,7 +27,7 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
   return (
     <View style={{ gap: theme.space.xxs }}>
       {label ? (
-        <Text variant="caption" color="textMuted">
+        <Text variant="meta" color="textMuted">
           {label}
         </Text>
       ) : null}
@@ -48,7 +48,7 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
         {...rest}
       />
       {error ? (
-        <Text variant="caption" color="danger">
+        <Text variant="meta" color="dangerText">
           {error}
         </Text>
       ) : null}

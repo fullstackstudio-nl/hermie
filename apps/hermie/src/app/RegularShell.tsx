@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import { View } from 'react-native'
 
+import type { DevInitialView } from '../dev'
 import { ActivityScreen } from '../features/activity'
 import { BotsScreen, type BotsSection } from '../features/bots'
 import { ChatScreen, type OpenChatOptions } from '../features/chats'
@@ -32,10 +33,10 @@ import { OverlayPanel } from './OverlayPanel'
  * Mac-aware inset never reached. Two columns cannot disagree about a number
  * they do not each own.
  */
-export function RegularShell() {
+export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
   const insets = useSafeAreaInsets()
-  const [section, setSection] = useState<BotsSection | null>(null)
-  const [selectedBot, setSelectedBot] = useState<string | undefined>(undefined)
+  const [section, setSection] = useState<BotsSection | null>(initial?.section ?? null)
+  const [selectedBot, setSelectedBot] = useState<string | undefined>(initial?.bot)
   const [focusItemId, setFocusItemId] = useState<string | undefined>(undefined)
 
   const openBot = useCallback((name: string, options?: OpenChatOptions) => {
@@ -90,7 +91,9 @@ export function RegularShell() {
           <OverlayPanel onClose={() => setSection(null)} title={titleFor(section)} visible={section !== null}>
             {section === 'activity' ? <ActivityScreen onOpenBot={openBot} /> : null}
             {section === 'cron' ? <CronScreen /> : null}
-            {section === 'settings' ? <SettingsScreen /> : null}
+            {section === 'settings' ? (
+              <SettingsScreen {...(initial?.page ? { initialPage: initial.page } : {})} />
+            ) : null}
           </OverlayPanel>
         </View>
       </View>

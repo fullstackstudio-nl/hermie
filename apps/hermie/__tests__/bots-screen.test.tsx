@@ -298,6 +298,22 @@ describe('edit mode', () => {
     expect(screen.getByTestId(`divider-${(divider as { id: string }).id}`)).toBeTruthy()
   })
 
+  it('opens the new divider focused, empty, with a placeholder that is not a name', () => {
+    // The owner's device still carries a section called "New sectionFinance",
+    // from a build that seeded the field with "New section". The placeholder has
+    // to say what the field is FOR without ever becoming its value.
+    renderScreen(<BotsScreen />)
+    fireEvent.press(screen.getByTestId('bots-edit'))
+    fireEvent.press(screen.getByTestId('add-divider'))
+
+    const id = (useChatLayoutStore.getState().entries.find(entry => entry.kind === 'divider') as { id: string }).id
+    const field = screen.getByTestId(`divider-name-${id}`)
+
+    expect(field.props.value).toBe('')
+    expect(field.props.placeholder).toBe('Section name')
+    expect(field.props.autoFocus).toBe(true)
+  })
+
   it('offers Remove on an empty section', () => {
     renderScreen(<BotsScreen />)
     fireEvent.press(screen.getByTestId('bots-edit'))
