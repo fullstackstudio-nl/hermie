@@ -20,6 +20,6 @@ export {
 } from './config'
 export { describeConnectionError, describeProbeError, describeSignInError, hostOf } from './errors'
 export { GatewayProvider, type GatewayContextValue, type GatewayPhase, useGateway } from './GatewayProvider'
-export { ReauthBanner } from './ReauthBanner'
+export { SignedOutPanel, useReauth } from './SignedOutPanel'
 export { type ConnectionStoreState, useConnectionStore } from './store'
 export { chatGatewayFor, type ChatGateway, type RestMessagesOptions } from './link'

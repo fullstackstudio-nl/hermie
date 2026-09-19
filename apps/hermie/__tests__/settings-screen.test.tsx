@@ -5,12 +5,24 @@
  * component gallery is a catalogue of fixtures. Both are tools for whoever is
  * building the app; neither belongs in a release someone installs.
  */
-import { screen } from '@testing-library/react-native'
+import { act, fireEvent, screen } from '@testing-library/react-native'
 
 import { SettingsScreen } from '../src/features/settings/SettingsScreen'
 import { GALLERY_ROW_TITLE } from '../src/features/settings/GalleryScreen'
 import { useSettingsStore } from '../src/store/settings'
 import { renderScreen } from './support/render'
+
+const mockEscapeListeners = new Set<() => void>()
+
+jest.mock('../src/platform/keyboard-modifiers', () => ({
+  isShiftDown: jest.fn(() => false),
+  hasHardwareKeyboard: jest.fn(() => false),
+  subscribeToEscape: (handler: () => void) => {
+    mockEscapeListeners.add(handler)
+
+    return () => mockEscapeListeners.delete(handler)
+  }
+}))
 
 jest.mock('../src/gateway', () => ({
   useGateway: () => ({
@@ -21,7 +33,19 @@ jest.mock('../src/gateway', () => ({
   })
 }))
 
-beforeEach(() => useSettingsStore.getState().reset())
+beforeEach(() => {
+  mockEscapeListeners.clear()
+  useSettingsStore.getState().reset()
+})
+
+/** Press Escape, the way the native module would deliver it. */
+function pressEscape() {
+  act(() => {
+    for (const listener of [...mockEscapeListeners]) {
+      listener()
+    }
+  })
+}
 
 describe('SettingsScreen', () => {
   it('shows the developer group in a development build', () => {
@@ -46,5 +70,32 @@ describe('SettingsScreen', () => {
     } finally {
       ;(globalThis as unknown as { __DEV__: boolean }).__DEV__ = previous
     }
+  })
+})
+
+describe('Settings and Escape', () => {
+  /**
+   * Escape goes back ONE level. A developer screen opened from Settings
+   * registers on the Escape stack above whatever is holding Settings — the
+   * overlay panel on the wide layout — so the first press returns here rather
+   * than closing the panel out from under the reader.
+   */
+  it('returns from a developer screen to Settings', () => {
+    renderScreen(<SettingsScreen />)
+
+    fireEvent.press(screen.getByText('Connection test'))
+    expect(screen.getByTestId('debug-status')).toBeTruthy()
+
+    pressEscape()
+
+    expect(screen.queryByTestId('debug-status')).toBeNull()
+    expect(screen.getByText(GALLERY_ROW_TITLE)).toBeTruthy()
+  })
+
+  it('takes no part in the stack while Settings itself is on top', () => {
+    renderScreen(<SettingsScreen />)
+
+    // Nothing registered: Escape belongs to whatever is holding this screen.
+    expect(mockEscapeListeners.size).toBe(0)
   })
 })

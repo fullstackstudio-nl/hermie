@@ -1,51 +1,71 @@
 /**
- * The chat list — the first thing the app shows.
+ * The chat list — the first thing the app shows, and the owner's own
+ * arrangement of it.
  *
- * It is the design board's "01 / Chats": a large title, a search field, and one
- * row per bot carrying an avatar, the last thing said, a relative stamp and the
- * badges that decide whether you tap it now or later. Two of those badges are
- * not roster fields and cannot be:
+ * Two halves that are easy to confuse. The ROSTER is the gateway's: which bots
+ * exist, what they last said, whether they are running. The LAYOUT is this
+ * device's: the order, the named dividers, what is archived, what colour each
+ * chat carries (ADR-0012). The roster decides which rows can exist; the layout
+ * decides where they sit. `reconcile` is the one place the two meet.
+ *
+ * Three pieces of state are deliberately NOT roster fields and cannot be:
  *
  *  - "working" comes from `session.active_list`, polled only while this list is
  *    mounted, because an unwatched roster has nothing to animate.
- *  - "needs your input" comes from the open approvals and clarifies the chat
- *    store already holds, so it survives a roster refresh and is true even for
- *    a question that arrived while this screen was not on top.
+ *  - "needs input" comes from the open approvals and clarifies the chat store
+ *    already holds, so it survives a roster refresh and is true even for a
+ *    question that arrived while this screen was not on top.
+ *  - "unread" is a timestamp comparison against a per-bot watermark.
  *
- * The same component is the regular shell's sidebar (`variant="sidebar"`):
- * denser rows, no large title, no tab bar — the shell has its own footer.
+ * The same component is the wide layout's sidebar and the phone's Chats screen.
+ * The only difference is density and the title size — the tab strip and the
+ * gateway card are in both, because both mockup frames show them.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { FlatList, Pressable, RefreshControl, TextInput, View } from 'react-native'
 
-import { unreadBadgeLabel, unreadCountSince } from '@hermie/transcript'
+import { unreadCountSince } from '@hermie/transcript'
 
-import { Avatar, formatListTime, formatPreview } from '../../chat-ui'
 import { useGateway } from '../../gateway'
+import { SignedOutPanel } from '../../gateway/SignedOutPanel'
 import { strings } from '../../i18n/strings'
-import { type Bot, isUnread, useBotsStore } from '../../store/bots'
+import { useSafeAreaInsets } from '../../platform/safe-area'
+import { isUnread, useBotsStore, type Bot } from '../../store/bots'
+import { archivedOf, dividersOf, sectionsOf, useChatLayoutStore } from '../../store/chat-layout'
 import { useChatsStore } from '../../store/chats'
-import { Screen, Text } from '../../ui/primitives'
+import { GlassSurface } from '../../ui/glass'
+import { Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
-import { CONTROL_MIN_HEIGHT } from '../../ui/tokens'
+import { CONTROL_MIN_HEIGHT, TAP_SLOP, type AccentName } from '../../ui/tokens'
 import { useChatRuntime } from '../chats/ChatRuntime'
+import { BotRow } from './BotRow'
+import { CHAT_FILTERS, matchesFilter, presenceOf, type ChatFilter, type Presence } from './presence'
+import { RowMenu } from './RowMenu'
+import { ConnectionLine, SidebarFooter, type BotsSection, type TabKey } from './SidebarFooter'
 
-export type BotsSection = 'activity' | 'cron' | 'settings'
+export type { BotsSection }
 
 export interface BotsScreenProps {
   /** Compact shell: navigate. Regular shell: select in place. */
   onOpenBot?: (bot: Bot) => void
   selectedBot?: string | undefined
-  /** Compact shell only: the footer tabs. The sidebar has its own footer. */
   onOpenSection?: (section: BotsSection) => void
+  /** Which footer tab reads as current; the wide shell drives this from its overlay. */
+  currentTab?: TabKey
   variant?: 'screen' | 'sidebar'
 }
 
-const TABS: { key: BotsSection; label: string; glyph: string }[] = [
-  { key: 'activity', label: strings.tabs.activity, glyph: '⇄' },
-  { key: 'cron', label: strings.tabs.routines, glyph: '◷' },
-  { key: 'settings', label: strings.tabs.settings, glyph: '⚙' }
-]
+/**
+ * An archived bot is shown as offline whatever the roster says. It is excluded
+ * from the polls and the counts, so any other bead would be a stale claim.
+ * Shared rather than built per render, so `BotRow`'s memo holds.
+ */
+const ARCHIVED_PRESENCE: Presence = { state: 'offline' }
+
+type ListItem =
+  | { key: string; kind: 'divider'; id: string | null; name: string }
+  | { key: string; kind: 'bot'; bot: Bot; archived: boolean }
+  | { key: string; kind: 'archiveHeader'; count: number }
 
 /** Name or description, case-insensitively — what a reader would type. */
 function matches(bot: Bot, query: string): boolean {
@@ -62,24 +82,58 @@ function matches(bot: Bot, query: string): boolean {
   )
 }
 
-export function BotsScreen({ onOpenBot, selectedBot, onOpenSection, variant = 'screen' }: BotsScreenProps) {
+export function BotsScreen({
+  currentTab = 'chats',
+  onOpenBot,
+  onOpenSection,
+  selectedBot,
+  variant = 'screen'
+}: BotsScreenProps) {
   const theme = useTheme()
+  const insets = useSafeAreaInsets()
   const runtime = useChatRuntime()
   const { status } = useGateway()
   const bots = useBotsStore(state => state.bots)
+  const byName = useBotsStore(state => state.byName)
+  const running = useBotsStore(state => state.running)
+  const lastSeen = useBotsStore(state => state.lastSeen)
+  const avatars = useBotsStore(state => state.avatars)
   const loading = useBotsStore(state => state.loading)
   const error = useBotsStore(state => state.error)
-  const refreshedAt = useBotsStore(state => state.refreshedAt)
+  const chats = useChatsStore(state => state.chats)
+
+  const entries = useChatLayoutStore(state => state.entries)
+  const archivedSet = useChatLayoutStore(state => state.archived)
+  const accents = useChatLayoutStore(state => state.accents)
+  const reconcile = useChatLayoutStore(state => state.reconcile)
+
   const [refreshing, setRefreshing] = useState(false)
   const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState<ChatFilter>('all')
+  const [editing, setEditing] = useState(false)
+  const [archiveOpen, setArchiveOpen] = useState(false)
+  const [menuFor, setMenuFor] = useState<string | null>(null)
 
   const sidebar = variant === 'sidebar'
+  const signedOut = status === 'needs_signin'
+
+  // Stable identities, so that `BotRow`'s memo survives a roster refresh. A
+  // fresh arrow per render would re-render forty rows because one of them
+  // changed, which is the whole cost the memo is there to avoid.
+  const openBot = useCallback((bot: Bot) => onOpenBot?.(bot), [onOpenBot])
+  const moveBot = useCallback((name: string, offset: number) => {
+    useChatLayoutStore.getState().moveBy(name, offset)
+  }, [])
 
   useEffect(() => {
     // Running state is polled only while this list is mounted; an unwatched
     // roster has nothing to animate.
     return runtime?.bots.watchRunning()
   }, [runtime])
+
+  useEffect(() => {
+    reconcile(bots.map(bot => bot.name))
+  }, [bots, reconcile])
 
   const refresh = useCallback(async () => {
     setRefreshing(true)
@@ -93,123 +147,286 @@ export function BotsScreen({ onOpenBot, selectedBot, onOpenSection, variant = 's
     }
   }, [runtime])
 
-  const visible = useMemo(() => bots.filter(bot => matches(bot, query)), [bots, query])
+  /**
+   * One pass over the roster for every derived thing a row needs.
+   *
+   * Computed here rather than per row so that the filter chips can filter on
+   * presence: a chip that hides everything except "Working" has to know which
+   * rows those are before it renders any of them.
+   */
+  const presence = useMemo(() => {
+    const map = new Map<string, Presence>()
+
+    for (const bot of bots) {
+      const chat = chats[bot.name]
+      const needsInput = chat
+        ? chat.order.some(id => {
+            const item = chat.items[id]
+
+            return (item?.kind === 'approval' || item?.kind === 'clarify') && item.state === 'open'
+          })
+        : false
+
+      map.set(
+        bot.name,
+        presenceOf({
+          gatewayReady: status === 'ready',
+          needsInput,
+          sessionAttached: Boolean(bot.canonical?.id),
+          working: Boolean(running[bot.name]),
+          ...(bot.canonical?.lastActive ? { lastActive: bot.canonical.lastActive } : {})
+        })
+      )
+    }
+
+    return map
+  }, [bots, chats, running, status])
+
+  const unreadFor = useCallback(
+    (name: string) => {
+      const chat = chats[name]
+      const count = chat ? unreadCountSince(chat, lastSeen[name] ?? 0) : 0
+
+      return { count, unread: isUnread({ byName, lastSeen }, name) || count > 0 }
+    },
+    [byName, chats, lastSeen]
+  )
+
+  const sections = useMemo(() => sectionsOf(entries, archivedSet), [entries, archivedSet])
+  const archivedNames = useMemo(() => archivedOf(entries, archivedSet), [entries, archivedSet])
+  const dividers = useMemo(() => dividersOf(entries), [entries])
+
+  /**
+   * The list, flattened.
+   *
+   * Archived bots are excluded from the filters and from the unread totals —
+   * archiving a bot is how you stop it counting — so they are appended after
+   * the filter has run rather than passed through it.
+   */
+  const items = useMemo<ListItem[]>(() => {
+    const out: ListItem[] = []
+
+    for (const section of sections) {
+      const visible = section.bots
+        .map(name => byName[name])
+        .filter((bot): bot is Bot => Boolean(bot))
+        .filter(bot => matches(bot, query))
+        .filter(bot => {
+          const state = presence.get(bot.name)
+
+          return state ? matchesFilter(filter, state, unreadFor(bot.name).unread) : false
+        })
+
+      if (!visible.length && !(editing && section.divider)) {
+        continue
+      }
+
+      if (section.divider) {
+        out.push({
+          id: section.divider.id,
+          key: `divider:${section.divider.id}`,
+          kind: 'divider',
+          name: section.divider.name
+        })
+      }
+
+      for (const bot of visible) {
+        out.push({ archived: false, bot, key: `bot:${bot.name}`, kind: 'bot' })
+      }
+    }
+
+    if (archivedNames.length) {
+      out.push({ count: archivedNames.length, key: 'archive', kind: 'archiveHeader' })
+
+      if (archiveOpen) {
+        for (const name of archivedNames) {
+          const bot = byName[name]
+
+          if (bot) {
+            out.push({ archived: true, bot, key: `archived:${name}`, kind: 'bot' })
+          }
+        }
+      }
+    }
+
+    return out
+  }, [archiveOpen, archivedNames, byName, editing, filter, presence, query, sections, unreadFor])
+
+  const hasRows = items.some(item => item.kind === 'bot')
+
+  // A chat-level failure must not compete with the signed-out card: a dead
+  // session is not a roster problem and showing both makes neither readable.
+  const rosterError = signedOut ? null : error
 
   return (
-    <Screen edgeToEdgeTop={sidebar} padded={false}>
+    // The sidebar sits inside a panel the shell has already inset; the phone
+    // screen is full-bleed and has to clear the notch and the home bar itself.
+    <View style={sidebar ? { flex: 1 } : { flex: 1, paddingBottom: insets.bottom, paddingTop: insets.top }}>
+      <Head
+        editing={editing}
+        onToggleEdit={() => setEditing(current => !current)}
+        sidebar={sidebar}
+        {...(onOpenSection ? { onNewCron: () => onOpenSection('cron') } : {})}
+      />
+
+      {/*
+        On a phone the connection speaks only when it needs something — there is
+        no gateway card at the bottom to glance at, and a permanent "Connected"
+        row is a row nobody reads.
+      */}
+      {sidebar ? null : <ConnectionLine />}
+
+      <SearchField onChangeText={setQuery} value={query} />
+
+      <Filters current={filter} onChange={setFilter} />
+
+      {signedOut ? (
+        <Text
+          color="warnText"
+          style={{ paddingBottom: theme.space.sm, paddingHorizontal: theme.space.lg }}
+          variant="meta"
+        >
+          {strings.signedOut.listNote}
+        </Text>
+      ) : null}
+
       <FlatList
         ListEmptyComponent={
-          <EmptyState error={error} loading={loading} query={query} searching={Boolean(query.trim())} />
-        }
-        ListFooterComponent={
-          sidebar || !visible.length ? null : (
-            <Text
-              color="textMuted"
-              style={{ paddingHorizontal: theme.space.lg, paddingVertical: theme.space.xl, textAlign: 'center' }}
-              variant="caption"
-            >
-              {strings.bots.footnote}
-            </Text>
-          )
-        }
-        ListHeaderComponent={
-          <ListHeader
-            count={visible.length}
-            offline={status === 'offline' || (status !== 'ready' && refreshedAt === null)}
-            onChangeQuery={setQuery}
+          <EmptyState
+            error={rosterError}
+            filtered={filter !== 'all'}
+            loading={loading}
             query={query}
-            sidebar={sidebar}
-            status={status}
+            searching={Boolean(query.trim())}
           />
         }
-        data={visible}
-        keyExtractor={bot => bot.name}
+        data={items}
+        extraData={hasRows}
+        keyExtractor={item => item.key}
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl onRefresh={refresh} refreshing={refreshing} />}
-        renderItem={({ item }) => (
-          <BotRow bot={item} compact={sidebar} onPress={() => onOpenBot?.(item)} selected={item.name === selectedBot} />
-        )}
+        renderItem={({ item }) => {
+          if (item.kind === 'archiveHeader') {
+            return (
+              <ArchiveHeader count={item.count} onToggle={() => setArchiveOpen(open => !open)} open={archiveOpen} />
+            )
+          }
+
+          if (item.kind === 'divider') {
+            return <Divider editing={editing} id={item.id} name={item.name} />
+          }
+
+          const state = presence.get(item.bot.name) ?? ARCHIVED_PRESENCE
+          const { count, unread } = unreadFor(item.bot.name)
+
+          return (
+            <BotRow
+              accent={accents[item.bot.name] ?? 'default'}
+              bot={item.bot}
+              compact={!sidebar}
+              editing={editing && !item.archived}
+              onMove={moveBot}
+              onOpenMenu={setMenuFor}
+              onPress={openBot}
+              presence={item.archived ? ARCHIVED_PRESENCE : state}
+              selected={item.bot.name === selectedBot}
+              unread={item.archived ? false : unread}
+              unreadCount={item.archived ? 0 : count}
+              {...(avatars[item.bot.name] ? { avatarUri: avatars[item.bot.name] } : {})}
+            />
+          )
+        }}
+        style={{ flex: 1 }}
         testID="bots-list"
       />
 
-      {onOpenSection ? <TabBar onOpenSection={onOpenSection} /> : null}
-    </Screen>
+      {editing ? <EditBar /> : null}
+
+      {onOpenSection ? (
+        <SidebarFooter current={currentTab} gatewayCard={sidebar} onOpenSection={onOpenSection} />
+      ) : null}
+
+      {menuFor ? (
+        <RowMenu
+          accent={accents[menuFor] ?? 'default'}
+          archived={Boolean(archivedSet[menuFor])}
+          botName={menuFor}
+          displayName={byName[menuFor]?.displayName ?? menuFor}
+          onClose={() => setMenuFor(null)}
+          onMoveToSection={id => useChatLayoutStore.getState().moveToSection(menuFor, id)}
+          onSetAccent={(accent: AccentName) => useChatLayoutStore.getState().setAccent(menuFor, accent)}
+          onSetArchived={archived => useChatLayoutStore.getState().setArchived(menuFor, archived)}
+          sections={[
+            { id: null, name: strings.layout.topGroup },
+            ...dividers.map(divider => ({ id: divider.id, name: divider.name }))
+          ]}
+          visible
+        />
+      ) : null}
+    </View>
   )
 }
 
-function ListHeader({
-  count,
-  offline,
-  onChangeQuery,
-  query,
-  sidebar,
-  status
+/** The compact shell's Chats screen shows the signed-out card in place of the list. */
+export function BotsScreenOrSignedOut(props: BotsScreenProps) {
+  const { status } = useGateway()
+
+  return status === 'needs_signin' ? <SignedOutPanel /> : <BotsScreen {...props} />
+}
+
+function Head({
+  editing,
+  onNewCron,
+  onToggleEdit,
+  sidebar
 }: {
-  count: number
-  offline: boolean
-  onChangeQuery: (value: string) => void
-  query: string
+  editing: boolean
+  onNewCron?: () => void
+  onToggleEdit: () => void
   sidebar: boolean
-  status: string
 }) {
   const theme = useTheme()
 
   return (
-    <View style={{ paddingHorizontal: theme.space.lg, paddingTop: sidebar ? theme.space.md : theme.space.sm }}>
-      {sidebar ? (
-        <Text color="textMuted" style={{ marginBottom: theme.space.sm }} variant="caption">
-          {strings.bots.sidebarHeader}
-        </Text>
-      ) : (
-        <Text style={{ marginBottom: theme.space.md }} variant="display">
-          {strings.bots.title}
-        </Text>
-      )}
+    <View
+      style={{
+        alignItems: 'center',
+        flexDirection: 'row',
+        gap: theme.space.md,
+        paddingBottom: theme.space.md,
+        paddingHorizontal: theme.space.lg,
+        paddingTop: theme.space.panel
+      }}
+    >
+      <Text style={{ flex: 1 }} variant={sidebar ? 'titleWide' : 'title'}>
+        {strings.bots.title}
+      </Text>
 
-      {sidebar ? null : (
-        <View
-          style={{
-            alignItems: 'center',
-            borderBottomColor: theme.colors.border,
-            borderBottomWidth: 1,
-            flexDirection: 'row',
-            justifyContent: 'space-between',
-            paddingBottom: theme.space.md
-          }}
+      {onNewCron ? (
+        <Pressable
+          accessibilityLabel={strings.bots.newCron}
+          accessibilityRole="button"
+          hitSlop={TAP_SLOP}
+          onPress={onNewCron}
+          testID="bots-new-cron"
         >
-          <Text color={status === 'ready' ? 'success' : 'textMuted'} variant="caption">
-            {`● ${strings.connection.status[status as keyof typeof strings.connection.status] ?? status}`}
-          </Text>
-        </View>
-      )}
-
-      <SearchField onChangeText={onChangeQuery} value={query} />
-
-      {offline ? (
-        <Text color="textMuted" style={{ paddingBottom: theme.space.sm }} variant="caption">
-          {strings.bots.offline}
-        </Text>
+          <GlassSurface
+            contentStyle={{ alignItems: 'center', height: 38, justifyContent: 'center', width: 38 }}
+            variant="control"
+          >
+            <Text color="textMuted" style={{ fontSize: 18 }}>
+              {'⊕'}
+            </Text>
+          </GlassSurface>
+        </Pressable>
       ) : null}
 
-      {sidebar ? null : (
-        <View
-          style={{
-            alignItems: 'center',
-            flexDirection: 'row',
-            justifyContent: 'space-between',
-            paddingBottom: theme.space.xs,
-            paddingTop: theme.space.sm
-          }}
-        >
-          <Text color="textMuted" style={{ fontWeight: '700', letterSpacing: 1.1 }} variant="caption">
-            {strings.bots.section}
-          </Text>
-          <Text color="textMuted" variant="caption">
-            {strings.bots.conversations(count)}
-          </Text>
-        </View>
-      )}
+      <Pressable accessibilityRole="button" hitSlop={TAP_SLOP} onPress={onToggleEdit} testID="bots-edit">
+        <Text color="accentText" style={{ fontWeight: '600' }} variant="preview">
+          {editing ? strings.layout.done : strings.layout.edit}
+        </Text>
+      </Pressable>
     </View>
   )
 }
@@ -221,15 +438,18 @@ function SearchField({ onChangeText, value }: { onChangeText: (value: string) =>
     <View
       style={{
         alignItems: 'center',
-        backgroundColor: theme.colors.surfaceRaised,
-        borderRadius: theme.radii.lg,
+        backgroundColor: theme.tintSunk,
+        borderColor: theme.hairlineSoft,
+        borderRadius: theme.radii.pill,
+        borderWidth: 1,
         flexDirection: 'row',
         gap: theme.space.sm,
-        marginVertical: theme.space.sm,
+        marginBottom: theme.space.md,
+        marginHorizontal: theme.space.lg,
         paddingHorizontal: theme.space.md
       }}
     >
-      <Text color="textMuted">{'⌕'}</Text>
+      <Text color="textFaint">{'⌕'}</Text>
       <TextInput
         accessibilityLabel={strings.bots.search}
         autoCapitalize="none"
@@ -237,13 +457,12 @@ function SearchField({ onChangeText, value }: { onChangeText: (value: string) =>
         clearButtonMode="while-editing"
         onChangeText={onChangeText}
         placeholder={strings.bots.search}
-        placeholderTextColor={theme.colors.textMuted}
+        placeholderTextColor={theme.colors.textFaint}
         style={{
           color: theme.colors.text,
           flex: 1,
-          fontSize: 17,
-          minHeight: CONTROL_MIN_HEIGHT,
-          paddingVertical: theme.space.sm
+          fontSize: 15,
+          minHeight: CONTROL_MIN_HEIGHT
         }}
         testID="bots-search"
         value={value}
@@ -252,14 +471,203 @@ function SearchField({ onChangeText, value }: { onChangeText: (value: string) =>
   )
 }
 
+function Filters({ current, onChange }: { current: ChatFilter; onChange: (filter: ChatFilter) => void }) {
+  const theme = useTheme()
+
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        gap: 6,
+        paddingBottom: theme.space.md,
+        paddingHorizontal: theme.space.lg
+      }}
+    >
+      {CHAT_FILTERS.map(filter => {
+        const selected = filter === current
+
+        return (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ selected }}
+            key={filter}
+            onPress={() => onChange(filter)}
+            style={{
+              backgroundColor: selected ? theme.colors.accent : theme.tintSunk,
+              borderColor: selected ? 'transparent' : theme.hairlineSoft,
+              borderRadius: theme.radii.pill,
+              borderWidth: 1,
+              paddingHorizontal: theme.space.md,
+              paddingVertical: 6
+            }}
+            testID={`filter-${filter}`}
+          >
+            <Text color={selected ? 'onAccent' : 'textMuted'} style={{ fontWeight: '600' }} variant="meta">
+              {strings.bots.filters[filter]}
+            </Text>
+          </Pressable>
+        )
+      })}
+    </View>
+  )
+}
+
+/**
+ * A named section break.
+ *
+ * In edit mode the name becomes editable in place rather than opening a rename
+ * dialog: the field is already the thing being renamed, and a dialog would be a
+ * second modal on a screen that already has one for the row menu.
+ */
+function Divider({ editing, id, name }: { editing: boolean; id: string | null; name: string }) {
+  const theme = useTheme()
+
+  if (!id) {
+    return null
+  }
+
+  return (
+    <View
+      style={{
+        alignItems: 'center',
+        flexDirection: 'row',
+        gap: theme.space.sm,
+        paddingBottom: 6,
+        paddingHorizontal: theme.space.lg,
+        paddingTop: theme.space.lg
+      }}
+      testID={`divider-${id}`}
+    >
+      {editing ? (
+        <TextInput
+          accessibilityLabel={strings.layout.dividerName}
+          autoCapitalize="words"
+          onChangeText={next => useChatLayoutStore.getState().renameDivider(id, next)}
+          placeholder={strings.layout.newDividerName}
+          placeholderTextColor={theme.colors.textFaint}
+          style={{
+            backgroundColor: theme.tintSunk,
+            borderRadius: theme.radii.md,
+            color: theme.colors.text,
+            flex: 1,
+            fontSize: 13,
+            paddingHorizontal: theme.space.sm,
+            paddingVertical: 4
+          }}
+          testID={`divider-name-${id}`}
+          value={name}
+        />
+      ) : (
+        <>
+          <Text color="textFaint" variant="micro">
+            {(name || strings.layout.newDividerName).toUpperCase()}
+          </Text>
+          <View style={{ backgroundColor: theme.hairlineSoft, flex: 1, height: 1 }} />
+        </>
+      )}
+
+      {editing ? (
+        <Pressable
+          accessibilityRole="button"
+          hitSlop={TAP_SLOP}
+          onPress={() => useChatLayoutStore.getState().removeDivider(id)}
+          testID={`divider-remove-${id}`}
+        >
+          <Text color="dangerText" variant="meta">
+            {strings.layout.remove}
+          </Text>
+        </Pressable>
+      ) : null}
+    </View>
+  )
+}
+
+function ArchiveHeader({ count, onToggle, open }: { count: number; onToggle: () => void; open: boolean }) {
+  const theme = useTheme()
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ expanded: open }}
+      onPress={onToggle}
+      style={{
+        alignItems: 'center',
+        flexDirection: 'row',
+        gap: theme.space.sm,
+        marginHorizontal: theme.space.sm,
+        marginTop: theme.space.sm,
+        paddingHorizontal: theme.space.md,
+        paddingVertical: theme.space.md
+      }}
+      testID="archived-row"
+    >
+      {/* Decorative: the row's own expanded state is what a screen reader reads. */}
+      <Text
+        accessibilityElementsHidden
+        color="textMuted"
+        importantForAccessibility="no-hide-descendants"
+        style={{ fontSize: 13 }}
+      >
+        {open ? '⌄' : '›'}
+      </Text>
+      <Text color="textMuted" style={{ fontWeight: '600' }} variant="preview">
+        {strings.layout.archived(count)}
+      </Text>
+    </Pressable>
+  )
+}
+
+function EditBar() {
+  const theme = useTheme()
+
+  return (
+    <View
+      style={{
+        alignItems: 'center',
+        backgroundColor: theme.tintSunk,
+        borderColor: theme.hairlineSoft,
+        borderRadius: theme.radii.card,
+        borderWidth: 1,
+        flexDirection: 'row',
+        gap: theme.space.sm,
+        marginHorizontal: theme.space.md,
+        marginTop: theme.space.sm,
+        paddingHorizontal: theme.space.md,
+        paddingVertical: theme.space.sm
+      }}
+      testID="edit-bar"
+    >
+      <Text color="textMuted" style={{ flex: 1 }} variant="meta">
+        {strings.layout.editHint}
+      </Text>
+
+      <Pressable
+        accessibilityRole="button"
+        hitSlop={TAP_SLOP}
+        // Empty rather than pre-filled with "New section": the field is focused
+        // straight into, and a seeded name means the first thing typed is
+        // APPENDED to a word nobody asked for.
+        onPress={() => useChatLayoutStore.getState().addDivider('')}
+        testID="add-divider"
+      >
+        <Text color="accentText" style={{ fontWeight: '600' }} variant="meta">
+          {strings.layout.addDivider}
+        </Text>
+      </Pressable>
+    </View>
+  )
+}
+
 function EmptyState({
-  loading,
   error,
+  filtered,
+  loading,
   query,
   searching
 }: {
-  loading: boolean
   error: string | null
+  filtered: boolean
+  loading: boolean
   query: string
   searching: boolean
 }) {
@@ -269,251 +677,17 @@ function EmptyState({
     ? strings.bots.failed(error)
     : searching
       ? strings.bots.noMatches(query.trim())
-      : loading
-        ? strings.bots.loading
-        : strings.bots.empty
+      : filtered
+        ? strings.bots.noneMatchFilter
+        : loading
+          ? strings.bots.loading
+          : strings.bots.empty
 
   return (
     <View style={{ gap: theme.space.sm, padding: theme.space.lg }}>
-      <Text color={error ? 'danger' : 'textMuted'} testID="bots-empty">
+      <Text color={error ? 'dangerText' : 'textMuted'} testID="bots-empty">
         {message}
       </Text>
     </View>
-  )
-}
-
-function BotRow({
-  bot,
-  selected,
-  compact,
-  onPress
-}: {
-  bot: Bot
-  selected: boolean
-  compact: boolean
-  onPress: () => void
-}) {
-  const theme = useTheme()
-  const running = useBotsStore(state => Boolean(state.running[bot.name]))
-  const unread = useBotsStore(state => isUnread(state, bot.name))
-  const lastSeen = useBotsStore(state => state.lastSeen[bot.name] ?? 0)
-  const avatar = useBotsStore(state => state.avatars[bot.name])
-  /**
-   * How many messages arrived since the user last looked.
-   *
-   * Only countable when the chat is actually loaded — opened once, or pulled in
-   * by the Activity screen's background load. The gateway reports `last_active`
-   * and nothing else, so a chat this app has never read can only say THAT it
-   * moved, and the badge stays a dot rather than inventing a number.
-   */
-  const unreadCount = useChatsStore(state => {
-    const chat = state.chats[bot.name]
-
-    return chat ? unreadCountSince(chat, lastSeen) : 0
-  })
-  // "Needs input" is not a roster field: it is an open approval or clarify in
-  // the chat this app already holds, which is why it survives a roster refresh.
-  const needsInput = useChatsStore(state => {
-    const chat = state.chats[bot.name]
-
-    if (!chat) {
-      return false
-    }
-
-    return chat.order.some(id => {
-      const item = chat.items[id]
-
-      return (item?.kind === 'approval' || item?.kind === 'clarify') && item.state === 'open'
-    })
-  })
-
-  // The gateway reports `last_active`, not a count, so the badge is a dot
-  // unless the roster gave us something countable to show.
-  const preview = bot.canonical?.preview ? formatPreview(bot.canonical.preview) : bot.description
-  const stamp = formatListTime(bot.canonical?.lastActive)
-
-  const label = [
-    bot.displayName,
-    unreadCount > 0 ? strings.bots.unreadLabel(unreadCount) : unread ? strings.bots.unread : '',
-    needsInput ? strings.bots.needsInput : '',
-    running ? strings.bots.running : ''
-  ]
-    .filter(Boolean)
-    .join(', ')
-
-  return (
-    <Pressable
-      accessibilityLabel={label}
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
-      onPress={onPress}
-      style={({ pressed }) => ({
-        backgroundColor: selected || pressed ? theme.colors.surfaceRaised : 'transparent',
-        flexDirection: 'row',
-        gap: theme.space.md,
-        paddingHorizontal: theme.space.lg,
-        paddingVertical: compact ? theme.space.sm : theme.space.md
-      })}
-      testID={`bot-row-${bot.name}`}
-    >
-      <Avatar name={bot.displayName} size={compact ? 40 : 52} uri={avatar} />
-
-      <View
-        style={{
-          borderBottomColor: theme.colors.border,
-          borderBottomWidth: compact ? 0 : 1,
-          flex: 1,
-          gap: 2,
-          paddingBottom: compact ? 0 : theme.space.sm
-        }}
-      >
-        <View style={{ alignItems: 'baseline', flexDirection: 'row', gap: theme.space.sm }}>
-          <Text numberOfLines={1} style={{ flex: 1, fontSize: compact ? 16 : 17, fontWeight: '600' }}>
-            {bot.displayName}
-          </Text>
-          {stamp ? (
-            <Text color="textMuted" variant="caption">
-              {stamp}
-            </Text>
-          ) : null}
-          {unread || unreadCount > 0 ? <UnreadBadge count={unreadCount} /> : null}
-        </View>
-
-        <Text color="textMuted" numberOfLines={compact ? 1 : 2} style={{ fontSize: compact ? 13 : 15 }}>
-          {preview || strings.bots.noPreview}
-        </Text>
-
-        {needsInput || running ? (
-          <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.sm }}>
-            {needsInput ? (
-              <Text
-                color="accent"
-                style={{ fontWeight: '600' }}
-                testID={`bot-needs-input-${bot.name}`}
-                variant="caption"
-              >
-                {strings.bots.needsInput}
-              </Text>
-            ) : null}
-            {running ? (
-              <Text color="success" testID={`bot-running-${bot.name}`} variant="caption">
-                {`● ${strings.bots.running}`}
-              </Text>
-            ) : null}
-          </View>
-        ) : null}
-      </View>
-    </Pressable>
-  )
-}
-
-/**
- * A number when the app can count, a dot when it cannot.
- *
- * The gateway reports `last_active` for a canonical chat and nothing more, so a
- * chat this app has never read can only be shown as "it moved". A chat it HAS
- * read is counted from the transcript itself — replies and inbound teammate
- * messages since the watermark — and capped, because a badge wider than the
- * row's stamp stops being a badge.
- */
-function UnreadBadge({ count }: { count: number }) {
-  const theme = useTheme()
-  const label = unreadBadgeLabel(count)
-
-  if (!label) {
-    return (
-      <View
-        accessibilityElementsHidden
-        importantForAccessibility="no-hide-descendants"
-        style={{
-          backgroundColor: theme.colors.bubbleBlue,
-          borderRadius: 5,
-          height: 10,
-          width: 10
-        }}
-        testID="bot-unread"
-      />
-    )
-  }
-
-  return (
-    <View
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
-      style={{
-        alignItems: 'center',
-        backgroundColor: theme.colors.bubbleBlue,
-        borderRadius: 10,
-        justifyContent: 'center',
-        minWidth: 20,
-        paddingHorizontal: 6,
-        paddingVertical: 1
-      }}
-      testID="bot-unread"
-    >
-      <Text color="onAccent" style={{ fontSize: 12, fontWeight: '700' }}>
-        {label}
-      </Text>
-    </View>
-  )
-}
-
-function TabBar({ onOpenSection }: { onOpenSection: (section: BotsSection) => void }) {
-  const theme = useTheme()
-
-  return (
-    <View
-      style={{
-        backgroundColor: theme.colors.surface,
-        borderTopColor: theme.colors.border,
-        borderTopWidth: 1,
-        flexDirection: 'row',
-        justifyContent: 'space-around',
-        paddingTop: theme.space.sm
-      }}
-    >
-      <Tab glyph="◉" label={strings.tabs.chats} selected />
-      {TABS.map(tab => (
-        <Tab glyph={tab.glyph} key={tab.key} label={tab.label} onPress={() => onOpenSection(tab.key)} />
-      ))}
-    </View>
-  )
-}
-
-function Tab({
-  glyph,
-  label,
-  onPress,
-  selected = false
-}: {
-  glyph: string
-  label: string
-  onPress?: () => void
-  selected?: boolean
-}) {
-  const theme = useTheme()
-
-  return (
-    <Pressable
-      accessibilityRole="tab"
-      accessibilityState={{ selected }}
-      disabled={!onPress}
-      onPress={onPress}
-      style={({ pressed }) => ({
-        alignItems: 'center',
-        minWidth: 70,
-        opacity: pressed ? 0.6 : 1,
-        paddingBottom: theme.space.sm,
-        paddingTop: theme.space.xs
-      })}
-      testID={`tab-${label.toLowerCase()}`}
-    >
-      <Text color={selected ? 'accent' : 'textMuted'} style={{ fontSize: 21, lineHeight: 26 }}>
-        {glyph}
-      </Text>
-      <Text color={selected ? 'accent' : 'textMuted'} style={{ fontSize: 11, fontWeight: selected ? '700' : '500' }}>
-        {label}
-      </Text>
-    </Pressable>
   )
 }

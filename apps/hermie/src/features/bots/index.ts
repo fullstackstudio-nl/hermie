@@ -7,4 +7,14 @@ export {
   PROFILE_SESSION_LIST_LIMIT,
   SESSION_COLUMNS
 } from './bots-controller'
-export { BotsScreen, type BotsScreenProps, type BotsSection } from './BotsScreen'
+export { BotsScreen, BotsScreenOrSignedOut, type BotsScreenProps } from './BotsScreen'
+export {
+  CHAT_FILTERS,
+  matchesFilter,
+  presenceOf,
+  type ChatFilter,
+  type Presence,
+  type PresenceInput,
+  type PresenceState
+} from './presence'
+export { ConnectionLine, GatewayCard, SidebarFooter, type BotsSection, type TabKey } from './SidebarFooter'

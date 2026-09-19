@@ -203,7 +203,7 @@ export const useBotsStore = create<BotsState>((set, get) => ({
  * deliberately a timestamp comparison rather than a counter: the gateway is the
  * only thing that knows how much happened, and it only reports `last_active`.
  */
-export function isUnread(state: BotsState, name: string): boolean {
+export function isUnread(state: Pick<BotsState, 'byName' | 'lastSeen'>, name: string): boolean {
   const lastActive = state.byName[name]?.canonical?.lastActive ?? 0
 
   return lastActive > 0 && lastActive > (state.lastSeen[name] ?? 0)

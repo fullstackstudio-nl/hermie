@@ -138,9 +138,20 @@ header subtitle repeats the state in words. Bead sizes: 14 px on a 48 px avatar
 (2.5 px ring in the panel colour), 9 px inline in the header and gateway card,
 18 px in the legend.
 
-The **global** connection state is not a bot state. It lives in the sidebar's
-gateway card (`gateway.example.com`, `Connected · 12 ms`), and the `…` on that card
+The **global** connection state is not a bot state, and it is shown differently
+on the two layouts. The wide layout carries it permanently, in the sidebar's
+gateway card (`gateway.example.com`, `Connected · 12 ms`); the `…` on that card
 opens connection settings.
+
+The phone does **not**. There is no gateway card at the bottom of the compact
+list — the bottom holds the four-tab strip and nothing else. A permanent row
+saying `Connected` is a row nobody reads, and the presence bead beside every
+chat already carries it. Instead the connection speaks only when it wants
+something: a slim status line sits under the `Chats` title whenever the status
+is anything but ready (`Connecting…`, `Reconnecting…`, `Offline`), and
+`needs_signin` takes the whole screen as the Signed out card rather than a line.
+The host, the state and the latency live in Settings → Gateway, where they are
+looked up rather than glanced at.
 
 ---
 
@@ -393,8 +404,9 @@ The compose button does not apply, because there is one canonical chat per bot a
 you never create a conversation. Its place is taken by a round glass **New cron**
 button, the one thing you do create from this screen.
 
-Footer navigation is a four-tab glass strip above the gateway card: **Chats ·
-Activity · Crons · Settings**.
+Footer navigation is a four-tab glass strip: **Chats · Activity · Crons ·
+Settings**. On the wide layout the gateway card sits under it; on the phone the
+strip is the whole footer (see §1.6).
 
 ### 6.9 Overlays, sheets and Esc
 

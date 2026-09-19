@@ -14,6 +14,7 @@ import { chatGatewayFor } from '../../gateway/link'
 import { chatCache } from '../../platform/chat-cache'
 import { RUNS_ON_MAC } from '../../platform/runs-on-mac'
 import { useBotsStore } from '../../store/bots'
+import { useChatLayoutStore } from '../../store/chat-layout'
 import { useChatsStore } from '../../store/chats'
 import { useSettingsStore } from '../../store/settings'
 import { BotsController } from '../bots/bots-controller'
@@ -27,7 +28,7 @@ export interface ChatRuntimeValue {
 const ChatRuntimeContext = createContext<ChatRuntimeValue | null>(null)
 
 export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
-  const { connection, status } = useGateway()
+  const { config, connection, status } = useGateway()
   const [value, setValue] = useState<ChatRuntimeValue | null>(null)
   const valueRef = useRef<ChatRuntimeValue | null>(null)
 
@@ -35,6 +36,18 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     void useSettingsStore.getState().hydrate()
     void useBotsStore.getState().hydrateLastSeen()
   }, [])
+
+  // The list's arrangement is stored per gateway, so it is read when the
+  // gateway is known rather than at startup: "Change gateway" then starts with
+  // an empty arrangement and "Sign out" keeps the one it had, with no clean-up
+  // code on either path (ADR-0012).
+  useEffect(() => {
+    if (config?.baseUrl) {
+      void useChatLayoutStore.getState().load(config.baseUrl)
+    } else {
+      useChatLayoutStore.getState().reset()
+    }
+  }, [config?.baseUrl])
 
   useEffect(() => {
     if (!connection) {

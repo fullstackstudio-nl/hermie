@@ -12,9 +12,11 @@
  * must not fall through to whatever is underneath either, or it would stop the
  * very turn that is waiting for the answer.
  */
-import { act, render, screen, waitFor } from '@testing-library/react-native'
-import { Text } from 'react-native'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native'
+import { useState } from 'react'
+import { Pressable, Text } from 'react-native'
 
+import { OverlayPanel } from '../src/app/OverlayPanel'
 import { BottomSheet } from '../src/ui/BottomSheet'
 import { useEscapeKey } from '../src/ui/useEscapeKey'
 import { renderScreen, withProviders } from './support/render'
@@ -213,5 +215,71 @@ describe('BottomSheet and Escape', () => {
 
     pressEscape()
     expect(underneath).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * Escape goes back ONE level.
+ *
+ * The overlay panel that carries Activity, Crons and Settings on the wide layout
+ * holds Escape while it is open. A sub page inside it — a cron's detail, a run
+ * transcript, the connection test — registers on top when it opens, so the first
+ * Escape returns to the page underneath and only the second closes the panel.
+ *
+ * Nothing coordinates that. It falls out of mount order, which is exactly what
+ * the stack is for, and this is the test that says so.
+ */
+function SubPage() {
+  const [open, setOpen] = useState(false)
+
+  // The shape every sub page in the app uses; see `CronScreen` and
+  // `SettingsScreen`.
+  useEscapeKey(() => setOpen(false), open)
+
+  return (
+    <>
+      <Pressable onPress={() => setOpen(true)} testID="open-sub-page">
+        <Text>Open</Text>
+      </Pressable>
+      {open ? <Text testID="sub-page">Sub page</Text> : null}
+    </>
+  )
+}
+
+describe('Escape inside the overlay panel', () => {
+  it('closes the panel when nothing is open inside it', async () => {
+    const onClose = jest.fn()
+
+    renderScreen(
+      <OverlayPanel onClose={onClose} title="Settings" visible>
+        <SubPage />
+      </OverlayPanel>
+    )
+
+    pressEscape()
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('pops the sub page first and leaves the panel open', () => {
+    const onClose = jest.fn()
+
+    renderScreen(
+      <OverlayPanel onClose={onClose} title="Settings" visible>
+        <SubPage />
+      </OverlayPanel>
+    )
+
+    fireEvent.press(screen.getByTestId('open-sub-page'))
+    expect(screen.getByTestId('sub-page')).toBeTruthy()
+
+    pressEscape()
+
+    expect(screen.queryByTestId('sub-page')).toBeNull()
+    expect(onClose).not.toHaveBeenCalled()
+
+    // And only now does the panel get it.
+    pressEscape()
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 })

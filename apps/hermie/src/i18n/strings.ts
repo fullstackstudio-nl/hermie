@@ -154,14 +154,90 @@ export const strings = {
     unread: 'New',
     needsInput: 'Needs your input',
     defaultBot: 'Default',
-    search: 'Search',
+    search: 'Search chats',
     section: 'MESSAGES',
     conversations: (count: number) => (count === 1 ? '1 conversation' : `${count} conversations`),
     noMatches: (query: string) => `No conversation matches “${query}”.`,
     unreadLabel: (count: number) => (count === 1 ? '1 unread message' : `${count} unread messages`),
     offline: 'Offline — showing the last saved list.',
     footnote: 'Your conversations stay with your gateway.',
-    sidebarHeader: 'CHATS'
+    sidebarHeader: 'CHATS',
+    newCron: 'New cron',
+    filters: {
+      all: 'All',
+      unread: 'Unread',
+      working: 'Working',
+      needsInput: 'Needs input'
+    },
+    noneMatchFilter: 'No conversation is in that state right now.'
+  },
+
+  /**
+   * The four presence states, in words.
+   *
+   * The bead never carries the state on colour alone — these are what the row
+   * and the chat header say out loud, and what a screen reader reads.
+   */
+  presence: {
+    online: 'Online',
+    working: 'Working…',
+    needsInput: 'Needs input',
+    offline: 'Offline',
+    offlineSince: (time: string) => `Offline · last seen ${time}`
+  },
+
+  /** Arranging the list. All of it is local to this device — see ADR-0012. */
+  layout: {
+    edit: 'Edit',
+    done: 'Done',
+    editHint: 'Reorder rows and move them between sections.',
+    addDivider: 'Add divider',
+    newDividerName: 'New section',
+    rename: 'Rename',
+    remove: 'Remove',
+    dividerName: 'Section name',
+    moveUp: 'Move up',
+    moveDown: 'Move down',
+    topGroup: 'No section',
+    moveToSection: (section: string) => `Move to ${section}`,
+    archive: 'Archive',
+    unarchive: 'Unarchive',
+    archived: (count: number) => `Archived (${count})`,
+    archivedPreview: 'Archived · excluded from filters and counts',
+    colour: 'Colour',
+    colourOf: (name: string) => `Colour for ${name}`,
+    accents: {
+      default: 'Default',
+      indigo: 'Indigo',
+      violet: 'Violet',
+      magenta: 'Magenta',
+      red: 'Red',
+      orange: 'Orange',
+      teal: 'Teal',
+      green: 'Green',
+      graphite: 'Graphite'
+    },
+    rowActions: (name: string) => `Actions for ${name}`,
+    close: 'Close'
+  },
+
+  /**
+   * The signed-out state, which used to be a small link in a corner and was not
+   * noticed. It is now the only thing in the content column.
+   */
+  signedOut: {
+    title: 'Signed out',
+    body: (host: string) => `Your session on ${host} has expired, so Hermie cannot reach your bots until you sign in.`,
+    bodyNoHost: 'Your session has expired, so Hermie cannot reach your bots until you sign in.',
+    signIn: 'Sign in',
+    changeGateway: 'Change gateway',
+    listNote: 'Showing the last saved list.'
+  },
+
+  gateway: {
+    connectionSettings: 'Connection settings',
+    latency: (ms: number) => `${ms} ms`,
+    noHost: 'No gateway'
   },
 
   activity: {
@@ -273,7 +349,9 @@ export const strings = {
     showThinking: 'Show thinking',
     appearance: 'APPEARANCE',
     theme: 'Theme',
-    themeOptions: { system: 'System', light: 'Light', dark: 'Dark' }
+    themeOptions: { system: 'System', light: 'Light', dark: 'Dark' },
+    wallpaper: 'Wallpaper',
+    wallpaperOptions: { blue: 'Blue', warm: 'Warm', graphite: 'Graphite' }
   },
 
   connection: {

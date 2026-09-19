@@ -17,6 +17,7 @@ import { Pressable, RefreshControl, SectionList, View } from 'react-native'
 
 import { useCronStore } from '../../store/cron'
 import { Screen, Text } from '../../ui/primitives'
+import { useEscapeKey } from '../../ui/useEscapeKey'
 import { useTheme } from '../../ui/theme'
 import { CONTROL_MIN_HEIGHT } from '../../ui/tokens'
 import type { CronJobInput } from './cron-controller'
@@ -99,6 +100,16 @@ export function CronScreen() {
   }, [jobs])
 
   const selected = view.screen === 'list' ? null : (jobs.find(job => job.id === view.jobId) ?? null)
+
+  // Escape goes back ONE level. A sub page registers on top of whatever is
+  // already holding the key — the overlay panel on the wide layout — so the
+  // first Escape returns to the list here and only the second closes the panel
+  // around it. Mount order does the ordering; see `useEscapeKey`.
+  useEscapeKey(
+    () =>
+      setView(current => (current.screen === 'run' ? { screen: 'detail', jobId: current.jobId } : { screen: 'list' })),
+    view.screen !== 'list'
+  )
 
   if (view.screen === 'run' && selected) {
     return (

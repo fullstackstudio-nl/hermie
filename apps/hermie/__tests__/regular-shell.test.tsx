@@ -1,31 +1,55 @@
 /**
- * The wide-window shell — an iPad or a Mac: sidebar plus detail.
+ * The wide-window shell — an iPad or a Mac: two floating glass panels over a
+ * wallpaper.
  *
- * There is no navigator here, both panes are always mounted, and a window too
+ * There is no navigator here, both panels are always mounted, and a window too
  * narrow for two never reaches this component (`useLayoutMode` hands that case
- * to the compact stack). So the whole behaviour is which pane is on screen and
- * which row is marked selected, which is exactly what a test can assert and
- * what a screenshot of a Mac window cannot.
+ * to the compact stack). So the whole behaviour is which row is marked selected
+ * and what the overlay panel is doing, which is exactly what a test can assert
+ * and what a screenshot of a Mac window cannot.
+ *
+ * The one thing worth stating about the overlay: it COVERS the chat column, it
+ * does not replace it. The sidebar stays outside the scrim and stays usable,
+ * which is the whole reason the destinations are an overlay rather than a third
+ * pane.
  */
-import { fireEvent, screen } from '@testing-library/react-native'
-import { useWindowDimensions } from 'react-native'
+import { fireEvent, screen, waitFor } from '@testing-library/react-native'
+import { StyleSheet, useWindowDimensions } from 'react-native'
 
 import { RegularShell } from '../src/app/RegularShell'
 import { type Bot, useBotsStore } from '../src/store/bots'
+import { useChatLayoutStore } from '../src/store/chat-layout'
 import { useChatsStore } from '../src/store/chats'
+import { WINDOW_GAP } from '../src/ui/tokens'
 import { renderScreen } from './support/render'
 
+const gateway = { status: 'ready', config: { baseUrl: 'https://gateway.example.com', authMode: 'native_pkce' } }
+
 jest.mock('../src/gateway', () => ({
-  useGateway: () => ({ status: 'ready' })
+  useGateway: () => gateway,
+  hostOf: (url: string) => url.replace(/^https:\/\//, '')
+}))
+
+jest.mock('../src/gateway/GatewayProvider', () => ({
+  useGateway: () => ({
+    ...gateway,
+    adoptTokens: jest.fn(),
+    changeGateway: jest.fn(),
+    extraHeaders: {},
+    signOut: jest.fn()
+  })
 }))
 
 jest.mock('../src/features/chats/ChatRuntime', () => ({
   useChatRuntime: () => null
 }))
 
+jest.mock('../src/platform/runs-on-mac', () => ({ RUNS_ON_MAC: false }))
+
 jest.mock('react-native/Libraries/Utilities/useWindowDimensions')
 
 const mockDimensions = useWindowDimensions as unknown as jest.Mock
+const runsOnMac = jest.requireMock('../src/platform/runs-on-mac') as { RUNS_ON_MAC: boolean }
 
 const bot = (name: string, displayName: string): Bot => ({
   name,
@@ -41,9 +65,17 @@ const bot = (name: string, displayName: string): Bot => ({
 
 const wide = () => mockDimensions.mockReturnValue({ width: 1024, height: 1366, scale: 2, fontScale: 1 })
 
+const paddingOf = (testID: string) =>
+  StyleSheet.flatten(screen.getByTestId(testID).props.style as never) as {
+    paddingTop?: number
+    paddingBottom?: number
+  }
+
 beforeEach(() => {
+  runsOnMac.RUNS_ON_MAC = false
   useBotsStore.getState().reset()
   useChatsStore.getState().reset()
+  useChatLayoutStore.getState().reset()
   useBotsStore.getState().setBots([bot('researcher', 'Researcher'), bot('writer', 'Writer')])
   wide()
 })
@@ -64,33 +96,102 @@ describe('RegularShell', () => {
     expect(screen.getByTestId('bot-row-writer').props.accessibilityState).toMatchObject({ selected: false })
   })
 
-  it('opens Activity as a detail pane and marks its sidebar row', () => {
-    renderScreen(<RegularShell />)
-
-    fireEvent.press(screen.getByTestId('sidebar-activity'))
-
-    // Two matches: the sidebar row and the pane's own title.
-    expect(screen.getAllByText('Activity')).toHaveLength(2)
-    expect(screen.getByTestId('activity-list')).toBeTruthy()
-    expect(screen.getByTestId('sidebar-activity').props.accessibilityState).toMatchObject({ selected: true })
-    // The chat pane is gone, not merely covered.
-    expect(screen.queryByText('Pick a conversation to start reading.')).toBeNull()
-  })
-
-  it('drops the selection highlight while a non-chat pane is open', () => {
-    renderScreen(<RegularShell />)
-
-    fireEvent.press(screen.getByTestId('bot-row-researcher'))
-    fireEvent.press(screen.getByTestId('sidebar-settings'))
-
-    expect(screen.getByTestId('bot-row-researcher').props.accessibilityState).toMatchObject({ selected: false })
-  })
-
-  it('keeps both panes mounted while a chat is open', () => {
+  it('keeps both panels mounted while a chat is open', () => {
     renderScreen(<RegularShell />)
 
     fireEvent.press(screen.getByTestId('bot-row-researcher'))
 
     expect(screen.getByTestId('bot-row-writer')).toBeTruthy()
+  })
+
+  it('drops the selection highlight while a destination is open', () => {
+    renderScreen(<RegularShell />)
+
+    fireEvent.press(screen.getByTestId('bot-row-researcher'))
+    fireEvent.press(screen.getByTestId('tab-settings'))
+
+    expect(screen.getByTestId('bot-row-researcher').props.accessibilityState).toMatchObject({ selected: false })
+  })
+})
+
+describe('the overlay panel', () => {
+  it('slides Activity over the chat column and leaves the sidebar alone', () => {
+    renderScreen(<RegularShell />)
+
+    fireEvent.press(screen.getByTestId('tab-activity'))
+
+    expect(screen.getByTestId('overlay-panel')).toBeTruthy()
+    expect(screen.getByTestId('activity-list')).toBeTruthy()
+    // Covered, not replaced — and the list underneath is still there to tap.
+    expect(screen.getByText('Pick a conversation to start reading.')).toBeTruthy()
+    expect(screen.getByTestId('bot-row-writer')).toBeTruthy()
+  })
+
+  // The panel stays mounted for its own slide-out — one that unmounted on the
+  // first frame of its exit would simply vanish — so these wait for it to go.
+  it('closes on the round close button', async () => {
+    renderScreen(<RegularShell />)
+
+    fireEvent.press(screen.getByTestId('tab-settings'))
+    expect(screen.getByTestId('overlay-panel')).toBeTruthy()
+
+    fireEvent.press(screen.getByTestId('overlay-close'))
+
+    await waitFor(() => expect(screen.queryByTestId('overlay-panel')).toBeNull())
+  })
+
+  it('closes on a tap outside itself', async () => {
+    renderScreen(<RegularShell />)
+
+    fireEvent.press(screen.getByTestId('tab-settings'))
+    fireEvent.press(screen.getByTestId('overlay-scrim'))
+
+    await waitFor(() => expect(screen.queryByTestId('overlay-panel')).toBeNull())
+  })
+})
+
+describe('the shell insets', () => {
+  /**
+   * Reported from a real Mac session: the empty strip under the title bar was
+   * gone above the chat column and still there above the list, because the
+   * sidebar carried a top padding of its own that the Mac-aware inset never
+   * reached. The fix is structural — ONE source — so this asserts the structure
+   * rather than a number: the row that holds both panels carries the inset, and
+   * neither panel adds any.
+   */
+  it('applies the safe area once, to the row that holds both panels', () => {
+    renderScreen(<RegularShell />)
+
+    // The metrics `renderScreen` provides are an iPhone 17 Pro's.
+    expect(paddingOf('shell-window').paddingTop).toBe(WINDOW_GAP + 59)
+    expect(paddingOf('shell-sidebar').paddingTop).toBeUndefined()
+    expect(paddingOf('shell-content').paddingTop).toBeUndefined()
+  })
+
+  it('leaves no strip above either column on a Mac', () => {
+    runsOnMac.RUNS_ON_MAC = true
+    renderScreen(<RegularShell />)
+
+    expect(paddingOf('shell-window').paddingTop).toBe(WINDOW_GAP)
+    expect(paddingOf('shell-sidebar').paddingTop).toBeUndefined()
+    expect(paddingOf('shell-content').paddingTop).toBeUndefined()
+  })
+})
+
+describe('the signed-out state', () => {
+  it('takes the whole content column rather than sitting under a chat error', () => {
+    gateway.status = 'needs_signin'
+
+    try {
+      renderScreen(<RegularShell />)
+
+      expect(screen.getByTestId('signed-out-panel')).toBeTruthy()
+      expect(screen.queryByText('Pick a conversation to start reading.')).toBeNull()
+      // The list stays: it is the half of the shell that still works.
+      expect(screen.getByTestId('bot-row-writer')).toBeTruthy()
+      expect(screen.getByTestId('gateway-state')).toHaveTextContent('Signed out')
+    } finally {
+      gateway.status = 'ready'
+    }
   })
 })

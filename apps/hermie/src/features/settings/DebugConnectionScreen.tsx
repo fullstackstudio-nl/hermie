@@ -7,6 +7,7 @@ import { strings } from '../../i18n/strings'
 import { hasHardwareKeyboard } from '../../platform/keyboard-modifiers'
 import { RUNS_ON_MAC } from '../../platform/runs-on-mac'
 import { Button, Screen, Text } from '../../ui/primitives'
+import { GLASS_MATERIAL } from '../../ui/glass'
 import { useTheme } from '../../ui/theme'
 
 /**
@@ -168,6 +169,18 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
           </Text>
           <Text color="textMuted" testID="debug-hardware-keyboard">
             hardware keyboard: {String(hasHardwareKeyboard())}
+          </Text>
+          {/*
+            Which material the glass surfaces are actually drawing. It is not
+            knowable from a screenshot — the native material and the blur
+            fallback look similar over a light wallpaper — and it is the first
+            thing to check when a surface looks flat.
+          */}
+          <Text color="textMuted" testID="debug-glass-material">
+            glass material: {GLASS_MATERIAL}
+          </Text>
+          <Text color="textMuted" testID="debug-reduce-transparency">
+            reduce transparency: {String(theme.reduceTransparency)} · reduce motion: {String(theme.reduceMotion)}
           </Text>
         </View>
 

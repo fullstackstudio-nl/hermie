@@ -25,6 +25,41 @@ jest.mock('expo-secure-store', () => {
   }
 })
 
+/**
+ * The glass stack. All three render native views, and two of them reach for a
+ * native module the moment they are imported — `expo-glass-effect` throws
+ * outright from `requireNativeModule`, which is exactly the case
+ * `src/ui/glass/material.ts` catches in the app and which a test renderer would
+ * otherwise hit on every import.
+ *
+ * The stand-ins keep the props, so a test can assert which material a surface
+ * asked for. `isLiquidGlassAvailable` answers false, so the suite renders the
+ * SOLID fallback — the one path that has to look right with no blur at all, and
+ * the one whose colours are assertable.
+ */
+jest.mock('expo-glass-effect', () => {
+  const React = require('react')
+
+  return {
+    GlassView: props => React.createElement('ExpoGlassView', props),
+    GlassContainer: props => React.createElement('ExpoGlassContainer', props),
+    isLiquidGlassAvailable: () => false,
+    isGlassEffectAPIAvailable: () => false
+  }
+})
+
+jest.mock('expo-blur', () => {
+  const React = require('react')
+
+  return { BlurView: props => React.createElement('ExpoBlurView', props) }
+})
+
+jest.mock('expo-linear-gradient', () => {
+  const React = require('react')
+
+  return { LinearGradient: props => React.createElement('ExpoLinearGradient', props) }
+})
+
 // react-native-webview reaches for its native module at import time, which is
 // the one thing a test renderer cannot provide. The stand-in keeps the props so
 // a test can assert on how the web view was configured.

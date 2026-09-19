@@ -18,6 +18,7 @@ import type { Verbosity } from '@hermie/transcript'
 import { create } from 'zustand'
 
 import { keyValueStore } from '../platform/key-value-store'
+import { DEFAULT_WALLPAPER, WALLPAPER_ORDER, type WallpaperName } from '../ui/tokens'
 
 /** `system` follows the OS; the other two pin the app regardless of it. */
 export type Appearance = 'system' | 'light' | 'dark'
@@ -43,12 +44,18 @@ interface PersistedChatView {
   defaults: ChatViewSettings
   perChat: Record<string, Partial<ChatViewSettings>>
   appearance?: Appearance
+  wallpaper?: WallpaperName
 }
 
 const APPEARANCES: readonly Appearance[] = ['system', 'light', 'dark']
 
 const asAppearance = (value: unknown): Appearance | undefined =>
   typeof value === 'string' && (APPEARANCES as readonly string[]).includes(value) ? (value as Appearance) : undefined
+
+const asWallpaper = (value: unknown): WallpaperName | undefined =>
+  typeof value === 'string' && (WALLPAPER_ORDER as readonly string[]).includes(value)
+    ? (value as WallpaperName)
+    : undefined
 
 const VERBOSITY: readonly Verbosity[] = ['quiet', 'normal', 'verbose']
 
@@ -75,6 +82,8 @@ export interface SettingsState {
   defaults: ChatViewSettings
   perChat: Record<string, Partial<ChatViewSettings>>
   appearance: Appearance
+  /** Which of the three gradient wallpapers the glass floats over. */
+  wallpaper: WallpaperName
   /** False until the first disk read finishes; screens paint the defaults meanwhile. */
   loaded: boolean
   hydrate: () => Promise<void>
@@ -82,6 +91,7 @@ export interface SettingsState {
   setChatView: (botName: string, patch: Partial<ChatViewSettings>) => void
   resetChatView: (botName: string) => void
   setAppearance: (appearance: Appearance) => void
+  setWallpaper: (wallpaper: WallpaperName) => void
   reset: () => void
 }
 
@@ -97,63 +107,81 @@ function persist(state: PersistedChatView): void {
     })
 }
 
-export const useSettingsStore = create<SettingsState>((set, get) => ({
-  defaults: DEFAULT_CHAT_VIEW,
-  perChat: {},
-  appearance: DEFAULT_APPEARANCE,
-  loaded: false,
+export const useSettingsStore = create<SettingsState>((set, get) => {
+  /** Write whatever is in the store now; every setter calls this after its `set`. */
+  const save = (): void => {
+    const { defaults, perChat, appearance, wallpaper } = get()
 
-  async hydrate() {
-    const stored = await keyValueStore.getJson<PersistedChatView>(CHAT_VIEW_KEY)
-    const perChat: Record<string, Partial<ChatViewSettings>> = {}
-
-    for (const [bot, patch] of Object.entries(stored?.perChat ?? {})) {
-      const parsed = asPatch(patch)
-
-      if (Object.keys(parsed).length) {
-        perChat[bot] = parsed
-      }
-    }
-
-    set({
-      defaults: { ...DEFAULT_CHAT_VIEW, ...asPatch(stored?.defaults) },
-      perChat,
-      appearance: asAppearance(stored?.appearance) ?? DEFAULT_APPEARANCE,
-      loaded: true
-    })
-  },
-
-  setDefaults(patch) {
-    const defaults = { ...get().defaults, ...patch }
-
-    set({ defaults })
-    persist({ defaults, perChat: get().perChat, appearance: get().appearance })
-  },
-
-  setChatView(botName, patch) {
-    const perChat = { ...get().perChat, [botName]: { ...get().perChat[botName], ...patch } }
-
-    set({ perChat })
-    persist({ defaults: get().defaults, perChat, appearance: get().appearance })
-  },
-
-  resetChatView(botName) {
-    const perChat = { ...get().perChat }
-
-    delete perChat[botName]
-    set({ perChat })
-    persist({ defaults: get().defaults, perChat, appearance: get().appearance })
-  },
-
-  setAppearance(appearance) {
-    set({ appearance })
-    persist({ defaults: get().defaults, perChat: get().perChat, appearance })
-  },
-
-  reset() {
-    set({ defaults: DEFAULT_CHAT_VIEW, perChat: {}, appearance: DEFAULT_APPEARANCE, loaded: false })
+    persist({ defaults, perChat, appearance, wallpaper })
   }
-}))
+
+  return {
+    defaults: DEFAULT_CHAT_VIEW,
+    perChat: {},
+    appearance: DEFAULT_APPEARANCE,
+    wallpaper: DEFAULT_WALLPAPER,
+    loaded: false,
+
+    async hydrate() {
+      const stored = await keyValueStore.getJson<PersistedChatView>(CHAT_VIEW_KEY)
+      const perChat: Record<string, Partial<ChatViewSettings>> = {}
+
+      for (const [bot, patch] of Object.entries(stored?.perChat ?? {})) {
+        const parsed = asPatch(patch)
+
+        if (Object.keys(parsed).length) {
+          perChat[bot] = parsed
+        }
+      }
+
+      set({
+        defaults: { ...DEFAULT_CHAT_VIEW, ...asPatch(stored?.defaults) },
+        perChat,
+        appearance: asAppearance(stored?.appearance) ?? DEFAULT_APPEARANCE,
+        wallpaper: asWallpaper(stored?.wallpaper) ?? DEFAULT_WALLPAPER,
+        loaded: true
+      })
+    },
+
+    setDefaults(patch) {
+      set({ defaults: { ...get().defaults, ...patch } })
+      save()
+    },
+
+    setChatView(botName, patch) {
+      set({ perChat: { ...get().perChat, [botName]: { ...get().perChat[botName], ...patch } } })
+      save()
+    },
+
+    resetChatView(botName) {
+      const perChat = { ...get().perChat }
+
+      delete perChat[botName]
+      set({ perChat })
+      save()
+    },
+
+    setAppearance(appearance) {
+      set({ appearance })
+      save()
+    },
+
+    setWallpaper(wallpaper) {
+      set({ wallpaper })
+      save()
+    },
+
+    reset() {
+      set({
+        defaults: DEFAULT_CHAT_VIEW,
+        perChat: {},
+        appearance: DEFAULT_APPEARANCE,
+        wallpaper: DEFAULT_WALLPAPER,
+        loaded: false
+      })
+    }
+  }
+})
 
 /** True when this chat pins its own view rather than following the default. */
 export function hasChatViewOverride(state: SettingsState, botName: string): boolean {

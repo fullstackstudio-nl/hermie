@@ -37,11 +37,14 @@ Knowing this helps when assessing an issue:
 
 The gap that used to be here — macOS had no keystore-backed `SecretStore`, so tokens went to
 unencrypted app storage — is closed. The native macOS target is gone, and the Mac runs the iOS build
-with the iOS keychain. One honest caveat: `expo-secure-store` links into the Mac build and the app is
-signed with `application-identifier`, which is its default keychain access group, but reading and
-writing a key **has not yet been exercised in a running Mac window**. It is the same binary and the
-same API as on an iPhone, where it is exercised; `docs/platform-notes.md` tracks it as unverified
-rather than claiming it.
+with the iOS keychain, and that is now **exercised rather than assumed**: on 2026-09-19 a Mac window
+stayed signed in across a quit and a relaunch, which is a keychain read and a keychain write of the
+token in the ordinary path.
+
+One observation from the same session, recorded because it is not explained: the FIRST launch of that
+build did ask for a sign-in again. The cause was not established — a fresh install and a new wrapper
+are both in the picture, and a different keychain access context is a plausible reading — so it is
+written down as something seen once, not as a known behaviour.
 
 ## Supported versions
 

@@ -22,6 +22,7 @@ new record supersedes it, and the old one gets a line at the top pointing forwar
 | [0009](0009-bot-to-bot-detection.md)             | Bot-to-bot traffic is detected from transcript conventions   | Accepted           |
 | [0010](0010-agent-questions-as-bottom-sheets.md) | Questions from the agent are bottom sheets                   | Accepted           |
 | [0011](0011-mac-via-the-ipad-build.md)           | The Mac version is the iPad build                            | Accepted           |
+| [0012](0012-local-chat-list-layout.md)           | The chat list's arrangement and colours are client-local     | Accepted           |
 
 ## Template
 

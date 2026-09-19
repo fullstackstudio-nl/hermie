@@ -1,112 +1,119 @@
 import { useCallback, useState } from 'react'
-import { Pressable, View } from 'react-native'
+import { View } from 'react-native'
 
 import { ActivityScreen } from '../features/activity'
-import { BotsScreen } from '../features/bots'
+import { BotsScreen, type BotsSection } from '../features/bots'
 import { ChatScreen, type OpenChatOptions } from '../features/chats'
 import { CronScreen } from '../features/cron'
 import { SettingsScreen } from '../features/settings'
+import { useGateway } from '../gateway'
+import { SignedOutPanel } from '../gateway/SignedOutPanel'
 import { strings } from '../i18n/strings'
-import { Text } from '../ui/primitives'
-import { useTheme } from '../ui/theme'
-import { SIDEBAR_WIDTH } from '../ui/tokens'
-
-type DetailKey = 'chat' | 'activity' | 'cron' | 'settings'
-
-const FOOTER_SECTIONS: { key: Exclude<DetailKey, 'chat'>; label: string; glyph: string }[] = [
-  { key: 'activity', label: strings.tabs.activity, glyph: '⇄' },
-  { key: 'cron', label: strings.tabs.routines, glyph: '◷' },
-  { key: 'settings', label: strings.tabs.settings, glyph: '⚙' }
-]
+import { useSafeAreaInsets } from '../platform/safe-area'
+import { GlassSurface, Wallpaper } from '../ui/glass'
+import { SIDEBAR_WIDTH, WINDOW_GAP } from '../ui/tokens'
+import { OverlayPanel } from './OverlayPanel'
 
 /**
- * Sidebar plus detail, for a wide window — an iPad, or a Mac.
+ * Two floating glass panels over a wallpaper, for a wide window — an iPad, or a
+ * Mac.
  *
- * Deliberately no navigator: both panes are always mounted, so a stack would
- * only get in the way. The chat list IS the sidebar, in its denser variant;
- * Activity, Routines and Settings sit under it as a footer and open as detail
- * panes.
+ * Deliberately no navigator: both panels are always mounted, so a stack would
+ * only get in the way. The chat list IS the sidebar; Activity, Crons and
+ * Settings slide in over the chat column from the right (`OverlayPanel`) rather
+ * than replacing it, so the list stays where the reader left it.
  *
- * A window narrower than two panes never reaches this component: `useLayoutMode`
+ * A window narrower than two panels never reaches this component: `useLayoutMode`
  * hands that case to the compact stack instead.
+ *
+ * **One inset source for both columns.** The padding that clears the system's
+ * safe area is applied ONCE, to the row that holds both panels, and neither
+ * panel adds any of its own. A Mac reported this as a bug when they disagreed:
+ * the strip under the title bar was gone above the chat and still there above
+ * the list, because the sidebar carried a hard-coded top padding that the
+ * Mac-aware inset never reached. Two columns cannot disagree about a number
+ * they do not each own.
  */
 export function RegularShell() {
-  const theme = useTheme()
-  const [detail, setDetail] = useState<DetailKey>('chat')
+  const insets = useSafeAreaInsets()
+  const { status } = useGateway()
+  const [section, setSection] = useState<BotsSection | null>(null)
   const [selectedBot, setSelectedBot] = useState<string | undefined>(undefined)
   const [focusItemId, setFocusItemId] = useState<string | undefined>(undefined)
 
-  const openBot = useCallback(
-    (name: string, options?: OpenChatOptions) => {
-      setSelectedBot(name)
-      // A new focus target every time, even for the same item: the chat screen
-      // only scrolls when the id it is handed changes, and following the same
-      // DM twice should work twice.
-      setFocusItemId(options?.focusItemId)
-      setDetail('chat')
-    },
-    [setDetail]
-  )
+  const openBot = useCallback((name: string, options?: OpenChatOptions) => {
+    setSelectedBot(name)
+    // A new focus target every time, even for the same item: the chat screen
+    // only scrolls when the id it is handed changes, and following the same DM
+    // twice should work twice.
+    setFocusItemId(options?.focusItemId)
+    setSection(null)
+  }, [])
+
+  const signedOut = status === 'needs_signin'
 
   return (
-    <View style={{ backgroundColor: theme.colors.bg, flex: 1, flexDirection: 'row' }}>
+    <Wallpaper style={{ flex: 1 }} testID="wallpaper">
       <View
         style={{
-          backgroundColor: theme.colors.surface,
-          borderRightColor: theme.colors.border,
-          borderRightWidth: 1,
-          paddingTop: theme.space.xxl,
-          width: SIDEBAR_WIDTH
+          flex: 1,
+          flexDirection: 'row',
+          gap: WINDOW_GAP,
+          paddingBottom: WINDOW_GAP + insets.bottom,
+          paddingLeft: WINDOW_GAP + insets.left,
+          paddingRight: WINDOW_GAP + insets.right,
+          paddingTop: WINDOW_GAP + insets.top
         }}
+        testID="shell-window"
       >
-        <View style={{ flex: 1 }}>
+        <GlassSurface
+          contentStyle={{ flex: 1 }}
+          style={{ width: SIDEBAR_WIDTH }}
+          testID="shell-sidebar"
+          variant="panel"
+        >
           <BotsScreen
+            currentTab={section ?? 'chats'}
             onOpenBot={bot => openBot(bot.name)}
-            selectedBot={detail === 'chat' ? selectedBot : undefined}
+            onOpenSection={setSection}
+            selectedBot={section === null ? selectedBot : undefined}
             variant="sidebar"
           />
-        </View>
+        </GlassSurface>
 
-        <View style={{ borderTopColor: theme.colors.border, borderTopWidth: 1, padding: theme.space.sm }}>
-          {FOOTER_SECTIONS.map(section => {
-            const selected = detail === section.key
+        <View style={{ flex: 1, minWidth: 0 }} testID="shell-content">
+          <GlassSurface contentStyle={{ flex: 1 }} style={{ flex: 1 }} variant="panel">
+            {/*
+              A dead session is not a chat problem and must not read as one, so
+              it takes the whole column rather than sitting under a chat error.
+            */}
+            {signedOut ? (
+              <SignedOutPanel />
+            ) : (
+              <ChatScreen bot={selectedBot} focusItemId={focusItemId} onOpenBot={openBot} />
+            )}
+          </GlassSurface>
 
-            return (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityState={{ selected }}
-                key={section.key}
-                onPress={() => setDetail(section.key)}
-                style={{
-                  alignItems: 'center',
-                  // The selected row keeps its highlight when the pointer
-                  // leaves it: on a desktop the sidebar is a persistent index,
-                  // and a selection that only shows while pressed is not one.
-                  backgroundColor: selected ? theme.colors.surfaceRaised : 'transparent',
-                  borderRadius: theme.radii.md,
-                  flexDirection: 'row',
-                  gap: theme.space.md,
-                  paddingHorizontal: theme.space.md,
-                  paddingVertical: theme.space.sm
-                }}
-                testID={`sidebar-${section.key}`}
-              >
-                <Text color={selected ? 'accent' : 'textMuted'}>{section.glyph}</Text>
-                <Text color={selected ? 'text' : 'textMuted'} variant="callout">
-                  {section.label}
-                </Text>
-              </Pressable>
-            )
-          })}
+          <OverlayPanel onClose={() => setSection(null)} title={titleFor(section)} visible={section !== null}>
+            {section === 'activity' ? <ActivityScreen onOpenBot={openBot} /> : null}
+            {section === 'cron' ? <CronScreen /> : null}
+            {section === 'settings' ? <SettingsScreen /> : null}
+          </OverlayPanel>
         </View>
       </View>
-
-      <View style={{ flex: 1 }}>
-        {detail === 'chat' ? <ChatScreen bot={selectedBot} focusItemId={focusItemId} onOpenBot={openBot} /> : null}
-        {detail === 'activity' ? <ActivityScreen onOpenBot={openBot} /> : null}
-        {detail === 'cron' ? <CronScreen /> : null}
-        {detail === 'settings' ? <SettingsScreen /> : null}
-      </View>
-    </View>
+    </Wallpaper>
   )
+}
+
+function titleFor(section: BotsSection | null): string {
+  switch (section) {
+    case 'activity':
+      return strings.activity.title
+    case 'cron':
+      return strings.tabs.routines
+    case 'settings':
+      return strings.settings.title
+    default:
+      return ''
+  }
 }

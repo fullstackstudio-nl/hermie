@@ -9,7 +9,8 @@ import { type Appearance, useSettingsStore } from '../../store/settings'
 import { InsetButtonRow, InsetGroup, InsetValueRow, Screen, Text } from '../../ui/primitives'
 import { SegmentedRow, SwitchRow } from '../../ui/sheets'
 import { useTheme } from '../../ui/theme'
-import { FORM_MAX_WIDTH } from '../../ui/tokens'
+import { useEscapeKey } from '../../ui/useEscapeKey'
+import { FORM_MAX_WIDTH, WALLPAPER_ORDER, type WallpaperName } from '../../ui/tokens'
 import { DebugConnectionScreen } from './DebugConnectionScreen'
 import { GALLERY_ROW_TITLE, GalleryScreen } from './GalleryScreen'
 
@@ -25,6 +26,11 @@ const APPEARANCE_OPTIONS: { value: Appearance; label: string }[] = [
   { value: 'dark', label: strings.settings.themeOptions.dark }
 ]
 
+const WALLPAPER_OPTIONS: { value: WallpaperName; label: string }[] = WALLPAPER_ORDER.map(name => ({
+  value: name,
+  label: strings.settings.wallpaperOptions[name]
+}))
+
 export function SettingsScreen() {
   const theme = useTheme()
   const { config, status, signOut, changeGateway } = useGateway()
@@ -32,9 +38,18 @@ export function SettingsScreen() {
   const appearance = useSettingsStore(state => state.appearance)
   const setDefaults = useSettingsStore(state => state.setDefaults)
   const setAppearance = useSettingsStore(state => state.setAppearance)
+  const wallpaper = useSettingsStore(state => state.wallpaper)
+  const setWallpaper = useSettingsStore(state => state.setWallpaper)
   const [showConnectionTest, setShowConnectionTest] = useState(false)
   const [showGallery, setShowGallery] = useState(false)
   const [confirmingChange, setConfirmingChange] = useState(false)
+
+  // Escape goes back ONE level: out of a developer screen and into Settings,
+  // and only then out of whatever is holding Settings.
+  useEscapeKey(() => {
+    setShowConnectionTest(false)
+    setShowGallery(false)
+  }, showConnectionTest || showGallery)
 
   if (showConnectionTest) {
     return <DebugConnectionScreen onClose={() => setShowConnectionTest(false)} />
@@ -131,6 +146,13 @@ export function SettingsScreen() {
             options={APPEARANCE_OPTIONS}
             testID="settings-appearance"
             value={appearance}
+          />
+          <SegmentedRow
+            label={strings.settings.wallpaper}
+            onChange={(value: WallpaperName) => setWallpaper(value)}
+            options={WALLPAPER_OPTIONS}
+            testID="settings-wallpaper"
+            value={wallpaper}
           />
         </InsetGroup>
 

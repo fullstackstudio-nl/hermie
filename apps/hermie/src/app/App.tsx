@@ -4,7 +4,7 @@ import { ActivityIndicator, View } from 'react-native'
 
 import { ChatRuntimeProvider } from '../features/chats'
 import { OnboardingNavigator } from '../features/onboarding'
-import { GatewayProvider, ReauthBanner, useGateway } from '../gateway'
+import { GatewayProvider, useGateway } from '../gateway'
 import { strings } from '../i18n/strings'
 import { SafeArea } from '../platform/safe-area'
 import { Screen, Text } from '../ui/primitives'
@@ -57,10 +57,7 @@ function Root() {
   // subscribe to until the gateway is configured.
   return (
     <ChatRuntimeProvider>
-      <View style={{ flex: 1 }}>
-        <ReauthBanner />
-        <Shell />
-      </View>
+      <Shell />
     </ChatRuntimeProvider>
   )
 }

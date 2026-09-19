@@ -16,18 +16,19 @@ rewritten, and git history has them.
 | Question                                         | Answer                                         | Date       |
 | ------------------------------------------------ | ---------------------------------------------- | ---------- |
 | Does the iOS app build for a Mac?                | Yes — Release, signed, wrapped, `npm run mac`  | 2026-09-19 |
-| Is the empty strip under the title bar gone?     | Fixed in code; **unverified at runtime**       | 2026-09-19 |
-| Does a bare Return send on a Mac?                | Implemented; **unverified at runtime**         | 2026-09-19 |
-| Is Shift+Return a newline on a Mac?              | Yes, inserted by hand; **unverified**          | 2026-09-19 |
-| Does Escape close a sheet on a Mac?              | Implemented; **unverified at runtime**         | 2026-09-19 |
-| Is `GCKeyboard` populated for an iOS app on Mac? | **Unverified** — reasoned from the SDK only    | 2026-09-19 |
-| Is `expo-secure-store` keychain-backed on a Mac? | Linked and entitled; **unverified at runtime** | 2026-09-19 |
+| Is the empty strip under the title bar gone?     | Chat column yes, sidebar no — now fixed        | 2026-09-19 |
+| Does a bare Return send on a Mac?                | **Yes** — used by hand                         | 2026-09-19 |
+| Is Shift+Return a newline on a Mac?              | **Yes** — used by hand                         | 2026-09-19 |
+| Does Escape close a sheet on a Mac?              | **Yes** — used by hand                         | 2026-09-19 |
+| Is `GCKeyboard` populated for an iOS app on Mac? | **Yes** — the three keys above prove it        | 2026-09-19 |
+| Is `expo-secure-store` keychain-backed on a Mac? | **Yes** — signed in across a quit and relaunch | 2026-09-19 |
 | What AppState does a Mac window report?          | **Unverified** — see "A Mac never pauses"      | 2026-09-19 |
 | Is `TextDecoder` present at runtime?             | Not verified; the guard ships either way       | 2026-09-18 |
 
 "Unverified at runtime" is exact: the app builds, is signed and is wrapped, and the code path was read
-rather than watched. The owner's own Hermie was running on this machine, and two copies of one bundle
-identifier cannot both run, so nothing was launched.
+rather than watched. Several rows that said so were closed on 2026-09-19 by a hand session in a real
+Mac window — see "What a hand session in a Mac window settled" at the end of the Mac section. The
+rows still marked unverified below were not part of that session.
 
 ## TextDecoder
 
@@ -538,7 +539,15 @@ is outside the app's window.
 are either zero on a Mac already or genuinely describe the window, and zeroing them would be a guess.
 iPhone and iPad are untouched, which is what `__tests__/mac-safe-area.test.tsx` asserts.
 
-**Unverified at runtime.** Not seen in a window — see the note under Summary.
+**Half right.** Confirmed in a Mac window on 2026-09-19: the strip was gone above the CHAT column and
+still there above the sidebar. The inset itself was fine; `RegularShell` was adding a top padding of
+its own to the sidebar pane, which nothing Mac-aware ever reached.
+
+The fix is structural rather than another branch. Both panels are siblings in one row, and the row
+carries the safe-area padding once; neither panel adds any. Two columns cannot disagree about a
+number they do not each own, which is the part a test can hold on to —
+`__tests__/regular-shell.test.tsx` asserts that the row has the inset and that both panels have none,
+with the Mac seam mocked both ways.
 
 One thing left open: in a Mac window dragged narrow enough for the compact shell, the native stack
 draws its own header and insets itself from the same safe area. That inset is applied natively, below
@@ -573,7 +582,8 @@ both arrive at `onSubmitEditing` identically — and suppressing the insertion s
 The first version of this shipped with no newline key on the Mac at all, which is not acceptable: a
 prompt is often more than one line. It is closed natively instead — see the next section.
 
-**Unverified at runtime.**
+**Verified by hand on 2026-09-19** in a real Mac window: Return sends, Shift+Return inserts a
+newline, Escape closes a sheet.
 
 ### Shift+Return and Escape come from GameController, below the responder chain
 
@@ -611,11 +621,11 @@ What is known, and what is only reasoned:
 - **A keyboard can arrive after launch**, so the handler is installed on
   `GCKeyboardDidConnectNotification` as well as immediately. All keyboards coalesce into one object, so
   that fires once rather than per device.
-- **Whether `GCKeyboard.coalesced` is populated for an iOS app on a Mac is UNVERIFIED.** It is
-  documented for iOS 14+ and macOS 11+, and a Mac always has a keyboard, but this has not been watched.
-  If it comes back nil the behaviour degrades to what shipped before — Return sends, Shift+Return also
-  sends, Escape does nothing — and nothing crashes: every path is a `guard let` that falls back to
-  false.
+- **`GCKeyboard.coalesced` IS populated for an iOS app on a Mac.** Verified by hand on 2026-09-19,
+  and not by reading a constant: Shift+Return inserted a newline and Escape closed a sheet, and
+  neither is reachable at all unless GameController hands this process the keyboard. The nil path is
+  still there — every branch is a `guard let` that falls back to false — but it is now the unexpected
+  one.
 - **None of this is gated on `RUNS_ON_MAC`**, deliberately. Keyboard presence is the question, not the
   operating system, so an iPad with a Magic Keyboard gets Escape too, which is what a reader with that
   keyboard expects. `hardwareKeyboard` still gates Shift+Return, because it only means anything where a
@@ -697,3 +707,110 @@ Not proved:
   Hermie was running and two copies of one bundle identifier cannot coexist, so nothing was launched.
 - The Android APK. There is still no JDK on this machine (`/usr/libexec/java_home -v 17` finds none),
   so Gradle was not run. "Building without a system JDK" above is how to get one.
+
+## The Liquid Glass pass, part 1 (2026-09-19)
+
+Tokens, the glass primitive, the two shells and the chat list. What follows is what was MEASURED on
+an iPhone 17 Pro simulator (iOS 26.5) and an iPad Pro 13" simulator against
+`npm run fake-gateway -- --auth token --token demo`, not what the documentation promises.
+
+### `expo-glass-effect` is real on iOS 26, and the app can tell you which material it drew
+
+`expo-glass-effect@~0.1.10` (the SDK 54 line) resolves to `native` on iOS 26.5 — both
+`isLiquidGlassAvailable()` and `isGlassEffectAPIAvailable()` answer true, and the panels draw a real
+`UIGlassEffect` behind a `UIVisualEffectView`. That is not visible from a screenshot, because the
+native material and the `expo-blur` fallback look similar over a light wallpaper, so
+**Settings → Connection test now prints it**: `glass material: native | blur | solid`, next to the
+Reduce Transparency and Reduce Motion flags. It is the first thing to read when a surface looks flat.
+
+Four things the API costs you, all of them found by reading the module's Swift rather than its
+README:
+
+- **Two checks, not one.** `isGlassEffectAPIAvailable()` exists because some iOS 26 betas ship the
+  design without a working `UIGlassEffect` initialiser, and constructing one there crashes. A build
+  that passes the first check and fails the second must fall back.
+- **Both calls throw when the module is not linked.** They reach for a native module through
+  `requireNativeModule`, which raises rather than returning undefined — so a JavaScript bundle running
+  against an older binary, or a test renderer, takes an exception at the first glass surface.
+  `src/ui/glass/material.ts` catches it and degrades to `blur`.
+- **A `GlassView` renders nothing on Android and on older iOS.** The package's own fallback is a bare
+  `View` with no background, so the surface has to bring its own colour; that is what the elevation
+  ladder is for.
+- **The effect does not apply until the view has been laid out.** The module works around it with an
+  `isMounted` flag in `layoutSubviews`, which matters for anything mounted hidden.
+
+### Do not lay the fallback's gradient over the real material
+
+This one cost a rebuild to see. The tokens document describes glass as a blur plus one or two
+translucent white gradients, and says to use the native material on iOS 26 and `expo-blur` **plus the
+same gradient layers** on older iOS. The first implementation drew the gradient in both cases.
+
+On device that is the lightening applied twice: the Blue wallpaper behind the chat list came out as a
+flat near-white field, with none of the colour the material is supposed to refract. The gradient is
+what turns a FLAT blur into glass; the real material already does it, and better. `GlassSurface` now
+draws the gradient only for the `blur` and `solid` materials.
+
+### A level-3 tint must stay translucent even where nothing blurs
+
+Every glass variant names the opaque rung it collapses to without a blur. Applying that to the
+level-3 tints as well — a chip, a list row, the gateway card — paints them as opaque `e4`, which on a
+light theme is pure white: the gateway card read as a white rectangle stuck to the bottom of the
+panel. The rung exists so a tint composites onto a known colour, not so the tint becomes it. Only the
+surfaces that have to hide a wallpaper take the rung, and only when they cannot blur.
+
+### An unsigned simulator build cannot reach the keychain
+
+`CODE_SIGNING_ALLOWED=NO` builds and installs and launches, and then onboarding fails on its last
+step with _"Calling the 'setValueWithKeyAsync' function has failed → Caused by: A required entitlement
+isn't present."_ Entitlements are attached at signing, so an unsigned build has no keychain access
+group and `expo-secure-store` cannot write the session token. Build the simulator target ad-hoc
+signed instead — no team needed:
+
+```sh
+xcodebuild -workspace Hermie.xcworkspace -scheme Hermie -configuration Debug \
+  -destination 'id=<udid>' -derivedDataPath build/SimDerivedData \
+  CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO build
+```
+
+`npx expo run:ios` does this correctly on its own but needs Simulator.app to be openable; on this
+machine it stops at _"Can't determine id of Simulator app"_ and never reaches the build. `xcodebuild`
+plus `xcrun simctl install` / `launch` is the path that works headlessly.
+
+### Wallpapers: React Native has no radial gradient, and the obvious substitute is worse
+
+The mockup builds each wallpaper from a diagonal base plus four or five radial blooms. `expo-linear-gradient`
+has no radial mode, and drawing a bloom as a circle with a gradient inside it is worse than no bloom
+at all: the circle clips while its colour is still at full strength, so what you see is a lit disc
+with a hard rim. Every bloom in the mockup is anchored near an edge, so each is drawn instead as a
+full-bleed wash that starts opaque at its own corner and is transparent well before the opposite one.
+No clip, no rim, and nothing to measure at layout time.
+
+### `Pressable` has no secondary click, on any platform Hermie ships
+
+The row context menu was specified to open on long press on touch and on right click where there is a
+pointer. React Native exposes no secondary-click event — `onContextMenu` is web only — so a right
+click on a Mac or an iPad trackpad does not reach the app at all. Long press is the whole gesture; it
+works with a mouse as well as a finger. Hover IS available, through `onPointerEnter` / `onPointerLeave`
+(W3C pointer events), which is what the list rows use.
+
+### Gateway latency is not measurable from the app today
+
+The sidebar's gateway card shows host and connection state, and the mockup also shows `· 12 ms`. The
+vendored channel does send a `gateway.ping` keepalive, but it does so inside
+`packages/hermes-shared`'s JSON-RPC channel and never surfaces the round trip;
+`packages/gateway-client` exposes nothing for it. The only typed RPC that looks cheap enough to time,
+`gateway.capabilities`, is not side-effect free — it DECLARES what the client handles, and re-sending
+it with empty parameters would be a live risk to approval delivery. So the card omits latency rather
+than inventing it. Surfacing the keepalive's own round trip is a change to `gateway-client`.
+
+### Not measured
+
+- **Android.** `npx expo prebuild --platform android --no-install` was run; no Gradle build and no
+  emulator run. The solid fallback is therefore unverified on a device — it is the path with no blur
+  at all, and the one the elevation ladder exists for.
+- **Reduce Transparency and Reduce Motion.** Both are read and both feed the theme, and the developer
+  screen prints them, but neither was switched on in the simulator, so the solid swap and the static
+  amber ring were not watched.
+- **The wide layout on a Mac.** Not run; the owner's own Hermie holds that bundle identifier.
+- **Performance in a long transcript.** No frame timings were taken. The nesting limit and the
+  blur-free list rows are the mitigations the tokens document asks for, not measurements.

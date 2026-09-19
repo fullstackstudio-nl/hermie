@@ -7,8 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
 ### Added
 
+- **The Liquid Glass direction, part 1: tokens, shells and the chat list.** The flat Messenger look is
+  gone. `src/ui/tokens.ts` is now the token set from `design/liquid-glass-tokens.md` — a dark
+  elevation ladder whose rungs are a measurable step apart, glass recipes per surface, three gradient
+  wallpapers, the presence colours, and the eight per-chat swatches with their gradient stops. Dark
+  mode is a blue-slate ramp rather than one flat black field.
+- **`src/ui/glass/`**, one `GlassSurface` for every glass surface in the app. It draws the real
+  material on iOS 26 through `expo-glass-effect`, falls back to `expo-blur` on older iOS, and
+  collapses to a rung of the elevation ladder on Android and under Reduce Transparency — the same
+  tokens in all three cases, which is what that ladder is for. The tokens document's rule about never
+  nesting glass more than one level is enforced by the component rather than documented and hoped
+  for: a surface past level 3 drops to a tint on its own. `Wallpaper` draws the three backgrounds as
+  gradients, with no image assets.
+- **A wallpaper setting** under Settings → Appearance: Blue (the default), Warm, Graphite, each with
+  a light and a dark variant.
+- **A wide layout that floats.** Two glass panels over the wallpaper with the mockup's gaps and
+  radii. Activity, Crons and Settings now slide in over the chat column from the right behind a
+  dimmed scrim, and the sidebar stays put and stays usable — they are things you consult, not places
+  you go, and replacing the chat with them costs the reader their place. The panel closes on its
+  round button, on a tap outside it, and on Escape.
+- **Escape goes back one level.** A sub page inside the overlay — a cron's detail, a run transcript,
+  the connection test — registers above the panel on the existing Escape stack, so the first press
+  returns to the page underneath and only the second closes the panel.
+- **Presence as one pure function** (`src/features/bots/presence.ts`), shared by the list and, in
+  part 2, the chat header, so the two cannot disagree. Four states, and a precedence order that is
+  the point of it: offline outranks everything, because a "needs input" bead on a chat that cannot be
+  answered is a promise the app cannot keep; then needs input, then working, then online. The bead
+  never carries the state on colour alone — the shape differs per state and the row says it in words.
+  **"Needs input" is the only thing in the app that animates**, and it goes static under Reduce
+  Motion.
+- **Filter chips** over the chat list: All, Unread, Working, Needs input.
+- **The list is the owner's, not the gateway's** ([ADR-0012](docs/adr/0012-local-chat-list-layout.md)).
+  Rows can be reordered and grouped under named dividers, bots can be archived into a collapsed
+  `Archived (n)` row at the bottom, and each chat can take one of eight colours. All of it is stored
+  on the device and keyed by gateway address, which is what makes "Change gateway" start clean and
+  "Sign out" keep the arrangement, with no clean-up code on either path. An archived bot is excluded
+  from the filters, the unread totals and Activity's background loading.
+- A round **New cron** control where a compose button would be, because there is one canonical chat
+  per bot and you never create a conversation (ADR-0007).
 - **The Mac, as the iPad build.** `npm run mac` builds the iOS app for
   `platform=macOS,variant=Designed for iPad`, signs it with the team in `HERMIE_APPLE_TEAM_ID`, and
   wraps the product so macOS will launch it — a bare iOS `.app` refuses to open with "incorrect
@@ -197,19 +236,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a live `message_agent` hand-off whose reply comes back as a `process_complete` row. A fan-out that
   finished inside one frame could not be looked at, let alone steered.
 
-### Removed
-
-- **The native macOS target.** `apps/hermie/macos/` and its hand-maintained Xcode project, Podfile and
-  application delegate; the `react-native-macos` dependency; the `macos` Metro platform and the
-  `react-native` → `react-native-macos` import rewrite; `react-native.config.js`; every
-  `*.macos.ts(x)` variant in `src/`; `docs/macos-smoke.md`; the macOS asset catalogue; the macOS CI
-  job; and the macOS build, Developer ID signing and notarisation steps in the release workflow, with
-  the four secrets that fed them. Git history keeps all of it, and
-  [ADR-0002](docs/adr/0002-macos-via-react-native-macos.md) keeps the reasoning.
-- `expo-document-picker`, which existed only for the macOS attachment picker.
-
 ### Changed
 
+- **The signed-out state is no longer a one-line banner.** A real Mac session reported the obvious:
+  what a reader saw was a chat error in the content area and a small "Sign in" in a corner, and it
+  was not clear at all that the thing to do was sign in. It is now a card that takes the whole content
+  column — it names the gateway, offers the same in-place sign-in the banner used, and offers Change
+  gateway — the sidebar's gateway card turns amber and is the same action, and the chat list stays
+  visible from cache with its rows reading Offline. `ReauthBanner` is gone; `SignedOutPanel` and
+  `useReauth` replace it.
+- **The empty strip under the macOS title bar is gone above the sidebar too.** It had been fixed for
+  the chat column only: the sidebar pane carried a top padding of its own that the Mac-aware inset
+  never reached. Both panels are siblings in one row now and the row carries the safe area once, so
+  the two columns cannot disagree about a number neither of them owns.
+- The four-tab strip (Chats · Activity · Crons · Settings) and the gateway card sit at the bottom of
+  the chat list on both layouts, as the mockup's two frames show.
+- `design/liquid-glass.html` and `design/liquid-glass-tokens.md` are the current reference;
+  `messenger.html` and `tokens.md` are superseded and say so.
 - **The Mac version is the iOS app** running as "Designed for iPad" on Apple Silicon, instead of a
   native react-native-macos target. Eight platform seams collapsed back into one implementation each —
   bottom sheets, safe area, haptics, the status bar, the secret store, attachments, connectivity and
@@ -238,7 +281,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The `overrides` entry pinning `react-native` and `react` in the root `package.json` is gone. It
   existed so react-native-macos resolved against Expo's runtime, and removing it changed no
   resolution in the lockfile.
-
 - The flat-colour placeholder artwork and the script that wrote it are gone, replaced by the icon set
   above.
 - The native CI jobs run on release tags as well as on demand, build with signing switched off, and
@@ -260,6 +302,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`expo-secure-store` on a Mac is exercised rather than assumed.** A Mac window stayed signed in
+  across a quit and a relaunch. `SECURITY.md` and `docs/platform-notes.md` no longer carry it as
+  unverified. One thing seen once and not explained is recorded as such: the first launch of that
+  build did ask for a sign-in again.
+- **Return, Shift+Return and Escape on a Mac are verified by hand**, which also settles that
+  `GCKeyboard` is populated for an iOS app on a Mac — none of the three is reachable otherwise.
 - `GameController.framework` is linked into the Mac and iOS builds, which is all GameController asks
   for — no entitlement and no Info.plist key. Whether `GCKeyboard.coalesced` is populated for an iOS
   app on a Mac is reasoned from the SDK and **not yet watched**; if it is nil, Shift+Enter and Escape
@@ -268,7 +316,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bar, and `Screen` turned that ~25pt top safe-area inset into padding nothing occupied, because the
   macOS title bar is outside the app's window. The top inset is dropped on a Mac and only there;
   iPhone and iPad are untouched. Fixed in code, **unverified in a window**.
-
 - A reply that arrived after a tool call was painted twice — once as the partially streamed copy and
   once as the clean final — while the gateway had stored a single row. The tool boundary seals the
   streaming bubble, so the completion had nowhere to land; it now settles onto that sealed bubble
@@ -290,5 +337,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rendering a different component" error and an update that can be dropped; it is an effect now.
 - The Activity timeline's `↩` rendered as an emoji on iOS, which is what U+21A9 means without an
   explicit text variation selector.
+
+
+### Removed
+
+- **The native macOS target.** `apps/hermie/macos/` and its hand-maintained Xcode project, Podfile and
+  application delegate; the `react-native-macos` dependency; the `macos` Metro platform and the
+  `react-native` → `react-native-macos` import rewrite; `react-native.config.js`; every
+  `*.macos.ts(x)` variant in `src/`; `docs/macos-smoke.md`; the macOS asset catalogue; the macOS CI
+  job; and the macOS build, Developer ID signing and notarisation steps in the release workflow, with
+  the four secrets that fed them. Git history keeps all of it, and
+  [ADR-0002](docs/adr/0002-macos-via-react-native-macos.md) keeps the reasoning.
+- `expo-document-picker`, which existed only for the macOS attachment picker.
+
+### Internal
+
+- `src/ui/tokens.ts` keeps the older colour roles (`bg`, `surface`, `surfaceRaised`, `bubbleBlue`,
+  `success`, `switchGreen`, `border`, `incoming`, `incomingText`, `danger` as a text colour) and the
+  older type names (`display`, `title`, `heading`, `callout`, `caption`, `mono`) as **aliases** onto
+  their Liquid Glass equivalents, so that the transcript, the bubbles, the composer and the sheets
+  keep rendering untouched while part 2 restyles them. They are meant to go with that pass.
+- `expo-glass-effect`, `expo-blur` and `expo-linear-gradient` are new dependencies. `npx expo-doctor`
+  stays at 18/18.
 
 [Unreleased]: https://github.com/fullstackstudio-nl/hermie/compare/main...HEAD
