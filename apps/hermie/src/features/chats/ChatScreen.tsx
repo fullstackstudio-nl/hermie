@@ -42,7 +42,9 @@ import {
 import { useGateway } from '../../gateway'
 import { strings } from '../../i18n/strings'
 import { haptic } from '../../platform/haptics'
+import { presenceOf } from '../bots/presence'
 import { useBotsStore } from '../../store/bots'
+import { useChatAccent } from '../../store/chat-layout'
 import { useChatsStore } from '../../store/chats'
 import { hasChatViewOverride, useChatView, useSettingsStore } from '../../store/settings'
 import { KEYBOARD_AVOID_BEHAVIOR } from '../../ui/keyboard'
@@ -51,7 +53,7 @@ import { useTheme } from '../../ui/theme'
 import { CONTROL_MIN_HEIGHT, TAP_SLOP } from '../../ui/tokens'
 import { openAppSettings, pickAttachment, type PickedAttachment } from './attachments'
 import { pickFile } from './file-attachments'
-import { FileUploadError } from './file-upload'
+import { FileUploadError, MAX_UPLOAD_BYTES } from './file-upload'
 import { ChatSheetHost, type RequestItem } from './ChatSheetHost'
 import type { AttachmentInput, ModelChoice } from './chat-controller'
 import type { ManualSheet } from './sheet-host'
@@ -118,6 +120,35 @@ function NoBotSelected() {
   )
 }
 
+/** A file staged in the tray whose upload has not finished. */
+interface PendingFile {
+  id: string
+  name: string
+  size: number
+  status: 'uploading' | 'error'
+  error?: string
+}
+
+/**
+ * The reason, short enough for a chip.
+ *
+ * The typed `FileUploadError.message` is a sentence — right for a notice, far too
+ * long for a 260pt chip — so each reason gets a chip-sized form and the sentence
+ * stays available in the notice. `Too large · 100 MB max` is §6.7's own example.
+ */
+function uploadChipError(error: FileUploadError): string {
+  switch (error.reason) {
+    case 'too-large':
+      return strings.chat.attach.chipTooLarge(Math.round(MAX_UPLOAD_BYTES / (1024 * 1024)))
+    case 'no-workspace':
+      return strings.chat.attach.chipNoWorkspace
+    case 'refused':
+      return strings.chat.attach.chipRefused
+    default:
+      return strings.chat.attach.chipFailed
+  }
+}
+
 function Conversation({
   botName,
   focusItemId,
@@ -135,9 +166,22 @@ function Conversation({
   const avatar = useBotsStore(state => state.avatars[botName])
   const byName = useBotsStore(state => state.byName)
   const overridden = useSettingsStore(state => hasChatViewOverride(state, botName))
+  const theme = useTheme()
+  // The chat's own colour: the avatar ring in the header and the outgoing bubble
+  // gradient. One lookup per screen rather than one per row.
+  const accent = useChatAccent(botName)
 
   const [sheet, setSheet] = useState<ManualSheet>('none')
   const [attachments, setAttachments] = useState<PickedAttachment[]>([])
+  /**
+   * Files whose upload is in flight or has failed.
+   *
+   * Separate from `uploaded` on purpose: only a file the gateway acknowledged may
+   * be referenced in a prompt, and keeping the two lists apart makes that a type
+   * distinction rather than a flag someone can forget to check.
+   */
+  const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([])
+  const [attachBusy, setAttachBusy] = useState<'photo' | 'file' | null>(null)
   /**
    * Files already uploaded and waiting to be named in the next prompt.
    *
@@ -509,6 +553,23 @@ function Conversation({
     needsInput
   })
 
+  /**
+   * The bead's state, from the same function the chat list uses.
+   *
+   * `sessionAttached` is `hydration === 'live'` rather than the socket's status,
+   * for exactly the reason `subtitleFor` gives: coming back from the background
+   * walks the whole pre-dial ladder again while this session keeps streaming, and a
+   * bead that goes hollow during it describes the socket's bookkeeping rather than
+   * the bot.
+   */
+  const presence = presenceOf({
+    gatewayReady: status === 'ready' || chat.hydration === 'live',
+    needsInput,
+    sessionAttached: chat.hydration === 'live',
+    working: busy,
+    ...(typeof chat.info?.last_active === 'number' ? { lastActive: chat.info.last_active } : {})
+  })
+
   const send = useCallback(
     async (text: string) => {
       const body = text.trim()
@@ -542,6 +603,11 @@ function Conversation({
   )
 
   const attach = useCallback(async () => {
+    // The `+` menu is already on screen; this marks WHICH entry is waiting on the
+    // system picker. The owner measured 1.5-2s of nothing here on the Mac, so the
+    // busy mark is the only feedback there is during it.
+    setAttachBusy('photo')
+
     try {
       const picked = await pickAttachment()
 
@@ -555,17 +621,28 @@ function Conversation({
       // and the only place to do it is the system settings app.
       setNeedsPhotoAccess(message === strings.chat.attach.permission)
       setNotice(strings.chat.attach.failed(message))
+    } finally {
+      setAttachBusy(null)
     }
   }, [])
 
   /**
-   * Pick a file, upload it, and stage the path.
+   * Pick a file, stage a chip for it, upload it.
    *
-   * Nothing is staged unless the upload finished: a chip for a file the gateway
-   * never received would produce a prompt referencing a path that is not there,
-   * and the agent would report a missing file rather than the upload failing.
+   * The chip appears BEFORE the upload rather than after. That is a deliberate
+   * change from the first version, which staged nothing until the upload finished:
+   * a 40 MB archive then produced several seconds in which the tap had visibly done
+   * nothing, and a failure produced a toast with no chip to attach it to. Now the
+   * chip carries its own state — uploading, then either a size or the reason it was
+   * refused — which is what §6.7 asks the tray to show.
+   *
+   * A chip in the `error` state is still never SENT: `send` only references files
+   * that reached `uploaded`, so a prompt can never name a path the gateway does not
+   * have.
    */
   const attachFile = useCallback(async () => {
+    setAttachBusy('file')
+
     let picked: Awaited<ReturnType<typeof pickFile>>
 
     try {
@@ -574,20 +651,31 @@ function Conversation({
       setNotice(strings.chat.attach.failed(messageOf(error)))
 
       return
+    } finally {
+      setAttachBusy(null)
     }
 
     if (!picked) {
       return
     }
 
+    const id = `pending-${Date.now().toString(36)}-${picked.name}`
+
+    setPendingFiles(current => [...current, { id, name: picked.name, size: picked.size, status: 'uploading' as const }])
+
     try {
       const result = await chat.uploadFile(picked)
 
+      setPendingFiles(current => current.filter(file => file.id !== id))
       setUploaded(current => [...current, { id: result.path, filename: result.filename, path: result.path }])
     } catch (error) {
       // A typed reason exists for exactly the failures a message can explain;
       // anything else is the transport, and its own words are the best available.
-      setNotice(error instanceof FileUploadError ? strings.chat.attach.uploadFailed(error.message) : messageOf(error))
+      const reason = error instanceof FileUploadError ? uploadChipError(error) : messageOf(error)
+
+      setPendingFiles(current =>
+        current.map(file => (file.id === id ? { ...file, status: 'error', error: reason } : file))
+      )
     }
   }, [chat])
 
@@ -642,12 +730,30 @@ function Conversation({
 
   const composerAttachments = useMemo<ComposerAttachment[]>(
     () => [
-      ...attachments.map(file => ({ id: file.id, name: file.filename, ...(file.uri ? { uri: file.uri } : {}) })),
-      // No `uri`, so the existing chip draws its name rather than a thumbnail —
-      // which is right for an archive, and is the whole of the UI this needs.
-      ...uploaded.map(file => ({ id: file.id, name: file.filename }))
+      ...attachments.map(file => ({
+        id: file.id,
+        kind: 'image' as const,
+        name: file.filename,
+        ...(file.uri ? { uri: file.uri } : {})
+      })),
+      // A file is a CHIP, not a thumbnail: a type glyph, the name and its size are
+      // what tells an archive from a spreadsheet, and neither has a preview.
+      ...pendingFiles.map(file => ({
+        id: file.id,
+        kind: 'file' as const,
+        name: file.name,
+        size: file.size,
+        status: file.status,
+        ...(file.error ? { error: file.error } : {})
+      })),
+      ...uploaded.map(file => ({
+        id: file.id,
+        kind: 'file' as const,
+        name: file.filename,
+        status: 'uploaded' as const
+      }))
     ],
-    [attachments, uploaded]
+    [attachments, pendingFiles, uploaded]
   )
 
   const display = byName[botName]?.displayName ?? botName
@@ -710,14 +816,18 @@ function Conversation({
   return (
     <Screen edgeToEdgeTop={false} padded={false}>
       <ChatHeader
+        accentFill={theme.accent(accent).fill}
         avatarUri={avatar}
         handle={botName}
         name={display}
-        needsInput={needsInput}
         onBack={onBack}
         onOpenOptions={openOptions}
-        running={busy}
-        subtitle={subtitle}
+        // The resolved state, from the same function the chat list uses. It is
+        // what keeps the header from saying "Connecting…" over a live chat: the
+        // socket's own status is not a bot's state.
+        presence={presence.state}
+        {...(presence.lastSeenAt !== undefined ? { lastSeenAt: presence.lastSeenAt } : {})}
+        {...(subtitle ? { subtitle } : {})}
       />
 
       <KeyboardAvoidingView
@@ -767,16 +877,18 @@ function Conversation({
         />
 
         <Composer
+          attachBusy={attachBusy}
           attachments={composerAttachments}
           botName={display}
           onAttach={() => void attach()}
-          // A long press picks a file instead. Both pickers exist on every
-          // target this builds for, so neither is conditional.
+          // The `+` menu's second entry. Both pickers exist on every target this
+          // builds for, so neither is conditional.
           onAttachFile={() => void attachFile()}
           onChangeText={chat.setDraft}
           onQuerySlash={querySlash}
           onRemoveAttachment={id => {
             setAttachments(current => current.filter(file => file.id !== id))
+            setPendingFiles(current => current.filter(file => file.id !== id))
             // An uploaded file is left on the gateway: deleting it would need a
             // second round trip to undo something the user only unstaged.
             setUploaded(current => current.filter(file => file.id !== id))

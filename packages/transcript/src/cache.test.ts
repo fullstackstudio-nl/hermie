@@ -68,8 +68,8 @@ describe('cache round trip', () => {
   it('remembers how far the transcript was read', () => {
     const snapshot = snapshotForCache(hydrated(), NOW)
 
-    expect(snapshot.lastRowId).toBe(15)
-    expect(stateFromCache('researcher', IDS, snapshot).lastSeenRowId).toBe(15)
+    expect(snapshot.lastRowId).toBe(16)
+    expect(stateFromCache('researcher', IDS, snapshot).lastSeenRowId).toBe(16)
   })
 
   it('carries the event watermark together with the session it was counted under', () => {

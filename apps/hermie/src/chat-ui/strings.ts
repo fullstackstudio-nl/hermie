@@ -12,6 +12,11 @@ export const chatStrings = {
     delivered: 'Delivered',
     read: 'Read'
   },
+  /** The `Show more` / `Show less` pair, shared by every fold in the kit. */
+  fold: {
+    more: 'Show more',
+    less: 'Show less'
+  },
   assistant: {
     thoughtFor: (seconds: number) => `Thought for ${seconds}s`,
     thinking: 'Thinking',
@@ -41,6 +46,8 @@ export const chatStrings = {
   },
   botDm: {
     to: (target: string) => `→ ${target}`,
+    /** The collapsed line's own label: `Message to @writer`. */
+    lineTo: (handle: string) => `Message to @${handle}`,
     replied: (name: string) => `${name} replied`,
     sending: 'Sending…',
     queued: 'Queued · waiting for the current task',
@@ -50,6 +57,29 @@ export const chatStrings = {
     unknown: 'Sent',
     showMore: 'Show more',
     showLess: 'Show less',
+    /**
+     * The reply marker at the right of a collapsed line. Always present, always
+     * static: §5's motion rule puts waiting on a hollow dot, not a blink.
+     */
+    marker: {
+      // U+FE0E after the arrow. Without the text variation selector iOS gives
+      // U+21A9 its emoji presentation and a blue glyph lands in the middle of a
+      // metadata line — the same trap the Activity timeline hit.
+      replied: '↩︎ replied',
+      waiting: 'Delivered · waiting for reply',
+      failed: 'Failed'
+    },
+    /** The roll-up more than three consecutive lines collapse into. */
+    rollup: (count: number, handle: string, replies: number) =>
+      `${count} messages to @${handle} · ${replies} ${replies === 1 ? 'reply' : 'replies'}`,
+    /** The same roll-up where the run went to more than one teammate. */
+    rollupMixed: (count: number, replies: number) =>
+      `${count} messages · ${replies} ${replies === 1 ? 'reply' : 'replies'}`,
+    /** The one place a DM line is allowed to navigate away from this chat. */
+    openChat: (handle: string) => `Open @${handle}’s chat`,
+    sent: 'Sent',
+    reply: 'Reply',
+    answered: '↩︎ answered',
     senderChip: (name: string) => `${name} · bot`,
     header: (from: string, to: string) => `@${from} → @${to}`,
     chip: (target: string) => `Message to ${target}`,
@@ -90,6 +120,25 @@ export const chatStrings = {
       failed: 'Failed'
     }
   },
+  /**
+   * The scheduled-jobs feature is called CRONS everywhere (§6.5) — the nav
+   * label, the list, the card. Not "scheduled jobs" in one place and "Crons" in
+   * another.
+   */
+  cron: {
+    eyebrow: 'CRON',
+    /**
+     * The gateway redacts a job name it could not scrub, and the placeholder it
+     * substitutes would read as the job's actual name on a card. So the card says
+     * nothing about the name rather than something false.
+     */
+    unnamed: 'Scheduled job',
+    ranAt: (time: string) => `ran ${time} · delivered to this chat`,
+    delivered: 'delivered to this chat',
+    emptyBody: 'The job delivered nothing to show.',
+    open: 'Open cron',
+    runNow: 'Run now'
+  },
   transcript: {
     jumpToLatest: 'Jump to latest',
     newMessages: (count: number) => `${count} new`,
@@ -104,7 +153,8 @@ export const chatStrings = {
     send: 'Send message',
     stop: 'Stop response',
     attach: 'Add attachment',
-    attachFileHint: 'Press and hold to attach a file instead of an image',
+    photoLibrary: 'Photo library',
+    chooseFile: 'Choose file',
     /** Shown under the field only where a bare Return sends. */
     keyHint: 'Enter to send · Shift+Enter for a new line',
     removeAttachment: 'Remove attachment',
@@ -115,8 +165,10 @@ export const chatStrings = {
     back: 'Back to chats',
     options: 'Chat options',
     running: 'Running',
-    idle: 'Idle',
-    needsInput: 'Waiting for you'
+    idle: 'Online',
+    needsInput: 'Waiting for you',
+    offline: 'Offline',
+    offlineAt: (time: string) => `Offline · last seen ${time}`
   },
   approval: {
     eyebrow: (handle: string) => `PERMISSION REQUEST · @${handle.toUpperCase()}`,

@@ -1,15 +1,16 @@
 import { describe, expect, it } from 'vitest'
 
 import { reconcile, reconcileTail } from './reconcile'
-import { applyEvent, applyServerRequest, beginLocalTurn } from './reducer'
+import { applyEvent, applyResumeSnapshot, applyServerRequest, beginLocalTurn } from './reducer'
 import { rowsToItems, type TranscriptRow } from './rows-to-items'
 import { approvalRequest, dmDispatchTurn, streamedTurn } from './__fixtures__/events'
-import { dmReplyProcessText, rpcHistoryRows } from './__fixtures__/rows'
+import { cronBotChatText, dmReplyProcessText, rpcHistoryRows } from './__fixtures__/rows'
 import {
   type ApprovalItem,
   type BotDmOutItem,
   type ChatState,
   createChatState,
+  type CronDeliveryItem,
   type ToolItem,
   type UserItem
 } from './types'
@@ -202,12 +203,68 @@ describe('reconcileTail', () => {
     expect(state.byRowId['99']).toBeDefined()
   })
 
+  it('fills a foreign placeholder with the cron card, not with an empty bubble', () => {
+    // A cron delivery starts a turn nobody local submitted, so the reducer stands
+    // a placeholder in first and the tail has to recognise the row as the author.
+    const live = run([{ type: 'message.start', seq: 1 }])
+    const placeholder = list(live)[0] as UserItem
+
+    expect(placeholder.unknownAuthor).toBe(true)
+
+    const state = reconcileTail(live, rowsToItems([{ role: 'user', row_id: 51, text: cronBotChatText }], 'rest'))
+
+    expect(state.items[placeholder.id]).toMatchObject({ kind: 'cron_delivery', jobName: 'Inbox scan', rowId: 51 })
+    expect(list(state).filter(item => item.kind === 'user' && item.unknownAuthor)).toHaveLength(0)
+    expect(state.turn.foreignReconcilePending).toBeUndefined()
+  })
+
   it('merges a row it already shows instead of duplicating it', () => {
     const live = reconcile(fresh(), rowsToItems(rpcHistoryRows, 'rpc'))
     const before = live.order.length
     const state = reconcileTail(live, rowsToItems(rpcHistoryRows.slice(-2), 'rpc'))
 
     expect(state.order.length).toBe(before)
+  })
+})
+
+describe('a cron delivery that was live before it was persisted', () => {
+  /** The chat was open and resuming when the scheduled turn was already running. */
+  const midDelivery = () => applyResumeSnapshot(fresh(), { inflight: { user: cronBotChatText }, running: true }, NOW)
+
+  const persisted = rowsToItems([{ role: 'user', row_id: 61, text: cronBotChatText, timestamp: 1_700_000_050 }], 'rest')
+
+  it('reconciles the live card and the persisted row onto ONE item', () => {
+    const state = reconcile(midDelivery(), persisted)
+    const cards = list(state).filter(item => item.kind === 'cron_delivery')
+
+    expect(cards).toHaveLength(1)
+    expect(cards[0]).toMatchObject({ rowId: 61, jobName: 'Inbox scan' })
+  })
+
+  it('does the same through a tail fetch, and a second sweep is a no-op', () => {
+    const once = reconcileTail(midDelivery(), persisted)
+
+    expect(once.order).toHaveLength(1)
+    expect(list(once)[0]).toMatchObject({ kind: 'cron_delivery', rowId: 61 })
+
+    const twice = reconcileTail(once, persisted)
+
+    expect(twice.order).toHaveLength(1)
+  })
+
+  it('needs no merge rule of its own: the persisted row carries the whole card', () => {
+    // `mergeWithLive` has no `cron_delivery` case on purpose. Proof: the live item
+    // and the reconciled one differ in nothing but the ids and bookkeeping the
+    // merge is there to preserve.
+    const live = list(midDelivery())[0] as CronDeliveryItem
+    const merged = list(reconcile(midDelivery(), persisted))[0] as CronDeliveryItem
+
+    expect(merged.id).toBe(live.id)
+    expect({ jobName: merged.jobName, body: merged.body, shape: merged.shape }).toEqual({
+      jobName: live.jobName,
+      body: live.body,
+      shape: live.shape
+    })
   })
 })
 

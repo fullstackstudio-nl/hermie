@@ -10,6 +10,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The Liquid Glass direction, part 2: the conversation itself.** The transcript, the composer and
+  everything the machine says in a chat now follow `design/liquid-glass.html`.
+- **A bubble tail that is one shape.** `src/chat-ui/primitives/Bubble.tsx` draws the tail as a single
+  SVG path belonging to the bubble (`react-native-svg`), positioned behind it so only the part that
+  escapes the bubble's rounded corner is visible, and only on the LAST bubble of a run. The previous
+  build built it from positioned `View`s and drew one on every bubble: on the Mac that showed as a
+  square of bubble colour protruding past the bottom-right corner with a dark sliver beside it.
+- **Grouping and date stamps** (`src/chat-ui/grouping.ts`), computed once per list rather than
+  guessed at per row — which bubbles continue a run, which one carries the tail, and where `Today` /
+  `Yesterday` / a date goes. A tool row between two replies ends a run: the reader can see it, so the
+  replies are not adjacent.
+- **Outgoing bubbles take the chat's accent gradient**, incoming ones the frosted glass recipe, and a
+  LONG reply the near-opaque reading wash — not a stylistic variant but the only way body-text
+  contrast stops depending on the wallpaper behind it. Past about fourteen lines the body folds with
+  a gradient mask and `Show more`. The message that is currently streaming is never folded.
+- **Per-item disclosure state lives above the list** (`src/chat-ui/expanded.tsx`). Every fold, card
+  and roll-up keys its open/closed flag by item id in one set, so scrolling an opened card out of the
+  window and back no longer re-collapses it. Nothing scrolls because a disclosure opened.
+- **One bubble from start to finish.** The typing dots are now inside the assistant's own bubble as
+  soon as it exists. The build drew a bubble of dots AND an empty assistant bubble with a timestamp
+  in it — the grey rectangle reported from real use.
+- **Cron deliveries are their own card**, not the owner's blue bubble. A clock glyph, the job's name
+  and `ran 04:22 · delivered to this chat`, expanding to the report as rendered markdown. The wire
+  carries no marker for this, so the projection is a documented heuristic — see
+  [ADR-0013](docs/adr/0013-cron-deliveries-in-the-transcript.md).
+- **Outgoing bot-to-bot messages are quiet LINES**, not bubbles: an arrow, `Message to @writer`, a
+  preview, the time, and a reply marker that is always present — replied, waiting (a static hollow
+  dot), or failed. Tapping one expands the exchange IN PLACE; it no longer navigates to the other
+  bot's chat and scrolls it. Navigation lives behind one explicit `Open @writer's chat` link, which
+  still lands on the matching row. More than three in a row roll up into
+  `5 messages to @writer · 4 replies`.
+- **Tool rows, thinking, status rows and notices are a quiet ledger** with one silhouette
+  (`src/chat-ui/primitives/LedgerRow.tsx`), expanding onto glass cards so the expensive content is
+  not mounted until asked for.
+- **User bubbles render markdown too**, so a person who typed `**done**` or a path in backticks sees
+  what the reply beside them would.
+- **The composer is three separate controls** — a round glass `+`, the pill field, a round accent
+  send that becomes a red stop square. A button that is not inside the field cannot overflow it.
+- **`+` opens an instant in-app glass menu** (_Photo library_, _Choose file_; file first on a Mac).
+  It is local state with no `await` in it, so it paints in the same frame as the tap, and the chosen
+  entry shows a busy mark for as long as the system picker takes. Measured on the simulator: the
+  menu is up in the frame of the tap, the picker follows 0.8–1.6 s later. The long-press placeholder
+  for attaching a file is gone.
+- **An attachment tray with file chips**: type glyph, the name middle-truncated so the extension
+  survives, the size, a remove `×`, a progress ring while uploading, and the reason it was refused
+  (`Too large · 100 MB max`). A sent file is a chip under the owner's bubble, never a raw `@file:`
+  token.
+- **A glass Jump-to-latest pill** with the unread count as an accent badge.
+- **Licences, both halves.** `THIRD_PARTY_NOTICES.md` now also lists the upstream Desktop code this
+  project ported, and `scripts/generate-third-party-licenses.mjs` walks the production dependency
+  tree and writes `THIRD_PARTY_LICENSES.md` plus a bundle the app reads lazily for Settings → About →
+  Licences. `npm run licences:check` runs in CI next to the icons check.
+
+### Fixed
+
+- **Bold was lost when a model opened the span with a stray space** — `** \`example.nl\` staat op
+  autorenew=off**` rendered its asterisks. That shape is not valid CommonMark, so marked never
+  emitted a `strong` token at all; `preprocess.ts` now repairs a run with exactly one broken end,
+  which is what tells the two model habits apart from arithmetic.
+- **An inline code span that wrapped painted an empty chip** across the rest of the line. A nested
+  `Text` with a background paints every line fragment of its range, and the chip's padding was an
+  ordinary space, so a wrap left a whitespace-only fragment filling the line. The chip's padding and
+  its internal gaps are now non-breaking, and the chip takes its own tint rather than borrowing the
+  code-block surface, which on the incoming bubble read as a redaction bar.
+- **The fold's gradient mask faded through black.** `transparent` is transparent BLACK in React
+  Native, so a mask interpolating to the surface colour travelled through dark grey and left a dirty
+  band across the last lines. It now fades a colour to itself, and bleeds out to the bubble's edges
+  so it is a fade rather than a visible rectangle.
+
+
 - **The Liquid Glass direction, part 1: tokens, shells and the chat list.** The flat Messenger look is
   gone. `src/ui/tokens.ts` is now the token set from `design/liquid-glass-tokens.md` — a dark
   elevation ladder whose rungs are a measurable step apart, glass recipes per surface, three gradient

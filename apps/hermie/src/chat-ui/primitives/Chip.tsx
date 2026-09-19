@@ -3,6 +3,10 @@
  *
  * `showBotToBot: false` never removes a DM — it collapses it to one of these,
  * because a bot's reply to a message you cannot see is unexplainable.
+ *
+ * A chip is a LEVEL-3 surface (§7.1): a tint and a hairline, no blur of its own,
+ * whatever it sits on. That is the rule that keeps the two panels' glass from
+ * being sampled a second time by everything inside them.
  */
 import type { ReactNode } from 'react'
 import { Pressable, View, type ViewStyle } from 'react-native'
@@ -22,7 +26,7 @@ export interface ChipProps {
   testID?: string
 }
 
-export function Chip({ label, tone = 'textMuted', leading, onPress, centered = false, style, testID }: ChipProps) {
+export function Chip({ label, tone = 'textFaint', leading, onPress, centered = false, style, testID }: ChipProps) {
   const theme = useTheme()
 
   const body = (
@@ -31,12 +35,14 @@ export function Chip({ label, tone = 'textMuted', leading, onPress, centered = f
         {
           alignItems: 'center',
           alignSelf: centered ? 'center' : 'flex-start',
-          backgroundColor: theme.colors.surfaceRaised,
+          backgroundColor: theme.tintSunk,
+          borderColor: theme.hairlineSoft,
           borderRadius: theme.radii.pill,
+          borderWidth: 1,
           flexDirection: 'row',
           gap: theme.space.xs,
           paddingHorizontal: theme.space.md,
-          paddingVertical: theme.space.xs
+          paddingVertical: theme.space.xs + 1
         },
         style
       ]}
@@ -46,7 +52,7 @@ export function Chip({ label, tone = 'textMuted', leading, onPress, centered = f
       testID={onPress ? undefined : testID}
     >
       {leading}
-      <Text color={tone} variant="caption">
+      <Text color={tone} variant="meta">
         {label}
       </Text>
     </View>

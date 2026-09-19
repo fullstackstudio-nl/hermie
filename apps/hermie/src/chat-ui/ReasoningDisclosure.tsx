@@ -1,36 +1,37 @@
 /**
- * "Thought for 4s" — a collapsed disclosure above a reply.
+ * `Thought for 4s` — one quiet ledger line above a reply.
  *
- * Collapsed by default on purpose: reasoning is context for the answer, not
- * the answer, and the default verbosity hides it altogether.
+ * §6.4: thinking is a single muted line that expands to a short summary. It is
+ * collapsed by default on purpose — reasoning is context for the answer, not the
+ * answer, and the default verbosity hides it altogether.
+ *
+ * The expanded state is keyed on the item's id and held above the list, so
+ * scrolling an opened summary out of the window and back does not close it.
  */
-import { useState } from 'react'
-import { Pressable, View } from 'react-native'
-
 import { Text } from '../ui/primitives'
-import { useTheme } from '../ui/theme'
-import { CONTROL_MIN_HEIGHT, TAP_SLOP } from '../ui/tokens'
+import { useExpanded } from './expanded'
+import { LedgerRow } from './primitives/LedgerRow'
 import { chatStrings } from './strings'
 
 export interface ReasoningDisclosureProps {
   text: string
+  /**
+   * The transcript item this belongs to.
+   *
+   * Reasoning is drawn by the assistant bubble rather than being an item of its
+   * own, so it borrows the bubble's id with a suffix — two disclosures on one
+   * item would otherwise share one flag.
+   */
+  id?: string
   /** Wall-clock seconds the model spent thinking, when the gateway sent one. */
   durationS?: number
   /** Still arriving: the row says "Thinking" and shows no duration. */
   streaming?: boolean
-  initialExpanded?: boolean
   testID?: string
 }
 
-export function ReasoningDisclosure({
-  text,
-  durationS,
-  streaming = false,
-  initialExpanded = false,
-  testID
-}: ReasoningDisclosureProps) {
-  const theme = useTheme()
-  const [expanded, setExpanded] = useState(initialExpanded)
+export function ReasoningDisclosure({ text, id, durationS, streaming = false, testID }: ReasoningDisclosureProps) {
+  const [expanded, toggle] = useExpanded(`reasoning:${id ?? testID ?? ''}`)
 
   if (!text.trim() && !streaming) {
     return null
@@ -41,34 +42,10 @@ export function ReasoningDisclosure({
     : chatStrings.assistant.thoughtFor(Math.max(1, Math.round(durationS ?? 0)))
 
   return (
-    <View style={{ marginBottom: theme.space.xs }}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ expanded }}
-        hitSlop={TAP_SLOP}
-        onPress={() => setExpanded(current => !current)}
-        style={({ pressed }) => ({
-          justifyContent: 'center',
-          minHeight: CONTROL_MIN_HEIGHT,
-          opacity: pressed ? 0.6 : 1
-        })}
-        testID={testID}
-      >
-        <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.xs }}>
-          <Text color="textMuted" variant="caption">
-            {label}
-          </Text>
-          <Text color="textMuted" variant="caption">
-            {expanded ? '⌄' : '›'}
-          </Text>
-        </View>
-      </Pressable>
-
-      {expanded && text.trim() ? (
-        <Text color="textMuted" selectable style={{ fontSize: 14, lineHeight: 20, marginTop: theme.space.xs }}>
-          {text}
-        </Text>
-      ) : null}
-    </View>
+    <LedgerRow expanded={expanded} glyph="◌" onToggle={text.trim() ? toggle : undefined} testID={testID} title={label}>
+      <Text color="textMuted" selectable variant="preview">
+        {text}
+      </Text>
+    </LedgerRow>
   )
 }

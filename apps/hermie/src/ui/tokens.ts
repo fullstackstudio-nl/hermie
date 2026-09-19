@@ -555,6 +555,86 @@ export const darkGlass: GlassScale = {
   }
 }
 
+/**
+ * Bubbles.
+ *
+ * A bubble is NOT a `GlassSurface`. §7.4 of the token document is explicit: a
+ * virtualised list with a blur view per row is the fastest way to make a long
+ * report scroll badly, and on Android there are no per-bubble blur views at all.
+ * So an incoming bubble is the glass RECIPE composited by hand — gradient over a
+ * rung — and a long reply drops the gradient for the near-opaque `read` wash so
+ * its contrast is a fixed number rather than a function of the wallpaper.
+ *
+ * `tail` is the flat colour the SVG tail is filled with. It has to match the
+ * bubble's LOWER edge, which for a translucent gradient means the composite
+ * rather than the stop: these are the stops resolved against the panel they sit
+ * on, so the tail meets the bubble with no visible seam.
+ */
+export type BubbleVariant = 'in' | 'inRead' | 'dm' | 'dmRead'
+
+export type BubbleRecipe = {
+  gradient: readonly [string, string]
+  /** What the gradient composites onto where nothing behind it shows through. */
+  solid: string
+  tail: string
+}
+
+export const lightBubbles: Record<BubbleVariant, BubbleRecipe> = {
+  in: { gradient: ['rgba(255,255,255,0.76)', 'rgba(244,248,255,0.64)'], solid: '#FFFFFF', tail: '#F1F5FE' },
+  inRead: { gradient: ['rgba(255,255,255,0.93)', 'rgba(243,247,255,0.88)'], solid: '#FFFFFF', tail: '#F5F8FE' },
+  dm: { gradient: ['rgba(243,238,255,0.88)', 'rgba(235,229,253,0.80)'], solid: '#FFFFFF', tail: '#EFE9FC' },
+  dmRead: { gradient: ['rgba(243,238,255,0.96)', 'rgba(235,229,253,0.94)'], solid: '#FFFFFF', tail: '#ECE6FB' }
+}
+
+export const darkBubbles: Record<BubbleVariant, BubbleRecipe> = {
+  in: { gradient: ['rgba(255,255,255,0.10)', 'rgba(255,255,255,0.035)'], solid: darkElevation.e3, tail: '#415881' },
+  inRead: { gradient: ['rgba(255,255,255,0.08)', 'rgba(255,255,255,0.03)'], solid: darkElevation.e3, tail: '#405780' },
+  dm: { gradient: ['rgba(140,110,255,0.16)', 'rgba(140,110,255,0.08)'], solid: '#413470', tail: '#453977' },
+  dmRead: { gradient: ['rgba(140,110,255,0.14)', 'rgba(140,110,255,0.07)'], solid: '#413470', tail: '#443876' }
+}
+
+/**
+ * The tail, as ONE path that belongs to the bubble.
+ *
+ * 13 × 17, drawn for the sender's side and mirrored with `scaleX(-1)` for the
+ * other. It is offset `TAIL_OVERLAP` into the bubble so it covers the 6pt
+ * sender-side bottom corner rather than sitting beside it. There is deliberately
+ * no separately positioned tail VIEW: the previous build drew the tail as an
+ * absolutely positioned square with one rounded corner, and at certain bubble
+ * heights the square's straight corners escaped the bubble's own rounding and
+ * painted the stray block the owner reported. A path cannot do that.
+ */
+export const TAIL = { width: 13, height: 17, path: 'M0 0 L5 0 C5 7 7.6 13.4 13 16 C8.4 17.7 3 16 0 12.4 Z' } as const
+
+export const TAIL_OVERLAP = 6
+
+/**
+ * Max bubble width — the rule that fixes edge-to-edge text walls.
+ *
+ * 68 % is too narrow to read at phone width, hence the override; the 640pt cap
+ * is what keeps a long report from spanning a Mac window.
+ */
+export const BUBBLE_MAX = {
+  regular: { percent: 68, points: 640 },
+  compact: { percent: 78, points: 320 }
+} as const
+
+export type ResolvedBubbleWidth = (typeof BUBBLE_MAX)[keyof typeof BUBBLE_MAX]
+
+/**
+ * Where a long reply folds.
+ *
+ * Fourteen lines at the reading leading, which is the number the mockup folds
+ * at. Expressed in POINTS because that is what `maxHeight` takes, and derived
+ * from the leading so the two cannot drift: 14 × 27 ≈ 378 on the wide layout,
+ * and the phone folds sooner because its bubble is narrower and therefore its
+ * fourteen lines hold less.
+ */
+export const FOLD_HEIGHT = { regular: 378, compact: 300 } as const
+
+/** How many consecutive bubbles from one sender sit this far apart. */
+export const BUBBLE_GAP = { grouped: 3, separate: 10 } as const
+
 /** A sunk surface: a search field, a code well, the tab strip's track. */
 export const TINT_SUNK: Record<Scheme, string> = {
   light: 'rgba(14,32,64,0.055)',

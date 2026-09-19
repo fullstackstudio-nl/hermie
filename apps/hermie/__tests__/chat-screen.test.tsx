@@ -416,7 +416,10 @@ describe('ChatScreen', () => {
       })
     })
 
-    expect(screen.queryByText(/new$/u)).toBeNull()
+    // The pill carries the count as a badge beside its own name, so the number
+    // is what appears and disappears — and it says it in the label too, for
+    // anyone who cannot see a badge.
+    expect(screen.queryByLabelText(/Jump to latest, \d+ new/u)).toBeNull()
 
     act(() => {
       useChatsStore.getState().dispatchEvent('researcher', {
@@ -426,7 +429,8 @@ describe('ChatScreen', () => {
       })
     })
 
-    await waitFor(() => expect(screen.getByText('1 new')).toBeTruthy())
+    await waitFor(() => expect(screen.getByLabelText(/Jump to latest, 1 new/u)).toBeTruthy())
+    expect(screen.getByText('1')).toBeTruthy()
   })
 
   it('offers the way out of a refused photo picker, and only for that', async () => {
@@ -435,7 +439,9 @@ describe('ChatScreen', () => {
     )
     renderChat()
 
+    // The "+" opens the menu; the photo picker is its own entry.
     fireEvent.press(screen.getByTestId('composer-attach'))
+    fireEvent.press(screen.getByTestId('composer-attach-menu-photo'))
 
     await waitFor(() => expect(screen.getByTestId('chat-open-settings')).toBeTruthy())
     fireEvent.press(screen.getByTestId('chat-open-settings'))
@@ -444,7 +450,11 @@ describe('ChatScreen', () => {
     // Any other failure has no such button: there is nothing in Settings to fix.
     fireEvent.press(screen.getByTestId('chat-error-dismiss'))
     attachments.pickAttachment.mockRejectedValueOnce(new Error('the picker exploded'))
+    // The menu closed itself when the picker went away, so this opens it again —
+    // which is the behaviour that stops a cancelled picker leaving the menu
+    // standing over the composer.
     fireEvent.press(screen.getByTestId('composer-attach'))
+    fireEvent.press(screen.getByTestId('composer-attach-menu-photo'))
 
     await waitFor(() => expect(screen.getByText(/the picker exploded/u)).toBeTruthy())
     expect(screen.queryByTestId('chat-open-settings')).toBeNull()
@@ -522,8 +532,14 @@ describe('following a DM across chats', () => {
 
     renderScreen(<ChatScreen bot="researcher" onOpenBot={onOpenBot} />)
 
-    await waitFor(() => expect(screen.getByTestId('bot-dm-out-header-t:call_dm_1')).toBeTruthy())
-    fireEvent.press(screen.getByTestId('bot-dm-out-header-t:call_dm_1'))
+    // Tapping the LINE expands it in place and navigates nowhere (§6.6); the
+    // explicit link inside is what opens the other chat, and it still lands on
+    // the matching inbound row rather than at the bottom.
+    await waitFor(() => expect(screen.getByTestId('bot-dm-out-line-t:call_dm_1')).toBeTruthy())
+    fireEvent.press(screen.getByTestId('bot-dm-out-line-t:call_dm_1'))
+    expect(onOpenBot).not.toHaveBeenCalled()
+
+    fireEvent.press(screen.getByTestId('bot-dm-out-open-t:call_dm_1'))
 
     expect(onOpenBot).toHaveBeenCalledWith('writer', { focusItemId: 'w:1' })
   })
@@ -538,8 +554,14 @@ describe('following a DM across chats', () => {
 
     renderScreen(<ChatScreen bot="researcher" onOpenBot={onOpenBot} />)
 
-    await waitFor(() => expect(screen.getByTestId('bot-dm-out-header-t:call_dm_1')).toBeTruthy())
-    fireEvent.press(screen.getByTestId('bot-dm-out-header-t:call_dm_1'))
+    // Tapping the LINE expands it in place and navigates nowhere (§6.6); the
+    // explicit link inside is what opens the other chat, and it still lands on
+    // the matching inbound row rather than at the bottom.
+    await waitFor(() => expect(screen.getByTestId('bot-dm-out-line-t:call_dm_1')).toBeTruthy())
+    fireEvent.press(screen.getByTestId('bot-dm-out-line-t:call_dm_1'))
+    expect(onOpenBot).not.toHaveBeenCalled()
+
+    fireEvent.press(screen.getByTestId('bot-dm-out-open-t:call_dm_1'))
 
     // No focus target rather than a wrong one: the chat opens at its bottom.
     expect(onOpenBot).toHaveBeenCalledWith('writer', undefined)

@@ -10,4 +10,10 @@ export { resetBlockCache, splitBlocks } from './blocks'
 export { codeScopeColor, type CodeScheme } from './code-theme'
 export { MONOSPACE, type MarkdownContext, type MarkdownImageSource, resolveImageUri } from './context'
 export { highlightToLines, isKnownLanguage, type CodeSpan } from './highlight'
-export { mediaTagValues, preprocessMarkdown, renderMediaTags, trimUrlTail } from './preprocess'
+export {
+  mediaTagValues,
+  preprocessMarkdown,
+  renderMediaTags,
+  repairStrayEmphasisSpaces,
+  trimUrlTail
+} from './preprocess'

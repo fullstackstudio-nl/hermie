@@ -34,6 +34,19 @@ const textKeyOf = (item: TranscriptItem): string => `${item.kind}\n${normalizedI
 /** Items the backend never persists, so a re-hydration can never re-supply them. */
 const isEphemeral = (item: TranscriptItem): boolean => item.kind === 'approval' || item.kind === 'clarify'
 
+/**
+ * A row that opens a turn, and therefore names the author a foreign
+ * `message.start` placeholder is standing in for.
+ *
+ * A cron delivery counts: the scheduler's report runs on the `user` role and
+ * starts a turn nobody local submitted, so it is exactly what such a placeholder
+ * is waiting for. `mergeWithLive` needs no cron case of its own — the stream
+ * learns nothing about a delivery that the persisted row does not also carry, so
+ * the default "fresh wins, id is kept" merge is already correct.
+ */
+const isAuthoredRow = (item: TranscriptItem): boolean =>
+  item.kind === 'user' || item.kind === 'bot_dm_in' || item.kind === 'cron_delivery'
+
 /** Merge live knowledge onto a hydrated row: history is thinner than the stream. */
 function mergeWithLive(fresh: TranscriptItem, current: TranscriptItem): TranscriptItem {
   const merged = { ...fresh, id: current.id, version: current.version + 1 } as TranscriptItem
@@ -326,7 +339,7 @@ export function reconcileTail(state: ChatState, tailItems: readonly TranscriptIt
       pairedLive.add(liveMatch.id)
       byId.set(liveMatch.id, mergeWithLive(fresh, liveMatch))
 
-      if (fresh.kind === 'user' || fresh.kind === 'bot_dm_in') {
+      if (isAuthoredRow(fresh)) {
         pairedAuthoredRow = true
       }
 
@@ -345,7 +358,7 @@ export function reconcileTail(state: ChatState, tailItems: readonly TranscriptIt
       continue
     }
 
-    if ((fresh.kind === 'user' || fresh.kind === 'bot_dm_in') && placeholderCursor < placeholders.length) {
+    if (isAuthoredRow(fresh) && placeholderCursor < placeholders.length) {
       const placeholderId = placeholders[placeholderCursor]
 
       placeholderCursor += 1

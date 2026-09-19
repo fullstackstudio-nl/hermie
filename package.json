@@ -25,6 +25,8 @@
     "sync:hermes-shared:check": "node scripts/sync-hermes-shared.mjs --check",
     "icons": "node scripts/generate-app-icons.mjs",
     "icons:check": "node scripts/generate-app-icons.mjs --check",
+    "licences": "node scripts/generate-third-party-licenses.mjs",
+    "licences:check": "node scripts/generate-third-party-licenses.mjs --check",
     "set-version": "node scripts/set-version.mjs",
     "fake-gateway": "tsx packages/fake-gateway/src/cli.ts",
     "ios": "npm run ios --workspace @hermie/app",

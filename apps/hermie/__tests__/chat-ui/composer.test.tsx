@@ -6,10 +6,10 @@ import { StyleSheet } from 'react-native'
 
 import { Composer } from '../../src/chat-ui'
 import {
-  COMPOSER_BUTTON_SIZE,
   COMPOSER_FIELD_INSET,
   COMPOSER_FIELD_RADIUS,
-  COMPOSER_LINE_HEIGHT
+  COMPOSER_LINE_HEIGHT,
+  COMPOSER_ROUND_SIZE
 } from '../../src/chat-ui/Composer'
 import { renderScreen } from '../support/render'
 
@@ -49,6 +49,7 @@ const SUGGESTIONS = [
 function renderComposer(props: Record<string, unknown> = {}) {
   const handlers = {
     onAttach: jest.fn(),
+    onAttachFile: jest.fn(),
     onChangeText: jest.fn(),
     onQuerySlash: jest.fn(),
     onRemoveAttachment: jest.fn(),
@@ -124,7 +125,7 @@ describe('Composer', () => {
 
   it('offers attachments and can remove one', () => {
     const handlers = renderComposer({
-      attachments: [{ id: 'att-1', name: 'diagram.png', uri: 'file:///tmp/diagram.png' }]
+      attachments: [{ id: 'att-1', kind: 'image', name: 'diagram.png', uri: 'file:///tmp/diagram.png' }]
     })
 
     expect(screen.getByTestId('composer-attachments')).toBeTruthy()
@@ -132,12 +133,66 @@ describe('Composer', () => {
     fireEvent.press(screen.getByTestId('composer-attachment-remove-att-1'))
     expect(handlers.onRemoveAttachment).toHaveBeenCalledWith('att-1')
 
+    // The "+" opens the MENU now; the picker is the menu's first entry. Nothing
+    // asynchronous happens between the tap and the menu, which is the point.
     fireEvent.press(screen.getByTestId('composer-attach'))
+    expect(handlers.onAttach).not.toHaveBeenCalled()
+    expect(screen.getByTestId('composer-attach-menu')).toBeTruthy()
+
+    fireEvent.press(screen.getByTestId('composer-attach-menu-photo'))
     expect(handlers.onAttach).toHaveBeenCalled()
   })
 
+  it('offers Choose file as the menu\u2019s own entry, not a long press', () => {
+    const handlers = renderComposer()
+
+    fireEvent.press(screen.getByTestId('composer-attach'))
+    fireEvent.press(screen.getByTestId('composer-attach-menu-file'))
+
+    expect(handlers.onAttachFile).toHaveBeenCalled()
+  })
+
+  it('marks the chosen entry busy and refuses a second tap on it', () => {
+    // The busy mark is the only feedback there is during the 1.5-2s the system
+    // picker takes to come up on a Mac, and a second tap during it would present
+    // two pickers.
+    const handlers = renderComposer({ attachBusy: 'file' })
+
+    fireEvent.press(screen.getByTestId('composer-attach'))
+
+    expect(screen.getByTestId('composer-attach-menu-file-busy')).toBeTruthy()
+
+    fireEvent.press(screen.getByTestId('composer-attach-menu-file'))
+    expect(handlers.onAttachFile).not.toHaveBeenCalled()
+
+    // The other entry is still usable: only the one that is waiting is blocked.
+    expect(screen.queryByTestId('composer-attach-menu-photo-busy')).toBeNull()
+  })
+
+  it('shows a file as a chip with its size, and an image as a thumbnail', () => {
+    renderComposer({
+      attachments: [
+        { id: 'att-1', kind: 'image', name: 'diagram.png', uri: 'file:///tmp/diagram.png' },
+        { id: 'att-2', kind: 'file', name: 'quarterly-report-final-v4.xlsx', size: 48210, status: 'uploaded' }
+      ]
+    })
+
+    expect(screen.getByTestId('composer-attachment-att-2')).toBeTruthy()
+    expect(screen.getByText('47 KB')).toBeTruthy()
+  })
+
+  it('says why a rejected file will not be sent', () => {
+    renderComposer({
+      attachments: [
+        { error: 'Too large · 100 MB max', id: 'att-3', kind: 'file', name: 'capture.mov', status: 'error' }
+      ]
+    })
+
+    expect(screen.getByText('Too large · 100 MB max')).toBeTruthy()
+  })
+
   it('can send an attachment with no text', () => {
-    const handlers = renderComposer({ attachments: [{ id: 'att-1', name: 'diagram.png' }] })
+    const handlers = renderComposer({ attachments: [{ id: 'att-1', kind: 'image', name: 'diagram.png' }] })
 
     fireEvent.press(screen.getByTestId('composer-send'))
     expect(handlers.onSend).toHaveBeenCalledWith('')
@@ -155,69 +210,80 @@ describe('Composer', () => {
 
     expect(screen.getByTestId('composer-attach').props.accessibilityState).toMatchObject({ disabled: true })
   })
+
+  it('offers only the pickers the caller actually gave it', () => {
+    renderScreen(<Composer onAttachFile={jest.fn()} onChangeText={jest.fn()} onSend={jest.fn()} value="" />)
+
+    fireEvent.press(screen.getByTestId('composer-attach'))
+
+    expect(screen.getByTestId('composer-attach-menu-file')).toBeTruthy()
+    expect(screen.queryByTestId('composer-attach-menu-photo')).toBeNull()
+  })
 })
 
 /**
- * The geometry of the rounded field.
+ * The geometry of the composer row.
  *
  * Sebas saw the send button poking through the top of the field's border and
- * sitting off-centre. Three things were sizing themselves independently inside
- * a 28pt corner radius — a 38pt circle, a 44pt "+" and a 40pt input in 3pt of
- * padding — so the row was as tall as its tallest child rather than as tall as
- * one line, and the circle sat in the corner's curve.
+ * sitting off-centre, because all three controls sized themselves independently
+ * inside one 28pt corner radius. The first fix was arithmetic: make the three
+ * agree on one line box and assert the inequality that made overflow impossible.
  *
- * These assertions are about the numbers rather than about pixels, because the
- * test renderer lays nothing out: what they pin down is the invariant that
- * makes overflow impossible, and the fact that every piece agrees on one line
- * box.
+ * The mockup's answer is better than the arithmetic. The buttons are **not inside
+ * the field at all** — a separate round "+", a pill field, a separate round send —
+ * so a button cannot overflow a field it is not in, at any text size, in either
+ * theme. These assertions therefore pin the new structure AND keep the old
+ * concern: the field stays a true pill at one line and keeps the same caps as it
+ * grows, and the two round controls stay round, equal and whole-numbered (the Mac
+ * renders this build scaled, so a fractional control size is a visible sliver).
  */
-describe('the Composer field', () => {
-  it('keeps the button inside the field it sits in', () => {
+describe('the composer row', () => {
+  it('keeps the buttons outside the field, so neither can overflow it', () => {
     renderComposer({ value: 'ready' })
 
     const field = styleOf('composer-field')
-    const circle = styleOf('composer-send-circle')
-
-    // A circle, and never taller than the line box it is centred in — so the
-    // field's inset is clearance on every side, in either theme.
-    expect(circle.height).toBe(COMPOSER_BUTTON_SIZE)
-    expect(circle.width).toBe(circle.height)
-    expect(circle.borderRadius).toBe(COMPOSER_BUTTON_SIZE / 2)
-    expect(COMPOSER_BUTTON_SIZE).toBeLessThanOrEqual(COMPOSER_LINE_HEIGHT)
-    expect(field.padding).toBe(COMPOSER_FIELD_INSET)
 
     // Half the single-line height: a true pill at one line, and the same caps
     // once it grows. A larger radius turns a tall field's ends into full
-    // semicircles and swallows the "+" on the bottom line.
+    // semicircles; 28pt on a 40pt box was the original bug.
     expect(field.borderRadius).toBe(COMPOSER_FIELD_RADIUS)
     expect(COMPOSER_FIELD_RADIUS).toBe((COMPOSER_LINE_HEIGHT + 2 * COMPOSER_FIELD_INSET) / 2)
+
+    // The "+" and the send are siblings of the field, not children of it: the
+    // field's own testID is not an ancestor of either.
+    expect(screen.getByTestId('composer-attach')).toBeTruthy()
+    expect(screen.getByTestId('composer-send')).toBeTruthy()
+    expect(screen.queryByTestId('composer-field')?.findAllByProps({ testID: 'composer-send' })).toHaveLength(0)
   })
 
-  it('gives the buttons and the input the same line box', () => {
+  it('draws both round controls at one whole-numbered size', () => {
     renderComposer({ value: 'ready' })
 
-    // One line box: at a single line the buttons are centred in the field, and
-    // as the input grows they stay on the bottom line rather than stretching
-    // or floating.
-    expect(styleOf('composer-send').height).toBe(COMPOSER_LINE_HEIGHT)
-    expect(styleOf('composer-attach').height).toBe(COMPOSER_LINE_HEIGHT)
-    expect(styleOf('composer-input').minHeight).toBe(COMPOSER_LINE_HEIGHT)
+    const circle = styleOf('composer-send-circle')
+
+    expect(COMPOSER_ROUND_SIZE).toBe(Math.round(COMPOSER_ROUND_SIZE))
+    expect(styleOf('composer-send').height).toBe(COMPOSER_ROUND_SIZE)
+    expect(styleOf('composer-attach').height).toBe(COMPOSER_ROUND_SIZE)
+    expect(circle.height).toBe(COMPOSER_ROUND_SIZE)
+    expect(circle.width).toBe(circle.height)
+    expect(circle.borderRadius).toBe(COMPOSER_ROUND_SIZE / 2)
   })
 
   it('anchors the row to the bottom so a growing input pushes upward', () => {
     renderComposer({ value: 'one\ntwo\nthree\nfour' })
 
-    expect(styleOf('composer-field').alignItems as unknown).toBe('flex-end')
-    // The input is the only thing allowed to grow.
+    // The input is the only thing allowed to grow; the round controls ride the
+    // bottom line rather than stretching with it.
+    expect(styleOf('composer-input').minHeight).toBe(COMPOSER_LINE_HEIGHT)
     expect(styleOf('composer-input').maxHeight).toBeGreaterThan(COMPOSER_LINE_HEIGHT)
-    expect(styleOf('composer-send').height).toBe(COMPOSER_LINE_HEIGHT)
+    expect(styleOf('composer-send').height).toBe(COMPOSER_ROUND_SIZE)
   })
 
   it('keeps the stop button on exactly the same geometry', () => {
     renderComposer({ running: true, value: 'ignored' })
 
-    expect(styleOf('composer-stop').height).toBe(COMPOSER_LINE_HEIGHT)
-    expect(styleOf('composer-send-circle').height).toBe(COMPOSER_BUTTON_SIZE)
+    expect(styleOf('composer-stop').height).toBe(COMPOSER_ROUND_SIZE)
+    expect(styleOf('composer-send-circle').height).toBe(COMPOSER_ROUND_SIZE)
   })
 })
 

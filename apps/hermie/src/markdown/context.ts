@@ -22,6 +22,19 @@ export interface MarkdownContext {
   selectable: boolean
   /** Surface a code block, table or blockquote paints on. */
   blockBackground: string
+  /**
+   * Surface an INLINE code chip paints on, separate from the code-block one.
+   *
+   * A chip sits on running text, on whatever surface that text is on — an
+   * incoming bubble, a reading bubble, a tool card. The code-block surface is
+   * opaque and near-black in dark mode, so borrowing it paints a redaction bar
+   * through the middle of a sentence. This is a translucent sunk tint instead,
+   * which steps one rung off its own background wherever it lands. Defaults to
+   * the theme's `tintSunk`.
+   */
+  inlineCodeBackground?: string
+  /** Hairline around a chip. See `codeStyle` in `Inline.tsx`: likely inert. */
+  inlineCodeBorderColor?: string
   borderColor: string
   textColor: string
   mutedTextColor: string

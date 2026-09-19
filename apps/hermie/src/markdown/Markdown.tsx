@@ -30,8 +30,17 @@ export interface MarkdownProps {
   mutedColor?: ColorRole
   /** Link colour, when the body colour makes the accent unreadable. */
   linkColor?: string
-  /** Surface that code blocks, tables and inline code paint on. */
+  /** Surface that code blocks and tables paint on. */
   surface?: string
+  /**
+   * Surface an inline code chip paints on. Defaults to the theme's sunk tint,
+   * which is translucent and therefore correct on any bubble; `surface` does not
+   * reach the chip, because the code-block surface is opaque and a near-black
+   * slab behind three words in a sentence reads as a redaction bar.
+   */
+  inlineCodeBackground?: string
+  /** Hairline around an inline code chip. Defaults to the theme's hairline. */
+  inlineCodeBorderColor?: string
   borderColor?: string
   fontSize?: number
   selectable?: boolean
@@ -56,6 +65,8 @@ export function Markdown({
   mutedColor = 'textMuted',
   linkColor,
   surface,
+  inlineCodeBackground,
+  inlineCodeBorderColor,
   borderColor,
   fontSize,
   selectable = true,
@@ -90,6 +101,8 @@ export function Markdown({
   const context = useMemo<MarkdownContext>(
     () => ({
       blockBackground: surface ?? theme.colors.surfaceRaised,
+      inlineCodeBackground: inlineCodeBackground ?? theme.tintSunk,
+      inlineCodeBorderColor: inlineCodeBorderColor ?? theme.hairline,
       borderColor: borderColor ?? theme.colors.border,
       color,
       fontSize: body,
@@ -103,7 +116,20 @@ export function Markdown({
       textColor: theme.colors[color],
       ...(images ? { images } : {})
     }),
-    [body, borderColor, color, handleLink, images, linkColor, mutedColor, selectable, surface, theme]
+    [
+      body,
+      borderColor,
+      color,
+      handleLink,
+      images,
+      inlineCodeBackground,
+      inlineCodeBorderColor,
+      linkColor,
+      mutedColor,
+      selectable,
+      surface,
+      theme
+    ]
   )
 
   const blocks = useMemo(() => splitBlocks(preprocessMarkdown(text)), [text])

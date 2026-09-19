@@ -29,6 +29,30 @@ export const plainProcessText = [
   'error TS2345: Argument of type string is not assignable.]'
 ].join('\n')
 
+/**
+ * The header `cron/scheduler_delivery.py::_deliver_to_bot_chat` splices in front
+ * of a report it injects into a bot's chat, verbatim at upstream b9c2660. The em
+ * dash, the quotes around the name and the BLANK line before the body are all
+ * part of it.
+ */
+export const cronBotChatHeader = (jobName: string) =>
+  `[Cronjob "${jobName}" output — scheduled job, not the user. Review it, act on ` +
+  'anything that needs action, and summarize for the chat.]'
+
+export const cronBotChatBody = [
+  '## Inbox scan',
+  '',
+  '- 3 threads waiting on a reply',
+  '- 1 invoice past due',
+  '',
+  'Nothing needs you before tomorrow.'
+].join('\n')
+
+export const cronBotChatText = `${cronBotChatHeader('Inbox scan')}\n\n${cronBotChatBody}`
+
+/** The second, different shape: `_cron_mirror_message`, one newline, no instruction. */
+export const cronMirrorText = '[Cron delivery: Morning Brief]\nTwo deploys overnight, both green.'
+
 /** A full canonical Bot Chat as `session.history` projects it. */
 export const rpcHistoryRows: TranscriptRow[] = [
   { role: 'user', text: 'Summarise the release notes.', timestamp: 1_700_000_000, row_id: 1 },
@@ -97,7 +121,10 @@ export const rpcHistoryRows: TranscriptRow[] = [
     timestamp: 1_700_000_040,
     row_id: 14
   },
-  { role: 'assistant', text: 'Thanks — I will fold that in.', timestamp: 1_700_000_041, row_id: 15 }
+  { role: 'assistant', text: 'Thanks — I will fold that in.', timestamp: 1_700_000_041, row_id: 15 },
+  // No `display_kind`, no metadata: a cron delivery is indistinguishable from the
+  // owner speaking except for its header.
+  { role: 'user', text: cronBotChatText, timestamp: 1_700_000_050, row_id: 16 }
 ]
 
 /** The same conversation as the REST transcript prefetch ships it. */
@@ -118,7 +145,10 @@ export const restHistoryRows: TranscriptRow[] = [
     timestamp: 1_700_000_040,
     id: 14
   },
-  { role: 'assistant', content: 'Thanks — I will fold that in.', timestamp: 1_700_000_041, id: 15 }
+  { role: 'assistant', content: 'Thanks — I will fold that in.', timestamp: 1_700_000_041, id: 15 },
+  // The REST transport prefers `display_content`, so the same delivery reaches us
+  // under the other alias and has to project to the same item and the same id.
+  { role: 'user', content: 'raw stored body', display_content: cronBotChatText, timestamp: 1_700_000_050, id: 16 }
 ]
 
 /** A user turn persisted with the model-facing scaffolding still attached. */

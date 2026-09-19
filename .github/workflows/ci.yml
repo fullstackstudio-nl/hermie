@@ -50,6 +50,9 @@ jobs:
       - name: Icons match the design source
         run: npm run icons:check
 
+      - name: Third-party licences match the dependency tree
+        run: npm run licences:check
+
       - name: Commit messages
         if: github.event_name == 'pull_request'
         run: node scripts/check-no-trailers.mjs origin/${{ github.base_ref }}..HEAD

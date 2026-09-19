@@ -1,6 +1,10 @@
 /**
  * A transient one-liner from `status.update` — compaction, lifecycle, a
- * background process. Centred and quiet: it is weather, not a message.
+ * background process.
+ *
+ * Centred and quiet: it is weather, not a message. The kind is the eyebrow and
+ * the text is the line, in the micro/meta pair every machine row in the
+ * transcript uses.
  */
 import { View } from 'react-native'
 
@@ -26,11 +30,14 @@ export function StatusRow({ item, presentation = 'chip' }: StatusRowProps) {
   }
 
   return (
-    <View style={{ alignItems: 'center', marginVertical: theme.space.xs }} testID={`status-${item.id}`}>
-      <Text color="textMuted" style={{ fontSize: 11, letterSpacing: 0.4 }}>
-        {item.statusKind.toUpperCase()}
+    <View
+      style={{ alignItems: 'center', gap: theme.space.xxs, paddingVertical: theme.space.xs }}
+      testID={`status-${item.id}`}
+    >
+      <Text color="textFaint" variant="micro">
+        {item.statusKind.replace(/[._-]+/g, ' ').toUpperCase()}
       </Text>
-      <Text color="textMuted" style={{ fontSize: 12, textAlign: 'center' }}>
+      <Text color="textMuted" style={{ textAlign: 'center' }} variant="meta">
         {item.text}
       </Text>
     </View>

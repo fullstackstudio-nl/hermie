@@ -36,6 +36,7 @@ Item kinds:
 | `subagent_group`       | one `delegate_task` fan-out; the children live in `ChatState.subagents`               |
 | `status`               | a transient one-liner (`status.update`)                                               |
 | `notice`               | a display-only timeline event (model switch, background process, …)                   |
+| `cron_delivery`        | a scheduled job's report — also on the `user` role, also not the human                |
 | `approval` / `clarify` | a question the agent is waiting on                                                    |
 
 Every item carries `origin` (`history` / `live` / `optimistic` / `inflight` /
@@ -65,11 +66,15 @@ Each entry is `{ item, presentation }` with `presentation` one of `full`,
 |                               | quiet                                         | normal      | verbose |
 | ----------------------------- | --------------------------------------------- | ----------- | ------- |
 | user / assistant / inbound DM | full                                          | full        | full    |
+| cron delivery                 | collapsed                                     | full        | full    |
 | tool                          | one `hidden-placeholder` for the running call | collapsed   | full    |
 | outbound DM, subagent group   | chip                                          | collapsed   | full    |
 | status                        | latest only, while busy                       | latest only | all     |
 | notice                        | errors only                                   | collapsed   | full    |
 | approval / clarify            | full                                          | full        | full    |
+
+A cron delivery is the result the owner scheduled, so it survives `quiet` and the
+bot-to-bot toggle leaves it alone: the scheduler is not a peer bot.
 
 `showBotToBot: false` demotes DM traffic to a chip — it never removes it.
 Hiding the message a teammate sent would leave the bot answering a question
@@ -137,6 +142,19 @@ in `agent-delivery.tsx`: the scan stops at the nearest earlier human turn or at
 an earlier inbound row from the same sender, so one dispatch exempts only the
 answer that follows it.
 
+**Cron deliveries.** A scheduled job reporting into a chat has it worse: there is
+no event, no `display_kind` and no surviving `source_label` — it persists as a
+plain `role: user` row, and only the header the scheduler splices in front of the
+report says otherwise. Two headers exist, both in
+`cron/scheduler_delivery.py`: `[Cronjob "<name>" output — scheduled job, not the
+user. Review it, act on anything that needs action, and summarize for the
+chat.]` followed by a blank line and the report (`_deliver_to_bot_chat`), and
+`[Cron delivery: <name>]` followed by one newline and the text
+(`_cron_mirror_message`). `cron-delivery.ts` matches both anchored at the start of
+the row and nowhere else. It is a heuristic, and
+[ADR-0013](../../docs/adr/0013-cron-deliveries-in-the-transcript.md) records what
+breaks it.
+
 **Target aliases.** `@writer`, `Writer`, `scribe@laptop` and `peer/scribe` all
 name one routing alias. `normalizeAgentTarget` reduces them the same way the
 desktop does: strip a leading `@`, strip an `@<connection>` suffix, keep the last
@@ -148,6 +166,7 @@ desktop does: strip a leading `@`, strip an `@<connection>` suffix, keep the las
 | ---------------------- | -------------------------------------------------------------- |
 | `types.ts`             | the item model and `createChatState`                           |
 | `bot-dm.ts`            | every bot-to-bot wire convention                               |
+| `cron-delivery.ts`     | the two cron-delivery headers, as pure parsers                 |
 | `rows-to-items.ts`     | history rows → items, for both transports                      |
 | `reducer.ts`           | gateway events, server requests, resume snapshots, local turns |
 | `subagent-progress.ts` | `subagent.*` payload → `Subagent`                              |

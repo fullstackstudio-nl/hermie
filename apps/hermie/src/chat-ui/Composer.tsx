@@ -27,14 +27,17 @@ import {
 
 import { isShiftDown } from '../platform/keyboard-modifiers'
 import { RUNS_ON_MAC } from '../platform/runs-on-mac'
+import { GlassGroup, GlassSurface } from '../ui/glass'
 import { KEYBOARD_AVOID_BEHAVIOR } from '../ui/keyboard'
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
-import { TAP_SLOP } from '../ui/tokens'
+import { CONTROL_SIZE, TAP_SLOP } from '../ui/tokens'
 import { useEscapeKey } from '../ui/useEscapeKey'
+import { AttachMenu } from './AttachMenu'
+import { FileChip } from './FileChip'
 import { QueuedChip } from './QueuedChip'
 import { chatStrings } from './strings'
-import type { ComposerAttachment, SlashSuggestion } from './types'
+import type { AttachChoice, ComposerAttachment, SlashSuggestion } from './types'
 
 export interface ComposerProps {
   /** Controlled draft. */
@@ -46,17 +49,23 @@ export interface ComposerProps {
   onStop?: () => void
   onAttach?: () => void
   /**
-   * Attach an arbitrary FILE rather than an image, on a long press of the same
-   * "+".
+   * Attach an arbitrary FILE rather than an image.
    *
-   * Deliberately not a second button. An image and a file leave by different
-   * roads — one is bytes over the socket, the other an HTTP upload the prompt
-   * then references — but that is a difference in plumbing, not one the composer
-   * should spend a control on. A picker sheet behind the "+" is the right shape
-   * and it belongs to whoever owns this row's design; this is the seam it plugs
-   * into, and it changes no geometry in the meantime.
+   * Reached from the `+` menu's second entry, not from a long press. A long press
+   * was a placeholder and it was the wrong shape twice over: it is invisible, so
+   * it had to be announced in an accessibility hint nobody hears, and it made the
+   * two roads a file and an image travel by (an HTTP upload the prompt references
+   * versus base64 over the socket) look like one control with a secret.
    */
   onAttachFile?: () => void
+  /**
+   * The system picker is being presented.
+   *
+   * The caller sets it around its own `await`, because only the caller knows when
+   * the picker is actually up. The chosen menu entry stays busy until then — see
+   * `AttachMenu` for the two seconds this exists to account for.
+   */
+  attachBusy?: 'photo' | 'file' | null
   attachments?: ComposerAttachment[]
   onRemoveAttachment?: (id: string) => void
   /** Slash candidates for the current prefix; the caller fetches them. */
@@ -89,40 +98,37 @@ export interface ComposerProps {
 }
 
 /**
- * The geometry of the rounded field, and the one rule it has to keep.
+ * The geometry, and how it stopped being fragile.
  *
- * The field is a single pill holding three things: "+", the growing input, and
- * the send/stop button. Those three used to be sized independently — a 38pt
- * circle, a 44pt "+" and a 40pt input inside 3pt of padding, under a 28pt
- * corner radius — so the circle sat in the corner's curve and visibly crossed
- * the border, and the row was as tall as the tallest of the three rather than
- * as tall as one line of text.
+ * The first version put all three controls INSIDE one bordered pill: a circle, a
+ * "+" and the input, each sized independently under a 28pt corner radius, so the
+ * circle sat in the corner's curve and visibly crossed the border. The fix then was
+ * to make all three agree on one line box and assert the arithmetic.
  *
- * Now there is one line box. `COMPOSER_LINE_HEIGHT` is a single line of input;
- * both buttons occupy a slot exactly that tall and draw a
- * `COMPOSER_BUTTON_SIZE` circle centred in it. At one line the circle is
- * centred in the field; once the input grows, the slot stays one line tall and
- * the row aligns to `flex-end`, so the buttons ride the bottom line the way
- * iMessage does.
+ * The mockup's answer is better than the arithmetic: **the buttons are not inside
+ * the field at all.** A separate round `+`, a pill field, a separate round send
+ * (§6.7 and §4's "round glass controls 38 on the wide layout, 40 on phone"). A
+ * button that is not inside the field cannot overflow it, in any theme, at any
+ * text size — so the invariant is structural rather than checked.
  *
- * The invariant `COMPOSER_BUTTON_SIZE + 2 * COMPOSER_FIELD_INSET <=
- * COMPOSER_LINE_HEIGHT + 2 * COMPOSER_FIELD_INSET` — i.e. the button is never
- * taller than the line box — is what makes overflow impossible in either
- * theme, and it is asserted in `__tests__/chat-ui/composer.test.tsx`.
+ * What is left to get right is the FIELD: `COMPOSER_LINE_HEIGHT` is one line of
+ * input, and the radius is half the single-line height so the field is a true pill
+ * at one line and keeps those same caps as it grows. Not `radii.pill`: a 999pt
+ * radius on a four-line field makes both ends full semicircles.
  */
 export const COMPOSER_FIELD_INSET = 4
 export const COMPOSER_LINE_HEIGHT = 32
-export const COMPOSER_BUTTON_SIZE = 30
 
 /**
- * Half the SINGLE-LINE field height, so the field is a true pill at one line
- * and keeps those same caps as it grows.
+ * The round controls flanking the field.
  *
- * Not `radii.pill`: a 999pt radius on a four-line field makes both ends full
- * semicircles, and the "+" on the bottom line then sits inside the left one.
- * Not `radii.sheet` either — 28pt on a 40pt box was the original bug. This is
- * the one radius that is correct at every height.
+ * A Mac window is the wide layout, so it takes the 38pt control; everything else
+ * gets the 40pt one, because a phone's primary controls are 44pt targets and 40
+ * plus the slop is how the kit reaches that.
  */
+export const COMPOSER_ROUND_SIZE = RUNS_ON_MAC ? CONTROL_SIZE.regular : CONTROL_SIZE.compact
+
+/** Half the single-line field height. See the note above. */
 export const COMPOSER_FIELD_RADIUS = (COMPOSER_LINE_HEIGHT + 2 * COMPOSER_FIELD_INSET) / 2
 
 function slashPrefix(text: string): string | null {
@@ -141,6 +147,7 @@ export function Composer({
   onStop,
   onAttach,
   onAttachFile,
+  attachBusy = null,
   attachments = [],
   onRemoveAttachment,
   suggestions = [],
@@ -180,6 +187,40 @@ export function Composer({
 
   const prefix = useMemo(() => slashPrefix(value), [value])
   const [popoverDismissed, setPopoverDismissed] = useState(false)
+
+  /**
+   * The `+` menu, as local state and nothing else.
+   *
+   * No await, no layout measurement, no animation to wait on: opening it is one
+   * `setState`, so it paints in the same frame as the tap. That is the whole
+   * requirement — the owner measured 1.5–2 s between tapping `+` and the system
+   * picker appearing on the Mac, and a menu that took any of that time would just
+   * move the dead air.
+   */
+  const [menuOpen, setMenuOpen] = useState(false)
+
+  /**
+   * Close the menu once the picker has been and gone.
+   *
+   * It deliberately stays open WHILE `attachBusy` is set — the busy mark on the
+   * entry is the only feedback during the second or two UIKit takes to present a
+   * picker. It is the falling edge that closes it, so a cancelled picker does not
+   * leave the menu standing over the composer.
+   */
+  const wasBusy = useRef(false)
+
+  useEffect(() => {
+    if (attachBusy) {
+      wasBusy.current = true
+
+      return
+    }
+
+    if (wasBusy.current) {
+      wasBusy.current = false
+      setMenuOpen(false)
+    }
+  }, [attachBusy])
 
   // A dismissed popover stays dismissed only for the prefix it was dismissed on;
   // typing on re-opens it.
@@ -332,6 +373,10 @@ export function Composer({
    */
   useEscapeKey(() => onStop?.(), running)
   useEscapeKey(() => setPopoverDismissed(true), showSuggestions)
+  // Registered last, so while the attach menu is open Escape closes IT and
+  // neither the popover nor the running turn sees the key. Esc goes back exactly
+  // one level.
+  useEscapeKey(() => setMenuOpen(false), menuOpen)
 
   /**
    * What a bare Return does, decided one layer below `onKeyPress`.
@@ -359,6 +404,44 @@ export function Composer({
     inputRef.current?.focus()
   }
 
+  /**
+   * The two entries, in the order this platform wants them.
+   *
+   * `Choose file` first on a Mac: a Mac window has a filesystem in front of it and
+   * a photo library somewhere behind it, which is the opposite of a phone.
+   */
+  const choices: AttachChoice[] = (
+    RUNS_ON_MAC
+      ? ([
+          { id: 'file', label: chatStrings.composer.chooseFile },
+          { id: 'photo', label: chatStrings.composer.photoLibrary }
+        ] as const)
+      : ([
+          { id: 'photo', label: chatStrings.composer.photoLibrary },
+          { id: 'file', label: chatStrings.composer.chooseFile }
+        ] as const)
+  )
+    .filter(choice => (choice.id === 'photo' ? Boolean(onAttach) : Boolean(onAttachFile)))
+    .map(choice => ({ ...choice, ...(attachBusy === choice.id ? { busy: true } : {}) }))
+
+  const choose = (id: AttachChoice['id']) => {
+    // The menu stays OPEN while the picker is being presented, because the busy
+    // mark on the entry is the only feedback there is during those two seconds.
+    // It closes when the caller reports the picker is no longer coming up.
+    if (id === 'photo') {
+      onAttach?.()
+
+      return
+    }
+
+    onAttachFile?.()
+  }
+
+  // The picker is up or it failed; either way the menu has said all it can.
+  const menuVisible = menuOpen && choices.length > 0
+
+  const round = COMPOSER_ROUND_SIZE
+
   return (
     // Without `behavior` a `KeyboardAvoidingView` is a plain `View`, which is
     // exactly what the composer wants inside a screen that already has one.
@@ -366,18 +449,13 @@ export function Composer({
     // type on every render and remount the text field under the caret.
     <KeyboardAvoidingView behavior={keyboardAvoiding ? KEYBOARD_AVOID_BEHAVIOR : undefined} testID={testID}>
       {showSuggestions ? (
-        <View
-          style={{
-            backgroundColor: theme.colors.surface,
-            borderColor: theme.colors.border,
-            borderRadius: theme.radii.lg,
-            borderWidth: 1,
-            marginBottom: theme.space.sm,
-            marginHorizontal: theme.space.md,
-            maxHeight: 220,
-            overflow: 'hidden'
-          }}
+        <GlassSurface
+          contentStyle={{ maxHeight: 220 }}
+          radius={theme.radii.card}
+          shadow="float"
+          style={{ marginBottom: theme.space.sm, marginHorizontal: theme.space.md }}
           testID="composer-slash-popover"
+          variant="float"
         >
           <ScrollView keyboardShouldPersistTaps="handled">
             {suggestions.map(suggestion => (
@@ -386,153 +464,167 @@ export function Composer({
                 key={suggestion.name}
                 onPress={() => pick(suggestion.name)}
                 style={({ pressed }) => ({
-                  backgroundColor: pressed ? theme.colors.surfaceRaised : 'transparent',
-                  padding: theme.space.md
+                  backgroundColor: pressed ? theme.tintSunk : 'transparent',
+                  gap: 1,
+                  paddingHorizontal: theme.space.lg,
+                  paddingVertical: theme.space.sm + 2
                 })}
                 testID={`slash-option-${suggestion.name}`}
               >
-                <Text style={{ fontWeight: '600' }}>{`/${suggestion.name}`}</Text>
-                <Text color="textMuted" variant="caption">
+                <Text variant="name">{`/${suggestion.name}`}</Text>
+                <Text color="textFaint" variant="meta">
                   {suggestion.description}
                 </Text>
               </Pressable>
             ))}
           </ScrollView>
+        </GlassSurface>
+      ) : null}
+
+      {menuVisible ? (
+        <View style={{ paddingHorizontal: theme.space.md }}>
+          <AttachMenu choices={choices} onChoose={choose} />
         </View>
       ) : null}
 
+      {/*
+        The tray. Images are thumbnails, files are chips, and they sit side by
+        side — §6.7. A chip carries its own upload state, which is how a rejected
+        file says "Too large · 100 MB max" instead of vanishing.
+      */}
       {attachments.length ? (
         <ScrollView
-          contentContainerStyle={{ gap: theme.space.sm, paddingHorizontal: theme.space.md }}
+          contentContainerStyle={{ alignItems: 'flex-end', gap: theme.space.sm, paddingHorizontal: theme.space.md }}
           horizontal
           showsHorizontalScrollIndicator={false}
+          // A horizontal ScrollView defaults to `flexGrow: 1`, which inside a
+          // column makes it as tall as the viewport. Learned on the gallery.
           style={{ flexGrow: 0, marginBottom: theme.space.sm }}
           testID="composer-attachments"
         >
-          {attachments.map(attachment => (
-            <View key={attachment.id} style={{ width: 64 }}>
-              <View
-                style={{
-                  backgroundColor: theme.colors.surfaceRaised,
-                  borderRadius: theme.radii.md,
-                  height: 64,
-                  overflow: 'hidden',
-                  width: 64
-                }}
-              >
-                {attachment.uri ? (
-                  <Image source={{ uri: attachment.uri }} style={{ height: 64, width: 64 }} />
-                ) : (
-                  <View style={{ alignItems: 'center', flex: 1, justifyContent: 'center' }}>
-                    <Text color="textMuted" style={{ fontSize: 20 }}>
-                      {'▤'}
-                    </Text>
-                  </View>
-                )}
-              </View>
+          {attachments.map(attachment =>
+            attachment.kind === 'image' && attachment.uri ? (
+              <View key={attachment.id} style={{ height: 64, width: 64 }}>
+                <Image
+                  source={{ uri: attachment.uri }}
+                  style={{ borderRadius: theme.radii.thumb, height: 64, width: 64 }}
+                />
 
-              <Pressable
-                accessibilityLabel={chatStrings.composer.removeAttachment}
-                accessibilityRole="button"
-                hitSlop={TAP_SLOP}
-                onPress={() => onRemoveAttachment?.(attachment.id)}
-                style={{ justifyContent: 'center', minHeight: 24 }}
-                testID={`composer-attachment-remove-${attachment.id}`}
-              >
-                <Text color="accent" numberOfLines={1} variant="caption">
-                  {attachment.name}
-                </Text>
-              </Pressable>
-            </View>
-          ))}
+                <Pressable
+                  accessibilityLabel={chatStrings.composer.removeAttachment}
+                  accessibilityRole="button"
+                  hitSlop={TAP_SLOP}
+                  onPress={() => onRemoveAttachment?.(attachment.id)}
+                  style={{
+                    alignItems: 'center',
+                    backgroundColor: 'rgba(8,20,44,0.62)',
+                    borderRadius: 11,
+                    height: 22,
+                    justifyContent: 'center',
+                    position: 'absolute',
+                    right: 2,
+                    top: 2,
+                    width: 22
+                  }}
+                  testID={`composer-attachment-remove-${attachment.id}`}
+                >
+                  <Text color="onAccent" style={{ fontSize: 14, lineHeight: 16 }}>
+                    {'×'}
+                  </Text>
+                </Pressable>
+              </View>
+            ) : (
+              <FileChip
+                key={attachment.id}
+                name={attachment.name}
+                {...(attachment.error ? { error: attachment.error } : {})}
+                onRemove={() => onRemoveAttachment?.(attachment.id)}
+                {...(attachment.progress !== undefined ? { progress: attachment.progress } : {})}
+                {...(attachment.size !== undefined ? { size: attachment.size } : {})}
+                {...(attachment.status ? { status: attachment.status } : {})}
+                testID={`composer-attachment-${attachment.id}`}
+              />
+            )
+          )}
         </ScrollView>
       ) : null}
 
-      <View
-        style={{
-          backgroundColor: theme.colors.surface,
-          borderTopColor: theme.colors.border,
-          borderTopWidth: 1,
-          paddingHorizontal: theme.space.md,
-          paddingTop: theme.space.sm
-        }}
-      >
-        <View
-          style={{
-            // The buttons ride the BOTTOM line as the input grows upward.
-            alignItems: 'flex-end',
-            borderColor: theme.colors.textMuted,
-            borderRadius: COMPOSER_FIELD_RADIUS,
-            borderWidth: 1,
-            flexDirection: 'row',
-            gap: theme.space.xxs,
-            padding: COMPOSER_FIELD_INSET
-          }}
-          testID={`${testID}-field`}
+      <View style={{ paddingBottom: theme.space.sm, paddingHorizontal: theme.space.md, paddingTop: theme.space.sm }}>
+        {/*
+          Three separate controls, not one box: a round `+`, the pill field, and
+          the round send. `GlassGroup` is what lets iOS 26 merge them where they
+          are close enough, the way its own toolbars do.
+        */}
+        <GlassGroup
+          spacing={theme.space.sm}
+          style={{ alignItems: 'flex-end', flexDirection: 'row', gap: theme.space.sm }}
         >
-          <Pressable
-            accessibilityLabel={chatStrings.composer.attach}
-            accessibilityRole="button"
-            // Greyed out is not the same as announced as unavailable, and a
-            // screen reader has no other way to learn that a caller left the
-            // picker out. Either picker being present is enough to be usable.
-            accessibilityState={{ disabled: !onAttach && !onAttachFile }}
-            // A long press is invisible, so it is announced rather than left to
-            // be discovered.
-            {...(onAttachFile ? { accessibilityHint: chatStrings.composer.attachFileHint } : {})}
-            disabled={!onAttach && !onAttachFile}
-            // The slot is one line tall; the 44pt touch target comes from the
-            // slop, the way every other small control in the kit gets one.
-            hitSlop={TAP_SLOP}
-            onPress={onAttach}
-            {...(onAttachFile ? { onLongPress: onAttachFile } : {})}
-            style={({ pressed }) => ({
-              alignItems: 'center',
-              height: COMPOSER_LINE_HEIGHT,
-              justifyContent: 'center',
-              opacity: onAttach || onAttachFile ? (pressed ? 0.6 : 1) : 0.3,
-              width: COMPOSER_BUTTON_SIZE
-            })}
-            testID="composer-attach"
-          >
-            <Text color="textMuted" style={{ fontSize: 24, lineHeight: 28 }}>
-              +
-            </Text>
-          </Pressable>
+          <GlassSurface radius={round / 2} shadow="card" style={{ height: round, width: round }} variant="control">
+            <Pressable
+              accessibilityLabel={chatStrings.composer.attach}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: choices.length === 0, expanded: menuVisible }}
+              disabled={choices.length === 0}
+              onPress={() => setMenuOpen(current => !current)}
+              style={({ pressed }) => ({
+                alignItems: 'center',
+                height: round,
+                justifyContent: 'center',
+                opacity: choices.length === 0 ? 0.3 : pressed ? 0.6 : 1,
+                width: round
+              })}
+              testID="composer-attach"
+            >
+              <Text color="textMuted" style={{ fontSize: 22, lineHeight: 26 }}>
+                +
+              </Text>
+            </Pressable>
+          </GlassSurface>
 
-          <TextInput
-            accessibilityLabel={botName ? chatStrings.composer.messageTo(botName) : chatStrings.composer.placeholder}
-            multiline
-            onChangeText={onChangeText}
-            onKeyPress={onKeyPress}
-            onSelectionChange={onSelectionChange}
-            // Only reached where `submitBehavior` is 'submit', i.e. on a Mac.
-            onSubmitEditing={onSubmitEditing}
-            placeholder={placeholder ?? chatStrings.composer.placeholder}
-            placeholderTextColor={theme.colors.textMuted}
-            ref={inputRef}
-            selection={caret}
-            style={{
-              color: theme.colors.text,
-              flex: 1,
-              fontSize: 17,
-              maxHeight: 132,
-              minHeight: COMPOSER_LINE_HEIGHT,
-              paddingHorizontal: theme.space.xs,
-              // Centres one line of 17pt text in the 32pt line box. iOS adds
-              // its own inset to a multiline field, which is why the two
-              // numbers differ.
-              paddingTop: Platform.OS === 'ios' ? 7 : 4,
-              paddingBottom: Platform.OS === 'ios' ? 7 : 4
+          <GlassSurface
+            contentStyle={{
+              alignItems: 'flex-end',
+              flexDirection: 'row',
+              paddingHorizontal: COMPOSER_FIELD_INSET + 6,
+              paddingVertical: COMPOSER_FIELD_INSET
             }}
-            submitBehavior={submitBehavior}
-            testID="composer-input"
-            value={value}
-          />
+            radius={COMPOSER_FIELD_RADIUS}
+            shadow="float"
+            style={{ flex: 1 }}
+            testID={`${testID}-field`}
+            variant="float"
+          >
+            <TextInput
+              accessibilityLabel={botName ? chatStrings.composer.messageTo(botName) : chatStrings.composer.placeholder}
+              multiline
+              onChangeText={onChangeText}
+              onKeyPress={onKeyPress}
+              onSelectionChange={onSelectionChange}
+              // Only reached where `submitBehavior` is 'submit', i.e. on a Mac.
+              onSubmitEditing={onSubmitEditing}
+              placeholder={placeholder ?? chatStrings.composer.placeholder}
+              placeholderTextColor={theme.colors.textFaint}
+              ref={inputRef}
+              selection={caret}
+              style={{
+                color: theme.colors.text,
+                flex: 1,
+                fontSize: theme.type.body.fontSize,
+                maxHeight: 132,
+                minHeight: COMPOSER_LINE_HEIGHT,
+                // Centres one line of 17pt text in the 32pt line box. iOS adds
+                // its own inset to a multiline field, which is why the two
+                // numbers differ.
+                paddingBottom: Platform.OS === 'ios' ? 7 : 4,
+                paddingTop: Platform.OS === 'ios' ? 7 : 4
+              }}
+              submitBehavior={submitBehavior}
+              testID="composer-input"
+              value={value}
+            />
+          </GlassSurface>
 
-          {/* The Pressable is the LINE BOX; the circle inside it is the
-              button. Sizing the Pressable itself as the circle would either
-              float it off the bottom line or stretch it as the input grew. */}
+          {/* Accent while it sends, a red stop SQUARE while a turn runs. */}
           <Pressable
             accessibilityLabel={running ? chatStrings.composer.stop : chatStrings.composer.send}
             accessibilityRole="button"
@@ -540,39 +632,45 @@ export function Composer({
             onPress={press}
             style={({ pressed }) => ({
               alignItems: 'center',
-              height: COMPOSER_LINE_HEIGHT,
+              height: round,
               justifyContent: 'center',
               opacity: !running && !canSend ? 0.35 : pressed ? 0.85 : 1,
-              width: COMPOSER_BUTTON_SIZE
+              width: round
             })}
             testID={running ? 'composer-stop' : 'composer-send'}
           >
             <View
               style={{
                 alignItems: 'center',
-                backgroundColor: running ? theme.colors.danger : theme.colors.bubbleBlue,
-                borderRadius: COMPOSER_BUTTON_SIZE / 2,
-                height: COMPOSER_BUTTON_SIZE,
+                backgroundColor: running ? theme.colors.danger : theme.accent().fill,
+                borderRadius: round / 2,
+                height: round,
                 justifyContent: 'center',
-                width: COMPOSER_BUTTON_SIZE
+                width: round,
+                ...theme.shadows.card
               }}
               testID="composer-send-circle"
             >
               {running ? (
-                <View style={{ backgroundColor: theme.colors.onAccent, borderRadius: 2, height: 11, width: 11 }} />
+                <View style={{ backgroundColor: theme.colors.onAccent, borderRadius: 2, height: 12, width: 12 }} />
               ) : (
-                <Text color="onAccent" style={{ fontSize: 17, fontWeight: '700', lineHeight: 20 }}>
-                  {'↑'}
+                <Text color="onAccent" style={{ fontSize: 18, fontWeight: '700', lineHeight: 21 }}>
+                  {'\u2191'}
                 </Text>
               )}
             </View>
           </Pressable>
-        </View>
+        </GlassGroup>
 
         {/* Only where a bare Return sends, which is the only place the two
             chords mean anything. */}
         {hardwareKeyboard ? (
-          <Text color="textMuted" style={{ marginTop: theme.space.xxs }} testID="composer-key-hint" variant="caption">
+          <Text
+            color="textFaint"
+            style={{ marginTop: theme.space.xs, textAlign: 'center' }}
+            testID="composer-key-hint"
+            variant="micro"
+          >
             {chatStrings.composer.keyHint}
           </Text>
         ) : null}

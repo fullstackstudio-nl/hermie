@@ -101,7 +101,9 @@ describe('TranscriptList', () => {
 
     fireEvent.press(screen.getByTestId(`bot-dm-in-chip-${botDmInItem.id}`))
     // The second argument describes the row to look for on the far side, so the
-    // sender's chat opens on the dispatch rather than at its bottom.
+    // sender's chat opens on the dispatch rather than at its bottom. §6.6 removed
+    // navigation as the DEFAULT gesture on a DM line, not the ability to land
+    // somewhere useful once the reader has explicitly asked.
     expect(onOpenBot).toHaveBeenCalledWith('writer', expect.objectContaining({ kind: 'bot_dm_out' }))
   })
 
@@ -117,7 +119,9 @@ describe('TranscriptList', () => {
       { receipt: 'read' }
     )
 
-    expect(screen.getAllByText(/^Read/)).toHaveLength(1)
+    // The receipt is a tick on the metadata line, labelled for anyone who
+    // cannot see it. One bubble carries it, not all three.
+    expect(screen.getAllByLabelText(/Read$/)).toHaveLength(1)
   })
 
   it('reports scrolling away from the bottom and shows the jump pill', () => {
@@ -135,7 +139,10 @@ describe('TranscriptList', () => {
 
     expect(onScrolledAwayFromBottom).toHaveBeenCalledWith(true)
     expect(screen.getByTestId('jump-to-latest')).toBeTruthy()
-    expect(screen.getByText('3 new')).toBeTruthy()
+    // The pill is glass now and the count is a badge on it rather than the whole
+    // label; the label stays readable for anyone who cannot see the badge.
+    expect(screen.getByText('3')).toBeTruthy()
+    expect(screen.getByLabelText(/Jump to latest, 3 new/)).toBeTruthy()
   })
 
   it('shows the typing bubble while a turn has produced no text', () => {
@@ -185,6 +192,8 @@ describe('a dispatch whose recipient is answering', () => {
   it('says so under the card while the reply has not landed', () => {
     renderList([{ item: pendingDmOutItem, presentation: 'collapsed' }], { typingHandles: ['builder'] })
 
+    // It refines the WAITING marker rather than adding a fourth one: the line's
+    // right-hand side is always exactly one indicator.
     expect(screen.getByTestId(`bot-dm-out-typing-${pendingDmOutItem.id}`)).toBeTruthy()
     expect(screen.getByText('@builder is writing…')).toBeTruthy()
   })

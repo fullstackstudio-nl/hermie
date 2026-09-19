@@ -62,6 +62,14 @@ describe('visibleItems levels', () => {
     expect(entries).toContainEqual(['subagent_group', 'full'])
   })
 
+  it('keeps a cron delivery at every level, folded at quiet', () => {
+    // It is the result the owner scheduled, so it is never dropped and never a
+    // chip; `quiet` folds the report rather than losing it.
+    expect(shown(state, { level: 'quiet' })).toContainEqual(['cron_delivery', 'collapsed'])
+    expect(shown(state)).toContainEqual(['cron_delivery', 'full'])
+    expect(shown(state, { level: 'verbose' })).toContainEqual(['cron_delivery', 'full'])
+  })
+
   it('shows the same conversation rows at every level', () => {
     const conversation = (level: VisibilityOptions['level']) =>
       shown(state, { level }).filter(entry => ['user', 'assistant', 'bot_dm_in'].includes(String(entry[0]))).length
@@ -88,6 +96,12 @@ describe('the bot-to-bot toggle', () => {
 
   it('leaves the count of visible items unchanged', () => {
     expect(shown(state, { showBotToBot: false })).toHaveLength(shown(state).length)
+  })
+
+  it('does not touch a cron delivery, which is not bot-to-bot traffic', () => {
+    // The scheduler is not a peer bot, so the toggle that quietens agents talking
+    // amongst themselves has no business demoting its report.
+    expect(shown(state, { showBotToBot: false })).toContainEqual(['cron_delivery', 'full'])
   })
 })
 

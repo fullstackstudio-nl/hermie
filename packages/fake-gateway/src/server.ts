@@ -357,6 +357,146 @@ const DM_REPLY_PROCESS_TEXT = [
 ].join('\n')
 
 /**
+ * One outbound `message_agent` plus, optionally, the `process_complete` row that
+ * carries the answer back.
+ *
+ * A run of these is what the app rolls up into one "five messages to Researcher"
+ * card, so the fixture has to produce the run the way a real transcript does: the
+ * dispatch is a tool row with no result, and the reply is a separate row later,
+ * joined by the recipient named in the background command. A dispatch without one
+ * is a hand-off still in flight, which is the state the roll-up has to survive.
+ */
+function dispatchRunRows(
+  target: string,
+  index: number,
+  message: string,
+  reply: { text: string; rowId: number; timestamp: number } | null
+): TranscriptRow[] {
+  const suffix = `dm${index}`
+  const command =
+    `/usr/bin/python3 /opt/hermes/tools/bot_mode_dm.py --run-delivery query-file ` +
+    `/root/.hermes/dm/${suffix}.json hermes -p ${target} chat -c "Bot Chat" -Q -q @/root/.hermes/dm/${suffix}.json`
+
+  const rows: TranscriptRow[] = [
+    {
+      role: 'tool',
+      name: 'message_agent',
+      tool_id: `call_${suffix}`,
+      context: `message_agent(${target})`,
+      args: { target: `@${target}`, message }
+    }
+  ]
+
+  if (reply !== null) {
+    const display = `${target[0]?.toUpperCase()}${target.slice(1)}`
+
+    rows.push({
+      role: 'user',
+      text: [
+        `[IMPORTANT: Background process proc-${suffix} completed (exit code 0).`,
+        `Command: ${command}`,
+        'Output:',
+        `Message from 🤖 ${display} (@${target}): ${reply.text}]`
+      ].join('\n'),
+      row_id: reply.rowId,
+      timestamp: reply.timestamp,
+      display_kind: 'process_complete',
+      display_metadata: { display_text: 'Background Process Finished: bot_mode_dm.py' }
+    })
+  }
+
+  return rows
+}
+
+/**
+ * The header `cron/scheduler_delivery.py::_deliver_to_bot_chat` splices in front
+ * of a report it injects into a bot's chat, verbatim: the em dash, the quotes
+ * around the job name and the BLANK line before the body are all part of it.
+ *
+ * The row carries no `display_kind` and no metadata, exactly as upstream writes
+ * it — which is the whole reason the transcript engine has to recognise it from
+ * the header. The name matches `job-inbox-scan`, the fixture cron that delivers
+ * to `bot-chat:researcher`, so the report and the job that produced it agree.
+ */
+const CRON_DELIVERY_TEXT = [
+  '[Cronjob "Source scan" output — scheduled job, not the user. Review it, act on ' +
+    'anything that needs action, and summarize for the chat.]',
+  '',
+  '### Source scan — 4 new items',
+  '',
+  '| Source | Item | Why it matters |',
+  '| --- | --- | --- |',
+  '| docs.example.com | Retry semantics rewritten | Contradicts our own guide |',
+  '| status.example.org | Two incidents, both closed | No action |',
+  '| blog.example.net | Long post on session resume | Worth reading in full |',
+  '| docs.example.com | Changelog for 1.4 | Three flags renamed |',
+  '',
+  'The first one needs a decision: our guide still documents the old behaviour.',
+  '',
+  'Nothing else is urgent. Next scan in four hours.'
+].join('\n')
+
+/**
+ * A report long enough that the app has to fold it, with the three structures
+ * that make folding awkward: a table, a fenced code block and a nested list.
+ * Well over twenty rendered lines on purpose.
+ */
+const LONG_REPORT_MARKDOWN = [
+  '## Retry semantics: what actually changed',
+  '',
+  'Short version: the backoff is now computed per attempt instead of per call, so a',
+  'long-running request no longer inherits the delay of the one before it.',
+  '',
+  '| Behaviour | Before | After |',
+  '| --- | --- | --- |',
+  '| First retry delay | 1s | 1s |',
+  '| Second retry delay | 1s | 2s |',
+  '| Ceiling | none | 30s |',
+  '| Jitter | none | ±20% |',
+  '| Budget | per call | per attempt |',
+  '',
+  'Where this bites us:',
+  '',
+  '- The reconnect loop, which assumed a flat delay.',
+  '  - It reads the delay once and caches it.',
+  '  - Caching it is what makes the ceiling invisible.',
+  '- The upload path, which retries on its own.',
+  '  - Two retry budgets now overlap.',
+  '    - Worst case is eight attempts where we documented three.',
+  '- Nothing in the transcript path: it does not retry.',
+  '',
+  'The shape we should move to:',
+  '',
+  '```ts',
+  'export function backoff(attempt: number): number {',
+  '  const base = Math.min(2 ** attempt * 1000, 30_000)',
+  '  // Jitter is not decoration: without it every client in a fleet retries',
+  '  // on the same tick and the recovery looks like a second outage.',
+  '  return base * (0.8 + Math.random() * 0.4)',
+  '}',
+  '',
+  'export async function withRetries<T>(run: () => Promise<T>, attempts = 3): Promise<T> {',
+  '  for (let attempt = 0; ; attempt += 1) {',
+  '    try {',
+  '      return await run()',
+  '    } catch (error) {',
+  '      if (attempt >= attempts - 1) {',
+  '        throw error',
+  '      }',
+  '',
+  '      await new Promise(resolve => setTimeout(resolve, backoff(attempt)))',
+  '    }',
+  '  }',
+  '}',
+  '```',
+  '',
+  '> The ceiling matters more than the curve. A retry that waits four minutes is',
+  '> indistinguishable from a hang.',
+  '',
+  'I would change the reconnect loop first — it is the one a user can see.'
+].join('\n')
+
+/**
  * A 1×1 half-opaque red PNG. Deliberately NOT transparent: scaled up behind an
  * avatar's tint it paints a visible dot, which is how a run against this server
  * shows at a glance that `profiles.get_asset` was fetched and rendered rather
@@ -569,6 +709,44 @@ function makeSession(profile: string, title: string): FakeSession {
         display_metadata: { display_text: 'Background Process Finished: bot_mode_dm.py' }
       },
       { role: 'assistant', text: 'Thanks — I will fold that in.', row_id: 4, timestamp: base + 61 }
+    )
+
+    // The scheduled job's report, exactly as the scheduler injects it: a plain
+    // `user` row with NO display_kind, recognised only by its header. This is the
+    // row Hermie used to draw as the owner's own bubble with raw markdown in it.
+    messages.push({ role: 'user', text: CRON_DELIVERY_TEXT, row_id: 5, timestamp: base + 120 })
+
+    // …and the summary the header asked for: long enough to need folding, with a
+    // table, a fenced code block and a nested list inside it.
+    messages.push({ role: 'assistant', text: LONG_REPORT_MARKDOWN, row_id: 6, timestamp: base + 140 })
+  }
+
+  if (profile === 'writer') {
+    // A RUN of dispatches to the same target, back to back, because the app shows
+    // one roll-up instead of five near-identical cards. The joined replies emit no
+    // item of their own, so all five stay consecutive in the projection; the last
+    // two are still in flight and have no answer yet.
+    //
+    // It lives in the writer's chat rather than the researcher's so that the two
+    // DM fixtures stay separable: one exchange to read, one run to collapse.
+    messages.push(
+      ...dispatchRunRows('researcher', 3, 'Which sources back the retry claim?', {
+        text: 'Two: the changelog and the long post. I sent both links.',
+        rowId: 3,
+        timestamp: base + 70
+      }),
+      ...dispatchRunRows('researcher', 4, 'Is the ceiling documented anywhere upstream?', {
+        text: 'Only in the changelog, not in the guide.',
+        rowId: 4,
+        timestamp: base + 80
+      }),
+      ...dispatchRunRows('researcher', 5, 'Any incident that was actually caused by the old backoff?', {
+        text: 'One, last quarter. I noted the reference.',
+        rowId: 5,
+        timestamp: base + 90
+      }),
+      ...dispatchRunRows('researcher', 6, 'Can you re-check the second source before I quote it?', null),
+      ...dispatchRunRows('researcher', 7, 'And whether the guide has an owner listed.', null)
     )
   }
 

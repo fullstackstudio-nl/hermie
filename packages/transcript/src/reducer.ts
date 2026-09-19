@@ -10,6 +10,7 @@ import {
   parseProcessCompleteText,
   replyFromDeliveryOutput
 } from './bot-dm'
+import { parseCronDelivery } from './cron-delivery'
 import { subagentIdOf, TERMINAL_SUBAGENT_STATUS, toSubagent } from './subagent-progress'
 import type { ErrorSurface, SessionLiveInfo, Usage } from '@hermes/shared/gateway-events'
 import {
@@ -19,6 +20,7 @@ import {
   type ChatState,
   type ClarifyItem,
   type ClarifyQuestionItem,
+  type CronDeliveryItem,
   type ItemOrigin,
   type ItemReaction,
   type NoticeItem,
@@ -1099,7 +1101,33 @@ export function applyResumeSnapshot(state: ChatState, snapshot: ResumeSnapshot, 
   const userText = str(inflight.user).trim()
 
   if (userText) {
-    addItem<UserItem>(next, { id: `i:${next.turn.nextSeq}`, kind: 'user', text: userText, ts: now / 1000 }, 'inflight')
+    // The turn a resume finds running may be a scheduled job's, not the owner's.
+    // Projecting it here rather than only in `rows-to-items` is what keeps the
+    // invariant: a cron delivery renders as the same card whether the chat was
+    // open when it landed or loaded from history afterwards.
+    const cron = parseCronDelivery(userText)
+
+    if (cron) {
+      addItem<CronDeliveryItem>(
+        next,
+        {
+          id: `i:${next.turn.nextSeq}`,
+          kind: 'cron_delivery',
+          jobName: cron.jobName,
+          ...(cron.nameRedacted ? { nameRedacted: true } : {}),
+          body: cron.body,
+          shape: cron.shape,
+          ts: now / 1000
+        },
+        'inflight'
+      )
+    } else {
+      addItem<UserItem>(
+        next,
+        { id: `i:${next.turn.nextSeq}`, kind: 'user', text: userText, ts: now / 1000 },
+        'inflight'
+      )
+    }
   }
 
   const assistantText = str(inflight.assistant)

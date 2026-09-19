@@ -5,7 +5,7 @@
  * component gallery is a catalogue of fixtures. Both are tools for whoever is
  * building the app; neither belongs in a release someone installs.
  */
-import { act, fireEvent, screen } from '@testing-library/react-native'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react-native'
 
 import { SettingsScreen } from '../src/features/settings/SettingsScreen'
 import { GALLERY_ROW_TITLE } from '../src/features/settings/GalleryScreen'
@@ -22,6 +22,18 @@ jest.mock('../src/platform/keyboard-modifiers', () => ({
 
     return () => mockEscapeListeners.delete(handler)
   }
+}))
+
+// The licence data is half a megabyte of generated JSON; this suite is about the
+// row that opens it, not about the payload.
+jest.mock('../src/features/settings/licences-data', () => ({
+  loadLicenceData: async () => ({
+    generatedBy: 'scripts/generate-third-party-licenses.mjs',
+    scope: 'production dependencies of apps/hermie',
+    excludesWorkspacePackages: ['@hermie/transcript'],
+    packages: [{ name: 'expo', version: '54.0.37', licence: 'MIT' }],
+    texts: {}
+  })
 }))
 
 jest.mock('../src/gateway', () => ({
@@ -70,6 +82,32 @@ describe('SettingsScreen', () => {
     } finally {
       ;(globalThis as unknown as { __DEV__: boolean }).__DEV__ = previous
     }
+  })
+})
+
+describe('About', () => {
+  it('opens the licences from a row that ships in every build', async () => {
+    const view = renderScreen(<SettingsScreen />)
+
+    // Not behind `__DEV__`: an attribution obligation is not a developer tool.
+    expect(screen.getByText('Licences')).toBeTruthy()
+
+    fireEvent.press(screen.getByText('Licences'))
+
+    await waitFor(() => expect(view.getByTestId('licences-list')).toBeTruthy())
+    expect(screen.getByText('expo')).toBeTruthy()
+  })
+
+  it('comes back to Settings on Escape', async () => {
+    const view = renderScreen(<SettingsScreen />)
+
+    fireEvent.press(screen.getByText('Licences'))
+    await waitFor(() => expect(view.getByTestId('licences-list')).toBeTruthy())
+
+    pressEscape()
+
+    expect(view.queryByTestId('licences-list')).toBeNull()
+    expect(screen.getByText('Settings')).toBeTruthy()
   })
 })
 

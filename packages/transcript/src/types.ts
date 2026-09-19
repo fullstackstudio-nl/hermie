@@ -9,6 +9,7 @@
  * Nothing here filters. Verbosity and the bot-to-bot toggle are selectors
  * (`selectors.ts`); the reducer always keeps the full truth.
  */
+import type { CronDeliveryShape } from './cron-delivery'
 import type { ErrorSurface, SessionLiveInfo, Usage } from '@hermes/shared/gateway-events'
 
 /** Client-side verbosity filter. Purely a read-time concern. */
@@ -241,6 +242,25 @@ export interface NoticeItem extends ItemBase {
   completions?: ProcessCompletionBlock[]
 }
 
+/**
+ * A scheduled job's report, delivered into this chat.
+ *
+ * Notice-class, not speech: it arrives on the `user` role because the turn it
+ * starts runs on that role, but nobody said it — the scheduler did. Detected
+ * from the header alone (`cron-delivery.ts`), because the wire carries no marker.
+ */
+export interface CronDeliveryItem extends ItemBase {
+  kind: 'cron_delivery'
+  /** The job name the header carried. */
+  jobName: string
+  /** `jobName` is the redactor's placeholder, not a name; do not title a card with it. */
+  nameRedacted?: boolean
+  /** The report itself, header removed. Empty when the header arrived without one. */
+  body: string
+  /** Which header matched, so a card can say how it got here. */
+  shape: CronDeliveryShape
+}
+
 export type RequestState = 'open' | 'answered' | 'cancelled'
 
 export interface ApprovalItem extends ItemBase {
@@ -295,6 +315,7 @@ export type TranscriptItem =
   | BotDmInItem
   | BotDmOutItem
   | ClarifyItem
+  | CronDeliveryItem
   | NoticeItem
   | StatusItem
   | SubagentGroupItem

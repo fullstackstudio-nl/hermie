@@ -5,6 +5,7 @@ import { AccessibilityInfo, useColorScheme } from 'react-native'
 import { useSettingsStore } from '../store/settings'
 import {
   ACCENTS,
+  darkBubbles,
   darkColors,
   darkElevation,
   darkGlass,
@@ -14,6 +15,7 @@ import {
   EDGE_SOFT,
   HAIRLINE,
   HAIRLINE_SOFT,
+  lightBubbles,
   lightColors,
   lightElevation,
   lightGlass,
@@ -27,6 +29,8 @@ import {
   WALLPAPERS,
   type AccentName,
   type AccentSwatch,
+  type BubbleRecipe,
+  type BubbleVariant,
   type ColorScale,
   type ElevationScale,
   type GlassScale,
@@ -52,6 +56,8 @@ export type Theme = {
   colors: ColorScale
   elevation: ElevationScale
   glass: GlassScale
+  /** Incoming bubbles: a hand-composited recipe, never a blur view per row. */
+  bubbles: Record<BubbleVariant, BubbleRecipe>
   presence: PresenceScale
   shadows: ShadowScale
   wallpaper: WallpaperSpec
@@ -110,6 +116,7 @@ function buildTheme(
     colors: dark ? darkColors : lightColors,
     elevation: dark ? darkElevation : lightElevation,
     glass: dark ? darkGlass : lightGlass,
+    bubbles: dark ? darkBubbles : lightBubbles,
     presence: dark ? darkPresence : lightPresence,
     shadows: dark ? darkShadows : lightShadows,
     wallpaper: WALLPAPERS[wallpaperName][scheme],

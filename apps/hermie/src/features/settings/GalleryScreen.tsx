@@ -18,16 +18,23 @@ import {
   AgentsBar,
   AgentsSheet,
   AssistantBubble,
+  AttachMenu,
   BotDmInBubble,
-  BotDmOutCard,
+  BotDmOutLine,
+  BotDmRollup,
   ChatHeader,
   Composer,
+  CronDeliveryCard,
+  DateSeparator,
   DiffView,
   ErrorCard,
+  ExpandedProvider,
+  FileChip,
   JumpToLatestPill,
   NoticePill,
   QueuedChip,
   ReasoningDisclosure,
+  rollupDmRuns,
   StatusRow,
   SubagentGroupCard,
   ToolCard,
@@ -42,13 +49,18 @@ import {
   botDmInItem,
   botDmOutItem,
   clarifyItem,
+  cronDeliveryItem,
+  dmRunItems,
   errorAssistantItem,
   failedDmOutItem,
   failedToolItem,
   galleryTranscript,
+  inlineCodeRegressionItem,
   interimAssistantItem,
+  longReportItem,
   noticeItem,
   patchToolItem,
+  pendingDmOutItem,
   processNoticeItem,
   recoverableAssistantItem,
   runningToolItem,
@@ -98,15 +110,15 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
   return (
     <View style={{ gap: theme.space.sm }}>
-      <Text color="textMuted" style={{ letterSpacing: 0.6 }} variant="caption">
+      <Text color="textFaint" variant="micro">
         {title.toUpperCase()}
       </Text>
       <View
         style={{
-          backgroundColor: theme.colors.bg,
-          borderColor: theme.colors.border,
-          borderRadius: theme.radii.lg,
+          borderColor: theme.hairlineSoft,
+          borderRadius: theme.radii.card,
           borderWidth: 1,
+          gap: theme.space.sm,
           padding: theme.space.md
         }}
       >
@@ -179,6 +191,7 @@ export function GalleryScreen({ onClose }: GalleryScreenProps) {
   const [clarifyOpen, setClarifyOpen] = useState(false)
   const [optionsOpen, setOptionsOpen] = useState(false)
   const [transcriptOpen, setTranscriptOpen] = useState(false)
+  const [cronExpanded, setCronExpanded] = useState(false)
 
   const [yolo, setYolo] = useState(false)
   const [fast, setFast] = useState(true)
@@ -202,7 +215,7 @@ export function GalleryScreen({ onClose }: GalleryScreenProps) {
         name="Researcher"
         onBack={() => setTranscriptOpen(false)}
         onOpenOptions={() => setOptionsOpen(true)}
-        running
+        presence="working"
       />
 
       <TranscriptList
@@ -242,8 +255,8 @@ export function GalleryScreen({ onClose }: GalleryScreenProps) {
     <Screen edgeToEdgeTop={false} padded={false}>
       <ScrollView contentContainerStyle={{ gap: theme.space.xl, padding: theme.space.lg }}>
         <View style={{ gap: theme.space.sm }}>
-          <Text variant="display">Component gallery</Text>
-          <Text color="textMuted" variant="callout">
+          <Text variant="title">Component gallery</Text>
+          <Text color="textMuted" variant="preview">
             Every chat surface with fixture data. Last action: {lastAction}
           </Text>
           {onClose ? <Button onPress={onClose} title="Back to settings" variant="secondary" /> : null}
@@ -254,8 +267,23 @@ export function GalleryScreen({ onClose }: GalleryScreenProps) {
             handle="researcher"
             name="Researcher"
             onOpenOptions={() => setOptionsOpen(true)}
-            running
+            presence="working"
             testID="gallery-chat-header"
+          />
+          <ChatHeader
+            handle="writer"
+            lastSeenAt={1_767_000_000}
+            name="Writer"
+            onOpenOptions={() => setOptionsOpen(true)}
+            presence="offline"
+            testID="gallery-chat-header-offline"
+          />
+          <ChatHeader
+            handle="bookkeeper"
+            name="Bookkeeper"
+            onOpenOptions={() => setOptionsOpen(true)}
+            presence="needsInput"
+            testID="gallery-chat-header-needs-input"
           />
         </Section>
 
@@ -266,15 +294,55 @@ export function GalleryScreen({ onClose }: GalleryScreenProps) {
         <StreamingSection />
 
         <Section title="Bubbles">
-          <UserBubble item={userItem} receipt="read" />
+          <DateSeparator label="Yesterday" />
+          {/* Grouping: three own bubbles in a run, only the last with a tail. */}
+          <UserBubble grouped={false} item={userItem} tail={false} />
+          <UserBubble grouped item={{ ...userItem, id: 'u1b', text: 'And keep it short.' }} tail={false} />
+          <UserBubble grouped item={{ ...userItem, id: 'u1c', text: 'Thanks.' }} receipt="read" tail />
           <AssistantBubble item={assistantItem} presentation="full" showFooter />
           <AssistantBubble item={interimAssistantItem} presentation="full" />
           <BotDmInBubble
+            answered
             item={botDmInItem}
             onOpenBot={handle => setLastAction(`Open bot @${handle}`)}
             selfHandle="researcher"
           />
           <TypingIndicator />
+        </Section>
+
+        <Section title="Receipts">
+          <UserBubble item={{ ...userItem, id: 'u-r1', text: 'Sending.' }} receipt="sending" />
+          <UserBubble item={{ ...userItem, id: 'u-r2', text: 'Sent.' }} receipt="sent" />
+          <UserBubble item={{ ...userItem, id: 'u-r3', text: 'Delivered.' }} receipt="delivered" />
+          <UserBubble item={{ ...userItem, id: 'u-r4', text: 'Read.' }} receipt="read" />
+        </Section>
+
+        <Section title="Long reply — reading treatment and fold">
+          {/* The fold's state lives above the list, so the gallery provides one. */}
+          <ExpandedProvider>
+            <AssistantBubble item={longReportItem} presentation="full" showFooter />
+          </ExpandedProvider>
+        </Section>
+
+        <Section title="Markdown regressions">
+          {/* The exact sentence the owner hit: a code span near a line end, and
+              emphasis a model opened with a stray space. */}
+          <ExpandedProvider>
+            <AssistantBubble item={inlineCodeRegressionItem} presentation="full" />
+          </ExpandedProvider>
+        </Section>
+
+        <Section title="Cron delivery">
+          <CronDeliveryCard
+            body={cronDeliveryItem.body}
+            expanded={cronExpanded}
+            name={cronDeliveryItem.jobName}
+            onOpenCron={() => setLastAction('Open cron')}
+            onRunNow={() => setLastAction('Run cron now')}
+            onToggle={() => setCronExpanded(current => !current)}
+            testID="gallery-cron-card"
+            ts={cronDeliveryItem.ts}
+          />
         </Section>
 
         <Section title="Errors">
@@ -298,13 +366,37 @@ export function GalleryScreen({ onClose }: GalleryScreenProps) {
           <DiffView diff={sampleDiff} />
         </Section>
 
-        <Section title="Bot-to-bot">
-          <BotDmOutCard
-            item={botDmOutItem}
-            onOpenBot={handle => setLastAction(`Open bot @${handle}`)}
-            presentation="full"
-          />
-          <BotDmOutCard item={failedDmOutItem} presentation="collapsed" />
+        <Section title="Bot-to-bot lines">
+          <ExpandedProvider>
+            <View style={{ gap: theme.space.sm + 1 }}>
+              <BotDmOutLine
+                item={botDmOutItem}
+                onOpenBot={handle => setLastAction(`Open bot @${handle}`)}
+                presentation="collapsed"
+              />
+              <BotDmOutLine item={pendingDmOutItem} presentation="collapsed" />
+              <BotDmOutLine item={failedDmOutItem} presentation="collapsed" />
+            </View>
+          </ExpandedProvider>
+        </Section>
+
+        <Section title="Bot-to-bot roll-up">
+          <ExpandedProvider>
+            <BotDmRollup
+              run={{
+                handle: 'writer',
+                id: dmRunItems[0]?.id ?? 'dm-run-0',
+                items: dmRunItems,
+                replies: 4
+              }}
+            />
+          </ExpandedProvider>
+          <Text color="textFaint" variant="micro">
+            {`${Object.values(rollupDmRuns(dmRunItems.map(item => ({ item, presentation: 'collapsed' as const })))).length} rows in the run`}
+          </Text>
+        </Section>
+
+        <Section title="Agents">
           <SubagentGroupCard
             item={subagentGroupItem}
             onOpenTranscript={id => setLastAction(`Open transcript ${id}`)}
@@ -321,9 +413,37 @@ export function GalleryScreen({ onClose }: GalleryScreenProps) {
           <JumpToLatestPill count={3} onPress={() => setLastAction('Jump to latest')} />
         </Section>
 
+        <Section title="File chips">
+          <View style={{ alignItems: 'flex-start', gap: theme.space.sm }}>
+            <FileChip
+              name="quarterly-report-final-v4.xlsx"
+              onRemove={() => setLastAction('Remove chip')}
+              size={48210}
+            />
+            <FileChip name="archive.zip" progress={0.4} size={98_000_000} status="uploading" />
+            <FileChip error="Too large · 100 MB max" name="capture.mov" size={420_000_000} status="error" />
+            <FileChip name="notes.md" onAccent size={1240} />
+          </View>
+        </Section>
+
+        <Section title="Attach menu">
+          <AttachMenu
+            choices={[
+              { id: 'photo', label: 'Photo library' },
+              { busy: true, id: 'file', label: 'Choose file' }
+            ]}
+            onChoose={id => setLastAction(`Attach ${id}`)}
+            testID="gallery-attach-menu"
+          />
+        </Section>
+
         <Section title="Composer">
           <Composer
-            attachments={[{ id: 'att-1', name: 'diagram.png' }]}
+            attachments={[
+              { id: 'att-1', kind: 'image', name: 'diagram.png' },
+              { id: 'att-2', kind: 'file', name: 'quarterly-report-final-v4.xlsx', size: 48210, status: 'uploaded' },
+              { error: 'Too large · 100 MB max', id: 'att-3', kind: 'file', name: 'capture.mov', status: 'error' }
+            ]}
             botName="Researcher"
             onAttach={() => setLastAction('Attach pressed')}
             onChangeText={setDraft}

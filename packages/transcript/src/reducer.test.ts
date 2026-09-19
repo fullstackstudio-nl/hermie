@@ -22,7 +22,8 @@ import {
   erroredTurn,
   streamedTurn
 } from './__fixtures__/events'
-import { dmReplyProcessText } from './__fixtures__/rows'
+import { rowsToItems } from './rows-to-items'
+import { cronBotChatBody, cronBotChatText, dmReplyProcessText } from './__fixtures__/rows'
 import {
   type ApprovalItem,
   type AssistantItem,
@@ -30,8 +31,10 @@ import {
   type ChatState,
   type ClarifyItem,
   createChatState,
+  type CronDeliveryItem,
   type SubagentGroupItem,
   type ToolItem,
+  type TranscriptItem,
   type UserItem
 } from './types'
 
@@ -808,6 +811,39 @@ describe('resume snapshots', () => {
 
   it('re-delivers the open requests', () => {
     expect(state.byRequestId['srq-4']).toBeDefined()
+  })
+
+  it('rebuilds an in-flight cron delivery as a cron card, not as the owner speaking', () => {
+    // A resume can land mid-turn on a turn nobody local submitted. The live path
+    // has to reach the same item the history path would, or the chat changes
+    // shape the moment the rows persist.
+    const running = applyResumeSnapshot(fresh(), { inflight: { user: cronBotChatText }, running: true }, NOW)
+    const first = list(running)[0] as CronDeliveryItem
+
+    expect(first).toMatchObject({
+      kind: 'cron_delivery',
+      jobName: 'Inbox scan',
+      shape: 'bot_chat',
+      origin: 'inflight'
+    })
+    expect(first.body).toBe(cronBotChatBody)
+  })
+
+  it('reaches the identical item live and from history', () => {
+    const live = list(applyResumeSnapshot(fresh(), { inflight: { user: cronBotChatText } }, NOW))[0]!
+    const [fromHistory] = rowsToItems([{ role: 'user', text: cronBotChatText }], 'rpc') as [CronDeliveryItem]
+
+    // Everything but the bookkeeping the two paths cannot share: an id, a seq, an
+    // origin and a timestamp the row has and a resume snapshot does not.
+    const body = ({ id: _i, seq: _s, origin: _o, ts: _t, ...rest }: TranscriptItem) => rest
+
+    expect(body(live)).toEqual(body(fromHistory))
+  })
+
+  it('still rebuilds an ordinary in-flight turn as the owner speaking', () => {
+    const typed = applyResumeSnapshot(fresh(), { inflight: { user: '[urgent] deploy staging' } }, NOW)
+
+    expect(list(typed)[0]).toMatchObject({ kind: 'user', text: '[urgent] deploy staging' })
   })
 
   it('rebuilds a retained failed turn as a failure', () => {

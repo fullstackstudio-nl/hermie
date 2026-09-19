@@ -12,6 +12,7 @@ import type {
   BotDmInItem,
   BotDmOutItem,
   ClarifyItem,
+  CronDeliveryItem,
   NoticeItem,
   StatusItem,
   Subagent,
@@ -389,6 +390,127 @@ export const clarifyItem: ClarifyItem = {
   state: 'open'
 }
 
+/**
+ * A long report: table, fenced code, nested list.
+ *
+ * Long enough to need the reading treatment AND the fold, which are the two
+ * states §6.3 describes and the two that cannot be reached from a short reply.
+ */
+export const longReportMarkdown = `## Domain sweep, 19 September
+
+Four of the eleven domains need a decision this week. Two are on autorenew and
+two are not, which is the whole of the problem.
+
+| Domain        | Renews     | Autorenew | Registrar     |
+| ------------- | ---------- | --------- | ------------- |
+| example.com   | 2026-10-02 | on        | Registrar One |
+| example.org   | 2026-10-04 | off       | Registrar One |
+| example.net   | 2026-11-18 | on        | Registrar Two |
+| docs.example.org | 2026-12-01 | off    | Registrar Two |
+
+### What I checked
+
+1. The registrar API, for the renewal dates and the autorenew flag.
+2. DNS, for anything still pointing at the old host:
+   - \`example.org\` resolves to 203.0.113.24, which is the old host.
+   - \`docs.example.org\` is a CNAME onto the new one.
+3. The invoices, to see which of them we have actually been paying for.
+
+The sweep itself is one call per domain:
+
+\`\`\`bash
+for domain in example.com example.org example.net docs.example.org; do
+  registrar-cli domain:show "$domain" --format json \\
+    | jq '{name, expires, autorenew, registrar}'
+done
+\`\`\`
+
+### What I would do
+
+** \`example.org\` staat op autorenew=off** and it renews in two weeks, so it is
+the only one with a deadline. Turning it on is one call and costs nothing extra,
+because the price is the same either way.
+
+\`docs.example.org\` is worth letting go: nothing links to it, it has had no
+traffic for six weeks, and the content is already on \`example.org\`.
+
+The two on autorenew need no action at all. I would still move them to one
+registrar at some point, because two invoices for eleven domains is how one of
+them gets missed.
+
+Say the word and I will turn autorenew on for \`example.org\`.`
+
+export const longReportItem: AssistantItem = {
+  ...base('a-long', 30),
+  interim: false,
+  kind: 'assistant',
+  status: 'complete',
+  streaming: false,
+  text: longReportMarkdown,
+  usage: { input: 8420, model: 'example-model', output: 1180 }
+}
+
+/**
+ * The inline-code regression, as the owner actually hit it.
+ *
+ * Both halves in one sentence: a code span near the end of a line (which used to
+ * paint an empty chip across the rest of the line) and emphasis a model opened
+ * with a stray space (which marked never read as bold at all).
+ */
+export const inlineCodeRegressionItem: AssistantItem = {
+  ...base('a-inline-code', 31),
+  interim: false,
+  kind: 'assistant',
+  status: 'complete',
+  streaming: false,
+  text:
+    'Ik heb de testmail van gisteren naar `test@example.com` teruggezocht. ' +
+    'Dat is dezelfde afzender als vorige week, en ** `example.nl` staat op autorenew=off** — ' +
+    'dus die moet er nog voor vrijdag bij. Draai anders `git commit --amend` en stuur hem opnieuw.'
+}
+
+/**
+ * A cron delivery.
+ *
+ * The item the projection in `packages/transcript/src/cron-delivery.ts` produces
+ * from a `role:user` row the gateway injected — the row that used to render as the
+ * owner's own blue bubble. See ADR-0013.
+ */
+export const cronDeliveryItem: CronDeliveryItem = {
+  ...base('cron-1', 32),
+  body:
+    '11 domains checked. `example.org` renews on 2026-10-04 with autorenew off.\n\n' +
+    'Nothing else needs a decision this week.',
+  jobName: 'Nightly domain scout',
+  kind: 'cron_delivery',
+  shape: 'bot_chat'
+}
+
+/**
+ * Five consecutive dispatches to one teammate, so the roll-up has something to
+ * roll up. Four of them came back; one is still waiting, which is the state the
+ * static hollow dot is for.
+ */
+export const dmRunItems: BotDmOutItem[] = [
+  'Draft the intro from the three findings.',
+  'Shorten the second paragraph by about a third.',
+  'Drop the registrar names — they read as an endorsement.',
+  'One more pass for the passive voice in the last line.',
+  'And a title, six words at most.'
+].map((message, index) => ({
+  ...base(`dm-run-${index}`, 40 + index),
+  dispatch: { deliveryId: `d-run-${index}`, processId: `p-run-${index}`, status: 'queued' as const, to: 'writer' },
+  kind: 'bot_dm_out' as const,
+  message,
+  // The last one has not come back yet.
+  ...(index < 4
+    ? { reply: { text: `Done — ${message.toLowerCase().replace(/\.$/, '')}.`, ts: BASE_TS + 100 + index } }
+    : {}),
+  target: 'Writer',
+  targetHandle: 'writer',
+  toolId: `call_dm_run_${index}`
+}))
+
 /** The gallery's transcript: one of every kind, in a plausible order. */
 export const galleryTranscript: VisibleItem[] = [
   { item: userItem, presentation: 'full' },
@@ -413,5 +535,9 @@ export const galleryTranscript: VisibleItem[] = [
   { item: errorAssistantItem, presentation: 'full' },
   { item: recoverableAssistantItem, presentation: 'full' },
   { item: approvalItem, presentation: 'full' },
-  { item: clarifyItem, presentation: 'full' }
+  { item: clarifyItem, presentation: 'full' },
+  { item: cronDeliveryItem, presentation: 'collapsed' },
+  ...dmRunItems.map(item => ({ item, presentation: 'collapsed' as const })),
+  { item: inlineCodeRegressionItem, presentation: 'full' },
+  { item: longReportItem, presentation: 'full' }
 ]

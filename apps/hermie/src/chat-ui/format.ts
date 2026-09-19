@@ -61,6 +61,72 @@ export function formatCount(value: number | undefined): string {
   return `${Math.round(value / 100_000) / 10}M`
 }
 
+/**
+ * Does this reply get the READING treatment?
+ *
+ * §6.3 and §7.1: a long reply drops the frosted interior for the near-opaque
+ * `bubbleInRead` wash, looser leading and more generous padding. That is not a
+ * stylistic variant — it is the only way body-text contrast becomes a fixed
+ * number instead of a function of whatever wallpaper is behind the bubble, and a
+ * wall of text is exactly where that matters.
+ *
+ * The test is deliberately crude and cheap: it runs on every streaming flush. A
+ * fenced block or a table qualifies at any length, because both are wide machine
+ * text that has to sit on a known surface to be readable at all.
+ */
+export function needsReadingTreatment(text: string): boolean {
+  if (text.length >= 480) {
+    return true
+  }
+
+  if (text.includes('```')) {
+    return true
+  }
+
+  // A table's delimiter row is the one line whose shape is unambiguous.
+  return /^\s*\|?[\s:-]*-{2,}[\s:|-]*$/m.test(text)
+}
+
+/** `4 KB`, `1.2 MB`, `98.4 MB` — an attachment's size on a chip. */
+export function formatBytes(bytes: number | undefined): string {
+  if (!bytes || bytes < 0 || Number.isNaN(bytes)) {
+    return ''
+  }
+
+  if (bytes < 1024) {
+    return `${bytes} B`
+  }
+
+  const kilobytes = bytes / 1024
+
+  if (kilobytes < 1024) {
+    return `${Math.round(kilobytes)} KB`
+  }
+
+  const megabytes = kilobytes / 1024
+
+  return megabytes < 1024 ? `${Math.round(megabytes * 10) / 10} MB` : `${Math.round((megabytes / 1024) * 10) / 10} GB`
+}
+
+/**
+ * Ellipsise the HEAD of a file name and keep the tail.
+ *
+ * The extension is the most informative part of a file name, so it is the part
+ * that survives: `…-final-v4.xlsx` tells a reader more than `Q3-report-fin…`.
+ */
+export function middleTruncate(name: string, max = 28): string {
+  if (name.length <= max) {
+    return name
+  }
+
+  // Keep a couple of leading characters as well: a tail alone loses which of
+  // three similarly-named exports this is.
+  const head = Math.max(0, Math.floor((max - 1) / 3))
+  const tail = max - 1 - head
+
+  return `${name.slice(0, head)}…${name.slice(name.length - tail)}`
+}
+
 /** One line, whitespace collapsed, ellipsised. */
 export function clipInline(value: string, max = 80): string {
   const collapsed = value.replace(/\s+/g, ' ').trim()

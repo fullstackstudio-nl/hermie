@@ -13,6 +13,7 @@ import { useEscapeKey } from '../../ui/useEscapeKey'
 import { FORM_MAX_WIDTH, WALLPAPER_ORDER, type WallpaperName } from '../../ui/tokens'
 import { DebugConnectionScreen } from './DebugConnectionScreen'
 import { GALLERY_ROW_TITLE, GalleryScreen } from './GalleryScreen'
+import { LicencesScreen } from './LicencesScreen'
 
 const VERBOSITY_OPTIONS: { value: Verbosity; label: string }[] = [
   { value: 'quiet', label: chatStrings.options.verbosityOptions.quiet },
@@ -42,21 +43,34 @@ export function SettingsScreen() {
   const setWallpaper = useSettingsStore(state => state.setWallpaper)
   const [showConnectionTest, setShowConnectionTest] = useState(false)
   const [showGallery, setShowGallery] = useState(false)
+  const [showLicences, setShowLicences] = useState(false)
   const [confirmingChange, setConfirmingChange] = useState(false)
 
-  // Escape goes back ONE level: out of a developer screen and into Settings,
-  // and only then out of whatever is holding Settings.
-  useEscapeKey(() => {
-    setShowConnectionTest(false)
-    setShowGallery(false)
-  }, showConnectionTest || showGallery)
+  // Escape goes back ONE level: out of a screen Settings opened and into
+  // Settings, and only then out of whatever is holding Settings.
+  useEscapeKey(
+    () => {
+      setShowConnectionTest(false)
+      setShowGallery(false)
+      setShowLicences(false)
+    },
+    showConnectionTest || showGallery || showLicences
+  )
 
+  // A screen opened from here REPLACES Settings rather than pushing onto a
+  // navigator, because Settings has to work in both shells: on a phone it sits
+  // in a native stack, and on a wide window it is the content of an overlay
+  // panel with no navigator above it at all (`app/RegularShell.tsx`).
   if (showConnectionTest) {
     return <DebugConnectionScreen onClose={() => setShowConnectionTest(false)} />
   }
 
   if (showGallery) {
     return <GalleryScreen onClose={() => setShowGallery(false)} />
+  }
+
+  if (showLicences) {
+    return <LicencesScreen onClose={() => setShowLicences(false)} />
   }
 
   const token = config?.authMode === 'session_token'
@@ -153,6 +167,14 @@ export function SettingsScreen() {
             options={WALLPAPER_OPTIONS}
             testID="settings-wallpaper"
             value={wallpaper}
+          />
+        </InsetGroup>
+
+        <InsetGroup header={strings.settings.about}>
+          <InsetButtonRow
+            detail={strings.settings.licencesHint}
+            onPress={() => setShowLicences(true)}
+            title={strings.settings.licences}
           />
         </InsetGroup>
 

@@ -9,11 +9,13 @@ import {
   AgentsSheet,
   AssistantBubble,
   BotDmInBubble,
-  BotDmOutCard,
+  BotDmOutLine,
   ChatHeader,
+  ExpandedProvider,
   UserBubble,
   formatCount,
-  formatDuration
+  formatDuration,
+  markerFor
 } from '../../src/chat-ui'
 import {
   assistantItem,
@@ -30,10 +32,29 @@ import { GalleryScreen } from '../../src/features/settings/GalleryScreen'
 import { renderScreen } from '../support/render'
 
 describe('bubbles', () => {
-  it('shows the receipt under an own bubble', () => {
+  // The receipt is now TICKS beside the clock rather than the word under the
+  // bubble: a bubble that says "Delivered" under every line is noise, and §4's
+  // metadata line has no room for it. The word survives as the accessibility
+  // label, which is the only place it is still needed — a tick is not readable.
+  it('shows the receipt as a labelled tick on an own bubble', () => {
     renderScreen(<UserBubble item={userItem} receipt="delivered" />)
 
-    expect(screen.getByText(/^Delivered/)).toBeTruthy()
+    expect(screen.getByLabelText(/Delivered$/)).toBeTruthy()
+  })
+
+  it('distinguishes read from delivered', () => {
+    renderScreen(<UserBubble item={userItem} receipt="read" />)
+
+    expect(screen.getByLabelText(/Read$/)).toBeTruthy()
+  })
+
+  it('renders a sent file as a chip, never as the raw @file: token', () => {
+    renderScreen(
+      <UserBubble item={{ ...userItem, attachments: ['@file:/srv/work/quarterly-report.xlsx'], text: 'Here it is.' }} />
+    )
+
+    expect(screen.getByText(/quarterly-report\.xlsx$/)).toBeTruthy()
+    expect(screen.queryByText(/@file:/)).toBeNull()
   })
 
   it('renders the reply footer only when asked', () => {
@@ -60,37 +81,81 @@ describe('bubbles', () => {
   it('captions a reply that answers another bot', () => {
     renderScreen(<AssistantBubble item={replyToBotItem} />)
 
-    expect(screen.getByText('Reply to @writer')).toBeTruthy()
+    // The caption is the micro type now, which is uppercase.
+    expect(screen.getByText('REPLY TO @WRITER')).toBeTruthy()
   })
 
-  it('opens the sender from an inbound DM header', () => {
+  it('keeps the sender chip on an inbound DM, in the micro type', () => {
+    renderScreen(<BotDmInBubble item={botDmInItem} selfHandle="researcher" />)
+
+    expect(screen.getByText('WRITER · BOT')).toBeTruthy()
+    expect(screen.getByText('@writer → @researcher')).toBeTruthy()
+  })
+
+  it('marks an inbound DM this bot has answered', () => {
+    renderScreen(<BotDmInBubble answered item={botDmInItem} selfHandle="researcher" />)
+
+    expect(screen.getByText(/answered$/)).toBeTruthy()
+  })
+})
+
+describe('bot-to-bot lines', () => {
+  // §6.6: collapsed outgoing is a LINE, and tapping it expands the exchange in
+  // place. It used to be a card whose header navigated to the other bot's chat,
+  // which cost the reader the conversation they were reading.
+  it('draws a line with the reply marker and expands in place', () => {
+    renderScreen(
+      <ExpandedProvider>
+        <BotDmOutLine item={botDmOutItem} presentation="collapsed" />
+      </ExpandedProvider>
+    )
+
+    expect(screen.getByText('Message to @writer')).toBeTruthy()
+    expect(screen.getByText(/replied/)).toBeTruthy()
+    expect(screen.queryByTestId(`bot-dm-out-expanded-${botDmOutItem.id}`)).toBeNull()
+
+    fireEvent.press(screen.getByTestId(`bot-dm-out-line-${botDmOutItem.id}`))
+    expect(screen.getByTestId(`bot-dm-out-expanded-${botDmOutItem.id}`)).toBeTruthy()
+  })
+
+  it('never navigates from the line itself, only from the explicit link', () => {
     const onOpenBot = jest.fn()
 
-    renderScreen(<BotDmInBubble item={botDmInItem} onOpenBot={onOpenBot} selfHandle="researcher" />)
-
-    expect(screen.getByText('Writer · bot')).toBeTruthy()
-    expect(screen.getByText('@writer → @researcher')).toBeTruthy()
-
-    fireEvent.press(screen.getByTestId(`bot-dm-in-header-${botDmInItem.id}`))
-    expect(onOpenBot).toHaveBeenCalledWith(
-      'writer',
-      expect.objectContaining({ kind: 'bot_dm_out', text: botDmInItem.text })
+    renderScreen(
+      <ExpandedProvider>
+        <BotDmOutLine item={botDmOutItem} onOpenBot={onOpenBot} presentation="collapsed" />
+      </ExpandedProvider>
     )
+
+    fireEvent.press(screen.getByTestId(`bot-dm-out-line-${botDmOutItem.id}`))
+    expect(onOpenBot).not.toHaveBeenCalled()
+
+    // The link carries the counterpart query, so the far chat lands on the
+    // matching inbound row rather than at its bottom.
+    fireEvent.press(screen.getByTestId(`bot-dm-out-open-${botDmOutItem.id}`))
+    expect(onOpenBot).toHaveBeenCalledWith('writer', expect.objectContaining({ kind: 'bot_dm_in' }))
   })
 
-  it('nests the teammate reply inside the dispatch card', () => {
-    renderScreen(<BotDmOutCard item={botDmOutItem} presentation="full" />)
-
-    expect(screen.getByText('→ Writer')).toBeTruthy()
-    expect(screen.getByTestId(`bot-dm-out-reply-${botDmOutItem.id}`)).toBeTruthy()
-    expect(screen.getByText('Writer replied')).toBeTruthy()
-  })
-
-  it('marks a failed delivery', () => {
-    renderScreen(<BotDmOutCard item={failedDmOutItem} presentation="full" />)
+  it('marks a failed delivery and says why', () => {
+    renderScreen(
+      <ExpandedProvider>
+        <BotDmOutLine item={failedDmOutItem} presentation="collapsed" />
+      </ExpandedProvider>
+    )
 
     expect(screen.getByText('Failed')).toBeTruthy()
+
+    fireEvent.press(screen.getByTestId(`bot-dm-out-line-${failedDmOutItem.id}`))
     expect(screen.getByText('The gateway timed out.')).toBeTruthy()
+  })
+
+  // The indicator is never absent: a line with nothing on its right would read
+  // as "delivered and answered", the one state a reader cannot verify.
+  it('always produces a marker', () => {
+    expect(markerFor(botDmOutItem).label).toMatch(/replied/)
+    expect(markerFor(failedDmOutItem).label).toBe('Failed')
+    expect(markerFor({ ...botDmOutItem, reply: undefined }).hollow).toBe(true)
+    expect(markerFor({ ...botDmOutItem, reply: undefined }).label).toBe('Delivered · waiting for reply')
   })
 })
 
@@ -100,7 +165,7 @@ describe('ChatHeader', () => {
 
     renderScreen(<ChatHeader handle="researcher" name="Researcher" onOpenOptions={onOpenOptions} running />)
 
-    expect(screen.getByText('@researcher · Running')).toBeTruthy()
+    expect(screen.getByText(/@researcher/)).toBeTruthy()
 
     fireEvent.press(screen.getByTestId('chat-header-options'))
     expect(onOpenOptions).toHaveBeenCalled()

@@ -17,10 +17,12 @@ import {
   parseProcessCompleteText,
   replyFromDeliveryOutput
 } from './bot-dm'
+import { parseCronDelivery } from './cron-delivery'
 import {
   type AssistantItem,
   type BotDmInItem,
   type BotDmOutItem,
+  type CronDeliveryItem,
   type ItemOrigin,
   type NoticeItem,
   type NoticeKind,
@@ -484,6 +486,26 @@ export function rowsToItems(rows: readonly TranscriptRow[], shape: RowShape, opt
       return
     }
 
+    // Before the speech paths, and only on a row this file has NOT already
+    // recognised by `display_kind`: a cron delivery is an ordinary `role: user`
+    // row with no marker on it, so anything the gateway did label is a stronger
+    // signal than our header heuristic and has already returned above.
+    const cron = role === 'user' && !displayKind ? parseCronDelivery(content) : null
+
+    if (cron) {
+      push<CronDeliveryItem>({
+        id: fallbackId,
+        kind: 'cron_delivery',
+        jobName: cron.jobName,
+        ...(cron.nameRedacted ? { nameRedacted: true } : {}),
+        body: cron.body,
+        shape: cron.shape,
+        ...base
+      })
+
+      return
+    }
+
     const incoming = role === 'user' ? parseIncomingBotMessage(content) : null
 
     if (incoming) {
@@ -565,7 +587,12 @@ export function normalizedItemText(item: TranscriptItem): string {
         ? `${item.title}\n${item.body ?? ''}`
         : item.kind === 'status'
           ? item.text
-          : ''
+          : // Both transports parse the same header into the same name and body,
+            // so this is the key that pairs a live cron card with its persisted
+            // row instead of letting the row land as a second card.
+            item.kind === 'cron_delivery'
+            ? `${item.jobName}\n${item.body}`
+            : ''
 
   return text.replace(/\s+/gu, ' ').trim()
 }

@@ -9,20 +9,21 @@ new record supersedes it, and the old one gets a line at the top pointing forwar
 
 ## Index
 
-| #                                                | Title                                                        | Status             |
-| ------------------------------------------------ | ------------------------------------------------------------ | ------------------ |
-| [0001](0001-expo-sdk-54-rn-081.md)               | Expo SDK 54 and React Native 0.81                            | Accepted           |
-| [0002](0002-macos-via-react-native-macos.md)     | macOS through react-native-macos, in the same app package    | Superseded by 0011 |
-| [0003](0003-vendor-hermes-shared.md)             | Vendor the Hermes protocol sources with a sync script        | Accepted           |
-| [0004](0004-native-pkce-via-webview.md)          | Native PKCE sign-in through an intercepted web view redirect | Accepted           |
-| [0005](0005-ticket-per-websocket-dial.md)        | A fresh ticket per WebSocket dial, offered as a subprotocol  | Accepted           |
-| [0006](0006-single-gateway-no-relay.md)          | One gateway per install, no cross-gateway bot relay          | Accepted           |
-| [0007](0007-canonical-bot-chats-only.md)         | Only canonical Bot Chats                                     | Accepted           |
-| [0008](0008-verbosity-as-client-selector.md)     | Verbosity is a client-side selector                          | Accepted           |
-| [0009](0009-bot-to-bot-detection.md)             | Bot-to-bot traffic is detected from transcript conventions   | Accepted           |
-| [0010](0010-agent-questions-as-bottom-sheets.md) | Questions from the agent are bottom sheets                   | Accepted           |
-| [0011](0011-mac-via-the-ipad-build.md)           | The Mac version is the iPad build                            | Accepted           |
-| [0012](0012-local-chat-list-layout.md)           | The chat list's arrangement and colours are client-local     | Accepted           |
+| #                                                 | Title                                                          | Status             |
+| ------------------------------------------------- | -------------------------------------------------------------- | ------------------ |
+| [0001](0001-expo-sdk-54-rn-081.md)                | Expo SDK 54 and React Native 0.81                              | Accepted           |
+| [0002](0002-macos-via-react-native-macos.md)      | macOS through react-native-macos, in the same app package      | Superseded by 0011 |
+| [0003](0003-vendor-hermes-shared.md)              | Vendor the Hermes protocol sources with a sync script          | Accepted           |
+| [0004](0004-native-pkce-via-webview.md)           | Native PKCE sign-in through an intercepted web view redirect   | Accepted           |
+| [0005](0005-ticket-per-websocket-dial.md)         | A fresh ticket per WebSocket dial, offered as a subprotocol    | Accepted           |
+| [0006](0006-single-gateway-no-relay.md)           | One gateway per install, no cross-gateway bot relay            | Accepted           |
+| [0007](0007-canonical-bot-chats-only.md)          | Only canonical Bot Chats                                       | Accepted           |
+| [0008](0008-verbosity-as-client-selector.md)      | Verbosity is a client-side selector                            | Accepted           |
+| [0009](0009-bot-to-bot-detection.md)              | Bot-to-bot traffic is detected from transcript conventions     | Accepted           |
+| [0010](0010-agent-questions-as-bottom-sheets.md)  | Questions from the agent are bottom sheets                     | Accepted           |
+| [0011](0011-mac-via-the-ipad-build.md)            | The Mac version is the iPad build                              | Accepted           |
+| [0012](0012-local-chat-list-layout.md)            | The chat list's arrangement and colours are client-local       | Accepted           |
+| [0013](0013-cron-deliveries-in-the-transcript.md) | A cron delivery is its own item kind, detected from its header | Accepted           |
 
 ## Template
 

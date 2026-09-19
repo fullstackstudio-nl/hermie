@@ -6,13 +6,18 @@
  * literals, and what keeps the data layer free to change shape underneath.
  */
 export { AgentsBar, type AgentsBarProps } from './AgentsBar'
+export { AttachMenu, type AttachMenuProps } from './AttachMenu'
 export { AgentsSheet, type AgentsSheetProps, type SubagentTranscript } from './AgentsSheet'
 export { AssistantBubble, type AssistantBubbleProps } from './AssistantBubble'
 export { BotDmInBubble, type BotDmInBubbleProps } from './BotDmInBubble'
-export { BotDmOutCard, type BotDmOutCardProps } from './BotDmOutCard'
+export { BotDmOutLine, markerFor, type BotDmOutLineProps } from './BotDmOutLine'
+export { BotDmRollup, useRollupExpanded, type BotDmRollupProps } from './BotDmRollup'
 export { ChatHeader, type ChatHeaderProps } from './ChatHeader'
 export { Composer, type ComposerProps } from './Composer'
+export { CronDeliveryCard, type CronDeliveryCardProps } from './CronDeliveryCard'
+export { DateSeparator, type DateSeparatorProps } from './DateSeparator'
 export { DiffView, type DiffViewProps } from './DiffView'
+export { FileChip, fileGlyph, type FileChipProps } from './FileChip'
 export { ErrorCard, type ErrorCardProps } from './ErrorCard'
 export { JumpToLatestPill, type JumpToLatestPillProps } from './JumpToLatestPill'
 export { NoticePill, type NoticePillProps } from './NoticePill'
@@ -27,22 +32,33 @@ export {
   type TranscriptListHandle,
   type TranscriptListProps
 } from './TranscriptList'
-export { TypingIndicator, type TypingIndicatorProps } from './TypingIndicator'
+export { TypingDots, TypingIndicator, type TypingIndicatorProps } from './TypingIndicator'
 export { UserBubble, type UserBubbleProps } from './UserBubble'
 
 export { Avatar, type AvatarProps } from './primitives/Avatar'
-export { Bubble, type BubbleProps } from './primitives/Bubble'
+export { Bubble, useBubbleWidth, type BubbleProps } from './primitives/Bubble'
 export { Chip, type ChipProps } from './primitives/Chip'
+export { Fold, useFoldHeight, type FoldProps } from './primitives/Fold'
+export { LedgerRow, type LedgerRowProps } from './primitives/LedgerRow'
+export { MetaLine, type MetaLineProps } from './primitives/MetaLine'
+export { Ticks, type TicksProps } from './primitives/Ticks'
+
+export { ExpandedProvider, useExpanded, useExpandedApi, type ExpandedApi } from './expanded'
+export { hasReply, isDmOut, rollupDmRuns, ROLLUP_THRESHOLD, type DmRowRole, type DmRun } from './dm-rollup'
+export { dateStampFor, GROUP_WINDOW_SECONDS, layoutRows, speakerKey, type RowLayout } from './grouping'
 
 export { parseUnifiedDiff, summarizeDiff, type DiffLine, type DiffLineKind } from './diff'
 export {
   clipInline,
+  formatBytes,
   formatClock,
   formatCount,
   formatDuration,
   formatListTime,
   formatPreview,
   initialFor,
+  middleTruncate,
+  needsReadingTreatment,
   tintIndex
 } from './format'
 export { chatStrings } from './strings'

@@ -7,6 +7,33 @@ Two rules from that document are easy to lose and expensive to rediscover:
 - **Status indicators are static.** The only presence state that animates is _Needs input_ — a slow amber ring pulse, off under Reduce Motion. A bot being busy is information, not a request.
 - **Never nest glass more than one level.** Panel → header/composer/sheet/card → tint only. Two stacked blurs cost real frame time and visually cancel out.
 
+## Where the implementation deviates from the mockup
+
+The mockup is the source of truth and the app follows it, with these knowing exceptions. Each one is
+a decision, not a shortfall; if the mockup should change instead, change it and this list with it.
+
+- **The bubble tail is drawn BEHIND the bubble, not inside it.** §6.1 says the tail is an inline SVG
+  child of the bubble, absolutely positioned at its bottom corner. It is a sibling rendered first
+  instead, so the bubble's own fill covers the overlapping part. Drawn on top, the tail's flat colour
+  paints a 5pt strip of the bubble's BOTTOM stop over a lighter part of its gradient, which reads as a
+  stripe on a tall bubble. Behind, only the part that escapes the rounded corner is ever visible and
+  the join cannot show.
+- **A pending dispatch whose recipient is mid-turn says so.** §6.6 lists three reply indicators
+  (replied / waiting / failed). Where the app holds both chats and knows the recipient's turn is
+  running, the WAITING indicator reads `@writer is writing…` instead of `Delivered · waiting for
+reply`. It is still one indicator and still static; it is strictly more information in the same
+  space, and dropping it would have lost a behaviour the previous build had.
+- **The `Open @writer's chat` link lands on the matching message.** §6.6 only asks that the link
+  exists. It carries the counterpart query the old card used, so the far chat opens on the row this
+  one is about rather than at its bottom. What §6.6 removed — navigation as the DEFAULT gesture — is
+  removed.
+- **A cron card in a chat offers neither _Open cron_ nor _Run now_ yet.** §6.5 lists both and the
+  component takes both; the chat screen does not pass them, so the card shows no actions rather than
+  dead ones. Wiring a chat row to the Crons feature is outstanding.
+- **The jump-to-latest pill carries the count as a badge**, not as its whole label. §6.10 says "with
+  the count of messages that arrived since"; `3 new` alone stopped saying what tapping it does, so
+  the pill keeps its name and the count rides beside it.
+
 `messenger.html` and `tokens.md` are the **superseded** Messenger direction. They are kept because the app still carries a few token names from them while the second half of the Liquid Glass pass lands, and because the reasoning in them about bubble contrast has not changed. Do not take layout, colour or motion from them.
 
 `icon.svg` is the app icon: a speech bubble carrying an H whose crossbar lifts to the right like a wing. It is hand-authored and it is the only source for the artwork — every PNG the app ships is rasterised from it by `scripts/generate-app-icons.mjs` (`npm run icons`), and `npm run icons:check` fails in CI if one of them has drifted. Edit the SVG, never a PNG.

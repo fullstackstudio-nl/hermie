@@ -13,6 +13,7 @@ export type {
   BotDmOutItem,
   ClarifyItem,
   ClarifyQuestionItem,
+  CronDeliveryItem,
   DispatchStatus,
   NoticeItem,
   NoticeKind,
@@ -43,12 +44,42 @@ export interface SlashSuggestion {
   description: string
 }
 
-/** A file or image staged in the composer's attachment tray. */
+/**
+ * A file or image staged in the composer's attachment tray.
+ *
+ * `kind` is not derived from `uri`: an image and a file leave by different roads
+ * (bytes over the socket versus an HTTP upload the prompt then references), and a
+ * file the platform happened to give a preview for would otherwise be drawn as a
+ * thumbnail and sent as bytes.
+ */
 export interface ComposerAttachment {
   id: string
   name: string
-  /** Local URI for the thumbnail; absent for a non-image attachment. */
+  kind: 'image' | 'file'
+  /** Local URI for the thumbnail; only an image has one. */
   uri?: string
+  /** Bytes, when the picker reported a size. */
+  size?: number
+  /**
+   * Where the upload is.
+   *
+   * `uploading` with no `progress` is the ordinary case rather than an omission:
+   * React Native's `fetch` has no upload-progress event, so the chip shows an
+   * indeterminate ring instead of inventing a curve that stalls at 90 %.
+   */
+  status?: 'staged' | 'uploading' | 'uploaded' | 'error'
+  /** 0…1 on a platform that reports it. */
+  progress?: number
+  /** Why it will not be sent, already in the reader's words. */
+  error?: string
+}
+
+/** One entry in the composer's `+` menu. */
+export interface AttachChoice {
+  id: 'photo' | 'file'
+  label: string
+  /** Shows a busy state until the system picker is actually up. */
+  busy?: boolean
 }
 
 /** One entry in a picker sheet row (reasoning effort, model). */

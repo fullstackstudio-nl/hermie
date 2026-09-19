@@ -931,3 +931,100 @@ upload path has been run against a real `hermes serve`. Specifically unverified:
 `UploadFile` as-is; that `info.cwd` is populated for a Hermie session rather than arriving `lazy`;
 that an absolute `path` under that cwd is accepted by `_resolve_managed_path`; and that
 `@file:<abs path>` then expands rather than being refused.
+
+## The Liquid Glass pass, part 2 (2026-09-20)
+
+Everything below was measured or seen on the iPhone 17 Pro simulator (iOS 26.5) against
+`npm run fake-gateway -- --auth token --token demo`, not inferred from documentation.
+
+### A bubble tail has to be one path, drawn BEHIND the bubble
+
+The previous build drew the tail as a small `View` with one rounded corner, offset `-5`, tucked under
+the bubble's edge and rendered on every bubble. On the owner's Mac build that showed as a ~10pt
+square of bubble colour protruding past the bottom-right corner with a notch in it, plus a dark
+vertical sliver where the tail's box was wider than the bubble's own. Two separate causes:
+
+- A rectangle has square corners. At bubble heights where the rounding did not cover them, one
+  escaped.
+- Two sibling views meeting at an edge both anti-alias that edge, and the Mac renders the iPad build
+  **scaled**, so a sub-point offset that is invisible at 3× is a visible sliver there.
+
+The replacement is `react-native-svg` (`15.12.1`, installed with `npx expo install`) drawing the
+mockup's own path, positioned as a sibling BEFORE the bubble so the bubble's opaque fill covers the
+overlapping part. Only the part that escapes the rounded corner is ever visible, so the join cannot
+show as a seam even though the tail is a flat colour and the bubble is a gradient — which it would if
+the tail were drawn on top, as a 5pt strip of the bottom stop over a lighter part of the gradient.
+Every offset is a whole point for the same scaling reason.
+
+### `transparent` is transparent BLACK, and a fade mask travels through it
+
+The reading fold clips a long reply and lays a gradient over the seam. Written the obvious way —
+`colors={['transparent', surface]}` — the mask interpolates from `rgba(0,0,0,0)`, so it travels
+through dark grey and paints a dirty band across the last two lines. On the dark theme it was plainly
+visible over the bubble with the clipped line ghosting through it. A mask has to fade a colour to
+**itself**: the first stop is the surface colour at zero alpha.
+
+A second, smaller trap on top of that one: the fold lives inside the bubble's padded content box, so
+a mask spanning only that box leaves the bubble's padding unmasked around it and reads as a rectangle
+rather than as a fade. The clip box is pulled out by the padding and padded back in by the same
+amount, which works because `overflow: hidden` clips the box, not what the box's own padding covers.
+
+### The system photo picker's delay is UIKit's, and the only fix is to stop pretending
+
+The owner measured 1.5–2 s between tapping `+` and the system photo picker appearing on the Mac.
+Nothing in the app can shorten that. Measured here by capturing timestamped `xcrun simctl io
+screenshot` frames (~420 ms apart, which is that command's own cost) while driving the simulator:
+
+- The `+` menu is present in the first frame after the tap. It is local state with no `await` in it,
+  so it paints in the same frame.
+- The chosen entry's busy mark is present in the first frame after ITS tap.
+- The picker's sheet has begun animating in ~0.8 s later and is fully presented at ~1.6 s.
+
+So the two seconds are real and they are the platform's. What changed is that they are now spent
+looking at a menu with a busy mark on the entry you chose, rather than at a screen where nothing
+happened. The menu deliberately stays open for the whole of it and closes on the FALLING edge of the
+busy flag, so a cancelled picker does not leave it standing over the composer.
+
+### Per-row disclosure state cannot live in the row
+
+`FlatList` unmounts a row that scrolls out of its window. Any `useState` in that row — a tool card's
+expanded flag, a fold, a bot-to-bot exchange — is therefore reset by scrolling, with a delay, which
+reads as the app forgetting what you opened. The state belongs in one set above the list, keyed by
+item id (`src/chat-ui/expanded.tsx`). It also has a second benefit worth naming: the list can then
+guarantee that expanding something never moves the viewport, because nothing calls a scroll method.
+
+### Memoizing a per-row prop is not enough; it has to be STABILISED
+
+`TranscriptRow` is memoized on a tuple that now includes the row's grouping layout. A streaming delta
+produces a new `items` array, so the grouping pass runs again and hands every row a freshly allocated
+layout object — a different identity for an identical value, which breaks the memo and re-renders
+every settled bubble on every token. `useMemo` does not help: the input really did change. The fix is
+to keep the previous object for every key whose value is unchanged, which
+`__tests__/chat-ui/transcript-memo.test.tsx` catches when it regresses.
+
+### The simulator build needs React Core from source once a Fabric component is added
+
+Adding `react-native-svg` made the Debug simulator build fail at link time with undefined
+`facebook::react::Sealable`, `RCTPackagerConnection` and `RCTPerfMonitor`. Expo SDK 54 defaults to
+`RCT_USE_PREBUILT_RNCORE=1`, and the prebuilt React Core artefact does not export those. Building the
+pods with that flag off links cleanly:
+
+```sh
+RCT_USE_PREBUILT_RNCORE=0 LANG=en_US.UTF-8 npx pod-install ios
+```
+
+It is an environment choice rather than a file edit, which matters because `ios/` is generated: the
+alternative is `ios.buildReactNativeFromSource` in `Podfile.properties.json`, and `expo prebuild`
+would throw that away.
+
+### What this pass did NOT verify
+
+- **The wide layout.** An iPad simulator is booted on this machine and can be driven with
+  `xcrun simctl` alone, but nothing in this pass was looked at on one: the wide bubble cap
+  (`min(68%, 640pt)`), the sheet width constraint and the header's two-button group are unverified at
+  that width.
+- **Android.** Not built, not run. The bubble recipes are defined so the solid fallback keeps the
+  hierarchy, and no per-bubble blur view exists to fall back FROM, but that is reasoning.
+- **A long multi-word inline code chip.** The chip's padding and internal gaps are now non-breaking
+  characters, with `U+200B` as the only break opportunity. If a platform ignores `U+200B` as a break,
+  a long chip overflows instead of wrapping. Not seen either way.

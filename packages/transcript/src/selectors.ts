@@ -93,6 +93,23 @@ export function visibleItems(state: ChatState, options: VisibilityOptions): Visi
         out.push({ item, presentation: showBotToBot ? 'full' : 'chip' })
         break
 
+      case 'cron_delivery':
+        /**
+         * A cron delivery survives `quiet`, and the bot-to-bot toggle does not
+         * touch it.
+         *
+         * It is the RESULT of something the owner scheduled — the reason they
+         * opened the chat — so dropping it at `quiet` would hide the one row they
+         * came for, which is the same rule that keeps `user` and `assistant`
+         * visible at every level. `quiet` folds the report instead of losing it.
+         *
+         * And it is not bot-to-bot traffic: the scheduler is not a peer bot, so
+         * `showBotToBot: false` — which exists to quieten agents talking amongst
+         * themselves — has no business demoting it to a chip.
+         */
+        out.push({ item, presentation: level === 'quiet' ? 'collapsed' : 'full' })
+        break
+
       case 'bot_dm_out':
         out.push({
           item,

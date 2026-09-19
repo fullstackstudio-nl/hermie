@@ -6,7 +6,7 @@
  * break out, because an `Image` cannot live inside a `Text` on Android.
  */
 import { Fragment, useState, type ReactNode } from 'react'
-import { Image, Text, type TextStyle, View } from 'react-native'
+import { Image, StyleSheet, Text, type TextStyle, View } from 'react-native'
 import type { Token, Tokens } from 'marked'
 
 import { MONOSPACE, resolveImageUri, type MarkdownContext } from './context'
@@ -17,12 +17,69 @@ export interface InlineProps {
   style?: TextStyle
 }
 
+/**
+ * The chip's fake horizontal padding. React Native will not apply padding to a
+ * `Text` nested inside a `Text`, so the padding has to be characters — and they
+ * are NON-BREAKING on purpose. Do not "tidy" this back into a normal space.
+ *
+ * A background-coloured nested `Text` paints EVERY line fragment of its range,
+ * and a fragment that holds only the line's trailing whitespace is painted
+ * across the whole rest of the line. So a chip that broke on its own ASCII
+ * padding space drew a full-width empty bar at the end of the previous line and
+ * then the real chip on the next one. Non-breaking padding means a break can
+ * never land at the chip's edge: the whole chip moves down instead.
+ */
+const CODE_PAD = '\u00a0'
+
+/**
+ * The wrap point inside a chip. Zero width, so the fragment it ends is painted
+ * behind glyphs only — never a bar of empty background. It is what lets a chip
+ * still wrap on word boundaries (design/liquid-glass-tokens.md, 6.3) now that
+ * none of its spaces are breakable.
+ */
+const CODE_BREAK = '\u200b'
+
+/**
+ * Pad the chip and move its wrap points off its whitespace.
+ *
+ * No ASCII space survives inside a chip, at either edge or between words: any
+ * of them could end up as a line's trailing whitespace and paint the bar above.
+ * A gap between words keeps its width as non-breaking spaces and gains a
+ * zero-width break opportunity in FRONT of it, so the gap travels to the next
+ * line with the word it belongs to.
+ */
+function padCode(text: string): string {
+  const leading = /^\s*/.exec(text)?.[0] ?? ''
+  const rest = text.slice(leading.length)
+  const trailing = /\s*$/.exec(rest)?.[0] ?? ''
+  const core = rest.slice(0, rest.length - trailing.length)
+  const wrapped = core.replace(/\s+/g, gap => `${CODE_BREAK}${CODE_PAD.repeat(gap.length)}`)
+
+  // Whitespace the code itself opened or closed on is padding, not a wrap point.
+  return `${CODE_PAD}${CODE_PAD.repeat(leading.length)}${wrapped}${CODE_PAD.repeat(trailing.length)}${CODE_PAD}`
+}
+
+/**
+ * The chip reads as a sunk well on whatever surface it sits on, NOT as the
+ * code-BLOCK surface: `blockBackground` is an opaque near-black in dark mode, and
+ * a near-black slab behind a few words on a blue-slate bubble reads as a
+ * redaction bar. `inlineCodeBackground` is a translucent tint instead, so it
+ * steps one rung off its own surface wherever it lands.
+ *
+ * The hairline is carried but is very likely inert: React Native draws a nested
+ * `Text` as a span on both platforms, and a span takes a background colour but
+ * not a border. It is here so a caller's value survives to whatever renders the
+ * chip, and the tint alone has to do the separating today.
+ */
 function codeStyle(context: MarkdownContext): TextStyle {
+  const border = context.inlineCodeBorderColor
+
   return {
-    backgroundColor: context.blockBackground,
+    backgroundColor: context.inlineCodeBackground ?? context.blockBackground,
     color: context.textColor,
     fontFamily: MONOSPACE,
-    fontSize: Math.max(11, context.fontSize - 2)
+    fontSize: Math.max(11, context.fontSize - 2),
+    ...(border ? { borderColor: border, borderWidth: StyleSheet.hairlineWidth } : {})
   }
 }
 
@@ -114,7 +171,7 @@ function renderToken(token: Token, index: number, context: MarkdownContext): Rea
     case 'codespan':
       return (
         <Text key={key} style={codeStyle(context)}>
-          {` ${(token as Tokens.Codespan).text} `}
+          {padCode((token as Tokens.Codespan).text)}
         </Text>
       )
 
