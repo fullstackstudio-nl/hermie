@@ -33,19 +33,19 @@
     "prepare": "husky"
   },
   "devDependencies": {
-    "@commitlint/cli": "^19.6.1",
-    "@commitlint/config-conventional": "^19.6.0",
-    "@types/node": "^22.10.5",
+    "@commitlint/cli": "^21.2.2",
+    "@commitlint/config-conventional": "^21.2.2",
+    "@types/node": "^26.6.1",
     "eslint": "^9.18.0",
     "eslint-config-expo": "^10.0.0",
     "eslint-config-prettier": "^10.0.1",
-    "globals": "^16.5.0",
+    "globals": "^17.12.0",
     "husky": "^9.1.7",
     "prettier": "^3.4.2",
     "tsx": "^4.23.13",
     "typescript": "~5.9.2",
     "typescript-eslint": "^8.20.0",
-    "vitest": "^3.0.0"
+    "vitest": "^5.0.1"
   },
   "overrides": {
     "react-native": "0.81.5",
