@@ -1,4 +1,8 @@
 module.exports = {
+  // Keep the microtask family real when a test switches to fake timers:
+  // the testing library's cleanup awaits a microtask flush, and faking these
+  // on Node 22 makes that flush hang until the hook times out.
+  fakeTimers: { doNotFake: ['nextTick', 'queueMicrotask', 'setImmediate'] },
   preset: 'jest-expo',
   setupFiles: ['<rootDir>/jest.setup.js'],
   testMatch: ['<rootDir>/__tests__/**/*.test.ts?(x)', '<rootDir>/src/**/*.test.ts?(x)'],
