@@ -104,6 +104,11 @@ export interface FakeGatewayState {
   sessions: Map<string, FakeSession>
   profiles: ProfileRow[]
   cronJobs: CronJob[]
+  /**
+   * `gateway_running` in every `cron.manage` answer: whether the scheduler
+   * process is up. Flip it to false to drive the Routines banner.
+   */
+  cronGatewayRunning: boolean
   /** Stored ids of the sessions the gateway reports as busy. */
   runningSessions: Set<string>
   /** Session-scoped configuration `config.get` / `config.set` read and write. */
@@ -135,18 +140,45 @@ interface ProfileRow {
   ui_meta?: Record<string, unknown>
 }
 
+/**
+ * A cron job as the store holds it.
+ *
+ * The two gateway surfaces disagree about its shape and the fake reproduces
+ * that on purpose, because a client that only ever sees one of them breaks the
+ * first time it meets the other: `cron.manage` answers `_format_job` rows
+ * (`job_id`, `prompt_preview`, no full prompt), the REST detail route answers
+ * the stored job (`id`, full `prompt`).
+ */
 interface CronJob {
-  job_id: string
+  id: string
   name: string
   schedule: string
-  prompt_preview: string
+  prompt: string
   deliver: string
   enabled: boolean
   state: string
   next_run_at: string | null
   last_run_at: string | null
   last_status: string | null
-  runs: { id: string; started_at: string; status: string }[]
+  last_error: string | null
+  paused_at: string | null
+  paused_reason: string | null
+  repeat: number | null
+  skills: string[]
+  model: string | null
+  runs: CronRunRow[]
+}
+
+/** A run session, in the `list_sessions_rich` row shape `/runs` answers with. */
+interface CronRunRow {
+  id: string
+  title: string
+  status: string
+  started_at: number
+  ended_at: number | null
+  last_active: number
+  message_count: number
+  preview: string
 }
 
 export interface FakeGateway {
@@ -242,7 +274,12 @@ const DM_REPLY_PROCESS_TEXT = [
   'Message from 🤖 Writer (@writer): Draft is ready, I pushed it to the shared folder.]'
 ].join('\n')
 
-/** A 1×1 transparent PNG: enough for an avatar round trip, not enough to matter. */
+/**
+ * A 1×1 half-opaque red PNG. Deliberately NOT transparent: scaled up behind an
+ * avatar's tint it paints a visible dot, which is how a run against this server
+ * shows at a glance that `profiles.get_asset` was fetched and rendered rather
+ * than quietly falling back to the generated initial.
+ */
 const AVATAR_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 
@@ -251,6 +288,61 @@ const AVATAR_PNG_BASE64 =
  * row, an outbound `message_agent` dispatch and the `process_complete` row that
  * carries the teammate's answer back.
  */
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
+
+/** `tools/cronjob_job_args.py::_format_job` — the row `cron.manage list` answers with. */
+function formatCronJob(job: CronJob): Record<string, unknown> {
+  return {
+    job_id: job.id,
+    name: job.name,
+    schedule: job.schedule,
+    prompt_preview: job.prompt.slice(0, 120),
+    deliver: job.deliver,
+    enabled: job.enabled,
+    state: job.state,
+    next_run_at: job.next_run_at,
+    last_run_at: job.last_run_at,
+    last_status: job.last_status,
+    last_error: job.last_error,
+    paused_at: job.paused_at,
+    paused_reason: job.paused_reason,
+    repeat: job.repeat,
+    skills: job.skills,
+    model: job.model
+  }
+}
+
+/**
+ * A cron run: an ordinary session whose id is `cron_{job_id}_{timestamp}`.
+ *
+ * That is the whole binding between a job and its runs on a real gateway — the
+ * id prefix plus `source='cron'` — so the fake keeps run transcripts in the
+ * same session map as chats and answers `session.history` for them unchanged.
+ */
+function makeCronRunSession(jobId: string, startedAt: number, prompt: string, answer: string): FakeSession {
+  const id = `cron_${jobId}_${startedAt}`
+
+  return {
+    id,
+    storedId: id,
+    profile: 'default',
+    title: `Cron: ${jobId}`,
+    seq: 0,
+    ring: [],
+    messages: [
+      { role: 'user', text: prompt, row_id: 1, timestamp: startedAt },
+      {
+        role: 'tool',
+        name: 'read_file',
+        tool_id: `call_${jobId}_${startedAt}`,
+        context: 'read_file(status.md)',
+        args: { path: 'status.md' }
+      },
+      { role: 'assistant', text: answer, row_id: 2, timestamp: startedAt + 12 }
+    ]
+  }
+}
+
 function makeSession(profile: string, title: string): FakeSession {
   const storedId = `stored-${profile}-${randomUUID().slice(0, 8)}`
   const base = nowSeconds() - 600
@@ -314,6 +406,23 @@ function initialState(options: FakeGatewayOptions): FakeGatewayState {
     sessions.set(session.storedId, session)
   }
 
+  const cronJobs = initialCronJobs()
+
+  for (const job of cronJobs) {
+    for (const run of job.runs) {
+      const session = makeCronRunSession(
+        job.id,
+        run.started_at,
+        job.prompt,
+        run.status === 'error' ? 'The check did not complete.' : 'Done — nothing needs your attention.'
+      )
+
+      session.id = run.id
+      session.storedId = run.id
+      sessions.set(run.id, session)
+    }
+  }
+
   const profileRow = (session: FakeSession, description: string): ProfileRow => ({
     name: session.profile,
     path: `/root/.hermes/profiles/${session.profile}`,
@@ -357,22 +466,100 @@ function initialState(options: FakeGatewayOptions): FakeGatewayState {
     sessionConfig: new Map<string, Record<string, string>>(),
     pendingApprovals: new Map<string, { session_id: string; payload: Record<string, unknown> }>(),
     attachedImages: [],
-    cronJobs: [
-      {
-        job_id: 'job-heartbeat',
-        name: 'VM heartbeat',
-        schedule: 'every 2h',
-        prompt_preview: 'Check the VM and report.',
-        deliver: 'local',
-        enabled: true,
-        state: 'active',
-        next_run_at: new Date(Date.now() + 7_200_000).toISOString(),
-        last_run_at: new Date(Date.now() - 3_600_000).toISOString(),
-        last_status: 'ok',
-        runs: [{ id: 'cron_heartbeat_1', started_at: new Date(Date.now() - 3_600_000).toISOString(), status: 'ok' }]
-      }
-    ]
+    cronGatewayRunning: true,
+    cronJobs
   }
+}
+
+/**
+ * Three routines, chosen to cover the three rows the list has to draw: a
+ * healthy one with run history, one whose last attempt failed (with the
+ * exception-wrapped `last_error` the scheduler really writes), and a paused one.
+ */
+function initialCronJobs(): CronJob[] {
+  const hourAgo = Math.floor(Date.now() / 1000) - 3_600
+  const yesterday = hourAgo - 86_400
+
+  return [
+    {
+      id: 'job-heartbeat',
+      name: 'VM heartbeat',
+      schedule: 'every 2h',
+      prompt: 'Check the VM, summarize disk and memory, and flag anything unusual.',
+      deliver: 'local',
+      enabled: true,
+      state: 'active',
+      next_run_at: new Date(Date.now() + 7_200_000).toISOString(),
+      last_run_at: new Date(hourAgo * 1000).toISOString(),
+      last_status: 'ok',
+      last_error: null,
+      paused_at: null,
+      paused_reason: null,
+      repeat: null,
+      skills: [],
+      model: null,
+      runs: [
+        {
+          id: `cron_job-heartbeat_${hourAgo}`,
+          title: 'VM heartbeat',
+          status: 'ok',
+          started_at: hourAgo,
+          ended_at: hourAgo + 42,
+          last_active: hourAgo + 42,
+          message_count: 3,
+          preview: 'Done — nothing needs your attention.'
+        },
+        {
+          id: `cron_job-heartbeat_${yesterday}`,
+          title: 'VM heartbeat',
+          status: 'ok',
+          started_at: yesterday,
+          ended_at: yesterday + 38,
+          last_active: yesterday + 38,
+          message_count: 3,
+          preview: 'Done — nothing needs your attention.'
+        }
+      ]
+    },
+    {
+      id: 'job-digest',
+      name: 'Weekly digest',
+      schedule: 'every friday 16:30',
+      prompt: 'Write a short digest of this week for the team.',
+      deliver: 'bot-chat:researcher',
+      enabled: true,
+      state: 'active',
+      next_run_at: new Date(Date.now() + 86_400_000).toISOString(),
+      last_run_at: new Date((hourAgo - 7_200) * 1000).toISOString(),
+      last_status: 'error',
+      last_error: "RuntimeError: Cron job 'Weekly digest' has no model configured. Set one with `hermes cron edit`.",
+      paused_at: null,
+      paused_reason: null,
+      repeat: null,
+      skills: ['research'],
+      model: null,
+      runs: []
+    },
+    {
+      id: 'job-cleanup',
+      name: 'Inbox cleanup',
+      schedule: 'every day at 6pm',
+      prompt: 'Archive anything already answered and list what is still open.',
+      deliver: 'local',
+      enabled: false,
+      state: 'paused',
+      next_run_at: null,
+      last_run_at: null,
+      last_status: null,
+      last_error: null,
+      paused_at: new Date((hourAgo - 86_400) * 1000).toISOString(),
+      paused_reason: 'Paused from the desktop app',
+      repeat: null,
+      skills: [],
+      model: null,
+      runs: []
+    }
+  ]
 }
 
 export async function startFakeGateway(options: FakeGatewayOptions = {}): Promise<FakeGateway> {
@@ -642,6 +829,20 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       return
     }
 
+    if (path === '/api/cron/delivery-targets') {
+      // `local` is implicit on every gateway; the second one is a configured
+      // bot chat, which is what a delivery target looks like once the messaging
+      // gateway is set up.
+      json(res, 200, {
+        targets: [
+          { id: 'local', name: 'Local (save only)', home_target_set: true, home_env_var: null },
+          { id: 'bot-chat:researcher', name: 'Bot chat · researcher', home_target_set: true, home_env_var: null }
+        ]
+      })
+
+      return
+    }
+
     if (path.startsWith('/api/cron/jobs')) {
       await handleCron(req, res, path, method)
 
@@ -732,32 +933,24 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     )
   }
 
+  /**
+   * The REST cron surface, in `hermes_cli/web_routers/cron.py`'s shapes:
+   * the list is a bare array, the detail routes answer the stored job itself
+   * (no `{job: …}` wrapper), `/runs` answers `{runs, limit}` of session rows,
+   * and `DELETE` answers `{ok: true}`.
+   */
   async function handleCron(req: IncomingMessage, res: ServerResponse, path: string, method: string): Promise<void> {
     if (path === '/api/cron/jobs') {
       if (method === 'GET') {
-        json(res, 200, { jobs: state.cronJobs, count: state.cronJobs.length, gateway_running: true })
+        json(res, 200, state.cronJobs)
 
         return
       }
 
       if (method === 'POST') {
         const body = await readBody(req)
-        const job: CronJob = {
-          job_id: `job-${randomUUID().slice(0, 8)}`,
-          name: String(body.name ?? 'New job'),
-          schedule: String(body.schedule ?? 'every 1h'),
-          prompt_preview: String(body.prompt ?? ''),
-          deliver: String(body.deliver ?? 'local'),
-          enabled: true,
-          state: 'active',
-          next_run_at: new Date(Date.now() + 3_600_000).toISOString(),
-          last_run_at: null,
-          last_status: null,
-          runs: []
-        }
-        state.cronJobs.push(job)
-        publish('cron.changed', undefined, {})
-        json(res, 200, { job, success: true })
+        const job = addCronJob(body)
+        json(res, 200, job)
 
         return
       }
@@ -771,7 +964,8 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       return
     }
 
-    const job = state.cronJobs.find(entry => entry.job_id === match[1])
+    const wanted = decodeURIComponent(match[1] as string)
+    const job = state.cronJobs.find(entry => entry.id === wanted || entry.name === wanted)
 
     if (!job) {
       json(res, 404, { detail: 'Unknown job' })
@@ -782,55 +976,153 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     const action = match[3]
 
     if (action === 'runs') {
-      json(res, 200, { runs: job.runs, count: job.runs.length })
+      // Newest first, the way the id-range scan returns them.
+      const runs = [...job.runs].sort((a, b) => b.started_at - a.started_at)
+      json(res, 200, { runs, limit: runs.length })
 
       return
     }
 
     if (action === 'pause' || action === 'resume') {
-      job.enabled = action === 'resume'
-      job.state = job.enabled ? 'active' : 'paused'
+      setCronPaused(job, action === 'pause')
       publish('cron.changed', undefined, {})
-      json(res, 200, { job, success: true })
+      json(res, 200, job)
 
       return
     }
 
     if (action === 'trigger') {
-      const run = { id: `cron_${job.job_id}_${Date.now()}`, started_at: new Date().toISOString(), status: 'running' }
-      job.runs.push(run)
-      job.last_run_at = run.started_at
-      publish('cron.changed', undefined, {})
-      json(res, 200, { run, success: true })
+      json(res, 200, triggerCronJob(job))
 
       return
     }
 
     if (method === 'GET') {
-      json(res, 200, { job })
+      json(res, 200, job)
 
       return
     }
 
     if (method === 'PUT') {
       const body = await readBody(req)
-      const updates = (body.updates ?? body) as Record<string, unknown>
+      // `CronJobUpdate` is `{updates: {...}}` and the route MERGES it; a client
+      // that sends only a schedule must not lose the prompt.
+      const updates = (isRecord(body.updates) ? body.updates : body) as Record<string, unknown>
       Object.assign(job, updates)
+
+      if (typeof updates.schedule === 'string') {
+        job.next_run_at = nextRunFor(updates.schedule)
+      }
+
       publish('cron.changed', undefined, {})
-      json(res, 200, { job, success: true })
+      json(res, 200, job)
 
       return
     }
 
     if (method === 'DELETE') {
-      state.cronJobs = state.cronJobs.filter(entry => entry.job_id !== job.job_id)
+      state.cronJobs = state.cronJobs.filter(entry => entry.id !== job.id)
       publish('cron.changed', undefined, {})
-      json(res, 200, { removed_job: job, success: true })
+      json(res, 200, { ok: true })
 
       return
     }
 
     json(res, 405, { detail: `Method ${method} not allowed on ${path}` })
+  }
+
+  function addCronJob(body: Record<string, unknown>): CronJob {
+    const schedule = typeof body.schedule === 'string' && body.schedule ? body.schedule : 'every 1h'
+    const job: CronJob = {
+      id: `job-${randomUUID().slice(0, 8)}`,
+      name: typeof body.name === 'string' && body.name ? body.name : 'New job',
+      schedule,
+      prompt: typeof body.prompt === 'string' ? body.prompt : '',
+      deliver: typeof body.deliver === 'string' && body.deliver ? body.deliver : 'local',
+      enabled: true,
+      state: 'active',
+      next_run_at: nextRunFor(schedule),
+      last_run_at: null,
+      last_status: null,
+      last_error: null,
+      paused_at: null,
+      paused_reason: null,
+      repeat: typeof body.repeat === 'number' ? body.repeat : null,
+      skills: Array.isArray(body.skills)
+        ? body.skills.filter((skill): skill is string => typeof skill === 'string')
+        : [],
+      model: typeof body.model === 'string' ? body.model : null,
+      runs: []
+    }
+
+    state.cronJobs.push(job)
+    publish('cron.changed', undefined, {})
+
+    return job
+  }
+
+  function setCronPaused(job: CronJob, paused: boolean): void {
+    job.enabled = !paused
+    job.state = paused ? 'paused' : 'active'
+    job.paused_at = paused ? new Date().toISOString() : null
+    job.paused_reason = paused ? 'Paused from Hermie' : null
+    job.next_run_at = paused ? null : nextRunFor(job.schedule)
+  }
+
+  /** Fire now: record a run, register its transcript, and answer the refreshed job. */
+  function triggerCronJob(job: CronJob): CronJob {
+    const startedAt = nowSeconds()
+    const run: CronRunRow = {
+      id: `cron_${job.id}_${startedAt}`,
+      title: job.name,
+      status: 'ok',
+      started_at: startedAt,
+      ended_at: startedAt + 9,
+      last_active: startedAt + 9,
+      message_count: 3,
+      preview: 'Done — nothing needs your attention.'
+    }
+
+    job.runs.push(run)
+    job.last_run_at = new Date(startedAt * 1000).toISOString()
+    job.last_status = 'ok'
+    job.last_error = null
+
+    const session = makeCronRunSession(job.id, startedAt, job.prompt, 'Done — nothing needs your attention.')
+    state.sessions.set(run.id, session)
+
+    publish('cron.changed', undefined, {})
+
+    return job
+  }
+
+  /**
+   * A plausible `next_run_at`.
+   *
+   * The real scheduler parses the schedule in the gateway's timezone; this only
+   * has to move when the schedule does, so that a client showing the server's
+   * answer can be told apart from one that kept its own guess.
+   */
+  function nextRunFor(schedule: string): string {
+    const interval = /^every\s+(\d+)\s*(m|h|d)/i.exec(schedule.trim())
+
+    if (interval) {
+      const unit = interval[2]!.toLowerCase()
+      const minutes = Number(interval[1]) * (unit === 'h' ? 60 : unit === 'd' ? 1440 : 1)
+
+      return new Date(Date.now() + minutes * 60_000).toISOString()
+    }
+
+    const once = /^in\s+(\d+)\s*(m|h|d)/i.exec(schedule.trim())
+
+    if (once) {
+      const unit = once[2]!.toLowerCase()
+      const minutes = Number(once[1]) * (unit === 'h' ? 60 : unit === 'd' ? 1440 : 1)
+
+      return new Date(Date.now() + minutes * 60_000).toISOString()
+    }
+
+    return new Date(Date.now() + 86_400_000).toISOString()
   }
 
   // ------------------------------------------------------------ WebSocket ---
@@ -1220,11 +1512,16 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       }
 
       case 'model.options':
+        // The inventory's own shape: a provider slug plus plain model ids, the
+        // way `hermes_cli/inventory.py::build_models_payload` writes them.
         return {
           providers: [
             {
-              name: 'example-provider',
-              models: [{ id: 'example-provider/example-model' }, { id: 'example-provider/expensive-model' }]
+              slug: 'example-provider',
+              name: 'Example Provider',
+              models: ['example-model', 'expensive-model'],
+              total_models: 2,
+              is_current: true
             }
           ],
           model: 'example-provider/example-model',
@@ -1311,52 +1608,70 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     }
   }
 
+  /**
+   * `cron.manage`, the WS half.
+   *
+   * Every answer carries `gateway_running`: it is the only place a client can
+   * learn whether the scheduler process (`hermes gateway`, not `hermes serve`)
+   * is up, and a list of healthy-looking jobs with it false is exactly the case
+   * the Routines banner exists for. Rows are `_format_job` shaped, so they key
+   * the job as `job_id` and carry a preview rather than the full prompt.
+   */
   function cronManage(params: Record<string, unknown>): Record<string, unknown> {
     const action = typeof params.action === 'string' ? params.action : 'list'
     const name = typeof params.name === 'string' ? params.name : ''
+    const listed = () => state.cronJobs.map(formatCronJob)
 
     if (action === 'list') {
-      return { success: true, jobs: state.cronJobs, count: state.cronJobs.length, gateway_running: true }
+      return {
+        success: true,
+        jobs: listed(),
+        count: state.cronJobs.length,
+        gateway_running: state.cronGatewayRunning
+      }
     }
 
     if (action === 'add') {
-      const job: CronJob = {
-        job_id: `job-${randomUUID().slice(0, 8)}`,
-        name: name || 'New job',
-        schedule: typeof params.schedule === 'string' ? params.schedule : 'every 1h',
-        prompt_preview: typeof params.prompt === 'string' ? params.prompt : '',
-        deliver: typeof params.deliver === 'string' ? params.deliver : 'local',
-        enabled: true,
-        state: 'active',
-        next_run_at: new Date(Date.now() + 3_600_000).toISOString(),
-        last_run_at: null,
-        last_status: null,
-        runs: []
-      }
-      state.cronJobs.push(job)
-      publish('cron.changed', undefined, {})
+      const job = addCronJob({
+        name,
+        schedule: params.schedule,
+        prompt: params.prompt,
+        deliver: params.deliver,
+        repeat: params.repeat
+      })
 
-      return { success: true, job, job_id: job.job_id, jobs: state.cronJobs, gateway_running: true }
+      return {
+        success: true,
+        job: formatCronJob(job),
+        job_id: job.id,
+        jobs: listed(),
+        next_run_at: job.next_run_at,
+        gateway_running: state.cronGatewayRunning
+      }
     }
 
-    const job = state.cronJobs.find(entry => entry.name === name || entry.job_id === name)
+    const job = state.cronJobs.find(entry => entry.name === name || entry.id === name)
 
     if (!job) {
       return { success: false, error: `No such job: ${name}` }
     }
 
     if (action === 'remove') {
-      state.cronJobs = state.cronJobs.filter(entry => entry.job_id !== job.job_id)
+      state.cronJobs = state.cronJobs.filter(entry => entry.id !== job.id)
       publish('cron.changed', undefined, {})
 
-      return { success: true, removed_job: job, jobs: state.cronJobs, gateway_running: true }
+      return {
+        success: true,
+        removed_job: { id: job.id, name: job.name, schedule: job.schedule },
+        jobs: listed(),
+        gateway_running: state.cronGatewayRunning
+      }
     }
 
-    job.enabled = action === 'resume'
-    job.state = job.enabled ? 'active' : 'paused'
+    setCronPaused(job, action === 'pause')
     publish('cron.changed', undefined, {})
 
-    return { success: true, job, jobs: state.cronJobs, gateway_running: true }
+    return { success: true, job: formatCronJob(job), jobs: listed(), gateway_running: state.cronGatewayRunning }
   }
 
   /**

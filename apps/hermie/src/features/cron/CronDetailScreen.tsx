@@ -1,0 +1,277 @@
+/**
+ * One routine.
+ *
+ * The design board's "contact card": what it does, when it next runs, the
+ * actions, and the run history under it. Everything on it is the gateway's
+ * answer — in particular `next_run_at`, which is shown as the server sent it
+ * rather than recomputed from the schedule string, because the scheduler owns
+ * the timezone and the DST rules.
+ *
+ * The full prompt only exists on the HTTP detail read, so the screen fires that
+ * on mount and paints the list row's preview until it lands.
+ */
+import { useCallback, useEffect, useState } from 'react'
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, View } from 'react-native'
+
+import { BottomSheet, SheetEyebrow } from '../../ui/BottomSheet'
+import { Button, InsetGroup, InsetRow, InsetValueRow, Screen, Text } from '../../ui/primitives'
+import { useTheme } from '../../ui/theme'
+import type { CronController } from './cron-controller'
+import { useCronStore } from '../../store/cron'
+import { StatusDot } from './StatusDot'
+import { ScreenHeader } from './ScreenHeader'
+import {
+  type CronJob,
+  type CronRun,
+  cronStatusLabel,
+  cronStatusOf,
+  lastErrorSummary,
+  relativeEpoch,
+  relativeTime,
+  scheduleText
+} from './model'
+import { cronStrings } from './strings'
+
+export interface CronDetailScreenProps {
+  controller: CronController | null
+  job: CronJob
+  onClose: () => void
+  onOpenRun: (run: CronRun) => void
+  onEdit: (job: CronJob) => void
+  /** Called after a successful delete, so the list can take the screen back. */
+  onDeleted: () => void
+}
+
+export function CronDetailScreen({ controller, job, onClose, onOpenRun, onEdit, onDeleted }: CronDetailScreenProps) {
+  const theme = useTheme()
+  const detail = useCronStore(state => state.details[job.id]) ?? job
+  const runs = useCronStore(state => state.runs[job.id])
+  const busy = useCronStore(state => Boolean(state.busy[job.id]))
+  const [runsError, setRunsError] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+
+  const load = useCallback(async () => {
+    if (!controller) {
+      return
+    }
+
+    setRunsError(null)
+
+    await Promise.all([
+      controller.loadDetail(job).catch(() => undefined),
+      controller.loadRuns(job).catch((error: unknown) => {
+        setRunsError(error instanceof Error ? error.message : String(error))
+      })
+    ])
+  }, [controller, job])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const refresh = useCallback(async () => {
+    setRefreshing(true)
+
+    try {
+      await load()
+    } finally {
+      setRefreshing(false)
+    }
+  }, [load])
+
+  const status = cronStatusOf(detail)
+  const paused = status === 'paused'
+  const nextRun = relativeTime(detail.nextRunAt)
+  const lastRun = relativeTime(detail.lastRunAt)
+  const error = lastErrorSummary(detail.lastError)
+
+  return (
+    <Screen padded={false}>
+      <ScreenHeader
+        back={cronStrings.detail.back}
+        onBack={onClose}
+        title={detail.name}
+        subtitle={scheduleText(detail.schedule)}
+      />
+
+      <ScrollView
+        contentContainerStyle={{ gap: theme.space.xl, padding: theme.space.lg }}
+        refreshControl={<RefreshControl onRefresh={refresh} refreshing={refreshing} />}
+      >
+        <View
+          style={{
+            backgroundColor: theme.colors.surface,
+            borderColor: theme.colors.border,
+            borderRadius: theme.radii.xl,
+            borderWidth: 1,
+            gap: theme.space.xs,
+            padding: theme.space.lg
+          }}
+          testID="cron-detail-summary"
+        >
+          <SheetEyebrow>{cronStrings.detail.nextRun}</SheetEyebrow>
+          <Text variant="title">{nextRun ?? cronStrings.list.noNextRun}</Text>
+          <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.sm }}>
+            <StatusDot status={status} />
+            <Text color="textMuted" variant="callout">
+              {cronStatusLabel(status)}
+            </Text>
+          </View>
+          {error ? (
+            <Text color="danger" variant="caption" testID="cron-detail-error">
+              {error}
+            </Text>
+          ) : null}
+        </View>
+
+        <View style={{ gap: theme.space.sm }}>
+          <Text variant="heading">{cronStrings.detail.instructions}</Text>
+          <Text color="textMuted" testID="cron-detail-prompt">
+            {detail.prompt || detail.promptPreview || cronStrings.detail.noPrompt}
+          </Text>
+        </View>
+
+        <InsetGroup header={cronStrings.detail.details}>
+          <InsetValueRow
+            label={cronStrings.detail.scheduleLabel}
+            value={detail.schedule || cronStrings.detail.unknown}
+          />
+          <InsetValueRow label={cronStrings.detail.deliverLabel} value={detail.deliver || cronStrings.detail.unknown} />
+          <InsetValueRow
+            label={cronStrings.detail.repeatLabel}
+            value={detail.repeat === null ? cronStrings.detail.repeatForever : String(detail.repeat)}
+          />
+          <InsetValueRow label={cronStrings.detail.lastRunLabel} value={lastRun ?? cronStrings.list.neverRun} />
+          <InsetValueRow
+            label={cronStrings.detail.lastStatusLabel}
+            value={detail.lastStatus ?? cronStrings.detail.unknown}
+          />
+          {detail.model ? <InsetValueRow label={cronStrings.detail.modelLabel} value={detail.model} /> : null}
+          {detail.skills.length ? (
+            <InsetValueRow label={cronStrings.detail.skillsLabel} value={detail.skills.join(', ')} />
+          ) : null}
+          {detail.pausedReason ? (
+            <InsetValueRow label={cronStrings.detail.pausedReasonLabel} value={detail.pausedReason} />
+          ) : null}
+        </InsetGroup>
+
+        <View style={{ gap: theme.space.sm }}>
+          <Button
+            busy={busy}
+            onPress={() => void controller?.runNow(job).catch(() => undefined)}
+            testID="cron-run-now"
+            title={busy ? cronStrings.detail.running : cronStrings.detail.runNow}
+          />
+          <Button
+            disabled={busy}
+            onPress={() => void (paused ? controller?.resume(job) : controller?.pause(job))?.catch(() => undefined)}
+            testID="cron-toggle-pause"
+            title={paused ? cronStrings.detail.resume : cronStrings.detail.pause}
+            variant="secondary"
+          />
+          <Button
+            disabled={busy}
+            onPress={() => onEdit(detail)}
+            testID="cron-edit"
+            title={cronStrings.detail.edit}
+            variant="secondary"
+          />
+          <Button
+            disabled={busy}
+            onPress={() => setConfirmingDelete(true)}
+            testID="cron-delete"
+            title={cronStrings.detail.delete}
+            variant="danger"
+          />
+        </View>
+
+        <View style={{ gap: theme.space.sm }}>
+          <Text color="textMuted" style={{ fontWeight: '700', letterSpacing: 1.1 }} variant="caption">
+            {cronStrings.detail.runHistory}
+          </Text>
+
+          {runsError ? (
+            <Text color="danger" variant="caption">
+              {cronStrings.detail.runsFailed(runsError)}
+            </Text>
+          ) : runs === undefined ? (
+            <View style={{ alignItems: 'flex-start', gap: theme.space.sm }}>
+              <ActivityIndicator />
+              <Text color="textMuted" variant="caption">
+                {cronStrings.detail.loadingRuns}
+              </Text>
+            </View>
+          ) : runs.length === 0 ? (
+            <Text color="textMuted">{cronStrings.detail.noRuns}</Text>
+          ) : (
+            <InsetGroup>
+              {runs.map(run => (
+                <RunRow key={run.id} onPress={() => onOpenRun(run)} run={run} />
+              ))}
+            </InsetGroup>
+          )}
+        </View>
+      </ScrollView>
+
+      <BottomSheet
+        accessibilityLabel={cronStrings.confirmDelete.title(detail.name)}
+        blocking
+        onRequestClose={() => setConfirmingDelete(false)}
+        testID="cron-delete-sheet"
+        visible={confirmingDelete}
+      >
+        <View style={{ gap: theme.space.md }}>
+          <SheetEyebrow>{cronStrings.confirmDelete.eyebrow}</SheetEyebrow>
+          <Text variant="title">{cronStrings.confirmDelete.title(detail.name)}</Text>
+          <Text color="textMuted">{cronStrings.confirmDelete.body}</Text>
+          <Button
+            onPress={() => {
+              setConfirmingDelete(false)
+              void controller
+                ?.remove(job)
+                .then(onDeleted)
+                .catch(() => undefined)
+            }}
+            testID="cron-delete-confirm"
+            title={cronStrings.confirmDelete.confirm}
+            variant="danger"
+          />
+          <Button
+            onPress={() => setConfirmingDelete(false)}
+            title={cronStrings.confirmDelete.cancel}
+            variant="secondary"
+          />
+        </View>
+      </BottomSheet>
+    </Screen>
+  )
+}
+
+function RunRow({ run, onPress }: { run: CronRun; onPress: () => void }) {
+  const theme = useTheme()
+  const started = relativeEpoch(run.startedAt ?? run.lastActive)
+  const ok = !run.status || /ok|success|completed|done|idle/i.test(run.status)
+
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel={run.title || run.id} onPress={onPress}>
+      {({ pressed }) => (
+        <InsetRow style={{ backgroundColor: pressed ? theme.colors.surfaceRaised : 'transparent' }}>
+          <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.sm }}>
+            <Text style={{ flex: 1 }} numberOfLines={1}>
+              {started ?? run.id}
+            </Text>
+            <Text color={ok ? 'success' : 'danger'} variant="caption">
+              {run.status ?? cronStrings.status.ok}
+            </Text>
+          </View>
+          {run.preview ? (
+            <Text color="textMuted" numberOfLines={1} variant="caption">
+              {run.preview}
+            </Text>
+          ) : null}
+        </InsetRow>
+      )}
+    </Pressable>
+  )
+}
