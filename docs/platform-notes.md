@@ -18,7 +18,9 @@ rewritten, and git history has them.
 | Does the iOS app build for a Mac?                | Yes — Release, signed, wrapped, `npm run mac`  | 2026-09-19 |
 | Is the empty strip under the title bar gone?     | Fixed in code; **unverified at runtime**       | 2026-09-19 |
 | Does a bare Return send on a Mac?                | Implemented; **unverified at runtime**         | 2026-09-19 |
-| Is Shift+Return a newline on a Mac?              | No, and it cannot be — see below               | 2026-09-19 |
+| Is Shift+Return a newline on a Mac?              | Yes, inserted by hand; **unverified**          | 2026-09-19 |
+| Does Escape close a sheet on a Mac?              | Implemented; **unverified at runtime**         | 2026-09-19 |
+| Is `GCKeyboard` populated for an iOS app on Mac? | **Unverified** — reasoned from the SDK only    | 2026-09-19 |
 | Is `expo-secure-store` keychain-backed on a Mac? | Linked and entitled; **unverified at runtime** | 2026-09-19 |
 | What AppState does a Mac window report?          | **Unverified** — see "A Mac never pauses"      | 2026-09-19 |
 | Is `TextDecoder` present at runtime?             | Not verified; the guard ships either way       | 2026-09-18 |
@@ -566,12 +568,65 @@ So the composer sets `submitBehavior` from `RUNS_ON_MAC` and sends from `onSubmi
 modes are mutually exclusive by construction, which is what makes a double send impossible rather than
 guarded against.
 
-**The cost: a Mac has no newline key in the composer.** Shift+Return inserts the same `"\n"` as
-Return, iOS gives JavaScript no modifier to tell them apart, and `UIKeyCommand` is not reachable
-through a React Native `TextInput`. Enter-to-send is worth more on a desktop than the newline key is,
-so that is the trade that shipped. Closing it needs a small native key-command view, not a prop.
+**Shift+Return is the half `submitBehavior` cannot answer.** It inserts the same `"\n"` as Return, so
+both arrive at `onSubmitEditing` identically — and suppressing the insertion suppresses it for both.
+The first version of this shipped with no newline key on the Mac at all, which is not acceptable: a
+prompt is often more than one line. It is closed natively instead — see the next section.
 
-**Unverified at runtime**, both halves.
+**Unverified at runtime.**
+
+### Shift+Return and Escape come from GameController, below the responder chain
+
+Two keys UIKit will not hand to a React Native `TextInput`, and one mechanism for both.
+
+**Shift, because the modifier is missing.** `onSubmitEditing` fires for Return and Shift+Return alike,
+so the composer asks the keyboard directly: `isShiftDown()` in the local module reads
+`GCKeyboard.coalesced?.keyboardInput` and reports whether either Shift key is pressed. Polled rather
+than pushed, because the caller already knows a Return happened and only wants the modifier that came
+with it — a pushed modifier event would have to be raced against the Return it belongs to. Shift down
+means the composer writes the newline into the draft itself, at the caret, replacing any selected range
+the way typing a character would. `selection` is controlled for exactly one round trip so the caret
+lands after the newline rather than at the end of the draft, and is released on the next
+`onSelectionChange` — which the field fires because the selection changed.
+
+**Escape, because the key never arrives at all.** It inserts no text, so it never reaches a
+`UITextView` delegate. A `UIKeyCommand` would have to live in the responder chain, and a presented
+`Modal` leaves that chain — exactly the case that matters, since a sheet is the main thing Escape should
+close. `GCKeyboardInput.keyChangedHandler` is below all of it: HID state, delivered regardless of what
+is first responder. It is guarded on `applicationState == .active`, because HID state does not care
+which app is in front and a keystroke meant for another window must not dismiss a sheet nobody is
+looking at.
+
+`useEscapeKey(handler, enabled)` decides who gets it: a stack, last registered wins, one native
+subscription for the whole app. A **blocking** sheet registers a handler that does nothing, which
+swallows the key rather than ignoring it — ADR-0010 says an agent's question is answered by an explicit
+tap, and letting Escape fall through would stop the very turn that is waiting for the answer. The order
+today, lowest first: a running turn, the slash popover, a sheet, the full-screen sign-in page.
+
+What is known, and what is only reasoned:
+
+- **The SDK says GameController needs nothing but linking.** `GCKeyboard.h`: "available to an
+  application that links to GameController.framework". No entitlement, no Info.plist key. The podspec
+  declares the framework and `otool -L` confirms it in the built Mac app.
+- **A keyboard can arrive after launch**, so the handler is installed on
+  `GCKeyboardDidConnectNotification` as well as immediately. All keyboards coalesce into one object, so
+  that fires once rather than per device.
+- **Whether `GCKeyboard.coalesced` is populated for an iOS app on a Mac is UNVERIFIED.** It is
+  documented for iOS 14+ and macOS 11+, and a Mac always has a keyboard, but this has not been watched.
+  If it comes back nil the behaviour degrades to what shipped before — Return sends, Shift+Return also
+  sends, Escape does nothing — and nothing crashes: every path is a `guard let` that falls back to
+  false.
+- **None of this is gated on `RUNS_ON_MAC`**, deliberately. Keyboard presence is the question, not the
+  operating system, so an iPad with a Magic Keyboard gets Escape too, which is what a reader with that
+  keyboard expects. `hardwareKeyboard` still gates Shift+Return, because it only means anything where a
+  bare Return already sends.
+- **Cmd+Return sends**, by not being special-cased: the only branch is Shift, so a Return arriving with
+  any other modifier falls through to the send. Whether macOS delivers Cmd+Return to a text view as a
+  Return at all is unverified; if it does, it sends.
+- **A note on reading the binary.** `strings` does not find `isShiftDown` in the compiled module while
+  it does find `hasHardwareKeyboard`. That is not a missing registration: Swift stores a string literal
+  of 15 UTF-8 bytes or fewer inline as immediates rather than as a constant, so an 11-byte name leaves
+  no contiguous bytes to find. Reproduced with a standalone file under the same `-O -wmo` settings.
 
 ### A Mac never pauses: AppState and the socket
 
@@ -630,13 +685,15 @@ was removed rather than left as code that cannot run.
 Proved, on this machine, today:
 
 - `npm run mac -- --no-open` ends in `** BUILD SUCCEEDED **`, signed, and produces the wrapped bundle.
-- The local native module is compiled into that binary.
+- The local native module is compiled into that binary, and `GameController.framework` is linked into
+  it (`otool -L`).
 - The iPhone 17 Pro simulator still builds with the module present (`** BUILD SUCCEEDED **`).
 - `npx expo prebuild --platform android --no-install` succeeds and Android's module set is unchanged.
 
 Not proved:
 
-- Anything at runtime in a Mac window: the strip, Enter-to-send, the keychain, the sign-in web view on
-  THIS build. The owner's Hermie was running and two copies of one bundle identifier cannot coexist.
+- Anything at runtime in a Mac window: the strip, Return-to-send, Shift+Return, Escape, whether
+  `GCKeyboard` reports a keyboard at all, the keychain, the sign-in web view on THIS build. The owner's
+  Hermie was running and two copies of one bundle identifier cannot coexist, so nothing was launched.
 - The Android APK. There is still no JDK on this machine (`/usr/libexec/java_home -v 17` finds none),
   so Gradle was not run. "Building without a system JDK" above is how to get one.

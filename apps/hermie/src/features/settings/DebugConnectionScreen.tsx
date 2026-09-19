@@ -4,6 +4,7 @@ import { Platform, Pressable, ScrollView, TextInput, View } from 'react-native'
 
 import { createGatewayConnection } from '../../gateway'
 import { strings } from '../../i18n/strings'
+import { hasHardwareKeyboard } from '../../platform/keyboard-modifiers'
 import { RUNS_ON_MAC } from '../../platform/runs-on-mac'
 import { Button, Screen, Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
@@ -164,6 +165,9 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
           <Text variant="heading">Runtime</Text>
           <Text color="textMuted" testID="debug-runs-on-mac">
             iOS app on a Mac: {String(RUNS_ON_MAC)}
+          </Text>
+          <Text color="textMuted" testID="debug-hardware-keyboard">
+            hardware keyboard: {String(hasHardwareKeyboard())}
           </Text>
         </View>
 

@@ -9,6 +9,7 @@ import { randomBytes } from '../../platform/random'
 import { Button, InsetGroup, InsetRow, Screen, Text, TextField } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { FORM_MAX_WIDTH } from '../../ui/tokens'
+import { useEscapeKey } from '../../ui/useEscapeKey'
 import { inspectSignInNavigation } from './loopback'
 
 /** The provider's page gets ten minutes; after that the pending code is stale anyway. */
@@ -64,6 +65,11 @@ export function NativeSignInWebView({
   const [pastedUrl, setPastedUrl] = useState('')
   const exchangingRef = useRef(false)
   const headersWithheld = Object.keys(extraHeaders).length > 0 && !webViewMayCarryHeaders()
+
+  // Escape backs out of the sign-in page, the same as the Cancel button. It is
+  // the full-screen thing on top, so it registers last and outranks anything the
+  // wizard underneath has open.
+  useEscapeKey(onCancel, visible)
 
   useEffect(() => {
     if (!visible) {

@@ -11,7 +11,7 @@
  *   - The slash popover is fed by props. The composer asks (`onQuerySlash`) and
  *     paints what it is given; it never calls the gateway itself.
  */
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Image,
   KeyboardAvoidingView,
@@ -20,15 +20,18 @@ import {
   Pressable,
   ScrollView,
   type TextInputKeyPressEventData,
+  type TextInputSelectionChangeEventData,
   TextInput,
   View
 } from 'react-native'
 
+import { isShiftDown } from '../platform/keyboard-modifiers'
 import { RUNS_ON_MAC } from '../platform/runs-on-mac'
 import { KEYBOARD_AVOID_BEHAVIOR } from '../ui/keyboard'
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
 import { TAP_SLOP } from '../ui/tokens'
+import { useEscapeKey } from '../ui/useEscapeKey'
 import { QueuedChip } from './QueuedChip'
 import { chatStrings } from './strings'
 import type { ComposerAttachment, SlashSuggestion } from './types'
@@ -142,8 +145,36 @@ export function Composer({
 
   query.current = onQuerySlash
 
+  /**
+   * Where the caret is, so a newline can be inserted at it rather than appended.
+   *
+   * A ref and not state: it changes on every keystroke and nothing renders from
+   * it. It starts at the end of the draft, which is where a field opens.
+   */
+  const selection = useRef({ start: value.length, end: value.length })
+
+  /**
+   * A caret position to hand back to the field, until the field has taken it.
+   *
+   * Setting `value` programmatically moves the caret to the end on iOS, which is
+   * wrong for a newline inserted mid-sentence, so `selection` is controlled just
+   * long enough to put it where it belongs. It is released on the next
+   * `onSelectionChange` — which the field fires BECAUSE the selection changed —
+   * so control lasts one round trip rather than for good. A permanently
+   * controlled selection fights the caret on every keystroke.
+   */
+  const [caret, setCaret] = useState<{ start: number; end: number } | undefined>(undefined)
+
   const prefix = useMemo(() => slashPrefix(value), [value])
-  const showSuggestions = prefix !== null && suggestions.length > 0
+  const [popoverDismissed, setPopoverDismissed] = useState(false)
+
+  // A dismissed popover stays dismissed only for the prefix it was dismissed on;
+  // typing on re-opens it.
+  useEffect(() => {
+    setPopoverDismissed(false)
+  }, [prefix])
+
+  const showSuggestions = prefix !== null && suggestions.length > 0 && !popoverDismissed
 
   // The caller decides where the candidates come from (`commands.catalog`,
   // `complete.slash`, a cache); the composer only says which prefix it is on.
@@ -173,6 +204,48 @@ export function Composer({
     onSend(value)
   }
 
+  /**
+   * Shift+Return: put a newline where the caret is, by hand.
+   *
+   * It has to be by hand because the platform was told not to insert one — see
+   * `submitBehavior` below — and because iOS cannot tell us which Return this
+   * was until we ask the keyboard directly. A selected range is replaced rather
+   * than kept, which is what typing any other character would do.
+   */
+  const insertNewline = () => {
+    const start = Math.max(0, Math.min(selection.current.start, value.length))
+    const end = Math.max(start, Math.min(selection.current.end, value.length))
+    const next = `${value.slice(0, start)}\n${value.slice(end)}`
+
+    onChangeText(next)
+    selection.current = { start: start + 1, end: start + 1 }
+    setCaret({ start: start + 1, end: start + 1 })
+  }
+
+  /**
+   * The one Return handler, and the only place the two chords are told apart.
+   *
+   * Cmd+Return sends: nothing here special-cases it, which is the point — the
+   * only branch is Shift, so a Return arriving with any other modifier falls
+   * through to the send. Whether macOS delivers Cmd+Return to a text view as a
+   * Return at all is unverified; if it does, it sends.
+   */
+  const onSubmitEditing = () => {
+    if (hardwareKeyboard && isShiftDown()) {
+      insertNewline()
+
+      return
+    }
+
+    submit()
+  }
+
+  const onSelectionChange = (event: NativeSyntheticEvent<TextInputSelectionChangeEventData>) => {
+    selection.current = event.nativeEvent.selection
+    // The field has reported a position of its own, so stop overriding it.
+    setCaret(undefined)
+  }
+
   /** The round button: stop while a turn runs, send otherwise. */
   const press = () => {
     if (running) {
@@ -185,39 +258,30 @@ export function Composer({
   }
 
   /**
-   * Modifier chords and Escape.
+   * Modifier chords, for any platform that reports them.
    *
-   * Read this together with `submitBehavior` below, because the two halves of
-   * "Enter sends" live in different places and for a reason.
+   * Read this together with `submitBehavior` below, because "Enter sends" is
+   * spread over three places and none of them is obvious on its own.
    *
    * `onKeyPress` cannot carry a bare Return on iOS. React Native derives its
    * `key` from the text a `UITextView` is about to insert, and the payload it
    * builds (`TextInputEventEmitter::keyPressMetricsPayload`) is exactly
    * `{ key, eventCount }` — **no `shiftKey`, `metaKey` or `ctrlKey`**. Those
-   * flags only ever arrived from react-native-macos. So on the platforms Hermie
-   * ships today the two branches below are a contract rather than a live path:
-   * correct if a modifier ever shows up, inert while it does not. The same goes
-   * for Escape, which inserts no text and therefore never reaches this handler
-   * on iOS at all.
+   * flags only ever arrived from react-native-macos, so on the platforms Hermie
+   * ships the branches below are a contract rather than a live path: correct if a
+   * modifier ever shows up, inert while it does not. `preventDefault` is not what
+   * stops a Return landing either — by the time this fires the insertion has been
+   * accepted.
    *
-   * `preventDefault` is not the reason a Return does not land, either — by the
-   * time this fires the insertion has already been accepted. `submitBehavior`
-   * is what suppresses it, one layer lower.
+   * Escape is NOT handled here. It inserts no text, so it never reaches a text
+   * field's delegate on iOS at all; it comes from the keyboard seam instead, via
+   * `useEscapeKey` below.
    */
   const onKeyPress = (event: NativeSyntheticEvent<TextInputKeyPressEventData>) => {
     const native = event.nativeEvent as TextInputKeyPressEventData & {
       shiftKey?: boolean
       metaKey?: boolean
       ctrlKey?: boolean
-    }
-
-    if (native.key === 'Escape') {
-      if (running) {
-        event.preventDefault?.()
-        onStop?.()
-      }
-
-      return
     }
 
     if (native.key !== 'Enter') {
@@ -246,6 +310,17 @@ export function Composer({
   }
 
   /**
+   * Escape, in priority order.
+   *
+   * The popover is registered second, so while it is open it takes the key and
+   * the running turn does not. That ordering is the whole reason `useEscapeKey`
+   * is a stack rather than one handler per screen: a sheet opened over this
+   * composer registers later still and outranks both.
+   */
+  useEscapeKey(() => onStop?.(), running)
+  useEscapeKey(() => setPopoverDismissed(true), showSuggestions)
+
+  /**
    * What a bare Return does, decided one layer below `onKeyPress`.
    *
    * `submitBehavior` is a real native prop, and on a multiline iOS field it is
@@ -260,10 +335,9 @@ export function Composer({
    * makes a double send impossible: where Return submits it never reaches
    * `onKeyPress`, and where it inserts a newline `hardwareKeyboard` is false.
    *
-   * The cost, and it is a real one: iOS hands JS no modifier state for a text
-   * field, and Shift+Return inserts the same `"\n"` as Return. On a Mac the
-   * composer therefore has no key that makes a newline. `docs/platform-notes.md`
-   * records it; closing it needs a native key-command seam, not a prop.
+   * Shift+Return is what this cannot answer on its own: it inserts the same
+   * `"\n"` as Return, so both arrive here identically. `onSubmitEditing` asks the
+   * keyboard which one it was — see `insertNewline` above.
    */
   const submitBehavior = hardwareKeyboard ? 'submit' : 'newline'
 
@@ -414,11 +488,13 @@ export function Composer({
             multiline
             onChangeText={onChangeText}
             onKeyPress={onKeyPress}
+            onSelectionChange={onSelectionChange}
             // Only reached where `submitBehavior` is 'submit', i.e. on a Mac.
-            onSubmitEditing={submit}
+            onSubmitEditing={onSubmitEditing}
             placeholder={placeholder ?? chatStrings.composer.placeholder}
             placeholderTextColor={theme.colors.textMuted}
             ref={inputRef}
+            selection={caret}
             style={{
               color: theme.colors.text,
               flex: 1,
@@ -475,6 +551,14 @@ export function Composer({
             </View>
           </Pressable>
         </View>
+
+        {/* Only where a bare Return sends, which is the only place the two
+            chords mean anything. */}
+        {hardwareKeyboard ? (
+          <Text color="textMuted" style={{ marginTop: theme.space.xxs }} testID="composer-key-hint" variant="caption">
+            {chatStrings.composer.keyHint}
+          </Text>
+        ) : null}
 
         {queuedText ? <QueuedChip testID="composer-queued" text={queuedText} /> : null}
       </View>

@@ -28,6 +28,7 @@ import { useSafeAreaInsets } from '../platform/safe-area'
 import { KEYBOARD_AVOID_BEHAVIOR } from './keyboard'
 import { Text } from './primitives'
 import { useTheme } from './theme'
+import { useEscapeKey } from './useEscapeKey'
 
 export interface BottomSheetProps {
   visible: boolean
@@ -56,6 +57,10 @@ export interface BottomSheetProps {
 }
 
 export const SHEET_ANIMATION_MS = 220
+
+function noop(): void {
+  // A blocking sheet takes Escape and does nothing with it. See `useEscapeKey`.
+}
 
 /**
  * `mounted` trails `visible` by one animation, so the sheet can slide out
@@ -112,6 +117,18 @@ export function BottomSheet({
   const theme = useTheme()
   const insets = useSafeAreaInsets()
   const { mounted, progress } = useSheetPresence(visible, onClosed)
+
+  /**
+   * Escape closes the sheet — unless it is blocking, in which case it is
+   * SWALLOWED rather than ignored.
+   *
+   * The difference matters. A blocking sheet is an agent's question, and ADR-0010
+   * says those are answered by an explicit tap; letting Escape fall through would
+   * hand the key to whatever is underneath, so the composer would stop the very
+   * turn that is waiting for the answer. Registering a handler that does nothing
+   * is how a modal says "the key stops here".
+   */
+  useEscapeKey(blocking ? noop : onRequestClose, mounted)
 
   if (!mounted) {
     return null

@@ -20,6 +20,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Platform.isMacCatalyst` reads a compile-time flag that is false for a "Designed for iPad" binary.
   The module is Apple-only, so Android and the test environment read `false` with no second
   implementation.
+- **Shift+Enter inserts a newline** on a Mac, and a bare Enter still sends. The same module reads
+  GameController's HID state, which is the only place the modifier exists: a text field's key event
+  carries no modifier flags on iOS, so Shift+Return and Return arrive identically. The composer asks
+  while it is handling the Return and, for Shift, writes the newline into the draft at the caret —
+  replacing a selected range the way typing a character would, and leaving the caret after the
+  newline rather than at the end of the draft. `Enter to send · Shift+Enter for a new line` now sits
+  under the field wherever a bare Enter sends.
+- **Escape closes things** on any build with a hardware keyboard attached. It comes from the same
+  module and for the mirrored reason: Escape inserts no text, so it never reaches a text field at all,
+  and a `UIKeyCommand` would sit in a responder chain that a presented `Modal` leaves — which is the
+  case that matters, because a sheet is the main thing Escape should close. `useEscapeKey` routes it:
+  a stack, last registered wins, one native subscription. It dismisses a sheet, closes the slash
+  popover, backs out of the sign-in page, and stops a running turn when nothing else is open. A
+  **blocking** sheet swallows Escape instead of being dismissed by it — ADR-0010 says an agent's
+  question is answered by an explicit tap, and letting the key fall through would stop the very turn
+  waiting for the answer.
 - [ADR-0011](docs/adr/0011-mac-via-the-ipad-build.md), which supersedes ADR-0002 and lists what a day
   of building on react-native-macos actually cost.
 - Project skeleton: npm workspaces, TypeScript project references, ESLint, Prettier, commit-message
@@ -202,13 +218,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   iPhone/iPad app on a Mac from the same listing.
 - A bare `Return` sends on a Mac through `submitBehavior="submit"` and `onSubmitEditing`, not through
   `onKeyPress`. On iOS a text field's key event carries no modifier state and cannot suppress the
-  insertion, so `submitBehavior` is the only thing that can stop a Return becoming a newline. The cost
-  is that Shift+Return cannot be told apart from Return, so the composer has no newline key on a Mac;
-  `docs/platform-notes.md` says so plainly.
+  insertion, so `submitBehavior` is the only thing that can stop a Return becoming a newline. Which
+  Return it was comes from the keyboard itself — see the Shift+Enter entry above.
+- The composer no longer looks for Escape in `onKeyPress`. It never arrived there on iOS, and there is
+  one mechanism for the key now rather than two that could both fire.
 - A Mac window no longer pauses the gateway connection when it leaves the front. `pause()` closes the
-  socket, which is right on a phone and wrong for a window that is merely hidden or behind another
-  app — and is consistent with "gateway not connected" appearing on a Mac build that was connected a
-  moment earlier. The approval and subagent polls keep running there for the same reason.
+  socket, which is right on a phone and wrong for a window that is merely hidden or behind another app.
+  The owner's report of "gateway not connected" on the Mac build is consistent with that, though
+  neither the banner's cause nor the AppState values a Mac window reports have been measured. The
+  approval and subagent polls keep running there for the same reason.
 - `expo-secure-store` is the secret store on the Mac too, so the AsyncStorage fallback and the warning
   that a Mac build must not be pointed at a production gateway are both gone. Linked and entitled;
   **not yet exercised in a running Mac window**.
@@ -242,6 +260,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `GameController.framework` is linked into the Mac and iOS builds, which is all GameController asks
+  for — no entitlement and no Info.plist key. Whether `GCKeyboard.coalesced` is populated for an iOS
+  app on a Mac is reasoned from the SDK and **not yet watched**; if it is nil, Shift+Enter and Escape
+  degrade to doing nothing rather than failing.
 - The empty band under the title bar on a Mac. An iOS app on a Mac is told it has an iPad's status
   bar, and `Screen` turned that ~25pt top safe-area inset into padding nothing occupied, because the
   macOS title bar is outside the app's window. The top inset is dropped on a Mac and only there;

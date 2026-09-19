@@ -155,11 +155,17 @@ export function createGatewayConnection(options: CreateConnectionOptions): Gatew
  * **A Mac never pauses.** `pause()` tears the socket down, and on a phone that is
  * the right trade — the OS is about to kill a half-open socket anyway. A Mac
  * window that is hidden, minimised or simply behind another app is still a live
- * window with a live network, and closing its socket every time it lost the
- * front is what put "gateway not connected" in front of the reader on a build
- * that was connected a second earlier. The old native macOS target skipped
- * AppState entirely for this reason; `RUNS_ON_MAC` is how that survives into the
- * iPad build, which reports iOS's AppState values like any other iOS app.
+ * window with a live network, so there is nothing to protect it from. The old
+ * native macOS target skipped AppState entirely for this reason; `RUNS_ON_MAC` is
+ * how that survives into the iPad build, which reports iOS's AppState values like
+ * any other iOS app.
+ *
+ * There is also a hypothesis behind it, and it is worth naming as one: the owner
+ * reports "gateway not connected" appearing on the Mac build, which is what a
+ * socket closed on every loss of the front would look like. That has NOT been
+ * measured — neither the AppState values a Mac window reports nor the banner's
+ * actual cause — so this change is justified on its own terms rather than as a
+ * fix for that report.
  *
  * `resume()` is still wired on a Mac, and cheaply: it returns immediately unless
  * the connection is actually paused or stopped, so on a window coming forward it
