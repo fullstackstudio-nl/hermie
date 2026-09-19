@@ -7,15 +7,21 @@ import { InsetButtonRow, InsetGroup, InsetValueRow, Screen, Text } from '../../u
 import { useTheme } from '../../ui/theme'
 import { FORM_MAX_WIDTH } from '../../ui/tokens'
 import { DebugConnectionScreen } from './DebugConnectionScreen'
+import { GALLERY_ROW_TITLE, GalleryScreen } from './GalleryScreen'
 
 export function SettingsScreen() {
   const theme = useTheme()
   const { config, status, signOut, changeGateway } = useGateway()
   const [showConnectionTest, setShowConnectionTest] = useState(false)
+  const [showGallery, setShowGallery] = useState(false)
   const [confirmingChange, setConfirmingChange] = useState(false)
 
   if (showConnectionTest) {
     return <DebugConnectionScreen onClose={() => setShowConnectionTest(false)} />
+  }
+
+  if (showGallery) {
+    return <GalleryScreen onClose={() => setShowGallery(false)} />
   }
 
   const token = config?.authMode === 'session_token'
@@ -78,6 +84,7 @@ export function SettingsScreen() {
 
         <InsetGroup header={strings.settings.developer}>
           <InsetButtonRow title={strings.settings.connectionTest} onPress={() => setShowConnectionTest(true)} />
+          <InsetButtonRow title={GALLERY_ROW_TITLE} onPress={() => setShowGallery(true)} />
         </InsetGroup>
 
         <View style={{ height: theme.space.xxl }} />

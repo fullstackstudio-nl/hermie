@@ -1,0 +1,178 @@
+/**
+ * Inline token rendering.
+ *
+ * Everything nests inside one `Text`, which is what makes a bold word inside a
+ * sentence wrap with the sentence instead of becoming its own box. Only images
+ * break out, because an `Image` cannot live inside a `Text` on Android.
+ */
+import { Fragment, type ReactNode } from 'react'
+import { Image, Text, type TextStyle, View } from 'react-native'
+import type { Token, Tokens } from 'marked'
+
+import { MONOSPACE, type MarkdownContext } from './context'
+
+export interface InlineProps {
+  tokens: Token[]
+  context: MarkdownContext
+  style?: TextStyle
+}
+
+function codeStyle(context: MarkdownContext): TextStyle {
+  return {
+    backgroundColor: context.blockBackground,
+    color: context.textColor,
+    fontFamily: MONOSPACE,
+    fontSize: Math.max(11, context.fontSize - 2)
+  }
+}
+
+/**
+ * Images are hoisted out of the inline flow by `renderInline`; this keeps a
+ * sane box for one without knowing its intrinsic size. `expo-image` is not a
+ * dependency of this app, so the platform `Image` does the work.
+ */
+function InlineImage({ token, context }: { token: Tokens.Image; context: MarkdownContext }) {
+  return (
+    <View style={{ gap: 4, marginVertical: 8 }}>
+      <Image
+        accessibilityLabel={token.text || token.title || undefined}
+        resizeMode="contain"
+        source={{ uri: token.href }}
+        style={{
+          width: '100%',
+          height: 180,
+          borderRadius: 12,
+          backgroundColor: context.blockBackground
+        }}
+      />
+      {token.text ? (
+        <Text selectable={context.selectable} style={{ color: context.mutedTextColor, fontSize: 12 }}>
+          {token.text}
+        </Text>
+      ) : null}
+    </View>
+  )
+}
+
+function renderToken(token: Token, index: number, context: MarkdownContext): ReactNode {
+  const key = `${token.type}-${index}`
+
+  switch (token.type) {
+    case 'text':
+    case 'escape': {
+      const nested = (token as Tokens.Text).tokens
+
+      if (nested?.length) {
+        return <Fragment key={key}>{nested.map((child, at) => renderToken(child, at, context))}</Fragment>
+      }
+
+      return <Fragment key={key}>{(token as Tokens.Text).text}</Fragment>
+    }
+
+    case 'strong':
+      return (
+        <Text key={key} style={{ fontWeight: '700' }}>
+          {(token as Tokens.Strong).tokens.map((child, at) => renderToken(child, at, context))}
+        </Text>
+      )
+
+    case 'em':
+      return (
+        <Text key={key} style={{ fontStyle: 'italic' }}>
+          {(token as Tokens.Em).tokens.map((child, at) => renderToken(child, at, context))}
+        </Text>
+      )
+
+    case 'del':
+      return (
+        <Text key={key} style={{ textDecorationLine: 'line-through' }}>
+          {(token as Tokens.Del).tokens.map((child, at) => renderToken(child, at, context))}
+        </Text>
+      )
+
+    case 'codespan':
+      return (
+        <Text key={key} style={codeStyle(context)}>
+          {` ${(token as Tokens.Codespan).text} `}
+        </Text>
+      )
+
+    case 'br':
+      return <Fragment key={key}>{'\n'}</Fragment>
+
+    case 'link': {
+      const link = token as Tokens.Link
+
+      return (
+        <Text
+          accessibilityRole="link"
+          key={key}
+          onPress={() => context.onLinkPress(link.href)}
+          style={{ color: context.linkColor, textDecorationLine: 'underline' }}
+        >
+          {link.tokens?.length ? link.tokens.map((child, at) => renderToken(child, at, context)) : link.text}
+        </Text>
+      )
+    }
+
+    case 'image':
+      // Reached only when an image sits inside emphasis or a link; the block
+      // renderer hoists the common case. Fall back to the alt text so the
+      // sentence still reads.
+      return <Fragment key={key}>{(token as Tokens.Image).text}</Fragment>
+
+    case 'html':
+      // No HTML renderer here by design: an agent's stray `<div>` should read
+      // as the literal characters it typed.
+      return <Fragment key={key}>{(token as Tokens.HTML).raw}</Fragment>
+
+    default: {
+      const nested = (token as { tokens?: Token[] }).tokens
+
+      if (nested?.length) {
+        return <Fragment key={key}>{nested.map((child, at) => renderToken(child, at, context))}</Fragment>
+      }
+
+      return <Fragment key={key}>{(token as { raw?: string }).raw ?? ''}</Fragment>
+    }
+  }
+}
+
+/** Splits a token list into the images that need their own box and the rest. */
+export function partitionImages(tokens: Token[]): { images: Tokens.Image[]; inline: Token[] } {
+  const images: Tokens.Image[] = []
+  const inline: Token[] = []
+
+  for (const token of tokens) {
+    if (token.type === 'image') {
+      images.push(token as Tokens.Image)
+
+      continue
+    }
+
+    inline.push(token)
+  }
+
+  return { images, inline }
+}
+
+export function Inline({ tokens, context, style }: InlineProps) {
+  const { images, inline } = partitionImages(tokens)
+  const hasText = inline.some(token => (token as { raw?: string }).raw?.trim())
+
+  return (
+    <>
+      {hasText ? (
+        <Text
+          selectable={context.selectable}
+          style={[{ color: context.textColor, fontSize: context.fontSize, lineHeight: context.lineHeight }, style]}
+        >
+          {inline.map((token, index) => renderToken(token, index, context))}
+        </Text>
+      ) : null}
+      {images.map((token, index) => (
+        <InlineImage context={context} key={`img-${index}`} token={token} />
+      ))}
+    </>
+  )
+}

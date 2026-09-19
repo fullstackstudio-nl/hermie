@@ -271,3 +271,73 @@ Two things about this machine rather than about the project:
 no JDK on this machine (`java -version` reports no runtime), so `assembleDebug` could not be
 attempted. The Android SDK is present at `~/Library/Android/sdk`. This is the largest untested gap in
 the skeleton.
+
+## Chat UI kit: inverted lists, Modal sheets and text input (2026-09-19)
+
+Verified while building `src/chat-ui`, `src/markdown` and `src/ui/sheets`. Everything below was seen
+on a device or in a crash report, not inferred from documentation.
+
+### `FlatList` inverted + `maintainVisibleContentPosition`
+
+- **iOS (iPhone 17 Pro simulator, iOS 26.5): works.** `TranscriptList` is an inverted `FlatList` with
+  `maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: 32 }}`. Offset 0
+  is the bottom of the conversation, so "stick to the bottom while streaming" needs no code: a list
+  already at 0 stays there when content grows. `onScroll` reports the distance from the bottom
+  directly, which is what drives the jump-to-latest pill.
+- **Windowing is real and it bites tests.** The default `initialNumToRender` is 10, so a list of
+  every item kind only mounts the newest ten and the rows further up are simply absent from the tree.
+  `__tests__/chat-ui/transcript-list.test.tsx` therefore renders one list per kind rather than one
+  list of everything.
+- **macOS: not exercised at runtime.** The macOS build launches and evaluates the whole chat kit (see
+  below), but the transcript could not be opened — onboarding cannot be completed there yet.
+
+### Nested scroll views
+
+Two traps, both found on the developer gallery and both fixed in the components rather than in the
+gallery:
+
+- **A horizontal `ScrollView` defaults to `flexGrow: 1`.** React Native's `baseHorizontal` style sets
+  `flexGrow: 1, flexShrink: 1`. Inside a scrollable column that means the code block, the Markdown
+  table, the diff and the composer's attachment tray each expanded to the height of the _viewport_
+  instead of hugging their content — on screen, a grey rectangle roughly 2000pt tall that swallowed
+  the rest of the page. Every horizontal `ScrollView` in the kit now sets `style={{ flexGrow: 0 }}`.
+- **A `FlatList` inside a vertical `ScrollView` warns and measures wrong.** The gallery shows the
+  transcript as its own screen for that reason, not as a section.
+
+### `Modal`-based bottom sheets
+
+- **iOS: works.** `src/ui/BottomSheet.tsx` is `Modal` + `Animated.timing` on the JS driver
+  (`useNativeDriver: false` — layout properties are not native-driver eligible on the old
+  architecture, which is what macOS runs). The approval sheet was driven end to end on the simulator:
+  it slides up, dims the content behind it, and renders exactly the server's `choices` in the
+  server's order.
+- **Dismissal is taps only.** No gesture library is involved, which is both an ADR-0010 requirement
+  and the only portable option: macOS has no `react-native-gesture-handler`.
+- **`blocking` really does block.** The backdrop `Pressable` is `disabled`, and `onRequestClose` is
+  left undefined so a hardware back press cannot answer an agent's question either.
+- **macOS: not exercised at runtime**, for the same reason as the transcript.
+
+### react-native-macos text input
+
+Two findings from the macOS run, both about `TextInput` and both outside this kit's own code:
+
+- **`secureTextEntry` renders characters but does not emit `onChangeText`.** Typing into the
+  onboarding gateway-address field (a plain `TextInput`) updates the draft and the probe runs; typing
+  the same way into the session-token field (`secureTextEntry`) shows the dots but leaves the draft
+  empty, so "Continue" stays disabled and onboarding cannot be finished on macOS. The plain field on
+  the previous step proves the keystrokes themselves arrive. **This blocks reaching any post-onboarding
+  screen on macOS**, including the component gallery.
+- **A programmatic `.focus()` can abort the app.** `Hermie-2026-09-19-024734.ips`:
+  `-[RCTTextInputComponentView focus]` → `-[NSWindow _realMakeFirstResponder:]` → `objc_exception_rethrow`
+  → `SIGABRT`. The command runs on the main thread, so a JS `try/catch` around `focus()` would not
+  catch it. `Composer` therefore skips the focus it would otherwise do after picking a slash command
+  when `Platform.OS === 'macos'`; the draft is already updated, so the only cost is that the caret
+  does not return by itself.
+
+### What the macOS build does prove
+
+`npm run macos` builds and launches (`** BUILD SUCCEEDED **`, window renders in dark mode). `App.tsx`
+imports the shell, which imports `SettingsScreen`, which imports `GalleryScreen`, which imports the
+whole chat kit — so `marked`, `highlight.js/lib/core` with its fifteen grammars, and every component
+module are evaluated under react-native-macos at startup without throwing. What is _not_ proven on
+macOS is anything about layout or interaction.
