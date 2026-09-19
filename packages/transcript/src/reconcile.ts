@@ -122,6 +122,7 @@ function rebuild(state: ChatState, list: readonly TranscriptItem[]): ChatState {
     byToolId: {},
     byRowId: {},
     byRequestId: {},
+    byApprovalId: {},
     byProcessId: {},
     byDelegationId: {},
     turn: { ...state.turn }
@@ -153,6 +154,10 @@ function rebuild(state: ChatState, list: readonly TranscriptItem[]): ChatState {
 
     if (placed.kind === 'approval' || placed.kind === 'clarify') {
       next.byRequestId[placed.requestId] = placed.id
+    }
+
+    if (placed.kind === 'approval' && placed.approvalId) {
+      next.byApprovalId[placed.approvalId] = placed.id
     }
   })
 
@@ -284,6 +289,13 @@ export function reconcileTail(state: ChatState, tailItems: readonly TranscriptIt
   }
 
   const pairedLive = new Set<string>()
+  /**
+   * The tail carried an authored row that belonged to a bubble already on
+   * screen — our own optimistic submit coming back persisted. It is the only
+   * evidence that says a placeholder standing beside it was never anybody
+   * else's turn, as opposed to a turn whose row the tail has not reached yet.
+   */
+  let pairedAuthoredRow = false
 
   for (const fresh of tailItems) {
     if (fresh.rowId !== undefined && knownRowIds.has(fresh.rowId)) {
@@ -313,6 +325,10 @@ export function reconcileTail(state: ChatState, tailItems: readonly TranscriptIt
     if (liveMatch) {
       pairedLive.add(liveMatch.id)
       byId.set(liveMatch.id, mergeWithLive(fresh, liveMatch))
+
+      if (fresh.kind === 'user' || fresh.kind === 'bot_dm_in') {
+        pairedAuthoredRow = true
+      }
 
       continue
     }
@@ -359,9 +375,32 @@ export function reconcileTail(state: ChatState, tailItems: readonly TranscriptIt
     insertAt -= 1
   }
 
-  const next = rebuild(state, [...ordered.slice(0, insertAt), ...appended, ...ordered.slice(insertAt)])
+  let merged = [...ordered.slice(0, insertAt), ...appended, ...ordered.slice(insertAt)]
+  let stillPending = placeholderCursor < placeholders.length
 
-  next.turn = { ...next.turn, foreignReconcilePending: placeholderCursor < placeholders.length ? true : undefined }
+  if (pairedAuthoredRow && placeholderCursor === 0) {
+    // The tail described this turn without needing a placeholder, which means
+    // the turn was ours all along: the row paired with the optimistic bubble
+    // above. An empty placeholder nobody will ever fill is an empty bubble the
+    // reader has to explain to themselves, so it goes. A tail that simply has
+    // not reached the foreign row yet pairs nothing and leaves it standing.
+    const stale = new Set(
+      placeholders.filter(id => {
+        const item = byId.get(id)
+
+        return item?.kind === 'user' && item.unknownAuthor && !item.text.trim()
+      })
+    )
+
+    if (stale.size) {
+      merged = merged.filter(item => !stale.has(item.id))
+      stillPending = stillPending && stale.size < placeholders.length
+    }
+  }
+
+  const next = rebuild(state, merged)
+
+  next.turn = { ...next.turn, foreignReconcilePending: stillPending ? true : undefined }
 
   return next
 }

@@ -119,8 +119,12 @@ export class BotsController {
 
     try {
       const result = await this.gateway.request('profiles.list', { include_sessions: true })
-      const rows: ProfileRow[] = result?.profiles ?? []
-      const bots = rows.map(botFromProfileRow)
+      const rows: ProfileRow[] = Array.isArray(result?.profiles) ? result.profiles : []
+      // The name is this bot's identity everywhere — the store key, the chat
+      // key, the `profile` every RPC carries. A row without one is not a bot
+      // this app can address, and a blank entry in the roster is worse than a
+      // missing one.
+      const bots = rows.map(botFromProfileRow).filter(bot => Boolean(bot.name))
 
       this.store.getState().setBots(bots)
       void this.persist(bots)

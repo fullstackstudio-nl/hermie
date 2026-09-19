@@ -329,7 +329,7 @@ describe('sending', () => {
     await controller.openChat(RESEARCHER)
     await controller.send('researcher', 'and then this')
 
-    expect(chatOf().queued).toEqual({ text: 'and then this' })
+    expect(chatOf().queued).toEqual({ text: 'and then this', local: true })
   })
 
   it('stops the turn without throwing away the partial reply', async () => {
@@ -385,31 +385,28 @@ describe('approvals', () => {
     expect(item).toMatchObject({ state: 'answered', answer: 'once' })
   })
 
-  it('answers a card rebuilt from a snapshot through approval.respond instead', async () => {
+  it('answers a queue entry with no request behind it through approval.respond', async () => {
     const { gateway, controller } = setup()
 
+    // `pending_approval` is a queue entry the resume reports, not a request the
+    // socket carried: there is no reply frame anywhere to answer it on.
     gateway.reply('session.resume', {
       session_id: 'runtime-1',
       stored_session_id: 'tip-researcher',
       message_count: 2,
       messages: [],
       info: { desktop_contract: 7 },
-      open_requests: [
-        {
-          id: 'srq-replayed',
-          method: 'approval',
-          params: { session_id: 'runtime-1', request_id: 'appr-7', command: 'rm -rf build', choices: ['once', 'deny'] }
-        }
-      ]
+      pending_approval: { request_id: 'appr-7', command: 'rm -rf build', choices: ['once', 'deny'] },
+      open_requests: []
     })
     gateway.reply('approval.respond', { resolved: 1 })
 
     controller.start()
     await controller.openChat(RESEARCHER)
 
-    expect(chatOf().byRequestId['srq-replayed']).toBeDefined()
+    expect(chatOf().byRequestId['pending:appr-7']).toBeDefined()
 
-    await controller.respondApproval('researcher', 'srq-replayed', 'deny')
+    await controller.respondApproval('researcher', 'pending:appr-7', 'deny')
 
     expect(gateway.lastCall('approval.respond')).toMatchObject({
       session_id: 'runtime-1',
@@ -418,14 +415,200 @@ describe('approvals', () => {
     })
   })
 
-  it('declines a request for a session it does not hold, so the agent is not parked', async () => {
+  it('declines a method it has no surface for, so the agent is not parked', async () => {
     const { gateway, controller } = setup()
 
     controller.start()
     await controller.openChat(RESEARCHER)
 
-    expect(gateway.serverRequest('srq-x', 'approval', { session_id: 'runtime-elsewhere' }).accepted).toBe(false)
+    // Sudo, secret, vault, preview, terminal — nothing here can answer them,
+    // and -32601 is the honest reply.
     expect(gateway.serverRequest('srq-y', 'sudo', { session_id: 'runtime-1' }).accepted).toBe(false)
+    expect(gateway.declined.map(entry => entry.method)).toEqual(['sudo'])
+  })
+
+  it('holds an approval for a session it has not bound yet instead of declining it', async () => {
+    const { gateway, controller } = setup()
+
+    controller.start()
+    await controller.openChat(RESEARCHER)
+
+    // Declining would not read as "not mine": the gateway takes -32601 to mean
+    // the client cannot answer approvals at all and WITHDRAWS the question.
+    expect(gateway.serverRequest('srq-x', 'approval', { session_id: 'runtime-later' }).accepted).toBe(true)
+    expect(gateway.declined).toHaveLength(0)
+
+    // The first ready of the process is not a reconnect.
+    gateway.status('ready')
+    await flush()
+
+    gateway.reply('session.resume', {
+      session_id: 'runtime-later',
+      stored_session_id: 'tip-researcher',
+      message_count: 2,
+      messages: [],
+      info: { desktop_contract: 7 },
+      open_requests: []
+    })
+    gateway.status('reconnecting')
+    gateway.status('ready')
+    await flush()
+
+    expect(chatOf().byRequestId['srq-x']).toBeDefined()
+  })
+
+  it('takes the open requests a resume replays before it resolves', async () => {
+    const { gateway, controller } = setup()
+
+    // Exactly what the channel does: the requests reach the handlers a tick
+    // before anything can know which bot owns the session they name.
+    gateway.reply('session.resume', {
+      session_id: 'runtime-1',
+      stored_session_id: 'tip-researcher',
+      message_count: 2,
+      messages: [],
+      info: { desktop_contract: 7 },
+      open_requests: [
+        {
+          id: 'srq-inherited',
+          method: 'approval',
+          params: { session_id: 'runtime-1', request_id: 'appr-2', command: 'rm -rf build', choices: ['once', 'deny'] }
+        }
+      ]
+    })
+
+    controller.start()
+    await controller.openChat(RESEARCHER)
+
+    expect(gateway.declined).toHaveLength(0)
+
+    const item = chatOf().items[chatOf().byRequestId['srq-inherited'] ?? '']
+
+    expect(item).toMatchObject({ kind: 'approval', approvalId: 'appr-2', state: 'open' })
+
+    // And the reply handle survived the parking, so the card answers the
+    // request itself rather than going out as a second RPC.
+    await controller.respondApproval('researcher', 'srq-inherited', 'deny')
+
+    expect(gateway.answerFor('srq-inherited')).toEqual({ choice: 'deny' })
+    expect(gateway.methodOrder()).not.toContain('approval.respond')
+  })
+
+  it('shows one card when the pending poll reports an approval already on screen', async () => {
+    const { gateway, controller } = setup()
+
+    controller.start()
+    await controller.openChat(RESEARCHER)
+    gateway.serverRequest('srq-9', 'approval', {
+      session_id: 'runtime-1',
+      request_id: 'appr-1',
+      command: 'rm -rf build'
+    })
+
+    gateway.reply('approval.pending', {
+      approvals: [{ request_id: 'appr-1', command: 'rm -rf build', choices: ['once', 'deny'] }]
+    })
+
+    await controller.onForeground()
+
+    const approvals = chatOf()
+      .order.map(id => chatOf().items[id])
+      .filter(item => item?.kind === 'approval')
+
+    expect(approvals).toHaveLength(1)
+    expect(approvals[0]).toMatchObject({ requestId: 'srq-9', approvalId: 'appr-1' })
+  })
+
+  it('forgets the handles behind a card the gateway withdraws', async () => {
+    const { gateway, controller } = setup()
+
+    controller.start()
+    await controller.openChat(RESEARCHER)
+    gateway.serverRequest('srq-9', 'approval', {
+      session_id: 'runtime-1',
+      request_id: 'appr-1',
+      command: 'rm -rf build'
+    })
+    await flush()
+
+    gateway.emit({
+      type: 'request.cancel',
+      session_id: 'runtime-1',
+      seq: 30,
+      payload: { id: 'srq-9', method: 'approval', reason: 'timeout' }
+    })
+
+    expect(chatOf().items[chatOf().byRequestId['srq-9'] ?? '']).toMatchObject({ state: 'cancelled' })
+
+    // The handle is gone, so answering the dead card cannot resolve a request
+    // that no longer exists; it falls through to the queue instead.
+    gateway.reply('approval.respond', { resolved: 0 })
+    await controller.respondApproval('researcher', 'srq-9', 'once')
+
+    expect(gateway.lastCall('approval.respond')).toMatchObject({ request_id: 'appr-1' })
+  })
+})
+
+describe('clarify', () => {
+  it('answers a replayed single-question clarify through request.answer', async () => {
+    const { gateway, controller } = setup()
+
+    gateway.reply('request.answer', { status: 'ok' })
+    controller.start()
+    await controller.openChat(RESEARCHER)
+
+    // No live reply frame behind it, and `clarify.lock` is batch-only upstream:
+    // it reports `expired` for a single question and the agent keeps waiting.
+    useChatsStore.getState().dispatchServerRequest('researcher', {
+      id: 'srq-clar',
+      method: 'clarify',
+      params: { session_id: 'runtime-1', request_id: 'c1', question: 'Which branch?' },
+      replayed: true
+    })
+
+    await controller.respondClarify('researcher', 'srq-clar', { c1: 'main' })
+
+    expect(gateway.methodOrder()).not.toContain('clarify.lock')
+    expect(gateway.lastCall('request.answer')).toEqual({
+      id: 'srq-clar',
+      result: { answer: 'main' },
+      profile: 'researcher'
+    })
+  })
+
+  it('locks a batch clarify question by question while it is incomplete', async () => {
+    const { gateway, controller } = setup()
+
+    gateway.reply('clarify.lock', { status: 'ok', remaining: ['q2'] })
+    controller.start()
+    await controller.openChat(RESEARCHER)
+    gateway.serverRequest('srq-batch', 'clarify', {
+      session_id: 'runtime-1',
+      questions: [
+        { qid: 'q1', question: 'Which cluster?' },
+        { qid: 'q2', question: 'Which branch?' }
+      ]
+    })
+
+    await controller.respondClarify('researcher', 'srq-batch', { q1: 'staging' })
+
+    expect(gateway.lastCall('clarify.lock')).toMatchObject({ request_id: 'srq-batch', question_id: 'q1' })
+  })
+
+  it('answers a live batch clarify on its own reply frame', async () => {
+    const { gateway, controller } = setup()
+
+    controller.start()
+    await controller.openChat(RESEARCHER)
+
+    const delivered = gateway.serverRequest('srq-batch', 'clarify', {
+      session_id: 'runtime-1',
+      questions: [{ qid: 'q1', question: 'Which cluster?' }]
+    })
+
+    await controller.respondClarify('researcher', 'srq-batch', { q1: 'staging' })
+
+    expect(delivered.answer()).toEqual({ answers: { q1: 'staging' } })
   })
 })
 
@@ -487,6 +670,98 @@ describe('reconnecting', () => {
   })
 })
 
+describe('the event watermark', () => {
+  it('starts over when the gateway rebuilds the session under a new id', async () => {
+    const { gateway, controller } = setup()
+
+    controller.start()
+    await controller.openChat(RESEARCHER)
+    gateway.emit({ type: 'message.delta', session_id: 'runtime-1', seq: 41, payload: { text: 'a' } })
+
+    expect(chatOf().lastSeq).toBe(41)
+
+    // A rebuilt session numbers its events from 1 again. Carrying 41 over
+    // would make the reducer drop the first forty of them as replay.
+    gateway.status('ready')
+    await flush()
+    gateway.reply('session.resume', {
+      session_id: 'runtime-2',
+      stored_session_id: 'tip-researcher',
+      message_count: 2,
+      messages: [],
+      info: { desktop_contract: 7 },
+      open_requests: []
+    })
+    gateway.reply('session.events.since', {
+      events: [],
+      latest_seq: 3,
+      truncated: false,
+      count: 0,
+      epoch: 'e1',
+      open_requests: []
+    })
+    gateway.status('reconnecting')
+    gateway.status('ready')
+    await flush()
+
+    expect(gateway.lastCall('session.events.since')).toMatchObject({ session_id: 'runtime-2', last_seen: 0 })
+    expect(chatOf().lastSeqSessionId).toBe('runtime-2')
+
+    gateway.emit({ type: 'message.delta', session_id: 'runtime-2', seq: 4, payload: { text: 'kept' } })
+
+    expect(JSON.stringify(chatOf().items)).toContain('kept')
+  })
+
+  it('goes cold when the replay epoch says the gateway restarted', async () => {
+    const { gateway, controller } = setup()
+
+    controller.start()
+    await controller.openChat(RESEARCHER)
+
+    expect(chatOf().epoch).toBe('e1')
+
+    gateway.emit({ type: 'message.delta', session_id: 'runtime-1', seq: 9, payload: { text: 'before' } })
+
+    expect(chatOf().lastSeq).toBe(9)
+
+    gateway.reply('session.events.since', {
+      // A restarted gateway numbers from 1 again, so its `latest_seq` is BELOW
+      // the watermark we hold and its events describe a different sequence.
+      events: [{ type: 'message.delta', session_id: 'runtime-1', seq: 2, payload: { text: 'replayed' } }],
+      latest_seq: 2,
+      truncated: false,
+      count: 1,
+      epoch: 'e2',
+      open_requests: []
+    })
+
+    // The same runtime id comes back, so nothing else says the numbering moved.
+    gateway.status('ready')
+    await flush()
+    gateway.status('reconnecting')
+    gateway.status('ready')
+    await flush()
+
+    expect(chatOf().epoch).toBe('e2')
+    expect(chatOf().lastSeq).toBe(2)
+    expect(JSON.stringify(chatOf().items)).not.toContain('replayed')
+  })
+
+  it('refuses a resume that comes back without a session id', async () => {
+    const { gateway, controller } = setup()
+
+    gateway.reply('session.resume', {
+      session_id: '',
+      message_count: 0,
+      messages: [],
+      info: { desktop_contract: 7 }
+    })
+
+    await expect(controller.openChat(RESEARCHER)).rejects.toThrow(/without a session id/)
+    expect(chatOf().hydration).toBe('error')
+  })
+})
+
 describe('chat options', () => {
   it('scopes yolo to this session rather than rewriting the gateway configuration', async () => {
     const { gateway, controller } = setup()
@@ -507,6 +782,73 @@ describe('chat options', () => {
       session_id: 'runtime-1',
       scope: 'session'
     })
+  })
+
+  it('reads the options back without resuming the session', async () => {
+    const { gateway, controller } = setup()
+
+    gateway.reply('config.set', { key: 'yolo', value: 'on' }).reply('config.get', params => {
+      const key = String(params.key)
+
+      return { value: key === 'model' ? 'example-provider/fast' : key === 'yolo' ? 'on' : '' }
+    })
+
+    controller.start()
+    await controller.openChat(RESEARCHER)
+    gateway.emit({
+      type: 'session.info',
+      session_id: 'runtime-1',
+      seq: 30,
+      payload: { desktop_contract: 7, model: 'example-provider/example-model', cwd: '/work' }
+    })
+
+    const resumesBefore = gateway.calls.filter(call => call.method === 'session.resume').length
+
+    // `config.set` answered with no `info`, so the sheet re-reads the values.
+    await controller.setOption('researcher', 'yolo', 'on')
+
+    // Resuming is a write: it mints a new runtime id and rebuilds the agent.
+    expect(gateway.calls.filter(call => call.method === 'session.resume')).toHaveLength(resumesBefore)
+    expect(gateway.lastCall('config.get')).toMatchObject({ session_id: 'runtime-1', profile: 'researcher' })
+    // The four keys land on top of what the session already reported rather
+    // than in place of it: `session.info` replaces the whole record.
+    expect(chatOf().info).toMatchObject({
+      yolo: true,
+      model: 'example-provider/fast',
+      desktop_contract: 7,
+      cwd: '/work'
+    })
+  })
+
+  it('forgets the slash catalogue of a session that has been replaced', async () => {
+    const { gateway, controller } = setup()
+
+    gateway
+      .reply('commands.catalog', { pairs: [['/model', 'Switch the model']] })
+      .reply('complete.slash', { items: [] })
+
+    controller.start()
+    await controller.openChat(RESEARCHER)
+    await controller.querySlash('researcher', '/mo')
+
+    expect(controller.slashCatalog('researcher')).toBeDefined()
+
+    gateway.status('ready')
+    await flush()
+    gateway.reply('session.resume', {
+      session_id: 'runtime-2',
+      stored_session_id: 'tip-researcher',
+      message_count: 2,
+      messages: [],
+      info: { desktop_contract: 7 },
+      open_requests: []
+    })
+    gateway.status('reconnecting')
+    gateway.status('ready')
+    await flush()
+
+    // The catalogue belongs to the session that is gone, not to the bot.
+    expect(controller.slashCatalog('researcher')).toBeUndefined()
   })
 
   it('hands an expensive-model confirmation back instead of confirming it', async () => {

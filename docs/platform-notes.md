@@ -272,6 +272,30 @@ no JDK on this machine (`java -version` reports no runtime), so `assembleDebug` 
 attempted. The Android SDK is present at `~/Library/Android/sdk`. This is the largest untested gap in
 the skeleton.
 
+### The sign-in WebView is not given the gateway's extra headers on Android
+
+`react-native-webview`'s `source.headers` are applied per load. On iOS and macOS (WKWebView) they
+stay with the request that carried them. Android's WebView re-sends them on cross-origin redirects
+instead of dropping them at the origin boundary.
+
+A native sign-in redirects to the identity provider by design — that is the whole flow — so on
+Android a `CF-Access-Client-Secret` (or any other header the user configured for the _gateway_) would
+travel to the IdP's domain. That is a credential leaving the host it authenticates to.
+
+`NativeSignInWebView` therefore refuses the in-app page on Android **when extra headers are
+configured**: `webViewMayCarryHeaders()` returns false there, and the component opens on the existing
+system-browser fallback — open the page in the browser, paste the `127.0.0.1` redirect it fails to
+load back into the app. The system browser never sees the gateway headers at all, and the loopback
+code exchange is a plain `fetch` from the app, which does send them, safely.
+
+Consequences worth knowing:
+
+- An Android user behind Cloudflare Access signs in through their browser, not in the app. The
+  redirect-paste step is the same one macOS already uses.
+- Android **without** extra headers is unaffected and still signs in inside the app.
+- If `react-native-webview` ever grows a per-origin header API, this is the place to revisit; the
+  seam is one exported predicate.
+
 ## Chat UI kit: inverted lists, Modal sheets and text input (2026-09-19)
 
 Verified while building `src/chat-ui`, `src/markdown` and `src/ui/sheets`. Everything below was seen
@@ -451,9 +475,25 @@ The Activity timeline reads `writer ↩ researcher`. Written plainly, iOS gives 
 presentation and the arrow comes out as a blue glyph in the middle of a sentence. Appending the text
 variation selector (U+FE0E) is what makes it render as text.
 
-### `expo-haptics` is not a dependency
+### `expo-haptics` is wired through a platform seam
 
-M4 asked for haptics on send, approve/deny and `message.complete`. `expo-haptics` is not in
-`apps/hermie/package.json` and no dependency was added for it, so no haptics were wired. Adding it
-later is a one-module change plus a macOS no-op wrapper — on macOS there is no haptic engine, and the
-module has no macOS slice, so it would have to be required lazily like `expo-document-picker`.
+M4 asked for haptics on send, approve/deny and `message.complete`. `expo-haptics` (`~15.0.8`, the
+Expo 54 bundled version) is now a dependency, behind `src/platform/haptics.ts` with a `.macos.ts`
+no-op beside it: a Mac has no haptic engine and the module ships no macOS slice, so importing it
+there would fail the way `@react-native-community/netinfo` does.
+
+Two things about that seam are load-bearing:
+
+- The macOS variant **declares** `HapticMoment` rather than re-exporting it from `./haptics`, because
+  inside a `.macos` file that specifier resolves back to itself (see "Platform-variant modules
+  resolve to themselves" above). A type-only re-export would have been safe; declaring it is safe
+  under any later edit.
+- `haptic()` swallows everything. The engine is absent on a simulator, switchable off in system
+  settings, and missing on some Android builds, and none of those is a reason for a message not to
+  send.
+
+Only three moments buzz — a submitted message, an answered approval or clarify, and a reply landing
+while the chat is on screen. The last one lives in a `ChatScreen` effect rather than in the
+controller, which is what keeps a bot answering in a chat nobody is looking at silent.
+
+`npx expo-doctor` stays at 18/18 with the module added.

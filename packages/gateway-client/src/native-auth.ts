@@ -201,7 +201,17 @@ export class TokenCoordinator {
     }
 
     if (!this.loadFlight) {
+      // The read is async, so a sign-in or sign-out can land while it is out.
+      // `beginAuthChange` drops the flight, but the flight's own continuation
+      // still runs — and without this fence it would write the pre-change
+      // contents of the store back over the token that just replaced them.
+      const flightEpoch = this.authEpoch
+
       this.loadFlight = this.options.store.load().then(loaded => {
+        if (this.authEpoch !== flightEpoch) {
+          return this.cached ?? null
+        }
+
         this.cached = loaded
         this.loadFlight = null
 

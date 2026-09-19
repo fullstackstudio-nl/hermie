@@ -12,6 +12,7 @@
 import { act, fireEvent, screen, waitFor } from '@testing-library/react-native'
 
 import { ChatScreen } from '../src/features/chats/ChatScreen'
+import { haptic } from '../src/platform/haptics'
 import { type Bot, useBotsStore } from '../src/store/bots'
 import { useChatsStore } from '../src/store/chats'
 import { useSettingsStore } from '../src/store/settings'
@@ -27,6 +28,8 @@ jest.mock('../src/gateway', () => ({
 jest.mock('../src/features/chats/ChatRuntime', () => ({
   useChatRuntime: () => ({ controller: mockController, bots: {} })
 }))
+
+jest.mock('../src/platform/haptics', () => ({ haptic: jest.fn() }))
 
 // The picker is a native module with no test implementation; the screen only
 // ever awaits what it returns.
@@ -132,6 +135,28 @@ describe('ChatScreen', () => {
 
     await waitFor(() => expect(mockController.send).toHaveBeenCalledWith('researcher', 'hello', []))
     expect(useChatsStore.getState().chats.researcher?.draft).toBe('')
+    expect(haptic).toHaveBeenCalledWith('send')
+  })
+
+  it('buzzes once when a reply lands and not when a turn merely runs', async () => {
+    renderChat()
+
+    act(() => {
+      useChatsStore.getState().beginTurn('researcher', 'do a thing')
+    })
+    await waitFor(() => expect(screen.getByTestId('composer-stop')).toBeTruthy())
+
+    expect(jest.mocked(haptic).mock.calls.filter(([moment]) => moment === 'complete')).toHaveLength(0)
+
+    act(() => {
+      useChatsStore
+        .getState()
+        .dispatchEvent('researcher', { type: 'message.complete', seq: 90, payload: { text: 'done' } })
+    })
+
+    await waitFor(() =>
+      expect(jest.mocked(haptic).mock.calls.filter(([moment]) => moment === 'complete')).toHaveLength(1)
+    )
   })
 
   it('stops a running turn instead of sending', async () => {
@@ -174,6 +199,7 @@ describe('ChatScreen', () => {
 
       expect(mockController.respondApproval).toHaveBeenCalledWith('researcher', 'srq-7', 'once', undefined)
     })
+    expect(haptic).toHaveBeenCalledWith('choice')
   })
 
   it('shows one question at a time, oldest first', async () => {

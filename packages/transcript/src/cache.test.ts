@@ -71,6 +71,31 @@ describe('cache round trip', () => {
     expect(snapshot.lastRowId).toBe(15)
     expect(stateFromCache('researcher', IDS, snapshot).lastSeenRowId).toBe(15)
   })
+
+  it('carries the event watermark together with the session it was counted under', () => {
+    const before = { ...hydrated(), lastSeq: 42, lastSeqSessionId: 'runtime-1', epoch: 'e1' }
+    const snapshot = snapshotForCache(before, NOW)
+
+    expect(snapshot).toMatchObject({ lastSeq: 42, lastSeqSessionId: 'runtime-1', epoch: 'e1' })
+
+    const after = stateFromCache('researcher', IDS, snapshot)
+
+    expect(after).toMatchObject({ lastSeq: 42, lastSeqSessionId: 'runtime-1', epoch: 'e1' })
+  })
+
+  it('reads a watermark with no session id as cold rather than trusting it', () => {
+    // The gateway restarts event numbering at 1 for every runtime session it
+    // builds. A bare number from an unknown session would make the reducer
+    // discard the whole of the next one as replay.
+    const snapshot = { ...snapshotForCache(hydrated(), NOW), lastSeq: 42, epoch: 'e1' }
+    const after = stateFromCache('researcher', IDS, snapshot)
+
+    expect(after.lastSeq).toBe(0)
+    expect(after.lastSeqSessionId).toBeUndefined()
+    expect(after.epoch).toBeUndefined()
+    // Everything else still paints; only the watermark is refused.
+    expect(after.order).toHaveLength(snapshot.items.length)
+  })
 })
 
 describe('what the cache refuses to keep', () => {

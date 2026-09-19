@@ -25,7 +25,7 @@ import { type Bot, useBotsStore } from '../../store/bots'
 import { useChatsStore } from '../../store/chats'
 import { useChatView } from '../../store/settings'
 import type { AttachmentInput, ChatOptionKey, ModelChoice, SetOptionResult } from './chat-controller'
-import { useChatRuntime } from './ChatRuntime'
+import { type ChatRuntimeValue, useChatRuntime } from './ChatRuntime'
 
 export interface UseChatResult {
   bot: Bot | undefined
@@ -84,7 +84,10 @@ export function useChat(botName: string): UseChatResult {
   const chat = useChatsStore(state => state.chats[botName])
   const view = useChatView(botName)
   const [error, setError] = useState<string | null>(null)
-  const openedRef = useRef<string | null>(null)
+  // The bot AND the runtime that opened it. A new gateway connection builds a
+  // new controller with empty stores, so remembering only the name leaves the
+  // screen bound to a chat the live controller has never opened.
+  const openedRef = useRef<{ botName: string; runtime: ChatRuntimeValue } | null>(null)
 
   const open = useCallback(async () => {
     if (!runtime || !bot) {
@@ -100,11 +103,17 @@ export function useChat(botName: string): UseChatResult {
   }, [bot, runtime])
 
   useEffect(() => {
-    if (!runtime || !bot || openedRef.current === bot.name) {
+    if (!runtime || !bot) {
       return
     }
 
-    openedRef.current = bot.name
+    const opened = openedRef.current
+
+    if (opened?.botName === bot.name && opened.runtime === runtime) {
+      return
+    }
+
+    openedRef.current = { botName: bot.name, runtime }
     void open()
   }, [bot, open, runtime])
 
@@ -112,8 +121,10 @@ export function useChat(botName: string): UseChatResult {
     // Leaving the screen writes the cache and marks the chat read. It does NOT
     // detach: a teammate bot's message has to keep streaming in.
     return () => {
-      if (openedRef.current) {
-        void runtime?.controller.closeChat(openedRef.current)
+      const opened = openedRef.current
+
+      if (opened) {
+        void opened.runtime.controller.closeChat(opened.botName)
       }
     }
   }, [runtime])

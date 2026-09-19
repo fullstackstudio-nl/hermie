@@ -1,6 +1,6 @@
 import { buildAuthorizeUrl, createPkce, exchangeCode, type Pkce, type TokenSet } from '@hermie/gateway-client'
 import { Component, type ErrorInfo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ActivityIndicator, Linking, Modal, Pressable, ScrollView, View } from 'react-native'
+import { ActivityIndicator, Linking, Modal, Platform, Pressable, ScrollView, View } from 'react-native'
 import { WebView } from 'react-native-webview'
 
 import { describeSignInError } from '../../gateway/errors'
@@ -13,6 +13,20 @@ import { inspectSignInNavigation } from './loopback'
 
 /** The provider's page gets ten minutes; after that the pending code is stale anyway. */
 export const SIGN_IN_TIMEOUT_MS = 10 * 60 * 1000
+
+/**
+ * Whether this platform may be handed the gateway's extra headers.
+ *
+ * `source.headers` is applied per load, and Android's WebView re-sends them on
+ * cross-origin redirects rather than dropping them at the origin boundary. A
+ * sign-in redirects to the identity provider by design, so a Cloudflare Access
+ * client secret set for the gateway would travel to the IdP's domain. iOS and
+ * macOS do not re-send them, so only Android refuses the in-app page — the
+ * system browser plus the pasted redirect signs in without ever seeing them.
+ */
+export function webViewMayCarryHeaders(platform: string = Platform.OS): boolean {
+  return platform !== 'android'
+}
 
 export interface NativeSignInWebViewProps {
   visible: boolean
@@ -49,6 +63,7 @@ export function NativeSignInWebView({
   const [error, setError] = useState<string | null>(null)
   const [pastedUrl, setPastedUrl] = useState('')
   const exchangingRef = useRef(false)
+  const headersWithheld = Object.keys(extraHeaders).length > 0 && !webViewMayCarryHeaders()
 
   useEffect(() => {
     if (!visible) {
@@ -60,6 +75,11 @@ export function NativeSignInWebView({
 
       return
     }
+
+    // The headers this gateway needs cannot ride in the in-app page here, and a
+    // sign-in page loaded WITHOUT them would simply be refused by the proxy in
+    // front of the gateway. So the browser does it instead, from the start.
+    setPhase(headersWithheld ? 'fallback' : 'signing-in')
 
     try {
       // A fresh verifier, challenge and state per attempt: reusing any of them
@@ -77,7 +97,7 @@ export function NativeSignInWebView({
       setPhase('failed')
       setError(describeSignInError(creationError, baseUrl))
     }
-  }, [baseUrl, provider, visible])
+  }, [baseUrl, headersWithheld, provider, visible])
 
   useEffect(() => {
     if (!visible || !attempt || phase !== 'signing-in') {
@@ -204,6 +224,12 @@ export function NativeSignInWebView({
           url={pastedUrl}
           onChange={setPastedUrl}
           error={error}
+          reason={
+            headersWithheld
+              ? strings.onboarding.signIn.webview.headersWithheld
+              : strings.onboarding.signIn.webview.unavailable
+          }
+          onOpen={openInBrowser}
           onSubmit={() => handleNavigation(pastedUrl.trim())}
         />
       )
@@ -213,7 +239,9 @@ export function NativeSignInWebView({
       <WebViewBoundary onFailure={openInBrowser}>
         <WebView
           testID="sign-in-webview"
-          source={{ uri: attempt.url, headers: extraHeaders }}
+          // Belt and braces: this branch is unreachable while the headers are
+          // withheld, and the source must not carry them even if that changes.
+          source={{ uri: attempt.url, ...(headersWithheld ? {} : { headers: extraHeaders }) }}
           incognito
           sharedCookiesEnabled={false}
           thirdPartyCookiesEnabled={false}
@@ -276,11 +304,15 @@ function FallbackForm({
   url,
   onChange,
   error,
+  reason,
+  onOpen,
   onSubmit
 }: {
   url: string
   onChange: (next: string) => void
   error: string | null
+  reason: string
+  onOpen?: () => void
   onSubmit: () => void
 }) {
   const theme = useTheme()
@@ -295,7 +327,8 @@ function FallbackForm({
         alignSelf: 'center'
       }}
     >
-      <Text color="textMuted">{strings.onboarding.signIn.webview.unavailable}</Text>
+      <Text color="textMuted">{reason}</Text>
+      {onOpen ? <Button title={strings.common.openInBrowser} variant="secondary" onPress={onOpen} /> : null}
       <InsetGroup
         header={strings.onboarding.signIn.webview.fallbackLabel}
         footer={strings.onboarding.signIn.webview.fallbackHelp}

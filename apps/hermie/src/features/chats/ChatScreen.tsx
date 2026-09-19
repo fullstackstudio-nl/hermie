@@ -42,6 +42,7 @@ import {
 } from '../../chat-ui'
 import { useGateway } from '../../gateway'
 import { strings } from '../../i18n/strings'
+import { haptic } from '../../platform/haptics'
 import { useBotsStore } from '../../store/bots'
 import { useChatsStore } from '../../store/chats'
 import { hasChatViewOverride, useChatView, useSettingsStore } from '../../store/settings'
@@ -205,6 +206,24 @@ function Conversation({
     acknowledged.current = approval.id
     void chat.acknowledgeApproval(approval.requestId).catch(() => undefined)
   }, [approval, chat])
+
+  // A reply landing is worth one buzz, and only while the chat is on screen:
+  // this effect is unmounted the moment the user leaves, so a bot answering in
+  // a chat nobody is looking at stays silent.
+  const wasRunning = useRef(false)
+
+  useEffect(() => {
+    if (chat.turnActive) {
+      wasRunning.current = true
+
+      return
+    }
+
+    if (wasRunning.current) {
+      wasRunning.current = false
+      haptic('complete')
+    }
+  }, [chat.turnActive])
 
   // Land on the item the caller asked for, once it is actually in the list.
   // Hydration is asynchronous, so this retries as items arrive and gives up
@@ -409,6 +428,8 @@ function Conversation({
       setAttachments([])
       setSuggestions([])
 
+      haptic('send')
+
       try {
         await chat.send(body, files)
       } catch (error) {
@@ -575,6 +596,7 @@ function Conversation({
           item={approval}
           onClose={() => setDismissed(current => [...current, approval.id])}
           onRespond={choice => {
+            haptic('choice')
             void chat.respondApproval(approval.requestId, choice).catch(error => setNotice(messageOf(error)))
           }}
           visible
@@ -590,6 +612,7 @@ function Conversation({
           }}
           onSkip={() => setDismissed(current => [...current, clarify.id])}
           onSubmit={answers => {
+            haptic('choice')
             void chat.respondClarify(clarify.requestId, answers).catch(error => setNotice(messageOf(error)))
           }}
           visible

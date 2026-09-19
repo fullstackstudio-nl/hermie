@@ -50,9 +50,11 @@ export function botFromProfileRow(row: ProfileRow): Bot {
     (value): value is number => typeof value === 'number' && Number.isFinite(value)
   )
 
+  const name = str(row.name)
+
   return {
-    name: row.name,
-    displayName: str(row.display_name) || row.name,
+    name,
+    displayName: str(row.display_name) || name,
     description: str(row.description),
     model: str(row.model),
     provider: str(row.provider),

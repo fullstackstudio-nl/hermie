@@ -51,6 +51,11 @@ interface ChatHarness {
   runtimeSessionId: string
   /** `approval` / `clarify` requests the gateway asked, with their reply handle. */
   answered: string[]
+  /** Every server request the channel delivered, tagged with what was in flight. */
+  deliveries: { id: string; method: string; replayed: boolean; during: string }[]
+  /** What `deliveries` records as "in flight" from here on. */
+  mark: (label: string) => void
+  storedSessionId: string
   respondApproval: (requestId: string, choice: string) => void
   restRows: (limit: number) => Promise<TranscriptRow[]>
   waitFor: (predicate: (state: ChatState) => boolean, label: string) => Promise<void>
@@ -117,6 +122,8 @@ async function openBotChat(profile: string, options: FakeGatewayOptions = {}): P
   })
 
   const answered: string[] = []
+  const deliveries: ChatHarness['deliveries'] = []
+  let during = 'idle'
   const replies = new Map<string, (result: Record<string, unknown>) => void>()
 
   connection.onRequest(request => {
@@ -128,12 +135,25 @@ async function openBotChat(profile: string, options: FakeGatewayOptions = {}): P
       return false
     }
 
+    deliveries.push({ id: request.id, method: request.method, replayed: request.replayed === true, during })
     replies.set(request.id, request.respond)
-    apply(applyServerRequest(state, { id: request.id, method: request.method, params: request.params }))
-    void connection.request('approval.received', {
-      session_id: runtimeSessionId,
-      request_id: String(request.params.request_id ?? request.id)
-    })
+    apply(
+      applyServerRequest(state, {
+        id: request.id,
+        method: request.method,
+        params: request.params,
+        ...(request.replayed ? { replayed: true } : {})
+      })
+    )
+    // Fire and forget, exactly as the controller sends it: the ack is a
+    // courtesy to the queue's timeout, and one still in flight when the test
+    // tears the socket down must not surface as an unhandled rejection.
+    void connection
+      .request('approval.received', {
+        session_id: runtimeSessionId,
+        request_id: String(request.params.request_id ?? request.id)
+      })
+      .catch(() => undefined)
 
     return true
   })
@@ -191,6 +211,11 @@ async function openBotChat(profile: string, options: FakeGatewayOptions = {}): P
     state: () => state,
     runtimeSessionId,
     answered,
+    deliveries,
+    storedSessionId: storedId,
+    mark(label) {
+      during = label
+    },
     respondApproval(requestId, choice) {
       apply(answerRequest(state, requestId, choice))
       answered.push(choice)
@@ -474,6 +499,119 @@ describe('a Bot Chat end to end', () => {
     })
 
     expect(expensive.confirm_required).toBe(true)
+  }, 20_000)
+
+  it('re-delivers an unanswered request before the resume that carries it resolves', async () => {
+    const chat = await openBotChat('researcher')
+    const pending = chat.gateway.requestApproval({
+      session_id: chat.runtimeSessionId,
+      request_id: 'ap-open',
+      command: 'rm -rf ./build',
+      choices: ['once', 'deny']
+    })
+
+    await chat.waitFor(
+      state => itemsOf(state).some(item => item.kind === 'approval' && item.state === 'open'),
+      'the approval card'
+    )
+
+    chat.mark('resuming')
+
+    const resume = await chat.connection.request('session.resume', {
+      session_id: chat.storedSessionId,
+      profile: 'researcher',
+      omit_messages: true,
+      source: 'hermie',
+      cols: 96
+    })
+
+    chat.mark('idle')
+
+    expect(resume.open_requests?.map(entry => entry.method)).toEqual(['approval'])
+
+    // This ordering is the whole reason a client has to park a request whose
+    // session it has not bound yet: the request handler runs while the resume
+    // that would do the binding is still in flight.
+    const replayed = chat.deliveries.filter(entry => entry.replayed)
+
+    expect(replayed).toHaveLength(1)
+    expect(replayed[0]).toMatchObject({ method: 'approval', during: 'resuming' })
+
+    const approval = itemsOf(chat.state()).find(item => item.kind === 'approval')
+
+    expect(itemsOf(chat.state()).filter(item => item.kind === 'approval')).toHaveLength(1)
+
+    chat.respondApproval(approval?.kind === 'approval' ? approval.requestId : '', 'deny')
+
+    await expect(pending).resolves.toEqual({ choice: 'deny' })
+  }, 20_000)
+
+  it('settles an open request through request.answer when there is no frame to answer on', async () => {
+    const chat = await openBotChat('researcher')
+    const pending = chat.gateway.requestApproval({
+      session_id: chat.runtimeSessionId,
+      request_id: 'ap-proxy',
+      command: 'rm -rf ./build',
+      choices: ['once', 'deny']
+    })
+
+    await chat.waitFor(
+      state => itemsOf(state).some(item => item.kind === 'approval' && item.state === 'open'),
+      'the approval card'
+    )
+
+    const approval = itemsOf(chat.state()).find(item => item.kind === 'approval')
+    const acknowledged = await chat.connection.request('request.answer', {
+      id: approval?.kind === 'approval' ? approval.requestId : '',
+      result: { choice: 'deny' },
+      profile: 'researcher'
+    })
+
+    expect(acknowledged.status).toBe('ok')
+    await expect(pending).resolves.toEqual({ choice: 'deny' })
+
+    // A second attempt has nothing left to settle.
+    const again = await chat.connection.request('request.answer', {
+      id: approval?.kind === 'approval' ? approval.requestId : '',
+      result: { choice: 'deny' }
+    })
+
+    expect(again.status).toBe('expired')
+  }, 20_000)
+
+  it('refuses to lock a single-question clarify, which is why request.answer exists', async () => {
+    const chat = await openBotChat('researcher')
+    const pending = chat.gateway.requestServerSide('clarify', {
+      session_id: chat.runtimeSessionId,
+      question: 'Which branch?',
+      choices: ['main', 'next']
+    })
+
+    await chat.waitFor(
+      state => itemsOf(state).some(item => item.kind === 'clarify' && item.state === 'open'),
+      'the clarify card'
+    )
+
+    const clarify = itemsOf(chat.state()).find(item => item.kind === 'clarify')
+    const requestId = clarify?.kind === 'clarify' ? clarify.requestId : ''
+
+    // `lock_answer` has no qid set to lock against for a bare question, so the
+    // gateway reports it expired and the agent keeps waiting.
+    const locked = await chat.connection.request('clarify.lock', {
+      request_id: requestId,
+      question_id: clarify?.kind === 'clarify' ? (clarify.questions[0]?.qid ?? '') : '',
+      answer: 'main'
+    })
+
+    expect(locked.status).toBe('expired')
+
+    const answered = await chat.connection.request('request.answer', {
+      id: requestId,
+      result: { answer: 'main' }
+    })
+
+    expect(answered.status).toBe('ok')
+    await expect(pending).resolves.toEqual({ answer: 'main' })
   }, 20_000)
 
   it('attaches an image before the prompt that uses it', async () => {

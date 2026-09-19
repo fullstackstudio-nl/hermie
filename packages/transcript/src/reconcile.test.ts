@@ -143,6 +143,32 @@ describe('reconcileTail', () => {
     expect(state.turn.foreignReconcilePending).toBeUndefined()
   })
 
+  it('drops a placeholder the tail turned out not to need', () => {
+    // Our own queued prompt: the optimistic bubble is already there, so the
+    // row pairs with it by text and never reaches the placeholder. Nothing
+    // will ever fill that bubble, so it must not stay on screen.
+    let live = beginLocalTurn(fresh(), 'and then deploy', undefined, NOW)
+
+    live = applyEvent(live, { type: 'message.start', seq: 1 }, NOW)
+    live = { ...live, turn: { ...live.turn, local: false } }
+    live = applyEvent(live, { type: 'message.start', seq: 2 }, NOW)
+
+    expect(list(live).filter(item => item.kind === 'user' && item.unknownAuthor)).toHaveLength(1)
+
+    const state = reconcileTail(live, rowsToItems([{ role: 'user', row_id: 31, text: 'and then deploy' }], 'rest'))
+
+    expect(list(state).filter(item => item.kind === 'user' && item.unknownAuthor)).toHaveLength(0)
+    expect(list(state).filter(item => item.kind === 'user')).toHaveLength(1)
+    expect(state.turn.foreignReconcilePending).toBeUndefined()
+  })
+
+  it('keeps a placeholder the tail has not caught up with yet', () => {
+    const live = run([{ type: 'message.start', seq: 1 }])
+    const state = reconcileTail(live, rowsToItems([{ role: 'assistant', row_id: 41, text: 'unrelated' }], 'rest'))
+
+    expect(list(state).filter(item => item.kind === 'user' && item.unknownAuthor)).toHaveLength(1)
+  })
+
   it('never drops the bubbles of the turn it is describing', () => {
     const live = run([
       { type: 'message.start', seq: 1 },

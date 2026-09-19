@@ -272,6 +272,44 @@ describe('TokenCoordinator', () => {
     expect(store.value).toBeNull()
   })
 
+  it('fences a store read that a sign-in raced', async () => {
+    let release: (() => void) | undefined
+    let started: (() => void) | undefined
+    const gate = new Promise<void>(resolve => {
+      release = resolve
+    })
+    const reading = new Promise<void>(resolve => {
+      started = resolve
+    })
+    const stored = tokenSet({ accessToken: 'at-old' })
+    const store: TokenStore = {
+      async load() {
+        started?.()
+        await gate
+
+        return stored
+      },
+      async save() {
+        return undefined
+      },
+      async clear() {
+        return undefined
+      }
+    }
+    const coordinator = new TokenCoordinator({ store, refresh: async () => tokenSet() })
+
+    // The secret store is slow, and a sign-in can finish while it is still
+    // being read. Without the fence the read's continuation writes the
+    // pre-sign-in contents back over the token that just replaced them.
+    const pending = coordinator.current()
+    await reading
+    await coordinator.save(tokenSet({ accessToken: 'at-new' }))
+    release?.()
+    await pending
+
+    expect((await coordinator.current())?.accessToken).toBe('at-new')
+  })
+
   it('forgets a set with no refresh token rather than looping on it', async () => {
     const store = memoryStore(tokenSet({ refreshToken: '', expiresAt: 10 }))
     const coordinator = new TokenCoordinator({ store, refresh: async () => tokenSet(), nowSeconds: () => 0 })

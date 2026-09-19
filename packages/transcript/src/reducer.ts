@@ -82,6 +82,7 @@ function editable(state: ChatState): ChatState {
     byToolId: { ...state.byToolId },
     byRowId: { ...state.byRowId },
     byRequestId: { ...state.byRequestId },
+    byApprovalId: { ...state.byApprovalId },
     byProcessId: { ...state.byProcessId },
     byDelegationId: { ...state.byDelegationId },
     subagents: { ...state.subagents },
@@ -114,6 +115,12 @@ function indexItem(next: ChatState, item: TranscriptItem): void {
 
   if (item.kind === 'approval' || item.kind === 'clarify') {
     next.byRequestId[item.requestId] = item.id
+  }
+
+  if (item.kind === 'approval' && item.approvalId) {
+    // Last one in wins: a card that replaces an earlier duplicate is the one a
+    // cancel has to reach.
+    next.byApprovalId[item.approvalId] = item.id
   }
 }
 
@@ -278,7 +285,10 @@ function cancelOpenRequests(next: ChatState, reason: string): void {
 
 function clearTurn(next: ChatState): void {
   next.turn.active = false
-  next.turn.local = false
+  // A prompt WE queued starts the next turn, and that turn is still ours. Going
+  // non-local here is what used to make our own message arrive as a foreign
+  // placeholder the moment the turn ahead of it finished.
+  next.turn.local = next.queued?.local === true
   next.turn.assistantId = undefined
   next.turn.startedAt = undefined
   next.turn.draftingTool = undefined
@@ -845,7 +855,11 @@ export function applyEvent(state: ChatState, event: TranscriptEvent, now: number
     }
 
     case 'request.cancel': {
-      const id = next.byRequestId[str(payload.id)]
+      // The gateway withdraws a question under whichever id it knows it by: the
+      // transport's request id for a live one, the approval queue's own id for
+      // one the client only ever saw as a snapshot entry.
+      const cancelId = str(payload.id)
+      const id = next.byRequestId[cancelId] ?? next.byApprovalId[cancelId]
 
       if (id) {
         patchItem(next, id, draft => {
@@ -915,6 +929,22 @@ function goalsFromArgs(args: Record<string, unknown>): string[] {
 
 // ── server→client requests ───────────────────────────────────────────────────
 
+/**
+ * The id of the still-open approval card carrying this queue entry, if there is
+ * one. An answered or cancelled card does not block a fresh question that the
+ * queue happened to give the same id.
+ */
+function openApprovalIdOf(state: ChatState, approvalId: string): string | undefined {
+  if (!approvalId) {
+    return undefined
+  }
+
+  const id = state.byApprovalId[approvalId]
+  const item = id ? state.items[id] : undefined
+
+  return item?.kind === 'approval' && item.state === 'open' ? id : undefined
+}
+
 /** Turn an `approval` / `clarify` server request into a transcript item. */
 export function applyServerRequest(state: ChatState, request: ServerRequest, now: number = Date.now()): ChatState {
   if (state.byRequestId[request.id]) {
@@ -922,6 +952,12 @@ export function applyServerRequest(state: ChatState, request: ServerRequest, now
   }
 
   const params = rec(request.params)
+
+  if (request.method === 'approval' && openApprovalIdOf(state, str(params.request_id) || request.id)) {
+    // The same queue entry under a second transport id. One question, one card.
+    return state
+  }
+
   const next = editable(state)
 
   if (request.method === 'approval') {
@@ -986,6 +1022,7 @@ export function applyServerRequest(state: ChatState, request: ServerRequest, now
       kind: 'clarify',
       requestId: request.id,
       questions,
+      ...(Array.isArray(params.questions) ? { batch: true } : {}),
       answers,
       locked: Object.keys(answers),
       state: questions.every(question => answers[question.qid] !== undefined) && questions.length ? 'answered' : 'open',
@@ -1204,7 +1241,7 @@ export function confirmSubmit(state: ChatState, result: SubmitResult, now: numbe
   if (status === 'queued') {
     const item = next.items[id]
 
-    next.queued = { text: item?.kind === 'user' ? item.text : '' }
+    next.queued = { text: item?.kind === 'user' ? item.text : '', local: true }
     // A queued prompt does not start a turn of its own; the running one owns it.
     next.turn.active = state.turn.active
   } else if (status === 'steered' || status === 'redirected') {

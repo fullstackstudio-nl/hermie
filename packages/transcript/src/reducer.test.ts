@@ -301,8 +301,38 @@ describe('local submits', () => {
 
     state = confirmSubmit(state, { status: 'queued' }, NOW)
 
-    expect(state.queued).toEqual({ text: 'and then deploy' })
+    expect(state.queued).toEqual({ text: 'and then deploy', local: true })
     expect((list(state)[0] as UserItem).pending).toBe(true)
+  })
+
+  it('keeps the turn ours while our own queued prompt waits for it', () => {
+    let state = beginLocalTurn(fresh(), 'first', undefined, NOW)
+
+    state = confirmSubmit(state, { status: 'streaming' }, NOW)
+    state = beginLocalTurn(state, 'and then deploy', undefined, NOW)
+    state = confirmSubmit(state, { status: 'queued' }, NOW)
+    // The running turn ends and the gateway starts the one it parked.
+    state = applyEvent(state, { type: 'message.complete', seq: 1, payload: { text: 'done' } }, NOW)
+
+    expect(state.turn.local).toBe(true)
+    expect(state.queued).toBeUndefined()
+
+    state = applyEvent(state, { type: 'message.start', seq: 2 }, NOW)
+
+    expect(list(state).filter(item => item.kind === 'user' && item.unknownAuthor)).toHaveLength(0)
+    expect(state.turn.foreignReconcilePending).toBeUndefined()
+  })
+
+  it('still calls the next turn foreign when another surface parked the prompt', () => {
+    let state = applyResumeSnapshot(fresh(), { queued: { user: 'from another surface' }, running: true }, NOW)
+
+    state = applyEvent(state, { type: 'message.complete', seq: 1, payload: { text: 'done' } }, NOW)
+
+    expect(state.turn.local).toBe(false)
+
+    state = applyEvent(state, { type: 'message.start', seq: 2 }, NOW)
+
+    expect(list(state).filter(item => item.kind === 'user' && item.unknownAuthor)).toHaveLength(1)
   })
 
   it('marks a steer as one', () => {
@@ -633,6 +663,62 @@ describe('server requests', () => {
     expect(list(state)[0]).toMatchObject({ state: 'cancelled', cancelReason: 'resolved' })
   })
 
+  it('shows one card for a queue entry that arrives under a second transport id', () => {
+    const live = applyServerRequest(fresh(), approvalRequest, NOW)
+    // What `approval.pending` and a resume snapshot synthesize for the same
+    // queue entry: a different request id, the same `request_id`.
+    const polled = applyServerRequest(
+      live,
+      {
+        id: 'pending:apr-3',
+        method: 'approval',
+        params: { request_id: 'apr-3', command: 'rm -rf build' },
+        replayed: true
+      },
+      NOW
+    )
+
+    expect(polled).toBe(live)
+    expect(list(polled).filter(item => item.kind === 'approval')).toHaveLength(1)
+  })
+
+  it('lets a new question reuse the queue id of one already answered', () => {
+    let state = applyServerRequest(fresh(), approvalRequest, NOW)
+
+    state = answerRequest(state, 'srq-7', 'once')
+    state = applyServerRequest(
+      state,
+      { id: 'srq-77', method: 'approval', params: { request_id: 'apr-3', command: 'rm -rf dist' } },
+      NOW
+    )
+
+    expect(list(state).filter(item => item.kind === 'approval')).toHaveLength(2)
+  })
+
+  it('withdraws a cancel addressed to the approval queue id rather than the request id', () => {
+    let state = applyServerRequest(fresh(), approvalRequest, NOW)
+
+    state = applyEvent(
+      state,
+      { type: 'request.cancel', seq: 1, payload: { id: 'apr-3', method: 'approval', reason: 'timeout' } },
+      NOW
+    )
+
+    expect(list(state)[0]).toMatchObject({ state: 'cancelled', cancelReason: 'timeout' })
+  })
+
+  it('marks a clarify built from a questions array as a batch', () => {
+    const batch = applyServerRequest(fresh(), clarifyRequest, NOW)
+    const single = applyServerRequest(
+      fresh(),
+      { id: 'srq-9', method: 'clarify', params: { request_id: 'c1', question: 'Which branch?' } },
+      NOW
+    )
+
+    expect((list(batch)[0] as ClarifyItem).batch).toBe(true)
+    expect((list(single)[0] as ClarifyItem).batch).toBeUndefined()
+  })
+
   it('builds a batch clarify and locks each answer as it lands', () => {
     let state = applyServerRequest(fresh(), clarifyRequest, NOW)
 
@@ -704,6 +790,7 @@ describe('resume snapshots', () => {
 
   it('rebuilds the parked prompt and the todo list', () => {
     expect(state.queued).toEqual({ text: 'then run the smoke tests' })
+    expect(state.queued?.local).toBeUndefined()
     expect(state.todo?.revision).toBe(2)
   })
 

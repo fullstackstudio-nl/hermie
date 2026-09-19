@@ -272,6 +272,15 @@ export interface ClarifyItem extends ItemBase {
   kind: 'clarify'
   requestId: string
   questions: ClarifyQuestionItem[]
+  /**
+   * The request carried a `questions` array rather than one bare `question`.
+   *
+   * It decides the shape of the answer: a batch resolves with `answers` keyed
+   * by qid, a single question with a bare `answer`. It is also the difference
+   * between a request `clarify.lock` can settle and one it reports `expired`
+   * for.
+   */
+  batch?: boolean
   /** qid → answer. */
   answers: Record<string, string>
   /** qid set the server already accepted (locked); those may not be edited. */
@@ -293,6 +302,16 @@ export type TranscriptItem =
   | UserItem
 
 export type TranscriptItemKind = TranscriptItem['kind']
+
+/** A prompt parked behind the running turn. */
+export interface QueuedPrompt {
+  text: string
+  /**
+   * This client submitted it. The turn it eventually starts is ours, so the
+   * reducer must not stand a foreign-author placeholder in front of it.
+   */
+  local?: boolean
+}
 
 /** Authoritative todo snapshot (`tool_progress._normalize_todo_state`). */
 export interface TodoSnapshot {
@@ -334,6 +353,16 @@ export interface ChatState {
   byRowId: Record<string, string>
   /** Server-request id → item id. */
   byRequestId: Record<string, string>
+  /**
+   * Approval-queue id → item id, for the open approvals only.
+   *
+   * The same queue entry reaches a client under more than one server-request
+   * id — live as `srq-N`, rebuilt from `pending_approval` as `pending:<id>`,
+   * polled out of `approval.pending` as `pending:<id>` again. They are one
+   * question, so the card is deduplicated on the queue's own id rather than on
+   * the transport's.
+   */
+  byApprovalId: Record<string, string>
   /** Background delivery process id → `bot_dm_out` item id. */
   byProcessId: Record<string, string>
   /** delegation_id → `subagent_group` item id. */
@@ -341,12 +370,21 @@ export interface ChatState {
   subagents: Record<string, Subagent>
   turn: TurnState
   /** A prompt the backend parked behind the running turn. */
-  queued?: { text: string }
+  queued?: QueuedPrompt
   todo?: TodoSnapshot
   usage?: Usage
   info?: SessionLiveInfo
   /** Highest event `seq` applied; anything at or below it is a replay. */
   lastSeq: number
+  /**
+   * The runtime session id `lastSeq` was counted under.
+   *
+   * The gateway numbers events per runtime session and restarts at 1 every time
+   * it rebuilds one, so a watermark carried across a rebuild would swallow the
+   * whole new session. `bindRuntime` compares this with the id it is binding
+   * and drops the watermark when they differ.
+   */
+  lastSeqSessionId?: string
   /** `replay_epoch` from `gateway.ready`; a change forces full re-hydration. */
   epoch?: string
   hydration: HydrationState
@@ -372,6 +410,7 @@ export function createChatState(botName: string, storedSessionId: string, resolv
     byToolId: {},
     byRowId: {},
     byRequestId: {},
+    byApprovalId: {},
     byProcessId: {},
     byDelegationId: {},
     subagents: {},

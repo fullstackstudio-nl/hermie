@@ -16,6 +16,15 @@ export interface CachedTranscript {
   subagents: Subagent[]
   lastRowId?: number
   lastSeq: number
+  /**
+   * The runtime session id `lastSeq` was counted under.
+   *
+   * Without it a cached watermark is a number with no frame of reference: the
+   * gateway restarts event numbering at 1 for every runtime session it builds,
+   * so replaying "everything after 41" against a session that has only reached
+   * 12 silently drops the entire chat.
+   */
+  lastSeqSessionId?: string
   epoch?: string
   updatedAt: number
 }
@@ -53,6 +62,7 @@ export function snapshotForCache(state: ChatState, now: number = Date.now()): Ca
     subagents: Object.values(state.subagents),
     ...(lastRowId !== undefined ? { lastRowId } : {}),
     lastSeq: state.lastSeq,
+    ...(state.lastSeqSessionId ? { lastSeqSessionId: state.lastSeqSessionId } : {}),
     ...(state.epoch ? { epoch: state.epoch } : {}),
     updatedAt: now
   }
@@ -104,12 +114,19 @@ export function stateFromCache(botName: string, ids: SessionIds, snapshot: Cache
   }
 
   state.turn.nextSeq = snapshot.items.length * SEQ_STEP
-  state.lastSeq = snapshot.lastSeq
   state.hydration = 'cached'
 
-  if (snapshot.epoch) {
-    state.epoch = snapshot.epoch
+  if (snapshot.lastSeqSessionId) {
+    state.lastSeq = snapshot.lastSeq
+    state.lastSeqSessionId = snapshot.lastSeqSessionId
+
+    if (snapshot.epoch) {
+      state.epoch = snapshot.epoch
+    }
   }
+  // A snapshot from before the watermark carried its session id cannot say which
+  // session it counted, so it is read as cold: one extra replay-free hydration
+  // beats a silently truncated chat.
 
   if (snapshot.lastRowId !== undefined) {
     state.lastSeenRowId = snapshot.lastRowId

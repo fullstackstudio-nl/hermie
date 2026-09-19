@@ -124,6 +124,16 @@ export interface FakeGatewayState {
   sessionConfig: Map<string, Record<string, string>>
   /** Approvals raised and not yet answered, by queue id. */
   pendingApprovals: Map<string, { session_id: string; payload: Record<string, unknown> }>
+  /**
+   * Server→client requests still waiting on an answer, by request id.
+   *
+   * The real gateway reports these as `open_requests` on `session.resume` and
+   * `session.events.since`, and the channel re-delivers them to the client's
+   * request handlers BEFORE the call they rode in on resolves. A fake without
+   * them cannot reproduce the window where an inherited approval arrives for a
+   * session nothing has bound yet.
+   */
+  openServerRequests: Map<string, { session_id: string; method: string; params: Record<string, unknown> }>
   /** Images accepted through `image.attach_bytes`, newest last. */
   attachedImages: { session_id: string; filename: string; bytes: number }[]
   /**
@@ -230,6 +240,8 @@ export interface FakeGateway {
   emit(type: string, options?: { sessionId?: string; payload?: unknown }): void
   /** Push a server→client `approval` request and resolve with the client's answer. */
   requestApproval(params: Record<string, unknown>): Promise<unknown>
+  /** The same for any server→client method, so `clarify` can be driven too. */
+  requestServerSide(method: string, params: Record<string, unknown>): Promise<unknown>
   /** Close every live socket with a code, the way the gateway does on a policy refusal. */
   closeSockets(code: number, reason?: string): void
   /** Kill every live socket without a close frame: the client sees 1006. */
@@ -508,6 +520,7 @@ function initialState(options: FakeGatewayOptions): FakeGatewayState {
     runningSessions: new Set<string>(),
     sessionConfig: new Map<string, Record<string, string>>(),
     pendingApprovals: new Map<string, { session_id: string; payload: Record<string, unknown> }>(),
+    openServerRequests: new Map<string, { session_id: string; method: string; params: Record<string, unknown> }>(),
     attachedImages: [],
     liveSubagents: new Map<string, LiveSubagent>(),
     agentProcesses: new Map<string, { session_id: string; command: string; status: string; startedAt: number }>(),
@@ -1392,7 +1405,7 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
           messages: omit ? [] : session.messages,
           messages_omitted: omit,
           info: sessionInfo(session),
-          open_requests: []
+          open_requests: openRequestsFor(session.id)
         }
       }
 
@@ -1426,7 +1439,7 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
           truncated,
           count: entries.length,
           epoch: state.replayEpoch,
-          open_requests: []
+          open_requests: session ? openRequestsFor(session.id) : []
         }
       }
 
@@ -1617,8 +1630,43 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
         return { resolved: state.pendingApprovals.delete(requestId) ? 1 : 0 }
       }
 
-      case 'clarify.lock':
+      case 'clarify.lock': {
+        const requestId = String(params.request_id ?? '')
+        const open = state.openServerRequests.get(requestId)
+
+        // `lock_answer` only knows batch clarify; a single question has no qid
+        // set to lock against, so the real gateway reports it expired and the
+        // agent keeps waiting. A client has to use `request.answer` for those.
+        if (!open || open.method !== 'clarify' || !Array.isArray(open.params.questions)) {
+          return { status: 'expired' }
+        }
+
         return { status: 'ok', remaining: [] }
+      }
+
+      case 'request.answer': {
+        // `methods_prompt.request.answer`: settle an open server→client request
+        // for a client that cannot answer it on its own reply frame. It takes
+        // the request's own id and the result that frame would have carried —
+        // no session id anywhere.
+        const requestId = String(params.id ?? '')
+        const result = params.result
+
+        if (!result || typeof result !== 'object' || Array.isArray(result)) {
+          throw new Error('id and an object result required')
+        }
+
+        const pending = pendingServerRequests.get(requestId)
+
+        if (!pending) {
+          return { status: 'expired' }
+        }
+
+        pendingServerRequests.delete(requestId)
+        pending.resolve(result)
+
+        return { status: 'ok' }
+      }
 
       case 'subagent.list': {
         const session = resolveSession(String(params.session_id ?? ''))
@@ -2257,14 +2305,36 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
   /** Send one server→client request and resolve with the client's answer. */
   function sendServerRequest(method: string, sessionId: string, params: Record<string, unknown>): Promise<unknown> {
     const id = `srq-${++serverRequestSequence}`
+    const runtimeId = resolveRuntimeId(sessionId)
+
+    state.openServerRequests.set(id, { session_id: runtimeId, method, params })
 
     return new Promise<unknown>((resolve, reject) => {
       pendingServerRequests.set(id, { resolve, reject })
 
       for (const socket of sockets) {
-        send(socket, { jsonrpc: '2.0', id, method, params: { session_id: sessionId, ...params } })
+        send(socket, { jsonrpc: '2.0', id, method, params: { session_id: runtimeId, ...params } })
       }
+    }).finally(() => {
+      state.openServerRequests.delete(id)
     })
+  }
+
+  /** Push one server→client request and resolve with whatever the client answers. */
+  function requestServerSide(method: string, params: Record<string, unknown>): Promise<unknown> {
+    const sessionId = typeof params.session_id === 'string' ? params.session_id : ''
+    const { session_id: _ignored, ...rest } = params
+
+    return sendServerRequest(method, sessionId, rest)
+  }
+
+  /** `server_requests.Request.snapshot()`: what a resume re-delivers. */
+  function openRequestsFor(sessionId: string): { id: string; method: string; params: Record<string, unknown> }[] {
+    const runtimeId = resolveRuntimeId(sessionId)
+
+    return [...state.openServerRequests.entries()]
+      .filter(([, entry]) => entry.session_id === runtimeId)
+      .map(([id, entry]) => ({ id, method: entry.method, params: { session_id: runtimeId, ...entry.params } }))
   }
 
   await new Promise<void>(resolve => {
@@ -2284,11 +2354,9 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       publish(type, emitOptions.sessionId, emitOptions.payload)
     },
     requestApproval(params) {
-      const sessionId = typeof params.session_id === 'string' ? params.session_id : ''
-      const { session_id: _ignored, ...rest } = params
-
-      return sendServerRequest('approval', sessionId, rest)
+      return requestServerSide('approval', params)
     },
+    requestServerSide,
     closeSockets(code, reason = '') {
       for (const socket of sockets) {
         socket.close(code, reason)

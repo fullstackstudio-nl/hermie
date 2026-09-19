@@ -20,6 +20,10 @@ export class FakeChatGateway implements ChatGateway {
   readonly responders = new Map<string, Responder>()
   restMessages: unknown[] | null = []
   readonly restCalls: { sessionId: string; limit: number; order: string }[] = []
+  /** Requests answered with a JSON-RPC error, the way the channel declines one. */
+  readonly declined: { id: string; method: string; code: number; message: string }[] = []
+
+  private readonly answers = new Map<string, () => Record<string, unknown> | null>()
 
   private eventHandlers: ((event: unknown) => void)[] = []
   private requestHandlers: ((request: never) => boolean | void)[] = []
@@ -50,8 +54,30 @@ export class FakeChatGateway implements ChatGateway {
       throw new Error(`FakeChatGateway has no reply for ${method}`)
     }
 
-    return responder(params)
+    const result = responder(params)
+
+    // The real channel replays a result's `open_requests` to the request
+    // handlers BEFORE resolving the call, over the socket that owns them. A
+    // fake that resolves first would never reproduce the window in which the
+    // session those requests belong to is not bound yet.
+    this.deliverOpenRequests(result)
+
+    return result
   }) as ChatGateway['request']
+
+  private deliverOpenRequests(result: unknown): void {
+    const open = (result as { open_requests?: unknown } | null | undefined)?.open_requests
+
+    if (!Array.isArray(open)) {
+      return
+    }
+
+    for (const entry of open as { id?: unknown; method?: unknown; params?: unknown }[]) {
+      if (typeof entry?.id === 'string' && typeof entry.method === 'string') {
+        this.serverRequest(entry.id, entry.method, (entry.params ?? {}) as Record<string, unknown>, true)
+      }
+    }
+  }
 
   on = ((_type: string, _handler: unknown) => () => undefined) as ChatGateway['on']
 
@@ -102,26 +128,41 @@ export class FakeChatGateway implements ChatGateway {
   serverRequest(
     id: string,
     method: string,
-    params: Record<string, unknown>
+    params: Record<string, unknown>,
+    replayed = false
   ): { accepted: boolean; answer: () => Record<string, unknown> | null } {
     let answer: Record<string, unknown> | null = null
     const request = {
       id,
       method,
       params,
+      ...(replayed ? { replayed: true } : {}),
       respond: (result: Record<string, unknown>) => {
         answer = result
       },
-      fail: () => undefined
+      fail: (code: number, message: string) => {
+        this.declined.push({ id, method, code, message })
+      }
     }
 
     for (const handler of [...this.requestHandlers]) {
       if ((handler as unknown as (value: unknown) => boolean | void)(request) !== false) {
+        this.answers.set(id, () => answer)
+
         return { accepted: true, answer: () => answer }
       }
     }
 
+    // What the real channel does with a request nobody claims — and what makes
+    // the gateway withdraw an approval instead of waiting for one.
+    request.fail(-32601, `Method not found: ${method}`)
+
     return { accepted: false, answer: () => null }
+  }
+
+  /** What a request delivered earlier was eventually answered with. */
+  answerFor(id: string): Record<string, unknown> | null {
+    return this.answers.get(id)?.() ?? null
   }
 
   /** Announce a connection status change. */

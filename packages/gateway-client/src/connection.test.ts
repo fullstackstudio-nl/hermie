@@ -1,11 +1,12 @@
 import { startFakeGateway, type FakeGateway } from '@hermie/fake-gateway'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WebSocket as NodeWebSocket } from 'ws'
 
 import {
   assertDesktopContract,
   FIRST_SESSION_TIMEOUT_MS,
   GatewayConnection,
+  OFFLINE_GRACE_MS,
   PROMPT_SUBMIT_TIMEOUT_MS,
   DEFAULT_RPC_TIMEOUT_MS,
   rpcTimeoutMs
@@ -86,6 +87,8 @@ async function harness(options: {
   closeCode?: number
   heartbeatIntervalMs?: number
   streamDelayMs?: number
+  offlineGraceMs?: number
+  backoffDelayMs?: (attempt: number) => number
 }): Promise<Harness> {
   const auth = options.auth ?? 'none'
   const gateway = await startFakeGateway({
@@ -119,11 +122,14 @@ async function harness(options: {
     config: { baseUrl: gateway.url, authMode: auth === 'native' ? 'native_pkce' : 'session_token' },
     credentials,
     socketFactory: factory,
-    backoffDelayMs: () => 10,
+    backoffDelayMs: options.backoffDelayMs ?? (() => 10),
     readyTimeoutMs: 2000,
     connectTimeoutMs: 2000,
     heartbeatIntervalMs: options.heartbeatIntervalMs ?? 0,
-    heartbeatDeadlineMs: options.heartbeatIntervalMs ? 5000 : 0
+    heartbeatDeadlineMs: options.heartbeatIntervalMs ? 5000 : 0,
+    // The real grace is seconds long by design; these tests only care that it
+    // is observed, and `the offline grace period` below covers its length.
+    offlineGraceMs: options.offlineGraceMs ?? 10
   })
   entry.connection = connection
 
@@ -326,6 +332,40 @@ describe('GatewayConnection against the fake gateway', () => {
     expect(gateway.state.connections).toBe(2)
   })
 
+  it('keeps a terminal status when the app goes to the background', async () => {
+    const { connection, gateway, waitFor } = await harness({ auth: 'native' })
+
+    gateway.state.rejectNextUpgrades = 2
+
+    connection.start()
+    await waitFor('needs_signin')
+
+    connection.pause()
+    await settle(60)
+
+    // `paused` here would erase the only account of why nothing is connected,
+    // and the sign-in banner with it.
+    expect(connection.status).toBe('needs_signin')
+    expect(connection.lastError?.kind).toBe('auth')
+  })
+
+  it('gives a new credential a full attempt after a resume', async () => {
+    const { connection, gateway, waitFor } = await harness({ auth: 'native' })
+
+    // One rejection, absorbed by the refresh. The tally it left behind must not
+    // outlive the sign-in that follows.
+    gateway.state.rejectNextUpgrades = 1
+    connection.start()
+    await waitFor('ready')
+
+    connection.resume()
+    gateway.state.rejectNextUpgrades = 1
+    gateway.dropSockets()
+    await waitFor('ready')
+
+    expect(connection.status).toBe('ready')
+  })
+
   it('answers a server-to-client approval request', async () => {
     const { connection, gateway, waitFor } = await harness({ auth: 'token' })
 
@@ -396,6 +436,108 @@ describe('GatewayConnection against the fake gateway', () => {
 
     // The default for this method is half an hour; the override has to win.
     expect(Date.now() - started).toBeLessThan(2000)
+  })
+})
+
+describe('the offline grace period', () => {
+  it('rides out a NetInfo flap without rebuilding anything', async () => {
+    const { connection, gateway, statuses, waitFor } = await harness({ auth: 'token', offlineGraceMs: 200 })
+
+    connection.start()
+    await waitFor('ready')
+    expect(gateway.state.connections).toBe(1)
+
+    // A Wi-Fi/cellular handover: offline and back inside the grace.
+    connection.setOnline(false)
+    connection.setOnline(true)
+    await settle(300)
+
+    // The socket never came down, so there is no ticket to mint and no session
+    // to rebuild — and the user never saw the connection blink.
+    expect(connection.status).toBe('ready')
+    expect(gateway.state.connections).toBe(1)
+    expect(statuses).not.toContain('offline')
+  })
+
+  it('tears the socket down once the gap outlasts the grace', async () => {
+    const { connection, gateway, waitFor } = await harness({ auth: 'token', offlineGraceMs: 20 })
+
+    connection.start()
+    await waitFor('ready')
+
+    connection.setOnline(false)
+    await waitFor('offline')
+    expect(gateway.state.connections).toBe(1)
+
+    connection.setOnline(true)
+    await waitFor('ready')
+    expect(gateway.state.connections).toBe(2)
+  })
+
+  it('waits the full grace before giving up on a live socket', async () => {
+    const { connection, waitFor } = await harness({ auth: 'token', offlineGraceMs: OFFLINE_GRACE_MS })
+
+    connection.start()
+    await waitFor('ready')
+
+    vi.useFakeTimers()
+
+    try {
+      connection.setOnline(false)
+      vi.advanceTimersByTime(OFFLINE_GRACE_MS - 1)
+
+      expect(connection.status).toBe('ready')
+
+      vi.advanceTimersByTime(2)
+
+      expect(connection.status).toBe('offline')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps the backoff it had earned when the gateway itself is unreachable', async () => {
+    const attempts: number[] = []
+    const { connection, gateway, waitFor } = await harness({
+      auth: 'token',
+      offlineGraceMs: 5,
+      backoffDelayMs: attempt => {
+        attempts.push(attempt)
+
+        return 30
+      }
+    })
+
+    connection.start()
+    await waitFor('ready')
+
+    // The gateway is gone, so the ladder climbs: this is not a radio problem.
+    await gateway.close()
+    await waitFor('reconnecting')
+
+    const climbed = Date.now() + 2000
+
+    while (attempts.length < 2 && Date.now() < climbed) {
+      await settle(20)
+    }
+
+    expect(attempts.length).toBeGreaterThan(1)
+
+    connection.setOnline(false)
+    await waitFor('offline')
+
+    const mark = attempts.length
+    connection.setOnline(true)
+
+    const resumed = Date.now() + 2000
+
+    while (attempts.length === mark && Date.now() < resumed) {
+      await settle(20)
+    }
+
+    // Starting from zero again would hammer an unreachable gateway once per
+    // flap, which is exactly what the ladder exists to prevent.
+    expect(attempts[mark]).toBeGreaterThan(0)
   })
 })
 

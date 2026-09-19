@@ -48,6 +48,8 @@ describe('the chat cache', () => {
     const store = useChatsStore.getState()
 
     store.ensure('researcher', { storedSessionId: 'stored-1', resolvedSessionId: 'tip-1' })
+    // The watermark only means anything alongside the session that counted it.
+    store.bindRuntime('researcher', 'runtime-1')
     store.dispatchEvent('researcher', { type: 'message.delta', seq: 1, payload: { text: 'hello' } })
     store.dispatchEvent('researcher', { type: 'message.complete', seq: 2, payload: { text: 'hello' } })
 
@@ -71,6 +73,7 @@ describe('the chat cache', () => {
 
     expect(restored.hydration).toBe('cached')
     expect(restored.lastSeq).toBe(2)
+    expect(restored.lastSeqSessionId).toBe('runtime-1')
     expect(restored.order).toHaveLength(1)
   })
 

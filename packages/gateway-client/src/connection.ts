@@ -21,6 +21,22 @@ export const PROMPT_SUBMIT_TIMEOUT_MS = 1_800_000
 export const FIRST_SESSION_TIMEOUT_MS = 60_000
 /** Ceiling on the reconnect ladder. */
 export const RECONNECT_CAP_MS = 15_000
+
+/**
+ * How long a NetInfo "offline" has to hold before the socket comes down.
+ *
+ * On a phone, connectivity reports flap: a Wi-Fi/cellular handover, a VPN
+ * coming up, walking past a lift. Each flap used to tear the connection down
+ * and redial with `attempt = 0`, which mints a fresh ticket and rebuilds every
+ * session — for a gap the socket would have ridden out untouched.
+ */
+export const OFFLINE_GRACE_MS = 2_500
+
+/**
+ * A dial that failed this recently means the ladder is still climbing, so a
+ * network flap must not reset it back to the bottom.
+ */
+export const DIAL_FAILURE_RECENT_MS = 30_000
 /** The oldest `SessionLiveInfo.desktop_contract` this client speaks. */
 export const MIN_DESKTOP_CONTRACT = 7
 
@@ -64,6 +80,10 @@ export interface GatewayConnectionOptions {
   heartbeatIntervalMs?: number
   heartbeatDeadlineMs?: number
   connectTimeoutMs?: number
+  /** How long an offline report must hold before the socket comes down. */
+  offlineGraceMs?: number
+  /** Injectable clock, so the backoff-preserving rules are testable. */
+  now?: () => number
 }
 
 /**
@@ -85,6 +105,8 @@ export class GatewayConnection {
   private readonly extraHeaders: Record<string, string>
   private readonly backoff: (attempt: number) => number
   private readonly readyTimeoutMs: number
+  private readonly offlineGraceMs: number
+  private readonly now: () => number
 
   private currentStatus: ConnectionStatus = 'disconnected'
   private currentError: GatewayError | null = null
@@ -97,6 +119,8 @@ export class GatewayConnection {
   private consecutiveAuthFailures = 0
   private dialToken = 0
   private retryTimer: ReturnType<typeof setTimeout> | undefined
+  private offlineTimer: ReturnType<typeof setTimeout> | undefined
+  private lastDialFailureAt: number | null = null
   private lastCloseCode: number | null = null
   private readyWaiter: {
     resolve: () => void
@@ -115,6 +139,8 @@ export class GatewayConnection {
     this.extraHeaders = normalizeHeaders(options.config.extraHeaders)
     this.wsUrl = wsUrlFor(baseUrl)
     this.readyTimeoutMs = options.readyTimeoutMs ?? READY_TIMEOUT_MS
+    this.offlineGraceMs = options.offlineGraceMs ?? OFFLINE_GRACE_MS
+    this.now = options.now ?? (() => Date.now())
     this.backoff = options.backoffDelayMs ?? (attempt => reconnectBackoffDelayMs(attempt, { capMs: RECONNECT_CAP_MS }))
 
     this.http = new GatewayHttp({
@@ -190,9 +216,17 @@ export class GatewayConnection {
     this.setStatus('disconnected', null)
   }
 
-  /** Close the socket cleanly and stop every timer — the app went to the background. */
+  /**
+   * Close the socket cleanly and stop every timer — the app went to the
+   * background.
+   *
+   * A connection that is not running has already stopped for a reason it can
+   * explain: `needs_signin`, a rejected certificate, a gateway that refused the
+   * address. Overwriting that with `paused` loses the only account of why there
+   * is no connection, and the user comes back to a blank screen.
+   */
   pause(): void {
-    if (this.paused) {
+    if (this.paused || !this.running) {
       return
     }
 
@@ -210,6 +244,11 @@ export class GatewayConnection {
     this.paused = false
     this.running = true
     this.attempt = 0
+    // A resume follows a fresh sign-in as often as it follows a foreground.
+    // Keeping the old tally would send the next single rejection straight to
+    // `needs_signin` with the new credential barely tried.
+    this.consecutiveAuthFailures = 0
+    this.clearOfflineTimer()
 
     if (!this.online) {
       this.setStatus('offline')
@@ -220,8 +259,23 @@ export class GatewayConnection {
     void this.runDial()
   }
 
-  /** NetInfo says the device has (no) connectivity. Offline cancels every timer. */
+  /**
+   * NetInfo says the device has (no) connectivity.
+   *
+   * Offline is acted on after a grace period rather than immediately: the
+   * reports flap, and a socket that is actually fine must not be rebuilt for a
+   * gap shorter than the rebuild itself. Coming back online inside the grace
+   * cancels the whole thing, so the connection never notices.
+   */
   setOnline(online: boolean): void {
+    // True while the grace is still running, which means the socket is still up
+    // and coming back online is a no-op rather than a redial.
+    const withinGrace = this.offlineTimer !== undefined
+
+    if (online) {
+      this.clearOfflineTimer()
+    }
+
     if (this.online === online) {
       return
     }
@@ -229,16 +283,37 @@ export class GatewayConnection {
     this.online = online
 
     if (!online) {
-      this.teardown()
-      this.setStatus('offline', null)
+      if (this.currentStatus !== 'ready') {
+        // Nothing established to protect: a dial in progress or a ladder
+        // waiting out its backoff is pure battery while the radio is down.
+        this.teardown()
+        this.setStatus('offline', null)
+
+        return
+      }
+
+      this.offlineTimer = setTimeout(() => {
+        this.offlineTimer = undefined
+        this.teardown()
+        this.setStatus('offline', null)
+      }, this.offlineGraceMs)
 
       return
     }
 
-    if (this.running && !this.paused) {
-      this.attempt = 0
-      void this.runDial()
+    if (withinGrace || !this.running || this.paused) {
+      // The flap ended before the socket came down; there is nothing to redial.
+      return
     }
+
+    // A dial that failed moments ago means the gateway, not the radio, is what
+    // is unreachable. Resetting the ladder there would hammer it once per flap,
+    // so the backoff it had earned is kept.
+    if (this.lastDialFailureAt === null || this.now() - this.lastDialFailureAt > DIAL_FAILURE_RECENT_MS) {
+      this.attempt = 0
+    }
+
+    void this.runDial()
   }
 
   /**
@@ -327,6 +402,7 @@ export class GatewayConnection {
       this.attempt = 0
       this.consecutiveAuthFailures = 0
       this.firstSessionCallDone = false
+      this.lastDialFailureAt = null
       this.currentLastReadyAt = Date.now()
       this.setStatus('ready', null)
     } catch (error) {
@@ -423,6 +499,7 @@ export class GatewayConnection {
   private async handleFailure(raw: unknown): Promise<void> {
     const error = asGatewayError(raw, 'network', 'The gateway connection failed.')
     const closeCode = error.closeCode ?? this.lastCloseCode
+    this.lastDialFailureAt = this.now()
 
     if (closeCode !== null && closeCode !== undefined && CONFIG_CLOSE_CODES[closeCode]) {
       this.running = false
@@ -530,6 +607,7 @@ export class GatewayConnection {
   private teardown(): void {
     this.dialToken += 1
     this.clearRetryTimer()
+    this.clearOfflineTimer()
     this.teardownSocket()
     this.factory.disarm()
   }
@@ -543,6 +621,13 @@ export class GatewayConnection {
     if (this.retryTimer !== undefined) {
       clearTimeout(this.retryTimer)
       this.retryTimer = undefined
+    }
+  }
+
+  private clearOfflineTimer(): void {
+    if (this.offlineTimer !== undefined) {
+      clearTimeout(this.offlineTimer)
+      this.offlineTimer = undefined
     }
   }
 

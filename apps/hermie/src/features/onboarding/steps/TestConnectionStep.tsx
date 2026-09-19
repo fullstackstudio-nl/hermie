@@ -24,7 +24,11 @@ export function TestConnectionStep({ draft, update }: TestConnectionStepProps) {
     setError(null)
 
     try {
-      update({ test: await runConnectionTest(draft) })
+      const outcome = await runConnectionTest(draft)
+
+      // The test may have rotated the credential it dialled with; the draft has
+      // to carry the live one into the save, not the one it started with.
+      update({ test: outcome, ...(outcome.tokens ? { tokens: outcome.tokens } : {}) })
     } catch (testError) {
       update({ test: null })
       setError(describeConnectionError(testError, draft.baseUrl ?? ''))

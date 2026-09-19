@@ -77,6 +77,25 @@ export const SUBAGENT_RECONCILE_MS = 5_000
 /** Rows the Activity screen's background load asks for per bot. */
 export const ACTIVITY_TAIL_LIMIT = 50
 
+/**
+ * Terminal width the gateway lays its transcript out for.
+ *
+ * Every `session.resume` carries it. A resume that omits it silently re-lays
+ * the session at the gateway's 80-column default, which rewraps everything the
+ * chat has already shown.
+ */
+export const RESUME_COLS = 96
+
+/**
+ * Server requests held for a session that is not bound yet, per session.
+ *
+ * A bound session flushes in the same tick, so this only ever holds the handful
+ * of requests one resume replays. The cap is there because a session id the
+ * app never binds — another surface's chat on the same socket — would otherwise
+ * accumulate for the life of the process.
+ */
+export const MAX_PARKED_REQUESTS = 16
+
 /** The delivery runner a `message_agent` hand-off spawns (`tools/bot_mode_dm.py`). */
 export const DM_DELIVERY_MARKER = 'bot_mode_dm.py --run-delivery'
 
@@ -126,6 +145,17 @@ export class ChatController {
 
   /** Live server→client requests, by JSON-RPC request id, so a card can answer. */
   private readonly pending = new Map<string, PendingRequest>()
+  /**
+   * Requests whose session is not bound yet, by runtime session id.
+   *
+   * The channel replays `open_requests` from a `session.resume` result BEFORE
+   * resolving the call, so the approvals a reconnect inherits arrive a tick
+   * before anything knows which bot owns them. Declining one is not a neutral
+   * "not mine": the gateway reads the -32601 as "this client cannot answer"
+   * and WITHDRAWS the approval, so the question the agent is parked on simply
+   * disappears. They wait here instead and go in on `bindRuntime`.
+   */
+  private readonly parked = new Map<string, GatewayServerRequest[]>()
   private readonly opening = new Map<string, Promise<void>>()
   private readonly slashCatalogs = new Map<string, CommandsCatalogResult>()
   private sessionsChangedTimer: ReturnType<typeof setTimeout> | undefined
@@ -170,6 +200,8 @@ export class ChatController {
     this.stopApprovalPoll()
     this.stopSubagentPoll()
     this.pending.clear()
+    this.parked.clear()
+    this.acknowledged.clear()
     this.opening.clear()
     this.slashCatalogs.clear()
   }
@@ -218,7 +250,7 @@ export class ChatController {
         profile: bot.name,
         omit_messages: true,
         source: 'hermie',
-        cols: 96
+        cols: RESUME_COLS
       })
     } catch (error) {
       this.chats.getState().setHydration(bot.name, 'error')
@@ -230,11 +262,21 @@ export class ChatController {
     //    before anything half-renders.
     assertDesktopContract(resume.info as SessionLiveInfo | undefined)
 
-    const runtimeId = resume.session_id
+    const runtimeId = typeof resume.session_id === 'string' ? resume.session_id : ''
+
+    if (!runtimeId) {
+      // Every event and every server request is addressed by this id. Binding
+      // an empty one routes the whole session to nobody, which reads as a chat
+      // that opened fine and then never said anything again.
+      this.chats.getState().setHydration(bot.name, 'error')
+
+      throw new Error(`The gateway resumed ${bot.name}'s chat without a session id.`)
+    }
+
     const resolvedId = resume.stored_session_id || canonical.resolvedId
 
     this.chats.getState().ensure(bot.name, { storedSessionId: canonical.id, resolvedSessionId: resolvedId })
-    this.chats.getState().bindRuntime(bot.name, runtimeId)
+    this.bindRuntime(bot.name, runtimeId)
     this.chats.getState().markLive(bot.name)
 
     // 3. History. Either transport projects onto the same items, which is what
@@ -340,7 +382,7 @@ export class ChatController {
       return
     }
 
-    const cold = chat.lastSeq === 0
+    const knownEpoch = chat.epoch
     let result
 
     try {
@@ -359,15 +401,23 @@ export class ChatController {
       return
     }
 
+    // The epoch identifies the gateway process that did the numbering. A
+    // different one restarted under us and began counting at 1 again, so every
+    // seq we hold describes a different sequence and the ring's contents cannot
+    // be lined up against them.
+    const epochChanged = knownEpoch !== undefined && knownEpoch !== result.epoch
+    const cold = chat.lastSeq === 0 || epochChanged
+
     if (cold || result.truncated) {
       // Adopt the watermark without replaying: history already describes this.
-      this.chats
-        .getState()
-        .update(botName, state =>
-          result.latest_seq > state.lastSeq ? { ...state, lastSeq: result.latest_seq, epoch: result.epoch } : state
-        )
+      this.chats.getState().update(botName, state => ({
+        ...state,
+        lastSeq: epochChanged ? result.latest_seq : Math.max(state.lastSeq, result.latest_seq),
+        lastSeqSessionId: runtimeId,
+        epoch: result.epoch
+      }))
     } else {
-      for (const raw of result.events ?? []) {
+      for (const raw of Array.isArray(result.events) ? result.events : []) {
         const event = transcriptEventOf(raw)
 
         if (event) {
@@ -390,10 +440,17 @@ export class ChatController {
    * `approval.respond` / `clarify.lock` rather than as a reply to the request.
    */
   private registerOpenRequests(botName: string, entries: OpenRequestEntry[] | null): void {
-    for (const entry of entries ?? []) {
-      this.chats
-        .getState()
-        .dispatchServerRequest(botName, { id: entry.id, method: entry.method, params: entry.params, replayed: true })
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      if (typeof entry?.id !== 'string' || typeof entry.method !== 'string') {
+        continue
+      }
+
+      this.chats.getState().dispatchServerRequest(botName, {
+        id: entry.id,
+        method: entry.method,
+        params: entry.params && typeof entry.params === 'object' ? entry.params : {},
+        replayed: true
+      })
     }
   }
 
@@ -434,6 +491,13 @@ export class ChatController {
     }
 
     this.chats.getState().dispatchEvent(botName, event)
+
+    if (event.type === 'request.cancel' || event.type === 'message.complete' || event.type === 'error') {
+      // A withdrawn question and a finished turn both close cards. The handles
+      // behind them answer nothing from here on, and a chat left open for days
+      // would otherwise keep every one it ever saw.
+      this.pruneRequests(botName)
+    }
 
     if (event.type === 'message.start' || event.type === 'message.complete') {
       this.syncApprovalPoll()
@@ -580,10 +644,15 @@ export class ChatController {
             session_id: chat.storedSessionId,
             profile: name,
             omit_messages: true,
-            source: 'hermie'
+            source: 'hermie',
+            cols: RESUME_COLS
           })
 
-          this.chats.getState().bindRuntime(name, resume.session_id)
+          if (typeof resume.session_id !== 'string' || !resume.session_id) {
+            throw new Error(`The gateway resumed ${name}'s chat without a session id.`)
+          }
+
+          this.bindRuntime(name, resume.session_id)
           this.chats.getState().applySnapshot(name, resumeSnapshotOf(resume))
           this.registerOpenRequests(name, resume.open_requests ?? null)
           await this.replaySince(name, resume.session_id)
@@ -617,11 +686,64 @@ export class ChatController {
     const sessionId = typeof request.params.session_id === 'string' ? request.params.session_id : ''
     const botName = sessionId ? this.chats.getState().runtimeToBot[sessionId] : undefined
 
-    if (!botName) {
+    if (botName) {
+      this.deliverServerRequest(botName, request)
+
+      return true
+    }
+
+    return sessionId ? this.park(sessionId, request) : false
+  }
+
+  /** Hold a request until its session is bound. False means "we cannot take it". */
+  private park(sessionId: string, request: GatewayServerRequest): boolean {
+    const queue = this.parked.get(sessionId) ?? []
+
+    if (queue.length >= MAX_PARKED_REQUESTS) {
       return false
     }
 
-    this.pending.set(request.id, { botName, request })
+    queue.push(request)
+    this.parked.set(sessionId, queue)
+
+    return true
+  }
+
+  /** Bind a runtime id to a bot and hand over whatever was waiting on it. */
+  private bindRuntime(botName: string, runtimeSessionId: string): void {
+    const previous = this.chats.getState().chats[botName]?.runtimeSessionId
+
+    if (previous && previous !== runtimeSessionId) {
+      // The catalogue is a per-session fact and the old session is gone.
+      this.slashCatalogs.delete(previous)
+      this.parked.delete(previous)
+    }
+
+    this.chats.getState().bindRuntime(botName, runtimeSessionId)
+
+    const waiting = this.parked.get(runtimeSessionId)
+
+    if (!waiting?.length) {
+      return
+    }
+
+    this.parked.delete(runtimeSessionId)
+
+    for (const request of waiting) {
+      this.deliverServerRequest(botName, request)
+    }
+  }
+
+  /**
+   * Put one request on screen and remember how to answer it.
+   *
+   * The reducer may fold this onto a card it already holds for the same
+   * approval-queue entry — a replayed snapshot and the live request are one
+   * question under two transport ids. When it does, the live reply handle is
+   * filed under the card's id, so answering what the user can actually see
+   * still resolves the request the agent is waiting on.
+   */
+  private deliverServerRequest(botName: string, request: GatewayServerRequest): void {
     this.chats.getState().dispatchServerRequest(botName, {
       id: request.id,
       method: request.method,
@@ -629,13 +751,54 @@ export class ChatController {
       ...(request.replayed ? { replayed: true } : {})
     })
 
-    if (request.method === 'approval') {
-      void this.acknowledgeApproval(botName, request.id)
+    const chat = this.chats.getState().chats[botName]
+    const cardId = chat?.byRequestId[request.id]
+      ? request.id
+      : approvalCardIdFor(chat, typeof request.params.request_id === 'string' ? request.params.request_id : '')
+
+    if (cardId) {
+      this.pending.set(cardId, { botName, request })
+
+      if (request.method === 'approval') {
+        void this.acknowledgeApproval(botName, cardId)
+      }
     }
 
     this.syncApprovalPoll()
+  }
 
-    return true
+  /**
+   * Forget the bookkeeping behind cards that are no longer open.
+   *
+   * `pending` holds a JSON-RPC reply handle and `acknowledged` a request id;
+   * neither means anything once the card has been answered, cancelled or
+   * withdrawn, and a chat that stays live for a working day accumulates both.
+   */
+  private pruneRequests(botName: string): void {
+    const chat = this.chats.getState().chats[botName]
+
+    if (!chat) {
+      return
+    }
+
+    const stillOpen = (requestId: string): boolean => {
+      const itemId = chat.byRequestId[requestId]
+      const item = itemId ? chat.items[itemId] : undefined
+
+      return (item?.kind === 'approval' || item?.kind === 'clarify') && item.state === 'open'
+    }
+
+    for (const [requestId, entry] of this.pending) {
+      if (entry.botName === botName && !stillOpen(requestId)) {
+        this.pending.delete(requestId)
+      }
+    }
+
+    for (const requestId of this.acknowledged) {
+      if (chat.byRequestId[requestId] && !stillOpen(requestId)) {
+        this.acknowledged.delete(requestId)
+      }
+    }
   }
 
   /**
@@ -677,10 +840,15 @@ export class ChatController {
   /**
    * Answer an approval.
    *
-   * A live request is answered on its own JSON-RPC reply, which is what the
-   * queue is waiting on. A card rebuilt from `open_requests` or from a resume
-   * snapshot has no reply to make, so it goes out as `approval.respond` against
-   * the queue entry's own id instead.
+   * A request is answered on its own JSON-RPC reply, which is what the queue is
+   * waiting on. That includes one replayed out of `open_requests`: the channel
+   * re-delivers it over the socket that owns it, so its reply frame is as live
+   * as any other.
+   *
+   * What has no frame is a card synthesized from the `pending_approval` resume
+   * field or from the `approval.pending` poll — those are queue entries, never
+   * transported requests. They go out as `approval.respond` against the queue
+   * entry's own id instead.
    */
   async respondApproval(botName: string, requestId: string, choice: string, all = false): Promise<void> {
     const chat = this.chats.getState().chats[botName]
@@ -688,21 +856,27 @@ export class ChatController {
     const item = itemId ? chat?.items[itemId] : undefined
     const approvalId = item?.kind === 'approval' ? item.approvalId : requestId
     const live = this.pending.get(requestId)
+    const result = { choice, ...(all ? { all: true } : {}) }
 
     this.chats.getState().answer(botName, requestId, choice)
     this.acknowledged.delete(requestId)
 
     if (live) {
       this.pending.delete(requestId)
-      live.request.respond({ choice, ...(all ? { all: true } : {}) })
-    } else if (chat?.runtimeSessionId) {
+      live.request.respond(result)
+    } else if (approvalId && chat?.runtimeSessionId) {
       await this.gateway.request('approval.respond', {
         session_id: chat.runtimeSessionId,
         profile: botName,
         choice,
         ...(all ? { all: true } : {}),
-        ...(approvalId ? { request_id: approvalId } : {})
+        request_id: approvalId
       })
+    } else {
+      // No queue id to address and no reply frame to make. `request.answer` is
+      // the gateway's proxy for exactly that: it settles the open request by
+      // its own id, with the result the reply frame would have carried.
+      await this.gateway.request('request.answer', { id: requestId, result, profile: botName })
     }
 
     this.syncApprovalPoll()
@@ -711,24 +885,37 @@ export class ChatController {
   /**
    * Answer one clarify question.
    *
-   * Batch clarify is answered question by question: each answer is locked
-   * server-side, and the lock that empties `remaining` resolves the request. A
-   * single-question clarify still goes back on the request itself.
+   * A live request is answered on its own reply frame. A replayed one has no
+   * frame to answer, and `clarify.lock` cannot stand in for every shape: the
+   * gateway only accepts a lock for a BATCH clarify and reports `expired` for a
+   * single-question one, which would leave the agent waiting on a question the
+   * user has already answered. `request.answer` settles an open request by its
+   * id and is the path for that case.
    */
   async respondClarify(botName: string, requestId: string, answers: Record<string, string>): Promise<void> {
     const chat = this.chats.getState().chats[botName]
     const itemId = chat?.byRequestId[requestId]
     const item = itemId ? chat?.items[itemId] : undefined
+    const clarify = item?.kind === 'clarify' ? item : undefined
     const live = this.pending.get(requestId)
 
     this.chats.getState().answer(botName, requestId, answers)
 
-    const complete =
-      item?.kind === 'clarify' ? item.questions.every(question => answers[question.qid] !== undefined) : true
+    const complete = clarify ? clarify.questions.every(question => answers[question.qid] !== undefined) : true
+    // The wire shape follows the question shape: a batch answers `answers` by
+    // qid, a single question answers the bare `answer` the gateway reads.
+    const result = clarify?.batch ? { answers } : { answer: Object.values(answers)[0] ?? '' }
 
     if (live && complete) {
       this.pending.delete(requestId)
-      live.request.respond({ answers })
+      this.acknowledged.delete(requestId)
+      live.request.respond(result)
+
+      return
+    }
+
+    if (!live && (complete || !clarify?.batch)) {
+      await this.gateway.request('request.answer', { id: requestId, result, profile: botName })
 
       return
     }
@@ -1225,33 +1412,61 @@ export class ChatController {
     return this.modelsInFlight
   }
 
-  /** Re-read `session.info` so the options sheet reflects what the gateway holds. */
+  /**
+   * Re-read the four chat options so the sheet reflects what the gateway holds.
+   *
+   * Deliberately NOT `session.resume`. Resuming is a write: it mints a new
+   * runtime session id, rebinds the socket's transport to it and schedules an
+   * agent build. Using it to answer "what model is this chat on" rebuilt the
+   * session every time the options sheet opened, which invalidated the very
+   * event watermark the sheet was opened alongside. `config.get` is the read.
+   */
   async refreshOptions(botName: string): Promise<SessionLiveInfo | null> {
     const chat = this.chats.getState().chats[botName]
+    const sessionId = chat?.runtimeSessionId
 
-    if (!chat?.runtimeSessionId) {
+    if (!sessionId) {
       return null
     }
 
-    try {
-      const resume = await this.gateway.request('session.resume', {
-        session_id: chat.storedSessionId,
-        profile: botName,
-        omit_messages: true,
-        source: 'hermie'
-      })
+    const keys: ChatOptionKey[] = ['model', 'yolo', 'fast', 'reasoning']
+    const values = await Promise.all(
+      keys.map(async key => {
+        try {
+          const result = await this.gateway.request('config.get', { key, session_id: sessionId, profile: botName })
 
-      this.chats.getState().bindRuntime(botName, resume.session_id)
-      this.chats.getState().dispatchEvent(botName, {
-        type: 'session.info',
-        session_id: resume.session_id,
-        payload: resume.info
+          return typeof result?.value === 'string' ? result.value : key === 'model' ? (result?.model ?? '') : ''
+        } catch {
+          // A gateway that cannot answer one key leaves that row as it was
+          // rather than failing the whole sheet.
+          return ''
+        }
       })
+    )
 
-      return resume.info ?? null
-    } catch {
+    const [model, yolo, fast, reasoning] = values
+    const patch: SessionLiveInfo = {
+      ...(model ? { model } : {}),
+      ...(yolo ? { yolo: yolo === 'on' || yolo === '1' || yolo === 'true' } : {}),
+      ...(fast ? { fast: fast === 'fast' || fast === 'on' || fast === 'true' } : {}),
+      ...(reasoning ? { reasoning_effort: reasoning } : {})
+    }
+
+    if (!Object.keys(patch).length) {
       return null
     }
+
+    // `session.info` replaces the whole record, so the four keys read here go
+    // on top of what the resume reported rather than in place of it.
+    const info: SessionLiveInfo = { ...this.chats.getState().chats[botName]?.info, ...patch }
+
+    this.chats.getState().dispatchEvent(botName, {
+      type: 'session.info',
+      session_id: sessionId,
+      payload: info
+    })
+
+    return info
   }
 
   // ── approvals while a turn runs ────────────────────────────────────────────
@@ -1316,11 +1531,14 @@ export class ChatController {
         profile: botName
       })
 
-      for (const approval of result?.approvals ?? []) {
+      for (const approval of Array.isArray(result?.approvals) ? result.approvals : []) {
         const approvalId = typeof approval.request_id === 'string' ? approval.request_id : ''
 
         // `pending:` marks a card with no live JSON-RPC reply behind it, the
-        // same shape `applyResumeSnapshot` synthesizes.
+        // same shape `applyResumeSnapshot` synthesizes. The reducer folds it
+        // onto the card already showing this queue entry, if there is one —
+        // the poll is a safety net for questions with no card, not a second
+        // copy of the ones that have.
         this.chats.getState().dispatchServerRequest(botName, {
           id: `pending:${approvalId || 'approval'}`,
           method: 'approval',
@@ -1420,6 +1638,24 @@ function resumeSnapshotOf(result: SessionResumeResult): ResumeSnapshot {
  */
 function asRecord(value: object | null | undefined): Record<string, unknown> | null {
   return value ? ({ ...value } as Record<string, unknown>) : null
+}
+
+/**
+ * The open approval card already showing this queue entry, if any.
+ *
+ * The same question reaches a client under several transport ids; the reducer
+ * keeps one card for it, and this is how the caller finds which one so the live
+ * reply handle can be filed against it.
+ */
+function approvalCardIdFor(chat: ChatState | undefined, approvalId: string): string | undefined {
+  if (!chat || !approvalId) {
+    return undefined
+  }
+
+  const itemId = chat.byApprovalId[approvalId]
+  const item = itemId ? chat.items[itemId] : undefined
+
+  return item?.kind === 'approval' && item.state === 'open' ? item.requestId : undefined
 }
 
 /** One replayed event frame, narrowed to what the reducer needs. */

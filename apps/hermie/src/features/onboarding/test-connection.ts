@@ -121,8 +121,19 @@ export async function runConnectionTest(
     await waitForReady(connection, timeoutMs)
 
     const result = await connection.request('profiles.list', { include_sessions: true })
+    // Read the coordinator back rather than the draft: if the dial rotated the
+    // pair, this is the only place the live one exists. The payload key is
+    // computed against the rotated draft too, or the step would invalidate its
+    // own result the moment the caller adopts the token.
+    const tokens = coordinator ? await coordinator.current() : null
+    const tested = tokens ? { ...draft, tokens } : draft
 
-    return { key: connectionPayloadKey(draft), userDisplayName, botCount: (result.profiles ?? []).length }
+    return {
+      key: connectionPayloadKey(tested),
+      userDisplayName,
+      botCount: (result.profiles ?? []).length,
+      ...(tokens ? { tokens } : {})
+    }
   } finally {
     connection.stop()
   }

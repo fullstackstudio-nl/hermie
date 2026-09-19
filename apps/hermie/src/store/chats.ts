@@ -191,6 +191,13 @@ export const useChatsStore = create<ChatsState>((set, get) => {
         return
       }
 
+      // The gateway numbers events per runtime session and starts each one at
+      // 1, so a watermark from the previous session is a number from another
+      // counter. Carrying it over makes the reducer's `seq <= lastSeq` guard
+      // drop the whole of the new session instead of the replay it is for.
+      const sameSession = chat.lastSeqSessionId === runtimeSessionId
+      const watermark = sameSession ? {} : { lastSeq: 0, lastSeqSessionId: runtimeSessionId, epoch: undefined }
+
       set(state => {
         const runtimeToBot = { ...state.runtimeToBot }
 
@@ -206,7 +213,7 @@ export const useChatsStore = create<ChatsState>((set, get) => {
 
         return {
           runtimeToBot,
-          chats: { ...state.chats, [botName]: { ...chat, runtimeSessionId } }
+          chats: { ...state.chats, [botName]: { ...chat, runtimeSessionId, ...watermark } }
         }
       })
     },

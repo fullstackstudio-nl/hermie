@@ -103,6 +103,8 @@ export const strings = {
         cancelled: 'Sign-in was cancelled.',
         unavailable:
           'The in-app browser is not available on this platform. Open the sign-in page in your browser, then paste the address it fails to open back here.',
+        headersWithheld:
+          'This gateway needs extra headers, and Android\u2019s in-app browser would forward them to your identity provider. Sign in in your browser instead, then paste the address it fails to open back here.',
         fallbackLabel: 'FAILED ADDRESS',
         fallbackPlaceholder: 'http://127.0.0.1:38007/callback?code=…',
         fallbackHelp:

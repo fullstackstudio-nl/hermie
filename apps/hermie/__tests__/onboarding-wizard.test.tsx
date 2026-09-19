@@ -130,6 +130,37 @@ describe('the test-connection gate', () => {
     expect(isDisabled('Continue')).toBe(false)
   })
 
+  it('adopts a credential the test rotated, and stays passed afterwards', async () => {
+    const draft = signedInDraft()
+    const rotated: TokenSet = { ...TOKENS, accessToken: 'access-2', refreshToken: 'refresh-2' }
+
+    // Dialling refreshes an access token inside its skew window, which rotates
+    // the refresh token with it and kills the one the draft still holds.
+    runConnectionTest.mockResolvedValue({
+      key: connectionPayloadKey({ ...draft, tokens: rotated }),
+      userDisplayName: 'Fake Tester',
+      botCount: 2,
+      tokens: rotated
+    })
+
+    const onComplete = jest.fn()
+    renderScreen(<OnboardingNavigator onComplete={onComplete} initialStep="test" initialDraft={draft} />)
+    fireEvent.press(primaryButton('Test connection'))
+
+    await waitFor(() => expect(screen.getByTestId('test-result')).toBeTruthy())
+
+    // The rotation must not read as "something changed, test again".
+    expect(isDisabled('Continue')).toBe(false)
+
+    fireEvent.press(primaryButton('Continue'))
+    fireEvent.press(primaryButton('Start chatting'))
+
+    await waitFor(() => expect(onComplete).toHaveBeenCalled())
+
+    expect(secretStore.set).toHaveBeenCalledWith(SECRET_KEYS.refreshToken, 'refresh-2')
+    expect(secretStore.set).not.toHaveBeenCalledWith(SECRET_KEYS.refreshToken, 'refresh-1')
+  })
+
   it('reports a rejected credential and stays shut', async () => {
     runConnectionTest.mockRejectedValue(new GatewayError('auth', 'raw', { closeCode: 4401 }))
 

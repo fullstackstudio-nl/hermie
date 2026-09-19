@@ -31,6 +31,16 @@ export interface ConnectionTestOutcome {
   key: string
   userDisplayName: string
   botCount: number
+  /**
+   * The token set as it stands AFTER the test.
+   *
+   * The test dials for real, and a dial refreshes an access token that is
+   * inside its skew window — which rotates the refresh token with it. The
+   * gateway then invalidates the old one, so saving the draft's original pair
+   * writes a credential that is already dead and the first reconnect lands on
+   * the sign-in screen.
+   */
+  tokens?: TokenSet | null
 }
 
 export interface OnboardingDraft {
