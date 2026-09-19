@@ -88,6 +88,28 @@ start:
 [docs/test-gateway.md](docs/test-gateway.md) is a runbook for standing one up
 from scratch.
 
+### Keep the gateway off the public internet
+
+A Hermes gateway runs agents that execute commands on the machine it lives on.
+That is not something to leave reachable by anyone who finds the address, however
+good the sign-in in front of it is. The recommended setup is a private network:
+[Tailscale](https://tailscale.com), or [Headscale](https://headscale.net) if you
+would rather host the control server yourself. Both use the same clients.
+
+- Put the gateway machine and every device that runs Hermie on the same tailnet,
+  and give Hermie the gateway's tailnet name as its address.
+- Serve it over HTTPS there too. `tailscale serve` puts a certificate for the
+  machine's tailnet name in front of `hermes serve` and passes WebSocket upgrades
+  through; with Headscale, a reverse proxy with its own certificate does the same
+  job.
+- Set `dashboard.public_url` to that tailnet address, for the reason above.
+- If the gateway signs you in through an identity provider, the provider's
+  sign-in page has to be reachable from the device as well. A public provider
+  already is; one that lives on the tailnet is reachable as long as the VPN is up.
+
+Hermie needs nothing special for any of this. It talks to whatever address it is
+given, so the VPN only has to be connected before the app is.
+
 ## Getting it
 
 Hermie has not had a release yet. When it does:
