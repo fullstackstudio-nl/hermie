@@ -37,3 +37,12 @@ documented in [packages/hermes-shared/README.md](packages/hermes-shared/README.m
 
 The macOS Xcode project, Podfile and application delegate started as the react-native-macos 0.81
 template and have been adapted for this app. `docs/platform-notes.md` lists the changes.
+
+## Contributor Covenant — code of conduct
+
+- **Project:** [Contributor Covenant](https://www.contributor-covenant.org)
+- **Licence:** CC BY 4.0
+- **Vendored path:** `CODE_OF_CONDUCT.md`
+
+Version 2.1 of the Contributor Covenant, adopted with the enforcement contact filled in. The text is
+meant to be copied; the attribution it asks for is at the foot of the file itself.

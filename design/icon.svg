@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Hermie">
+  <!--
+    The Hermie mark: a speech bubble in Hermie blue with an H monogram whose
+    crossbar lifts to the right like a wing — Hermes carried the messages, and
+    these are messages too.
+
+    Hand-authored, and deliberately made of few, large shapes: the whole thing
+    still reads at 29 px, where a drawing with any real detail turns to mush.
+
+    scripts/generate-app-icons.mjs rasterises this file. It addresses the parts
+    below by id, so renaming one breaks the generator loudly rather than
+    quietly dropping a shape:
+
+      #backdrop  the blue square. The generator squares its corners off for the
+                 full-bleed iOS and Android icon, which the platform masks
+                 itself, and keeps them for the standalone artwork.
+      #mark      the bubble and the monogram, on their own for the Android
+                 adaptive foreground.
+
+    Colours are the brand blues from design/tokens.md: #006BDC and #0874DE sit
+    on the gradient between the two stops below.
+  -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2E8FE9" />
+      <stop offset="1" stop-color="#0055BC" />
+    </linearGradient>
+  </defs>
+
+  <rect id="backdrop" x="0" y="0" width="1024" height="1024" rx="224" fill="url(#sky)" />
+
+  <g id="mark">
+    <!-- The tail is drawn first; the bubble covers where the two meet. -->
+    <path
+      id="tail"
+      d="M 424 656 C 420 732 358 790 222 818 C 288 752 306 700 304 644 Z"
+      fill="#FFFFFF"
+    />
+    <rect id="bubble" x="168" y="216" width="688" height="464" rx="140" fill="#FFFFFF" />
+    <rect id="stem-left" x="336" y="300" width="96" height="296" rx="24" fill="#006BDC" />
+    <rect id="stem-right" x="592" y="300" width="96" height="296" rx="24" fill="#006BDC" />
+    <!-- The crossbar: a bar that rises and tapers towards the right. -->
+    <path
+      id="crossbar"
+      d="M 336 434 C 452 434 562 396 688 366 L 688 438 C 562 468 452 522 336 522 Z"
+      fill="#006BDC"
+    />
+  </g>
+</svg>

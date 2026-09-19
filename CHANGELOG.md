@@ -95,7 +95,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and one carrying a scheduler exception, run sessions whose transcripts come back through
   `session.history`, delivery targets, a merging `PUT`, a `trigger` that appends a run, and a
   `cron.changed` broadcast after every mutation.
-
 - The chat list, in the Messenger direction: a large title, a search field that filters on name and
   description, and one row per bot carrying its avatar, the last thing said, a relative stamp and the
   badges that decide whether you tap it now or later. A preview that starts `Message from 🤖 Writer
@@ -121,6 +120,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `image.attach_bytes` shares the socket the transcript streams on.
 - A Chat section in Settings for the default verbosity, bot-to-bot and thinking, and an Appearance
   section that pins the app to light or dark instead of following the system.
+- An app icon: a speech bubble carrying an H whose crossbar lifts like a wing, drawn by hand as
+  `design/icon.svg`. `scripts/generate-app-icons.mjs` rasterises it into every size the app ships —
+  the iOS and Android icons, the Android adaptive foreground, the splash image, the favicon and the
+  macOS asset catalogue — with a scan-converter written for the purpose, so the icons need no image
+  tooling installed and come out byte-identical on every machine. CI fails if any of them has drifted
+  from the SVG.
+- A release process. `.github/workflows/release.yml` builds the macOS app and an Android APK on a
+  `v*` tag and publishes a GitHub release with the CHANGELOG section for that version; the macOS app
+  is signed with a Developer ID and notarised when the secrets are present, and unsigned when they
+  are not, so a fork can cut a release too. `docs/release.md` is the runbook, including the halves a
+  machine cannot do: TestFlight and Play internal testing through EAS.
+- `scripts/set-version.mjs` sets the version in all four places that carry it — both package.json
+  files, `app.config.ts` and the macOS `Info.plist` — and fails loudly rather than skipping a file
+  whose shape has changed. `scripts/changelog-section.mjs` reads one version's notes out of this
+  file, which is what the release workflow publishes.
+- Repository furniture for a public project: a Contributor Covenant code of conduct, issue forms for
+  bugs and feature requests, and grouped weekly Dependabot updates for npm and the actions.
+
+### Changed
+
+- The flat-colour placeholder artwork and the script that wrote it are gone, replaced by the icon set
+  above.
+- The native CI jobs run on release tags as well as on demand, build with signing switched off, and
+  keep what they produced: the Android APK, and the macOS app as a zip. macOS builds Release rather
+  than Debug, because only Release bundles the JavaScript into the app.
+- Android asks for the network and the photo library and nothing else; `VIBRATE` and
+  `WRITE_EXTERNAL_STORAGE`, both pulled in by dependencies rather than wanted, are blocked. iOS
+  answers the export-compliance question in advance, the splash screen now hands over to the app's own
+  background colours, and the Android adaptive icon sits on the blue from the middle of the icon's
+  gradient.
+- The macOS bundle knows what it is: the compiled app icon, a display name, an application category,
+  a copyright line, and the version the rest of the repository is on rather than the template's 1.0.
 
 ### Fixed
 

@@ -1,0 +1,31 @@
+# What EAS does NOT need to upload.
+#
+# This file REPLACES .gitignore when EAS packs the project, so it has to repeat
+# the build output as well as name the extra things. The patterns are
+# deliberately unanchored — they match at any depth — because the archive is
+# taken at the workspace root while this file sits beside eas.json.
+
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.expo/
+ios/
+android/
+DerivedData/
+
+# The macOS target is built by Xcode on a Mac, never on an EAS worker, and it is
+# the largest directory in the repository. See docs/release.md.
+macos/
+
+# Documentation, design sources and screenshots
+docs/
+design/
+*.md
+
+# Local state
+*.log
+.env
+.env.local
+.DS_Store

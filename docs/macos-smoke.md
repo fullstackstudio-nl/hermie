@@ -16,6 +16,16 @@ Ticking a box means you saw it happen. Write down what you skipped.
 - [ ] `xcodebuild -workspace Hermie.xcworkspace -scheme Hermie-macOS -configuration Debug build`
       succeeds.
 - [ ] The build produced no new warnings about deployment targets.
+- [ ] `npm run icons:check` passes, and the built app carries the icon:
+      `Hermie.app/Contents/Resources/AppIcon.icns` exists and is the blue bubble, not the generic
+      template icon. Without `CFBundleIconName` in `Info.plist` the catalogue is compiled and then
+      ignored, which looks exactly like a build that has no icon at all.
+- [ ] Before a release, the same build in **Release**:
+      `xcodebuild -workspace Hermie.xcworkspace -scheme Hermie-macOS -configuration Release build`.
+      Only Release runs the phase that bundles the JavaScript, so it is the only configuration whose
+      product starts without a Metro server — and it is what the release workflow ships.
+- [ ] The version in **Hermie → About Hermie** is the one the rest of the repository is on
+      (`npm run set-version -- <version> --check` reports no drift).
 
 ## Launch
 

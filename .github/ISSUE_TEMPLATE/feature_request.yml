@@ -1,0 +1,30 @@
+name: Feature request
+description: Suggest something Hermie should do.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Hermie is a client. If what you want needs the gateway to send something
+        it does not send today, it is an upstream change first — say so and we
+        can work out which half is which.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: The situation, not the solution. What is awkward today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you have in mind
+      description: How you imagine it working, if you have a shape in mind.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do instead today
+      description: Workarounds are useful; they say how much the gap costs.

@@ -1,0 +1,56 @@
+version: 2
+
+# Weekly and grouped. Ungrouped updates on a repository with this many React
+# Native packages produce a dozen pull requests a week, all of which need the
+# same iOS, Android and macOS builds run against them, and the Expo SDK pins
+# most of the interesting versions anyway.
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      expo:
+        patterns:
+          - expo
+          - expo-*
+          - '@expo/*'
+          - jest-expo
+      react-native:
+        patterns:
+          - react-native
+          - react-native-*
+          - '@react-native/*'
+          - '@react-native-community/*'
+          - '@react-navigation/*'
+      development:
+        dependency-type: development
+        patterns:
+          - '*'
+        exclude-patterns:
+          - jest-expo
+      production:
+        dependency-type: production
+        patterns:
+          - '*'
+        exclude-patterns:
+          - expo
+          - expo-*
+          - '@expo/*'
+          - react-native
+          - react-native-*
+          - '@react-native/*'
+          - '@react-native-community/*'
+          - '@react-navigation/*'
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns:
+          - '*'

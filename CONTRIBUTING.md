@@ -116,6 +116,28 @@ that silently no longer works. When that happens, read the upstream file before 
 pattern. [packages/hermes-shared/README.md](packages/hermes-shared/README.md) documents each
 rewrite and why it exists.
 
+## Screenshots
+
+`docs/screenshots/` is what the README shows, so treat it as published material.
+
+- **Fixture data only.** The bots in those images are the fake gateway's Researcher and Writer, with
+  its scripted commands and transcripts. No real gateway address, no real bot, no real conversation,
+  and nothing that names a person.
+- **Strip the metadata.** A screenshot carries EXIF and XMP that nobody looks at and everybody
+  publishes. Remove it before committing.
+- **Say what is in the picture.** Every image in the README has alt text that describes the screen,
+  not the file.
+
+## Releasing
+
+[docs/release.md](docs/release.md) is the process: the version numbers and the script that sets all
+four of them, what a `v*` tag sets off, the secrets the macOS signing and notarisation steps look
+for, and the TestFlight and Play steps that are still done by hand.
+
+The icons are generated, not drawn per size. `design/icon.svg` is the source; `npm run icons`
+rewrites every PNG from it and `npm run icons:check` — which CI runs — fails if one of them has
+drifted. Never edit a PNG in `apps/hermie/assets` or the macOS asset catalogue directly.
+
 ## Commits
 
 Conventional commits, in the imperative, in English:

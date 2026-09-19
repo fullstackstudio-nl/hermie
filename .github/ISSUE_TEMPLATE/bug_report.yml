@@ -1,0 +1,74 @@
+name: Bug report
+description: Something in Hermie does not work.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: is the problem in Hermie, or in the gateway it talks to?
+        Anything about `hermes serve` itself, its authentication endpoints or the
+        agent's own behaviour belongs upstream in
+        [NousResearch/Hermes-Agent](https://github.com/NousResearch/Hermes-Agent).
+
+        Please do not paste tokens, gateway addresses you would rather keep
+        private, or transcript contents you do not want public.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a chat with a bot
+        2. Send "…"
+        3. …
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      multiple: true
+      options:
+        - iPhone
+        - iPad
+        - Android
+        - macOS
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Hermie's version, the OS version, and the gateway version (Settings shows all three).
+      placeholder: Hermie 0.1.0, iOS 18.2, gateway 0.21.3
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How was it installed
+      options:
+        - Built from source
+        - TestFlight
+        - Play internal testing
+        - macOS download
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Logs, a screenshot, whether it happens every time. Redact first.
