@@ -1,10 +1,20 @@
 /**
  * The hook a chat screen talks to.
  *
- * It opens the chat on mount, keeps it live afterwards, and hands back the
- * transcript already filtered through the view settings. The actions are thin
- * bindings onto the controller — no logic lives here, so a screen can be
- * replaced wholesale without any of the protocol moving with it.
+ * It opens the chat once the connection can carry it, keeps it live afterwards,
+ * and hands back the transcript already filtered through the view settings. The
+ * actions are thin bindings onto the controller — no logic lives here, so a
+ * screen can be replaced wholesale without any of the protocol moving with it.
+ *
+ * WHEN it opens is the part worth stating. `openChat` ends in
+ * `session.resume`, and a JSON-RPC call on a socket that is still dialling
+ * rejects immediately with "gateway not connected" — it does not queue. Opening
+ * on mount therefore failed outright on a cold start or mid-reconnect, and
+ * nothing asked again: the screen showed "This conversation could not be
+ * opened: gateway not connected" with a Try again nobody should have had to
+ * press. The open now waits for `status === 'ready'` and runs on the transition
+ * to it, which is the same fix the roster got in `ChatRuntime` for the same
+ * race, and which covers every reconnect for free.
  */
 import {
   isBusy,
@@ -18,9 +28,12 @@ import {
   type VisibleItem,
   visibleItems
 } from '@hermie/transcript'
+import type { ConnectionStatus, GatewayError } from '@hermie/gateway-client'
 import type { CompletionItem, SessionLiveInfo } from '@hermes/shared/gateway-contract'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { describeConnectionError, useGateway } from '../../gateway'
+import { strings } from '../../i18n/strings'
 import { type Bot, useBotsStore } from '../../store/bots'
 import { useChatsStore } from '../../store/chats'
 import { useChatView } from '../../store/settings'
@@ -51,7 +64,25 @@ export interface UseChatResult {
   queuedText: string | undefined
   /** The gateway's view of this session: yolo, fast, reasoning effort, model. */
   info: SessionLiveInfo | undefined
+  /**
+   * A failure that happened WHILE connected — the only kind worth a banner with
+   * a retry on it. A chat that has not been opened because the socket is not up
+   * is not an error; see `waitingForConnection`.
+   */
   error: string | null
+  /**
+   * The connection cannot carry the chat yet, and nothing has gone wrong. The
+   * screen keeps whatever the cache painted and says so quietly; the open runs
+   * by itself when the socket reports ready.
+   */
+  waitingForConnection: boolean
+  /**
+   * What the CONNECTION says, when its own state is why this chat cannot open
+   * and waiting will not fix it: signed out, too old, or refused by the
+   * gateway's configuration. It replaces the raw RPC message, which in those
+   * cases says "gateway not connected" and explains nothing.
+   */
+  connectionError: string | null
   /**
    * Drop the controller error the banner is showing.
    *
@@ -88,14 +119,23 @@ export interface UseChatResult {
 
 export function useChat(botName: string): UseChatResult {
   const runtime = useChatRuntime()
+  const { status, lastError, config } = useGateway()
   const bot = useBotsStore(state => state.byName[botName])
   const chat = useChatsStore(state => state.chats[botName])
   const view = useChatView(botName)
   const [error, setError] = useState<string | null>(null)
-  // The bot AND the runtime that opened it. A new gateway connection builds a
-  // new controller with empty stores, so remembering only the name leaves the
-  // screen bound to a chat the live controller has never opened.
-  const openedRef = useRef<{ botName: string; runtime: ChatRuntimeValue } | null>(null)
+
+  const ready = status === 'ready'
+  const connectionError = terminalConnectionMessage(status, lastError, config?.baseUrl ?? '')
+
+  /**
+   * The attempt, if one has been made: the bot AND the runtime it was made on.
+   * A new gateway connection builds a new controller with empty stores, so
+   * remembering only the name leaves the screen bound to a chat the live
+   * controller has never opened. `failed` is what makes the next `ready`
+   * transition a retry rather than a no-op.
+   */
+  const attemptRef = useRef<{ botName: string; runtime: ChatRuntimeValue; failed: boolean } | null>(null)
 
   const open = useCallback(async () => {
     if (!runtime || !bot) {
@@ -105,34 +145,48 @@ export function useChat(botName: string): UseChatResult {
     try {
       setError(null)
       await runtime.controller.openChat(bot)
+
+      if (attemptRef.current) {
+        attemptRef.current.failed = false
+      }
     } catch (caught) {
+      // Remembered rather than only shown: a failure here is usually the socket
+      // going away underneath the resume, and the next ready connection is the
+      // thing that can actually fix it.
+      if (attemptRef.current) {
+        attemptRef.current.failed = true
+      }
+
       setError(caught instanceof Error ? caught.message : String(caught))
     }
   }, [bot, runtime])
 
   useEffect(() => {
-    if (!runtime || !bot) {
+    if (!runtime || !bot || !ready) {
+      // Nothing to do and nothing to report. Whatever the cache painted stays
+      // on screen; the effect runs again the moment `ready` flips.
       return
     }
 
-    const opened = openedRef.current
+    const attempt = attemptRef.current
+    const opened = attempt?.botName === bot.name && attempt.runtime === runtime
 
-    if (opened?.botName === bot.name && opened.runtime === runtime) {
+    if (opened && !attempt.failed) {
       return
     }
 
-    openedRef.current = { botName: bot.name, runtime }
+    attemptRef.current = { botName: bot.name, runtime, failed: false }
     void open()
-  }, [bot, open, runtime])
+  }, [bot, open, ready, runtime])
 
   useEffect(() => {
     // Leaving the screen writes the cache and marks the chat read. It does NOT
     // detach: a teammate bot's message has to keep streaming in.
     return () => {
-      const opened = openedRef.current
+      const attempt = attemptRef.current
 
-      if (opened) {
-        void opened.runtime.controller.closeChat(opened.botName)
+      if (attempt) {
+        void attempt.runtime.controller.closeChat(attempt.botName)
       }
     }
   }, [runtime])
@@ -181,7 +235,11 @@ export function useChat(botName: string): UseChatResult {
     subagentTree: tree,
     queuedText: chat?.queued?.text,
     info: chat?.info,
-    error,
+    // A stale message from a previous connection must not outlive it: the retry
+    // it offers is the reconnect that already happened.
+    error: ready ? error : null,
+    waitingForConnection: !ready && connectionError === null,
+    connectionError,
     clearError: useCallback(() => setError(null), []),
     setDraft: useCallback((draft: string) => useChatsStore.getState().setDraft(botName, draft), [botName]),
     send: useCallback(
@@ -245,4 +303,38 @@ export function useChat(botName: string): UseChatResult {
     modelOptions: useCallback(() => (controller ? controller.modelOptions() : Promise.resolve([])), [controller]),
     reload: open
   }
+}
+
+/**
+ * Close codes that mean the gateway looked at us and said no.
+ *
+ * 4403 is its host guard and 4404 is chat being switched off; neither is a
+ * transient. The dial loop keeps retrying them anyway — it cannot know the
+ * difference — so the chat would otherwise sit on "Connecting…" forever
+ * instead of saying what has to be changed on the gateway.
+ */
+const CONFIGURATION_CLOSE_CODES = new Set([4403, 4404])
+
+/**
+ * The connection's own message, when the connection is why this chat cannot
+ * open and waiting will not help. Null means keep waiting.
+ */
+function terminalConnectionMessage(
+  status: ConnectionStatus,
+  error: GatewayError | null,
+  baseUrl: string
+): string | null {
+  if (status === 'needs_signin') {
+    return error ? describeConnectionError(error, baseUrl) : strings.errors.signedOut
+  }
+
+  if (status === 'incompatible') {
+    return error ? describeConnectionError(error, baseUrl) : strings.errors.incompatible
+  }
+
+  if (error && (error.kind === 'config' || CONFIGURATION_CLOSE_CODES.has(error.closeCode ?? 0))) {
+    return describeConnectionError(error, baseUrl)
+  }
+
+  return null
 }

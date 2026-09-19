@@ -320,6 +320,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bar, and `Screen` turned that ~25pt top safe-area inset into padding nothing occupied, because the
   macOS title bar is outside the app's window. The top inset is dropped on a Mac and only there;
   iPhone and iPad are untouched. Fixed in code, **unverified in a window**.
+- A chat opened while the socket was still dialling failed outright and nothing retried it. The
+  screen called `openChat` on mount regardless of the connection, and `session.resume` on a
+  connection that is not up rejects immediately — it does not queue — so a cold start or a tap during
+  a reconnect put "This conversation could not be opened: gateway not connected" over the
+  conversation, with a Try again nobody should have had to press. The open now waits for the
+  connection to report ready and runs on the transition to it, which is the same fix the bot roster
+  got for the same race and which covers every reconnect; a failed attempt is retried on the next
+  ready connection. While it waits the screen keeps whatever the cache painted and says so quietly.
+  The red banner is now reserved for failures that happen while there is a connection, and a
+  connection that will never become ready on its own — signed out, too old, or refused by the
+  gateway's own configuration — says which of those it is instead of "gateway not connected".
+- The chat header said "Connecting…" over a conversation that was loaded and streaming. Resuming
+  from the background walks the whole pre-dial ladder again while the session keeps working, and the
+  subtitle was reading the socket's bookkeeping rather than this chat's state.
 - The cron list showed nothing for a cron that lives in a bot's profile, while the gateway dashboard
   listed it. The list was read over the socket, and `cron.manage` is profile-scoped: it binds
   HERMES_HOME to its `profile` parameter and answers from that one store, so an unscoped call

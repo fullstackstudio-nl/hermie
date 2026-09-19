@@ -286,6 +286,8 @@ export const strings = {
     send: 'Send',
     stop: 'Stop',
     hydrating: 'Loading the conversation…',
+    /** Not a failure: the chat opens itself once the socket is up, so there is nothing to press. */
+    waitingForConnection: 'Waiting for the gateway. This conversation opens as soon as it answers.',
     offlineCopy: 'Showing the last saved copy of this conversation.',
     stale: 'This conversation lost its connection to the gateway. It reattaches on the next open.',
     failed: (message: string) => `This conversation could not be opened: ${message}`,

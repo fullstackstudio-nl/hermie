@@ -53,7 +53,7 @@ import { openAppSettings, pickAttachment, type PickedAttachment } from './attach
 import { ChatSheetHost, type RequestItem } from './ChatSheetHost'
 import type { ModelChoice } from './chat-controller'
 import type { ManualSheet } from './sheet-host'
-import { useChat } from './useChat'
+import { useChat, type UseChatResult } from './useChat'
 
 export interface OpenChatOptions {
   /**
@@ -493,6 +493,7 @@ function Conversation({
   const needsInput = chat.requests.length > 0
   const subtitle = subtitleFor({
     status,
+    hydration: chat.hydration,
     busy,
     queued: Boolean(chat.queuedText),
     needsInput
@@ -675,8 +676,11 @@ function Conversation({
         style={{ flex: 1 }}
       >
         <Banner
-          error={chat.error ?? notice}
+          // The connection's own account of a terminal refusal beats the RPC
+          // message it produced, which only ever says "gateway not connected".
+          error={chat.connectionError ?? chat.error ?? notice}
           hydration={chat.hydration}
+          waitingForConnection={chat.waitingForConnection}
           onDismiss={() => {
             setNotice(null)
             setNeedsPhotoAccess(false)
@@ -843,7 +847,13 @@ function resolveBot(handle: string, names: readonly string[]): string {
   return names.find(name => name.toLowerCase() === needle) ?? needle
 }
 
-function subtitleFor(state: { status: string; busy: boolean; queued: boolean; needsInput: boolean }): string {
+function subtitleFor(state: {
+  status: string
+  hydration: UseChatResult['hydration']
+  busy: boolean
+  queued: boolean
+  needsInput: boolean
+}): string {
   if (state.needsInput) {
     return strings.bots.needsInput
   }
@@ -868,7 +878,12 @@ function subtitleFor(state: { status: string; busy: boolean; queued: boolean; ne
     case 'connecting':
     case 'authenticating':
     case 'probing':
-      return strings.chat.subtitle.connecting
+      // A live chat is one the gateway answered `session.resume` for and is
+      // streaming events into. Coming back from the background walks the whole
+      // pre-dial ladder again while that session keeps working, and
+      // "Connecting…" over a conversation the reader can see updating describes
+      // the socket's bookkeeping rather than this chat.
+      return state.hydration === 'live' ? strings.chat.subtitle.connected : strings.chat.subtitle.connecting
     default:
       return strings.connection.status.disconnected
   }
@@ -877,12 +892,15 @@ function subtitleFor(state: { status: string; busy: boolean; queued: boolean; ne
 function Banner({
   hydration,
   error,
+  waitingForConnection,
   onRetry,
   onDismiss,
   onOpenSettings
 }: {
-  hydration: ReturnType<typeof useChat>['hydration']
+  hydration: UseChatResult['hydration']
   error: string | null
+  /** The socket is not up yet. Quiet, and with nothing to press: see `useChat`. */
+  waitingForConnection: boolean
   onRetry: () => Promise<void>
   onDismiss: () => void
   /** Only for a refused photo picker: the one failure with a way out. */
@@ -959,6 +977,27 @@ function Banner({
       <View style={{ backgroundColor: theme.colors.surfaceRaised, padding: theme.space.md }}>
         <Text color="textMuted" variant="callout">
           {hydration === 'cached' ? strings.chat.offlineCopy : strings.chat.stale}
+        </Text>
+      </View>
+    )
+  }
+
+  // Last, because a cache paint already explains itself and says more: this is
+  // the empty-screen case, where otherwise nothing at all would be on it.
+  if (waitingForConnection) {
+    return (
+      <View
+        style={{
+          alignItems: 'center',
+          flexDirection: 'row',
+          gap: theme.space.sm,
+          padding: theme.space.md
+        }}
+        testID="chat-waiting-for-connection"
+      >
+        <ActivityIndicator />
+        <Text color="textMuted" variant="callout">
+          {strings.chat.waitingForConnection}
         </Text>
       </View>
     )
