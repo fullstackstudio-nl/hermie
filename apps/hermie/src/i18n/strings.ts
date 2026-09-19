@@ -132,6 +132,38 @@ export const strings = {
     }
   },
 
+  bots: {
+    title: 'Bots',
+    empty: 'This gateway has no bot profiles yet. Create one with `hermes profile create`.',
+    loading: 'Reading the roster…',
+    failed: (message: string) => `The bot list could not be loaded: ${message}`,
+    noPreview: 'No messages yet',
+    running: 'Working',
+    unread: 'New',
+    needsInput: 'Needs input',
+    defaultBot: 'Default'
+  },
+
+  chat: {
+    placeholder: 'Message',
+    send: 'Send',
+    stop: 'Stop',
+    hydrating: 'Loading the conversation…',
+    offlineCopy: 'Showing the last saved copy of this conversation.',
+    stale: 'This conversation lost its connection to the gateway. It reattaches on the next open.',
+    failed: (message: string) => `This conversation could not be opened: ${message}`,
+    empty: 'Nothing has been said in this chat yet.',
+    unknownAuthor: 'Someone else started a turn…',
+    thinking: 'Thinking',
+    toolRunning: 'running',
+    approvalTitle: 'Approval requested',
+    clarifyTitle: 'The bot has a question',
+    answered: (answer: string) => `Answered: ${answer}`,
+    cancelled: 'Withdrawn',
+    subagents: (count: number) => (count === 1 ? '1 subagent running' : `${count} subagents running`),
+    retry: 'Try again'
+  },
+
   settings: {
     title: 'Settings',
     gateway: 'GATEWAY',

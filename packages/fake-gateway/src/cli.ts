@@ -26,7 +26,13 @@ if (values.help) {
       '  --auth none|token|native  authentication mode (default none)',
       '  --token <value>         session token for --auth token',
       '  --close-code <n>        close code used when a WS upgrade fails auth (default 4401)',
-      '  --scenario <file.json>  scripted prompt replies'
+      '  --scenario <file.json>  scripted prompt replies',
+      '',
+      'Prompts steer the built-in scenario: "approve" raises an approval request,',
+      '"delegate" fans out subagent events, anything else streams a reply with a tool call.',
+      '',
+      'Control endpoint (not part of the gateway contract):',
+      '  POST /__fake/inject {profile, user, assistant}   inject a turn somebody else ran'
     ].join('\n')
   )
   process.exit(0)
@@ -57,6 +63,7 @@ const gateway = await startFakeGateway({
 console.log(`fake gateway listening on ${gateway.url} (auth: ${auth})`)
 console.log(`  status     ${gateway.url}/api/status`)
 console.log(`  websocket  ${gateway.wsUrl}`)
+console.log(`  inject     curl -XPOST ${gateway.url}/__fake/inject -d '{"profile":"researcher"}'`)
 
 if (auth === 'token') {
   console.log(`  token      ${gateway.state.token}`)

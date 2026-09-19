@@ -50,5 +50,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   direction from `design/tokens.md`.
 - A connectivity seam (`src/platform/net-info.ts`) so that macOS, where NetInfo has no native module,
   no longer fails at startup.
+- `@hermie/transcript`: the chat engine — one item model that both history rows and live events
+  project onto, a reducer that never filters and never invents an author, stable-id reconciliation,
+  and verbosity as read-time selectors.
+- The chat data layer. `src/store/chats.ts` holds one transcript per bot plus the runtime-session-id
+  map that routes events and server requests to the right chat; `src/store/bots.ts` holds the roster,
+  avatars, running state and the read watermark behind the unread marker; `src/store/settings.ts`
+  holds the verbosity, bot-to-bot and thinking preferences, with one global default and an optional
+  override per chat.
+- A chat controller that owns every round trip a conversation needs: cache paint, `session.resume` on
+  the durable id, history over RPC or — past four hundred rows — over the REST transcript,
+  reconciliation, the in-flight snapshot, and the missed-event replay, in that order. It keeps every
+  opened chat attached so bot-to-bot traffic keeps arriving, debounces `sessions.changed` into one
+  tail reconcile per burst, re-resumes every live chat after a reconnect and refetches only the
+  histories whose message counts moved, and drops the runtime id on `session.reclaimed`.
+- Sending, with the message painted before the round trip and settled against `prompt.submit`'s
+  status; images attached before the prompt that uses them; stop; approvals and clarifications;
+  subagent steer, interrupt and tail; slash completion and execution; and the chat options (YOLO,
+  fast, reasoning effort, model) scoped to the session so the gateway's global configuration is never
+  rewritten behind the user's back.
+- A bots screen and a chat screen wired into both shells, with the bot list as the sidebar on iPad
+  and macOS. Both render plainly for now — the chat UI kit replaces them.
+- `ChatCache`, a SQLite store for the roster and the last two hundred items per chat, so a chat
+  paints before the gateway answers. It downgrades to memory if the database cannot be opened.
+- The fake gateway grew the surface a chat needs: profile assets, the active list, the command
+  catalogue and completion, session configuration, pending approvals, subagent methods and image
+  attachment. Prompts steer it — "approve" raises an approval and parks the turn on it, "delegate"
+  fans out subagent events — and `POST /__fake/inject` injects a turn somebody else ran.
 
 [Unreleased]: https://github.com/fullstackstudio/hermie/compare/main...HEAD

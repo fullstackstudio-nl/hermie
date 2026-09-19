@@ -61,8 +61,12 @@ export interface TranscriptRow {
   row_id?: number
   timestamp?: number
   display_kind?: string | null
+  display_metadata?: Record<string, unknown> | null
   name?: string | null
+  tool_id?: string | null
+  context?: string | null
   args?: Record<string, unknown> | null
+  reasoning?: string | null
 }
 
 interface RingEntry {
@@ -100,6 +104,14 @@ export interface FakeGatewayState {
   sessions: Map<string, FakeSession>
   profiles: ProfileRow[]
   cronJobs: CronJob[]
+  /** Stored ids of the sessions the gateway reports as busy. */
+  runningSessions: Set<string>
+  /** Session-scoped configuration `config.get` / `config.set` read and write. */
+  sessionConfig: Map<string, Record<string, string>>
+  /** Approvals raised and not yet answered, by queue id. */
+  pendingApprovals: Map<string, { session_id: string; payload: Record<string, unknown> }>
+  /** Images accepted through `image.attach_bytes`, newest last. */
+  attachedImages: { session_id: string; filename: string; bytes: number }[]
 }
 
 interface ProfileRow {
@@ -107,6 +119,10 @@ interface ProfileRow {
   path: string
   description: string
   display_name: string
+  model: string
+  provider: string
+  has_avatar: boolean
+  ui_meta_revisions: Record<string, number>
   is_default?: boolean
   canonical_session?: {
     id: string
@@ -210,8 +226,73 @@ function escapeHtml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
+/**
+ * The delivery command a `message_agent` hand-off spawns. The transcript engine
+ * recognises bot-to-bot traffic from this string, so it is copied verbatim from
+ * `tools/bot_mode_dm.py`.
+ */
+const DM_DELIVERY_COMMAND =
+  '/usr/bin/python3 /opt/hermes/tools/bot_mode_dm.py --run-delivery query-file ' +
+  '/root/.hermes/dm/2f9c.json hermes -p writer chat -c "Bot Chat" -Q -q @/root/.hermes/dm/2f9c.json'
+
+const DM_REPLY_PROCESS_TEXT = [
+  '[IMPORTANT: Background process proc-2f9c completed (exit code 0).',
+  `Command: ${DM_DELIVERY_COMMAND}`,
+  'Output:',
+  'Message from 🤖 Writer (@writer): Draft is ready, I pushed it to the shared folder.]'
+].join('\n')
+
+/** A 1×1 transparent PNG: enough for an avatar round trip, not enough to matter. */
+const AVATAR_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+
+/**
+ * A canonical Bot Chat with enough shape to exercise the whole engine: a tool
+ * row, an outbound `message_agent` dispatch and the `process_complete` row that
+ * carries the teammate's answer back.
+ */
 function makeSession(profile: string, title: string): FakeSession {
   const storedId = `stored-${profile}-${randomUUID().slice(0, 8)}`
+  const base = nowSeconds() - 600
+
+  const messages: TranscriptRow[] = [
+    { role: 'user', text: 'Introduce yourself in one line.', row_id: 1, timestamp: base },
+    {
+      role: 'assistant',
+      text: `I am ${profile}, at your service.`,
+      reasoning: 'Keep it to one line.',
+      row_id: 2,
+      timestamp: base + 1
+    },
+    {
+      role: 'tool',
+      name: 'read_file',
+      tool_id: `call_read_${profile}`,
+      context: 'read_file(SOUL.md)',
+      args: { path: 'SOUL.md' }
+    }
+  ]
+
+  if (profile === 'researcher') {
+    messages.push(
+      {
+        role: 'tool',
+        name: 'message_agent',
+        tool_id: 'call_dm_1',
+        context: 'message_agent(writer)',
+        args: { target: '@writer', message: 'Can you draft the announcement?' }
+      },
+      {
+        role: 'user',
+        text: DM_REPLY_PROCESS_TEXT,
+        row_id: 3,
+        timestamp: base + 60,
+        display_kind: 'process_complete',
+        display_metadata: { display_text: 'Background Process Finished: bot_mode_dm.py' }
+      },
+      { role: 'assistant', text: 'Thanks — I will fold that in.', row_id: 4, timestamp: base + 61 }
+    )
+  }
 
   return {
     id: `runtime-${randomUUID().slice(0, 8)}`,
@@ -220,15 +301,7 @@ function makeSession(profile: string, title: string): FakeSession {
     title,
     seq: 0,
     ring: [],
-    messages: [
-      { role: 'user', text: 'Introduce yourself in one line.', row_id: 1, timestamp: nowSeconds() - 600 },
-      {
-        role: 'assistant',
-        text: `I am ${profile}, at your service.`,
-        row_id: 2,
-        timestamp: nowSeconds() - 599
-      }
-    ]
+    messages
   }
 }
 
@@ -245,7 +318,11 @@ function initialState(options: FakeGatewayOptions): FakeGatewayState {
     name: session.profile,
     path: `/root/.hermes/profiles/${session.profile}`,
     description,
-    display_name: session.profile,
+    display_name: session.profile[0]?.toUpperCase() + session.profile.slice(1),
+    model: 'example-provider/example-model',
+    provider: 'example-provider',
+    has_avatar: true,
+    ui_meta_revisions: { avatar: 1 },
     canonical_session: {
       id: session.storedId,
       resolved_id: session.storedId,
@@ -276,6 +353,10 @@ function initialState(options: FakeGatewayOptions): FakeGatewayState {
     hangMethods: new Set<string>(),
     sessions,
     profiles: [profileRow(researcher, 'Finds things out.'), profileRow(writer, 'Writes things down.')],
+    runningSessions: new Set<string>(),
+    sessionConfig: new Map<string, Record<string, string>>(),
+    pendingApprovals: new Map<string, { session_id: string; payload: Record<string, unknown> }>(),
+    attachedImages: [],
     cronJobs: [
       {
         job_id: 'job-heartbeat',
@@ -493,6 +574,32 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
 
       refreshTokens.delete(token)
       json(res, 200, issueTokens(known.provider, known.userId))
+
+      return
+    }
+
+    if (path === '/__fake/inject' && method === 'POST') {
+      // A control surface, never part of the gateway contract: it fakes a turn
+      // somebody else ran — a teammate bot, a cron delivery, the same chat open
+      // on a desktop — so a client can be checked against a foreign turn it
+      // never submitted.
+      const body = await readBody(req)
+      const profile = String(body.profile ?? 'researcher')
+      const session = [...state.sessions.values()].find(entry => entry.profile === profile)
+
+      if (!session) {
+        json(res, 404, { detail: `No session for profile ${profile}` })
+
+        return
+      }
+
+      injectForeignTurn(session, {
+        user: String(body.user ?? 'Message from 🤖 Writer (@writer): the draft is ready.'),
+        assistant: String(body.assistant ?? 'Noted — I will fold that in.'),
+        stream: body.stream !== false
+      })
+
+      json(res, 200, { injected: true, session_id: session.id, stored_session_id: session.storedId })
 
       return
     }
@@ -990,23 +1097,195 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
         return { status: 'streaming' }
       }
 
-      case 'session.interrupt':
-        return { status: 'interrupted', interrupted: true }
+      case 'session.interrupt': {
+        const session = resolveSession(String(params.session_id ?? ''))
 
-      case 'session.active_list':
-        return { sessions: [] }
+        if (session) {
+          state.runningSessions.delete(session.storedId)
+          publish('message.complete', session.storedId, { text: '', status: 'interrupted' })
+        }
+
+        return { status: 'interrupted', interrupted: true }
+      }
+
+      case 'session.active_list': {
+        const profile = typeof params.profile === 'string' ? params.profile : null
+        const sessions = [...state.sessions.values()]
+          .filter(session => (profile ? session.profile === profile : true))
+          .filter(session => state.runningSessions.has(session.storedId))
+          .map(session => ({
+            current: false,
+            id: session.id,
+            last_active: nowSeconds(),
+            message_count: session.messages.length,
+            model: 'example-provider/example-model',
+            preview: session.messages[session.messages.length - 1]?.text ?? '',
+            session_key: session.storedId,
+            started_at: nowSeconds() - 600,
+            status: 'working',
+            title: session.title
+          }))
+
+        return { sessions }
+      }
 
       case 'cron.manage':
         return cronManage(params)
 
-      case 'config.get':
-        return { value: 'verbose', tool_progress: 'verbose' }
+      case 'profiles.get_asset': {
+        const name = String(params.name ?? '')
+        const profile = state.profiles.find(entry => entry.name === name)
+
+        if (!profile?.has_avatar) {
+          return { found: false }
+        }
+
+        return {
+          found: true,
+          mime: 'image/png',
+          size: 68,
+          data: `data:image/png;base64,${AVATAR_PNG_BASE64}`
+        }
+      }
+
+      case 'commands.catalog':
+        return {
+          pairs: [
+            ['/model', 'Switch the model'],
+            ['/reasoning', 'Set the reasoning effort'],
+            ['/status', 'Show the session status']
+          ],
+          commands: {
+            model: { argument_mode: 'required' },
+            reasoning: { argument_mode: 'required' },
+            status: { argument_mode: 'none' }
+          },
+          skills: { 'release-notes': { description: 'Draft release notes' } },
+          skill_count: 1
+        }
+
+      case 'complete.slash': {
+        const text = String(params.text ?? '')
+        const all = [
+          { text: '/model', display: '/model', meta: 'Switch the model', kind: 'command' },
+          { text: '/reasoning', display: '/reasoning', meta: 'Set the reasoning effort', kind: 'command' },
+          { text: '/status', display: '/status', meta: 'Show the session status', kind: 'command' },
+          { text: '/release-notes', display: '/release-notes', meta: 'Draft release notes', kind: 'skill' }
+        ]
+
+        return { items: all.filter(item => item.text.startsWith(text)), replace_from: 0 }
+      }
+
+      case 'slash.exec': {
+        const command = String(params.command ?? '')
+
+        return { output: `${command} is not a real command on a fake gateway, but it ran.` }
+      }
+
+      case 'config.get': {
+        const key = String(params.key ?? 'verbose')
+        const sessionId = String(params.session_id ?? '')
+        const stored = state.sessionConfig.get(resolveSession(sessionId)?.storedId ?? sessionId) ?? {}
+
+        if (key === 'verbose') {
+          return { value: 'verbose', tool_progress: 'verbose' }
+        }
+
+        return { value: stored[key] ?? '' }
+      }
+
+      case 'config.set': {
+        const key = String(params.key ?? '')
+        const value = typeof params.value === 'string' ? params.value : String(params.value ?? '')
+        const session = resolveSession(String(params.session_id ?? ''))
+
+        if (key === 'model' && value.includes('expensive') && params.confirm_expensive_model !== true) {
+          return { key, value, confirm_required: true, confirm_message: `${value} is an expensive model. Continue?` }
+        }
+
+        if (session) {
+          const config = { ...(state.sessionConfig.get(session.storedId) ?? {}), [key]: value }
+          state.sessionConfig.set(session.storedId, config)
+          publish('session.info', session.storedId, sessionInfo(session))
+
+          return {
+            key,
+            value,
+            scope: typeof params.scope === 'string' ? params.scope : 'session',
+            info: sessionInfo(session)
+          }
+        }
+
+        return { key, value }
+      }
+
+      case 'model.options':
+        return {
+          providers: [
+            {
+              name: 'example-provider',
+              models: [{ id: 'example-provider/example-model' }, { id: 'example-provider/expensive-model' }]
+            }
+          ],
+          model: 'example-provider/example-model',
+          provider: 'example-provider'
+        }
+
+      case 'image.attach_bytes': {
+        const base64 = String(params.content_base64 ?? params.data ?? '')
+        state.attachedImages.push({
+          session_id: String(params.session_id ?? ''),
+          filename: String(params.filename ?? 'image.png'),
+          bytes: Math.floor((base64.length * 3) / 4)
+        })
+
+        return { attached: true, name: String(params.filename ?? 'image.png'), width: 1, height: 1, count: 1 }
+      }
 
       case 'approval.received':
         return { acknowledged: true }
 
-      case 'approval.respond':
-        return { resolved: 1 }
+      case 'approval.pending': {
+        const session = resolveSession(String(params.session_id ?? ''))
+        const approvals = [...state.pendingApprovals.values()]
+          .filter(entry => !session || entry.session_id === session.storedId)
+          .map(entry => entry.payload)
+
+        return { approvals }
+      }
+
+      case 'approval.respond': {
+        const requestId = typeof params.request_id === 'string' ? params.request_id : ''
+
+        if (params.all === true) {
+          const resolved = state.pendingApprovals.size
+          state.pendingApprovals.clear()
+
+          return { resolved }
+        }
+
+        return { resolved: state.pendingApprovals.delete(requestId) ? 1 : 0 }
+      }
+
+      case 'clarify.lock':
+        return { status: 'ok', remaining: [] }
+
+      case 'subagent.list':
+        return { subagents: [], delegations: [] }
+
+      case 'subagent.steer':
+        return { status: 'queued', subagent_id: String(params.subagent_id ?? ''), text: String(params.text ?? '') }
+
+      case 'subagent.interrupt':
+        return { found: true, subagent_id: String(params.subagent_id ?? '') }
+
+      case 'subagent.tail':
+        return {
+          subagent_id: String(params.subagent_id ?? ''),
+          available: true,
+          text: 'child transcript tail',
+          truncated: false
+        }
 
       default:
         throw new Error(`Unknown method: ${method}`)
@@ -1014,19 +1293,21 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
   }
 
   function sessionInfo(session: FakeSession): Record<string, unknown> {
+    const config = state.sessionConfig.get(session.storedId) ?? {}
+
     return {
-      model: 'example-provider/example-model',
-      provider: 'anthropic',
-      reasoning_effort: 'medium',
-      fast: false,
-      yolo: false,
+      model: config.model ?? 'example-provider/example-model',
+      provider: 'example-provider',
+      reasoning_effort: config.reasoning ?? 'medium',
+      fast: config.fast === 'fast',
+      yolo: config.yolo === 'on' || config.yolo === '1',
       approval_mode: 'ask',
       title: session.title,
       profile_name: session.profile,
       stored_session_id: session.storedId,
       desktop_contract: 7,
       version,
-      running: false
+      running: state.runningSessions.has(session.storedId)
     }
   }
 
@@ -1078,6 +1359,14 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     return { success: true, job, jobs: state.cronJobs, gateway_running: true }
   }
 
+  /**
+   * Answer one prompt.
+   *
+   * Three keywords steer it, because those are the three paths a client has to
+   * be able to survive: a prompt containing "approve" raises a server→client
+   * approval and parks the turn until it is answered, "delegate" fans out
+   * subagent events, and anything else streams a reply with one tool call.
+   */
   function streamReply(session: FakeSession, prompt: string): void {
     const reply =
       scenario.replies?.find(entry => !entry.match || prompt.includes(entry.match)) ??
@@ -1088,6 +1377,7 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     const sid = session.storedId
     let at = streamDelayMs
 
+    state.runningSessions.add(sid)
     session.messages.push({
       role: 'user',
       text: prompt,
@@ -1130,8 +1420,12 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       )
     }
 
-    at += streamDelayMs
-    later(() => {
+    if (/delegate/i.test(prompt)) {
+      at = streamSubagents(sid, at)
+    }
+
+    const finish = () => {
+      state.runningSessions.delete(sid)
       session.messages.push({ role: 'assistant', text, row_id: session.messages.length + 1, timestamp: nowSeconds() })
       publish('message.complete', sid, {
         text,
@@ -1139,7 +1433,122 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
         usage: { input: 12, output: 34, total: 46 }
       })
       publish('sessions.changed', undefined, {})
-    }, at)
+    }
+
+    if (/approve/i.test(prompt)) {
+      // The turn parks on the question, exactly as the real approval queue does:
+      // nothing completes until a client answers.
+      at += streamDelayMs
+      later(() => void raiseApproval(session).then(finish), at)
+
+      return
+    }
+
+    at += streamDelayMs
+    later(finish, at)
+  }
+
+  /** One `delegate_task` fan-out, start to finish. */
+  function streamSubagents(sid: string, startAt: number): number {
+    const subagentId = `sub-${randomUUID().slice(0, 6)}`
+    const delegationId = `del-${randomUUID().slice(0, 6)}`
+    const common = {
+      subagent_id: subagentId,
+      delegation_id: delegationId,
+      parent_id: null,
+      goal: 'Audit the dependencies',
+      task_index: 0,
+      task_count: 1,
+      depth: 1,
+      model: 'example-provider/example-model'
+    }
+    let at = startAt
+
+    for (const [type, payload] of [
+      ['subagent.spawn_requested', {}],
+      ['subagent.start', { status: 'running' }],
+      ['subagent.thinking', { text: 'Reading the lockfile.' }],
+      ['subagent.tool', { tool_name: 'read_file', text: 'package-lock.json' }],
+      ['subagent.progress', { text: 'Two packages behind.' }],
+      ['subagent.complete', { status: 'completed', summary: 'Two packages behind; no advisories.' }]
+    ] as [string, Record<string, unknown>][]) {
+      at += streamDelayMs
+      later(() => publish(type, sid, { ...common, ...payload }), at)
+    }
+
+    return at
+  }
+
+  /** Raise an approval and wait for the answer, the way the queue does. */
+  async function raiseApproval(session: FakeSession): Promise<void> {
+    const requestId = `appr-${randomUUID().slice(0, 8)}`
+    const payload = {
+      request_id: requestId,
+      command: 'rm -rf ./build',
+      description: 'Remove the build directory',
+      tool_name: 'run_command',
+      choices: ['once', 'session', 'always', 'deny'],
+      allow_permanent: true,
+      allow_session: true
+    }
+
+    state.pendingApprovals.set(requestId, { session_id: session.storedId, payload })
+
+    try {
+      await sendServerRequest('approval', session.id, payload)
+    } catch {
+      // A client that declines the request leaves the queue entry withdrawn.
+    } finally {
+      state.pendingApprovals.delete(requestId)
+    }
+  }
+
+  /**
+   * A turn this client never submitted: someone else prompted the same session.
+   * The rows land in history and the socket sees the same event sequence a live
+   * turn produces, so a foreign-turn placeholder has something to reconcile
+   * against.
+   */
+  function injectForeignTurn(session: FakeSession, turn: { user: string; assistant: string; stream: boolean }): void {
+    const sid = session.storedId
+
+    session.messages.push({
+      role: 'user',
+      text: turn.user,
+      row_id: session.messages.length + 1,
+      timestamp: nowSeconds()
+    })
+
+    if (turn.stream) {
+      publish('message.start', sid, {})
+      publish('message.delta', sid, { text: turn.assistant })
+    }
+
+    session.messages.push({
+      role: 'assistant',
+      text: turn.assistant,
+      row_id: session.messages.length + 1,
+      timestamp: nowSeconds()
+    })
+
+    if (turn.stream) {
+      publish('message.complete', sid, { text: turn.assistant, status: 'ok' })
+    }
+
+    publish('sessions.changed', undefined, {})
+  }
+
+  /** Send one server→client request and resolve with the client's answer. */
+  function sendServerRequest(method: string, sessionId: string, params: Record<string, unknown>): Promise<unknown> {
+    const id = `srq-${++serverRequestSequence}`
+
+    return new Promise<unknown>((resolve, reject) => {
+      pendingServerRequests.set(id, { resolve, reject })
+
+      for (const socket of sockets) {
+        send(socket, { jsonrpc: '2.0', id, method, params: { session_id: sessionId, ...params } })
+      }
+    })
   }
 
   await new Promise<void>(resolve => {
@@ -1159,15 +1568,10 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       publish(type, emitOptions.sessionId, emitOptions.payload)
     },
     requestApproval(params) {
-      const id = `srq-${++serverRequestSequence}`
+      const sessionId = typeof params.session_id === 'string' ? params.session_id : ''
+      const { session_id: _ignored, ...rest } = params
 
-      return new Promise<unknown>((resolve, reject) => {
-        pendingServerRequests.set(id, { resolve, reject })
-
-        for (const socket of sockets) {
-          send(socket, { jsonrpc: '2.0', id, method: 'approval', params })
-        }
-      })
+      return sendServerRequest('approval', sessionId, rest)
     },
     closeSockets(code, reason = '') {
       for (const socket of sockets) {

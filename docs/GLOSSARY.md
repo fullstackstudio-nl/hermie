@@ -168,6 +168,38 @@ from the desktop app, from the terminal, by a cron job, or by another bot. Hermi
 of the user message that caused it, so it inserts a placeholder and reconciles the tail of the
 transcript against the server instead of guessing.
 
+## Live chat
+
+A Bot Chat that Hermie has resumed and kept attached. Hermie does not detach when you leave the
+screen: a bot only streams a teammate's message into a chat that is resumed, so closing on navigation
+would turn bot-to-bot traffic into a list of messages you have to go looking for. A live chat keeps
+receiving events, keeps its place in the runtime-id map, and is re-resumed after a reconnect.
+
+## Item origin
+
+Where a transcript item came from, and therefore what reconciliation may do to it: `history` for a
+persisted row, `live` for something that arrived on the socket, `optimistic` for a message submitted
+locally and not yet echoed back, `inflight` for the tail rebuilt from a resume snapshot, and
+`foreign` for the placeholder standing in for a turn somebody else started. Only settled items reach
+the chat cache — an unanswered question and an unechoed submit both describe a moment, not the
+conversation.
+
+## Chat cache
+
+The on-device copy of the roster and of the last couple of hundred items per chat, in SQLite. It
+exists so a chat is on screen before the gateway has answered: the cached items are painted first and
+then reconciled against the live transcript, which keeps item identifiers stable instead of
+remounting the thread under you. It is written when a turn completes, when a chat is left and when
+the app goes to the background — never mid-stream.
+
+## Approval queue
+
+The gateway-side queue that owns an approval's lifetime: its timeout, its coalescing, and the fact
+that answering one on any surface resolves it everywhere. Hermie acknowledges a card with
+`approval.received` when it appears, which only marks it as seen, and answers the server request
+itself when you choose. A card rebuilt after a reconnect has no request to answer, so that one goes
+back as `approval.respond` against the queue entry's own identifier.
+
 ## Replay epoch
 
 An identifier the gateway sends on connect, marking the generation of its event log. It lets a

@@ -2,14 +2,16 @@ import { NavigationContainer, useNavigation } from '@react-navigation/native'
 import { createNativeStackNavigator, type NativeStackNavigationProp } from '@react-navigation/native-stack'
 import { Pressable } from 'react-native'
 
-import { ChatScreen, ChatsScreen } from '../features/chats'
+import { BotsScreen } from '../features/bots'
+import { ChatScreen } from '../features/chats'
 import { CronScreen } from '../features/cron'
 import { SettingsScreen } from '../features/settings'
+import { useBotsStore } from '../store'
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
 
 export type CompactStackParamList = {
-  Chats: undefined
+  Bots: undefined
   Chat: { bot: string }
   Cron: undefined
   Settings: undefined
@@ -30,6 +32,23 @@ function SettingsLink() {
   )
 }
 
+function BotsRoute() {
+  const navigation = useNavigation<NativeStackNavigationProp<CompactStackParamList>>()
+
+  return <BotsScreen onOpenBot={bot => navigation.navigate('Chat', { bot: bot.name })} />
+}
+
+/** The header shows the bot's display name, which is not always its profile name. */
+function useChatTitle(botName: string | undefined): string {
+  return useBotsStore(state => (botName ? (state.byName[botName]?.displayName ?? botName) : 'Chat'))
+}
+
+function ChatTitle({ bot }: { bot: string | undefined }) {
+  const title = useChatTitle(bot)
+
+  return <Text variant="heading">{title}</Text>
+}
+
 export function CompactShell() {
   const theme = useTheme()
 
@@ -46,14 +65,17 @@ export function CompactShell() {
         }}
       >
         <Stack.Screen
-          name="Chats"
-          component={ChatsScreen}
+          name="Bots"
+          component={BotsRoute}
           options={{ title: 'Bots', headerRight: () => <SettingsLink /> }}
         />
         <Stack.Screen
           name="Chat"
           component={ChatScreen}
-          options={({ route }) => ({ title: route.params?.bot ?? 'Chat' })}
+          options={({ route }) => ({
+            title: route.params?.bot ?? 'Chat',
+            headerTitle: () => <ChatTitle bot={route.params?.bot} />
+          })}
         />
         <Stack.Screen name="Cron" component={CronScreen} options={{ title: 'Routines' }} />
         <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />

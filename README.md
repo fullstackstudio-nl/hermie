@@ -12,11 +12,18 @@ Website: [hermie.dev](https://hermie.dev)
 
 ## Status
 
-Early development. The project skeleton, the shells and the platform abstractions are in place, and
-so is the transport: the vendored protocol sources, the connection state machine with both
-authentication flows, and a gateway stand-in to develop against. Setup and authentication work end to
-end — you can point the app at a gateway, sign in, and it stays connected. The chat engine is next.
-See [CHANGELOG.md](CHANGELOG.md).
+Early development, and the first end-to-end path is up: point the app at a gateway, sign in, and the
+bots on it appear as chats you can open and talk to. Underneath that are the vendored protocol
+sources, the connection state machine with both authentication flows, the transcript engine, and the
+data layer that keeps every opened chat attached so bot-to-bot traffic arrives as it happens.
+
+What works: setup and sign-in, the bot roster, opening a bot's canonical chat with its history,
+sending and watching the reply stream with its tool calls, answering approvals and clarifications,
+seeing delegation activity, and surviving a reconnect or a turn somebody else started elsewhere.
+
+What does not yet: the chat is drawn as plain rows. Bubbles, markdown, tool cards and the bottom
+sheets are being built alongside this and land next, as does the routines screen. See
+[CHANGELOG.md](CHANGELOG.md).
 
 ## What you need to run it
 
@@ -89,8 +96,17 @@ npm run macos           # macOS
 `android/` are not committed. `macos/` is committed and maintained by hand — see
 [CONTRIBUTING.md](CONTRIBUTING.md) before changing it.
 
-You do not need a real gateway to start. `npm run fake-gateway` stands one up on port 9119, and
-Settings → Connection test in the app points a connection at it and reports what happens.
+You do not need a real gateway to start:
+
+```sh
+npm run fake-gateway -- --auth token --token demo
+```
+
+That stands a gateway up on port 9119 with two bots, each with a canonical chat, history that
+includes a tool call and a bot-to-bot exchange, and a streaming reply for anything you send. A prompt
+containing "approve" raises an approval request; one containing "delegate" fans out subagent
+activity; and `POST /__fake/inject` injects a turn as if somebody else had prompted the same bot
+somewhere else.
 
 The repository is an npm workspace:
 
@@ -98,6 +114,7 @@ The repository is an npm workspace:
 apps/hermie              the Expo app, including the macOS project
 packages/hermes-shared   protocol sources vendored from Hermes Agent
 packages/gateway-client  connection state machine, credentials, PKCE — no React
+packages/transcript      the chat engine: item model, reducer, reconciliation, selectors
 packages/fake-gateway    a gateway stand-in for tests and offline development
 docs/                    architecture decisions, glossary, platform notes, runbooks
 ```

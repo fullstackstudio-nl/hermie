@@ -24,6 +24,7 @@
   },
   "devDependencies": {
     "@hermie/fake-gateway": "*",
+    "@hermie/transcript": "*",
     "@types/ws": "^8.5.13",
     "ws": "^8.18.0"
   }

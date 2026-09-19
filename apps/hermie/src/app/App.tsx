@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useMemo } from 'react'
 import { ActivityIndicator, View } from 'react-native'
 
+import { ChatRuntimeProvider } from '../features/chats'
 import { OnboardingNavigator } from '../features/onboarding'
 import { GatewayProvider, ReauthBanner, useGateway } from '../gateway'
 import { strings } from '../i18n/strings'
@@ -51,11 +52,16 @@ function Root() {
     return <OnboardingNavigator resumeConfig={resumeConfig} onComplete={reload} />
   }
 
+  // The chat runtime sits inside the `connected` branch on purpose: it owns the
+  // subscriptions to the live connection, and there is no connection to
+  // subscribe to until the gateway is configured.
   return (
-    <View style={{ flex: 1 }}>
-      <ReauthBanner />
-      <Shell />
-    </View>
+    <ChatRuntimeProvider>
+      <View style={{ flex: 1 }}>
+        <ReauthBanner />
+        <Shell />
+      </View>
+    </ChatRuntimeProvider>
   )
 }
 
