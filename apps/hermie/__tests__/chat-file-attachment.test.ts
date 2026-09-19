@@ -144,7 +144,7 @@ it('refuses the upload when the session never reported a working directory', asy
   expect(fetchCalls).toHaveLength(0)
 })
 
-it('submits the prompt with the reference appended, and paints the same text', async () => {
+it('submits the prompt with the reference appended, and paints what the row will say', async () => {
   const { gateway, controller } = setup()
   await controller.openChat(RESEARCHER)
 
@@ -161,13 +161,15 @@ it('submits the prompt with the reference appended, and paints the same text', a
     text: `Summarise this\n\n@file:${uploaded.path}`
   })
 
-  // The painted bubble has to be byte-identical to the submit: the gateway
-  // echoes the turn back, and a mismatch is a second bubble.
+  // The painted bubble has to match the row's PROJECTION, not the submit. The
+  // gateway stores the body verbatim and `stripUserText` lifts the directive out
+  // of the text into `attachments` on the way back, so a bubble painted with the
+  // directive still in its text pairs with nothing and shows up twice.
   const items = Object.values(useChatsStore.getState().chats.researcher?.items ?? {})
   const user = items.filter(entry => entry.kind === 'user')
 
   expect(user).toHaveLength(1)
-  expect(JSON.stringify(user[0])).toContain(`@file:${uploaded.path}`)
+  expect(user[0]).toMatchObject({ text: 'Summarise this', attachments: ['report.csv'] })
 })
 
 it('sends nothing at all when the upload failed', async () => {
