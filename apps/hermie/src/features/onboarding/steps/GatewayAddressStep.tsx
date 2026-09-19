@@ -4,7 +4,7 @@ import { Pressable, View } from 'react-native'
 
 import { describeProbeError } from '../../../gateway/errors'
 import { strings } from '../../../i18n/strings'
-import { InsetButtonRow, InsetGroup, InsetRow, Text, TextField } from '../../../ui/primitives'
+import { InsetButtonRow, InsetGroup, InsetRow, SecretField, Text, TextField } from '../../../ui/primitives'
 import { useTheme } from '../../../ui/theme'
 import { headerError, headerRecord, newHeaderRow, type OnboardingDraft } from '../draft'
 
@@ -148,13 +148,14 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
                   placeholder="CF-Access-Client-Id"
                   {...(headerError(row) ? { error: headerError(row) } : {})}
                 />
-                <TextField
+                <SecretField
                   label={strings.onboarding.address.headerValue}
                   value={row.value}
                   onChangeText={value => setHeader(row.id, { value })}
                   autoCapitalize="none"
                   autoCorrect={false}
-                  secureTextEntry
+                  concealLabel={strings.onboarding.address.hideValue}
+                  revealLabel={strings.onboarding.address.showValue}
                 />
                 <Pressable
                   accessibilityRole="button"

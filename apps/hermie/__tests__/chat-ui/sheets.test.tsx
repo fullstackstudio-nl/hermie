@@ -83,38 +83,38 @@ describe('ApprovalSheet', () => {
   it('renders exactly the server choices, in the server order', () => {
     renderSheet()
 
-    expect(screen.getByTestId('approval-choice-allow')).toBeTruthy()
-    expect(screen.getByTestId('approval-choice-allow_session')).toBeTruthy()
-    expect(screen.getByTestId('approval-choice-allow_permanent')).toBeTruthy()
+    expect(screen.getByTestId('approval-choice-once')).toBeTruthy()
+    expect(screen.getByTestId('approval-choice-session')).toBeTruthy()
+    expect(screen.getByTestId('approval-choice-always')).toBeTruthy()
     expect(screen.getByTestId('approval-choice-deny')).toBeTruthy()
   })
 
   it('offers no choice the server did not send', () => {
-    renderSheet({ item: { ...approvalItem, choices: ['allow', 'deny'] } })
+    renderSheet({ item: { ...approvalItem, choices: ['once', 'deny'] } })
 
-    expect(screen.queryByTestId('approval-choice-allow_permanent')).toBeNull()
-    expect(screen.queryByTestId('approval-choice-allow_session')).toBeNull()
+    expect(screen.queryByTestId('approval-choice-always')).toBeNull()
+    expect(screen.queryByTestId('approval-choice-session')).toBeNull()
   })
 
   it('ignores a tap inside the guard window and accepts one after it', () => {
     const { onRespond } = renderSheet()
 
-    fireEvent.press(screen.getByTestId('approval-choice-allow'))
+    fireEvent.press(screen.getByTestId('approval-choice-once'))
     expect(onRespond).not.toHaveBeenCalled()
 
     act(() => {
       jest.advanceTimersByTime(400)
     })
 
-    fireEvent.press(screen.getByTestId('approval-choice-allow'))
-    expect(onRespond).toHaveBeenCalledWith('allow')
+    fireEvent.press(screen.getByTestId('approval-choice-once'))
+    expect(onRespond).toHaveBeenCalledWith('once')
   })
 
   it('passes the choice through verbatim', () => {
     const { onRespond } = renderSheet({ tapGuardMs: 0 })
 
-    fireEvent.press(screen.getByTestId('approval-choice-allow_permanent'))
-    expect(onRespond).toHaveBeenCalledWith('allow_permanent')
+    fireEvent.press(screen.getByTestId('approval-choice-always'))
+    expect(onRespond).toHaveBeenCalledWith('always')
   })
 
   it('shows the command and the tool that asked', () => {
@@ -128,7 +128,7 @@ describe('ApprovalSheet', () => {
     renderSheet({ item: { ...approvalItem, cancelReason: 'resolved', state: 'cancelled' } })
 
     expect(screen.getByText('Answered elsewhere')).toBeTruthy()
-    expect(screen.queryByTestId('approval-choice-allow')).toBeNull()
+    expect(screen.queryByTestId('approval-choice-once')).toBeNull()
   })
 
   it('explains a request that timed out', () => {
@@ -138,7 +138,7 @@ describe('ApprovalSheet', () => {
   })
 
   it('reports the answer once it has one', () => {
-    renderSheet({ item: { ...approvalItem, answer: 'allow', state: 'answered' } })
+    renderSheet({ item: { ...approvalItem, answer: 'once', state: 'answered' } })
 
     expect(screen.getByText('Answered: Allow once')).toBeTruthy()
   })
@@ -230,7 +230,7 @@ describe('ChatOptionsSheet', () => {
       onChangeVerbosity: jest.fn(),
       onChangeYolo: jest.fn(),
       onClose: jest.fn(),
-      onConfirmExpensiveModel: jest.fn()
+      onPickExpensiveModel: jest.fn()
     }
 
     renderScreen(
@@ -276,14 +276,46 @@ describe('ChatOptionsSheet', () => {
     expect(handlers.onChangeReasoningEffort).toHaveBeenCalledWith('low')
   })
 
-  it('routes an expensive model through the confirm callback', () => {
+  it('hands an expensive model to the caller instead of switching to it', () => {
     const handlers = renderSheet()
 
     fireEvent.press(screen.getByTestId('option-model'))
     fireEvent.press(screen.getByTestId('picker-option-example-model-large'))
 
-    expect(handlers.onConfirmExpensiveModel).toHaveBeenCalledWith('example-model-large')
+    expect(handlers.onPickExpensiveModel).toHaveBeenCalledWith('example-model-large')
     expect(handlers.onChangeModel).not.toHaveBeenCalled()
+  })
+
+  it('offers a reset only when the chat pins its own view', () => {
+    const onResetView = jest.fn()
+
+    renderSheet({ onResetView, viewOverridden: false })
+    expect(screen.queryByTestId('option-use-default')).toBeNull()
+
+    renderSheet({ onResetView, viewOverridden: true })
+    fireEvent.press(screen.getByTestId('option-use-default'))
+
+    expect(onResetView).toHaveBeenCalled()
+  })
+
+  it('asks for confirmation before an expensive model the gateway flagged', () => {
+    const onConfirmExpensiveModel = jest.fn()
+    const onCancelExpensiveModel = jest.fn()
+
+    renderSheet({
+      confirmMessage: 'That model bills at four times the rate.',
+      onCancelExpensiveModel,
+      onConfirmExpensiveModel,
+      pendingExpensiveModel: 'example-model-large'
+    })
+
+    expect(screen.getByText('That model bills at four times the rate.')).toBeTruthy()
+
+    fireEvent.press(screen.getByTestId('option-model-confirm'))
+    expect(onConfirmExpensiveModel).toHaveBeenCalled()
+
+    fireEvent.press(screen.getByTestId('option-model-cancel'))
+    expect(onCancelExpensiveModel).toHaveBeenCalled()
   })
 
   it('filters the model list', () => {

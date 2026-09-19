@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { Pressable, View } from 'react-native'
 
 import { strings } from '../../../i18n/strings'
-import { Button, InsetGroup, InsetRow, Text, TextField } from '../../../ui/primitives'
+import { Button, InsetGroup, InsetRow, SecretField, Text } from '../../../ui/primitives'
 import { useTheme } from '../../../ui/theme'
 import { authModeOf, headerRecord, type OnboardingDraft } from '../draft'
 import { NativeSignInWebView } from '../NativeSignInWebView'
@@ -50,13 +50,14 @@ export function SignInStep({ draft, update }: SignInStepProps) {
       {authMode === 'session_token' ? (
         <InsetGroup header={strings.onboarding.signIn.tokenLabel} footer={strings.onboarding.signIn.tokenHelp}>
           <InsetRow>
-            <TextField
+            <SecretField
               testID="session-token"
               value={draft.sessionToken}
               onChangeText={sessionToken => update({ sessionToken })}
               autoCapitalize="none"
               autoCorrect={false}
-              secureTextEntry
+              concealLabel={strings.onboarding.signIn.hideToken}
+              revealLabel={strings.onboarding.signIn.showToken}
               placeholder={strings.onboarding.signIn.tokenPlaceholder}
               accessibilityLabel={strings.onboarding.signIn.tokenLabel}
             />

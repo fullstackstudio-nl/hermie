@@ -215,6 +215,54 @@ describe('response_previewed', () => {
   })
 })
 
+describe('a completion that follows a tool call', () => {
+  // The tool boundary seals the streaming bubble, so the completion arrives
+  // with nothing live to settle onto. Painting it fresh renders the reply
+  // twice while the gateway stored one row (upstream #63679).
+  const toolTurn = (final: string) =>
+    [
+      { type: 'message.start', seq: 1 },
+      { type: 'message.delta', seq: 2, payload: { text: 'Looking that up for you.' } },
+      { type: 'tool.start', seq: 3, payload: { tool_id: 't1', name: 'read_file', args: { path: 'README.md' } } },
+      {
+        type: 'tool.complete',
+        seq: 4,
+        payload: { tool_id: 't1', name: 'read_file', args: {}, duration_s: 0.2, result: '# Hermie' }
+      },
+      { type: 'message.complete', seq: 5, payload: { text: final, status: 'ok' } }
+    ] as TranscriptEvent[]
+
+  it('settles an identical final onto the sealed bubble instead of repeating it', () => {
+    const state = run(toolTurn('Looking that up for you.'))
+    const assistants = list(state).filter(item => item.kind === 'assistant') as AssistantItem[]
+
+    expect(assistants).toHaveLength(1)
+    expect(assistants[0]).toMatchObject({
+      text: 'Looking that up for you.',
+      interim: false,
+      streaming: false,
+      status: 'complete'
+    })
+  })
+
+  it('settles a final that extends what was streamed', () => {
+    const state = run(toolTurn('Looking that up for you. It is in the README.'))
+    const assistants = list(state).filter(item => item.kind === 'assistant') as AssistantItem[]
+
+    expect(assistants).toHaveLength(1)
+    expect(assistants[0]?.text).toBe('Looking that up for you. It is in the README.')
+  })
+
+  it('still opens a new bubble for a final that is a different reply', () => {
+    const state = run(toolTurn('The README says Hermie is a client for Hermes Agent.'))
+    const assistants = list(state).filter(item => item.kind === 'assistant') as AssistantItem[]
+
+    expect(assistants).toHaveLength(2)
+    expect(assistants[0]).toMatchObject({ text: 'Looking that up for you.', interim: true })
+    expect(assistants[1]?.text).toBe('The README says Hermie is a client for Hermes Agent.')
+  })
+})
+
 describe('a foreign turn', () => {
   it('stands a placeholder in for the author we have not seen yet', () => {
     const state = applyEvent(fresh(), { type: 'message.start', seq: 1 }, NOW)

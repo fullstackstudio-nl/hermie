@@ -416,7 +416,7 @@ export function GalleryScreen({ onClose }: GalleryScreenProps) {
         onChangeVerbosity={setVerbosity}
         onChangeYolo={setYolo}
         onClose={() => setOptionsOpen(false)}
-        onConfirmExpensiveModel={value => setLastAction(`Confirm expensive model ${value}`)}
+        onPickExpensiveModel={value => setLastAction(`Confirm expensive model ${value}`)}
         reasoningEffort={reasoning}
         reasoningOptions={REASONING_OPTIONS}
         showBotToBot={showBotToBot}

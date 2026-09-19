@@ -1,54 +1,62 @@
 import { NavigationContainer, useNavigation } from '@react-navigation/native'
 import { createNativeStackNavigator, type NativeStackNavigationProp } from '@react-navigation/native-stack'
-import { Pressable } from 'react-native'
 
-import { BotsScreen } from '../features/bots'
+import { ActivityScreen } from '../features/activity'
+import { BotsScreen, type BotsSection } from '../features/bots'
 import { ChatScreen } from '../features/chats'
 import { CronScreen } from '../features/cron'
 import { SettingsScreen } from '../features/settings'
-import { useBotsStore } from '../store'
-import { Text } from '../ui/primitives'
+import { strings } from '../i18n/strings'
 import { useTheme } from '../ui/theme'
 
 export type CompactStackParamList = {
   Bots: undefined
   Chat: { bot: string }
+  Activity: undefined
   Cron: undefined
   Settings: undefined
 }
 
 const Stack = createNativeStackNavigator<CompactStackParamList>()
 
-/** The only way into Settings on a phone; the regular shell has a sidebar instead. */
-function SettingsLink() {
-  const navigation = useNavigation<NativeStackNavigationProp<CompactStackParamList>>()
-
-  return (
-    <Pressable accessibilityRole="button" onPress={() => navigation.navigate('Settings')} hitSlop={8}>
-      <Text variant="callout" color="accent">
-        Settings
-      </Text>
-    </Pressable>
-  )
+const SECTION_ROUTES: Record<BotsSection, keyof CompactStackParamList> = {
+  activity: 'Activity',
+  cron: 'Cron',
+  settings: 'Settings'
 }
 
 function BotsRoute() {
   const navigation = useNavigation<NativeStackNavigationProp<CompactStackParamList>>()
 
-  return <BotsScreen onOpenBot={bot => navigation.navigate('Chat', { bot: bot.name })} />
+  return (
+    <BotsScreen
+      onOpenBot={bot => navigation.navigate('Chat', { bot: bot.name })}
+      onOpenSection={section => navigation.navigate(SECTION_ROUTES[section] as 'Settings')}
+    />
+  )
 }
 
-/** The header shows the bot's display name, which is not always its profile name. */
-function useChatTitle(botName: string | undefined): string {
-  return useBotsStore(state => (botName ? (state.byName[botName]?.displayName ?? botName) : 'Chat'))
+function ChatRoute({
+  route,
+  navigation
+}: {
+  route: { params?: { bot?: string } }
+  navigation: NativeStackNavigationProp<CompactStackParamList>
+}) {
+  return (
+    <ChatScreen onBack={() => navigation.goBack()} onOpenBot={bot => navigation.push('Chat', { bot })} route={route} />
+  )
 }
 
-function ChatTitle({ bot }: { bot: string | undefined }) {
-  const title = useChatTitle(bot)
-
-  return <Text variant="heading">{title}</Text>
-}
-
+/**
+ * The phone stack.
+ *
+ * The chat route hides the stack's own header rather than configuring it: the
+ * design board's chat header carries an avatar, a live subtitle and the options
+ * button, and a native title bar can carry none of those. Every other route
+ * keeps the platform header, so the only screen that draws its own is the one
+ * that has a header component of its own.
+ */
 export function CompactShell() {
   const theme = useTheme()
 
@@ -64,21 +72,11 @@ export function CompactShell() {
           contentStyle: { backgroundColor: theme.colors.bg }
         }}
       >
-        <Stack.Screen
-          name="Bots"
-          component={BotsRoute}
-          options={{ title: 'Bots', headerRight: () => <SettingsLink /> }}
-        />
-        <Stack.Screen
-          name="Chat"
-          component={ChatScreen}
-          options={({ route }) => ({
-            title: route.params?.bot ?? 'Chat',
-            headerTitle: () => <ChatTitle bot={route.params?.bot} />
-          })}
-        />
-        <Stack.Screen name="Cron" component={CronScreen} options={{ title: 'Routines' }} />
-        <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
+        <Stack.Screen component={BotsRoute} name="Bots" options={{ headerShown: false }} />
+        <Stack.Screen component={ChatRoute} name="Chat" options={{ headerShown: false }} />
+        <Stack.Screen component={ActivityScreen} name="Activity" options={{ title: strings.tabs.activity }} />
+        <Stack.Screen component={CronScreen} name="Cron" options={{ title: strings.tabs.routines }} />
+        <Stack.Screen component={SettingsScreen} name="Settings" options={{ title: strings.tabs.settings }} />
       </Stack.Navigator>
     </NavigationContainer>
   )

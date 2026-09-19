@@ -357,7 +357,7 @@ export const errorNoticeItem: NoticeItem = {
 export const approvalItem: ApprovalItem = {
   ...base('ap-1', 23),
   approvalId: 'approval-1',
-  choices: ['allow', 'allow_session', 'allow_permanent', 'deny'],
+  choices: ['once', 'session', 'always', 'deny'],
   command: 'git push origin release-notes',
   description: 'Publish the draft release notes to the shared repository.',
   kind: 'approval',

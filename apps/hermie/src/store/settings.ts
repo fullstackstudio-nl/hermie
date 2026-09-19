@@ -9,11 +9,20 @@
  * There is one global default and an optional per-chat override. A chat without
  * an override follows the default as the default moves; an override pins that
  * chat until it is reset. Both are persisted through the `KeyValueStore`.
+ *
+ * The appearance preference rides along here rather than in its own store: it
+ * is the same blob on disk, read at the same moment, and a second store would
+ * mean a second first-paint flash.
  */
 import type { Verbosity } from '@hermie/transcript'
 import { create } from 'zustand'
 
 import { keyValueStore } from '../platform/key-value-store'
+
+/** `system` follows the OS; the other two pin the app regardless of it. */
+export type Appearance = 'system' | 'light' | 'dark'
+
+export const DEFAULT_APPEARANCE: Appearance = 'system'
 
 export interface ChatViewSettings {
   level: Verbosity
@@ -33,7 +42,13 @@ export const CHAT_VIEW_KEY = 'hermie.chat.view'
 interface PersistedChatView {
   defaults: ChatViewSettings
   perChat: Record<string, Partial<ChatViewSettings>>
+  appearance?: Appearance
 }
+
+const APPEARANCES: readonly Appearance[] = ['system', 'light', 'dark']
+
+const asAppearance = (value: unknown): Appearance | undefined =>
+  typeof value === 'string' && (APPEARANCES as readonly string[]).includes(value) ? (value as Appearance) : undefined
 
 const VERBOSITY: readonly Verbosity[] = ['quiet', 'normal', 'verbose']
 
@@ -59,12 +74,14 @@ function asPatch(value: unknown): Partial<ChatViewSettings> {
 export interface SettingsState {
   defaults: ChatViewSettings
   perChat: Record<string, Partial<ChatViewSettings>>
+  appearance: Appearance
   /** False until the first disk read finishes; screens paint the defaults meanwhile. */
   loaded: boolean
   hydrate: () => Promise<void>
   setDefaults: (patch: Partial<ChatViewSettings>) => void
   setChatView: (botName: string, patch: Partial<ChatViewSettings>) => void
   resetChatView: (botName: string) => void
+  setAppearance: (appearance: Appearance) => void
   reset: () => void
 }
 
@@ -83,6 +100,7 @@ function persist(state: PersistedChatView): void {
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   defaults: DEFAULT_CHAT_VIEW,
   perChat: {},
+  appearance: DEFAULT_APPEARANCE,
   loaded: false,
 
   async hydrate() {
@@ -97,21 +115,26 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       }
     }
 
-    set({ defaults: { ...DEFAULT_CHAT_VIEW, ...asPatch(stored?.defaults) }, perChat, loaded: true })
+    set({
+      defaults: { ...DEFAULT_CHAT_VIEW, ...asPatch(stored?.defaults) },
+      perChat,
+      appearance: asAppearance(stored?.appearance) ?? DEFAULT_APPEARANCE,
+      loaded: true
+    })
   },
 
   setDefaults(patch) {
     const defaults = { ...get().defaults, ...patch }
 
     set({ defaults })
-    persist({ defaults, perChat: get().perChat })
+    persist({ defaults, perChat: get().perChat, appearance: get().appearance })
   },
 
   setChatView(botName, patch) {
     const perChat = { ...get().perChat, [botName]: { ...get().perChat[botName], ...patch } }
 
     set({ perChat })
-    persist({ defaults: get().defaults, perChat })
+    persist({ defaults: get().defaults, perChat, appearance: get().appearance })
   },
 
   resetChatView(botName) {
@@ -119,13 +142,23 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
     delete perChat[botName]
     set({ perChat })
-    persist({ defaults: get().defaults, perChat })
+    persist({ defaults: get().defaults, perChat, appearance: get().appearance })
+  },
+
+  setAppearance(appearance) {
+    set({ appearance })
+    persist({ defaults: get().defaults, perChat: get().perChat, appearance })
   },
 
   reset() {
-    set({ defaults: DEFAULT_CHAT_VIEW, perChat: {}, loaded: false })
+    set({ defaults: DEFAULT_CHAT_VIEW, perChat: {}, appearance: DEFAULT_APPEARANCE, loaded: false })
   }
 }))
+
+/** True when this chat pins its own view rather than following the default. */
+export function hasChatViewOverride(state: SettingsState, botName: string): boolean {
+  return Object.keys(state.perChat[botName] ?? {}).length > 0
+}
 
 /** The effective view for one chat: the global default with its override folded in. */
 export function chatViewFor(state: SettingsState, botName: string): ChatViewSettings {

@@ -198,6 +198,40 @@ function currentAssistantId(next: ChatState, now: number): string {
 }
 
 /**
+ * The bubble a mid-turn seal left behind, when this completion is plainly that
+ * same reply finishing rather than a new one.
+ *
+ * A tool call seals the streaming bubble as interim (`sealAssistantForTool`),
+ * so `message.complete` arrives with no live bubble to settle onto. Painting
+ * the final text as a NEW bubble then shows the reply twice — once partially
+ * streamed, once clean — while the gateway stored a single row. Upstream hit
+ * exactly this (`hermes-agent` #63679, and #74560 for the chained-turn variant)
+ * and settles the final onto the interim instead.
+ *
+ * The test is continuity, not equality: streaming can drop characters and the
+ * final can add a trailing delta, so either text being a prefix of the other
+ * means the same message. Two different replies cannot satisfy that, which is
+ * why this needs no boundary flag to be safe.
+ */
+function interimContinuedBy(next: ChatState, finalText: string): string | undefined {
+  const id = lastAssistantId(next)
+  const item = id ? next.items[id] : undefined
+
+  if (item?.kind !== 'assistant' || !item.interim || item.error) {
+    return undefined
+  }
+
+  const sealed = item.text.trim()
+  const final = finalText.trim()
+
+  if (!sealed || !final) {
+    return undefined
+  }
+
+  return final === sealed || final.startsWith(sealed) || sealed.startsWith(final) ? id : undefined
+}
+
+/**
  * A tool call interrupts the reply: seal what the bubble already said as
  * mid-turn commentary so the tool card lands after it, and drop an empty one
  * rather than strand a blank bubble.
@@ -705,8 +739,14 @@ export function applyEvent(state: ChatState, event: TranscriptEvent, now: number
       // `response_previewed` means the reply already landed as a sealed interim
       // bubble; promote that one instead of painting the same text twice.
       const previewed = payload.response_previewed === true ? lastAssistantId(next) : undefined
+      // Without that flag, a tool call in the middle of the turn has the same
+      // effect: it sealed the bubble, so this completion has nowhere to land.
+      const continued = next.turn.assistantId ? undefined : interimContinuedBy(next, finalText)
       const id =
-        next.turn.assistantId ?? previewed ?? (finalText || failure ? currentAssistantId(next, now) : undefined)
+        next.turn.assistantId ??
+        previewed ??
+        continued ??
+        (finalText || failure ? currentAssistantId(next, now) : undefined)
 
       if (id) {
         patchItem<AssistantItem>(next, id, draft => {

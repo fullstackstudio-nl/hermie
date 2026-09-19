@@ -17,13 +17,16 @@ bots on it appear as chats you can open and talk to. Underneath that are the ven
 sources, the connection state machine with both authentication flows, the transcript engine, and the
 data layer that keeps every opened chat attached so bot-to-bot traffic arrives as it happens.
 
-What works: setup and sign-in, the bot roster, opening a bot's canonical chat with its history,
-sending and watching the reply stream with its tool calls, answering approvals and clarifications,
-seeing delegation activity, and surviving a reconnect or a turn somebody else started elsewhere.
+What works: setup and sign-in, the chat list with previews and badges, opening a bot's canonical
+chat with its history, sending and watching the reply stream with its tool calls, answering
+approvals and clarifications in bottom sheets, seeing bot-to-bot messages and delegation activity,
+attaching an image, changing what a conversation shows, and surviving a reconnect or a turn somebody
+else started elsewhere.
 
-What does not yet: the chat is drawn as plain rows. Bubbles, markdown, tool cards and the bottom
-sheets are being built alongside this and land next, as does the routines screen. See
-[CHANGELOG.md](CHANGELOG.md).
+What does not yet: Activity is still a placeholder, there is no paging back through long history,
+and the macOS build is verified far less thoroughly than iOS — see
+[docs/platform-notes.md](docs/platform-notes.md). Notifications and Android have not been exercised
+at all. See [CHANGELOG.md](CHANGELOG.md).
 
 ## What you need to run it
 

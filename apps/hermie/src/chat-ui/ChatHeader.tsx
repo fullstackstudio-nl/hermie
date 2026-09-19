@@ -12,6 +12,8 @@ import { chatStrings } from './strings'
 export interface ChatHeaderProps {
   name: string
   handle?: string
+  /** The profile's picture, when the roster has loaded one. */
+  avatarUri?: string
   /** Overrides the derived Running/Idle line. */
   subtitle?: string
   running?: boolean
@@ -24,6 +26,7 @@ export interface ChatHeaderProps {
 export function ChatHeader({
   name,
   handle,
+  avatarUri,
   subtitle,
   running = false,
   needsInput = false,
@@ -70,7 +73,7 @@ export function ChatHeader({
         </Pressable>
       ) : null}
 
-      <Avatar name={name} size={40} />
+      <Avatar name={name} size={40} uri={avatarUri} />
 
       <View style={{ flex: 1 }}>
         <Text style={{ fontSize: 17, fontWeight: '600' }}>{name}</Text>

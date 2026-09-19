@@ -109,10 +109,13 @@ export const chatStrings = {
     answeredElsewhere: 'Answered elsewhere',
     timedOut: 'Timed out',
     answered: (choice: string) => `Answered: ${choice}`,
+    // The gateway's own vocabulary (`tools/approval_prompt.py`): once, session,
+    // always, deny. An unknown choice keeps its own name rather than being
+    // dropped — the buttons are exactly what the server offered.
     choices: {
-      allow: 'Allow once',
-      allow_session: 'Allow for session',
-      allow_permanent: 'Always allow',
+      once: 'Allow once',
+      session: 'Allow for this session',
+      always: 'Always allow',
       deny: 'Deny'
     } as Record<string, string>
   },
@@ -145,6 +148,10 @@ export const chatStrings = {
     verbosityOptions: { quiet: 'Quiet', normal: 'Normal', verbose: 'Verbose' },
     showBotToBot: 'Show bot-to-bot',
     showThinking: 'Show thinking',
+    viewHeader: 'What this conversation shows',
+    useDefault: 'Use the default view',
+    usingDefault: 'Following the default set in Settings.',
+    usingOverride: 'This conversation has its own view.',
     expensiveTitle: 'This model costs more',
     expensiveConfirm: 'Use it anyway',
     cancel: 'Cancel'

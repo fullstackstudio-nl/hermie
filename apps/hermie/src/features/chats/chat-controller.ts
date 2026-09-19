@@ -99,6 +99,13 @@ export class ChatController {
   private readonly now: () => number
 
   private unsubscribes: (() => void)[] = []
+  /** Approval request ids already acknowledged, so the ack is sent once. */
+  private readonly acknowledged = new Set<string>()
+
+  /** The gateway's model inventory, read once per connection. */
+  private models: ModelChoice[] | null = null
+  private modelsInFlight: Promise<ModelChoice[]> | null = null
+
   /** Live server→client requests, by JSON-RPC request id, so a card can answer. */
   private readonly pending = new Map<string, PendingRequest>()
   private readonly opening = new Map<string, Promise<void>>()
@@ -591,18 +598,48 @@ export class ChatController {
     })
 
     if (request.method === 'approval') {
-      // Tell the queue the card is on screen. This is an acknowledgement, not
-      // an answer: the agent keeps waiting until a choice comes back.
-      const approvalId = typeof request.params.request_id === 'string' ? request.params.request_id : ''
-
-      void this.gateway
-        .request('approval.received', { session_id: sessionId, request_id: approvalId || request.id })
-        .catch(() => undefined)
+      void this.acknowledgeApproval(botName, request.id)
     }
 
     this.syncApprovalPoll()
 
     return true
+  }
+
+  /**
+   * Tell the queue a human is looking at this approval.
+   *
+   * It is an acknowledgement, not an answer: the agent keeps waiting until a
+   * choice comes back, but the queue stops counting the request down as
+   * unseen. Sent once per request — a card that arrives on the socket is
+   * acknowledged on arrival, and one rebuilt from a resume snapshot or from
+   * the pending poll is acknowledged when the sheet first shows it, so the
+   * screen may call this freely.
+   */
+  async acknowledgeApproval(botName: string, requestId: string): Promise<void> {
+    if (this.acknowledged.has(requestId)) {
+      return
+    }
+
+    const chat = this.chats.getState().chats[botName]
+    const sessionId = chat?.runtimeSessionId
+
+    if (!sessionId) {
+      return
+    }
+
+    const itemId = chat?.byRequestId[requestId]
+    const item = itemId ? chat?.items[itemId] : undefined
+    const approvalId = item?.kind === 'approval' && item.approvalId ? item.approvalId : requestId
+
+    this.acknowledged.add(requestId)
+
+    try {
+      await this.gateway.request('approval.received', { session_id: sessionId, request_id: approvalId })
+    } catch {
+      // The ack is a courtesy to the queue's timeout, never a precondition for
+      // answering; a failed one must not keep the sheet off the screen.
+    }
   }
 
   /**
@@ -621,6 +658,7 @@ export class ChatController {
     const live = this.pending.get(requestId)
 
     this.chats.getState().answer(botName, requestId, choice)
+    this.acknowledged.delete(requestId)
 
     if (live) {
       this.pending.delete(requestId)
@@ -891,6 +929,55 @@ export class ChatController {
     }
   }
 
+  /**
+   * The gateway's model catalogue, flattened to `provider/model` ids.
+   *
+   * Fetched once per connection and kept: the inventory is a per-gateway fact,
+   * not a per-chat one, and it is big enough that re-reading it every time the
+   * options sheet opens would be felt. A gateway that cannot answer gets an
+   * empty list rather than an error — the picker then shows only the model the
+   * chat is already on, which is honest.
+   */
+  async modelOptions(): Promise<ModelChoice[]> {
+    if (this.models) {
+      return this.models
+    }
+
+    if (!this.modelsInFlight) {
+      this.modelsInFlight = this.gateway
+        .request('model.options', {})
+        .then(result => {
+          const choices: ModelChoice[] = []
+
+          for (const provider of result?.providers ?? []) {
+            const slug = provider.slug || provider.name || ''
+
+            for (const model of provider.models ?? []) {
+              // The inventory writes plain ids; a model already carrying its
+              // provider must not be prefixed twice.
+              const id = model.includes('/') ? model : slug ? `${slug}/${model}` : model
+
+              choices.push({ id, label: model, provider: provider.name || slug })
+            }
+          }
+
+          this.models = choices
+
+          return choices
+        })
+        .catch(() => {
+          this.models = []
+
+          return []
+        })
+        .finally(() => {
+          this.modelsInFlight = null
+        })
+    }
+
+    return this.modelsInFlight
+  }
+
   /** Re-read `session.info` so the options sheet reflects what the gateway holds. */
   async refreshOptions(botName: string): Promise<SessionLiveInfo | null> {
     const chat = this.chats.getState().chats[botName]
@@ -1051,6 +1138,14 @@ export class ChatController {
 export interface AttachmentInput {
   filename: string
   base64: string
+}
+
+/** One entry of the gateway's model inventory, as the options picker shows it. */
+export interface ModelChoice {
+  /** The value `config.set {key:'model'}` takes. */
+  id: string
+  label: string
+  provider: string
 }
 
 /**

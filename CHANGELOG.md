@@ -70,12 +70,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fast, reasoning effort, model) scoped to the session so the gateway's global configuration is never
   rewritten behind the user's back.
 - A bots screen and a chat screen wired into both shells, with the bot list as the sidebar on iPad
-  and macOS. Both render plainly for now — the chat UI kit replaces them.
+  and macOS.
 - `ChatCache`, a SQLite store for the roster and the last two hundred items per chat, so a chat
   paints before the gateway answers. It downgrades to memory if the database cannot be opened.
 - The fake gateway grew the surface a chat needs: profile assets, the active list, the command
   catalogue and completion, session configuration, pending approvals, subagent methods and image
   attachment. Prompts steer it — "approve" raises an approval and parks the turn on it, "delegate"
   fans out subagent events — and `POST /__fake/inject` injects a turn somebody else ran.
+- Routines: the cron surface, as a self-contained feature. The list comes from WS `cron.manage` with
+  `include_disabled`, split into Active and Paused, each row carrying its schedule in words, the next
+  run as a relative time, a status dot and — when the scheduler wrote one — the first plain sentence
+  of its last error rather than the Python exception around it. A banner says so when
+  `gateway_running` is false, because a routine on a gateway whose scheduler is down looks perfectly
+  healthy and fires nothing.
+- A routine detail screen with the full prompt, Pause/Resume, Run now, Edit and a Delete that asks
+  first, over the run history; a run opens as a read-only transcript rendered by the same engine as a
+  conversation, with no composer.
+- A routine editor as a bottom sheet, with a schedule builder that writes only the forms
+  `parse_schedule` documents — `every 30m`, `every day at 9am`, `every monday at 9am`,
+  `weekdays at 9am`, a validated five-field cron expression, `in 2h` or an ISO timestamp — and shows
+  the exact string before it is sent. It never predicts a next run: the schedule is parsed in the
+  gateway's timezone, so the server's `next_run_at` is the only truth the screens show.
+- The fake gateway's cron surface now matches `hermes serve`'s: three routines including a paused one
+  and one carrying a scheduler exception, run sessions whose transcripts come back through
+  `session.history`, delivery targets, a merging `PUT`, a `trigger` that appends a run, and a
+  `cron.changed` broadcast after every mutation.
+
+- The chat list, in the Messenger direction: a large title, a search field that filters on name and
+  description, and one row per bot carrying its avatar, the last thing said, a relative stamp and the
+  badges that decide whether you tap it now or later. A preview that starts `Message from 🤖 Writer
+  (@writer):` is folded to `🤖 @writer: …`, because spelling it out in full on a forty-character row
+  buries the message itself. "Working" comes from `session.active_list`, polled only while the list
+  is on screen; "needs your input" comes from the open requests the chat store already holds, so it
+  is true for a question that arrived while the list was not on top. Footer tabs reach Activity,
+  Routines and Settings.
+- The conversation, drawn with the chat UI kit: the header with its avatar and live subtitle, the
+  transcript with bubbles, markdown, tool cards, DM cards and subagent groups, the agents bar pinned
+  under the header while children run, the composer with its attachment tray and slash popover, and
+  the jump-to-latest pill. The compact stack hides its own header for that route rather than
+  configuring it, because a native title bar cannot carry an avatar and a status line.
+- Approvals and clarifications as bottom sheets driven by the open requests in the transcript: one at
+  a time, oldest first, acknowledged to the queue on first show so the countdown stops, and answered
+  only by an explicit tap. A question resolved elsewhere or timed out says which.
+- The chat options sheet, bound to `session.info` for YOLO, fast mode, reasoning effort and the model
+  inventory from `model.options`, and to the per-chat view settings for verbosity, bot-to-bot and
+  thinking. A chat that pins its own view says so and offers to follow the default again. A model the
+  gateway flags as expensive is confirmed before it is set.
+- Attachments: the photo library on iOS and Android, the file picker on macOS, resized to 1568 px on
+  the longest edge before they are encoded — a camera-roll photo is several megabytes and
+  `image.attach_bytes` shares the socket the transcript streams on.
+- A Chat section in Settings for the default verbosity, bot-to-bot and thinking, and an Appearance
+  section that pins the app to light or dark instead of following the system.
+
+### Fixed
+
+- A reply that arrived after a tool call was painted twice — once as the partially streamed copy and
+  once as the clean final — while the gateway had stored a single row. The tool boundary seals the
+  streaming bubble, so the completion had nowhere to land; it now settles onto that sealed bubble
+  whenever the two texts are prefix-compatible, which only the same message can be. Upstream carries
+  the same fix.
+- The approval sheet labelled its buttons from a vocabulary the gateway never sends. Hermes answers
+  with `once`, `session`, `always` and `deny`, so every approval showed raw protocol words instead of
+  "Allow once" and "Always allow".
+- `secureTextEntry` on macOS: the field renders dots but never reports what was typed, which left the
+  session token empty and onboarding impossible to finish. Masking is off on macOS, and every secret
+  field now offers to show its value.
+- `expo-image-picker` needs an explicit photo-library usage string; without one iOS terminates the
+  app the moment the permission is requested, with no dialog and no crash report.
 
 [Unreleased]: https://github.com/fullstackstudio/hermie/compare/main...HEAD

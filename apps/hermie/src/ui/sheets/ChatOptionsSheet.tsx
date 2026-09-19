@@ -39,11 +39,10 @@ export interface ChatOptionsSheetProps {
   modelOptions: PickerOption[]
   onChangeModel: (value: string) => void
   /**
-   * Called instead of `onChangeModel` when the picked model is flagged
-   * expensive; the caller runs `confirm_expensive_model` and calls
-   * `onChangeModel` itself once the user agrees.
+   * Called instead of `onChangeModel` when the catalogue already flags the
+   * picked model as expensive; the caller runs the confirmation itself.
    */
-  onConfirmExpensiveModel?: (value: string) => void
+  onPickExpensiveModel?: (value: string) => void
 
   verbosity: Verbosity
   onChangeVerbosity: (value: Verbosity) => void
@@ -53,6 +52,20 @@ export interface ChatOptionsSheetProps {
 
   showThinking: boolean
   onChangeShowThinking: (value: boolean) => void
+
+  /**
+   * True when this chat pins its own verbosity/toggles rather than following
+   * the global default. Only then is there anything to reset.
+   */
+  viewOverridden?: boolean
+  /** Drop this chat's override so it follows the Settings default again. */
+  onResetView?: () => void
+
+  /** The gateway answered `confirm_required` for the model just picked. */
+  pendingExpensiveModel?: string | null
+  confirmMessage?: string
+  onCancelExpensiveModel?: () => void
+  onConfirmExpensiveModel?: () => void
 }
 
 type Pane = 'root' | 'reasoning' | 'model'
@@ -168,6 +181,35 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
   const reasoningLabel =
     props.reasoningOptions.find(option => option.value === props.reasoningEffort)?.label ?? props.reasoningEffort
 
+  if (props.pendingExpensiveModel) {
+    // A confirmation replaces the sheet's body rather than stacking a second
+    // modal on it: two sheets deep is where a `Modal` stops behaving the same
+    // on all four targets.
+    return (
+      <BottomSheet
+        accessibilityLabel={chatStrings.options.expensiveTitle}
+        blocking
+        onRequestClose={() => props.onCancelExpensiveModel?.()}
+        testID="chat-options-sheet"
+        visible={props.visible}
+      >
+        <Text variant="title">{chatStrings.options.expensiveTitle}</Text>
+        <Text color="textMuted">{props.confirmMessage || props.pendingExpensiveModel}</Text>
+        <Button
+          onPress={() => props.onConfirmExpensiveModel?.()}
+          testID="option-model-confirm"
+          title={chatStrings.options.expensiveConfirm}
+        />
+        <Button
+          onPress={() => props.onCancelExpensiveModel?.()}
+          testID="option-model-cancel"
+          title={chatStrings.options.cancel}
+          variant="secondary"
+        />
+      </BottomSheet>
+    )
+  }
+
   return (
     <BottomSheet
       accessibilityLabel={chatStrings.options.title}
@@ -190,8 +232,8 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
         <PickerPane
           onBack={() => setPane('root')}
           onPick={option => {
-            if (option.expensive && props.onConfirmExpensiveModel) {
-              props.onConfirmExpensiveModel(option.value)
+            if (option.expensive && props.onPickExpensiveModel) {
+              props.onPickExpensiveModel(option.value)
             } else {
               props.onChangeModel(option.value)
             }
@@ -262,7 +304,9 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
             />
           </InsetGroup>
 
-          <InsetGroup>
+          <InsetGroup
+            footer={props.viewOverridden ? chatStrings.options.usingOverride : chatStrings.options.usingDefault}
+          >
             <SwitchRow
               label={chatStrings.options.showBotToBot}
               onChange={props.onChangeShowBotToBot}
@@ -276,6 +320,15 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
               value={props.showThinking}
             />
           </InsetGroup>
+
+          {props.viewOverridden && props.onResetView ? (
+            <Button
+              onPress={props.onResetView}
+              testID="option-use-default"
+              title={chatStrings.options.useDefault}
+              variant="secondary"
+            />
+          ) : null}
 
           <Button onPress={close} title={chatStrings.options.done} variant="secondary" />
         </View>

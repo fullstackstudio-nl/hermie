@@ -40,7 +40,7 @@ export interface ApprovalSheetProps {
 
 const DEFAULT_TAP_GUARD_MS = 400
 
-/** `allow_permanent` → "Always allow"; an unknown choice keeps its own name. */
+/** `always` → "Always allow"; an unknown choice keeps its own name. */
 function choiceLabel(choice: string): string {
   return chatStrings.approval.choices[choice] ?? choice.replace(/_/g, ' ')
 }
@@ -50,7 +50,7 @@ function choiceVariant(choice: string): 'primary' | 'secondary' | 'danger' {
     return 'danger'
   }
 
-  return choice === 'allow' ? 'primary' : 'secondary'
+  return choice === 'once' ? 'primary' : 'secondary'
 }
 
 export function ApprovalSheet({
@@ -153,7 +153,7 @@ export function ApprovalSheet({
             />
           ))}
 
-          {item.choices.includes('allow_permanent') ? (
+          {item.choices.includes('always') ? (
             <Text color="textMuted" variant="caption">
               {chatStrings.approval.fine}
             </Text>

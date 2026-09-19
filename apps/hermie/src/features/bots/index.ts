@@ -7,4 +7,4 @@ export {
   PROFILE_SESSION_LIST_LIMIT,
   SESSION_COLUMNS
 } from './bots-controller'
-export { BotsScreen, type BotsScreenProps } from './BotsScreen'
+export { BotsScreen, type BotsScreenProps, type BotsSection } from './BotsScreen'

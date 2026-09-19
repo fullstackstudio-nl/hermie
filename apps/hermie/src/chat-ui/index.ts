@@ -30,7 +30,16 @@ export { Bubble, type BubbleProps } from './primitives/Bubble'
 export { Chip, type ChipProps } from './primitives/Chip'
 
 export { parseUnifiedDiff, summarizeDiff, type DiffLine, type DiffLineKind } from './diff'
-export { clipInline, formatClock, formatCount, formatDuration, initialFor, tintIndex } from './format'
+export {
+  clipInline,
+  formatClock,
+  formatCount,
+  formatDuration,
+  formatListTime,
+  formatPreview,
+  initialFor,
+  tintIndex
+} from './format'
 export { chatStrings } from './strings'
 export { argumentRows, extractToolErrorMessage, formatToolResultSummary } from './tool-result-summary'
 export { isCardTool, isFileEditTool, isSilentTool, toolFamily, toolGlyph, type ToolFamily } from './tool-render-class'

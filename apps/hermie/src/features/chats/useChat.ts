@@ -12,17 +12,19 @@ import {
   openRequests,
   runningSubagents,
   type Subagent,
+  type SubagentNode,
+  subagentTree,
   type TranscriptItem,
   type VisibleItem,
   visibleItems
 } from '@hermie/transcript'
-import type { CompletionItem } from '@hermes/shared/gateway-contract'
+import type { CompletionItem, SessionLiveInfo } from '@hermes/shared/gateway-contract'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { type Bot, useBotsStore } from '../../store/bots'
 import { useChatsStore } from '../../store/chats'
 import { useChatView } from '../../store/settings'
-import type { AttachmentInput, ChatOptionKey, SetOptionResult } from './chat-controller'
+import type { AttachmentInput, ChatOptionKey, ModelChoice, SetOptionResult } from './chat-controller'
 import { useChatRuntime } from './ChatRuntime'
 
 export interface UseChatResult {
@@ -36,10 +38,18 @@ export interface UseChatResult {
   /** Approval and clarify cards still waiting on the user. */
   requests: TranscriptItem[]
   subagents: Subagent[]
+  /** The same children as a tree, for the agents sheet. */
+  subagentTree: SubagentNode[]
+  /** A prompt the backend parked behind the running turn. */
+  queuedText: string | undefined
+  /** The gateway's view of this session: yolo, fast, reasoning effort, model. */
+  info: SessionLiveInfo | undefined
   error: string | null
   setDraft: (draft: string) => void
   send: (text: string, attachments?: AttachmentInput[]) => Promise<void>
   stop: () => Promise<void>
+  /** Tell the queue the sheet is on screen; safe to call more than once. */
+  acknowledgeApproval: (requestId: string) => Promise<void>
   respondApproval: (requestId: string, choice: string, all?: boolean) => Promise<void>
   respondClarify: (requestId: string, answers: Record<string, string>) => Promise<void>
   lockClarify: (requestId: string, questionId: string, answer: string) => Promise<void>
@@ -54,6 +64,8 @@ export interface UseChatResult {
     options?: { confirmExpensiveModel?: boolean }
   ) => Promise<SetOptionResult>
   refreshOptions: () => Promise<void>
+  /** The gateway's model inventory; empty when it cannot answer. */
+  modelOptions: () => Promise<ModelChoice[]>
   reload: () => Promise<void>
 }
 
@@ -118,6 +130,12 @@ export function useChat(botName: string): UseChatResult {
     [version, chat?.botName]
   )
 
+  const tree = useMemo(
+    () => (chat ? subagentTree(chat) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [version, chat?.botName]
+  )
+
   const controller = runtime?.controller
 
   const notReady = useCallback(() => Promise.reject(new Error('The chat is not connected yet.')), [])
@@ -131,6 +149,9 @@ export function useChat(botName: string): UseChatResult {
     hydration: chat?.hydration ?? 'cold',
     requests,
     subagents,
+    subagentTree: tree,
+    queuedText: chat?.queued?.text,
+    info: chat?.info,
     error,
     setDraft: useCallback((draft: string) => useChatsStore.getState().setDraft(botName, draft), [botName]),
     send: useCallback(
@@ -139,6 +160,10 @@ export function useChat(botName: string): UseChatResult {
       [botName, controller, notReady]
     ),
     stop: useCallback(() => (controller ? controller.stopTurn(botName) : Promise.resolve()), [botName, controller]),
+    acknowledgeApproval: useCallback(
+      (requestId: string) => (controller ? controller.acknowledgeApproval(botName, requestId) : Promise.resolve()),
+      [botName, controller]
+    ),
     respondApproval: useCallback(
       (requestId: string, choice: string, all?: boolean) =>
         controller ? controller.respondApproval(botName, requestId, choice, all) : notReady(),
@@ -183,6 +208,7 @@ export function useChat(botName: string): UseChatResult {
     refreshOptions: useCallback(async () => {
       await controller?.refreshOptions(botName)
     }, [botName, controller]),
+    modelOptions: useCallback(() => (controller ? controller.modelOptions() : Promise.resolve([])), [controller]),
     reload: open
   }
 }

@@ -1,10 +1,11 @@
 import { type GatewayConnection, probeGateway, type ConnectionStatus, type ProbeResult } from '@hermie/gateway-client'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Platform, ScrollView, TextInput, View } from 'react-native'
+import { Platform, Pressable, ScrollView, TextInput, View } from 'react-native'
 
 import { createGatewayConnection } from '../../gateway'
+import { strings } from '../../i18n/strings'
 import { entropySource } from '../../platform/random'
-import { Button, Screen, Text } from '../../ui/primitives'
+import { Button, Screen, SECURE_TEXT_ENTRY_SUPPORTED, Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 
 /**
@@ -21,6 +22,7 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
   const theme = useTheme()
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL)
   const [sessionToken, setSessionToken] = useState('fake-session-token')
+  const [showToken, setShowToken] = useState(!SECURE_TEXT_ENTRY_SUPPORTED)
   const [probe, setProbe] = useState<ProbeResult | null>(null)
   const [status, setStatus] = useState<ConnectionStatus>('disconnected')
   const [transitions, setTransitions] = useState<string[]>([])
@@ -123,9 +125,15 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
             onChangeText={setSessionToken}
             autoCapitalize="none"
             autoCorrect={false}
-            secureTextEntry
+            // macOS masks but never reports the typing; see `SecretField`.
+            secureTextEntry={SECURE_TEXT_ENTRY_SUPPORTED && !showToken}
             style={inputStyle}
           />
+          <Pressable accessibilityRole="button" hitSlop={8} onPress={() => setShowToken(current => !current)}>
+            <Text color="accent" variant="caption">
+              {showToken ? strings.onboarding.signIn.hideToken : strings.onboarding.signIn.showToken}
+            </Text>
+          </Pressable>
         </View>
 
         <View style={{ flexDirection: 'row', gap: theme.space.sm }}>

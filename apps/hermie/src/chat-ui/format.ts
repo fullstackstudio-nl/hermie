@@ -88,3 +88,66 @@ export function tintIndex(name: string, buckets: number): number {
 
   return buckets > 0 ? hash % buckets : 0
 }
+
+const DAY_SECONDS = 86_400
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+/**
+ * The right-aligned stamp on a chat-list row: `Now`, `12:47`, `Tue`, `12/09`.
+ *
+ * Deliberately relative rather than absolute — the list is read at a glance,
+ * and "Now" against "12:47" is the difference a reader is actually after.
+ */
+export function formatListTime(unixSeconds: number | undefined, now = Date.now() / 1000): string {
+  if (!unixSeconds || unixSeconds <= 0) {
+    return ''
+  }
+
+  const date = new Date(unixSeconds * 1000)
+
+  if (Number.isNaN(date.getTime())) {
+    return ''
+  }
+
+  const age = now - unixSeconds
+
+  if (age < 60) {
+    return 'Now'
+  }
+
+  const today = new Date(now * 1000)
+  const sameDay =
+    date.getFullYear() === today.getFullYear() &&
+    date.getMonth() === today.getMonth() &&
+    date.getDate() === today.getDate()
+
+  if (sameDay) {
+    return formatClock(unixSeconds)
+  }
+
+  if (age < 7 * DAY_SECONDS) {
+    return WEEKDAYS[date.getDay()] ?? ''
+  }
+
+  return `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}`
+}
+
+/**
+ * A chat-list preview line.
+ *
+ * The gateway's preview for an inbound teammate message is the raw row text,
+ * which starts `Message from 🤖 Writer (@writer): …`. Spelling that out in full
+ * on a 40-character row buries the message itself, so it is folded to
+ * `🤖 @writer: …` — the same shape the transcript's DM bubble uses.
+ */
+export function formatPreview(preview: string): string {
+  const match = preview.match(/^Message from\s+(?:🤖\s*)?([^(:]+?)(?:\s*\(@([^)]+)\))?\s*:\s*([\s\S]*)$/)
+
+  if (!match) {
+    return clipInline(preview)
+  }
+
+  const handle = (match[2] ?? match[1] ?? '').trim()
+
+  return clipInline(`🤖 @${handle}: ${match[3] ?? ''}`)
+}

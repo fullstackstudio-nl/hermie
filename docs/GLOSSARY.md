@@ -200,6 +200,23 @@ that answering one on any surface resolves it everywhere. Hermie acknowledges a 
 itself when you choose. A card rebuilt after a reconnect has no request to answer, so that one goes
 back as `approval.respond` against the queue entry's own identifier.
 
+The answers are `once`, `session`, `always` and `deny` — the queue's own vocabulary, from
+`tools/approval_prompt.py`. The sheet renders exactly the `choices` the request carried, in the
+order it carried them, and never a choice the server did not offer.
+
+## Sealed bubble
+
+An assistant bubble the client closed mid-turn because something else had to be drawn after it — a
+tool call, most often. The turn is still running; the bubble is simply no longer the one receiving
+deltas.
+
+It matters at the end of the turn. `message.complete` carries the turn's full reply, and with the
+streaming bubble sealed there is nothing live for it to land on, so a naive client paints the same
+words a second time under the tool card while the gateway stored a single row. Hermie settles the
+completion onto the sealed bubble whenever the two texts are prefix-compatible in either direction —
+streaming can drop characters and the final can add a trailing delta, but only one message can
+satisfy that test, so no flag is needed to make it safe.
+
 ## Replay epoch
 
 An identifier the gateway sends on connect, marking the generation of its event log. It lets a
@@ -212,3 +229,31 @@ client re-hydrates the conversation from scratch.
 The gateway's protocol version for rich clients, reported as `desktop_contract`. Hermie requires
 version 7 or newer and refuses to connect below it. Failing at the door with a clear message is
 better than discovering halfway through a conversation that an event shape has changed.
+
+## Routine
+
+A scheduled prompt: the gateway calls it a cron job, Hermie calls it a routine. It carries a
+schedule, the instructions to run, and a delivery target. Two things about it are easy to get
+wrong. First, it is the **messaging gateway** (`hermes gateway`) that fires routines, not
+`hermes serve`; a gateway process that is down leaves every routine looking healthy and firing
+nothing, which is what `gateway_running` in the `cron.manage` answer reports and what the banner on
+the Routines list says out loud. Second, a routine is described by the same job in two shapes: WS
+`cron.manage` answers `_format_job` rows keyed `job_id` with a `prompt_preview`, and
+`GET /api/cron/jobs/{id}` answers the stored job keyed `id` with the full `prompt`.
+
+## Schedule string
+
+The one field a routine's timing lives in. The gateway parses it (`cron/jobs.py::parse_schedule`)
+and accepts an interval (`every 30m`), a weekday/time phrase (`every day at 9am`,
+`every monday at 9am`, `weekdays at 9am`), a five- or six-field cron expression, a one-shot delay
+(`in 2h`), or an ISO timestamp. Hermie's schedule builder emits only those forms, and never
+computes when the routine will next fire: the parse happens in the gateway's timezone, so
+`next_run_at` as the server returned it is the only trustworthy answer.
+
+## Run
+
+One execution of a routine. A run is an ordinary session whose id is `cron_{job_id}_{timestamp}`,
+which is the whole binding between a job and its history — `GET /api/cron/jobs/{id}/runs` scans that
+id range, and the transcript comes back from plain `session.history`. That is why a run renders
+through the same engine as a conversation and why it has no composer: the session is finished and
+there is no agent behind it to send anything to.

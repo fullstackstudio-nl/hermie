@@ -33,6 +33,18 @@ const config: ExpoConfig = {
     'expo-sqlite',
     'expo-dev-client',
     [
+      // Without an explicit usage string iOS TERMINATES the app the moment the
+      // photo-library permission is requested — no dialog, no crash report, the
+      // app simply disappears. The camera and microphone are switched off
+      // because the composer only ever picks an existing image.
+      'expo-image-picker',
+      {
+        photosPermission: 'Hermie uses your photo library so you can attach an image to a message.',
+        cameraPermission: false,
+        microphonePermission: false
+      }
+    ],
+    [
       'expo-splash-screen',
       {
         image: './assets/splash-icon.png',

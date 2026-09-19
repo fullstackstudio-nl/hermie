@@ -325,8 +325,14 @@ Two findings from the macOS run, both about `TextInput` and both outside this ki
   onboarding gateway-address field (a plain `TextInput`) updates the draft and the probe runs; typing
   the same way into the session-token field (`secureTextEntry`) shows the dots but leaves the draft
   empty, so "Continue" stays disabled and onboarding cannot be finished on macOS. The plain field on
-  the previous step proves the keystrokes themselves arrive. **This blocks reaching any post-onboarding
-  screen on macOS**, including the component gallery.
+  the previous step proves the keystrokes themselves arrive.
+
+  **Fixed** by `src/ui/primitives/SecretField.tsx`: masking is off when `Platform.OS === 'macos'`
+  (`SECURE_TEXT_ENTRY_SUPPORTED`), and every secret field — the session token, the extra-header
+  values, the developer screen's token — offers a "Show token" toggle on all platforms, so the choice
+  belongs to the reader rather than to the platform. Any new masked field must go through
+  `SecretField`; a bare `secureTextEntry` re-introduces the bug.
+
 - **A programmatic `.focus()` can abort the app.** `Hermie-2026-09-19-024734.ips`:
   `-[RCTTextInputComponentView focus]` → `-[NSWindow _realMakeFirstResponder:]` → `objc_exception_rethrow`
   → `SIGABRT`. The command runs on the main thread, so a JS `try/catch` around `focus()` would not
@@ -334,10 +340,51 @@ Two findings from the macOS run, both about `TextInput` and both outside this ki
   when `Platform.OS === 'macos'`; the draft is already updated, so the only cost is that the caret
   does not return by itself.
 
+### Platform-variant modules resolve to themselves
+
+`attachments.macos.ts` first shipped with `export { MAX_ATTACHMENT_EDGE } from './attachments'`, and
+the app died at startup with `RangeError: Maximum call stack size exceeded (native stack depth)` and
+a stack of nothing but `get`.
+
+Inside a `.macos` file, the specifier `./attachments` resolves back to **that same file**: Metro
+picks the platform variant for every importer, including the variant itself. A value re-export
+written that way is a self-referencing getter. Type-only imports are erased and therefore safe, which
+is what makes this easy to miss — the types looked fine.
+
+The fix is structural, not a rule to remember: anything two variants share lives in a third module
+with no `.macos` sibling (`attachment-contract.ts`), which cannot be captured that way.
+
+### An Expo module without a macOS slice must be required lazily
+
+`expo-document-picker` has no macOS implementation, and importing it at module scope threw
+`Cannot find native module 'ExpoDocumentPicker'` before the first screen rendered — not a failed
+attachment, a blank app. `attachments.macos.ts` therefore requires it inside the picker, behind a
+`try`, and exports `attachmentsSupported`; the composer renders its "+" disabled when that is false.
+The same shape applies to any Expo module added later: assume no macOS slice until proven otherwise.
+
+### Driving the macOS app from a script
+
+Screenshots work (`screencapture -l <windowId>`; never capture the whole desktop). Input largely does
+not:
+
+| Mechanism                                         | Result                                     |
+| ------------------------------------------------- | ------------------------------------------ |
+| System Events `click at {x, y}`                   | no effect on any react-native-macos view   |
+| System Events `click button 1 of window`          | AXPress returns `missing value`; no effect |
+| System Events `keystroke`                         | no effect on a focused `TextInput`         |
+| `CGEvent` mouse events posted to `.cghidEventTap` | **works** — buttons respond                |
+| `CGEvent` keyboard events with a unicode string   | no effect; the field keeps its placeholder |
+
+So a script can walk the wizard's buttons but cannot fill its fields, and an automated macOS
+onboarding run is not currently possible. macOS onboarding has to be completed by hand, from a real
+keyboard, before any post-onboarding screen can be reported on.
+
 ### What the macOS build does prove
 
-`npm run macos` builds and launches (`** BUILD SUCCEEDED **`, window renders in dark mode). `App.tsx`
-imports the shell, which imports `SettingsScreen`, which imports `GalleryScreen`, which imports the
-whole chat kit — so `marked`, `highlight.js/lib/core` with its fifteen grammars, and every component
-module are evaluated under react-native-macos at startup without throwing. What is _not_ proven on
-macOS is anything about layout or interaction.
+`npm run macos` builds and launches (`** BUILD SUCCEEDED **`, window renders in dark mode), and the
+onboarding wizard renders and advances: Welcome → Gateway address was walked with synthetic mouse
+events. `App.tsx` imports the shell, which imports `SettingsScreen`, which imports `GalleryScreen`,
+which imports the whole chat kit — so `marked`, `highlight.js/lib/core` with its fifteen grammars,
+and every component module are evaluated under react-native-macos at startup without throwing. What
+is _not_ proven on macOS is anything past the address step: the chat list, a conversation, sending,
+and the sidebar layout have not been seen running there.

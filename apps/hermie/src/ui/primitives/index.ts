@@ -10,5 +10,6 @@ export {
   type InsetValueRowProps
 } from './InsetGroup'
 export { Screen, type ScreenProps } from './Screen'
+export { SECURE_TEXT_ENTRY_SUPPORTED, SecretField, type SecretFieldProps } from './SecretField'
 export { Text, type TextProps } from './Text'
 export { TextField, type TextFieldProps } from './TextField'

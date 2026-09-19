@@ -6,6 +6,12 @@
  * voice, and a seam that a real catalogue can slot into later without touching
  * a screen. Strings that interpolate are functions rather than templates with
  * placeholders, so the type checker catches a missing argument.
+ *
+ * The chat UI kit keeps its own copy in `src/chat-ui/strings.ts`. That is on
+ * purpose and not an oversight: the kit is a self-contained set of components
+ * with its own gallery, and a component that travels with its wording can be
+ * lifted out without dragging this file along. Everything a SCREEN says lives
+ * here; everything a KIT COMPONENT says lives there.
  */
 
 const list = (items: string[]): string => {
@@ -58,6 +64,8 @@ export const strings = {
       headerName: 'Header',
       headerValue: 'Value',
       addHeader: 'Add a header',
+      showValue: 'Show value',
+      hideValue: 'Hide value',
       removeHeader: (name: string) => `Remove the ${name || 'empty'} header`,
       probing: 'Checking…',
       signInRequired: (version: string, providers: string[]) =>
@@ -84,6 +92,8 @@ export const strings = {
       tokenLabel: 'SESSION TOKEN',
       tokenHelp: 'Paste the session token printed by `hermes serve`.',
       tokenPlaceholder: 'Session token',
+      showToken: 'Show token',
+      hideToken: 'Hide token',
 
       webview: {
         title: 'Sign in',
@@ -133,15 +143,30 @@ export const strings = {
   },
 
   bots: {
-    title: 'Bots',
+    title: 'Chats',
     empty: 'This gateway has no bot profiles yet. Create one with `hermes profile create`.',
     loading: 'Reading the roster…',
     failed: (message: string) => `The bot list could not be loaded: ${message}`,
     noPreview: 'No messages yet',
-    running: 'Working',
+    running: 'working',
     unread: 'New',
-    needsInput: 'Needs input',
-    defaultBot: 'Default'
+    needsInput: 'Needs your input',
+    defaultBot: 'Default',
+    search: 'Search',
+    section: 'MESSAGES',
+    conversations: (count: number) => (count === 1 ? '1 conversation' : `${count} conversations`),
+    noMatches: (query: string) => `No conversation matches “${query}”.`,
+    unreadLabel: (count: number) => (count === 1 ? '1 unread message' : `${count} unread messages`),
+    offline: 'Offline — showing the last saved list.',
+    footnote: 'Your conversations stay with your gateway.',
+    sidebarHeader: 'CHATS'
+  },
+
+  tabs: {
+    chats: 'Chats',
+    activity: 'Activity',
+    routines: 'Routines',
+    settings: 'Settings'
   },
 
   chat: {
@@ -161,7 +186,26 @@ export const strings = {
     answered: (answer: string) => `Answered: ${answer}`,
     cancelled: 'Withdrawn',
     subagents: (count: number) => (count === 1 ? '1 subagent running' : `${count} subagents running`),
-    retry: 'Try again'
+    retry: 'Try again',
+    pickBot: 'Pick a conversation to start reading.',
+    subtitle: {
+      working: 'Working…',
+      queued: 'Queued',
+      connected: 'Connected',
+      offline: 'Offline',
+      reconnecting: 'Reconnecting…',
+      connecting: 'Connecting…',
+      signedOut: 'Signed out'
+    },
+    attach: {
+      photo: 'Photo library',
+      file: 'File',
+      cancel: 'Cancel',
+      title: 'Add an attachment',
+      failed: (message: string) => `The attachment could not be added: ${message}`,
+      permission: 'Hermie needs access to your photo library to attach an image. Allow it in Settings.'
+    },
+    expensiveModel: (message: string) => message || 'This model costs more than the current one.'
   },
 
   settings: {
@@ -183,7 +227,16 @@ export const strings = {
     keepIt: 'Keep it',
     developer: 'DEVELOPER',
     connectionTest: 'Connection test',
-    unknown: 'Unknown'
+    unknown: 'Unknown',
+    chat: 'CHAT',
+    defaultVerbosity: 'Default verbosity',
+    defaultVerbosityHint:
+      'How much of a bot’s working-out a new conversation shows. A conversation with its own setting keeps it.',
+    showBotToBot: 'Show bot-to-bot',
+    showThinking: 'Show thinking',
+    appearance: 'APPEARANCE',
+    theme: 'Theme',
+    themeOptions: { system: 'System', light: 'Light', dark: 'Dark' }
   },
 
   connection: {
