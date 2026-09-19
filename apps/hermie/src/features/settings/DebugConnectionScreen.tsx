@@ -1,4 +1,5 @@
 import { type GatewayConnection, probeGateway, type ConnectionStatus, type ProbeResult } from '@hermie/gateway-client'
+import { formatTranscriptDiagnostics } from '@hermie/transcript'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Platform, Pressable, ScrollView, TextInput, View } from 'react-native'
 
@@ -6,6 +7,7 @@ import { createGatewayConnection } from '../../gateway'
 import { strings } from '../../i18n/strings'
 import { hasHardwareKeyboard } from '../../platform/keyboard-modifiers'
 import { RUNS_ON_MAC } from '../../platform/runs-on-mac'
+import { useChatsStore } from '../../store/chats'
 import { Button, Screen, Text } from '../../ui/primitives'
 import { GLASS_MATERIAL } from '../../ui/glass'
 import { useTheme } from '../../ui/theme'
@@ -22,6 +24,7 @@ const DEFAULT_BASE_URL = Platform.OS === 'android' ? 'http://10.0.2.2:9119' : 'h
 
 export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
   const theme = useTheme()
+  const chats = useChatsStore(state => state.chats)
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL)
   const [sessionToken, setSessionToken] = useState('fake-session-token')
   const [showToken, setShowToken] = useState(false)
@@ -82,6 +85,8 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
 
     connection.start()
   }, [baseUrl, disconnect, sessionToken])
+
+  const transcriptLines = Object.entries(chats).flatMap(([botName, chat]) => formatTranscriptDiagnostics(botName, chat))
 
   const inputStyle = {
     backgroundColor: theme.colors.surface,
@@ -196,6 +201,25 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
           <View style={{ gap: theme.space.xxs }}>
             <Text variant="heading">profiles.list</Text>
             <Text testID="debug-profiles">{profiles.join(', ')}</Text>
+          </View>
+        ) : null}
+
+        {/*
+          What to read when a chat shows something twice. A screenshot of two
+          bubbles cannot say which path put the second one there; these lines
+          can — how many items have a durable row id, how many are still
+          unpaired, and which items are carrying the same text as another. No
+          message text is shown: a repeat is reported as a digest and a length,
+          so the lines can be pasted into an issue as they stand.
+        */}
+        {transcriptLines.length > 0 ? (
+          <View style={{ gap: theme.space.xxs }}>
+            <Text variant="heading">Transcripts</Text>
+            {transcriptLines.map(line => (
+              <Text key={line} variant="caption" color="textMuted" testID="debug-transcript-line">
+                {line}
+              </Text>
+            ))}
           </View>
         ) : null}
 
