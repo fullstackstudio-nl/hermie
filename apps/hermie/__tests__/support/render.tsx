@@ -11,13 +11,24 @@ const METRICS: Metrics = {
   insets: { top: 59, left: 0, right: 0, bottom: 34 }
 }
 
-/** Render a screen with the providers every screen assumes are above it. */
-export function renderScreen(ui: ReactElement) {
-  return render(
+/**
+ * The providers every screen assumes are above it.
+ *
+ * Exported separately because `rerender` replaces the WHOLE tree, providers
+ * included: `view.rerender(<Thing />)` drops the safe-area provider on the
+ * floor and the next render throws "No safe area value available".
+ */
+export function withProviders(ui: ReactElement) {
+  return (
     <SafeAreaProvider initialMetrics={METRICS}>
       <ThemeProvider>{ui}</ThemeProvider>
     </SafeAreaProvider>
   )
+}
+
+/** Render a screen with the providers every screen assumes are above it. */
+export function renderScreen(ui: ReactElement) {
+  return render(withProviders(ui))
 }
 
 export function deferred<T>() {

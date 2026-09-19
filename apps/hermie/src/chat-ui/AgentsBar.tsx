@@ -16,33 +16,40 @@ import { chatStrings } from './strings'
 export interface AgentsBarProps {
   /** How many children are queued or running. Zero hides the bar. */
   count: number
-  /** Unix seconds the oldest running child started; the bar ticks from it. */
-  startedAt?: number
+  /**
+   * Epoch MILLISECONDS the oldest running child started; the bar ticks from it.
+   *
+   * Named for its unit on purpose. `Subagent.startedAt` is milliseconds — the
+   * agents sheet already treats it as such — and this prop used to be seconds,
+   * so the screen handed it a number a thousand times too large and the clock
+   * read `0s` for the whole run.
+   */
+  startedAtMs?: number
   /** Overrides the ticking clock — the gallery and the tests pass a fixed value. */
   elapsedSeconds?: number
   onPress: () => void
   testID?: string
 }
 
-export function AgentsBar({ count, startedAt, elapsedSeconds, onPress, testID = 'agents-bar' }: AgentsBarProps) {
+export function AgentsBar({ count, startedAtMs, elapsedSeconds, onPress, testID = 'agents-bar' }: AgentsBarProps) {
   const theme = useTheme()
-  const [now, setNow] = useState(() => Date.now() / 1000)
+  const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
-    if (elapsedSeconds !== undefined || !startedAt || count === 0) {
+    if (elapsedSeconds !== undefined || !startedAtMs || count === 0) {
       return
     }
 
-    const timer = setInterval(() => setNow(Date.now() / 1000), 1000)
+    const timer = setInterval(() => setNow(Date.now()), 1000)
 
     return () => clearInterval(timer)
-  }, [count, elapsedSeconds, startedAt])
+  }, [count, elapsedSeconds, startedAtMs])
 
   if (count <= 0) {
     return null
   }
 
-  const elapsed = elapsedSeconds ?? (startedAt ? Math.max(0, now - startedAt) : 0)
+  const elapsed = elapsedSeconds ?? (startedAtMs ? Math.max(0, (now - startedAtMs) / 1000) : 0)
 
   return (
     <Pressable

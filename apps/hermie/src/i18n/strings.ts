@@ -240,7 +240,8 @@ export const strings = {
       cancel: 'Cancel',
       title: 'Add an attachment',
       failed: (message: string) => `The attachment could not be added: ${message}`,
-      permission: 'Hermie needs access to your photo library to attach an image. Allow it in Settings.'
+      permission: 'Hermie needs access to your photo library to attach an image. Allow it in Settings.',
+      openSettings: 'Open Settings'
     },
     expensiveModel: (message: string) => message || 'This model costs more than the current one.'
   },

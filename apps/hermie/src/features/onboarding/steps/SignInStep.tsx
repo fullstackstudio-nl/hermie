@@ -56,6 +56,7 @@ export function SignInStep({ draft, update }: SignInStepProps) {
               onChangeText={sessionToken => update({ sessionToken })}
               autoCapitalize="none"
               autoCorrect={false}
+              returnKeyType="done"
               concealLabel={strings.onboarding.signIn.hideToken}
               revealLabel={strings.onboarding.signIn.showToken}
               placeholder={strings.onboarding.signIn.tokenPlaceholder}

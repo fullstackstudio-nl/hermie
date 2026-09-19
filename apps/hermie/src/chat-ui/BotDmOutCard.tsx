@@ -11,7 +11,7 @@ import { Animated, Pressable, View } from 'react-native'
 
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
-import type { ColorRole } from '../ui/tokens'
+import { CONTROL_MIN_HEIGHT, TAP_SLOP, type ColorRole } from '../ui/tokens'
 import { Avatar } from './primitives/Avatar'
 import { Chip } from './primitives/Chip'
 import { chatStrings } from './strings'
@@ -132,7 +132,7 @@ export function BotDmOutCard({ item, presentation = 'collapsed', onOpenBot, targ
       testID={`bot-dm-out-${item.id}`}
     >
       <Pressable
-        accessibilityHint={onOpenBot ? `Opens the chat with ${item.target}` : undefined}
+        accessibilityHint={onOpenBot ? chatStrings.botDm.openTarget(item.target) : undefined}
         accessibilityRole={onOpenBot ? 'button' : undefined}
         disabled={!onOpenBot}
         onPress={open}
@@ -162,7 +162,10 @@ export function BotDmOutCard({ item, presentation = 'collapsed', onOpenBot, targ
       {lines.length > COLLAPSED_LINES ? (
         <Pressable
           accessibilityRole="button"
+          accessibilityState={{ expanded }}
+          hitSlop={TAP_SLOP}
           onPress={() => setExpanded(current => !current)}
+          style={{ justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT }}
           testID={`bot-dm-out-more-${item.id}`}
         >
           <Text color="accent" variant="caption">

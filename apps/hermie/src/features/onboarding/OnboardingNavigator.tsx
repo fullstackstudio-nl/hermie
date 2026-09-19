@@ -1,9 +1,10 @@
 import { useCallback, useState } from 'react'
-import { ScrollView, View } from 'react-native'
+import { KeyboardAvoidingView, ScrollView, View } from 'react-native'
 
 import { saveGatewaySetup, type StoredGatewayConfig } from '../../gateway/config'
 import { describeConnectionError } from '../../gateway/errors'
 import { strings } from '../../i18n/strings'
+import { KEYBOARD_AVOID_BEHAVIOR } from '../../ui/keyboard'
 import { Button, Screen, Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { FORM_MAX_WIDTH } from '../../ui/tokens'
@@ -149,51 +150,58 @@ export function OnboardingNavigator({
 
   return (
     <Screen padded={false}>
-      <ScrollView
-        contentContainerStyle={{
-          padding: theme.space.lg,
-          gap: theme.space.lg,
-          width: '100%',
-          maxWidth: FORM_MAX_WIDTH,
-          alignSelf: 'center'
-        }}
-        keyboardShouldPersistTaps="handled"
-      >
-        {counter >= 0 ? (
-          <Text variant="caption" color="textMuted" testID="step-counter">
-            {strings.onboarding.stepCounter(counter + 1, NUMBERED_STEPS.length)}
-          </Text>
-        ) : null}
+      {/* The wizard is a form with a pinned footer, and the footer holds the
+          only way forward. Without this the soft keyboard covered "Continue"
+          on every step that has a field — the session token, the gateway
+          address, a proxy header — and the way out was to dismiss the keyboard
+          first, which nothing on screen said. */}
+      <KeyboardAvoidingView behavior={KEYBOARD_AVOID_BEHAVIOR} style={{ flex: 1 }}>
+        <ScrollView
+          contentContainerStyle={{
+            padding: theme.space.lg,
+            gap: theme.space.lg,
+            width: '100%',
+            maxWidth: FORM_MAX_WIDTH,
+            alignSelf: 'center'
+          }}
+          keyboardShouldPersistTaps="handled"
+        >
+          {counter >= 0 ? (
+            <Text variant="caption" color="textMuted" testID="step-counter">
+              {strings.onboarding.stepCounter(counter + 1, NUMBERED_STEPS.length)}
+            </Text>
+          ) : null}
 
-        {step === 'welcome' ? <WelcomeStep /> : null}
-        {step === 'address' ? (
-          <GatewayAddressStep
-            draft={draft}
-            update={update}
-            {...(probeDebounceMs === undefined ? {} : { debounceMs: probeDebounceMs })}
-          />
-        ) : null}
-        {step === 'signin' ? <SignInStep draft={draft} update={update} /> : null}
-        {step === 'test' ? <TestConnectionStep draft={draft} update={update} /> : null}
-        {step === 'done' ? <DoneStep draft={draft} error={saveError} /> : null}
-      </ScrollView>
+          {step === 'welcome' ? <WelcomeStep /> : null}
+          {step === 'address' ? (
+            <GatewayAddressStep
+              draft={draft}
+              update={update}
+              {...(probeDebounceMs === undefined ? {} : { debounceMs: probeDebounceMs })}
+            />
+          ) : null}
+          {step === 'signin' ? <SignInStep draft={draft} update={update} /> : null}
+          {step === 'test' ? <TestConnectionStep draft={draft} update={update} /> : null}
+          {step === 'done' ? <DoneStep draft={draft} error={saveError} /> : null}
+        </ScrollView>
 
-      <View
-        style={{
-          padding: theme.space.lg,
-          gap: theme.space.sm,
-          width: '100%',
-          maxWidth: FORM_MAX_WIDTH,
-          alignSelf: 'center',
-          borderTopWidth: 1,
-          borderTopColor: theme.colors.border
-        }}
-      >
-        <Button title={primaryLabel} onPress={advance} disabled={!canAdvance()} busy={saving} />
-        {step === 'welcome' ? null : (
-          <Button title={strings.common.back} variant="secondary" onPress={goBack} disabled={saving} />
-        )}
-      </View>
+        <View
+          style={{
+            padding: theme.space.lg,
+            gap: theme.space.sm,
+            width: '100%',
+            maxWidth: FORM_MAX_WIDTH,
+            alignSelf: 'center',
+            borderTopWidth: 1,
+            borderTopColor: theme.colors.border
+          }}
+        >
+          <Button title={primaryLabel} onPress={advance} disabled={!canAdvance()} busy={saving} />
+          {step === 'welcome' ? null : (
+            <Button title={strings.common.back} variant="secondary" onPress={goBack} disabled={saving} />
+          )}
+        </View>
+      </KeyboardAvoidingView>
     </Screen>
   )
 }

@@ -27,8 +27,16 @@ import {
   useState,
   type ReactNode
 } from 'react'
-import { FlatList, View, type NativeScrollEvent, type NativeSyntheticEvent, type ViewStyle } from 'react-native'
+import {
+  FlatList,
+  Platform,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+  type ViewStyle
+} from 'react-native'
 
+import type { MarkdownImageSource } from '../markdown'
 import { Button, Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
 import { AssistantBubble } from './AssistantBubble'
@@ -73,6 +81,11 @@ export interface TranscriptContext {
   /** Re-opens the sheet for a question still sitting in the transcript. */
   onOpenRequest?: (item: ApprovalItem | ClarifyItem) => void
   onLinkPress?: (href: string) => void
+  /**
+   * Where a gateway-relative Markdown image resolves, and what its request
+   * carries. Must be a stable object; it is part of the row memo's key.
+   */
+  images?: MarkdownImageSource
 }
 
 export interface TranscriptListProps extends TranscriptContext {
@@ -222,6 +235,7 @@ function RowView({ entry, context, receipt }: RowProps) {
       return (
         <AssistantBubble
           item={item}
+          {...(context.images ? { images: context.images } : {})}
           onLinkPress={context.onLinkPress}
           onRetry={context.onRetry ? () => context.onRetry?.(item.id) : undefined}
           presentation={presentation}
@@ -279,6 +293,14 @@ const TranscriptRow = memo(
 
 const AWAY_THRESHOLD = 32
 
+/**
+ * The ceiling on a programmatic jump. `onMomentumScrollEnd` normally arrives
+ * first and clears the guard; this is what stops a jump that never reports
+ * finishing — a list already at offset 0 emits no momentum at all — from
+ * freezing the pill for good.
+ */
+const JUMP_SETTLE_MS = 600
+
 /** A stable empty array, so the context memo does not churn on every render. */
 const EMPTY_HANDLES: readonly string[] = []
 
@@ -303,6 +325,7 @@ export const TranscriptList = forwardRef<TranscriptListHandle, TranscriptListPro
 
   const context = useMemo<TranscriptContext>(
     () => ({
+      images: handlers.images,
       onLinkPress: handlers.onLinkPress,
       onOpenBot: handlers.onOpenBot,
       onOpenRequest: handlers.onOpenRequest,
@@ -313,6 +336,7 @@ export const TranscriptList = forwardRef<TranscriptListHandle, TranscriptListPro
       typingHandles: handlers.typingHandles ?? EMPTY_HANDLES
     }),
     [
+      handlers.images,
       handlers.onLinkPress,
       handlers.onOpenBot,
       handlers.onOpenRequest,
@@ -338,7 +362,30 @@ export const TranscriptList = forwardRef<TranscriptListHandle, TranscriptListPro
     return undefined
   }, [data])
 
+  /**
+   * A jump the LIST started, not the reader.
+   *
+   * `scrollToOffset({ animated: true })` emits a scroll event per frame on the
+   * way down, and the first few are still far from the bottom — so the pill
+   * that was just tapped reappeared for a moment mid-flight. Events are ignored
+   * until the animation has landed.
+   */
+  const jumping = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const endJump = useCallback(() => {
+    if (jumping.current) {
+      clearTimeout(jumping.current)
+      jumping.current = null
+    }
+  }, [])
+
+  useEffect(() => endJump, [endJump])
+
   const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (jumping.current) {
+      return
+    }
+
     // Inverted list: offset 0 IS the bottom of the conversation.
     setAway(event.nativeEvent.contentOffset.y > AWAY_THRESHOLD)
   }, [])
@@ -360,6 +407,14 @@ export const TranscriptList = forwardRef<TranscriptListHandle, TranscriptListPro
   }, [away])
 
   const jump = useCallback(() => {
+    if (jumping.current) {
+      clearTimeout(jumping.current)
+    }
+
+    jumping.current = setTimeout(() => {
+      jumping.current = null
+    }, JUMP_SETTLE_MS)
+
     listRef.current?.scrollToOffset({ animated: true, offset: 0 })
     setAway(false)
   }, [])
@@ -426,13 +481,17 @@ export const TranscriptList = forwardRef<TranscriptListHandle, TranscriptListPro
         keyExtractor={entry => entry.item.id}
         // Dragging the transcript down lowers the keyboard with the finger,
         // which is what every messenger does and what the inverted list makes
-        // possible without a gesture handler.
-        keyboardDismissMode="interactive"
+        // possible without a gesture handler. Android has no interactive
+        // dismissal — the value is ignored there and the keyboard simply stays
+        // up — so it drops the keyboard when the drag starts instead.
+        keyboardDismissMode={Platform.select({ ios: 'interactive', default: 'on-drag' })}
         keyboardShouldPersistTaps="handled"
         maintainVisibleContentPosition={{ autoscrollToTopThreshold: AWAY_THRESHOLD, minIndexForVisible: 0 }}
         onEndReached={onEndReached}
         onEndReachedThreshold={0.4}
+        onMomentumScrollEnd={endJump}
         onScroll={handleScroll}
+        onScrollBeginDrag={endJump}
         onScrollToIndexFailed={recoverScroll}
         ref={listRef}
         renderItem={renderItem}

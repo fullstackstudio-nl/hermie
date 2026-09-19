@@ -134,10 +134,16 @@ export function SettingsScreen() {
           />
         </InsetGroup>
 
-        <InsetGroup header={strings.settings.developer}>
-          <InsetButtonRow title={strings.settings.connectionTest} onPress={() => setShowConnectionTest(true)} />
-          <InsetButtonRow title={GALLERY_ROW_TITLE} onPress={() => setShowGallery(true)} />
-        </InsetGroup>
+        {/* Development builds only. The connection test prints the gateway's
+            address and the component gallery is a catalogue of fixtures; both
+            are tools for whoever is building the app, and neither belongs in a
+            release a user installs. */}
+        {__DEV__ ? (
+          <InsetGroup header={strings.settings.developer}>
+            <InsetButtonRow title={strings.settings.connectionTest} onPress={() => setShowConnectionTest(true)} />
+            <InsetButtonRow title={GALLERY_ROW_TITLE} onPress={() => setShowGallery(true)} />
+          </InsetGroup>
+        ) : null}
 
         <View style={{ height: theme.space.xxl }} />
       </ScrollView>

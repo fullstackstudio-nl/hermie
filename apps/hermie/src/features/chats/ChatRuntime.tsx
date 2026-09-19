@@ -26,7 +26,7 @@ export interface ChatRuntimeValue {
 const ChatRuntimeContext = createContext<ChatRuntimeValue | null>(null)
 
 export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
-  const { connection } = useGateway()
+  const { connection, status } = useGateway()
   const [value, setValue] = useState<ChatRuntimeValue | null>(null)
   const valueRef = useRef<ChatRuntimeValue | null>(null)
 
@@ -56,7 +56,9 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     })
 
     controller.start()
-    void bots.paintFromCache().then(() => bots.refresh().catch(() => undefined))
+    // Only the cache here. The roster itself is read once the connection is
+    // READY; see below.
+    void bots.paintFromCache()
 
     const next = { controller, bots }
     valueRef.current = next
@@ -68,6 +70,33 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       valueRef.current = null
     }
   }, [connection])
+
+  /**
+   * Read the roster when the connection becomes usable, and again after every
+   * reconnect.
+   *
+   * A `GatewayConnection` exists from the moment a gateway is configured, long
+   * before its socket is up, and `profiles.list` on one that is still dialling
+   * fails with "gateway not connected". That failure was the whole story: it
+   * happened once, right after onboarding, nothing asked again, and the chat
+   * list sat on an error while the header two lines above it said Connected.
+   */
+  const wasReady = useRef(false)
+
+  useEffect(() => {
+    if (!value || status !== 'ready') {
+      wasReady.current = false
+
+      return
+    }
+
+    if (wasReady.current) {
+      return
+    }
+
+    wasReady.current = true
+    void value.bots.refresh().catch(() => undefined)
+  }, [status, value])
 
   useEffect(() => {
     // macOS windows are never backgrounded the way a phone app is, and its

@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react'
 import { useColorScheme } from 'react-native'
 
+import { AppStatusBar } from '../platform/status-bar'
 import { useSettingsStore } from '../store/settings'
 import { darkColors, lightColors, radii, space, type, type ColorScale } from './tokens'
 
@@ -44,7 +45,16 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const scheme = appearance === 'system' ? system : appearance
   const theme = useMemo(() => buildTheme(scheme), [scheme])
 
-  return <ThemeContext.Provider value={theme}>{children}</ThemeContext.Provider>
+  // The status bar follows the PINNED appearance, not the system's. It is
+  // rendered here because this is the one component that knows which of the
+  // two won, and it is above every screen, so it survives navigation. The
+  // macOS variant of `AppStatusBar` renders nothing.
+  return (
+    <ThemeContext.Provider value={theme}>
+      <AppStatusBar scheme={scheme} />
+      {children}
+    </ThemeContext.Provider>
+  )
 }
 
 export function useTheme(): Theme {

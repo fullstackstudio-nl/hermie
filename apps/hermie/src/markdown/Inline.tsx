@@ -5,11 +5,11 @@
  * sentence wrap with the sentence instead of becoming its own box. Only images
  * break out, because an `Image` cannot live inside a `Text` on Android.
  */
-import { Fragment, type ReactNode } from 'react'
+import { Fragment, useState, type ReactNode } from 'react'
 import { Image, Text, type TextStyle, View } from 'react-native'
 import type { Token, Tokens } from 'marked'
 
-import { MONOSPACE, type MarkdownContext } from './context'
+import { MONOSPACE, resolveImageUri, type MarkdownContext } from './context'
 
 export interface InlineProps {
   tokens: Token[]
@@ -30,14 +30,35 @@ function codeStyle(context: MarkdownContext): TextStyle {
  * Images are hoisted out of the inline flow by `renderInline`; this keeps a
  * sane box for one without knowing its intrinsic size. `expo-image` is not a
  * dependency of this app, so the platform `Image` does the work.
+ *
+ * Three things the platform `Image` will not do by itself: resolve the
+ * gateway-relative `/api/...` src an agent actually writes, carry the headers a
+ * gated gateway demands, and say anything at all when the fetch fails. The
+ * third is the one a reader sees — a grey rectangle where a chart should be —
+ * so a failed image falls back to its alt text, which is the description the
+ * agent already wrote.
  */
 function InlineImage({ token, context }: { token: Tokens.Image; context: MarkdownContext }) {
+  const [failed, setFailed] = useState(false)
+  const uri = resolveImageUri(token.href, context.images?.baseUrl)
+  const headers = context.images?.headers
+  const alt = token.text || token.title || ''
+
+  if (failed || !uri) {
+    return alt ? (
+      <Text selectable={context.selectable} style={{ color: context.mutedTextColor, fontSize: 12, marginVertical: 8 }}>
+        {alt}
+      </Text>
+    ) : null
+  }
+
   return (
     <View style={{ gap: 4, marginVertical: 8 }}>
       <Image
-        accessibilityLabel={token.text || token.title || undefined}
+        accessibilityLabel={alt || undefined}
+        onError={() => setFailed(true)}
         resizeMode="contain"
-        source={{ uri: token.href }}
+        source={{ uri, ...(headers && Object.keys(headers).length ? { headers } : {}) }}
         style={{
           width: '100%',
           height: 180,

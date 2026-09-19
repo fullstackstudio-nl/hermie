@@ -18,7 +18,7 @@ import { useTheme } from '../ui/theme'
 import type { ColorRole } from '../ui/tokens'
 import { MarkdownBlock } from './Block'
 import { splitBlocks } from './blocks'
-import type { MarkdownContext } from './context'
+import type { MarkdownContext, MarkdownImageSource } from './context'
 import { preprocessMarkdown } from './preprocess'
 
 export interface MarkdownProps {
@@ -37,6 +37,13 @@ export interface MarkdownProps {
   selectable?: boolean
   /** Replaces the default `Linking.openURL`; the gallery uses it to log taps. */
   onLinkPress?: (href: string) => void
+  /**
+   * Where a relative image resolves and what its request carries.
+   *
+   * Pass a STABLE object: it lands in the context every block is memoized on,
+   * and a fresh one per render re-renders the whole reply on every delta.
+   */
+  images?: MarkdownImageSource
   style?: ViewStyle
 }
 
@@ -53,6 +60,7 @@ export function Markdown({
   fontSize,
   selectable = true,
   onLinkPress,
+  images,
   style
 }: MarkdownProps) {
   const theme = useTheme()
@@ -92,9 +100,10 @@ export function Markdown({
       onLinkPress: handleLink,
       scheme: theme.scheme,
       selectable,
-      textColor: theme.colors[color]
+      textColor: theme.colors[color],
+      ...(images ? { images } : {})
     }),
-    [body, borderColor, color, handleLink, linkColor, mutedColor, selectable, surface, theme]
+    [body, borderColor, color, handleLink, images, linkColor, mutedColor, selectable, surface, theme]
   )
 
   const blocks = useMemo(() => splitBlocks(preprocessMarkdown(text)), [text])

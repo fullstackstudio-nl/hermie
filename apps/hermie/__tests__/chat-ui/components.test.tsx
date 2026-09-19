@@ -125,6 +125,22 @@ describe('agents', () => {
     expect(view.queryByTestId('agents-bar')).toBeNull()
   })
 
+  it('ticks from a start in MILLISECONDS, the unit the reducer stores', () => {
+    // `Subagent.startedAt` is epoch milliseconds. The bar used to take unix
+    // seconds, so the screen handed it a number a thousand times too large,
+    // `now - startedAt` came out hugely negative, and the clock sat on `0s`
+    // for the entire run.
+    const now = jest.spyOn(Date, 'now').mockReturnValue(1_700_000_072_000)
+
+    try {
+      renderScreen(<AgentsBar count={2} onPress={jest.fn()} startedAtMs={1_700_000_000_000} />)
+
+      expect(screen.getByText('2 agents working · 1m 12s')).toBeTruthy()
+    } finally {
+      now.mockRestore()
+    }
+  })
+
   it('steers and stops a child from the sheet', () => {
     const onSteer = jest.fn()
     const onInterrupt = jest.fn()

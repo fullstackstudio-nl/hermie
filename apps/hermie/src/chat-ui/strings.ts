@@ -99,6 +99,8 @@ export const chatStrings = {
   },
   composer: {
     placeholder: 'Message',
+    /** The field's accessibility label once the chat knows whose it is. */
+    messageTo: (bot: string) => `Message ${bot}`,
     send: 'Send message',
     stop: 'Stop response',
     attach: 'Add attachment',
@@ -149,7 +151,11 @@ export const chatStrings = {
     lock: 'Lock answer',
     locked: 'Locked',
     submit: 'Submit',
-    skip: 'Skip',
+    // Not "Skip": the button only takes the sheet off the screen. The question
+    // stays open on the gateway and stays answerable from the transcript, and
+    // a label that promised to skip it would be a lie about what the agent is
+    // still waiting for.
+    later: 'Later',
     outcome: (answered: number, total: number) =>
       answered >= total ? (total === 1 ? 'Answered' : `Answered all ${total}`) : `Answered ${answered} of ${total}`,
     next: 'Next',
@@ -180,7 +186,6 @@ export const chatStrings = {
     cancel: 'Cancel'
   },
   sheet: {
-    close: 'Close',
-    grabber: 'Drag handle'
+    close: 'Close'
   }
 } as const

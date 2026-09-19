@@ -267,10 +267,12 @@ Two things about this machine rather than about the project:
 
 ## Android
 
-`npx expo prebuild --platform android --no-install` succeeds. A Gradle build was **not** run: there is
-no JDK on this machine (`java -version` reports no runtime), so `assembleDebug` could not be
-attempted. The Android SDK is present at `~/Library/Android/sdk`. This is the largest untested gap in
-the skeleton.
+`npx expo prebuild --platform android --no-install` succeeds. When this was first written a Gradle
+build had **not** been run: there is no JDK on this machine (`java -version` reports no runtime), so
+`assembleDebug` could not be attempted. The Android SDK is present at `~/Library/Android/sdk`.
+
+That gap has since been closed — see "Android runtime (2026-09-19)" at the end of this file for how
+to get a JDK, how the emulator was set up, and what an actual run on a device found.
 
 ### The sign-in WebView is not given the gateway's extra headers on Android
 
@@ -497,3 +499,274 @@ while the chat is on screen. The last one lives in a `ChatScreen` effect rather 
 controller, which is what keeps a bot answering in a chat nobody is looking at silent.
 
 `npx expo-doctor` stays at 18/18 with the module added.
+
+## Android runtime (2026-09-19)
+
+The first time Hermie was driven end to end on an Android device. Everything below was observed on a
+booted emulator, not reasoned about from the source.
+
+### Building without a system JDK
+
+`java -version` still reports no runtime on this machine, and Gradle needs one. The documented way to
+get it:
+
+```sh
+brew install --cask temurin@17
+```
+
+Homebrew puts it where `/usr/libexec/java_home -v 17` can find it, and the Gradle wrapper picks it up
+with no further configuration. Any JDK 17 works — React Native 0.81 / AGP 8 want 17, not 21 and not 11.
+
+If the JDK is not on the default search path, point Gradle at it explicitly rather than editing
+`gradle.properties` (which is a prebuild output and gets overwritten):
+
+```sh
+export JAVA_HOME=/path/to/jdk-17/Contents/Home
+export PATH="$JAVA_HOME/bin:$PATH"
+npx expo run:android            # or: cd android && ./gradlew assembleDebug
+```
+
+`android/` is a prebuild output and is gitignored: a clean checkout has to run `npx expo prebuild
+--platform android` before any of this.
+
+### Emulator setup
+
+The SDK at `~/Library/Android/sdk` already carries `emulator`, `platform-tools` and an arm64 system
+image. Creating one from scratch, if `emulator -list-avds` comes back empty:
+
+```sh
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
+"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "system-images;android-36;google_apis;arm64-v8a"
+avdmanager create avd -n hermie -k "system-images;android-36;google_apis;arm64-v8a" -d pixel_7
+emulator -avd hermie -no-snapshot -no-boot-anim -gpu swiftshader_indirect &
+adb wait-for-device shell 'while [ "$(getprop sys.boot_completed)" != 1 ]; do sleep 1; done'
+```
+
+Two things that are easy to get wrong:
+
+- **The gateway host is `10.0.2.2`, not `localhost`.** That alias maps to the host machine's loopback
+  interface, so `npm run fake-gateway` on `127.0.0.1:9119` is reachable at `http://10.0.2.2:9119`
+  with no extra flags. `adb reverse` is only needed for Metro (`adb reverse tcp:8081 tcp:8081`).
+- **A new `*.android.tsx` file needs Metro's cache cleared.** Metro memoises the resolution of
+  `../platform/safe-area` to the file it found first; adding a platform variant beside it changes
+  nothing until `npx expo start --clear`. Fast Refresh will happily keep serving the old graph, and
+  the symptom is a fix that "does not work" while the file is plainly correct.
+
+### The status bar had no ink of its own (fixed)
+
+iOS derives the status bar's ink from the view controller, so nothing in the app ever had to say it.
+Android does not. The window starts with `windowLightStatusBar` unset — white icons — and
+edge-to-edge (on by default since SDK 54) makes the bar transparent, so those white icons sit
+straight on the app's own background. Prebuild's `styles.xml` even writes
+`<item name="android:statusBarColor">#F2F2F7</item>` and no matching `windowLightStatusBar`, which is
+the bug in one line: a light bar with light ink.
+
+In practice, in light mode: the clock, battery and signal bars were a pale grey smudge on the chats
+list (`#F2F2F7`) and **completely invisible** on a native stack header, which is plain white.
+
+`src/platform/safe-area.android.tsx` now renders `<StatusBar style="auto" />` from `expo-status-bar`
+inside the provider. That provider is the only wrapper already present on every Android screen and it
+sits above the navigator, so the setting survives screen changes. Verified dark-on-light in light
+mode and light-on-dark in dark mode, on both the chats list and a native header.
+
+One caveat is left: `style="auto"` follows the _system_ scheme, which is the same source the theme
+uses while Appearance is on "System" (the default). A user who pins the app to Light while the phone
+is Dark gets the system's ink rather than the app's. Fixing that needs the status bar driven by
+`useTheme().scheme`, which lives _below_ this provider.
+
+### `adjustResize` is a no-op under edge-to-edge — the composer hides behind the keyboard
+
+**Not fixed; it needs a change to shared code.** This is the worst thing found on Android.
+
+`AndroidManifest.xml` carries `android:windowSoftInputMode="adjustResize"`, and the app's keyboard
+avoidance is built on it:
+
+```tsx
+<KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+```
+
+`undefined` on Android means "do nothing, the window will resize under me". Since Android 15 / edge-to-edge
+that is no longer true: the system stopped resizing the window for the IME and expects the app to
+consume `WindowInsets.ime` itself. Measured directly, with `dumpsys window windows`:
+
+|               | app window frame   |
+| ------------- | ------------------ |
+| keyboard down | `[0,0][1080,2400]` |
+| keyboard up   | `[0,0][1080,2400]` |
+
+The window does not move. So the `KeyboardAvoidingView` has nothing to react to, and everything
+anchored to the bottom stays underneath the keyboard:
+
+- **Chat composer** — the field, the `+` button and Send are all covered. You cannot see what you are
+  typing and you cannot reach Send; the only way to send a message is to dismiss the keyboard first.
+- **Onboarding footer** — Continue and Back are covered on every step with a text field.
+
+The fix is to give Android `behavior="padding"` as well. RN drives `padding` from the
+`keyboardDidShow` metrics rather than from a window resize, so it works whether or not the window
+moves. Three call sites: `src/chat-ui/Composer.tsx`, `src/features/chats/ChatScreen.tsx` and
+`src/ui/bottom-sheet/SheetBody.tsx`. It was deliberately **not** applied in this round — those are shared files
+and the change wants to be made and re-verified together with the rest of the UI pass.
+
+### What a full pass did confirm
+
+Driven with `adb shell input` against `npm run fake-gateway -- --auth token --token demo`:
+
+- Onboarding all four steps, gateway probe (`Hermes 0.21.3-fake · session token required`), token
+  entry (masked), **Connected · 2 bots**, and the config surviving a cold restart.
+- Chats list, a chat, sending a message and getting a reply, the approval sheet (Allow once), a
+  delegation to `@writer` with its reply, the chat options sheet, Activity, Routines, Settings.
+- **Back button.** Correct on all four cases: dismisses the keyboard without leaving the step; is
+  swallowed by the blocking approval sheet; dismisses the options sheet without leaving the chat;
+  leaves a chat for the chats list.
+- **Edge-to-edge insets.** No overlap anywhere. The tab bar clears the gesture pill, the native stack
+  header insets itself below the status bar, the composer and the bottom sheets clear the pill.
+- **The picker asks for no permission.** `+` opens the Android photo picker (`ACTION_PICK_IMAGES`),
+  which needs no runtime grant on Android 13+. `READ_EXTERNAL_STORAGE` is declared by
+  `expo-image-picker` but stays `granted=false` and is never needed.
+- **Text fields.** Every address/token/search field sets `autoCapitalize="none"` and
+  `autoCorrect={false}`; nothing was auto-capitalised and the token field masks.
+- **No crashes.** Zero `FATAL EXCEPTION` in logcat across the whole session. The only
+  `W/ReactNativeJS` lines were "Cannot connect to Metro" from a deliberate Metro restart.
+
+### One thing that is probably shared, not Android
+
+On the very first hand-off from onboarding into the app, the chats list showed **"The bot list could
+not be loaded: gateway not connected"** while the header next to it already said "● Connected", and
+it stayed that way — `retry: 1` and `staleTime: 30_000` mean nothing re-runs the query when the
+socket finally comes up. Navigating away and back remounted it and it loaded; a cold start never
+showed it. It reads as a race between the bots query and the connection, which the emulator's slower
+startup widens rather than causes. Worth a look on iOS before it is called an Android bug.
+
+## The UI pass of 2026-09-19
+
+A round of UI fixes that touched all four targets. What is worth keeping is not the list of changes
+— the diff has that — but the handful of platform facts the round uncovered, and the two places
+where the fix is a shape rather than a line.
+
+### macOS has no `Modal` at all, so every sheet red-boxed
+
+`react-native-macos`'s `React/Views/RCTModalHostView.m` is wrapped in `#if !TARGET_OS_OSX`. There is
+no `RCTModalHostView` view manager on a Mac, so `<Modal>` is an unknown component and every sheet in
+the app — options, agents, approval, clarify — red-boxed the moment it mounted. It went unnoticed
+because the macOS build is hard to drive: the only way to open a sheet without typing is the
+Component gallery behind Settings → Developer.
+
+The sheet is therefore split three ways:
+
+| File                                | Role                                                        |
+| ----------------------------------- | ----------------------------------------------------------- |
+| `src/ui/bottom-sheet/SheetBody.tsx` | Props, animation, backdrop, panel. **No `.macos` sibling.** |
+| `src/ui/BottomSheet.tsx`            | iOS/Android: wraps the body in a `Modal`.                   |
+| `src/ui/BottomSheet.macos.tsx`      | macOS: wraps it in an absolutely positioned overlay.        |
+
+The shared module having no `.macos` sibling is the load-bearing part, not an accident of layout:
+inside a `.macos` file a relative specifier resolves back to that same file (see "Platform-variant
+modules resolve to themselves"), so `BottomSheet.macos.tsx` may not import `./BottomSheet` — but it
+may import `./bottom-sheet/SheetBody`, because that module has exactly one variant.
+
+Two things about the macOS overlay a reader should know before changing it:
+
+- It is **not** a portal. There is no portal host in this app, so the overlay fills the `Screen` it
+  was rendered into. On the regular (sidebar + detail) shell that means the detail pane, not the
+  window: the sidebar stays visible and usable behind the sheet. That is a deliberate trade, not a
+  bug, and it is the same thing `accessibilityViewIsModal` promises and macOS does not enforce.
+- **Escape is wired but unverified.** The overlay passes the macOS-only `keyDownEvents`/`onKeyDown`
+  pair, which is what AppKit needs before it will hand Escape to JS. It could not be exercised from a
+  script: as the table above records, no scripted mechanism delivers a key to a react-native-macos
+  view. The backdrop tap is the dismissal that IS verified.
+
+### One sheet per chat, not four
+
+`ChatScreen` used to render four sheets side by side and let each decide its own visibility. On iOS
+that is four sibling `Modal`s: the first one presented wins and the rest are never shown. A
+permission request arriving while the options sheet was open was therefore dropped on the floor, and
+the agent waited on a question the user was never offered. It reproduces in one tap on a real
+device and in `__tests__/chat-screen.test.tsx`.
+
+`ChatSheetHost` now mounts at most one of them, and `features/chats/sheet-host.ts` decides which:
+priority (a blocked agent outranks anything the reader opened) and the close-then-open swap live
+there as a pure reducer. The swap waits for the outgoing sheet's `onClosed`, which the sheet fires
+when its slide-out animation completes — with a `SHEET_ANIMATION_MS * 4` fallback, because `Animated`
+on the JS driver stops ticking while the app is in the background and that callback really can be
+minutes late.
+
+The host also holds the question it is showing **by id** rather than taking it from
+`chat.requests`. `chat.requests` is `openRequests`, so a question vanishes from it the instant it
+resolves; the sheet's own "Answered elsewhere" / "Timed out" branch had been unreachable since it was
+written. A question answered on this device closes itself after two seconds; one answered somewhere
+else, or withdrawn, waits for the reader, because they never saw what happened to it.
+
+### `padding` is the keyboard behaviour on Android too
+
+The Android section above worked out why `adjustResize` is a no-op under SDK 54's edge-to-edge
+layout, and left the fix for this round. It is now `src/ui/keyboard.ts`:
+`KEYBOARD_AVOID_BEHAVIOR` is `'padding'` everywhere except macOS, which has no soft keyboard and
+wants `undefined`. Four call sites use it: the composer, the chat screen, the sheet body and the
+onboarding wizard — which had no keyboard avoidance at all, so its Continue button sat under the
+keyboard on **every** platform, iOS included.
+
+A `KeyboardAvoidingView` with no `behavior` renders as a plain `View`. That is what lets `Composer`
+take a `keyboardAvoiding` prop (default off) without a second component: a chat screen already has an
+avoiding view around the transcript, and two nested ones each added the keyboard's height.
+
+### The status bar belongs to the theme, not to the safe-area provider
+
+Android leaves `windowLightStatusBar` unset (white icons) and edge-to-edge makes the bar
+transparent, so on Hermie's light background the clock and the battery disappear. The Android pass
+put `<StatusBar style="auto" />` in a `safe-area.android.tsx`; that follows the SYSTEM scheme, which
+is the wrong one for a reader who pinned the app to Light while the phone is Dark.
+
+It now lives in `ThemeProvider`, which is the one component that knows which of the pinned and the
+system scheme won, and which sits above every screen so it survives navigation. `expo-status-bar` has
+no macOS slice, so it goes through the usual seam: `src/platform/status-bar.tsx` with a `.macos.tsx`
+that renders `null`. `safe-area.android.tsx` was deleted — there is one status bar and one place that
+decides its ink.
+
+### `Subagent.startedAt` is milliseconds
+
+The reducer stores it in milliseconds and the agents sheet reads it that way. `AgentsBar` took unix
+seconds, so `ChatScreen` handed it a number a thousand times too large and the bar read `0s` for an
+entire run. The prop is now named `startedAtMs`, because the previous name is exactly how this
+happened.
+
+### The photo picker needs no permission
+
+`launchImageLibraryAsync` goes through PHPicker on iOS and the Android photo picker on Android. Both
+run out of process: the app only ever sees the one item handed back, and neither platform requires a
+grant. The Android pass confirmed the Android half; the iOS half is the same contract.
+`requestMediaLibraryPermissionsAsync` was therefore removed — it put a full-library prompt in front
+of someone attaching one screenshot, and a "Limited" answer came back as `granted: false` and refused
+a picker that would have worked. A refusal on an older OS is still caught, and
+`openAppSettings()` is offered for it.
+
+### The roster is read when the socket is up, not when the connection object exists
+
+`ChatRuntimeProvider` used to call `bots.refresh()` the instant a `GatewayConnection` was
+constructed, which on a fresh device is well before the socket is open. It failed with "gateway not
+connected", nothing retried, and the chats list sat on that error under a header that said
+Connected — the race the Android pass flagged as "probably shared, not Android". It was shared. The
+refresh now runs on the transition to `status === 'ready'`, which also covers every reconnect.
+
+### The composer field is one line box, not three independent controls
+
+The send button poked through the top of the rounded field and sat off-centre. Three things inside
+it were sized independently — a 38pt circle, a 44pt "+" and a 40pt input in 3pt of padding — so the
+row was as tall as its tallest child rather than as tall as one line of text, and `radii.sheet` (28)
+on a ~42pt box curved through most of the field's height, which is what the circle was crossing.
+
+`Composer` now has one line box. `COMPOSER_LINE_HEIGHT` (32) is a single line of input; both buttons
+occupy a slot exactly that tall and draw a `COMPOSER_BUTTON_SIZE` (30) circle centred inside it, and
+the row is `alignItems: 'flex-end'`, so at one line the circles are centred in the field and once the
+input grows they ride the bottom line the way iMessage does. The 44pt touch target comes from
+`hitSlop`, the way every other small control in the kit gets one.
+
+The radius is `COMPOSER_FIELD_RADIUS` — half the SINGLE-LINE field height, so the field is a true
+pill at one line and keeps those same caps as it grows. `radii.pill` is wrong here for the same
+reason `radii.sheet` was: a 999pt radius on a four-line field makes both ends full semicircles and
+the "+" on the bottom line ends up inside the left one. That was caught on the simulator between two
+attempts at this fix, which is why the number is derived rather than picked.
+
+`__tests__/chat-ui/composer.test.tsx` asserts the invariant rather than pixels — the test renderer
+lays nothing out — and the two heights that make overflow impossible: the button is never taller than
+the line box, and the buttons, the input and the field all agree on that one number.

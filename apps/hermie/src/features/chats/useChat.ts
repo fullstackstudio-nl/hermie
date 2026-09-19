@@ -52,6 +52,14 @@ export interface UseChatResult {
   /** The gateway's view of this session: yolo, fast, reasoning effort, model. */
   info: SessionLiveInfo | undefined
   error: string | null
+  /**
+   * Drop the controller error the banner is showing.
+   *
+   * Without this the banner's "Done" only cleared the screen's OWN notice, so
+   * a failed `openChat` left a banner that no button on it could dismiss —
+   * only a successful retry.
+   */
+  clearError: () => void
   setDraft: (draft: string) => void
   send: (text: string, attachments?: AttachmentInput[]) => Promise<void>
   stop: () => Promise<void>
@@ -174,6 +182,7 @@ export function useChat(botName: string): UseChatResult {
     queuedText: chat?.queued?.text,
     info: chat?.info,
     error,
+    clearError: useCallback(() => setError(null), []),
     setDraft: useCallback((draft: string) => useChatsStore.getState().setDraft(botName, draft), [botName]),
     send: useCallback(
       (text: string, attachments?: AttachmentInput[]) =>

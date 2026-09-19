@@ -20,13 +20,17 @@ import { renderScreen } from './support/render'
 
 // `mock`-prefixed so the factory below may close over it (Jest's hoisting rule).
 let mockController: Record<string, jest.Mock>
+// One runtime object per test, not one per render: `useChat` re-opens the chat
+// whenever the runtime's identity changes, and a factory that built a fresh
+// object every render re-ran `openChat` on every single re-render.
+let mockRuntime: { controller: Record<string, jest.Mock>; bots: Record<string, never> }
 
 jest.mock('../src/gateway', () => ({
-  useGateway: () => ({ status: 'ready' })
+  useGateway: () => ({ config: { baseUrl: 'https://gateway.example.com' }, http: null, status: 'ready' })
 }))
 
 jest.mock('../src/features/chats/ChatRuntime', () => ({
-  useChatRuntime: () => ({ controller: mockController, bots: {} })
+  useChatRuntime: () => mockRuntime
 }))
 
 jest.mock('../src/platform/haptics', () => ({ haptic: jest.fn() }))
@@ -35,9 +39,16 @@ jest.mock('../src/platform/haptics', () => ({ haptic: jest.fn() }))
 // ever awaits what it returns.
 jest.mock('../src/features/chats/attachments', () => ({
   attachmentKind: 'photo',
+  attachmentsSupported: true,
   MAX_ATTACHMENT_EDGE: 1568,
+  openAppSettings: jest.fn(),
   pickAttachment: jest.fn(async () => null)
 }))
+
+const attachments = jest.requireMock('../src/features/chats/attachments') as {
+  openAppSettings: jest.Mock
+  pickAttachment: jest.Mock
+}
 
 const BOT: Bot = {
   name: 'researcher',
@@ -99,6 +110,9 @@ const renderChat = () => renderScreen(<ChatScreen bot="researcher" />)
 
 beforeEach(() => {
   mockController = makeController()
+  mockRuntime = { bots: {}, controller: mockController }
+  attachments.openAppSettings.mockClear()
+  attachments.pickAttachment.mockReset().mockResolvedValue(null)
   seedChat()
 })
 
@@ -325,6 +339,128 @@ describe('ChatScreen', () => {
     renderScreen(<ChatScreen />)
 
     expect(screen.getByText('Pick a conversation to start reading.')).toBeTruthy()
+  })
+
+  it('presents a request that arrives while the options sheet is open', async () => {
+    renderChat()
+
+    fireEvent.press(screen.getByTestId('chat-header-options'))
+    await waitFor(() => expect(screen.getByTestId('chat-options-sheet')).toBeTruthy())
+
+    act(() => {
+      useChatsStore.getState().dispatchServerRequest('researcher', {
+        id: 'srq-11',
+        method: 'approval',
+        params: { command: 'rm -rf build', choices: ['once', 'deny'], request_id: 'appr-11' }
+      })
+    })
+
+    // This is the one the four sibling modals lost: iOS presented the options
+    // sheet and never showed the question underneath it.
+    await waitFor(() => expect(screen.getByTestId('approval-sheet')).toBeTruthy())
+    expect(screen.queryByTestId('chat-options-sheet')).toBeNull()
+  })
+
+  it('keeps saying it is waiting for you after a question is put aside', async () => {
+    renderChat()
+
+    act(() => {
+      useChatsStore.getState().dispatchServerRequest('researcher', {
+        id: 'srq-12',
+        method: 'clarify',
+        params: { question: 'Which tone?', choices: ['Formal'], request_id: 'clar-12' }
+      })
+    })
+
+    await waitFor(() => expect(screen.getByTestId('clarify-sheet')).toBeTruthy())
+    fireEvent.press(screen.getByTestId('clarify-skip'))
+
+    // "Later" takes the sheet away and nothing else: the agent is still
+    // blocked, so the header must not go back to saying Connected.
+    await waitFor(() => expect(screen.queryByTestId('clarify-sheet')).toBeNull())
+    expect(screen.getByText('Needs your input')).toBeTruthy()
+    // …and the transcript still offers the way back to it.
+    expect(screen.getByText('Answer')).toBeTruthy()
+  })
+
+  it('counts messages rather than rows in the jump-to-latest pill', async () => {
+    renderChat()
+
+    // Scroll away from the bottom (the list is inverted: offset 0 IS the
+    // bottom), which is the only state in which the pill counts anything.
+    act(() => {
+      fireEvent.scroll(screen.getByTestId('transcript-list-scroll'), {
+        nativeEvent: {
+          contentInset: { bottom: 0, left: 0, right: 0, top: 0 },
+          contentOffset: { x: 0, y: 400 },
+          contentSize: { height: 2000, width: 402 },
+          layoutMeasurement: { height: 874, width: 402 }
+        }
+      })
+    })
+
+    await waitFor(() => expect(screen.getByText('Jump to latest')).toBeTruthy())
+
+    act(() => {
+      // A tool call and a status row are not messages. Counting them announced
+      // "4 new" for one `ls`.
+      useChatsStore.getState().dispatchEvent('researcher', {
+        type: 'tool.start',
+        session_id: 'runtime-1',
+        payload: { tool_id: 'call_1', name: 'bash', args: { command: 'ls' } }
+      })
+      useChatsStore.getState().dispatchEvent('researcher', {
+        type: 'tool.complete',
+        session_id: 'runtime-1',
+        payload: { tool_id: 'call_1', name: 'bash', result: { ok: true } }
+      })
+    })
+
+    expect(screen.queryByText(/new$/u)).toBeNull()
+
+    act(() => {
+      useChatsStore.getState().dispatchEvent('researcher', {
+        type: 'message.complete',
+        session_id: 'runtime-1',
+        payload: { text: 'Here it is.', status: 'ok' }
+      })
+    })
+
+    await waitFor(() => expect(screen.getByText('1 new')).toBeTruthy())
+  })
+
+  it('offers the way out of a refused photo picker, and only for that', async () => {
+    attachments.pickAttachment.mockRejectedValueOnce(
+      new Error('Hermie needs access to your photo library to attach an image. Allow it in Settings.')
+    )
+    renderChat()
+
+    fireEvent.press(screen.getByTestId('composer-attach'))
+
+    await waitFor(() => expect(screen.getByTestId('chat-open-settings')).toBeTruthy())
+    fireEvent.press(screen.getByTestId('chat-open-settings'))
+    expect(attachments.openAppSettings).toHaveBeenCalled()
+
+    // Any other failure has no such button: there is nothing in Settings to fix.
+    fireEvent.press(screen.getByTestId('chat-error-dismiss'))
+    attachments.pickAttachment.mockRejectedValueOnce(new Error('the picker exploded'))
+    fireEvent.press(screen.getByTestId('composer-attach'))
+
+    await waitFor(() => expect(screen.getByText(/the picker exploded/u)).toBeTruthy())
+    expect(screen.queryByTestId('chat-open-settings')).toBeNull()
+  })
+
+  it('dismisses a controller error from the banner', async () => {
+    mockController.openChat.mockRejectedValueOnce(new Error('gateway not connected'))
+    renderChat()
+
+    await waitFor(() => expect(screen.getByText(/gateway not connected/u)).toBeTruthy())
+
+    fireEvent.press(screen.getByTestId('chat-error-dismiss'))
+
+    // "Done" used to clear only the screen's own notice, so a failed open left
+    // a banner no button on it could remove.
+    await waitFor(() => expect(screen.queryByText(/gateway not connected/u)).toBeNull())
   })
 })
 

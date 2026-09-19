@@ -7,7 +7,7 @@
  */
 import { View } from 'react-native'
 
-import { Markdown } from '../markdown'
+import { Markdown, type MarkdownImageSource } from '../markdown'
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
 import { Bubble } from './primitives/Bubble'
@@ -25,6 +25,8 @@ export interface AssistantBubbleProps {
   onRetry?: () => void
   /** Links inside the reply; defaults to the platform's own handler. */
   onLinkPress?: (href: string) => void
+  /** Where a gateway-relative image resolves, and what its request carries. */
+  images?: MarkdownImageSource
 }
 
 /**
@@ -63,7 +65,8 @@ export function AssistantBubble({
   presentation = 'full',
   showFooter = false,
   onRetry,
-  onLinkPress
+  onLinkPress,
+  images
 }: AssistantBubbleProps) {
   const theme = useTheme()
 
@@ -104,6 +107,7 @@ export function AssistantBubble({
         >
           <Markdown
             fontSize={17}
+            {...(images ? { images } : {})}
             onLinkPress={onLinkPress}
             streaming={item.streaming}
             surface={theme.scheme === 'dark' ? '#1B1B1F' : '#F7F7FA'}

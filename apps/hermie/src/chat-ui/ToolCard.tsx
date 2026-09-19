@@ -16,6 +16,7 @@ import { ActivityIndicator, Pressable, View } from 'react-native'
 import { MONOSPACE } from '../markdown'
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
+import { CONTROL_MIN_HEIGHT, TAP_SLOP } from '../ui/tokens'
 import { DiffView } from './DiffView'
 import { clipInline, formatDuration } from './format'
 import { chatStrings } from './strings'
@@ -58,7 +59,13 @@ function Truncatable({ value, testID }: { value: string; testID?: string }) {
         {long && !open ? `${value.slice(0, LONG_VALUE_CHARS)}…` : value}
       </Text>
       {long ? (
-        <Pressable accessibilityRole="button" onPress={() => setOpen(current => !current)}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ expanded: open }}
+          hitSlop={TAP_SLOP}
+          onPress={() => setOpen(current => !current)}
+          style={{ justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT }}
+        >
           <Text color="accent" variant="caption">
             {open ? chatStrings.tool.showLess : chatStrings.tool.showMore}
           </Text>

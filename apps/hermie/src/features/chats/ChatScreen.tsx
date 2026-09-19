@@ -25,11 +25,10 @@ import {
   type Verbosity
 } from '@hermie/transcript'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, View } from 'react-native'
+import { ActivityIndicator, KeyboardAvoidingView, Pressable, View } from 'react-native'
 
 import {
   AgentsBar,
-  AgentsSheet,
   ChatHeader,
   chatStrings,
   Composer,
@@ -46,11 +45,20 @@ import { haptic } from '../../platform/haptics'
 import { useBotsStore } from '../../store/bots'
 import { useChatsStore } from '../../store/chats'
 import { hasChatViewOverride, useChatView, useSettingsStore } from '../../store/settings'
-import { ApprovalSheet, ChatOptionsSheet, ClarifySheet } from '../../ui/sheets'
+import { KEYBOARD_AVOID_BEHAVIOR } from '../../ui/keyboard'
 import { Screen, Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
-import { attachmentKind, attachmentsSupported, pickAttachment, type PickedAttachment } from './attachments'
+import { CONTROL_MIN_HEIGHT, TAP_SLOP } from '../../ui/tokens'
+import {
+  attachmentKind,
+  attachmentsSupported,
+  openAppSettings,
+  pickAttachment,
+  type PickedAttachment
+} from './attachments'
+import { ChatSheetHost, type RequestItem } from './ChatSheetHost'
 import type { ModelChoice } from './chat-controller'
+import type { ManualSheet } from './sheet-host'
 import { useChat } from './useChat'
 
 export interface OpenChatOptions {
@@ -114,8 +122,6 @@ function NoBotSelected() {
   )
 }
 
-type SheetKind = 'none' | 'options' | 'agents'
-
 function Conversation({
   botName,
   focusItemId,
@@ -128,13 +134,13 @@ function Conversation({
   onOpenBot?: (botName: string, options?: OpenChatOptions) => void
 }) {
   const chat = useChat(botName)
-  const { status } = useGateway()
+  const { config, http, status } = useGateway()
   const view = useChatView(botName)
   const avatar = useBotsStore(state => state.avatars[botName])
   const byName = useBotsStore(state => state.byName)
   const overridden = useSettingsStore(state => hasChatViewOverride(state, botName))
 
-  const [sheet, setSheet] = useState<SheetKind>('none')
+  const [sheet, setSheet] = useState<ManualSheet>('none')
   const [attachments, setAttachments] = useState<PickedAttachment[]>([])
   const [suggestions, setSuggestions] = useState<SlashSuggestion[]>([])
   const [models, setModels] = useState<ModelChoice[]>([])
@@ -145,24 +151,84 @@ function Conversation({
   const [pendingModel, setPendingModel] = useState<{ value: string; message?: string } | null>(null)
   const [transcript, setTranscript] = useState<SubagentTranscript | null>(null)
   const [agentsNotice, setAgentsNotice] = useState<string | null>(null)
+  const [imageHeaders, setImageHeaders] = useState<Record<string, string> | null>(null)
+  const [needsPhotoAccess, setNeedsPhotoAccess] = useState(false)
 
   const listRef = useRef<TranscriptListHandle>(null)
   const focused = useRef<string | null>(null)
   const acknowledged = useRef<string | null>(null)
   const awayRef = useRef(false)
-  const itemCount = chat.items.length
-  const lastCount = useRef(itemCount)
+
+  /**
+   * Only what a reader would call a message.
+   *
+   * The pill used to count `chat.items`, which is every row: a tool call, a
+   * status chip, a notice. One `ls` behind a scrolled-up reader announced "4
+   * new" and none of them were messages.
+   */
+  const messageCount = useMemo(
+    () => chat.items.reduce((total, entry) => (MESSAGE_KINDS.has(entry.item.kind) ? total + 1 : total), 0),
+    [chat.items]
+  )
+  const lastCount = useRef(messageCount)
 
   awayRef.current = away
 
   // Messages that landed while the reader was further up: the pill's count.
+  //
+  // The delta is taken BEFORE the watermark moves. React runs a functional
+  // updater during the next render, long after this effect body has finished,
+  // so reading `lastCount.current` from inside the updater read the value this
+  // effect had already overwritten — every delta came out as zero and the pill
+  // never showed a count at all.
   useEffect(() => {
-    if (itemCount > lastCount.current && awayRef.current) {
-      setNewCount(current => current + (itemCount - lastCount.current))
+    const arrived = messageCount - lastCount.current
+
+    lastCount.current = messageCount
+
+    if (arrived > 0 && awayRef.current) {
+      setNewCount(current => current + arrived)
+    }
+  }, [messageCount])
+
+  /**
+   * What a Markdown image in a reply needs to load.
+   *
+   * An agent writes an attachment as `/api/files/…` — a path on the gateway,
+   * behind whatever the rest of the API is behind. Resolved once per
+   * connection and held in state, because this object ends up in the memo key
+   * of every transcript row.
+   */
+  useEffect(() => {
+    if (!http) {
+      setImageHeaders(null)
+
+      return
     }
 
-    lastCount.current = itemCount
-  }, [itemCount])
+    let cancelled = false
+
+    void http
+      .requestHeaders()
+      .then(headers => {
+        if (!cancelled) {
+          setImageHeaders(headers)
+        }
+      })
+      .catch(() => undefined)
+
+    return () => {
+      cancelled = true
+    }
+  }, [http])
+
+  const images = useMemo(
+    () => ({
+      ...(config?.baseUrl ? { baseUrl: config.baseUrl } : {}),
+      ...(imageHeaders ? { headers: imageHeaders } : {})
+    }),
+    [config?.baseUrl, imageHeaders]
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -183,7 +249,7 @@ function Conversation({
   // Oldest first, and a question the user closed after it was resolved is not
   // re-opened. `dismissedRequests` is keyed by item id, so a NEW request with
   // the same shape still shows.
-  const request = useMemo(() => {
+  const request = useMemo<RequestItem | undefined>(() => {
     for (const item of chat.requests) {
       if ((item.kind === 'approval' || item.kind === 'clarify') && !dismissedRequests.includes(item.id)) {
         return item
@@ -193,19 +259,40 @@ function Conversation({
     return undefined
   }, [chat.requests, dismissedRequests])
 
-  const approval = request?.kind === 'approval' ? (request as ApprovalItem) : undefined
-  const clarify = request?.kind === 'clarify' ? (request as ClarifyItem) : undefined
+  /**
+   * Any question by id, answered or not.
+   *
+   * `chat.requests` is `openRequests`, so a question drops out of it the
+   * instant it resolves. The sheet host holds the one it is showing by id and
+   * reads it back through here, which is how an answered question can stay on
+   * screen long enough to say what happened to it.
+   */
+  const findRequest = useCallback(
+    (id: string): RequestItem | undefined => {
+      for (const entry of chat.items) {
+        if (entry.item.id === id && (entry.item.kind === 'approval' || entry.item.kind === 'clarify')) {
+          return entry.item
+        }
+      }
+
+      return undefined
+    },
+    [chat.items]
+  )
 
   // `approval.received` tells the gateway's queue a human is looking at it, so
   // it stops counting down. It is sent once per request, on first show.
-  useEffect(() => {
-    if (!approval || acknowledged.current === approval.id) {
-      return
-    }
+  const acknowledge = useCallback(
+    (item: RequestItem) => {
+      if (item.kind !== 'approval' || acknowledged.current === item.id) {
+        return
+      }
 
-    acknowledged.current = approval.id
-    void chat.acknowledgeApproval(approval.requestId).catch(() => undefined)
-  }, [approval, chat])
+      acknowledged.current = item.id
+      void chat.acknowledgeApproval(item.requestId).catch(() => undefined)
+    },
+    [chat]
+  )
 
   // A reply landing is worth one buzz, and only while the chat is on screen:
   // this effect is unmounted the moment the user leaves, so a bot answering in
@@ -407,11 +494,14 @@ function Conversation({
   }, [chat, subagents, transcript?.subagentId, transcript?.source])
 
   const busy = chat.busy
+  // Every question the agent is still blocked on, including one the reader put
+  // aside with "Later". The header must not go quiet while the agent waits.
+  const needsInput = chat.requests.length > 0
   const subtitle = subtitleFor({
     status,
     busy,
     queued: Boolean(chat.queuedText),
-    needsInput: Boolean(request)
+    needsInput
   })
 
   const send = useCallback(
@@ -450,7 +540,12 @@ function Conversation({
         setAttachments(current => [...current, picked])
       }
     } catch (error) {
-      setNotice(strings.chat.attach.failed(messageOf(error)))
+      const message = messageOf(error)
+
+      // A refused picker is the one failure the user can do something about,
+      // and the only place to do it is the system settings app.
+      setNeedsPhotoAccess(message === strings.chat.attach.permission)
+      setNotice(strings.chat.attach.failed(message))
     }
   }, [])
 
@@ -510,21 +605,76 @@ function Conversation({
 
   const display = byName[botName]?.displayName ?? botName
 
+  /**
+   * Stable callbacks for the transcript.
+   *
+   * `TranscriptRow` is memoized on `(id, version, presentation, receipt,
+   * context)`, and the context is rebuilt whenever any handler identity
+   * changes. An inline arrow here therefore invalidated EVERY settled row on
+   * every streaming delta — the one thing the memo exists to prevent.
+   */
+  const reopenRequest = useCallback((item: ApprovalItem | ClarifyItem) => {
+    setDismissed(current => current.filter(id => id !== item.id))
+  }, [])
+
+  const openAgents = useCallback(() => setSheet('agents'), [])
+  const openOptions = useCallback(() => setSheet('options'), [])
+
+  const onScrolledAway = useCallback((next: boolean) => {
+    setAway(next)
+
+    if (!next) {
+      setNewCount(0)
+    }
+  }, [])
+
+  const closeManualSheet = useCallback(() => {
+    setSheet('none')
+    setTranscript(null)
+  }, [])
+
+  const dismissRequest = useCallback((item: ApprovalItem | ClarifyItem) => {
+    setDismissed(current => (current.includes(item.id) ? current : [...current, item.id]))
+  }, [])
+
+  const respondApproval = useCallback(
+    (item: ApprovalItem, choice: string) => {
+      haptic('choice')
+      void chat.respondApproval(item.requestId, choice).catch(error => setNotice(messageOf(error)))
+    },
+    [chat]
+  )
+
+  const submitClarify = useCallback(
+    (item: ClarifyItem, answers: Record<string, string>) => {
+      haptic('choice')
+      void chat.respondClarify(item.requestId, answers).catch(error => setNotice(messageOf(error)))
+    },
+    [chat]
+  )
+
+  const lockClarify = useCallback(
+    (item: ClarifyItem, qid: string, answer: string) => {
+      void chat.lockClarify(item.requestId, qid, answer).catch(error => setNotice(messageOf(error)))
+    },
+    [chat]
+  )
+
   return (
     <Screen edgeToEdgeTop={false} padded={false}>
       <ChatHeader
         avatarUri={avatar}
         handle={botName}
         name={display}
-        needsInput={Boolean(request)}
+        needsInput={needsInput}
         onBack={onBack}
-        onOpenOptions={() => setSheet('options')}
+        onOpenOptions={openOptions}
         running={busy}
         subtitle={subtitle}
       />
 
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={KEYBOARD_AVOID_BEHAVIOR}
         // The chat header is inside this screen (the stack's own header is
         // hidden for this route), so there is no external bar to offset past.
         keyboardVerticalOffset={0}
@@ -533,33 +683,29 @@ function Conversation({
         <Banner
           error={chat.error ?? notice}
           hydration={chat.hydration}
-          onDismiss={() => setNotice(null)}
+          onDismiss={() => {
+            setNotice(null)
+            setNeedsPhotoAccess(false)
+            chat.clearError()
+          }}
           onRetry={chat.reload}
+          {...(needsPhotoAccess ? { onOpenSettings: openAppSettings } : {})}
         />
 
         <TranscriptList
           header={
             chat.subagents.length ? (
-              <AgentsBar
-                count={chat.subagents.length}
-                onPress={() => setSheet('agents')}
-                startedAt={oldestStart(chat.subagents)}
-              />
+              <AgentsBar count={chat.subagents.length} onPress={openAgents} startedAtMs={oldestStart(chat.subagents)} />
             ) : null
           }
+          images={images}
           items={chat.items}
           newMessageCount={newCount}
           onEndReached={noop}
           onOpenBot={openBot}
-          onOpenRequest={item => setDismissed(current => current.filter(id => id !== item.id))}
+          onOpenRequest={reopenRequest}
           onOpenTranscript={openTranscript}
-          onScrolledAwayFromBottom={next => {
-            setAway(next)
-
-            if (!next) {
-              setNewCount(0)
-            }
-          }}
+          onScrolledAwayFromBottom={onScrolledAway}
           ref={listRef}
           selfHandle={botName}
           subagents={subagents}
@@ -590,84 +736,64 @@ function Conversation({
         />
       </KeyboardAvoidingView>
 
-      {approval ? (
-        <ApprovalSheet
-          botHandle={botName}
-          item={approval}
-          onClose={() => setDismissed(current => [...current, approval.id])}
-          onRespond={choice => {
-            haptic('choice')
-            void chat.respondApproval(approval.requestId, choice).catch(error => setNotice(messageOf(error)))
-          }}
-          visible
-        />
-      ) : null}
-
-      {clarify ? (
-        <ClarifySheet
-          item={clarify}
-          onClose={() => setDismissed(current => [...current, clarify.id])}
-          onLock={(qid, answer) => {
-            void chat.lockClarify(clarify.requestId, qid, answer).catch(error => setNotice(messageOf(error)))
-          }}
-          onSkip={() => setDismissed(current => [...current, clarify.id])}
-          onSubmit={answers => {
-            haptic('choice')
-            void chat.respondClarify(clarify.requestId, answers).catch(error => setNotice(messageOf(error)))
-          }}
-          visible
-        />
-      ) : null}
-
-      <AgentsSheet
-        notice={agentsNotice}
-        onClose={() => {
-          setSheet('none')
-          setTranscript(null)
+      {/* One sheet, never four. `ChatSheetHost` decides which, and closes the
+          one on screen before it opens the next. */}
+      <ChatSheetHost
+        agents={{
+          notice: agentsNotice,
+          onCloseTranscript: () => setTranscript(null),
+          onInterrupt: id => void stopChild(id),
+          onOpenTranscript: openTranscript,
+          onSteer: (id, text) => void steerChild(id, text),
+          transcript,
+          tree: chat.subagentTree
         }}
-        onCloseTranscript={() => setTranscript(null)}
-        onInterrupt={id => void stopChild(id)}
-        onOpenTranscript={openTranscript}
-        onSteer={(id, text) => void steerChild(id, text)}
-        transcript={transcript}
-        tree={chat.subagentTree}
-        visible={sheet === 'agents'}
-      />
-
-      <ChatOptionsSheet
-        botName={display}
-        confirmMessage={pendingModel?.message ?? ''}
-        fast={chat.info?.fast === true}
-        model={chat.info?.model ?? ''}
-        modelOptions={modelOptions}
-        onCancelExpensiveModel={() => setPendingModel(null)}
-        onChangeFast={value => void setOption('fast', value ? 'true' : 'false')}
-        onChangeModel={value => void setOption('model', value)}
-        onChangeReasoningEffort={value => void setOption('reasoning', value)}
-        onChangeShowBotToBot={value => useSettingsStore.getState().setChatView(botName, { showBotToBot: value })}
-        onChangeShowThinking={value => useSettingsStore.getState().setChatView(botName, { showThinking: value })}
-        onChangeVerbosity={(value: Verbosity) => useSettingsStore.getState().setChatView(botName, { level: value })}
-        onChangeYolo={value => void setOption('yolo', value ? 'true' : 'false')}
-        onClose={() => setSheet('none')}
-        onConfirmExpensiveModel={() => {
-          if (pendingModel) {
-            void setOption('model', pendingModel.value, true)
-          }
+        botHandle={botName}
+        findRequest={findRequest}
+        manual={sheet}
+        onCloseManual={closeManualSheet}
+        onCloseRequest={dismissRequest}
+        onLockClarify={lockClarify}
+        onRespondApproval={respondApproval}
+        onShowRequest={acknowledge}
+        onSubmitClarify={submitClarify}
+        options={{
+          botName: display,
+          confirmMessage: pendingModel?.message ?? '',
+          fast: chat.info?.fast === true,
+          model: chat.info?.model ?? '',
+          modelOptions,
+          onCancelExpensiveModel: () => setPendingModel(null),
+          onChangeFast: value => void setOption('fast', value ? 'true' : 'false'),
+          onChangeModel: value => void setOption('model', value),
+          onChangeReasoningEffort: value => void setOption('reasoning', value),
+          onChangeShowBotToBot: value => useSettingsStore.getState().setChatView(botName, { showBotToBot: value }),
+          onChangeShowThinking: value => useSettingsStore.getState().setChatView(botName, { showThinking: value }),
+          onChangeVerbosity: (value: Verbosity) => useSettingsStore.getState().setChatView(botName, { level: value }),
+          onChangeYolo: value => void setOption('yolo', value ? 'true' : 'false'),
+          onConfirmExpensiveModel: () => {
+            if (pendingModel) {
+              void setOption('model', pendingModel.value, true)
+            }
+          },
+          onResetView: () => useSettingsStore.getState().resetChatView(botName),
+          pendingExpensiveModel: pendingModel?.value ?? null,
+          reasoningEffort: chat.info?.reasoning_effort ?? '',
+          reasoningOptions: REASONING_OPTIONS,
+          showBotToBot: view.showBotToBot,
+          showThinking: view.showThinking,
+          verbosity: view.level,
+          viewOverridden: overridden,
+          yolo: chat.info?.yolo === true
         }}
-        onResetView={() => useSettingsStore.getState().resetChatView(botName)}
-        pendingExpensiveModel={pendingModel?.value ?? null}
-        reasoningEffort={chat.info?.reasoning_effort ?? ''}
-        reasoningOptions={REASONING_OPTIONS}
-        showBotToBot={view.showBotToBot}
-        showThinking={view.showThinking}
-        verbosity={view.level}
-        viewOverridden={overridden}
-        visible={sheet === 'options'}
-        yolo={chat.info?.yolo === true}
+        {...(request ? { request } : {})}
       />
     </Screen>
   )
 }
+
+/** What the jump-to-latest pill counts: messages, not rows. */
+const MESSAGE_KINDS = new Set<string>(['assistant', 'bot_dm_in', 'bot_dm_out', 'user'])
 
 /** `onEndReached`: the controller has no older-history page to fetch (yet). */
 const noop = () => undefined
@@ -696,6 +822,7 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+/** The earliest start among the running children, in epoch milliseconds. */
 function oldestStart(children: readonly { startedAt: number }[]): number | undefined {
   const starts = children.map(child => child.startedAt).filter(value => value > 0)
 
@@ -761,12 +888,15 @@ function Banner({
   hydration,
   error,
   onRetry,
-  onDismiss
+  onDismiss,
+  onOpenSettings
 }: {
   hydration: ReturnType<typeof useChat>['hydration']
   error: string | null
   onRetry: () => Promise<void>
   onDismiss: () => void
+  /** Only for a refused photo picker: the one failure with a way out. */
+  onOpenSettings?: () => void
 }) {
   const theme = useTheme()
 
@@ -776,13 +906,37 @@ function Banner({
         <Text color="danger" variant="callout">
           {strings.chat.failed(error)}
         </Text>
-        <View style={{ flexDirection: 'row', gap: theme.space.lg }}>
-          <Pressable accessibilityRole="button" onPress={() => void onRetry()}>
+        <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.lg }}>
+          <Pressable
+            accessibilityRole="button"
+            hitSlop={TAP_SLOP}
+            onPress={() => void onRetry()}
+            style={{ justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT }}
+          >
             <Text color="accent" variant="callout">
               {strings.chat.retry}
             </Text>
           </Pressable>
-          <Pressable accessibilityRole="button" onPress={onDismiss}>
+          {onOpenSettings ? (
+            <Pressable
+              accessibilityRole="button"
+              hitSlop={TAP_SLOP}
+              onPress={onOpenSettings}
+              style={{ justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT }}
+              testID="chat-open-settings"
+            >
+              <Text color="accent" variant="callout">
+                {strings.chat.attach.openSettings}
+              </Text>
+            </Pressable>
+          ) : null}
+          <Pressable
+            accessibilityRole="button"
+            hitSlop={TAP_SLOP}
+            onPress={onDismiss}
+            style={{ justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT }}
+            testID="chat-error-dismiss"
+          >
             <Text color="textMuted" variant="callout">
               {strings.common.done}
             </Text>

@@ -1,15 +1,17 @@
 /**
  * What the Markdown renderer actually paints, with the real block component.
  */
-import { act, render } from '@testing-library/react-native'
+import { act, fireEvent, render, screen } from '@testing-library/react-native'
 import { marked } from 'marked'
+import { Image } from 'react-native'
 
 import { MarkdownBlock } from '../../src/markdown/Block'
 import { Markdown } from '../../src/markdown/Markdown'
 import { resetBlockCache } from '../../src/markdown/blocks'
 import type { MarkdownContext } from '../../src/markdown/context'
 import { highlightToLines, isKnownLanguage } from '../../src/markdown/highlight'
-import { preprocessMarkdown } from '../../src/markdown/preprocess'
+import { resolveImageUri } from '../../src/markdown/context'
+import { preprocessMarkdown, trimUrlTail } from '../../src/markdown/preprocess'
 import { ThemeProvider } from '../../src/ui/theme'
 
 const DOCUMENT = [
@@ -142,6 +144,107 @@ describe('preprocessMarkdown', () => {
     const out = preprocessMarkdown('Intro line\n| a | b |\n| --- | --- |\n| 1 | 2 |')
 
     expect(out).toContain('Intro line\n\n| a | b |')
+  })
+})
+
+/**
+ * The bare-URL autolinker, which used to corrupt two very ordinary shapes: a
+ * link whose visible text IS the URL, and a URL inside brackets. Both come out
+ * of models constantly, and both rendered as visible `<…>` angle brackets or as
+ * a link with a closing parenthesis inside the href.
+ */
+describe('autolinking bare URLs', () => {
+  it('leaves a link whose label is the URL exactly as written', () => {
+    expect(preprocessMarkdown('[https://foo.dev](https://foo.dev)')).toBe('[https://foo.dev](https://foo.dev)')
+  })
+
+  it('leaves an image and a reference link alone', () => {
+    expect(preprocessMarkdown('![chart](https://foo.dev/c.png)')).toBe('![chart](https://foo.dev/c.png)')
+  })
+
+  it('gives a closing parenthesis back to the sentence', () => {
+    expect(preprocessMarkdown('(see https://example.com)')).toBe('(see <https://example.com>)')
+  })
+
+  it('keeps a parenthesis the path itself opened', () => {
+    expect(preprocessMarkdown('https://en.wikipedia.org/wiki/Foo_(bar)')).toBe(
+      '<https://en.wikipedia.org/wiki/Foo_(bar)>'
+    )
+  })
+
+  it('gives a trailing full stop back to the sentence', () => {
+    expect(preprocessMarkdown('see https://example.com.')).toBe('see <https://example.com>.')
+  })
+
+  it('does not autolink an autolink twice', () => {
+    expect(preprocessMarkdown('<https://example.com>')).toBe('<https://example.com>')
+  })
+
+  it('still links a plain URL in prose', () => {
+    expect(preprocessMarkdown('read https://example.com now')).toBe('read <https://example.com> now')
+  })
+})
+
+describe('trimUrlTail', () => {
+  it('balances brackets rather than trusting the last character', () => {
+    expect(trimUrlTail('https://x.dev/a)')).toBe('https://x.dev/a')
+    expect(trimUrlTail('https://x.dev/a_(b)')).toBe('https://x.dev/a_(b)')
+    expect(trimUrlTail('https://x.dev/a]')).toBe('https://x.dev/a')
+    expect(trimUrlTail('https://x.dev/a[b]')).toBe('https://x.dev/a[b]')
+  })
+
+  it('strips the punctuation a sentence owns', () => {
+    expect(trimUrlTail('https://x.dev/a,')).toBe('https://x.dev/a')
+    expect(trimUrlTail('https://x.dev/a?!')).toBe('https://x.dev/a')
+  })
+})
+
+describe('Markdown images', () => {
+  it('resolves a gateway-relative source against the gateway', () => {
+    expect(resolveImageUri('/api/files/1.png', 'https://gw.example.com')).toBe('https://gw.example.com/api/files/1.png')
+    expect(resolveImageUri('/api/files/1.png', 'https://gw.example.com/')).toBe(
+      'https://gw.example.com/api/files/1.png'
+    )
+  })
+
+  it('leaves anything with a scheme of its own alone', () => {
+    expect(resolveImageUri('https://cdn.example.com/a.png', 'https://gw.example.com')).toBe(
+      'https://cdn.example.com/a.png'
+    )
+    expect(resolveImageUri('data:image/png;base64,AAAA', 'https://gw.example.com')).toBe('data:image/png;base64,AAAA')
+  })
+
+  it('hands a relative source back unchanged when there is no gateway to resolve it against', () => {
+    expect(resolveImageUri('/api/files/1.png')).toBe('/api/files/1.png')
+  })
+
+  it('carries the gateway headers on the image request', () => {
+    const headers = { Authorization: 'Bearer token' }
+
+    render(
+      <ThemeProvider>
+        <Markdown images={{ baseUrl: 'https://gw.example.com', headers }} text="![chart](/api/files/1.png)" />
+      </ThemeProvider>
+    )
+
+    const image = screen.UNSAFE_getByType(Image)
+
+    expect(image.props.source).toMatchObject({ uri: 'https://gw.example.com/api/files/1.png', headers })
+  })
+
+  it('falls back to the alt text when the image cannot be fetched', () => {
+    render(
+      <ThemeProvider>
+        <Markdown text="![a bar chart of weekly runs](https://gw.example.com/missing.png)" />
+      </ThemeProvider>
+    )
+
+    act(() => {
+      fireEvent(screen.UNSAFE_getByType(Image), 'error')
+    })
+
+    expect(screen.UNSAFE_queryAllByType(Image)).toHaveLength(0)
+    expect(screen.getByText('a bar chart of weekly runs')).toBeTruthy()
   })
 })
 

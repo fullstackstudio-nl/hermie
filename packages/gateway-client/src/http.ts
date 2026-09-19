@@ -80,6 +80,19 @@ export class GatewayHttp {
     }
   }
 
+  /**
+   * The headers a fetch this client does NOT make would still need.
+   *
+   * A Markdown image in a reply is loaded by the platform's own image loader,
+   * not by this class, and a gated gateway answers 401 without them. Callers
+   * are expected to resolve this once and hold the result: it mints nothing and
+   * refreshes nothing, so a stale bearer here fails the way any other stale
+   * bearer does, with a 401 the caller sees as a failed image.
+   */
+  async requestHeaders(): Promise<Record<string, string>> {
+    return { ...this.extraHeaders, ...(await this.options.credentials.httpAuthHeaders()) }
+  }
+
   /** `POST /api/auth/ws-ticket` — single-use, 30 s TTL, one per dial. */
   async wsTicket(options?: RequestOptions): Promise<WsTicket> {
     const body = await this.post<Record<string, unknown>>('/api/auth/ws-ticket', {}, options)

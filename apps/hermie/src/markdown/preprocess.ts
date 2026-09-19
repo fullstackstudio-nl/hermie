@@ -63,6 +63,77 @@ const CITATION_MARKER_RE = /(?<=[\p{L}\p{N})\].,!?:;"'”’])\[(?:\d+(?:\s*,\s*
 // pattern) does not swallow the trailing `**` into the href.
 const RAW_URL_RE = /https?:\/\/[^\s<>"'`*]+[^\s<>"'`*.,;:!?]/g
 
+/**
+ * Markdown that already links, so the autolinker leaves it alone.
+ *
+ * Only the DESTINATION used to be protected, by peeking at the two characters
+ * before the match. That left the label: `[https://foo.dev](https://foo.dev)`
+ * came out as `[<https://foo.dev>](https://foo.dev)`, which renders as a link
+ * whose visible text is a second, nested link. Splitting the prose on whole
+ * link constructs protects both halves at once, and images with it.
+ */
+const LINK_SYNTAX = String.raw`!?\[[^\]\n]*\](?:\([^)\n]*\)|\[[^\]\n]*\])|<[^\s<>]*>`
+const LINK_SYNTAX_SPLIT_RE = new RegExp(`(${LINK_SYNTAX})`, 'g')
+// Its own copy, without `g`: a global regex carries `lastIndex` between calls,
+// and `test` on one is a different answer every other time it is asked.
+const LINK_SYNTAX_RE = new RegExp(`^(?:${LINK_SYNTAX})$`)
+
+// Trailing punctuation a sentence owns rather than the URL: `see https://x.`
+// is a URL and a full stop. `)` and `]` are handled separately, because
+// `…/Foo_(bar)` genuinely ends in one.
+const URL_TAIL_PUNCTUATION = new Set(['!', '"', "'", '*', ',', '.', ':', ';', '?', '_', '~'])
+
+function countChar(value: string, char: string): number {
+  let total = 0
+
+  for (const candidate of value) {
+    if (candidate === char) {
+      total += 1
+    }
+  }
+
+  return total
+}
+
+/**
+ * Give back the trailing characters the sentence owns, the way marked's
+ * `_backpedal` does.
+ *
+ * A closing bracket stays only when the URL opened one: `(see
+ * https://example.com)` ends a parenthesis, while
+ * `https://en.wikipedia.org/wiki/Foo_(bar)` ends a path. Counting is what tells
+ * the two apart, and it is the whole reason this is not a regex.
+ */
+export function trimUrlTail(url: string): string {
+  let out = url
+
+  for (;;) {
+    const last = out.at(-1)
+
+    if (!last) {
+      return out
+    }
+
+    if (last === ')' || last === ']') {
+      const opener = last === ')' ? '(' : '['
+
+      if (countChar(out, last) <= countChar(out, opener)) {
+        return out
+      }
+
+      out = out.slice(0, -1)
+
+      continue
+    }
+
+    if (!URL_TAIL_PUNCTUATION.has(last)) {
+      return out
+    }
+
+    out = out.slice(0, -1)
+  }
+}
+
 // Mirrors `MEDIA_DELIVERY_EXTS` in the gateway's `platforms/base.py`: the
 // extensions a `MEDIA:` tag is allowed to end on. Anchoring on the extension is
 // what lets an unquoted path contain spaces.
@@ -356,20 +427,22 @@ function spaceTableBlocks(text: string): string {
   return out.join('\n')
 }
 
+function autolinkBareUrls(segment: string): string {
+  return segment.replace(RAW_URL_RE, (url: string) => {
+    const href = trimUrlTail(url)
+
+    // Everything the URL gave back stays in the prose, outside the link.
+    return href ? `<${href}>${url.slice(href.length)}` : url
+  })
+}
+
 function rewriteProseSegment(segment: string): string {
   const withoutCitations = segment.replace(CITATION_MARKER_RE, '')
 
-  return withoutCitations.replace(RAW_URL_RE, (url: string, index: number) => {
-    const previous = withoutCitations[index - 1] ?? ''
-    const beforePrevious = withoutCitations[index - 2] ?? ''
-
-    // Already an autolink, or already the target of a markdown link.
-    if (previous === '<' || (beforePrevious === ']' && previous === '(')) {
-      return url
-    }
-
-    return `<${url}>`
-  })
+  return withoutCitations
+    .split(LINK_SYNTAX_SPLIT_RE)
+    .map(part => (LINK_SYNTAX_RE.test(part) ? part : autolinkBareUrls(part)))
+    .join('')
 }
 
 function normalizeVisibleProse(text: string): string {

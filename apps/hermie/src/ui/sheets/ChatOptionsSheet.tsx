@@ -23,6 +23,8 @@ import { DisclosureRow, SegmentedRow, SwitchRow } from './controls'
 export interface ChatOptionsSheetProps {
   visible: boolean
   onClose: () => void
+  /** Forwarded to the sheet: the slide-out has finished. */
+  onClosed?: () => void
   botName: string
 
   yolo: boolean
@@ -189,6 +191,7 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
       <BottomSheet
         accessibilityLabel={chatStrings.options.expensiveTitle}
         blocking
+        onClosed={props.onClosed}
         onRequestClose={() => props.onCancelExpensiveModel?.()}
         testID="chat-options-sheet"
         visible={props.visible}
@@ -213,6 +216,7 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
   return (
     <BottomSheet
       accessibilityLabel={chatStrings.options.title}
+      onClosed={props.onClosed}
       onRequestClose={close}
       testID="chat-options-sheet"
       visible={props.visible}

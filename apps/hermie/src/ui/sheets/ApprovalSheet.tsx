@@ -32,6 +32,8 @@ export interface ApprovalSheetProps {
   onRespond: (choice: string) => void
   /** Only reachable once the request is no longer open. */
   onClose: () => void
+  /** Forwarded to the sheet: the slide-out has finished. */
+  onClosed?: () => void
   /** Milliseconds before taps are accepted. Tests pass 0. */
   tapGuardMs?: number
   /** Extra context line, e.g. the working directory. */
@@ -59,6 +61,7 @@ export function ApprovalSheet({
   botHandle,
   onRespond,
   onClose,
+  onClosed,
   tapGuardMs = DEFAULT_TAP_GUARD_MS,
   workingDirectory
 }: ApprovalSheetProps) {
@@ -66,6 +69,11 @@ export function ApprovalSheet({
   const [armed, setArmed] = useState(tapGuardMs <= 0)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // `item.id` is in here on purpose. The sheet host keeps ONE approval sheet
+  // mounted and swaps the request into it, so a second question can arrive
+  // without `visible` ever going false — and a guard that only re-armed on
+  // `visible` would hand the next question a live "Allow once" under the
+  // finger that just answered the previous one.
   useEffect(() => {
     if (!visible) {
       setArmed(tapGuardMs <= 0)
@@ -87,7 +95,7 @@ export function ApprovalSheet({
         clearTimeout(timer.current)
       }
     }
-  }, [tapGuardMs, visible])
+  }, [item.id, tapGuardMs, visible])
 
   const open = item.state === 'open'
 
@@ -97,6 +105,7 @@ export function ApprovalSheet({
       // Still blocking once answered: the sheet then shows why it closed, and
       // a stray backdrop tap should not race the reason off the screen.
       blocking
+      onClosed={onClosed}
       onRequestClose={onClose}
       testID="approval-sheet"
       visible={visible}

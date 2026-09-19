@@ -24,8 +24,15 @@ export interface ClarifySheetProps {
   /** Answers the user has committed per question, keyed by `qid`. */
   onLock?: (qid: string, answer: string) => void
   onSubmit: (answers: Record<string, string>) => void
+  /**
+   * Put the question aside. It stays open on the gateway and in the transcript
+   * — this only takes the sheet off the screen — which is why the button says
+   * "Later" rather than "Skip".
+   */
   onSkip: () => void
   onClose: () => void
+  /** Forwarded to the sheet: the slide-out has finished. */
+  onClosed?: () => void
 }
 
 const MULTI_SEPARATOR = ', '
@@ -49,7 +56,7 @@ function isSelected(current: string, choice: string, multiSelect: boolean): bool
   return current.split(MULTI_SEPARATOR).includes(choice)
 }
 
-export function ClarifySheet({ visible, item, onLock, onSubmit, onSkip, onClose }: ClarifySheetProps) {
+export function ClarifySheet({ visible, item, onLock, onSubmit, onSkip, onClose, onClosed }: ClarifySheetProps) {
   const theme = useTheme()
   const [index, setIndex] = useState(0)
   const [answers, setAnswers] = useState<Record<string, string>>(() => ({ ...item.answers }))
@@ -60,6 +67,33 @@ export function ClarifySheet({ visible, item, onLock, onSubmit, onSkip, onClose 
 
   if (!question) {
     return null
+  }
+
+  // The host keeps a resolved question on screen so its outcome can be read;
+  // without this branch the sheet would go on offering Submit for a question
+  // the gateway has already closed.
+  if (item.state !== 'open') {
+    return (
+      <BottomSheet
+        accessibilityLabel={chatStrings.clarify.title}
+        blocking
+        onClosed={onClosed}
+        onRequestClose={onClose}
+        testID="clarify-sheet"
+        visible={visible}
+      >
+        <SheetEyebrow>{chatStrings.clarify.eyebrow}</SheetEyebrow>
+        <Text variant="title">{chatStrings.clarify.title}</Text>
+        <Text color="textMuted" testID="clarify-resolution">
+          {item.state === 'answered'
+            ? chatStrings.clarify.outcome(Object.keys(item.answers).length, item.questions.length)
+            : item.cancelReason === 'timeout'
+              ? chatStrings.approval.timedOut
+              : chatStrings.approval.answeredElsewhere}
+        </Text>
+        <Button onPress={onClose} testID="clarify-close" title={chatStrings.sheet.close} variant="secondary" />
+      </BottomSheet>
+    )
   }
 
   const value = answers[question.qid] ?? ''
@@ -73,6 +107,7 @@ export function ClarifySheet({ visible, item, onLock, onSubmit, onSkip, onClose 
     <BottomSheet
       accessibilityLabel={chatStrings.clarify.title}
       blocking
+      onClosed={onClosed}
       onRequestClose={onClose}
       testID="clarify-sheet"
       visible={visible}
@@ -181,7 +216,7 @@ export function ClarifySheet({ visible, item, onLock, onSubmit, onSkip, onClose 
           />
         ) : null}
 
-        <Button onPress={onSkip} testID="clarify-skip" title={chatStrings.clarify.skip} variant="secondary" />
+        <Button onPress={onSkip} testID="clarify-skip" title={chatStrings.clarify.later} variant="secondary" />
       </View>
     </BottomSheet>
   )

@@ -115,6 +115,10 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
             keyboardType="url"
             textContentType="URL"
             inputMode="url"
+            // The address is one line and the probe runs while you type, so
+            // Return has nothing left to submit; it should put the keyboard
+            // away and uncover the footer.
+            returnKeyType="done"
             placeholder={strings.onboarding.address.placeholder}
             accessibilityLabel={strings.onboarding.address.label}
           />
@@ -145,6 +149,7 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
                   onChangeText={name => setHeader(row.id, { name })}
                   autoCapitalize="none"
                   autoCorrect={false}
+                  returnKeyType="done"
                   placeholder="CF-Access-Client-Id"
                   {...(headerError(row) ? { error: headerError(row) } : {})}
                 />
@@ -154,6 +159,7 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
                   onChangeText={value => setHeader(row.id, { value })}
                   autoCapitalize="none"
                   autoCorrect={false}
+                  returnKeyType="done"
                   concealLabel={strings.onboarding.address.hideValue}
                   revealLabel={strings.onboarding.address.showValue}
                 />

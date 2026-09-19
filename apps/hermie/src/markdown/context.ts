@@ -27,6 +27,47 @@ export interface MarkdownContext {
   mutedTextColor: string
   /** Stable for the lifetime of the renderer. */
   onLinkPress: (href: string) => void
+  /**
+   * What an image in the text needs to actually load.
+   *
+   * A gateway serves its attachments from its own origin, behind whatever
+   * guards the rest of the API is behind, and it writes them into replies as
+   * `/api/...` — a path, not a URL. Without a base an image like that resolves
+   * against nothing and renders as a grey box; without the headers a gated
+   * gateway answers 401 and it renders as the same grey box.
+   */
+  images?: MarkdownImageSource
+}
+
+export interface MarkdownImageSource {
+  /** The gateway's base URL, for a relative `src`. */
+  baseUrl?: string
+  /** Sent with the image request; stable identity, or every block re-renders. */
+  headers?: Record<string, string>
+}
+
+const ABSOLUTE_URI_RE = /^[a-z][a-z0-9+.-]*:/i
+
+/**
+ * Turn an image `src` into something `Image` can fetch.
+ *
+ * Anything already carrying a scheme (`https:`, `data:`, `file:`) is left
+ * exactly as written. A path is joined onto the gateway's base; without a base
+ * it is handed back unchanged, so the renderer falls back to the alt text
+ * rather than requesting a URL that cannot exist.
+ */
+export function resolveImageUri(href: string, baseUrl?: string): string {
+  const src = href.trim()
+
+  if (!src || ABSOLUTE_URI_RE.test(src)) {
+    return src
+  }
+
+  if (!baseUrl) {
+    return src
+  }
+
+  return `${baseUrl.replace(/\/+$/, '')}/${src.replace(/^\/+/, '')}`
 }
 
 /**

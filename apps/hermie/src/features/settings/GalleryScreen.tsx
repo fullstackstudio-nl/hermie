@@ -221,6 +221,8 @@ export function GalleryScreen({ onClose }: GalleryScreenProps) {
 
       <Composer
         botName="Researcher"
+        // Nothing above it is avoiding the keyboard here, unlike in a chat.
+        keyboardAvoiding
         onAttach={() => setLastAction('Attach pressed')}
         onChangeText={setDraft}
         onSend={text => {

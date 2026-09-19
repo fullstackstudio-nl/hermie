@@ -103,6 +103,16 @@ export type TypeToken = keyof typeof type
 // Main controls are 44pt or taller, per the design board's touch-target rule.
 export const CONTROL_MIN_HEIGHT = 44
 
+/**
+ * The slop that brings a small inline control up to a 44pt target.
+ *
+ * A caption-sized "Show more" or "Stop" is roughly 17pt tall. Growing the box
+ * would push the card's layout around, so the touchable area is grown instead
+ * — which is what `hitSlop` is for, and the only way these rows reach the
+ * touch-target rule without being redrawn.
+ */
+export const TAP_SLOP = { bottom: 14, left: 12, right: 12, top: 14 } as const
+
 // The width at and above which the regular (sidebar + detail) shell is used.
 export const REGULAR_LAYOUT_MIN_WIDTH = 700
 

@@ -4,13 +4,14 @@
  * nothing while a question is open.
  */
 import { act, fireEvent, screen } from '@testing-library/react-native'
-import { Text } from 'react-native'
+import { Modal, Text } from 'react-native'
 
 import { AgentsSheet } from '../../src/chat-ui'
 import { approvalItem, clarifyItem, subagentTree } from '../../src/chat-ui/fixtures'
 import { BottomSheet } from '../../src/ui/BottomSheet'
+import { BottomSheet as MacosBottomSheet } from '../../src/ui/BottomSheet.macos'
 import { ApprovalSheet, ChatOptionsSheet, ClarifySheet } from '../../src/ui/sheets'
-import { renderScreen } from '../support/render'
+import { renderScreen, withProviders } from '../support/render'
 
 const MODEL_OPTIONS = [
   { label: 'Gateway default', value: 'default' },
@@ -58,6 +59,83 @@ describe('BottomSheet', () => {
 
     expect(view.queryByTestId('sheet')).toBeNull()
   })
+
+  it('presents through a Modal on the platforms that have one', () => {
+    const view = renderScreen(
+      <BottomSheet onRequestClose={jest.fn()} testID="sheet" visible>
+        <Text>Body</Text>
+      </BottomSheet>
+    )
+
+    expect(view.UNSAFE_queryAllByType(Modal)).toHaveLength(1)
+  })
+
+  it('does not announce the grabber, which is not a control', () => {
+    renderScreen(
+      <BottomSheet onRequestClose={jest.fn()} testID="sheet" visible>
+        <Text>Body</Text>
+      </BottomSheet>
+    )
+
+    expect(screen.queryByLabelText('Drag handle')).toBeNull()
+    // The way out IS announced.
+    expect(screen.getByLabelText('Dismiss')).toBeTruthy()
+  })
+})
+
+/**
+ * react-native-macos has no `RCTModalHostView` — the class is wrapped in
+ * `#if !TARGET_OS_OSX` — so a `Modal` red-boxes on a Mac and every sheet in the
+ * app went with it. The macOS variant paints the same body into an absolutely
+ * positioned overlay instead, and this is the assertion that keeps a `Modal`
+ * from creeping back into it.
+ */
+describe('BottomSheet.macos', () => {
+  it('paints the sheet without a Modal anywhere in it', () => {
+    const view = renderScreen(
+      <MacosBottomSheet onRequestClose={jest.fn()} testID="sheet" visible>
+        <Text>Body</Text>
+      </MacosBottomSheet>
+    )
+
+    expect(view.UNSAFE_queryAllByType(Modal)).toHaveLength(0)
+    expect(screen.getByText('Body')).toBeTruthy()
+    expect(screen.getByTestId('sheet-backdrop')).toBeTruthy()
+  })
+
+  it('still dismisses on a backdrop tap, and still refuses while blocking', () => {
+    const onRequestClose = jest.fn()
+
+    const view = renderScreen(
+      <MacosBottomSheet onRequestClose={onRequestClose} testID="sheet" visible>
+        <Text>Body</Text>
+      </MacosBottomSheet>
+    )
+
+    fireEvent.press(screen.getByTestId('sheet-backdrop'))
+    expect(onRequestClose).toHaveBeenCalledTimes(1)
+
+    view.rerender(
+      withProviders(
+        <MacosBottomSheet blocking onRequestClose={onRequestClose} testID="sheet" visible>
+          <Text>Body</Text>
+        </MacosBottomSheet>
+      )
+    )
+
+    fireEvent.press(screen.getByTestId('sheet-backdrop'))
+    expect(onRequestClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders nothing while closed', () => {
+    const view = renderScreen(
+      <MacosBottomSheet onRequestClose={jest.fn()} testID="sheet" visible={false}>
+        <Text>Body</Text>
+      </MacosBottomSheet>
+    )
+
+    expect(view.queryByTestId('sheet')).toBeNull()
+  })
 })
 
 describe('ApprovalSheet', () => {
@@ -99,6 +177,43 @@ describe('ApprovalSheet', () => {
 
   it('ignores a tap inside the guard window and accepts one after it', () => {
     const { onRespond } = renderSheet()
+
+    fireEvent.press(screen.getByTestId('approval-choice-once'))
+    expect(onRespond).not.toHaveBeenCalled()
+
+    act(() => {
+      jest.advanceTimersByTime(400)
+    })
+
+    fireEvent.press(screen.getByTestId('approval-choice-once'))
+    expect(onRespond).toHaveBeenCalledWith('once')
+  })
+
+  it('re-arms the guard when a second question replaces the first', () => {
+    const onRespond = jest.fn()
+
+    const view = renderScreen(
+      <ApprovalSheet botHandle="researcher" item={approvalItem} onClose={jest.fn()} onRespond={onRespond} visible />
+    )
+
+    act(() => {
+      jest.advanceTimersByTime(400)
+    })
+
+    // A second question arrives into the SAME mounted sheet: `visible` never
+    // went false, and a guard keyed only on `visible` would leave "Allow once"
+    // live under the finger that just answered the first one.
+    view.rerender(
+      withProviders(
+        <ApprovalSheet
+          botHandle="researcher"
+          item={{ ...approvalItem, command: 'rm -rf build', id: 'ap-2', requestId: 'srq-9' }}
+          onClose={jest.fn()}
+          onRespond={onRespond}
+          visible
+        />
+      )
+    )
 
     fireEvent.press(screen.getByTestId('approval-choice-once'))
     expect(onRespond).not.toHaveBeenCalled()

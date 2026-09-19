@@ -12,6 +12,7 @@
  */
 import * as ImageManipulator from 'expo-image-manipulator'
 import * as ImagePicker from 'expo-image-picker'
+import { Linking } from 'react-native'
 
 import { strings } from '../../i18n/strings'
 import { MAX_ATTACHMENT_EDGE, nextAttachmentId, type PickedAttachment } from './attachment-contract'
@@ -39,31 +40,57 @@ function filenameFor(uri: string, given: string | null | undefined): string {
 
 /**
  * Open the photo library and return one attachment, or `null` when the user
- * backed out. A denied permission throws with the sentence the user needs.
+ * backed out.
+ *
+ * No permission is requested first, deliberately. `launchImageLibraryAsync`
+ * goes through PHPicker on iOS and the Android photo picker on Android, and
+ * both run OUT of process: the app never sees the library, only the one item
+ * handed back, and neither platform asks for a grant. Asking anyway put a
+ * scary system prompt about full library access in front of a user who wanted
+ * to attach one screenshot — and a "Limited" answer, which is the one most
+ * people give, came back as `granted: false` and refused the picker that would
+ * have worked perfectly.
+ *
+ * The permission path still exists for the older OS versions that do gate the
+ * picker: the error is caught, and the message points at Settings rather than
+ * at the platform's own wording.
  */
 export async function pickAttachment(): Promise<PickedAttachment | null> {
-  const permission = await ImagePicker.requestMediaLibraryPermissionsAsync()
+  let picked: ImagePicker.ImagePickerResult
 
-  if (!permission.granted) {
-    throw new Error(strings.chat.attach.permission)
+  try {
+    picked = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsMultipleSelection: false,
+      quality: 1,
+      // Not `base64: true`: that would encode the ORIGINAL, which is the whole
+      // thing this function exists to avoid. The resize below encodes instead.
+      exif: false
+    })
+  } catch (error) {
+    throw new Error(permissionMessage(error))
   }
-
-  const picked = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: ['images'],
-    allowsMultipleSelection: false,
-    quality: 1,
-    // Not `base64: true`: that would encode the ORIGINAL, which is the whole
-    // thing this function exists to avoid. The resize below encodes instead.
-    exif: false
-  })
 
   const asset = picked.canceled ? undefined : picked.assets?.[0]
 
   if (!asset) {
+    // Cancelled, or a picker that returned nothing: not an error, and nothing
+    // to show for it.
     return null
   }
 
   return resizeToBase64(asset.uri, filenameFor(asset.uri, asset.fileName), asset.width, asset.height)
+}
+
+/** Offer the one action that can fix a refused picker. */
+export function openAppSettings(): void {
+  void Linking.openSettings().catch(() => undefined)
+}
+
+function permissionMessage(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error)
+
+  return /permission|denied|authoriz/i.test(text) ? strings.chat.attach.permission : text
 }
 
 /**

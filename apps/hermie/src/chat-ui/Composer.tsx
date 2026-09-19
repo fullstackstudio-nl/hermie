@@ -24,8 +24,10 @@ import {
   View
 } from 'react-native'
 
+import { KEYBOARD_AVOID_BEHAVIOR } from '../ui/keyboard'
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
+import { TAP_SLOP } from '../ui/tokens'
 import { QueuedChip } from './QueuedChip'
 import { chatStrings } from './strings'
 import type { ComposerAttachment, SlashSuggestion } from './types'
@@ -58,10 +60,54 @@ export interface ComposerProps {
    * cannot produce either.
    */
   hardwareKeyboard?: boolean
+  /**
+   * Wrap the composer in its own `KeyboardAvoidingView`.
+   *
+   * Off by default. A chat screen already has one around the whole transcript,
+   * and two nested avoiding views each add the keyboard's height, which lifted
+   * the composer roughly twice as far as it needed to go. The gallery, where
+   * the composer stands on its own, is the caller that wants one.
+   */
+  keyboardAvoiding?: boolean
   testID?: string
 }
 
-const SEND_SIZE = 38
+/**
+ * The geometry of the rounded field, and the one rule it has to keep.
+ *
+ * The field is a single pill holding three things: "+", the growing input, and
+ * the send/stop button. Those three used to be sized independently — a 38pt
+ * circle, a 44pt "+" and a 40pt input inside 3pt of padding, under a 28pt
+ * corner radius — so the circle sat in the corner's curve and visibly crossed
+ * the border, and the row was as tall as the tallest of the three rather than
+ * as tall as one line of text.
+ *
+ * Now there is one line box. `COMPOSER_LINE_HEIGHT` is a single line of input;
+ * both buttons occupy a slot exactly that tall and draw a
+ * `COMPOSER_BUTTON_SIZE` circle centred in it. At one line the circle is
+ * centred in the field; once the input grows, the slot stays one line tall and
+ * the row aligns to `flex-end`, so the buttons ride the bottom line the way
+ * iMessage does.
+ *
+ * The invariant `COMPOSER_BUTTON_SIZE + 2 * COMPOSER_FIELD_INSET <=
+ * COMPOSER_LINE_HEIGHT + 2 * COMPOSER_FIELD_INSET` — i.e. the button is never
+ * taller than the line box — is what makes overflow impossible in either
+ * theme, and it is asserted in `__tests__/chat-ui/composer.test.tsx`.
+ */
+export const COMPOSER_FIELD_INSET = 4
+export const COMPOSER_LINE_HEIGHT = 32
+export const COMPOSER_BUTTON_SIZE = 30
+
+/**
+ * Half the SINGLE-LINE field height, so the field is a true pill at one line
+ * and keeps those same caps as it grows.
+ *
+ * Not `radii.pill`: a 999pt radius on a four-line field makes both ends full
+ * semicircles, and the "+" on the bottom line then sits inside the left one.
+ * Not `radii.sheet` either — 28pt on a 40pt box was the original bug. This is
+ * the one radius that is correct at every height.
+ */
+export const COMPOSER_FIELD_RADIUS = (COMPOSER_LINE_HEIGHT + 2 * COMPOSER_FIELD_INSET) / 2
 
 function slashPrefix(text: string): string | null {
   // Only a leading slash opens the popover — `/` in the middle of a sentence is
@@ -86,6 +132,7 @@ export function Composer({
   placeholder,
   botName,
   hardwareKeyboard = Platform.OS === 'macos',
+  keyboardAvoiding = false,
   testID = 'composer'
 }: ComposerProps) {
   const theme = useTheme()
@@ -107,18 +154,33 @@ export function Composer({
 
   const canSend = Boolean(value.trim()) || attachments.length > 0
 
+  /**
+   * What Enter does: send, or nothing.
+   *
+   * It deliberately does NOT stop a running turn. On macOS a bare Enter is the
+   * send key, and while a reply streamed that same key cancelled the turn — so
+   * typing the next message and pressing Enter killed the answer being written
+   * instead of queueing the message. A prompt sent mid-turn is parked by the
+   * gateway, which is what the queued chip reports; only the red button, and
+   * Escape, stop anything.
+   */
   const submit = () => {
+    if (!canSend) {
+      return
+    }
+
+    onSend(value)
+  }
+
+  /** The round button: stop while a turn runs, send otherwise. */
+  const press = () => {
     if (running) {
       onStop?.()
 
       return
     }
 
-    if (!canSend) {
-      return
-    }
-
-    onSend(value)
+    submit()
   }
 
   /**
@@ -193,8 +255,12 @@ export function Composer({
   }
 
   return (
+    // Without `behavior` a `KeyboardAvoidingView` is a plain `View`, which is
+    // exactly what the composer wants inside a screen that already has one.
+    // Declaring the component conditionally instead would give React a new
+    // type on every render and remount the text field under the caret.
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={keyboardAvoiding ? KEYBOARD_AVOID_BEHAVIOR : undefined}
       // macOS has no soft keyboard to avoid; the view is inert there.
       testID={testID}
     >
@@ -267,7 +333,9 @@ export function Composer({
               <Pressable
                 accessibilityLabel={chatStrings.composer.removeAttachment}
                 accessibilityRole="button"
+                hitSlop={TAP_SLOP}
                 onPress={() => onRemoveAttachment?.(attachment.id)}
+                style={{ justifyContent: 'center', minHeight: 24 }}
                 testID={`composer-attachment-remove-${attachment.id}`}
               >
                 <Text color="accent" numberOfLines={1} variant="caption">
@@ -290,36 +358,45 @@ export function Composer({
       >
         <View
           style={{
+            // The buttons ride the BOTTOM line as the input grows upward.
             alignItems: 'flex-end',
             borderColor: theme.colors.textMuted,
-            borderRadius: theme.radii.sheet,
+            borderRadius: COMPOSER_FIELD_RADIUS,
             borderWidth: 1,
             flexDirection: 'row',
-            gap: theme.space.xs,
-            padding: 3
+            gap: theme.space.xxs,
+            padding: COMPOSER_FIELD_INSET
           }}
+          testID={`${testID}-field`}
         >
           <Pressable
             accessibilityLabel={chatStrings.composer.attach}
             accessibilityRole="button"
+            // Greyed out is not the same as announced as unavailable: on macOS
+            // there is no document picker, and a screen reader has no other way
+            // to learn that.
+            accessibilityState={{ disabled: !onAttach }}
             disabled={!onAttach}
+            // The slot is one line tall; the 44pt touch target comes from the
+            // slop, the way every other small control in the kit gets one.
+            hitSlop={TAP_SLOP}
             onPress={onAttach}
             style={({ pressed }) => ({
               alignItems: 'center',
-              height: 40,
+              height: COMPOSER_LINE_HEIGHT,
               justifyContent: 'center',
               opacity: onAttach ? (pressed ? 0.6 : 1) : 0.3,
-              width: SEND_SIZE
+              width: COMPOSER_BUTTON_SIZE
             })}
             testID="composer-attach"
           >
-            <Text color="textMuted" style={{ fontSize: 26, lineHeight: 30 }}>
+            <Text color="textMuted" style={{ fontSize: 24, lineHeight: 28 }}>
               +
             </Text>
           </Pressable>
 
           <TextInput
-            accessibilityLabel={botName ? `Message ${botName}` : chatStrings.composer.placeholder}
+            accessibilityLabel={botName ? chatStrings.composer.messageTo(botName) : chatStrings.composer.placeholder}
             multiline
             onChangeText={onChangeText}
             onKeyPress={onKeyPress}
@@ -332,38 +409,54 @@ export function Composer({
               flex: 1,
               fontSize: 17,
               maxHeight: 132,
-              minHeight: 40,
+              minHeight: COMPOSER_LINE_HEIGHT,
               paddingHorizontal: theme.space.xs,
-              paddingTop: Platform.OS === 'ios' ? 10 : 6,
-              paddingBottom: Platform.OS === 'ios' ? 10 : 6
+              // Centres one line of 17pt text in the 32pt line box. iOS adds
+              // its own inset to a multiline field, which is why the two
+              // numbers differ.
+              paddingTop: Platform.OS === 'ios' ? 7 : 4,
+              paddingBottom: Platform.OS === 'ios' ? 7 : 4
             }}
             testID="composer-input"
             value={value}
           />
 
+          {/* The Pressable is the LINE BOX; the circle inside it is the
+              button. Sizing the Pressable itself as the circle would either
+              float it off the bottom line or stretch it as the input grew. */}
           <Pressable
             accessibilityLabel={running ? chatStrings.composer.stop : chatStrings.composer.send}
             accessibilityRole="button"
             disabled={!running && !canSend}
-            onPress={submit}
+            onPress={press}
             style={({ pressed }) => ({
               alignItems: 'center',
-              backgroundColor: running ? theme.colors.danger : theme.colors.bubbleBlue,
-              borderRadius: SEND_SIZE / 2,
-              height: SEND_SIZE,
+              height: COMPOSER_LINE_HEIGHT,
               justifyContent: 'center',
               opacity: !running && !canSend ? 0.35 : pressed ? 0.85 : 1,
-              width: SEND_SIZE
+              width: COMPOSER_BUTTON_SIZE
             })}
             testID={running ? 'composer-stop' : 'composer-send'}
           >
-            {running ? (
-              <View style={{ backgroundColor: theme.colors.onAccent, borderRadius: 2, height: 12, width: 12 }} />
-            ) : (
-              <Text color="onAccent" style={{ fontSize: 18, fontWeight: '700', lineHeight: 22 }}>
-                {'↑'}
-              </Text>
-            )}
+            <View
+              style={{
+                alignItems: 'center',
+                backgroundColor: running ? theme.colors.danger : theme.colors.bubbleBlue,
+                borderRadius: COMPOSER_BUTTON_SIZE / 2,
+                height: COMPOSER_BUTTON_SIZE,
+                justifyContent: 'center',
+                width: COMPOSER_BUTTON_SIZE
+              }}
+              testID="composer-send-circle"
+            >
+              {running ? (
+                <View style={{ backgroundColor: theme.colors.onAccent, borderRadius: 2, height: 11, width: 11 }} />
+              ) : (
+                <Text color="onAccent" style={{ fontSize: 17, fontWeight: '700', lineHeight: 20 }}>
+                  {'↑'}
+                </Text>
+              )}
+            </View>
           </Pressable>
         </View>
 

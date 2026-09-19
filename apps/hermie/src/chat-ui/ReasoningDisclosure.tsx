@@ -9,6 +9,7 @@ import { Pressable, View } from 'react-native'
 
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
+import { CONTROL_MIN_HEIGHT, TAP_SLOP } from '../ui/tokens'
 import { chatStrings } from './strings'
 
 export interface ReasoningDisclosureProps {
@@ -44,8 +45,13 @@ export function ReasoningDisclosure({
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded }}
+        hitSlop={TAP_SLOP}
         onPress={() => setExpanded(current => !current)}
-        style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+        style={({ pressed }) => ({
+          justifyContent: 'center',
+          minHeight: CONTROL_MIN_HEIGHT,
+          opacity: pressed ? 0.6 : 1
+        })}
         testID={testID}
       >
         <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.xs }}>

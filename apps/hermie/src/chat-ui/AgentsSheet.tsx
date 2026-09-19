@@ -13,6 +13,7 @@ import { MONOSPACE } from '../markdown/context'
 import { BottomSheet } from '../ui/BottomSheet'
 import { Button, Text, TextField } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
+import { CONTROL_MIN_HEIGHT, TAP_SLOP } from '../ui/tokens'
 import { formatDuration } from './format'
 import { statusGlyph, statusTone } from './SubagentGroupCard'
 import { chatStrings } from './strings'
@@ -39,6 +40,8 @@ export interface SubagentTranscript {
 export interface AgentsSheetProps {
   visible: boolean
   onClose: () => void
+  /** Forwarded to the sheet: the slide-out has finished. */
+  onClosed?: () => void
   /** `subagentTree(state)` — roots first, children nested. */
   tree: SubagentNode[]
   onSteer?: (subagentId: string, text: string) => void
@@ -50,6 +53,9 @@ export interface AgentsSheetProps {
   /** A one-line result of the last Steer or Stop, shown above the tree. */
   notice?: string | null
 }
+
+/** Caption-sized actions keep their size and grow their touch target instead. */
+const ACTION_STYLE = { justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT } as const
 
 function AgentRow({
   node,
@@ -132,7 +138,10 @@ function AgentRow({
           {live && onSteer ? (
             <Pressable
               accessibilityRole="button"
+              accessibilityState={{ expanded: steering }}
+              hitSlop={TAP_SLOP}
               onPress={() => setSteering(current => !current)}
+              style={ACTION_STYLE}
               testID={`agent-steer-${node.id}`}
             >
               <Text color="accent" variant="caption">
@@ -142,7 +151,13 @@ function AgentRow({
           ) : null}
 
           {live && onInterrupt ? (
-            <Pressable accessibilityRole="button" onPress={() => onInterrupt(node.id)} testID={`agent-stop-${node.id}`}>
+            <Pressable
+              accessibilityRole="button"
+              hitSlop={TAP_SLOP}
+              onPress={() => onInterrupt(node.id)}
+              style={ACTION_STYLE}
+              testID={`agent-stop-${node.id}`}
+            >
               <Text color="danger" variant="caption">
                 {chatStrings.subagents.stop}
               </Text>
@@ -152,7 +167,9 @@ function AgentRow({
           {onOpenTranscript && node.childSessionId ? (
             <Pressable
               accessibilityRole="button"
+              hitSlop={TAP_SLOP}
               onPress={() => onOpenTranscript(node.id)}
+              style={ACTION_STYLE}
               testID={`agent-transcript-${node.id}`}
             >
               <Text color="accent" variant="caption">
@@ -201,7 +218,13 @@ function TranscriptPanel({ transcript, onBack }: { transcript: SubagentTranscrip
 
   return (
     <View style={{ gap: theme.space.sm }} testID="agent-transcript">
-      <Pressable accessibilityRole="button" onPress={onBack} testID="agent-transcript-back">
+      <Pressable
+        accessibilityRole="button"
+        hitSlop={TAP_SLOP}
+        onPress={onBack}
+        style={ACTION_STYLE}
+        testID="agent-transcript-back"
+      >
         <Text color="accent" variant="callout">
           {`‹ ${chatStrings.subagents.transcriptBack}`}
         </Text>
@@ -248,6 +271,7 @@ function TranscriptPanel({ transcript, onBack }: { transcript: SubagentTranscrip
 export function AgentsSheet({
   visible,
   onClose,
+  onClosed,
   tree,
   onSteer,
   onInterrupt,
@@ -261,13 +285,20 @@ export function AgentsSheet({
   return (
     <BottomSheet
       accessibilityLabel={chatStrings.subagents.title}
+      onClosed={onClosed}
       onRequestClose={onClose}
       testID="agents-sheet"
       visible={visible}
     >
       <View style={{ alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' }}>
         <Text variant="title">{chatStrings.subagents.title}</Text>
-        <Pressable accessibilityRole="button" onPress={onClose} testID="agents-sheet-close">
+        <Pressable
+          accessibilityRole="button"
+          hitSlop={TAP_SLOP}
+          onPress={onClose}
+          style={ACTION_STYLE}
+          testID="agents-sheet-close"
+        >
           <Text color="accent" variant="body">
             {chatStrings.options.done}
           </Text>
