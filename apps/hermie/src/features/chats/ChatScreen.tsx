@@ -50,8 +50,10 @@ import { Screen, Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { CONTROL_MIN_HEIGHT, TAP_SLOP } from '../../ui/tokens'
 import { openAppSettings, pickAttachment, type PickedAttachment } from './attachments'
+import { pickFile } from './file-attachments'
+import { FileUploadError } from './file-upload'
 import { ChatSheetHost, type RequestItem } from './ChatSheetHost'
-import type { ModelChoice } from './chat-controller'
+import type { AttachmentInput, ModelChoice } from './chat-controller'
 import type { ManualSheet } from './sheet-host'
 import { useChat, type UseChatResult } from './useChat'
 
@@ -136,6 +138,14 @@ function Conversation({
 
   const [sheet, setSheet] = useState<ManualSheet>('none')
   const [attachments, setAttachments] = useState<PickedAttachment[]>([])
+  /**
+   * Files already uploaded and waiting to be named in the next prompt.
+   *
+   * Uploaded on pick rather than on send, because the upload is the slow part
+   * and the send should not be: by the time the message goes out the bytes are
+   * on the gateway and only the path travels with it.
+   */
+  const [uploaded, setUploaded] = useState<{ id: string; filename: string; path: string }[]>([])
   const [suggestions, setSuggestions] = useState<SlashSuggestion[]>([])
   const [models, setModels] = useState<ModelChoice[]>([])
   const [dismissedRequests, setDismissed] = useState<string[]>([])
@@ -503,14 +513,18 @@ function Conversation({
     async (text: string) => {
       const body = text.trim()
 
-      if (!body && attachments.length === 0) {
+      if (!body && attachments.length === 0 && uploaded.length === 0) {
         return
       }
 
-      const files = attachments.map(file => ({ filename: file.filename, base64: file.base64 }))
+      const files: AttachmentInput[] = [
+        ...attachments.map(file => ({ filename: file.filename, base64: file.base64 })),
+        ...uploaded.map(file => ({ kind: 'file' as const, filename: file.filename, path: file.path }))
+      ]
 
       chat.setDraft('')
       setAttachments([])
+      setUploaded([])
       setSuggestions([])
 
       haptic('send')
@@ -524,7 +538,7 @@ function Conversation({
         setNotice(messageOf(error))
       }
     },
-    [attachments, chat]
+    [attachments, chat, uploaded]
   )
 
   const attach = useCallback(async () => {
@@ -543,6 +557,39 @@ function Conversation({
       setNotice(strings.chat.attach.failed(message))
     }
   }, [])
+
+  /**
+   * Pick a file, upload it, and stage the path.
+   *
+   * Nothing is staged unless the upload finished: a chip for a file the gateway
+   * never received would produce a prompt referencing a path that is not there,
+   * and the agent would report a missing file rather than the upload failing.
+   */
+  const attachFile = useCallback(async () => {
+    let picked: Awaited<ReturnType<typeof pickFile>>
+
+    try {
+      picked = await pickFile()
+    } catch (error) {
+      setNotice(strings.chat.attach.failed(messageOf(error)))
+
+      return
+    }
+
+    if (!picked) {
+      return
+    }
+
+    try {
+      const result = await chat.uploadFile(picked)
+
+      setUploaded(current => [...current, { id: result.path, filename: result.filename, path: result.path }])
+    } catch (error) {
+      // A typed reason exists for exactly the failures a message can explain;
+      // anything else is the transport, and its own words are the best available.
+      setNotice(error instanceof FileUploadError ? strings.chat.attach.uploadFailed(error.message) : messageOf(error))
+    }
+  }, [chat])
 
   const querySlash = useCallback(
     (prefix: string) => {
@@ -594,8 +641,13 @@ function Conversation({
   }, [chat.info?.model, models])
 
   const composerAttachments = useMemo<ComposerAttachment[]>(
-    () => attachments.map(file => ({ id: file.id, name: file.filename, ...(file.uri ? { uri: file.uri } : {}) })),
-    [attachments]
+    () => [
+      ...attachments.map(file => ({ id: file.id, name: file.filename, ...(file.uri ? { uri: file.uri } : {}) })),
+      // No `uri`, so the existing chip draws its name rather than a thumbnail —
+      // which is right for an archive, and is the whole of the UI this needs.
+      ...uploaded.map(file => ({ id: file.id, name: file.filename }))
+    ],
+    [attachments, uploaded]
   )
 
   const display = byName[botName]?.displayName ?? botName
@@ -718,9 +770,17 @@ function Conversation({
           attachments={composerAttachments}
           botName={display}
           onAttach={() => void attach()}
+          // A long press picks a file instead. Both pickers exist on every
+          // target this builds for, so neither is conditional.
+          onAttachFile={() => void attachFile()}
           onChangeText={chat.setDraft}
           onQuerySlash={querySlash}
-          onRemoveAttachment={id => setAttachments(current => current.filter(file => file.id !== id))}
+          onRemoveAttachment={id => {
+            setAttachments(current => current.filter(file => file.id !== id))
+            // An uploaded file is left on the gateway: deleting it would need a
+            // second round trip to undo something the user only unstaged.
+            setUploaded(current => current.filter(file => file.id !== id))
+          }}
           onSend={text => void send(text)}
           onStop={() => void chat.stop()}
           running={busy}

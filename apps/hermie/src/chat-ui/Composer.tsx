@@ -45,6 +45,18 @@ export interface ComposerProps {
   running?: boolean
   onStop?: () => void
   onAttach?: () => void
+  /**
+   * Attach an arbitrary FILE rather than an image, on a long press of the same
+   * "+".
+   *
+   * Deliberately not a second button. An image and a file leave by different
+   * roads — one is bytes over the socket, the other an HTTP upload the prompt
+   * then references — but that is a difference in plumbing, not one the composer
+   * should spend a control on. A picker sheet behind the "+" is the right shape
+   * and it belongs to whoever owns this row's design; this is the seam it plugs
+   * into, and it changes no geometry in the meantime.
+   */
+  onAttachFile?: () => void
   attachments?: ComposerAttachment[]
   onRemoveAttachment?: (id: string) => void
   /** Slash candidates for the current prefix; the caller fetches them. */
@@ -128,6 +140,7 @@ export function Composer({
   running = false,
   onStop,
   onAttach,
+  onAttachFile,
   attachments = [],
   onRemoveAttachment,
   suggestions = [],
@@ -462,18 +475,22 @@ export function Composer({
             accessibilityRole="button"
             // Greyed out is not the same as announced as unavailable, and a
             // screen reader has no other way to learn that a caller left the
-            // picker out.
-            accessibilityState={{ disabled: !onAttach }}
-            disabled={!onAttach}
+            // picker out. Either picker being present is enough to be usable.
+            accessibilityState={{ disabled: !onAttach && !onAttachFile }}
+            // A long press is invisible, so it is announced rather than left to
+            // be discovered.
+            {...(onAttachFile ? { accessibilityHint: chatStrings.composer.attachFileHint } : {})}
+            disabled={!onAttach && !onAttachFile}
             // The slot is one line tall; the 44pt touch target comes from the
             // slop, the way every other small control in the kit gets one.
             hitSlop={TAP_SLOP}
             onPress={onAttach}
+            {...(onAttachFile ? { onLongPress: onAttachFile } : {})}
             style={({ pressed }) => ({
               alignItems: 'center',
               height: COMPOSER_LINE_HEIGHT,
               justifyContent: 'center',
-              opacity: onAttach ? (pressed ? 0.6 : 1) : 0.3,
+              opacity: onAttach || onAttachFile ? (pressed ? 0.6 : 1) : 0.3,
               width: COMPOSER_BUTTON_SIZE
             })}
             testID="composer-attach"

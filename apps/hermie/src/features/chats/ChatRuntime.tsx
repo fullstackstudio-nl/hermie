@@ -28,7 +28,7 @@ export interface ChatRuntimeValue {
 const ChatRuntimeContext = createContext<ChatRuntimeValue | null>(null)
 
 export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
-  const { config, connection, status } = useGateway()
+  const { config, connection, http, status } = useGateway()
   const [value, setValue] = useState<ChatRuntimeValue | null>(null)
   const valueRef = useRef<ChatRuntimeValue | null>(null)
 
@@ -66,6 +66,9 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       chats: useChatsStore,
       bots: useBotsStore,
       botsController: bots,
+      // The REST half, for file uploads. It is built with the connection and
+      // replaced with it, which is why it is not a dependency of its own.
+      http,
       cache: chatCache
     })
 
@@ -83,7 +86,10 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       bots.dispose()
       valueRef.current = null
     }
-  }, [connection])
+    // `http` is built with the connection and handed out as a ref, like the
+    // connection itself, so listing it costs no extra rebuild — and leaving it
+    // out would hand the controller a stale one if that ever changed.
+  }, [connection, http])
 
   /**
    * Read the roster when the connection becomes usable, and again after every

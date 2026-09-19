@@ -38,6 +38,7 @@ import { type Bot, useBotsStore } from '../../store/bots'
 import { useChatsStore } from '../../store/chats'
 import { useChatView } from '../../store/settings'
 import type { AttachmentInput, ChatOptionKey, ModelChoice, SetOptionResult } from './chat-controller'
+import { FileUploadError, type UploadableFile, type UploadedFile } from './file-upload'
 import { type ChatRuntimeValue, useChatRuntime } from './ChatRuntime'
 
 export interface UseChatResult {
@@ -93,6 +94,12 @@ export interface UseChatResult {
   clearError: () => void
   setDraft: (draft: string) => void
   send: (text: string, attachments?: AttachmentInput[]) => Promise<void>
+  /**
+   * Stream a file to the gateway and answer where it landed, so the next prompt
+   * can name it. Rejects with a `FileUploadError` — see `file-upload.ts` for the
+   * four reasons, two of which the sender cannot do anything about.
+   */
+  uploadFile: (file: UploadableFile, options?: { onProgress?: (fraction: number) => void }) => Promise<UploadedFile>
   stop: () => Promise<void>
   /** Tell the queue the sheet is on screen; safe to call more than once. */
   acknowledgeApproval: (requestId: string) => Promise<void>
@@ -246,6 +253,13 @@ export function useChat(botName: string): UseChatResult {
       (text: string, attachments?: AttachmentInput[]) =>
         controller ? controller.send(botName, text, attachments) : notReady(),
       [botName, controller, notReady]
+    ),
+    uploadFile: useCallback(
+      (file: UploadableFile, options?: { onProgress?: (fraction: number) => void }) =>
+        controller
+          ? controller.uploadFile(botName, file, options)
+          : Promise.reject(new FileUploadError('failed', 'There is no gateway connection to upload to.')),
+      [botName, controller]
     ),
     stop: useCallback(() => (controller ? controller.stopTurn(botName) : Promise.resolve()), [botName, controller]),
     acknowledgeApproval: useCallback(

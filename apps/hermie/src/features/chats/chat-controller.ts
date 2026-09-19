@@ -20,7 +20,7 @@
  * teammate bot writing into the chat, the same chat open on a desktop, and a
  * cron job delivering into it.
  */
-import { assertDesktopContract, type ConnectionStatus } from '@hermie/gateway-client'
+import { assertDesktopContract, type ConnectionStatus, type GatewayHttp } from '@hermie/gateway-client'
 import {
   applySubagentSnapshot,
   type ChatState,
@@ -49,6 +49,7 @@ import type { Bot, BotCanonicalSession, BotsState } from '../../store/bots'
 import type { ChatsState } from '../../store/chats'
 import { liveChatNames } from '../../store/chats'
 import type { BotsController } from '../bots/bots-controller'
+import { FileUploadError, uploadFile, type UploadableFile, type UploadedFile, withFileReferences } from './file-upload'
 
 /** Above this many rows, `session.history` is a download; the REST tail is not. */
 export const REST_HISTORY_THRESHOLD = 400
@@ -109,6 +110,8 @@ export interface ChatControllerOptions {
   chats: StoreApi<ChatsState>
   bots: StoreApi<BotsState>
   botsController: BotsController
+  /** The REST half, for the one thing that cannot go over the socket: file uploads. */
+  http?: GatewayHttp | null
   cache?: ChatCache | null
   now?: () => number
 }
@@ -132,6 +135,7 @@ export class ChatController {
   private readonly chats: StoreApi<ChatsState>
   private readonly bots: StoreApi<BotsState>
   private readonly botsController: BotsController
+  private readonly http: GatewayHttp | null
   private readonly cache: ChatCache | null
   private readonly now: () => number
 
@@ -170,6 +174,7 @@ export class ChatController {
     this.chats = options.chats
     this.bots = options.bots
     this.botsController = options.botsController
+    this.http = options.http ?? null
     this.cache = options.cache ?? null
     this.now = options.now ?? (() => Date.now())
   }
@@ -278,6 +283,21 @@ export class ChatController {
     this.chats.getState().ensure(bot.name, { storedSessionId: canonical.id, resolvedSessionId: resolvedId })
     this.bindRuntime(bot.name, runtimeId)
     this.chats.getState().markLive(bot.name)
+
+    // The resume's own `info` — the gateway's view of this session: its model,
+    // its flags, and its working directory. It was being read once for the
+    // contract check and then dropped, which left `chat.info` undefined until
+    // the gateway happened to emit a `session.info` event of its own. Two things
+    // already assumed otherwise: `refreshOptions` merges its patch onto "what
+    // the resume reported", and a file upload needs `cwd` to know where a file
+    // may legally go.
+    if (resume.info) {
+      this.chats.getState().dispatchEvent(bot.name, {
+        type: 'session.info',
+        session_id: runtimeId,
+        payload: resume.info as unknown as Record<string, unknown>
+      })
+    }
 
     // 3. History. Either transport projects onto the same items, which is what
     //    lets the reconcile below keep every id it already handed out.
@@ -947,6 +967,14 @@ export class ChatController {
    * running turn, `steered` folds it into that turn, `streaming` starts a new
    * one. Images are attached first: they are queued onto the next turn, so the
    * order matters.
+   *
+   * A file attachment is not attached at all — there is no RPC for it. Its bytes
+   * are already on the gateway (`uploadFile`), so all that is left is to name the
+   * path in the prompt, which `withFileReferences` appends as the `@file:` token
+   * the gateway expands. That composed text is what is painted AND what is
+   * submitted: the two have to be byte-identical, or the gateway echoes the turn
+   * back as a message the reconciler does not recognise and the bubble appears
+   * twice.
    */
   async send(botName: string, text: string, attachments: AttachmentInput[] = []): Promise<void> {
     const chat = this.chats.getState().chats[botName]
@@ -956,13 +984,19 @@ export class ChatController {
     }
 
     const sessionId = chat.runtimeSessionId
+    const files = attachments.filter(isFileAttachment)
+    const images = attachments.filter((attachment): attachment is ImageAttachmentInput => !isFileAttachment(attachment))
+    const body = withFileReferences(
+      text,
+      files.map(file => file.path)
+    )
 
     this.chats
       .getState()
-      .beginTurn(botName, text, attachments.length ? attachments.map(file => file.filename) : undefined)
+      .beginTurn(botName, body, attachments.length ? attachments.map(file => file.filename) : undefined)
 
     try {
-      for (const file of attachments) {
+      for (const file of images) {
         await this.gateway.request('image.attach_bytes', {
           session_id: sessionId,
           profile: botName,
@@ -974,7 +1008,7 @@ export class ChatController {
       const result = await this.gateway.request('prompt.submit', {
         session_id: sessionId,
         profile: botName,
-        text
+        text: body
       })
 
       this.chats.getState().settleTurn(botName, { status: result?.status ?? null })
@@ -986,6 +1020,34 @@ export class ChatController {
 
       throw error
     }
+  }
+
+  /**
+   * Put a file on the gateway, ready to be named in the next prompt.
+   *
+   * Everything about WHERE is decided here rather than by the caller, because
+   * the answer depends on this session: the upload has to land under the
+   * session's own working directory or the `@file:` reference will be refused as
+   * outside the allowed workspace. `info.cwd` is that directory, and it arrived
+   * with `session.resume`.
+   */
+  async uploadFile(
+    botName: string,
+    file: UploadableFile,
+    options: { onProgress?: (fraction: number) => void } = {}
+  ): Promise<UploadedFile> {
+    const chat = this.chats.getState().chats[botName]
+
+    if (!this.http) {
+      throw new FileUploadError('failed', 'There is no gateway connection to upload to.')
+    }
+
+    return uploadFile({
+      http: this.http,
+      file,
+      cwd: typeof chat?.info?.cwd === 'string' ? chat.info.cwd : undefined,
+      ...(options.onProgress ? { onProgress: options.onProgress } : {})
+    })
   }
 
   /** Stop the running turn. The partial reply is kept; it was really said. */
@@ -1602,10 +1664,31 @@ export class ChatController {
   }
 }
 
-export interface AttachmentInput {
+/**
+ * An image, which goes over the socket as bytes. `kind` is optional so every
+ * existing call site keeps compiling and keeps meaning what it meant.
+ */
+export interface ImageAttachmentInput {
+  kind?: 'image'
   filename: string
   base64: string
 }
+
+/**
+ * A file already uploaded to the gateway. Only the path travels with the prompt
+ * — the bytes went over HTTP, because upstream has no file-attach RPC. See
+ * `file-upload.ts`.
+ */
+export interface FileAttachmentInput {
+  kind: 'file'
+  filename: string
+  /** The absolute path on the gateway, from the upload's own answer. */
+  path: string
+}
+
+export type AttachmentInput = ImageAttachmentInput | FileAttachmentInput
+
+const isFileAttachment = (attachment: AttachmentInput): attachment is FileAttachmentInput => attachment.kind === 'file'
 
 /** One entry of the gateway's model inventory, as the options picker shows it. */
 export interface ModelChoice {

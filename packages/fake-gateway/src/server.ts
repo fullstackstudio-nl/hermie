@@ -143,6 +143,14 @@ export interface FakeGatewayState {
   /** Images accepted through `image.attach_bytes`, newest last. */
   attachedImages: { session_id: string; filename: string; bytes: number }[]
   /**
+   * Files accepted through `POST /api/files/upload-stream`, by resolved path.
+   *
+   * Held in memory rather than written anywhere: a test wants to know that the
+   * bytes arrived, how many there were, and at which path — never to read them
+   * back off a disk the test then has to clean up.
+   */
+  uploadedFiles: Map<string, { path: string; filename: string; bytes: number; contentType: string }>
+  /**
    * Children a delegation has spawned and not yet finished, by subagent id.
    *
    * `subagent.list` and `delegation.status` both read this. A real gateway only
@@ -364,6 +372,76 @@ const AVATAR_PNG_BASE64 =
  */
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
 
+/** `_MANAGED_FILE_MAX_BYTES` in `hermes_cli/web_server.py`. */
+const MANAGED_FILE_MAX_BYTES = 100 * 1024 * 1024
+
+interface MultipartForm {
+  fields: Record<string, string>
+  file: { filename: string; contentType: string; bytes: number } | null
+}
+
+/**
+ * Enough of RFC 7578 to read what the upload route declares: a few small text
+ * fields and one file part, of which only the SIZE is kept.
+ *
+ * Deliberately not a general parser and deliberately not a dependency. The file
+ * part is measured and its bytes are dropped, which is what lets the size cap be
+ * exercised without holding a second copy of the payload.
+ */
+async function readMultipart(req: IncomingMessage): Promise<MultipartForm> {
+  const boundary = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(req.headers['content-type'] ?? '')
+  const marker = boundary?.[1] ?? boundary?.[2]
+
+  if (!marker) {
+    throw new Error('Multipart body has no boundary')
+  }
+
+  const chunks: Buffer[] = []
+
+  for await (const chunk of req) {
+    chunks.push(chunk as Buffer)
+  }
+
+  const form: MultipartForm = { fields: {}, file: null }
+  // `binary` (latin1) is one JS character per byte, so a part's length IS its
+  // byte count and a split on the boundary cannot cut a multi-byte sequence.
+  const parts = Buffer.concat(chunks).toString('binary').split(`--${marker}`)
+
+  for (const part of parts) {
+    const split = part.indexOf('\r\n\r\n')
+
+    if (split === -1) {
+      // The preamble and the closing `--`: neither is a part.
+      continue
+    }
+
+    const headers = part.slice(0, split)
+    const name = /name="([^"]*)"/i.exec(headers)?.[1]
+
+    if (!name) {
+      continue
+    }
+
+    // A part's body ends with the CRLF that precedes the next boundary.
+    const raw = part.slice(split + 4).replace(/\r\n$/, '')
+    const filename = /filename="([^"]*)"/i.exec(headers)?.[1]
+
+    if (filename === undefined) {
+      form.fields[name] = Buffer.from(raw, 'binary').toString('utf8')
+
+      continue
+    }
+
+    form.file = {
+      filename,
+      contentType: /content-type:\s*([^\r\n;]+)/i.exec(headers)?.[1]?.trim() || 'application/octet-stream',
+      bytes: raw.length
+    }
+  }
+
+  return form
+}
+
 /**
  * `tools/cronjob_job_args.py::_format_job` — the row `cron.manage list` answers
  * with. Deliberately carries NO `profile`: the socket answers out of one
@@ -576,6 +654,7 @@ function initialState(options: FakeGatewayOptions): FakeGatewayState {
     pendingApprovals: new Map<string, { session_id: string; payload: Record<string, unknown> }>(),
     openServerRequests: new Map<string, { session_id: string; method: string; params: Record<string, unknown> }>(),
     attachedImages: [],
+    uploadedFiles: new Map(),
     liveSubagents: new Map<string, LiveSubagent>(),
     agentProcesses: new Map<string, { session_id: string; command: string; status: string; startedAt: number }>(),
     cronGatewayRunning: true,
@@ -980,6 +1059,12 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       return
     }
 
+    if (path === '/api/files/upload-stream' && method === 'POST') {
+      await handleFileUpload(req, res)
+
+      return
+    }
+
     if (path === '/api/cron/delivery-targets') {
       // `local` is implicit on every gateway; the second one is a configured
       // bot chat, which is what a delivery target looks like once the messaging
@@ -1199,6 +1284,95 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     }
 
     json(res, 405, { detail: `Method ${method} not allowed on ${path}` })
+  }
+
+  /**
+   * `POST /api/files/upload-stream`, in `hermes_cli/web_routers/files.py`'s shape.
+   *
+   * The interesting parts are the ones a client can get wrong, so all three are
+   * reproduced: `path` is resolved through the managed-files policy (which has
+   * NO locked root here, so it must be absolute — the real 400 a relative path
+   * earns), the 100 MB cap answers 413 as the stream crosses it rather than
+   * afterwards, and the result carries `path` as the RESOLVED path plus the
+   * policy metadata the dashboard reads.
+   */
+  async function handleFileUpload(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    let form: MultipartForm
+
+    try {
+      form = await readMultipart(req)
+    } catch (error) {
+      json(res, 400, { detail: error instanceof Error ? error.message : 'Malformed multipart body' })
+
+      return
+    }
+
+    const requested = (form.fields.path ?? '').trim()
+
+    if (!requested) {
+      json(res, 422, { detail: 'path is required' })
+
+      return
+    }
+
+    if (!requested.startsWith('/')) {
+      // `_resolve_managed_path`: with no locked managed-files root, a relative
+      // path is refused outright. Clients that assume otherwise fail here.
+      json(res, 400, { detail: 'Path must be absolute' })
+
+      return
+    }
+
+    if (requested.split('/').includes('..')) {
+      json(res, 400, { detail: "Path cannot contain '..'" })
+
+      return
+    }
+
+    if (!form.file) {
+      json(res, 422, { detail: 'file is required' })
+
+      return
+    }
+
+    if (form.file.bytes > MANAGED_FILE_MAX_BYTES) {
+      json(res, 413, { detail: 'File is too large' })
+
+      return
+    }
+
+    if (state.uploadedFiles.has(requested) && (form.fields.overwrite ?? 'true') === 'false') {
+      json(res, 409, { detail: 'File already exists' })
+
+      return
+    }
+
+    const entry = {
+      path: requested,
+      filename: form.file.filename,
+      bytes: form.file.bytes,
+      contentType: form.file.contentType
+    }
+
+    state.uploadedFiles.set(requested, entry)
+
+    json(res, 200, {
+      ok: true,
+      path: requested,
+      entry: {
+        name: form.file.filename,
+        path: requested,
+        is_directory: false,
+        size: form.file.bytes,
+        mtime: Date.now() / 1000,
+        mime_type: form.file.contentType
+      },
+      // `_managed_response_meta` for the unlocked policy: no root, and the
+      // browser may point itself anywhere the user can read.
+      root: null,
+      locked_root: null,
+      can_change_path: true
+    })
   }
 
   function addCronJob(body: Record<string, unknown>): CronJob {
@@ -2003,20 +2177,49 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
   }
 
   /**
+   * Every `@file:` reference in a prompt whose file was actually uploaded.
+   *
+   * The wrappers are the ones `agent/context_references.py` strips: backticks
+   * around a path with a space in it. A reference to a path nothing uploaded is
+   * ignored rather than answered for, which is what makes "the upload failed and
+   * the prompt went anyway" visible as a reply that mentions nothing.
+   */
+  function referencedUploads(prompt: string): { path: string; filename: string; bytes: number }[] {
+    const found: { path: string; filename: string; bytes: number }[] = []
+
+    for (const match of prompt.matchAll(/@file:(?:`([^`]+)`|(\S+))/g)) {
+      const entry = state.uploadedFiles.get(match[1] ?? match[2] ?? '')
+
+      if (entry) {
+        found.push({ path: entry.path, filename: entry.filename, bytes: entry.bytes })
+      }
+    }
+
+    return found
+  }
+
+  /**
    * Answer one prompt.
    *
    * Three keywords steer it, because those are the three paths a client has to
    * be able to survive: a prompt containing "approve" raises a server→client
    * approval and parks the turn until it is answered, "delegate" fans out
    * subagent events, and anything else streams a reply with one tool call.
+   *
+   * A prompt that references an uploaded file gets that named back in the reply.
+   * Not decoration: it is the only way an end-to-end test can tell a file that
+   * reached the agent from one that was uploaded and then never mentioned,
+   * which is the whole failure mode the reference text exists to prevent.
    */
   function streamReply(session: FakeSession, prompt: string): void {
     const reply =
       scenario.replies?.find(entry => !entry.match || prompt.includes(entry.match)) ??
       DEFAULT_SCENARIO.replies?.[0] ??
       {}
-    const deltas = reply.deltas ?? ['Working on it.']
-    const text = reply.text ?? deltas.join('')
+    const uploads = referencedUploads(prompt)
+    const received = uploads.map(file => `I received ${file.filename} (${file.bytes} bytes) at ${file.path}.`)
+    const deltas = [...received, ...(reply.deltas ?? ['Working on it.'])]
+    const text = received.length ? deltas.join('') : (reply.text ?? deltas.join(''))
     const sid = session.storedId
     let at = streamDelayMs
 

@@ -114,6 +114,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   developer connection test.
 - English UI strings collected in `src/i18n/strings.ts`, and design tokens updated to the Messenger
   direction from `design/tokens.md`.
+- A connectivity seam (`src/platform/net-info.ts`) so that macOS, where NetInfo has no native module,
+  no longer fails at startup.
+- Sending files, not only images. Upstream has no file-attach RPC, so a file is streamed to
+  `POST /api/files/upload-stream` — multipart from the picker's URI, so nothing larger than a chunk
+  is ever in JavaScript memory — and the prompt then carries the `@file:` reference the gateway
+  expands. It has to land inside the session's own working directory, which is the only place that
+  satisfies both the managed-files policy and the `allowed_root` the gateway pins `@file:` to;
+  docs/platform-notes.md records why, with the upstream lines. The 100 MB cap is checked before any
+  bytes move, every failure carries a reason rather than a raw message, and the file path sits behind
+  a long press of the existing "+" so the composer's design is left to whoever owns it.
 - `@hermie/transcript`: the chat engine — one item model that both history rows and live events
   project onto, a reducer that never filters and never invents an author, stable-id reconciliation,
   and verbosity as read-time selectors.
@@ -331,6 +341,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The red banner is now reserved for failures that happen while there is a connection, and a
   connection that will never become ready on its own — signed out, too old, or refused by the
   gateway's own configuration — says which of those it is instead of "gateway not connected".
+- A resumed chat dropped the gateway's own view of the session on the floor. `session.resume`
+  answers with `info` — the model, the flags, the working directory — and it was read once for the
+  compatibility check and then discarded, so `chat.info` stayed empty until the gateway happened to
+  send a `session.info` event. `refreshOptions` already assumed otherwise, merging its patch onto
+  "what the resume reported".
 - The chat header said "Connecting…" over a conversation that was loaded and streaming. Resuming
   from the background walks the whole pre-dial ladder again while the session keeps working, and the
   subtitle was reading the socket's bookkeeping rather than this chat's state.

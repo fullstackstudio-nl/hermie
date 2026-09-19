@@ -317,6 +317,8 @@ export const strings = {
       cancel: 'Cancel',
       title: 'Add an attachment',
       failed: (message: string) => `The attachment could not be added: ${message}`,
+      /** Already a whole sentence from `FileUploadError`; this only frames it. */
+      uploadFailed: (message: string) => `The file was not sent. ${message}`,
       permission: 'Hermie needs access to your photo library to attach an image. Allow it in Settings.',
       openSettings: 'Open Settings'
     },

@@ -104,6 +104,7 @@ export const chatStrings = {
     send: 'Send message',
     stop: 'Stop response',
     attach: 'Add attachment',
+    attachFileHint: 'Press and hold to attach a file instead of an image',
     /** Shown under the field only where a bare Return sends. */
     keyHint: 'Enter to send · Shift+Enter for a new line',
     removeAttachment: 'Remove attachment',

@@ -814,3 +814,120 @@ than inventing it. Surfacing the keepalive's own round trip is a change to `gate
 - **The wide layout on a Mac.** Not run; the owner's own Hermie holds that bundle identifier.
 - **Performance in a long transcript.** No frame timings were taken. The nesting limit and the
   blur-free list rows are the mitigations the tokens document asks for, not measurements.
+
+## Sending files, not only images (2026-09-19)
+
+Upstream at `b9c2660`. There is no file-attach RPC: `image.attach` / `image.attach_bytes` take
+images and nothing else, so a file has to be **uploaded over HTTP and then referenced from the
+prompt text**. Both halves of that have constraints that do not line up by default, and the whole
+design turns on making them line up, so this is what the code was written against.
+
+### The upload endpoint has no idea what a profile is
+
+`POST /api/files/upload-stream` (multipart: `file`, `path`, `overwrite`) and
+`POST /api/files/upload` (`{path, data_url, overwrite}`) both resolve `path` through
+`hermes_cli/web_server_files.py::_resolve_managed_path`, and that function takes a `Request` — never
+a profile. There is no header, no query parameter and no session binding: the managed-files surface
+is one filesystem, browsed as the OS user running `hermes serve`.
+
+`_managed_files_policy` (`web_server_files.py:122`) picks the root in three cases:
+
+| Condition                                     | `locked_root` | What `path` may be                             |
+| --------------------------------------------- | ------------- | ---------------------------------------------- |
+| `HERMES_DASHBOARD_FILES_ROOT` is set          | that root     | relative (resolved under it) or under it       |
+| the Hermes root is `/opt/data` (hosted image) | `/opt/data`   | same                                           |
+| otherwise — the ordinary self-hosted case     | `None`        | **absolute only**, anywhere the user can write |
+
+That last row is the one that matters and it is easy to get wrong: with no locked root,
+`_resolve_managed_path` answers **400 "Path must be absolute"** for a relative `path`
+(`web_server_files.py:159`). So a client cannot hardcode `uploads/hermie/…` — and it cannot hardcode
+an absolute path either, because a locked root would answer 403 "Path outside managed files root".
+
+`display_path` in the response is `str(resolved)` — the absolute, symlink-resolved path on the
+gateway host. `_managed_write_result` returns `{ok, entry, path, root, locked_root, can_change_path}`,
+so the response itself tells the client both where the file landed and whether a root is locked.
+
+Cap: `_MANAGED_FILE_MAX_BYTES = 100 * 1024 * 1024` (`hermes_cli/web_server.py:821`), enforced as the
+stream is written, in `_UPLOAD_CHUNK_BYTES` (1 MB) chunks, with a 413 when it is passed. The stream
+endpoint writes a sibling temp file and renames, so a cancelled upload cannot clobber an existing
+file.
+
+### `@file:` is expanded by the gateway, and it is confined to the session's cwd
+
+`@file:<path>` is real and it is not CLI-only. The gateway expands it for every prompt in
+`tui_gateway/prompt_turn.py:533-548`:
+
+```python
+ctx = preprocess_context_references(
+    prompt, cwd=cwd, allowed_root=cwd, context_length=ctx_len)
+```
+
+`cwd` there is `_session_cwd(session)`. **`allowed_root=cwd` is the whole problem.**
+`agent/context_references.py::_resolve_path` (line 345) resolves the target — keeping an absolute
+one as-is — and then raises `"path is outside the allowed workspace"` unless the result is under
+`allowed_root`. The CLI passes no `allowed_root` and is therefore unrestricted; the gateway is not.
+
+So the obvious design does **not** work: upload to the managed-files root (`$HOME` in the ordinary
+case) and reference it, and the reference is refused, because `$HOME/uploads/…` is not under the
+session's `$HOME/projects/whatever`. The containment runs the wrong way.
+
+What makes it work is to **upload into the session's own working directory**, which the client
+already knows: `SessionLiveInfo.cwd` arrives with `session.resume` and Hermie already keeps it as
+`chat.info`. Uploading to an absolute path under `info.cwd` satisfies both sides at once — the
+managed-files policy accepts an absolute path (no locked root), and the reference is inside
+`allowed_root` by construction. That is what `uploadFile` does, and why it refuses rather than
+guesses when `info.cwd` is missing.
+
+Two consequences worth knowing:
+
+- **A locked-root gateway can still refuse the upload.** If `HERMES_DASHBOARD_FILES_ROOT` or
+  `/opt/data` is in force and the session's cwd is not under it, the upload is a 403 and there is no
+  path that would satisfy both constraints. The client cannot fix this; it reports it.
+- **The file lands in the workspace, not in a scratch area.** That is the price of the `allowed_root`
+  rule, so the directory convention has to be obviously ours and collision-proof:
+  `uploads/hermie/<yyyy-mm-dd>/<random>-<sanitised name>` under the session cwd.
+
+### What the agent does with the reference
+
+`_expand_path_reference` (`agent/context_references.py:272`) inlines a text file as a fenced block
+and, for a binary, returns `_binary_reference_block` — a block that tells the model the file is on
+disk where its tools can reach it rather than a dead "unsupported" warning. Either way the
+`@file:` token stays in the sentence where the user put it; upstream stopped stripping it on purpose,
+because clients render it as an inline chip. Size is bounded twice: a single file over 50% of the
+context window is not inlined (the reference survives, the bytes do not), and a total injection over
+50% blocks the turn with `ctx.blocked`, which the gateway turns into an `error` event.
+
+`_ensure_reference_path_allowed` refuses credential paths (`~/.ssh`, `HERMES_HOME/.env`, the
+canonical read deny-list) whatever the workspace says, so an upload named to look like one of those
+is rejected at reference time rather than at upload time.
+
+### Auth
+
+Nothing special: the files routes sit behind the same `auth_middleware` as the rest of `/api`, so the
+bearer token and any configured extra headers are all that is needed. `GatewayHttp` already attaches
+both, which is why the upload reuses it for the URL and header construction instead of building a
+second client.
+
+### The picker on a Mac
+
+`expo-document-picker` is back in `apps/hermie/package.json`; it had gone out with the native macOS
+target, where it had no slice. It is needed again because the Mac now runs the iPad build, and that
+build is an iOS app: the module's iOS implementation presents `UIDocumentPickerViewController`, which
+UIKit provides for "Designed for iPad" apps on a Mac and renders as the ordinary macOS open panel.
+There is no `.macos` variant and no `RUNS_ON_MAC` branch, for the same reason `attachments.ts` no
+longer has one — one implementation covers every target this builds for.
+
+**Reasoned from the SDK, not watched.** Nothing has picked a file in a Mac window. If UIKit declines
+to present the picker there, the "+" long-press does nothing rather than failing loudly, which is the
+same degradation `GCKeyboard` has. `copyToCacheDirectory` is on, so the URI handed to the upload
+outlives the picker; whether the Mac's panel honours that the way iOS does is part of what is
+unverified.
+
+### What a real-gateway test still has to confirm
+
+Everything above is read from upstream source and exercised against the fake gateway. Nothing in the
+upload path has been run against a real `hermes serve`. Specifically unverified: that
+`multipart/form-data` from React Native's `fetch` with a `file://` URI is accepted by FastAPI's
+`UploadFile` as-is; that `info.cwd` is populated for a Hermie session rather than arriving `lazy`;
+that an absolute `path` under that cwd is accepted by `_resolve_managed_path`; and that
+`@file:<abs path>` then expands rather than being refused.
