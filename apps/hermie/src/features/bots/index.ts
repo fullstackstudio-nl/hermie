@@ -17,4 +17,5 @@ export {
   type PresenceInput,
   type PresenceState
 } from './presence'
-export { ConnectionLine, GatewayCard, SidebarFooter, type BotsSection, type TabKey } from './SidebarFooter'
+export { ConnectionLine } from './ConnectionLine'
+export { SidebarFooter, type BotsSection, type TabKey } from './SidebarFooter'

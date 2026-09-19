@@ -297,6 +297,79 @@ describe('edit mode', () => {
     // Empty, but visible: there has to be something to move a row into.
     expect(screen.getByTestId(`divider-${(divider as { id: string }).id}`)).toBeTruthy()
   })
+
+  it('offers Remove on an empty section', () => {
+    renderScreen(<BotsScreen />)
+    fireEvent.press(screen.getByTestId('bots-edit'))
+    fireEvent.press(screen.getByTestId('add-divider'))
+
+    const id = (useChatLayoutStore.getState().entries.find(entry => entry.kind === 'divider') as { id: string }).id
+
+    fireEvent.press(screen.getByTestId(`divider-remove-${id}`))
+
+    expect(useChatLayoutStore.getState().entries.some(entry => entry.kind === 'divider')).toBe(false)
+  })
+})
+
+/**
+ * Two headings that met with nothing between them.
+ *
+ * An empty named section used to be dropped from the list unless the list was
+ * in edit mode. That cost two things: a section whose last chat moved out
+ * vanished, so there was nothing left to move a chat back INTO; and in edit mode
+ * two headings then landed back to back with only a heading's own padding
+ * between them and read as one run-on line — which is how "NEW SECTIONFINANCE"
+ * got onto the screen and then into the stored arrangement as a single name.
+ */
+describe('a section with nothing in it', () => {
+  beforeEach(seedRoster)
+
+  /** Two named sections, the second holding every bot, the first holding none. */
+  function twoSections() {
+    // The roster has to be folded in first: `moveToSection` moves an entry that
+    // is already in the arrangement, and the screen's own reconcile has not run
+    // at this point.
+    useChatLayoutStore.getState().reconcile(['researcher', 'writer'])
+
+    const empty = useChatLayoutStore.getState().addDivider('Work')
+    const full = useChatLayoutStore.getState().addDivider('Finance')
+
+    useChatLayoutStore.getState().moveToSection('researcher', full)
+    useChatLayoutStore.getState().moveToSection('writer', full)
+
+    return { empty, full }
+  }
+
+  it('keeps its heading and gets a row of its own, outside edit mode too', () => {
+    const { empty } = twoSections()
+
+    renderScreen(<BotsScreen />)
+
+    expect(screen.getByTestId(`divider-${empty}`)).toBeTruthy()
+    expect(screen.getByTestId(`section-empty-${empty}`)).toBeTruthy()
+  })
+
+  it('puts a row between two headings rather than letting them meet', () => {
+    const { empty, full } = twoSections()
+
+    renderScreen(<BotsScreen />)
+
+    const ids = screen.getAllByTestId(/^(divider|section-empty)-/).map(node => node.props.testID as string)
+
+    // The empty heading, its own row, then the next heading. Never two
+    // headings adjacent.
+    expect(ids).toEqual([`divider-${empty}`, `section-empty-${empty}`, `divider-${full}`])
+  })
+
+  it('stays out of the way of a search, which narrows the list on purpose', () => {
+    const { empty } = twoSections()
+
+    renderScreen(<BotsScreen />)
+    fireEvent.changeText(screen.getByTestId('bots-search'), 'writer')
+
+    expect(screen.queryByTestId(`divider-${empty}`)).toBeNull()
+    expect(screen.queryByTestId(`section-empty-${empty}`)).toBeNull()
+  })
 })
 
 describe('the row context menu', () => {
@@ -474,9 +547,13 @@ describe('the unread badge', () => {
 })
 
 /**
- * A phone has no room to spend a permanent row on a green dot that says what
- * the green dot beside every bot already says. So the gateway card is the wide
- * layout's, and on a phone the connection speaks only when it wants something.
+ * One component, both layouts.
+ *
+ * The wide sidebar used to end in a gateway card carrying the host and the
+ * connection state. It is gone: it spent a permanent row saying "Connected",
+ * which is what it says every second of every day, and it said it in different
+ * words from the phone's own line. What is left is one line under the title
+ * that draws nothing at all while the connection is healthy.
  */
 describe('the connection state on the two layouts', () => {
   beforeEach(seedRoster)
@@ -485,27 +562,72 @@ describe('the connection state on the two layouts', () => {
     gateway.status = 'ready'
   })
 
-  it('says nothing at all on a phone while the gateway is ready', () => {
-    renderScreen(<BotsScreen onOpenSection={jest.fn()} />)
+  it.each(['screen', 'sidebar'] as const)('says nothing at all on %s while the gateway is ready', variant => {
+    renderScreen(<BotsScreen onOpenSection={jest.fn()} variant={variant} />)
 
-    expect(screen.queryByTestId('gateway-card')).toBeNull()
     expect(screen.queryByTestId('connection-line')).toBeNull()
     // The tab strip is still there; it is only the gateway card that went.
     expect(screen.getByTestId('tab-settings')).toBeTruthy()
   })
 
-  it('shows a status line on a phone once the connection needs attention', () => {
+  it.each(['screen', 'sidebar'] as const)('shows the same status line on %s once it needs attention', variant => {
     gateway.status = 'reconnecting'
-    renderScreen(<BotsScreen onOpenSection={jest.fn()} />)
+    renderScreen(<BotsScreen onOpenSection={jest.fn()} variant={variant} />)
 
     expect(screen.getByTestId('connection-line')).toHaveTextContent(/Reconnecting/)
-    expect(screen.queryByTestId('gateway-card')).toBeNull()
   })
 
-  it('keeps the gateway card on the wide layout, and no line with it', () => {
-    renderScreen(<BotsScreen onOpenSection={jest.fn()} variant="sidebar" />)
+  it('has no gateway card left on either layout', () => {
+    for (const variant of ['screen', 'sidebar'] as const) {
+      const view = renderScreen(<BotsScreen onOpenSection={jest.fn()} variant={variant} />)
 
-    expect(screen.getByTestId('gateway-card')).toBeTruthy()
-    expect(screen.queryByTestId('connection-line')).toBeNull()
+      expect(screen.queryByTestId('gateway-card')).toBeNull()
+      view.unmount()
+    }
+  })
+
+  it.each(['screen', 'sidebar'] as const)('says Signed out on %s, and offers the way back', variant => {
+    gateway.status = 'needs_signin'
+    renderScreen(<BotsScreen onOpenSection={jest.fn()} variant={variant} />)
+
+    expect(screen.getByTestId('connection-line')).toHaveTextContent('Signed out')
+    // Tappable, which the other states are not: it is the one a reader can act on.
+    expect(screen.getByTestId('connection-sign-in')).toBeTruthy()
+  })
+})
+
+/**
+ * The initial, when there is no picture.
+ *
+ * Most bots on a real gateway have none: uploading one is opt-in, and
+ * `profiles.list` answers `has_avatar: false` for the rest, so the app never
+ * asks for an asset and the row draws the generated initial instead. That path
+ * went unlooked-at for two passes because the fake gateway answered
+ * `has_avatar: true` for EVERY profile and served a flat 1x1 PNG — so every row
+ * in every screenshot was a coloured disc and the fallback was unreachable. The
+ * fake gateway now leaves Writer without one; this pins the rendering.
+ */
+describe('a bot with no picture', () => {
+  beforeEach(seedRoster)
+
+  it('draws the initial rather than an empty circle', () => {
+    renderScreen(<BotsScreen />)
+
+    // Both roster bots are `hasAvatar: false`, so nothing was ever fetched.
+    expect(useBotsStore.getState().avatars).toEqual({})
+    // The avatar is decorative, so its initial is hidden from the a11y tree —
+    // the row's own label is what a screen reader reads.
+    expect(screen.getByText('R', { includeHiddenElements: true })).toBeTruthy()
+    expect(screen.getByText('W', { includeHiddenElements: true })).toBeTruthy()
+  })
+
+  it('draws the picture instead once one has been fetched', () => {
+    useBotsStore.getState().setAvatar('writer', 1, 'data:image/png;base64,iVBORw0KGgo=')
+
+    renderScreen(<BotsScreen />)
+
+    expect(screen.getByText('R', { includeHiddenElements: true })).toBeTruthy()
+    // Writer's initial has given way to the image.
+    expect(screen.queryByText('W', { includeHiddenElements: true })).toBeNull()
   })
 })

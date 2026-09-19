@@ -178,6 +178,41 @@ describe('the shell insets', () => {
   })
 })
 
+/**
+ * What a panel is allowed to paint over the glass: nothing.
+ *
+ * Measured on an iPad Pro 13" simulator in the dark theme, the chat column
+ * sampled `#0A1830` — `elevation.e0`, the wallpaper's own rung — while the
+ * sidebar beside it sampled `#1B2744`, the panel rung. Same `GlassSurface`,
+ * same variant, so the difference was the `Screen` inside the column filling it
+ * with `colors.bg`. Every wide-layout destination goes through `Screen`, so
+ * every one of them was painting the wallpaper's colour over the material meant
+ * to refract it, and the elevation ladder collapsed to one flat field.
+ */
+describe('a screen inside a floating panel', () => {
+  const styleOf = (testID: string) =>
+    StyleSheet.flatten(screen.getByTestId(testID).props.style as never) as {
+      backgroundColor?: string
+      paddingTop?: number
+      paddingBottom?: number
+    }
+
+  it('paints no background of its own, so the panel stays glass', () => {
+    renderScreen(<RegularShell />)
+
+    expect(styleOf('chat-empty').backgroundColor).toBe('transparent')
+  })
+
+  it('adds no second copy of the safe-area inset the shell already applied', () => {
+    renderScreen(<RegularShell />)
+
+    const inner = styleOf('chat-empty')
+
+    expect(inner.paddingTop).toBe(0)
+    expect(inner.paddingBottom).toBe(0)
+  })
+})
+
 describe('the signed-out state', () => {
   it('takes the whole content column rather than sitting under a chat error', () => {
     gateway.status = 'needs_signin'
@@ -189,7 +224,10 @@ describe('the signed-out state', () => {
       expect(screen.queryByText('Pick a conversation to start reading.')).toBeNull()
       // The list stays: it is the half of the shell that still works.
       expect(screen.getByTestId('bot-row-writer')).toBeTruthy()
-      expect(screen.getByTestId('gateway-state')).toHaveTextContent('Signed out')
+      // …and it says so in the one place the connection speaks, which on this
+      // layout is the line under the title rather than a card at the foot.
+      expect(screen.getByTestId('connection-line')).toHaveTextContent('Signed out')
+      expect(screen.queryByTestId('gateway-card')).toBeNull()
     } finally {
       gateway.status = 'ready'
     }

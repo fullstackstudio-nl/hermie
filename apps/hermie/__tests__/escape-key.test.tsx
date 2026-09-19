@@ -18,6 +18,7 @@ import { Pressable, Text } from 'react-native'
 
 import { OverlayPanel } from '../src/app/OverlayPanel'
 import { BottomSheet } from '../src/ui/BottomSheet'
+import { ChatOptionsSheet } from '../src/ui/sheets'
 import { useEscapeKey } from '../src/ui/useEscapeKey'
 import { renderScreen, withProviders } from './support/render'
 
@@ -281,5 +282,88 @@ describe('Escape inside the overlay panel', () => {
     // And only now does the panel get it.
     pressEscape()
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * A sheet with pages inside it.
+ *
+ * The chat options sheet is the one surface where the "one level" rule is not
+ * obvious from the markup: the page is not a separate component that mounts over
+ * the sheet, it is the same sheet drawing something else. What makes Escape
+ * still go back one level is that the page registers its own handler while it is
+ * open, and effects flush child-first — so the `BottomSheet` inside the sheet
+ * component registers "close" BEFORE the sheet component registers "pop the
+ * page", and the stack hands the key to the page.
+ */
+describe('Escape inside a sheet that has pages', () => {
+  const props = {
+    accent: 'default' as const,
+    botName: 'Researcher',
+    fast: false,
+    model: 'sonnet',
+    modelOptions: [
+      { value: 'sonnet', label: 'Sonnet' },
+      { value: 'opus', label: 'Opus' }
+    ],
+    onChangeAccent: jest.fn(),
+    onChangeFast: jest.fn(),
+    onChangeModel: jest.fn(),
+    onChangeReasoningEffort: jest.fn(),
+    onChangeShowBotToBot: jest.fn(),
+    onChangeShowThinking: jest.fn(),
+    onChangeVerbosity: jest.fn(),
+    onChangeYolo: jest.fn(),
+    reasoningEffort: 'medium',
+    reasoningOptions: [{ value: 'medium', label: 'Medium' }],
+    showBotToBot: true,
+    showThinking: false,
+    verbosity: 'normal' as const,
+    yolo: false
+  }
+
+  it.each([
+    ['model', 'option-model'],
+    ['reasoning', 'option-reasoning'],
+    ['colour', 'option-colour']
+  ])('pops the %s page first, and closes the sheet only on the second Escape', (_name, row) => {
+    const onClose = jest.fn()
+
+    renderScreen(<ChatOptionsSheet {...props} onClose={onClose} visible />)
+
+    fireEvent.press(screen.getByTestId(row))
+    expect(screen.getByTestId('picker-back')).toBeTruthy()
+
+    pressEscape()
+
+    // The page is gone, the sheet is not.
+    expect(screen.queryByTestId('picker-back')).toBeNull()
+    expect(screen.getByTestId('option-model')).toBeTruthy()
+    expect(onClose).not.toHaveBeenCalled()
+
+    pressEscape()
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('closes on the first Escape when no page is open', () => {
+    const onClose = jest.fn()
+
+    renderScreen(<ChatOptionsSheet {...props} onClose={onClose} visible />)
+
+    pressEscape()
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('goes back one level from the back control too, not straight out', () => {
+    const onClose = jest.fn()
+
+    renderScreen(<ChatOptionsSheet {...props} onClose={onClose} visible />)
+
+    fireEvent.press(screen.getByTestId('option-colour'))
+    fireEvent.press(screen.getByTestId('picker-back'))
+
+    expect(screen.getByTestId('option-colour')).toBeTruthy()
+    expect(onClose).not.toHaveBeenCalled()
   })
 })

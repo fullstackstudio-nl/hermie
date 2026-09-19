@@ -135,23 +135,37 @@ is waiting. **Offline** = gateway unreachable or no session; the row shows
 
 Presence never depends on colour alone: the shape differs per state and the chat
 header subtitle repeats the state in words. Bead sizes: 14 px on a 48 px avatar
-(2.5 px ring in the panel colour), 9 px inline in the header and gateway card,
-18 px in the legend.
+(2.5 px ring in the panel colour), 9 px inline in the header and the connection
+line, 18 px in the legend.
 
-The **global** connection state is not a bot state, and it is shown differently
-on the two layouts. The wide layout carries it permanently, in the sidebar's
-gateway card (`gateway.example.com`, `Connected · 12 ms`); the `…` on that card
-opens connection settings.
+The **global** connection state is not a bot state, and it is shown the SAME way
+on every layout: one slim glass status line under the `Chats` title, and nothing
+else anywhere.
 
-The phone does **not**. There is no gateway card at the bottom of the compact
-list — the bottom holds the four-tab strip and nothing else. A permanent row
-saying `Connected` is a row nobody reads, and the presence bead beside every
-chat already carries it. Instead the connection speaks only when it wants
-something: a slim status line sits under the `Chats` title whenever the status
-is anything but ready (`Connecting…`, `Reconnecting…`, `Offline`), and
-`needs_signin` takes the whole screen as the Signed out card rather than a line.
-The host, the state and the latency live in Settings → Gateway, where they are
-looked up rather than glanced at.
+There is no gateway card. The wide layout used to carry one permanently at the
+foot of the sidebar, with the host and `Connected · 12 ms`; it spent a row of
+the sidebar saying the thing it says every second of every day, in different
+words from the phone's own line, and the latency in it was never measurable from
+the app anyway. The bottom of the list is the four-tab strip and nothing else,
+on both layouts.
+
+What the line says:
+
+- **Ready** — nothing at all. It does not render. A row that only ever says
+  `Connected` is a row nobody reads, and the presence bead beside every chat
+  already carries it.
+- `Connecting…`, `Reconnecting…`, `Offline` — the state, beside a static
+  hollow bead.
+- **`needs_signin`** — `Signed out`, in amber, and the line itself is the
+  button: tapping it starts the sign-in. This is in ADDITION to the Signed out
+  card, which still takes the whole content column (wide) or the whole screen
+  (phone, list AND inside a chat). The sidebar stays usable while that card is
+  up, and the sidebar is what a reader is looking at.
+
+The line is **static** in every state, including signed out. The pulse belongs
+to a bot's `needs input` presence and to nothing else. The host and the state
+live in Settings → Gateway as well, where they are looked up rather than
+glanced at.
 
 ---
 
@@ -397,6 +411,12 @@ The list is the owner's, not the gateway's. Rows can be reordered by hand and
 grouped under **named dividers** (`Work`, `Finance`, …). _Edit_ reveals drag handles
 on rows, Rename / Remove on dividers, and an _Add divider_ action.
 
+A named divider with no rows under it **keeps its heading and gets a row of its
+own** (`No chats in this section`), in and out of edit mode. Dropping an empty
+section leaves nothing to move a chat back INTO, and two headings whose rows have
+all moved away then meet with only a heading's own padding between them and read
+as one run-on line.
+
 A bot can be **archived** — swipe on phone, context menu on the wide layout — and
 lives under a collapsed `Archived (1)` disclosure at the bottom of the list.
 
@@ -405,8 +425,8 @@ you never create a conversation. Its place is taken by a round glass **New cron*
 button, the one thing you do create from this screen.
 
 Footer navigation is a four-tab glass strip: **Chats · Activity · Crons ·
-Settings**. On the wide layout the gateway card sits under it; on the phone the
-strip is the whole footer (see §1.6).
+Settings**. The strip is the whole footer on every layout — nothing sits under
+it (see §1.6).
 
 ### 6.9 Overlays, sheets and Esc
 
@@ -415,6 +435,23 @@ that slides in over the **chat column only**, from the right, behind a dimmed sc
 the sidebar stays put and stays usable. The panel has a round glass close button.
 
 On phone the same destinations push or present as a normal sheet.
+
+A **bottom sheet is glass** — the sheet recipe, opaque so its body text and any
+command it shows keep a fixed contrast — with a grabber at the top, which a
+blocking sheet omits because its only ways out are its own buttons.
+
+On the wide layout a sheet is **capped at 560 pt and parked over the content
+column**, whose left edge is the sidebar plus the gaps around it. Spanning the
+window would put `Allow once` and `Deny` a hand's width apart and lay the scrim
+over the chat list, which stays usable while a sheet is up. Where the column is
+narrower than the cap, the column wins.
+
+A sheet with **pages** inside it (chat options → model, reasoning, colour) is
+still one sheet. Each page has a back control, and **Esc goes back exactly one
+level**: the first pops the page, the second closes the sheet. The same rule
+holds for sub pages inside the overlay panel. Nothing coordinates it — the
+handler stack delivers to whatever registered last, and a page registers after
+the sheet it is in.
 
 **Every sheet, popover and overlay closes on Esc on the Mac.** The approval sheet
 closes only through one of its four buttons. Sheet actions are exactly

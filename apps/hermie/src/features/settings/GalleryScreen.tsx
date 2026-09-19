@@ -76,6 +76,7 @@ import type { ApprovalItem, ClarifyItem, PickerOption, Verbosity } from '../../c
 import { Button, InsetButtonRow, InsetGroup, Screen, Text } from '../../ui/primitives'
 import { ApprovalSheet, ChatOptionsSheet, ClarifySheet } from '../../ui/sheets'
 import { useTheme } from '../../ui/theme'
+import type { AccentName } from '../../ui/tokens'
 
 export interface GalleryScreenProps {
   onClose?: () => void
@@ -198,6 +199,7 @@ export function GalleryScreen({ onClose }: GalleryScreenProps) {
   const [reasoning, setReasoning] = useState('medium')
   const [model, setModel] = useState('default')
   const [verbosity, setVerbosity] = useState<Verbosity>('normal')
+  const [accent, setAccent] = useState<AccentName>('violet')
   const [showBotToBot, setShowBotToBot] = useState(true)
   const [showThinking, setShowThinking] = useState(false)
 
@@ -526,6 +528,7 @@ export function GalleryScreen({ onClose }: GalleryScreenProps) {
       />
 
       <ChatOptionsSheet
+        accent={accent}
         botName="Researcher"
         fast={fast}
         model={model}
@@ -535,6 +538,7 @@ export function GalleryScreen({ onClose }: GalleryScreenProps) {
         onChangeReasoningEffort={setReasoning}
         onChangeShowBotToBot={setShowBotToBot}
         onChangeShowThinking={setShowThinking}
+        onChangeAccent={setAccent}
         onChangeVerbosity={setVerbosity}
         onChangeYolo={setYolo}
         onClose={() => setOptionsOpen(false)}

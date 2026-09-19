@@ -289,3 +289,40 @@ describe('persistence, keyed by gateway', () => {
     expect(mockDisk.get(CHAT_LAYOUT_KEY)).toBeUndefined()
   })
 })
+
+/**
+ * The colour picked in the options sheet is the colour the list shows.
+ *
+ * There is one store behind both pickers (ADR-0012), which is what makes the
+ * retint live: the header ring, the selected row and the outgoing bubble all
+ * read `accents[bot]` through `useChatAccent`, so a write here reaches every one
+ * of them on the next render without anything being told to refresh.
+ */
+describe('one accent, read by every surface', () => {
+  beforeEach(() => useChatLayoutStore.getState().reset())
+
+  it('is the same value whichever picker wrote it', () => {
+    useChatLayoutStore.getState().setAccent('researcher', 'teal')
+
+    expect(useChatLayoutStore.getState().accents.researcher).toBe('teal')
+
+    // The row menu setting it back is the same call on the same key.
+    useChatLayoutStore.getState().setAccent('researcher', 'magenta')
+
+    expect(useChatLayoutStore.getState().accents.researcher).toBe('magenta')
+  })
+
+  it('stores Default as the absence of a choice rather than as a ninth colour', () => {
+    useChatLayoutStore.getState().setAccent('researcher', 'teal')
+    useChatLayoutStore.getState().setAccent('researcher', 'default')
+
+    expect(useChatLayoutStore.getState().accents).toEqual({})
+  })
+
+  it('does not touch any other chat', () => {
+    useChatLayoutStore.getState().setAccent('researcher', 'teal')
+    useChatLayoutStore.getState().setAccent('writer', 'orange')
+
+    expect(useChatLayoutStore.getState().accents).toEqual({ researcher: 'teal', writer: 'orange' })
+  })
+})

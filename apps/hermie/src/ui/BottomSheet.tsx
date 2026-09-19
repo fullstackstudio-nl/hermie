@@ -15,19 +15,21 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   Animated,
-  Dimensions,
   KeyboardAvoidingView,
   Modal,
   Pressable,
   ScrollView,
+  useWindowDimensions,
   View,
   type ViewStyle
 } from 'react-native'
 
 import { useSafeAreaInsets } from '../platform/safe-area'
+import { GlassSurface } from './glass'
 import { KEYBOARD_AVOID_BEHAVIOR } from './keyboard'
 import { Text } from './primitives'
 import { useTheme } from './theme'
+import { REGULAR_LAYOUT_MIN_WIDTH, SCRIM_COLOR, SHEET_MAX_WIDTH, SIDEBAR_WIDTH, WINDOW_GAP } from './tokens'
 import { useEscapeKey } from './useEscapeKey'
 
 export interface BottomSheetProps {
@@ -98,9 +100,26 @@ function useSheetPresence(visible: boolean, onClosed?: () => void): { mounted: b
   return { mounted, progress }
 }
 
-/** How tall a sheet may grow: most of the window, never all of it. */
-function sheetMaxHeight(): number {
-  return Math.round(Dimensions.get('window').height * 0.86)
+/**
+ * Where the sheet sits, and how wide it is allowed to get.
+ *
+ * On a phone it is the window, edge to edge. On the wide layout a sheet that
+ * spanned a 1366pt window would put its buttons a hand's width apart and lay a
+ * scrim over the chat list the reader is still using, so it is capped and parked
+ * over the CONTENT COLUMN — the panel the sheet belongs to — rather than centred
+ * on the window. The left inset is the sidebar's own width plus the gaps around
+ * it, which is where that column starts.
+ */
+function sheetBox(width: number, height: number): { maxHeight: number; maxWidth: number; left: number } {
+  const maxHeight = Math.round(height * 0.86)
+
+  if (width < REGULAR_LAYOUT_MIN_WIDTH) {
+    return { left: 0, maxHeight, maxWidth: width }
+  }
+
+  const column = SIDEBAR_WIDTH + WINDOW_GAP * 2
+
+  return { left: column, maxHeight, maxWidth: Math.min(SHEET_MAX_WIDTH, width - column) }
 }
 
 export function BottomSheet({
@@ -116,6 +135,7 @@ export function BottomSheet({
 }: BottomSheetProps) {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
+  const window = useWindowDimensions()
   const { mounted, progress } = useSheetPresence(visible, onClosed)
 
   /**
@@ -134,10 +154,17 @@ export function BottomSheet({
     return null
   }
 
-  const maxHeight = sheetMaxHeight()
+  const { left, maxHeight, maxWidth } = sheetBox(window.width, window.height)
 
   const body = (
-    <View style={{ gap: theme.space.md, paddingBottom: insets.bottom + theme.space.lg }}>
+    <View
+      style={{
+        gap: theme.space.md,
+        paddingBottom: insets.bottom + theme.space.lg,
+        paddingHorizontal: theme.space.xl,
+        paddingTop: theme.space.md
+      }}
+    >
       {blocking ? null : (
         <View
           // The bar is decoration, not a control: this sheet never listens to a
@@ -148,12 +175,13 @@ export function BottomSheet({
           importantForAccessibility="no-hide-descendants"
           style={{
             alignSelf: 'center',
-            backgroundColor: theme.colors.border,
+            backgroundColor: theme.hairline,
             borderRadius: 3,
             height: 5,
             marginBottom: theme.space.xs,
             width: 40
           }}
+          testID="sheet-grabber"
         />
       )}
       {children}
@@ -183,39 +211,61 @@ export function BottomSheet({
             // to it.
             disabled={blocking}
             onPress={onRequestClose}
-            style={{ backgroundColor: '#00000066', flex: 1 }}
+            style={{ backgroundColor: SCRIM_COLOR, flex: 1 }}
             testID={testID ? `${testID}-backdrop` : 'sheet-backdrop'}
           />
         </Animated.View>
 
-        <KeyboardAvoidingView behavior={KEYBOARD_AVOID_BEHAVIOR}>
+        <KeyboardAvoidingView
+          behavior={KEYBOARD_AVOID_BEHAVIOR}
+          // The column inset lives here rather than on the root so it travels with
+          // the sheet when the keyboard pushes it up.
+          style={{ alignItems: 'center', paddingLeft: left }}
+          testID={testID ? `${testID}-column` : 'sheet-column'}
+        >
           <Animated.View
             accessibilityLabel={accessibilityLabel}
             accessibilityViewIsModal
-            style={[
-              {
-                backgroundColor: theme.colors.bg,
-                borderTopLeftRadius: theme.radii.sheet,
-                borderTopRightRadius: theme.radii.sheet,
-                maxHeight,
-                paddingHorizontal: theme.space.xl,
-                paddingTop: theme.space.md,
-                transform: [
-                  {
-                    translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [maxHeight, 0] })
-                  }
-                ]
-              },
-              contentStyle
-            ]}
+            style={{
+              maxHeight,
+              maxWidth,
+              transform: [
+                {
+                  translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [maxHeight, 0] })
+                }
+              ],
+              width: '100%'
+            }}
+            testID={testID ? `${testID}-panel` : 'sheet-panel'}
           >
-            {scrollable ? (
-              <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-                {body}
-              </ScrollView>
-            ) : (
-              body
-            )}
+            {/*
+              `opaque`: a sheet carries body text and often a command, so its
+              contrast has to be a fixed number rather than a function of the
+              wallpaper it happens to be over. Only the top corners are rounded —
+              the bottom edge is the window's.
+            */}
+            <GlassSurface
+              contentStyle={[
+                {
+                  borderBottomLeftRadius: 0,
+                  borderBottomRightRadius: 0,
+                  maxHeight
+                },
+                contentStyle
+              ]}
+              opaque
+              radius={theme.radii.sheet}
+              style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}
+              variant="sheet"
+            >
+              {scrollable ? (
+                <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                  {body}
+                </ScrollView>
+              ) : (
+                body
+              )}
+            </GlassSurface>
           </Animated.View>
         </KeyboardAvoidingView>
       </View>

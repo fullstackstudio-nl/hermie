@@ -10,14 +10,18 @@
  * (ADR-0008); the gateway's own `display.tool_progress` is deliberately not
  * here, because changing it writes global config shared with other surfaces.
  */
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { Pressable, View } from 'react-native'
 
 import { chatStrings } from '../../chat-ui/strings'
 import type { PickerOption, Verbosity } from '../../chat-ui/types'
+import { strings } from '../../i18n/strings'
+import { AccentSwatches } from '../AccentSwatches'
 import { BottomSheet } from '../BottomSheet'
 import { Button, InsetGroup, Text, TextField } from '../primitives'
 import { useTheme } from '../theme'
+import { TAP_SLOP, type AccentName } from '../tokens'
+import { useEscapeKey } from '../useEscapeKey'
 import { DisclosureRow, SegmentedRow, SwitchRow } from './controls'
 
 export interface ChatOptionsSheetProps {
@@ -46,6 +50,17 @@ export interface ChatOptionsSheetProps {
    */
   onPickExpensiveModel?: (value: string) => void
 
+  /**
+   * This chat's colour, and a way to change it.
+   *
+   * It is the same value the row menu sets, from the same store (ADR-0012), so
+   * picking here retints the header ring, the selected row and the outgoing
+   * bubbles as soon as the store writes — no reload, and no second copy of the
+   * colour held by the sheet.
+   */
+  accent: AccentName
+  onChangeAccent: (value: AccentName) => void
+
   verbosity: Verbosity
   onChangeVerbosity: (value: Verbosity) => void
 
@@ -70,7 +85,41 @@ export interface ChatOptionsSheetProps {
   onConfirmExpensiveModel?: () => void
 }
 
-type Pane = 'root' | 'reasoning' | 'model'
+type Pane = 'root' | 'reasoning' | 'model' | 'colour'
+
+/**
+ * A page inside the sheet, with a back control.
+ *
+ * The header is shared so that every page has the same back affordance in the
+ * same place — the thing Escape and the Android back button also do, one level
+ * at a time.
+ */
+function Page({ children, onBack, title }: { children: ReactNode; onBack: () => void; title: string }) {
+  const theme = useTheme()
+
+  return (
+    <View style={{ gap: theme.space.md }}>
+      <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.sm }}>
+        <Pressable
+          accessibilityLabel={strings.common.back}
+          accessibilityRole="button"
+          hitSlop={TAP_SLOP}
+          onPress={onBack}
+          testID="picker-back"
+        >
+          <Text color="accent" style={{ fontSize: 22 }}>
+            {'‹'}
+          </Text>
+        </Pressable>
+        <Text style={{ flex: 1 }} variant="sheetTitle">
+          {title}
+        </Text>
+      </View>
+
+      {children}
+    </View>
+  )
+}
 
 function PickerPane({
   title,
@@ -106,18 +155,7 @@ function PickerPane({
   }, [options, query])
 
   return (
-    <View style={{ gap: theme.space.md }}>
-      <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.sm }}>
-        <Pressable accessibilityRole="button" onPress={onBack} testID="picker-back">
-          <Text color="accent" style={{ fontSize: 22 }}>
-            {'‹'}
-          </Text>
-        </Pressable>
-        <Text style={{ flex: 1 }} variant="title">
-          {title}
-        </Text>
-      </View>
-
+    <Page onBack={onBack} title={title}>
       {searchable ? (
         <TextField
           autoCapitalize="none"
@@ -166,13 +204,25 @@ function PickerPane({
           </Pressable>
         ))}
       </InsetGroup>
-    </View>
+    </Page>
   )
 }
 
 export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
   const theme = useTheme()
   const [pane, setPane] = useState<Pane>('root')
+
+  /**
+   * Escape goes back exactly ONE level.
+   *
+   * `useEscapeKey` delivers to whoever registered LAST, and effects flush
+   * child-first — so the `BottomSheet` inside this component registers its
+   * "close the sheet" handler before this one does. A page therefore wins
+   * Escape while it is open, pops itself, unregisters, and hands the key back
+   * to the sheet. Nothing coordinates that beyond mount order, which is the
+   * whole reason the stack is a stack.
+   */
+  useEscapeKey(() => setPane('root'), props.visible && pane !== 'root')
 
   const close = () => {
     setPane('root')
@@ -221,7 +271,19 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
       testID="chat-options-sheet"
       visible={props.visible}
     >
-      {pane === 'reasoning' ? (
+      {pane === 'colour' ? (
+        <Page onBack={() => setPane('root')} title={strings.layout.colour}>
+          <Text color="textMuted" variant="preview">
+            {chatStrings.options.colourHint}
+          </Text>
+          {/*
+            The page stays open after a pick, unlike the model and reasoning
+            pages. A colour is judged against the chat behind it, so closing on
+            the first tap would make comparing two of them four taps each.
+          */}
+          <AccentSwatches accent={props.accent} onSelect={props.onChangeAccent} testIDPrefix={props.botName} />
+        </Page>
+      ) : pane === 'reasoning' ? (
         <PickerPane
           onBack={() => setPane('root')}
           onPick={option => {
@@ -291,6 +353,12 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
               onPress={() => setPane('model')}
               testID="option-model"
               value={modelLabel}
+            />
+            <DisclosureRow
+              label={strings.layout.colour}
+              onPress={() => setPane('colour')}
+              testID="option-colour"
+              value={strings.layout.accents[props.accent]}
             />
           </InsetGroup>
 

@@ -40,11 +40,12 @@ import {
   type TranscriptListHandle
 } from '../../chat-ui'
 import { useGateway } from '../../gateway'
+import { SignedOutPanel } from '../../gateway/SignedOutPanel'
 import { strings } from '../../i18n/strings'
 import { haptic } from '../../platform/haptics'
 import { presenceOf } from '../bots/presence'
 import { useBotsStore } from '../../store/bots'
-import { useChatAccent } from '../../store/chat-layout'
+import { useChatAccent, useChatLayoutStore } from '../../store/chat-layout'
 import { useChatsStore } from '../../store/chats'
 import { hasChatViewOverride, useChatView, useSettingsStore } from '../../store/settings'
 import { KEYBOARD_AVOID_BEHAVIOR } from '../../ui/keyboard'
@@ -95,8 +96,22 @@ const REASONING_OPTIONS: PickerOption[] = [
 ]
 
 export function ChatScreen({ route, bot, focusItemId, onBack, onOpenBot }: ChatScreenProps) {
+  const { status } = useGateway()
   const botName = bot ?? route?.params?.bot ?? ''
   const focus = focusItemId ?? route?.params?.focusItemId
+
+  /**
+   * A dead session takes the whole screen, inside a chat as well as beside one.
+   *
+   * On the wide layout the shell did this and the phone did not, so a reader
+   * who was already inside a conversation when the token expired saw a transcript
+   * that had simply stopped, plus whatever error the next send produced. Neither
+   * says "sign in", which is the only thing that helps. It is checked before the
+   * bot name because a signed-out gateway has no roster to have picked from.
+   */
+  if (status === 'needs_signin') {
+    return <SignedOutPanel />
+  }
 
   if (!botName) {
     return <NoBotSelected />
@@ -112,7 +127,7 @@ function NoBotSelected() {
   const theme = useTheme()
 
   return (
-    <Screen>
+    <Screen testID="chat-empty">
       <View style={{ alignItems: 'center', flex: 1, gap: theme.space.sm, justifyContent: 'center' }}>
         <Text color="textMuted">{strings.chat.pickBot}</Text>
       </View>
@@ -924,6 +939,7 @@ function Conversation({
         onShowRequest={acknowledge}
         onSubmitClarify={submitClarify}
         options={{
+          accent,
           botName: display,
           confirmMessage: pendingModel?.message ?? '',
           fast: chat.info?.fast === true,
@@ -936,6 +952,7 @@ function Conversation({
           onChangeShowBotToBot: value => useSettingsStore.getState().setChatView(botName, { showBotToBot: value }),
           onChangeShowThinking: value => useSettingsStore.getState().setChatView(botName, { showThinking: value }),
           onChangeVerbosity: (value: Verbosity) => useSettingsStore.getState().setChatView(botName, { level: value }),
+          onChangeAccent: value => useChatLayoutStore.getState().setAccent(botName, value),
           onChangeYolo: value => void setOption('yolo', value ? 'true' : 'false'),
           onConfirmExpensiveModel: () => {
             if (pendingModel) {

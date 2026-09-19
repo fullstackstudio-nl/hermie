@@ -218,6 +218,7 @@ export const chatStrings = {
     multiSelectHint: 'Choose as many as apply'
   },
   options: {
+    colourHint: 'Tints this chat\u2019s avatar ring, its row in the list and the messages you send.',
     title: 'Chat options',
     done: 'Done',
     subtitle: (bot: string) => `For this conversation with ${bot}`,

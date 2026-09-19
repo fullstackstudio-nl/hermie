@@ -795,6 +795,16 @@ export const SIDEBAR_WIDTH = 344
 export const OVERLAY_MAX_WIDTH = 520
 
 /**
+ * How wide a bottom sheet grows on the wide layout.
+ *
+ * A sheet spanning a 1366pt window puts "Allow once" and "Deny" a hand's width
+ * apart, and lays its scrim over the chat list the reader is still using. It is
+ * capped and parked over the content column instead — see `sheetBox` in
+ * `src/ui/BottomSheet.tsx`.
+ */
+export const SHEET_MAX_WIDTH = 560
+
+/**
  * An onboarding form never grows past this; a centred column reads better than
  * a full-width field on an iPad or a Mac window.
  */

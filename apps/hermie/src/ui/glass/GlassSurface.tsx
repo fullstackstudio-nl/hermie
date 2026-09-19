@@ -33,6 +33,18 @@ import { GLASS_MATERIAL } from './material'
 /** How many glass surfaces are already between this one and the wallpaper. */
 const GlassDepth = createContext(0)
 
+/**
+ * How many glass surfaces are between the caller and the wallpaper.
+ *
+ * Read by anything that would otherwise paint an opaque background of its own.
+ * `Screen` is the one that matters: it fills with the app's background colour
+ * and adds the safe-area inset, both of which are right on a phone and both of
+ * which are wrong inside a floating panel that has already done them.
+ */
+export function useGlassDepth(): number {
+  return useContext(GlassDepth)
+}
+
 /** The level past which a surface stops blurring and becomes a plain tint. */
 const MAX_GLASS_DEPTH = 2
 

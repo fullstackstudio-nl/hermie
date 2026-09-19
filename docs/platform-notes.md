@@ -1182,3 +1182,95 @@ rather than as a bug report against 300 lines of accumulated dedupe:
 > impossible to hit, for every client, instead of each one rediscovering the text heuristic.
 
 That is the fix Hermie cannot make in its own layer, and the rule above is what it does instead.
+
+## The wide layout, on an iPad simulator (2026-09-20)
+
+The first pass in which the sidebar-plus-detail shell was actually looked at. Device: **iPad Pro 13"
+(M5), iOS 26.5**, `86D0AE46-5541-48D2-B9CF-8D7624C998DE`, Debug build against Metro and
+`npm run fake-gateway -- --auth token --token demo`. Everything below was sampled off
+`xcrun simctl io <udid> screenshot` frames, not inferred.
+
+### What can and cannot be driven here, exactly
+
+This machine has **no `Simulator.app`** — `/Applications/Xcode.app/Contents/Developer/Applications/`
+does not contain it, which is the real reason `npx expo run:ios` stops at _"Can't determine id of
+Simulator app"_ (Part 1 recorded the symptom, not the cause). Consequences, all of them load-bearing
+for anyone planning a pass:
+
+- **No rotation.** `xcrun simctl` has no rotate verb, and device orientation is Simulator.app's
+  state — there is nothing in `device.plist` or the device's preferences to write. So a landscape
+  window cannot be produced the ordinary way.
+- **No taps.** `simctl` has no tap, swipe or key verb, and `idb`, `fbsimctl`, `maestro` and `appium`
+  are all absent. So the app can be launched and photographed and nothing else: every state behind a
+  tap — a sheet, the overlay panel, a conversation — is out of reach.
+- **The dev client can still be pointed at Metro without a tap.** `xcrun simctl openurl` raises an
+  _"Open with Hermie?"_ system confirmation that then needs one. `expo-dev-launcher` reads a launch
+  argument instead (`EXDevLauncherController.m`, `initialUrlFromProcessInfo`), so this works and
+  skips the dialog entirely:
+
+  ```sh
+  xcrun simctl launch <udid> nl.fullstackstudio.hermie --initialUrl http://localhost:8081
+  ```
+
+- **Onboarding can be skipped by copying another simulator's state.** The gateway address is in
+  AsyncStorage (`<data container>/Library/Application Support/<bundle id>/RCTAsyncLocalStorage_V1/
+manifest.json`) and the session token is in the keychain — which on a simulator is a plain
+  unencrypted `keychain-2-debug.db` under `<device>/data/Library/Keychains/`. Copying both from a
+  device that has been through the wizard onboards the target with no taps. The device must be shut
+  down while the keychain is replaced.
+- **A landscape-PROPORTIONED window can be forced**, though not a rotated device: setting
+  `UISupportedInterfaceOrientations` to landscape only in the **installed bundle's** `Info.plist`
+  (`plutil -replace` on the built `.app`, never on `app.config.ts`) makes iOS hand the app a
+  landscape-shaped scene letterboxed inside the portrait screen. What that yields here is roughly
+  **1032 × 765 pt** — wide, and close to the mockup's 1180 × 820 Frame A, but NOT the 1366 pt of a
+  real landscape iPad. The 640 pt bubble cap does not bite below about 1300 pt of window, so it is
+  still unverified on a device; `__tests__/sheet-width.test.tsx` pins the widths at 1366 instead.
+
+### A `Screen` inside a glass panel paints the wallpaper over it
+
+The finding of the pass, and it needed a pixel sample to see. Dark theme, the two panels side by
+side:
+
+| Sample                     | Before    | After     |
+| -------------------------- | --------- | --------- |
+| Sidebar panel interior     | `#1B2744` | `#1B2744` |
+| Chat panel interior        | `#0A1830` | `#192844` |
+| Wallpaper above the panels | `#102B51` | `#102B51` |
+
+`#0A1830` is `elevation.e0` — the wallpaper's own rung. Both panels are the same `GlassSurface` with
+the same variant, so the panel was not the problem: `src/ui/primitives/Screen.tsx` fills its box with
+`colors.bg` and adds the safe-area inset, and every wide-layout destination goes through it — the
+chat, Settings, Activity, Crons. So every panel on that layout was painting the wallpaper's colour
+over the material meant to refract it, and the inset was applied a second time on top of the one
+`RegularShell` already applies once to the row holding both panels (which its own doc comment warns
+about). `Screen` now reads the glass depth off the context `GlassSurface` already maintains and
+draws neither background nor inset when it is inside one.
+
+It is worth stating why nobody caught this earlier: on the **light** theme `colors.bg` (`#DCE8FB`)
+and the panel are close enough that the flattening reads as "a bit pale", and every screenshot taken
+before this pass was a phone at depth 0, where the behaviour is correct.
+
+### The chat list, seen
+
+- **The empty-section bug is not two dividers.** The owner's stored arrangement on the test device
+  held ONE divider whose name is literally `New sectionFinance` — a single string. An older build
+  seeded a new divider's name with `New section`, so typing `Finance` appended to it; the seeding is
+  already gone (`addDivider('')`), and what is left on that device is stale data from a fixed bug.
+  The separate, real problem is that an empty named section was dropped from the list unless the list
+  was in edit mode, which is what let two headings meet.
+- **Both avatar paths now render side by side.** The fake gateway answered `has_avatar: true` for
+  every profile and served the same 1×1 half-opaque red PNG, so every row in every screenshot was a
+  flat coloured disc and the generated-initial fallback was unreachable. Writer now has no avatar:
+  its row draws `W` on the derived tint with its accent ring, beside Researcher's red disc. Upstream
+  (`packages/hermes-shared`, `has_avatar?: boolean`) makes the field optional and the app only calls
+  `profiles.get_asset` when it is true, so there is no placeholder image to defend against — the flat
+  disc was this repo's own fixture, not a real gateway's behaviour.
+
+### What this pass did NOT verify
+
+- **A real landscape window**, and therefore the 640 pt bubble cap and the header button group at
+  1366 pt. See the driving note above.
+- **Anything behind a tap**: the overlay panel and its sub pages, every sheet, the colour picker, a
+  conversation, the approval sheet, Crons, Activity. All of it is covered by component tests and none
+  of it has been looked at on a device.
+- **Android**, and **Reduce Transparency / Reduce Motion**, both still as Part 1 left them.

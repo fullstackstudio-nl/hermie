@@ -788,6 +788,17 @@ function initialState(options: FakeGatewayOptions): FakeGatewayState {
     }
   }
 
+  /**
+   * Writer deliberately has NO avatar.
+   *
+   * Every profile used to answer `has_avatar: true`, so the generated-initial
+   * fallback — the thing a real gateway shows for most bots, because uploading a
+   * picture is opt-in — was unreachable from a run against this server and went
+   * unlooked-at for two passes. One bot with a picture and one without is what
+   * makes both paths visible side by side in the same list.
+   */
+  const hasAvatar = (profile: string): boolean => profile !== 'writer'
+
   const profileRow = (session: FakeSession, description: string): ProfileRow => ({
     name: session.profile,
     path: `/root/.hermes/profiles/${session.profile}`,
@@ -795,8 +806,8 @@ function initialState(options: FakeGatewayOptions): FakeGatewayState {
     display_name: session.profile[0]?.toUpperCase() + session.profile.slice(1),
     model: 'example-provider/example-model',
     provider: 'example-provider',
-    has_avatar: true,
-    ui_meta_revisions: { avatar: 1 },
+    has_avatar: hasAvatar(session.profile),
+    ui_meta_revisions: hasAvatar(session.profile) ? { avatar: 1 } : {},
     canonical_session: {
       id: session.storedId,
       resolved_id: session.storedId,

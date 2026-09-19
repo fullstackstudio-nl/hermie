@@ -39,9 +39,10 @@ import { useTheme } from '../../ui/theme'
 import { CONTROL_MIN_HEIGHT, TAP_SLOP, type AccentName } from '../../ui/tokens'
 import { useChatRuntime } from '../chats/ChatRuntime'
 import { BotRow } from './BotRow'
+import { ConnectionLine } from './ConnectionLine'
 import { CHAT_FILTERS, matchesFilter, presenceOf, type ChatFilter, type Presence } from './presence'
 import { RowMenu } from './RowMenu'
-import { ConnectionLine, SidebarFooter, type BotsSection, type TabKey } from './SidebarFooter'
+import { SidebarFooter, type BotsSection, type TabKey } from './SidebarFooter'
 
 export type { BotsSection }
 
@@ -64,6 +65,7 @@ const ARCHIVED_PRESENCE: Presence = { state: 'offline' }
 
 type ListItem =
   | { key: string; kind: 'divider'; id: string | null; name: string }
+  | { key: string; kind: 'sectionEmpty'; id: string }
   | { key: string; kind: 'bot'; bot: Bot; archived: boolean }
   | { key: string; kind: 'archiveHeader'; count: number }
 
@@ -202,9 +204,21 @@ export function BotsScreen({
    * Archived bots are excluded from the filters and from the unread totals —
    * archiving a bot is how you stop it counting — so they are appended after
    * the filter has run rather than passed through it.
+   *
+   * **An empty named section keeps its heading and gets a row of its own.** It
+   * used to be dropped unless the list was in edit mode, which had two costs: a
+   * section the owner had made vanished as soon as its last chat moved out, so
+   * there was nothing left to move a chat back INTO; and in edit mode two
+   * headings then landed back to back with only a heading's own padding between
+   * them, which reads as one run-on line rather than as two sections. A heading
+   * plus an explicit empty row cannot do either.
+   *
+   * A search or a filter is the exception: those narrow the list on purpose,
+   * and answering "no matches" once per section would bury the matches.
    */
   const items = useMemo<ListItem[]>(() => {
     const out: ListItem[] = []
+    const narrowed = Boolean(query.trim()) || filter !== 'all'
 
     for (const section of sections) {
       const visible = section.bots
@@ -217,17 +231,28 @@ export function BotsScreen({
           return state ? matchesFilter(filter, state, unreadFor(bot.name).unread) : false
         })
 
-      if (!visible.length && !(editing && section.divider)) {
+      // The unsectioned top group has no heading, so an empty one is nothing.
+      if (!section.divider) {
+        for (const bot of visible) {
+          out.push({ archived: false, bot, key: `bot:${bot.name}`, kind: 'bot' })
+        }
+
         continue
       }
 
-      if (section.divider) {
-        out.push({
-          id: section.divider.id,
-          key: `divider:${section.divider.id}`,
-          kind: 'divider',
-          name: section.divider.name
-        })
+      if (!visible.length && narrowed && !editing) {
+        continue
+      }
+
+      out.push({
+        id: section.divider.id,
+        key: `divider:${section.divider.id}`,
+        kind: 'divider',
+        name: section.divider.name
+      })
+
+      if (!visible.length) {
+        out.push({ id: section.divider.id, key: `empty:${section.divider.id}`, kind: 'sectionEmpty' })
       }
 
       for (const bot of visible) {
@@ -270,11 +295,10 @@ export function BotsScreen({
       />
 
       {/*
-        On a phone the connection speaks only when it needs something — there is
-        no gateway card at the bottom to glance at, and a permanent "Connected"
-        row is a row nobody reads.
+        One connection line, on every layout, under the title. It draws nothing
+        while the connection is healthy — see `ConnectionLine`.
       */}
-      {sidebar ? null : <ConnectionLine />}
+      <ConnectionLine />
 
       <SearchField onChangeText={setQuery} value={query} />
 
@@ -317,6 +341,10 @@ export function BotsScreen({
             return <Divider editing={editing} id={item.id} name={item.name} />
           }
 
+          if (item.kind === 'sectionEmpty') {
+            return <SectionEmpty id={item.id} />
+          }
+
           const state = presence.get(item.bot.name) ?? ARCHIVED_PRESENCE
           const { count, unread } = unreadFor(item.bot.name)
 
@@ -343,9 +371,7 @@ export function BotsScreen({
 
       {editing ? <EditBar /> : null}
 
-      {onOpenSection ? (
-        <SidebarFooter current={currentTab} gatewayCard={sidebar} onOpenSection={onOpenSection} />
-      ) : null}
+      {onOpenSection ? <SidebarFooter current={currentTab} onOpenSection={onOpenSection} /> : null}
 
       {menuFor ? (
         <RowMenu
@@ -578,6 +604,33 @@ function Divider({ editing, id, name }: { editing: boolean; id: string | null; n
           </Text>
         </Pressable>
       ) : null}
+    </View>
+  )
+}
+
+/**
+ * A named section with nothing in it.
+ *
+ * It exists so the heading above it has a body, however empty: two headings
+ * whose rows have all moved away would otherwise meet with nothing between
+ * them, and read as one line.
+ */
+function SectionEmpty({ id }: { id: string }) {
+  const theme = useTheme()
+
+  return (
+    <View
+      style={{
+        justifyContent: 'center',
+        minHeight: 38,
+        paddingBottom: theme.space.sm,
+        paddingHorizontal: theme.space.lg
+      }}
+      testID={`section-empty-${id}`}
+    >
+      <Text color="textFaint" variant="meta">
+        {strings.layout.sectionEmpty}
+      </Text>
     </View>
   )
 }

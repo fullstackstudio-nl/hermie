@@ -10,6 +10,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The wide layout, run and looked at.** Part 1 and Part 2 both shipped without anyone seeing the
+  sidebar-plus-detail shell on a real device. It has now been built, installed and driven on an iPad
+  Pro 13" simulator against the fake gateway, in both themes, and the notes in
+  `docs/platform-notes.md` record what was measured rather than what was intended.
+- **One connection line, on every layout** (`src/features/bots/ConnectionLine.tsx`). It sits under
+  the `Chats` title, draws nothing at all while the connection is healthy, and reads
+  `Connecting…` / `Reconnecting…` / `Offline` when it is not. For `needs_signin` it reads
+  `Signed out` in amber and is itself the button that starts the sign-in.
+- **The signed-out state is shown inside a chat too**, not only beside one. A reader who was already
+  in a conversation when the token expired used to get a transcript that had simply stopped, under
+  an error about credentials — neither of which says "sign in". `ChatScreen` now takes the whole
+  screen for it on both layouts, which also removes the shell's separate copy of the same rule.
+- **Bottom sheets are glass**, with the mockup's grabber, and on the wide layout they are capped at
+  560 pt and parked over the content column instead of spanning the window.
+- **Pages inside the chat options sheet**, with a back control and a per-chat **colour picker**
+  whose nine swatches are the same component the row menu uses. Escape goes back exactly one level:
+  the first pops the page, the second closes the sheet.
+- **An empty named section keeps its heading and gets a row of its own.** It used to be dropped
+  unless the list was in edit mode, so a section whose last chat moved out vanished — and in edit
+  mode two headings then met with nothing between them.
+- **The fake gateway leaves one bot without an avatar.** Every profile used to answer
+  `has_avatar: true` and be served the same 1×1 red PNG, so the generated-initial fallback — what a
+  real gateway shows for most bots — was unreachable from a run against it.
+
+### Fixed
+
+- **Every wide-layout panel was painting the wallpaper's own colour over its glass.** `Screen` fills
+  with `colors.bg` and adds the safe-area inset, which is right on a phone and wrong inside a
+  floating panel that has already done both. Measured on the iPad simulator in the dark theme, the
+  chat column sampled `#0A1830` — `elevation.e0`, the wallpaper rung — while the sidebar beside it
+  sampled `#1B2744`, the panel rung it should have; after the fix both sit on the panel rung. This
+  is why dark mode read as one flat field rather than as an elevation ladder.
+
+### Removed
+
+- **The gateway card** at the foot of the wide sidebar. It spent a permanent row on the state it is
+  in every second of every day, said it in different words from the phone's own line, and carried a
+  latency figure the app cannot measure. The footer is the four-tab strip on every layout.
+
 - **The Liquid Glass direction, part 2: the conversation itself.** The transcript, the composer and
   everything the machine says in a chat now follow `design/liquid-glass.html`.
 - **A bubble tail that is one shape.** `src/chat-ui/primitives/Bubble.tsx` draws the tail as a single

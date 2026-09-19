@@ -30,6 +30,14 @@ reply`. It is still one indicator and still static; it is strictly more informat
 - **A cron card in a chat offers neither _Open cron_ nor _Run now_ yet.** §6.5 lists both and the
   component takes both; the chat screen does not pass them, so the card shows no actions rather than
   dead ones. Wiring a chat row to the Crons feature is outstanding.
+- **The tab strip's icons are text glyphs, not the mockup's line art.** §6.8 draws four stroked
+  SVG icons; the strip uses `◉ ⇄ ◷ ⚙︎`. They read as a monochrome set at strip size and cost
+  no assets, but the chat glyph in particular is a filled circle where the mockup has a speech
+  bubble. Replacing them is a `react-native-svg` job now that the dependency is in.
+- **The crons list, its detail, the run transcript and Activity are still on the Part-1 surfaces.**
+  §6.11's cron rows (schedule in words, next run, static status dot, profile chip, a `Paused`
+  section) and the ledger language Activity is supposed to share with the transcript's DM lines are
+  not built yet.
 - **The jump-to-latest pill carries the count as a badge**, not as its whole label. §6.10 says "with
   the count of messages that arrived since"; `3 new` alone stopped saying what tapping it does, so
   the pill keeps its name and the count rides beside it.

@@ -41,6 +41,19 @@ jest.mock('../src/gateway', () => {
   }
 })
 
+// `SignedOutPanel` reaches for the provider module directly rather than through
+// the barrel above, because the barrel imports it back.
+jest.mock('../src/gateway/GatewayProvider', () => ({
+  useGateway: () => ({
+    config: { baseUrl: 'https://gateway.example.com', authMode: 'session_token' },
+    extraHeaders: {},
+    status: mockStatus,
+    adoptTokens: jest.fn(),
+    signOut: jest.fn(),
+    changeGateway: jest.fn()
+  })
+}))
+
 jest.mock('../src/features/chats/ChatRuntime', () => ({
   useChatRuntime: () => mockRuntime
 }))
@@ -203,11 +216,15 @@ it("drops a previous connection's failure instead of carrying it into the next d
 })
 
 describe('a connection that will not become ready on its own', () => {
-  it('says the gateway rejected the credentials, not that it is not connected', async () => {
+  it('shows the signed-out state inside the chat, not a banner over a dead transcript', async () => {
+    // A phone reader who was already in a conversation when the token expired
+    // used to get a transcript that simply stopped, under an error about
+    // credentials. Neither says "sign in", which is the only thing that helps.
     const view = renderChat()
     view.setStatus('needs_signin')
 
-    expect(await screen.findByText(/The gateway rejected the credentials/)).toBeTruthy()
+    expect(await screen.findByTestId('signed-out-panel')).toBeTruthy()
+    expect(screen.getByTestId('signed-out-sign-in')).toBeTruthy()
     // Terminal: waiting is not the story, so the quiet notice gives way.
     expect(screen.queryByTestId('chat-waiting-for-connection')).toBeNull()
     expect(mockController.openChat).not.toHaveBeenCalled()

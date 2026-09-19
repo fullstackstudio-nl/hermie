@@ -6,8 +6,6 @@ import { BotsScreen, type BotsSection } from '../features/bots'
 import { ChatScreen, type OpenChatOptions } from '../features/chats'
 import { CronScreen } from '../features/cron'
 import { SettingsScreen } from '../features/settings'
-import { useGateway } from '../gateway'
-import { SignedOutPanel } from '../gateway/SignedOutPanel'
 import { strings } from '../i18n/strings'
 import { useSafeAreaInsets } from '../platform/safe-area'
 import { GlassSurface, Wallpaper } from '../ui/glass'
@@ -36,7 +34,6 @@ import { OverlayPanel } from './OverlayPanel'
  */
 export function RegularShell() {
   const insets = useSafeAreaInsets()
-  const { status } = useGateway()
   const [section, setSection] = useState<BotsSection | null>(null)
   const [selectedBot, setSelectedBot] = useState<string | undefined>(undefined)
   const [focusItemId, setFocusItemId] = useState<string | undefined>(undefined)
@@ -49,8 +46,6 @@ export function RegularShell() {
     setFocusItemId(options?.focusItemId)
     setSection(null)
   }, [])
-
-  const signedOut = status === 'needs_signin'
 
   return (
     <Wallpaper style={{ flex: 1 }} testID="wallpaper">
@@ -86,12 +81,10 @@ export function RegularShell() {
             {/*
               A dead session is not a chat problem and must not read as one, so
               it takes the whole column rather than sitting under a chat error.
+              `ChatScreen` does that itself now, on both layouts, so there is no
+              second copy of the rule here to disagree with it.
             */}
-            {signedOut ? (
-              <SignedOutPanel />
-            ) : (
-              <ChatScreen bot={selectedBot} focusItemId={focusItemId} onOpenBot={openBot} />
-            )}
+            <ChatScreen bot={selectedBot} focusItemId={focusItemId} onOpenBot={openBot} />
           </GlassSurface>
 
           <OverlayPanel onClose={() => setSection(null)} title={titleFor(section)} visible={section !== null}>

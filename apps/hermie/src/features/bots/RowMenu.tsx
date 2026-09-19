@@ -18,7 +18,8 @@ import { strings } from '../../i18n/strings'
 import { BottomSheet } from '../../ui/BottomSheet'
 import { Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
-import { ACCENT_ORDER, ACCENTS, CONTROL_MIN_HEIGHT, type AccentName } from '../../ui/tokens'
+import { AccentSwatches } from '../../ui/AccentSwatches'
+import { type AccentName } from '../../ui/tokens'
 import { Row } from './menu-row'
 
 export type RowMenuProps = {
@@ -62,7 +63,7 @@ export function RowMenu({
           <Text color="textFaint" style={{ marginBottom: theme.space.xs }} variant="micro">
             {strings.layout.colour.toUpperCase()}
           </Text>
-          <Swatches accent={accent} botName={botName} onSelect={onSetAccent} />
+          <AccentSwatches accent={accent} onSelect={onSetAccent} testIDPrefix={botName} />
         </View>
 
         <View style={{ gap: theme.space.xs }}>
@@ -89,56 +90,5 @@ export function RowMenu({
         </View>
       </View>
     </BottomSheet>
-  )
-}
-
-/**
- * Eight curated colours and Default.
- *
- * Default is drawn as a ring rather than as a ninth colour, because it is the
- * absence of a choice: nothing is stored for it, and a chat that never had a
- * colour and a chat that was set back to Default are the same chat.
- */
-function Swatches({
-  accent,
-  botName,
-  onSelect
-}: {
-  accent: AccentName
-  botName: string
-  onSelect: (accent: AccentName) => void
-}) {
-  const theme = useTheme()
-
-  // Wrapped rather than scrolled: nine swatches that scroll hide the last two
-  // behind a gesture nobody knows is there, and a colour you cannot see is a
-  // colour you will not pick.
-  return (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.space.sm, paddingVertical: theme.space.xs }}>
-      {ACCENT_ORDER.map(name => {
-        const selected = name === accent
-
-        return (
-          <Text
-            accessibilityLabel={strings.layout.accents[name]}
-            accessibilityRole="button"
-            accessibilityState={{ selected }}
-            key={name}
-            onPress={() => onSelect(name)}
-            style={{
-              backgroundColor: name === 'default' ? 'transparent' : ACCENTS[name].fill,
-              borderColor: selected ? theme.colors.text : theme.hairline,
-              borderRadius: CONTROL_MIN_HEIGHT / 2,
-              borderWidth: name === 'default' ? 2 : selected ? 3 : 1,
-              height: CONTROL_MIN_HEIGHT,
-              width: CONTROL_MIN_HEIGHT
-            }}
-            testID={`swatch-${botName}-${name}`}
-          >
-            {''}
-          </Text>
-        )
-      })}
-    </View>
   )
 }

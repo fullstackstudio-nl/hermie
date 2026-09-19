@@ -196,6 +196,7 @@ export const strings = {
     rename: 'Rename',
     remove: 'Remove',
     dividerName: 'Section name',
+    sectionEmpty: 'No chats in this section',
     moveUp: 'Move up',
     moveDown: 'Move down',
     topGroup: 'No section',
