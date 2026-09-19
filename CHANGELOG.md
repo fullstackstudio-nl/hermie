@@ -386,6 +386,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A message you sent no longer comes back as a second bubble.** Reported against a real gateway:
+  one long multi-paragraph message, shown twice a minute apart, with the turn still running. Nothing
+  links a locally sent turn to the row the gateway writes for it — `prompt.submit` answers with a
+  status, never a row id — so the two are paired on their text, and four separate things broke that
+  pairing. Each is now covered by its own case in `packages/transcript/src/duplicate-turns.test.ts`
+  and `apps/hermie/__tests__/chat-duplicates.test.ts`; `docs/platform-notes.md` has the diagnosis.
+  - **A resume projected its whole in-flight turn regardless of what was already on screen.** The
+    gateway writes the user row at submit time rather than when the turn ends, so the prompt is in
+    the rows AND in `session.resume`'s `inflight` — and a reconnect, or the chat reopened mid-turn,
+    painted it beside the bubble already standing for it. The second copy carries the time the resume
+    landed, which is the minute in the report; the reply got the same treatment. Both halves now
+    settle onto what the transcript holds. A prompt repeated on purpose still gets its own bubble:
+    what tells a repeat from a re-description is whether a durable reply sits between them.
+  - **A send carrying a file paired with nothing.** The bubble held the body as submitted, `@file:`
+    directive and all, while the row comes back with those directives lifted out into `attachments`.
+    The optimistic bubble now goes through the same projection a persisted row does.
+  - **Match text is normalised to NFC.** Two spellings of the same accented word are one message to
+    a reader. Nothing but the comparison sees it.
+  - **A parked burst lost its author after the first prompt.** The reducer remembered one queued
+    prompt, so the second of a burst started as a foreign turn and stood an empty placeholder in
+    front of the user's own message.
+- **Rows are shown in the gateway's order, not in the order they reached us.** A tail fetch spliced
+  every row it had not seen in front of the live tail, which is wrong for a row written BEFORE the
+  message on screen — a teammate's delivery or a cron turn that landed while the user was still
+  typing carries a lower row id, and the ids that say so only arrive with the tail. The reader saw
+  their own message above one written before it.
 - **`expo-secure-store` on a Mac is exercised rather than assumed.** A Mac window stayed signed in
   across a quit and a relaunch. `SECURITY.md` and `docs/platform-notes.md` no longer carry it as
   unverified. One thing seen once and not explained is recorded as such: the first launch of that

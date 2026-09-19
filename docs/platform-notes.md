@@ -1028,3 +1028,157 @@ would throw that away.
 - **A long multi-word inline code chip.** The chip's padding and internal gaps are now non-breaking
   characters, with `U+200B` as the only break opportunity. If a platform ignores `U+200B` as a break,
   a long chip overflows instead of wrapping. Not seen either way.
+
+## Messages shown twice, or out of order (2026-09-20)
+
+Reported from a real gateway, real use: _"Sometimes messages trip: things are shown twice or in the
+wrong order. Same behaviour as the original Hermes desktop app."_ The screenshot: the bot's previous
+reply finished at 23:29, the owner sent one long multi-paragraph message (plain text, blank lines, an
+IP address, a URL), and the transcript showed that same message as two outgoing bubbles stamped 23:30
+and 23:31, with the typing indicator running and the composer showing Stop.
+
+The one fact everything below follows from: **`prompt.submit` answers with a status, never a row id.**
+A turn you sent and the row the gateway writes for it have nothing in common but their text, so every
+path that can re-describe that turn is a chance to paint it twice. Four of them did, and none was the
+one already documented under "A locally sent turn needs text matching" above — `reconcileTail`'s text
+matching was working.
+
+### The reported bubble was a resume projection landing beside its own row
+
+`session.resume` answers with two overlapping truths: the gateway's live view of the running turn
+(`inflight`), and the rows it has already written. Those overlap for the user's prompt, because the
+gateway persists that row **at submit time**, not when the turn ends:
+
+- `tui_gateway/methods_prompt.py:684` calls `_persist_session_row_for_submit` before the agent build.
+- `tui_gateway/session_workdir.py:345` `_persist_submit_user_row` writes the row and stages the dict,
+  so the turn adopts it rather than writing a second one. Its docstring says why: quitting a frozen
+  app during a slow first build used to leave a session row with no message (upstream #111868).
+- `tui_gateway/session_auto_continue.py:346` `_inflight_snapshot` then reports that same prompt as
+  `inflight.user` for as long as the turn runs.
+
+`applyResumeSnapshot` added both halves unconditionally. So any resume arriving while the turn was
+still un-persisted **or already persisted** painted the prompt again, and the reply with it. The
+second copy is stamped when the resume landed, which is the minute between the two bubbles in the
+report. Two ordinary things trigger it on a phone:
+
+- a dropped socket and a reconnect, which is `recoverAfterReconnect` → `session.resume`;
+- leaving the chat and coming back, or a cold start, which is `hydrate`: step 3 reads history (which
+  by then carries the row) and step 4 applies the snapshot on top of it.
+
+The second matches the screenshot exactly, and it needs no network trouble at all.
+
+Upstream has machinery for this and Hermie's port did not bring it. In
+`apps/desktop/src/app/session/hooks/use-session-actions/utils.ts`:
+`appendLiveSessionProjection` refuses the projection when the latest user run already carries that
+text, `dedupeInflightUserAgainstTranscript` marks an already-flushed `inflight.user` for suppression,
+`removeRepresentedLocalLiveProjection` drops the local rows the projection replaces, and
+`preserveLocalPendingTurnMessages` decides which of two copies of a streamed reply to keep. That is
+some 300 lines, each branch commented with the issue it was written for (#70209, #70449, #73793,
+#75825, #76444). The port kept the item model and the reconcilers and left the resume path naive. The
+owner's "same behaviour as the desktop app" is the desktop still getting the remainder wrong in ways
+those helpers patch one at a time — not a place to copy the answer from.
+
+Hermie's version is one rule rather than four helpers, because our item model already carries what
+upstream has to infer. The prompt is suppressed when the newest authored item holds the same text; a
+durable reply after that item means the turn is over, so the projection is a NEW turn and gets its own
+bubble — unless that reply is the projection's own assistant text, which is a retained failure being
+replayed. It is deliberately better than upstream's rule in one case and deliberately equal in
+another:
+
+- **Better:** a repeat sent from another client after an answer gets its own bubble. Upstream's
+  latest-user-run walk suppresses it.
+- **Equal, and on purpose:** a repeat from another client with no answer between is suppressed. The
+  ambiguity is real and unresolvable from the projection alone, so the tie goes to the recoverable
+  mistake: the row arrives with its own durable id on the next tail sweep and is appended, whereas a
+  duplicate nothing ever removes stays for the life of the chat.
+
+### A send carrying a file never matched its own row
+
+`send` composes the body with `withFileReferences`, which appends the `@file:` token the gateway
+expands, and the controller's own comment says the painted text and the submitted text have to be
+byte-identical or the bubble appears twice. They were identical — and it appeared twice anyway,
+because the comparison is not against the submitted text. It is against the row's **projection**, and
+`stripUserText` lifts `@file:` and `@image:` directives out of the text into `attachments`. So the
+bubble held `look at this\n\n@file:"…"`, the row projected to `look at this`, and nothing paired them.
+The optimistic item now goes through `stripUserText` too: one projection for a user turn, whichever
+side it arrives from.
+
+An image send was already fine, for the same reason in reverse — the gateway appends its `@image:`
+directive at persist time (`tui_gateway/session_history.py:45`
+`_build_persist_message_with_image_refs`) and the projection strips it back off.
+
+### Rows were shown in the order they reached us, not the gateway's order
+
+`reconcileTail` splices rows it has never seen in front of the live tail. That is right for a row
+written after everything on screen and wrong for one written before it: a teammate's delivery or a
+cron turn that landed while the user was still typing carries a LOWER row id than the message they
+then sent, and the ids that say so only arrive with the tail. The reader saw their own message above
+one written before it. Row ids are the gateway's order, so the merged list sorts by them; an item with
+no row id yet sorts with the newest row above it, which keeps a streaming bubble under its prompt and
+still keeps a genuinely newer row behind the live tail.
+
+### The second prompt of a parked burst arrived as somebody else's turn
+
+`prompt.submit` answers `queued` when a turn is running (`session_auto_continue.py:248`
+`_handle_busy_submit`, which queues and leaves `_drain_queued_prompt` to start it later — which is
+also why that row's timestamp is the drain time, a minute after it was typed). `ChatState.queued`
+holds one prompt, so `clearTurn` could carry only one prompt's `local` flag across: the first parked
+prompt started as ours, the second started as a **foreign** turn, with an empty author placeholder in
+front of the user's own message and a tail fetch scheduled to fill a bubble that was never anybody
+else's. A bubble still marked `pending` is now what says "a prompt of ours is waiting for a
+`message.start`", which holds at any queue depth. Stop and a failed submit clear the marker, so a turn
+that really is a teammate's still gets its placeholder.
+
+### What was checked and found innocent
+
+- **Multi-paragraph text, `\r\n`, leading and trailing whitespace.** `normalizeMatchText` collapses
+  all of it. The report's message pairs correctly once the resume path stops projecting it.
+- **An IP address or a URL in the prompt.** The gateway only rewrites a prompt containing `@`
+  (`_prepare_turn_input` gates `preprocess_context_references` on it), so a bare URL is stored
+  verbatim. `sanitize_user_prompt_text` only strips leaked bracketed-paste markers.
+- **`session.events.since` replay.** The `seq <= lastSeq` guard and the per-runtime-session watermark
+  (`lastSeqSessionId`, dropped in `bindRuntime` when the id changes) do hold; a replayed stream
+  produces no second copy.
+- **The same message sent twice on purpose.** Stays two, before and after the fix.
+
+### Unicode normalisation: hardening, not a diagnosis
+
+Match text is normalised to NFC. Nothing was observed changing the form — the gateway stores what the
+client sent, and Python does not normalise — so this is defence, not a cause. It cannot make two
+genuinely different messages match: two spellings of the same accented word are one message to a
+reader.
+
+### What a real gateway still has to confirm, and how
+
+Everything above is read from upstream source at `b9c2660` and exercised against fixtures and the fake
+gateway. What no test can settle is which of the four paths the owner actually hit, and whether there
+is a fifth.
+
+Settings → **Connection test** now ends with a `Transcripts` block: per live chat, how many items it
+holds, how many have a durable row id, how many are still unpaired, whether a turn is running and
+whose it is, and one line per text that more than one item is carrying. That last line is the whole
+diagnosis. `2x user 4f3a91c2/318 — optimistic + history#4412` says a bubble the gateway has named and
+one it has not are holding the same words, which is a pairing that failed;
+`2x user 4f3a91c2/318 — history#4412 + history#4501` would say the gateway really did store it twice
+and the client is innocent. **No message text is shown** — a repeat is reported as a 32-bit digest and
+a character count, so the lines can be pasted into an issue as they stand.
+
+If it happens again: open that screen while the duplicate is still on screen and read those lines.
+Worth noting alongside them is whether the app had just come back from the background or had just been
+reopened on that chat, because that is what separates the reconnect resume from the cold-open one.
+
+### Worth filing upstream
+
+The desktop carries the same hole in a different shape, and it is worth raising as a contract question
+rather than as a bug report against 300 lines of accumulated dedupe:
+
+> `session.resume` returns `inflight.user` for a turn whose user row `_persist_submit_user_row` has
+> already written, with nothing in either payload marking the two as the same row. A client cannot
+> tell a re-description of the running turn from a genuinely new prompt except by comparing text,
+> which is ambiguous the moment a prompt is repeated — and every client has to get that guess right or
+> show the message twice. The id exists: `_persist_submit_user_row` stamps it on the dict it stages as
+> `_row_id`, before `_start_inflight_turn` builds `inflight_turn` from the same text. Carrying it
+> through to `_inflight_snapshot` as `inflight.row_id` would make the whole class of duplicate
+> impossible to hit, for every client, instead of each one rediscovering the text heuristic.
+
+That is the fix Hermie cannot make in its own layer, and the rule above is what it does instead.
