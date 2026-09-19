@@ -377,7 +377,9 @@ describe('ChatScreen', () => {
 
     // "Later" takes the sheet away and nothing else: the agent is still
     // blocked, so the header must not go back to saying Connected.
-    await waitFor(() => expect(screen.queryByTestId('clarify-sheet')).toBeNull())
+    // The sheet leaves after its close animation (or the host's settle
+    // fallback), which can take longer than the default wait on a slow runner.
+    await waitFor(() => expect(screen.queryByTestId('clarify-sheet')).toBeNull(), { timeout: 4000 })
     expect(screen.getByText('Needs your input')).toBeTruthy()
     // …and the transcript still offers the way back to it.
     expect(screen.getByText('Answer')).toBeTruthy()
