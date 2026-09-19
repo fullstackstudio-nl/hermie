@@ -1,0 +1,479 @@
+# Hermie design tokens — Liquid Glass
+
+Reference mockup: `liquid-glass.html` (open it in a browser, no build step). These
+are the values as they should land in `apps/hermie/src/ui/tokens.ts`. Every number
+below is the one the mockup actually uses; the contrast ratios were measured on the
+composited surfaces, not on the raw hex values.
+
+---
+
+## 1. Colour
+
+### 1.1 Text and content
+
+| Role                       | Light     | Dark      |
+| -------------------------- | --------- | --------- |
+| `text`                     | `#12151C` | `#F3F6FB` |
+| `textMuted`                | `#4B5462` | `#C8D2E0` |
+| `textFaint` (metadata)     | `#5E6777` | `#ADB7C6` |
+| `onAccent` (bubble/button) | `#FFFFFF` | `#FFFFFF` |
+| `accent` (solid fill)      | `#1668E3` | `#2C7BEA` |
+| `accentText` (on glass)    | `#0B57C4` | `#B4D6FF` |
+| `danger` (fill)            | `#C0293A` | `#D8465A` |
+| `dangerText`               | `#A81F30` | `#FF9AA6` |
+| `ok`                       | `#1C8547` | `#5CCB86` |
+| `warnText`                 | `#8A5A00` | `#FFC65C` |
+
+### 1.2 Outgoing bubble gradient (default chat)
+
+Vertical, top → bottom. Deliberately deeper than `#0A84FF`: white body text must
+clear AA at the **top** stop, which is the lighter one.
+
+| Theme | Top       | Bottom    | White text (top / bottom) |
+| ----- | --------- | --------- | ------------------------- |
+| Light | `#2A72DC` | `#0F4FBE` | 4.63 : 1 / 7.29 : 1       |
+| Dark  | `#2A72DC` | `#0F52C2` | 4.63 : 1 / 6.99 : 1       |
+
+### 1.3 Per-chat colour
+
+Each chat carries one of eight curated colours, or Default. Set it in the chat
+options sheet. It tints exactly four things and nothing else:
+
+1. the avatar ring in the list and the header,
+2. the selected row's glass tint,
+3. the header accent and in-chat links,
+4. the outgoing bubble gradient for that chat.
+
+| Name     | Fill      | Bubble top | Bubble bottom | White text (top / bottom) |
+| -------- | --------- | ---------- | ------------- | ------------------------- |
+| Default  | `#1668E3` | `#2A72DC`  | `#0F4FBE`     | 4.63 / 7.29               |
+| Indigo   | `#4B4CC8` | `#5556CE`  | `#33309F`     | 5.82 / 10.17              |
+| Violet   | `#7B3FC4` | `#8244CE`  | `#5B23A0`     | 5.73 / 9.58               |
+| Magenta  | `#B62F81` | `#C0368A`  | `#8E1B64`     | 5.08 / 8.43               |
+| Red      | `#C5303A` | `#CF3B44`  | `#9C1A24`     | 4.81 / 8.12               |
+| Orange   | `#B04C08` | `#B8540C`  | `#8B3A05`     | 4.87 / 7.76               |
+| Teal     | `#0E7A84` | `#14828C`  | `#07606A`     | 4.56 / 7.27               |
+| Green    | `#16783C` | `#1A8043`  | `#0E5C2E`     | 4.98 / 8.11               |
+| Graphite | `#485468` | `#54607A`  | `#343E52`     | 6.30 / 10.73              |
+
+Each colour also needs a _text_ variant for links and the header subtitle, because
+the fill is too dark to read on glass in dark mode and too light in light mode:
+
+| Name     | `accentText` light | `accentText` dark |
+| -------- | ------------------ | ----------------- |
+| Default  | `#0B57C4`          | `#B4D6FF`         |
+| Indigo   | `#3F3FB4`          | `#CCCDFF`         |
+| Violet   | `#6A2FB4`          | `#E0C8FF`         |
+| Magenta  | `#A22270`          | `#FFC2E2`         |
+| Red      | `#AE2029`          | `#FFC2C7`         |
+| Orange   | `#9A4106`          | `#FFD0A8`         |
+| Teal     | `#0A6670`          | `#A6E8EE`         |
+| Green    | `#12652F`          | `#A8ECBE`         |
+| Graphite | `#3D4859`          | `#D2DAE6`         |
+
+The dark text variants are lighter than they look like they need to be: they have to
+clear 4.5 : 1 on a **reading bubble**, the lightest surface they ever sit on
+(measured 4.48–5.30 : 1).
+
+### 1.4 Glass
+
+Glass is a stack: a blur, one or two translucent gradients, an inner highlight
+stroke and a drop shadow. Alphas are what makes it legible, so they are tokens.
+
+| Surface                                  | Light                           | Dark (over the rung below)                |
+| ---------------------------------------- | ------------------------------- | ----------------------------------------- |
+| `glassPanel` (sidebar/chat)              | white 0.74 → 0.48 → 0.60, 155°  | `#1C2A45` 0.80 + white 0.10 → 0.03 → 0.07 |
+| `glassFloat` (header, composer, popover) | white 0.80 → 0.58, 170°         | `#425A88` 0.74 + white 0.12 → 0.05        |
+| `glassSheet`                             | white 0.86 → 0.72               | `#334670` 0.92 + white 0.11 → 0.04        |
+| `glassCard` (tool, cron, DM thread)      | white 0.70 → 0.52               | `#2F4066` 0.86 + white 0.09 → 0.035       |
+| `bubbleIn` (frosted)                     | white 0.76 → `#F4F8FF` 0.64     | `#3E5480` 0.82 + white 0.10 → 0.035       |
+| `bubbleInRead` (tint layer)              | white 0.93 → `#F3F7FF` 0.88     | `#3E5480` 0.94 + white 0.08 → 0.03        |
+| `bubbleDm` (incoming bot)                | `#F3EEFF` 0.88 → `#EBE5FD` 0.80 | `#413470` 0.88 + violet 0.16 → 0.08       |
+| `tint1` (level-3 chip)                   | white 0.52                      | white 0.12                                |
+| `tintSunk` (field, code well)            | `#0E2040` 0.055                 | `#060C18` 0.44                            |
+| `hairline`                               | `#10264E` 0.13                  | `#BED4FF` 0.22                            |
+| `hairlineSoft`                           | `#10264E` 0.08                  | `#BED4FF` 0.13                            |
+
+Edge highlights (the specular 1px stroke):
+
+```
+edge      = inset 1.5px 1.5px 0 -0.5px  white 0.92 (light) / 0.34 (dark)
+            inset -1px -1px 0 -0.5px    white 0.40 (light) / 0.10 (dark)
+            inset 0 0 0 1px             white 0.30 (light) / 0.12 (dark)
+edgeSoft  = the first and third line only, at 0.80 / 0.26 (light), 0.24 / 0.10 (dark)
+```
+
+A corner sheen sits on top of panels only, limited to the outer 12 % of the
+gradient (`linear-gradient(148deg, white .40, transparent 12%)`), so it never falls
+under running text.
+
+### 1.5 Wallpapers
+
+Three, each with a light and a dark variant, all built from layered radial
+gradients — no image files. Dark wallpapers are deep but **coloured**; `#000000` is
+not a wallpaper.
+
+| Wallpaper | Light base            | Dark base             |
+| --------- | --------------------- | --------------------- |
+| Blue      | `#EAF3FF` → `#C5DAFB` | `#0C1B33` → `#070F1D` |
+| Warm      | `#FFF3E6` → `#F8D6BC` | `#2A1708` → `#160C05` |
+| Graphite  | `#EFF1F5` → `#CFD5E0` | `#171B22` → `#0D0F14` |
+
+### 1.6 Presence
+
+| State       | Light     | Dark      | Shape                                     |
+| ----------- | --------- | --------- | ----------------------------------------- |
+| Online      | `#20A24B` | `#3ED374` | filled bead                               |
+| Working     | `#1668E3` | `#5AA4FF` | filled bead + a **still** white inner dot |
+| Needs input | `#E09000` | `#FFB531` | filled bead + white notch, slow pulse     |
+| Offline     | `#8A93A3` | `#7E8798` | hollow ring, transparent centre           |
+
+Definitions: **Online** = gateway connected and the bot's session attached.
+**Working** = the bot is on a turn. **Needs input** = an approval or clarify request
+is waiting. **Offline** = gateway unreachable or no session; the row shows
+`Offline · last seen 21:09`.
+
+Presence never depends on colour alone: the shape differs per state and the chat
+header subtitle repeats the state in words. Bead sizes: 14 px on a 48 px avatar
+(2.5 px ring in the panel colour), 9 px inline in the header and gateway card,
+18 px in the legend.
+
+The **global** connection state is not a bot state. It lives in the sidebar's
+gateway card (`gateway.example.com`, `Connected · 12 ms`), and the `…` on that card
+opens connection settings.
+
+---
+
+## 2. Dark elevation ladder
+
+The first dark pass read as one flat black field. Every dark surface now sits on a
+named rung of a single blue-slate ramp, each rung a measurable step lighter than the
+one below it, and every rung carries a hairline so two adjacent rungs still show an
+edge.
+
+| Rung  | Hex       | Used by                                  | Ratio vs. rung below |
+| ----- | --------- | ---------------------------------------- | -------------------- |
+| `e0`  | `#0A1830` | wallpaper floor                          | —                    |
+| `e1`  | `#1C2A45` | floating panels (sidebar, chat, overlay) | 1.24 : 1             |
+| `e2`  | `#28385A` | list row hover, inset groups             | 1.23 : 1             |
+| `e2s` | `#334670` | selected row (plus the chat colour tint) | 1.25 : 1             |
+| `e3`  | `#3E5480` | incoming bubble                          | 1.24 : 1             |
+| `e4`  | `#50699A` | round controls, pressed segments, chips  | 1.37 : 1             |
+
+Two side rungs keep like-for-like surfaces apart:
+
+| Rung  | Hex       | Used by          | Ratio                    |
+| ----- | --------- | ---------------- | ------------------------ |
+| `e3c` | `#2F4066` | machine cards    | 1.36 : 1 vs. `e3` bubble |
+| `e3f` | `#425A88` | composer, header | 2.08 : 1 vs. `e1` panel  |
+
+So in dark mode a card on a panel on a wallpaper is three distinguishable tones, and
+an incoming bubble, a tool card and the composer are three more.
+
+**Measured text contrast in dark** (worst of the three wallpapers): body on panel
+12.88, muted on panel 9.14, body on incoming bubble 7.08, body on reading bubble
+6.67, muted on reading bubble 4.73.
+
+**Measured text contrast in light** (worst of the three wallpapers, worst point of
+the panel gradient): body on panel 15.02, muted on panel 6.29, body on reading
+bubble 16.72, muted on reading bubble 7.01, metadata on panel 4.69.
+
+---
+
+## 3. Type
+
+One scale, shared by phone and the wide layout. Body text is **not** scaled up on
+the wide layout — the same 17 pt reads correctly at both sizes and it is the same
+React Native code.
+
+| Role         | Value                 | Notes                                   |
+| ------------ | --------------------- | --------------------------------------- |
+| `title`      | 700 28 / 32, -0.022em | sidebar title on phone                  |
+| `titleWide`  | 700 30 / 34, -0.022em | sidebar title on the wide layout        |
+| `sheetTitle` | 700 21 / 26, -0.016em |                                         |
+| `chatName`   | 600 18 / 22, -0.014em | chat header                             |
+| `name`       | 600 17 / 22           | conversation name                       |
+| `body`       | 400 17 / 25           | bubbles, both layouts                   |
+| `bodyRead`   | 400 17 / 27           | long markdown replies — looser leading  |
+| `preview`    | 400 15 / 20           | list preview, sheet copy, thread text   |
+| `meta`       | 400 13 / 17           | timestamps, tool rows, bot-to-bot lines |
+| `micro`      | 600 11 / 14, +0.055em | uppercase labels, date stamps, chips    |
+| `code`       | 400 13.5 / 21 mono    | commands, arguments, diffs, code blocks |
+
+Families: `-apple-system, "SF Pro Text", "SF Pro Display", system-ui, sans-serif`
+and `ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace`. Monospace is
+reserved for machine text: commands, arguments, results, diffs, durations.
+
+Wide-layout-only additions: the 30 pt title, and the composer caption
+`Enter to send · Shift+Enter for a new line` at 12 px. The phone shows neither.
+
+---
+
+## 4. Spacing, radii, sizes
+
+**Spacing scale**: 4, 8, 12, 16, 20, 24, 32, 40, 48. The window gap — between a
+floating panel and the window edge, and between the two panels — is **14**.
+
+**Radii**: panel 30, sheet and composer 28, bubble 22 with a 6 px sender-side bottom
+corner, cards 18, thumbnails 14, inset controls 12, pills 999, phone frame 46,
+window frame 22.
+
+**Sizes**: list avatar 48, header avatar 38, inline avatar 26. Round glass controls
+38 on the wide layout, 40 on phone; list rows 74 (72 on phone); every primary
+control is at least 44 tall on phone. Sidebar width 344.
+
+**Max bubble width** — the rule that fixes edge-to-edge text walls:
+
+```
+wide layout: min(68%, 640px)   /* of the chat column */
+phone:       min(78%, 320px)
+```
+
+68 % is too narrow to read at phone width, hence the override; the 640 px cap is
+what keeps a long report from spanning a Mac window.
+
+---
+
+## 5. Shadows, blur, motion
+
+**Blur**: panel `blur(36px) saturate(185%)`, float `blur(24px) saturate(175%)`,
+sheet `blur(46px) saturate(180%)`, scrim `blur(3px) saturate(115%)`.
+
+**Shadows**:
+
+```
+panel  0 30px 64px -22px rgba(14,40,86,.40), 0 10px 26px -14px rgba(14,40,86,.28)
+float  0 14px 30px -12px rgba(14,40,86,.30), 0 3px 10px -6px  rgba(14,40,86,.20)
+card   0 6px 16px -10px  rgba(14,40,86,.24)
+sheet  0 -18px 60px -16px rgba(14,40,86,.34)
+```
+
+In dark the same geometry with black at .72 / .55 / .45 / .62.
+
+**Motion**:
+
+| Token        | Value                         | Used for                         |
+| ------------ | ----------------------------- | -------------------------------- |
+| `durMicro`   | 120 ms                        | press, hover, colour swaps       |
+| `durFast`    | 180 ms                        | chevrons, switch knob, jump pill |
+| `durBase`    | 260 ms                        | disclosure open, scrim fade      |
+| `durSheet`   | 420 ms                        | sheet and overlay panel travel   |
+| `easeOut`    | `cubic-bezier(.22,.61,.36,1)` | entries, travel                  |
+| `easeInOut`  | `cubic-bezier(.4,0,.2,1)`     | pulses, loops                    |
+| `easeSpring` | `cubic-bezier(.34,1.28,.5,1)` | sheet arrival, switch knob       |
+
+**The motion rule: animation is reserved for things that need the reader.**
+
+- The **only** presence state that animates is _Needs input_: a 2 s, low-amplitude
+  amber ring pulse. It stops under `prefers-reduced-motion`.
+- _Working_ is static — a solid blue bead with a still inner mark. A bot being busy
+  is information, not a request.
+- The agents bar, the `Delivered · waiting for reply` marker on bot-to-bot lines and
+  every other status indicator are static. Waiting uses a hollow dot, not a blink.
+- Typing dots inside a bubble **do** animate: that is streaming content, not status.
+- Under `prefers-reduced-motion` all durations collapse to ~0 and the amber pulse
+  resolves to a static ring.
+
+---
+
+## 6. Component rules worth writing down
+
+### 6.1 Bubble tails
+
+The tail is a **single path that belongs to the bubble element** — an inline SVG
+child of the bubble, absolutely positioned at the bubble's bottom corner, offset
+6 px so it overlaps the 6 px sender-side corner radius:
+
+```
+M0 0 L5 0 C5 7 7.6 13.4 13 16 C8.4 17.7 3 16 0 12.4 Z    (13 × 17)
+```
+
+Outgoing uses it as drawn, filled with the bubble's **bottom** gradient stop (the
+tail sits at the bottom, so a flat fill matches exactly). Incoming mirrors it with
+`scaleX(-1)` and fills with `tailIn` / `tailDm` — flat colours that match the
+bubble's lower edge.
+
+It is rendered **only on the last bubble of a group**. There is no separately
+positioned tail view; that is what produced the stray square in the previous build.
+
+### 6.2 Typing and streaming
+
+One bubble from start to finish. While the turn is pending, the bubble is compact
+and holds three animated dots; when tokens arrive the dots are replaced by text and
+the bubble's width animates to fit. No placeholder box, no grey rectangle, no
+swapping one view for another.
+
+### 6.3 Long markdown replies
+
+Long replies get the **reading treatment**: the `bubbleInRead` tint (near-opaque, so
+contrast no longer depends on the wallpaper), `bodyRead` leading, and generous
+horizontal padding. Inside: real rendered markdown — headings, bold, ordered and
+unordered lists, inline code chips that wrap on word boundaries, code blocks and
+tables that scroll horizontally inside their own wrapper rather than widening the
+bubble.
+
+Past roughly 14 lines (352 px at 25 px leading; 300 px on phone) the body is folded
+with a gradient mask and a `Show more` / `Show less` control.
+
+### 6.4 Machine events are not speech
+
+Tool calls, thinking, cron deliveries and outgoing bot-to-bot messages are never
+bubbles. They read as a quiet ledger in the bot's gutter: same left edge, distinct
+silhouette.
+
+- **Tool row** (collapsed): glyph + `terminal` + the command in monospace + duration,
+  expanding to Arguments and Result wells.
+- **Diff variant**: added lines on `ok` at 14 % with a `+` mark, removed on `danger`
+  at 13 % with `−`.
+- **Error variant**: danger-tinted glyph and title, the message in `dangerText`, the
+  raw output in a well, and Retry / Copy output.
+- **Thinking**: a single muted line, `Thought for 8s`, expanding to a short summary.
+
+### 6.5 Cron deliveries
+
+The scheduled-jobs feature is called **Crons** everywhere — the nav label, the list
+view, the card. A delivery is its own glass card with a clock glyph:
+
+```
+CRON
+Nightly domain scout
+ran 04:22 · delivered to this chat
+```
+
+collapsed, expanding to the body plus _Open cron_ and _Run now_. It is never drawn
+as the owner's own blue bubble.
+
+The Crons list view shows name, schedule in words (`Every day at 04:22 · Researcher`),
+next run, and a status bead, with paused crons under their own divider.
+
+### 6.6 Bot to bot
+
+**Collapsed outgoing is a line, not a bubble and not a pill.** Small arrow glyph +
+`Message to @writer` + a one-line truncated preview + time, and at the right a reply
+indicator that is always present:
+
+| Situation         | Indicator                                             |
+| ----------------- | ----------------------------------------------------- |
+| A reply came back | `↩ replied` + the first words of the reply, quoted    |
+| Still pending     | hollow dot + `Delivered · waiting for reply` (static) |
+| It did not go     | `Failed` in `dangerText` + the reason                 |
+
+Consecutive lines sit 9 px apart. More than three in a row roll up into
+`5 messages to @writer · 4 replies`, which expands in place.
+
+Tapping a line **expands the exchange inline**: the message sent, the delivery
+status, the reply rendered as markdown, and a secondary `Open @writer's chat` link.
+It never navigates away and never scrolls the transcript somewhere else.
+
+**Incoming** bot messages keep a tinted bubble — they start a turn in this chat —
+with a `Writer · bot` chip, and gain an `↩ answered` marker once this bot has replied.
+
+### 6.7 Files and images
+
+The composer's `+` opens a small glass menu: _Photo library_, _Choose file_. The
+attachment tray holds image thumbnails and file chips side by side. A file chip
+carries a type glyph, the file name middle-truncated (head ellipsised, tail kept so
+the extension stays visible), the size, and a remove `×`. While uploading it shows a
+progress ring instead of the `×`; if it is rejected it takes the danger tint and
+says what the limit is: `Too large · 100 MB max`.
+
+In the transcript a sent file is a compact file chip attached under the owner's
+bubble — name, size, type glyph. Never a raw `@file:` token in the message text.
+
+### 6.8 Sidebar organisation
+
+The list is the owner's, not the gateway's. Rows can be reordered by hand and
+grouped under **named dividers** (`Work`, `Finance`, …). _Edit_ reveals drag handles
+on rows, Rename / Remove on dividers, and an _Add divider_ action.
+
+A bot can be **archived** — swipe on phone, context menu on the wide layout — and
+lives under a collapsed `Archived (1)` disclosure at the bottom of the list.
+
+The compose button does not apply, because there is one canonical chat per bot and
+you never create a conversation. Its place is taken by a round glass **New cron**
+button, the one thing you do create from this screen.
+
+Footer navigation is a four-tab glass strip above the gateway card: **Chats ·
+Activity · Crons · Settings**.
+
+### 6.9 Overlays, sheets and Esc
+
+On the wide layout, Activity, Crons, Settings and chat options open as a glass panel
+that slides in over the **chat column only**, from the right, behind a dimmed scrim;
+the sidebar stays put and stays usable. The panel has a round glass close button.
+
+On phone the same destinations push or present as a normal sheet.
+
+**Every sheet, popover and overlay closes on Esc on the Mac.** The approval sheet
+closes only through one of its four buttons. Sheet actions are exactly
+`Allow once`, `Allow for this session`, `Always allow`, `Deny` (danger tint) — there
+is no swipe-to-answer, because an approval is not a notification.
+
+### 6.10 Transcript behaviour
+
+The transcript **opens at the bottom**, on the newest message. While the reader is
+at the bottom it follows new messages automatically. Once they scroll up, following
+stops and a glass **Jump to latest** pill appears, centred above the composer, with
+the count of messages that arrived since. Tapping it returns to the bottom and
+resumes following.
+
+---
+
+## 7. Implementation notes
+
+### 7.1 Which surfaces are glass
+
+Glass: the two panels, the chat header, the agents bar, the composer, the overlay
+panel, sheets, popovers (slash, attach menu), machine cards, cron cards, bot-to-bot
+thread blocks, file chips, and the jump pill.
+
+**Not glass**: the interior of a long-text bubble. It gets the `bubbleInRead` tint
+layer instead — a near-opaque wash — so body-text contrast is a fixed number rather
+than a function of whatever is behind it. This is the whole reason the reading
+treatment exists; it is not a stylistic variant.
+
+Also not glass: anything at level 3. A chip inside the composer, a segment inside a
+segmented control, a button inside a sheet — these use `tint1` / `tintSunk` plus a
+hairline, no blur of their own.
+
+### 7.2 Never nest glass more than one level
+
+Panel (level 1) → header / composer / sheet / card (level 2) → **tint only**
+(level 3). Two stacked blurs on the wide layout cost real frame time and visually
+they cancel out: the second blur samples an already-blurred backdrop and returns
+mud. One level of nesting is the hard limit.
+
+### 7.3 Platform
+
+- **iOS 26 and newer**: use the native material — `expo-glass-effect`, `GlassView`
+  for a single surface and `GlassContainer` when several glass surfaces sit next to
+  each other and should merge (the header buttons, the composer's controls). On the
+  SDK 54 line that package is on the `0.1.x` range; pin it there.
+- **Older iOS**: fall back to `expo-blur` (`BlurView`, `intensity` mapped from the
+  blur tokens) plus the same gradient, hairline and shadow layers.
+- **Android**: fall back to a translucent solid — the glass gradient composited over
+  the rung colour, no blur view at all. The ladder in §2 is defined so that the
+  solid fallback still reads as the same hierarchy.
+- The `Reduce transparency` setting swaps every glass surface for its solid tint on
+  all platforms and keeps the identical token set.
+
+### 7.4 Performance in long transcripts
+
+Do not put a blur view behind every bubble. On Android there are no per-bubble blur
+views at all, and on iOS the incoming bubble uses the material only while it is on
+screen — a virtualised list with a blur view per row is the fastest way to make a
+long report scroll badly. The reading treatment helps here too: a near-opaque tint
+is a plain view.
+
+Machine cards, cron cards and bot-to-bot thread blocks are collapsed by default, so
+the expensive content (code blocks, tables, diffs) is not mounted until asked for.
+
+---
+
+## 8. Fixture data
+
+The mockup uses bots **Researcher**, **Writer**, **Bookkeeper**, **Postman**, one
+archived bot **Default**, and the gateway `gateway.example.com`. Domains are drawn
+from the reserved documentation ranges (`example.org`, `example.net`,
+`example.com`); addresses from `203.0.113.0/24`. No real person, company or domain
+appears anywhere.
