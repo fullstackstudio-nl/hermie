@@ -578,6 +578,21 @@ export function attributeBotReplies(items: TranscriptItem[]): void {
   }
 }
 
+/**
+ * The comparison form of a piece of message text.
+ *
+ * Reconciliation pairs a live item with the row that persisted it, and text is
+ * the only thing the two have in common — `prompt.submit` answers with a status,
+ * never a row id. So every difference that is not a difference in what the
+ * message SAYS has to be normalised away here: the blank lines of a
+ * multi-paragraph prompt, `\r\n` against `\n`, whatever the composer or the
+ * gateway trimmed off the ends, and the Unicode form, because a keyboard that
+ * writes `e` + U+0301 and one that writes U+00E9 wrote the same word.
+ */
+export function normalizeMatchText(text: string): string {
+  return text.replace(/\s+/gu, ' ').trim().normalize('NFC')
+}
+
 /** A row matcher used by reconciliation: the text two transports agree on. */
 export function normalizedItemText(item: TranscriptItem): string {
   const text =
@@ -594,5 +609,5 @@ export function normalizedItemText(item: TranscriptItem): string {
             ? `${item.jobName}\n${item.body}`
             : ''
 
-  return text.replace(/\s+/gu, ' ').trim()
+  return normalizeMatchText(text)
 }

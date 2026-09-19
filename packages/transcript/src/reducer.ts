@@ -11,6 +11,7 @@ import {
   replyFromDeliveryOutput
 } from './bot-dm'
 import { parseCronDelivery } from './cron-delivery'
+import { normalizedItemText, normalizeMatchText, stripUserText } from './rows-to-items'
 import { subagentIdOf, TERMINAL_SUBAGENT_STATUS, toSubagent } from './subagent-progress'
 import type { ErrorSurface, SessionLiveInfo, Usage } from '@hermes/shared/gateway-events'
 import {
@@ -164,6 +165,25 @@ function dropItem(next: ChatState, id: string): void {
   if (at >= 0) {
     next.order.splice(at, 1)
   }
+}
+
+/**
+ * The oldest prompt of ours the gateway has parked, if any.
+ *
+ * Oldest first, because the gateway drains its queue in order. `pending` is set
+ * by `beginLocalTurn` and cleared by `confirmSubmit` for anything the gateway
+ * took straight away, so what is left marked is exactly the parked queue.
+ */
+function firstParkedPromptId(next: ChatState): string | undefined {
+  for (const id of next.order) {
+    const item = next.items[id]
+
+    if (item?.kind === 'user' && item.origin === 'optimistic' && item.pending === true) {
+      return item.id
+    }
+  }
+
+  return undefined
 }
 
 function lastAssistantId(next: ChatState): string | undefined {
@@ -387,21 +407,37 @@ export function applyEvent(state: ChatState, event: TranscriptEvent, now: number
       next.compacting = false
 
       if (!next.turn.local) {
-        // Nobody local submitted, so this turn belongs to a teammate bot or
-        // another surface. Stand a placeholder in for the author until a tail
-        // reconcile tells us who spoke.
-        addItem<UserItem>(
-          next,
-          {
-            id: `f:${next.turn.nextSeq}`,
-            kind: 'user',
-            text: '',
-            unknownAuthor: true,
-            ts: now / 1000
-          },
-          'foreign'
-        )
-        next.turn.foreignReconcilePending = true
+        // A prompt of ours the gateway parked starts its turn right here, and
+        // nothing in the frame says so: `prompt.submit` answered `queued`
+        // minutes ago and `message.start` carries no author. `ChatState.queued`
+        // only ever remembered the most recent one, so the SECOND prompt of a
+        // parked burst used to start as a foreign turn and put an empty
+        // placeholder in front of the user's own message. A bubble still marked
+        // `pending` is a prompt of ours waiting for exactly this frame.
+        const parked = firstParkedPromptId(next)
+
+        if (parked) {
+          patchItem<UserItem>(next, parked, draft => {
+            draft.pending = false
+          })
+          next.turn.local = true
+        } else {
+          // Nobody local submitted, so this turn belongs to a teammate bot or
+          // another surface. Stand a placeholder in for the author until a tail
+          // reconcile tells us who spoke.
+          addItem<UserItem>(
+            next,
+            {
+              id: `f:${next.turn.nextSeq}`,
+              kind: 'user',
+              text: '',
+              unknownAuthor: true,
+              ts: now / 1000
+            },
+            'foreign'
+          )
+          next.turn.foreignReconcilePending = true
+        }
       }
 
       next.turn.active = true
@@ -1091,16 +1127,112 @@ export interface ResumeSnapshot {
 }
 
 /**
+ * The tail of the transcript as a resume has to read it: the newest turn's
+ * prompt, and the persisted reply to it if there already is one.
+ *
+ * `authored` is the last user or inbound-DM item, whatever origin it has;
+ * `settledReply` is the durable assistant row after it. Nothing else is needed,
+ * because `session.resume`'s `inflight` describes exactly one turn — the newest.
+ */
+function shownTurn(state: ChatState): { authored?: string; settledReply?: string } {
+  let settledReply: string | undefined
+
+  for (let index = state.order.length - 1; index >= 0; index -= 1) {
+    const item = state.items[state.order[index] ?? '']
+
+    if (item?.kind === 'assistant' && item.rowId !== undefined && settledReply === undefined) {
+      settledReply = normalizedItemText(item)
+
+      continue
+    }
+
+    if (item?.kind !== 'user' && item?.kind !== 'bot_dm_in' && item?.kind !== 'cron_delivery') {
+      continue
+    }
+
+    return { authored: normalizedItemText(item), ...(settledReply !== undefined ? { settledReply } : {}) }
+  }
+
+  return settledReply !== undefined ? { settledReply } : {}
+}
+
+/**
+ * How much of a resume's `inflight` the transcript is already showing.
+ *
+ * A resume answers with two overlapping truths: the gateway's live view of a
+ * turn, and the rows it has already written. The user's prompt is normally in
+ * BOTH, because the gateway persists that row at submit time
+ * (`_persist_submit_user_row`) rather than when the turn ends — so projecting it
+ * on top of the bubble standing for it is how one sent message came back as two,
+ * one stamped when it was typed and one when the chat was resumed.
+ *
+ * Matching the newest prompt is not enough on its own: the user may deliberately
+ * send the same words again, and another client may have sent them while we were
+ * away. What tells those apart is the reply between them. A durable reply after
+ * the matching prompt means that turn is finished, so the `inflight` is a NEW
+ * turn and gets its own bubble — unless the reply is the `inflight`'s own
+ * assistant text, which is the gateway holding a finished turn replayable (a
+ * retained failure) and describing what the transcript already shows.
+ */
+function resumeOverlap(
+  state: ChatState,
+  userText: string,
+  assistantText: string
+): { promptShown: boolean; replyPersisted: boolean } {
+  const shown = shownTurn(state)
+  // A scheduled job's prompt is shown as a card keyed on its name and body, not
+  // on the raw text, so it has to be compared in that form or every resume
+  // during a cron turn stands a second card beside the first.
+  const cron = parseCronDelivery(userText)
+  const promptKey = normalizeMatchText(cron ? `${cron.jobName}\n${cron.body}` : userText)
+  const promptShown = Boolean(userText) && shown.authored !== undefined && shown.authored === promptKey
+
+  if (!promptShown) {
+    return { promptShown: false, replyPersisted: false }
+  }
+
+  if (shown.settledReply === undefined) {
+    return { promptShown: true, replyPersisted: false }
+  }
+
+  return shown.settledReply === normalizeMatchText(assistantText)
+    ? { promptShown: true, replyPersisted: true }
+    : { promptShown: false, replyPersisted: false }
+}
+
+/** The un-persisted assistant bubble this turn is filling, if it has one. */
+function liveAssistantOfCurrentTurn(state: ChatState): AssistantItem | undefined {
+  for (let index = state.order.length - 1; index >= 0; index -= 1) {
+    const item = state.items[state.order[index] ?? '']
+
+    if (item?.kind !== 'assistant') {
+      continue
+    }
+
+    return item.rowId === undefined ? item : undefined
+  }
+
+  return undefined
+}
+
+/**
  * Rebuild the in-flight tail from `session.resume`. Everything it adds carries
  * `origin: 'inflight'` so a later reconcile can replace it with the persisted
  * rows without leaving a duplicate behind.
+ *
+ * What it adds is only what the transcript does not already show. A resume lands
+ * on a chat that has been streaming the very turn it describes — and on a cold
+ * open whose history already carries that turn's prompt — so both halves of the
+ * projection settle onto the items standing for them rather than beside them.
  */
 export function applyResumeSnapshot(state: ChatState, snapshot: ResumeSnapshot, now: number = Date.now()): ChatState {
   let next = editable(state)
   const inflight = rec(snapshot.inflight)
   const userText = str(inflight.user).trim()
+  const assistantText = str(inflight.assistant)
+  const overlap = resumeOverlap(next, userText, assistantText)
 
-  if (userText) {
+  if (userText && !overlap.promptShown) {
     // The turn a resume finds running may be a scheduled job's, not the owner's.
     // Projecting it here rather than only in `rows-to-items` is what keeps the
     // invariant: a cron delivery renders as the same card whether the chat was
@@ -1130,38 +1262,71 @@ export function applyResumeSnapshot(state: ChatState, snapshot: ResumeSnapshot, 
     }
   }
 
-  const assistantText = str(inflight.assistant)
   const inflightStatus = str(inflight.status)
   const inflightError = str(inflight.error).trim()
+  const failure = inflightError
+    ? {
+        message: inflightError,
+        partial: Boolean(assistantText),
+        ...(inflight.recoverable === true ? { recoverable: true } : {})
+      }
+    : undefined
 
-  if (assistantText || inflightError) {
-    const item = addItem<AssistantItem>(
-      next,
-      {
-        id: `i:${next.turn.nextSeq}`,
-        kind: 'assistant',
-        text: assistantText,
-        streaming: inflight.streaming === true,
-        interim: false,
-        ...(inflightError
-          ? {
-              status: 'error' as const,
-              error: {
-                message: inflightError,
-                partial: Boolean(assistantText),
-                ...(inflight.recoverable === true ? { recoverable: true } : {})
-              }
-            }
-          : inflightStatus === 'interrupted'
-            ? { status: 'interrupted' as const }
-            : {}),
-        ts: now / 1000
-      },
-      'inflight'
-    )
+  // A durable row already carrying this reply needs nothing added to it; the
+  // `live` branch below covers the bubble a stream is still filling.
+  if ((assistantText || failure) && !overlap.replyPersisted) {
+    const live = liveAssistantOfCurrentTurn(next)
 
-    if (inflight.streaming === true) {
-      next.turn.assistantId = item.id
+    if (!live) {
+      const item = addItem<AssistantItem>(
+        next,
+        {
+          id: `i:${next.turn.nextSeq}`,
+          kind: 'assistant',
+          text: assistantText,
+          streaming: inflight.streaming === true,
+          interim: false,
+          ...(failure
+            ? { status: 'error' as const, error: failure }
+            : inflightStatus === 'interrupted'
+              ? { status: 'interrupted' as const }
+              : {}),
+          ts: now / 1000
+        },
+        'inflight'
+      )
+
+      if (inflight.streaming === true) {
+        next.turn.assistantId = item.id
+      }
+    } else {
+      // `inflight.assistant` is this turn's reply flattened to one string, and
+      // the bubble on screen is that same reply — so it settles onto it. A
+      // bubble a tool call already SEALED holds one segment of that flat
+      // string, never the whole of it, so its text is left alone and only the
+      // verdict lands: repainting it would show the segment twice.
+      const sealed = live.interim
+
+      patchItem<AssistantItem>(next, live.id, draft => {
+        if (!sealed) {
+          if (assistantText.length > draft.text.length) {
+            draft.text = assistantText
+          }
+
+          draft.streaming = inflight.streaming === true
+        }
+
+        if (failure) {
+          draft.status = 'error'
+          draft.error = failure
+        } else if (inflightStatus === 'interrupted' && !sealed) {
+          draft.status = 'interrupted'
+        }
+      })
+
+      if (inflight.streaming === true && !sealed) {
+        next.turn.assistantId = live.id
+      }
     }
   }
 
@@ -1203,7 +1368,17 @@ export function applyResumeSnapshot(state: ChatState, snapshot: ResumeSnapshot, 
   return next
 }
 
-/** Paint the user's own message before the gateway has echoed it. */
+/**
+ * Paint the user's own message before the gateway has echoed it.
+ *
+ * `text` is the body as submitted, and the body is not what the row will look
+ * like: the gateway stores the prompt verbatim — `@file:` and `@image:`
+ * directives included — and `stripUserText` lifts those directives out of the
+ * text into `attachments` on the way back. Painting the raw body left the bubble
+ * holding a different string from its own row, and since text is the only thing
+ * that pairs the two, every send carrying a file came back as a second bubble.
+ * So the optimistic item goes through the SAME projection a persisted row does.
+ */
 export function beginLocalTurn(
   state: ChatState,
   text: string,
@@ -1211,14 +1386,18 @@ export function beginLocalTurn(
   now: number = Date.now()
 ): ChatState {
   const next = editable(state)
+  const projected = stripUserText(text)
+  // The caller's names are the friendlier chip ("notes.txt", not a gateway
+  // path); the projected refs are the fallback for a ref the user typed.
+  const refs = attachments?.length ? attachments : projected.attachments
 
   addItem<UserItem>(
     next,
     {
       id: `o:${next.turn.nextSeq}`,
       kind: 'user',
-      text,
-      ...(attachments?.length ? { attachments } : {}),
+      text: projected.text,
+      ...(refs?.length ? { attachments: refs } : {}),
       pending: true,
       ts: now / 1000
     },
@@ -1296,6 +1475,22 @@ export function markInterrupted(state: ChatState, now: number = Date.now()): Cha
     })
   }
 
+  // Stop bumps the gateway's queue generation, and a submit that threw never
+  // reached the queue at all — so nothing of ours is parked any more. A bubble
+  // left marked `pending` would make the next turn a teammate starts read as
+  // that prompt's, and the reader would never be told who really spoke.
+  for (const id of next.order) {
+    const item = next.items[id]
+
+    if (item?.kind === 'user' && item.pending === true) {
+      patchItem<UserItem>(next, id, draft => {
+        draft.pending = false
+      })
+    }
+  }
+
+  next.queued = undefined
+  next.turn.local = false
   next.turn.active = false
   next.turn.interrupted = true
   next.turn.assistantId = undefined
