@@ -13,7 +13,6 @@ export default config(
       '**/.expo/**',
       'apps/hermie/ios/**',
       'apps/hermie/android/**',
-      'apps/hermie/macos/**',
       // Vendored upstream sources are linted by their own project, not by ours.
       'packages/hermes-shared/src/**'
     ]

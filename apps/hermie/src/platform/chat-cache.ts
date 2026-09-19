@@ -230,11 +230,12 @@ export class SqliteChatCache implements ChatCache {
  * A cache that starts on SQLite and gives up on it for good the first time the
  * native module throws.
  *
- * `docs/platform-notes.md` records expo-sqlite as linking and compiling on
- * macOS, which is not the same as running, and the app is not allowed to lose a
- * chat over a cache. So every call is tried against SQLite once; the first
- * failure downgrades the whole instance to memory and logs one line, and the
- * chat carries on with a cache that simply forgets between launches.
+ * A native module that is present is not a native module that works — a full
+ * disk, a corrupt database file, a sandbox that refuses the path — and the app
+ * is not allowed to lose a chat over a cache. So every call is tried against
+ * SQLite once; the first failure downgrades the whole instance to memory and
+ * logs one line, and the chat carries on with a cache that simply forgets
+ * between launches.
  */
 export class FallbackChatCache implements ChatCache {
   private primary: ChatCache | null

@@ -20,9 +20,9 @@ export const SIGN_IN_TIMEOUT_MS = 10 * 60 * 1000
  * `source.headers` is applied per load, and Android's WebView re-sends them on
  * cross-origin redirects rather than dropping them at the origin boundary. A
  * sign-in redirects to the identity provider by design, so a Cloudflare Access
- * client secret set for the gateway would travel to the IdP's domain. iOS and
- * macOS do not re-send them, so only Android refuses the in-app page — the
- * system browser plus the pasted redirect signs in without ever seeing them.
+ * client secret set for the gateway would travel to the IdP's domain. WKWebView
+ * does not re-send them, so only Android refuses the in-app page — the system
+ * browser plus the pasted redirect signs in without ever seeing them.
  */
 export function webViewMayCarryHeaders(platform: string = Platform.OS): boolean {
   return platform !== 'android'
@@ -355,10 +355,9 @@ function FallbackForm({
 }
 
 /**
- * react-native-webview links on macOS, but "links" is not "renders". A render
- * failure there would otherwise take the whole app down, so the fallback — the
- * system browser plus a pasted redirect — is one caught error away rather than
- * a platform check somebody has to remember to update.
+ * A web view that fails to render would otherwise take the whole app down, so
+ * the fallback — the system browser plus a pasted redirect — is one caught error
+ * away rather than a platform check somebody has to remember to update.
  */
 class WebViewBoundary extends Component<{ children: ReactNode; onFailure: () => void }, { failed: boolean }> {
   override state = { failed: false }

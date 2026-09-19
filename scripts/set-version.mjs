@@ -3,19 +3,17 @@
  * Sets the version everywhere it is written down, in one go.
  *
  *   node scripts/set-version.mjs 0.2.0
- *   node scripts/set-version.mjs 0.2.0 --build 7
  *   node scripts/set-version.mjs 0.2.0 --check    # report, change nothing
  *
- * There are four places, and they drift because three of them are easy to
- * forget: the root package.json, the app's package.json, `version` in
- * app.config.ts (which is what iOS and Android ship as their marketing
- * version), and the hand-maintained macOS project, where the same number lives
- * in Info.plist as CFBundleShortVersionString — or in MARKETING_VERSION, if
- * that build setting is ever introduced.
- *
- * The build number, CFBundleVersion, is separate: it has to increase for every
- * upload, which is not the same rhythm as the marketing version. `--build`
- * sets it; leaving it out leaves it alone.
+ * Three places, and they drift because two of them are easy to forget: the root
+ * package.json, the app's package.json, and `version` in app.config.ts, which
+ * is the marketing version every platform ships — iOS, Android, and the Mac,
+ * which is the iOS build (ADR-0011). There used to be a fourth, and a `--build`
+ * flag to go with it: the hand-maintained macOS project's Info.plist carried
+ * both numbers because nothing generated them. Nothing carries them by hand any
+ * more — the build number is EAS's, raised per build by `autoIncrement` on the
+ * `production` profile — so there is no longer anywhere for this script to put
+ * one.
  *
  * Run it from a clean tree, read the diff, then tag. docs/release.md is the
  * surrounding process.
@@ -28,16 +26,10 @@ import { fileURLToPath } from 'node:url'
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const args = process.argv.slice(2)
 const checkOnly = args.includes('--check')
-const buildIndex = args.indexOf('--build')
-const buildNumber = buildIndex === -1 ? null : args[buildIndex + 1]
-const version = args.find(argument => !argument.startsWith('--') && argument !== buildNumber)
+const version = args.find(argument => !argument.startsWith('--'))
 
 if (!version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
-  console.error('usage: node scripts/set-version.mjs <major.minor.patch> [--build <n>] [--check]')
-  process.exit(2)
-}
-if (buildIndex !== -1 && !/^\d+$/.test(buildNumber ?? '')) {
-  console.error('--build takes a whole number.')
+  console.error('usage: node scripts/set-version.mjs <major.minor.patch> [--check]')
   process.exit(2)
 }
 
@@ -72,38 +64,6 @@ function edit(path, description, pattern, replace) {
 edit('package.json', 'the version field', /"version":\s*"[^"]+"/, `"version": "${version}"`)
 edit('apps/hermie/package.json', 'the version field', /"version":\s*"[^"]+"/, `"version": "${version}"`)
 edit('apps/hermie/app.config.ts', 'the Expo version', /version:\s*'[^']+'/, `version: '${version}'`)
-edit(
-  'apps/hermie/macos/Hermie-macOS/Info.plist',
-  'CFBundleShortVersionString',
-  /(<key>CFBundleShortVersionString<\/key>\s*<string>)[^<]*(<\/string>)/,
-  `$1${version}$2`
-)
-
-// MARKETING_VERSION is not in the project today; the macOS Info.plist carries
-// the literal. If a future Xcode edit introduces the build setting, the two
-// would disagree silently, so it is updated here as well when it appears.
-const projectPath = 'apps/hermie/macos/Hermie.xcodeproj/project.pbxproj'
-if (/MARKETING_VERSION\s*=/.test(readFileSync(resolve(repoRoot, projectPath), 'utf8'))) {
-  edit(projectPath, 'MARKETING_VERSION', /MARKETING_VERSION\s*=\s*[^;]+;/g, `MARKETING_VERSION = ${version};`)
-}
-
-if (buildNumber !== null) {
-  edit(
-    'apps/hermie/macos/Hermie-macOS/Info.plist',
-    'CFBundleVersion',
-    /(<key>CFBundleVersion<\/key>\s*<string>)[^<]*(<\/string>)/,
-    `$1${buildNumber}$2`
-  )
-  const pbxproj = readFileSync(resolve(repoRoot, projectPath), 'utf8')
-  if (/CURRENT_PROJECT_VERSION\s*=/.test(pbxproj)) {
-    edit(
-      projectPath,
-      'CURRENT_PROJECT_VERSION',
-      /CURRENT_PROJECT_VERSION\s*=\s*[^;]+;/g,
-      `CURRENT_PROJECT_VERSION = ${buildNumber};`
-    )
-  }
-}
 
 for (const change of changes) {
   console.log(change)

@@ -6,7 +6,7 @@
  *   node scripts/generate-app-icons.mjs --check    # fail if anything is stale
  *
  * Why a renderer instead of a tool: the machines that build this repository are
- * not guaranteed to have rsvg-convert, and the two rasterisers macOS ships —
+ * not guaranteed to have rsvg-convert, and the two rasterisers a Mac ships —
  * `sips` cannot read SVG at all, `qlmanage` writes a thumbnail with its own
  * padding — are not something to pin an icon set to. So the geometry is
  * flattened and scan-converted here: no dependencies, and the same bytes on
@@ -18,7 +18,7 @@
  * throws rather than being skipped.
  */
 
-import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { crc32, deflateSync } from 'node:zlib'
@@ -27,18 +27,9 @@ const here = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(here, '..')
 const sourceSvg = resolve(repoRoot, 'design/icon.svg')
 const assetsDir = resolve(repoRoot, 'apps/hermie/assets')
-const appIconSet = resolve(repoRoot, 'apps/hermie/macos/Hermie-macOS/Assets.xcassets/AppIcon.appiconset')
 
 /** Sub-scanlines per pixel row. Sixteen is past the point of visible stepping. */
 const SUBSAMPLES = 16
-
-/**
- * How much of the canvas the artwork fills in a macOS app icon. Apple's icon
- * grid puts the rounded square in the middle 824 of 1024 and leaves the rest to
- * the drop shadow the system does not draw for you; an icon that ignores this
- * is visibly bigger than every other icon in the Dock.
- */
-const MACOS_ARTWORK_FRACTION = 824 / 1024
 
 /**
  * How much of the canvas the mark may fill in an Android adaptive foreground.
@@ -575,13 +566,6 @@ function fullBleed(size, squareCorners) {
   return { size, transform: { scale: size / 1024, x: 0, y: 0 }, squareCorners }
 }
 
-/** Artwork inset into its canvas by a fraction, centred. */
-function inset(size, fraction) {
-  const scale = (size / 1024) * fraction
-  const offset = (size - 1024 * scale) / 2
-  return { size, transform: { scale, x: offset, y: offset } }
-}
-
 /** The mark alone, scaled so its bounding box fits a centred box. */
 function fitted(size, shapes, box) {
   const bounds = boundsOf(shapes.flatMap(shape => shapePolygons(shape, false)))
@@ -637,50 +621,6 @@ emit(resolve(assetsDir, 'icon.png'), encodePng(render(allShapes, { ...fullBleed(
 emit(resolve(assetsDir, 'adaptive-icon.png'), encodePng(render(markShapes, fitted(1024, markShapes, ADAPTIVE_SAFE_BOX)), 1024)) // prettier-ignore
 emit(resolve(assetsDir, 'splash-icon.png'), encodePng(render(allShapes, fullBleed(512, false)), 512))
 emit(resolve(assetsDir, 'favicon.png'), encodePng(render(allShapes, fullBleed(64, false)), 64))
-
-// The macOS asset catalogue. Every point size at 1x and 2x, plus the
-// Contents.json that names them.
-const macosSizes = [16, 32, 128, 256, 512]
-const catalogue = []
-for (const points of macosSizes) {
-  for (const scale of [1, 2]) {
-    const pixels = points * scale
-    const filename = `icon_${points}x${points}${scale === 2 ? '@2x' : ''}.png`
-    emit(resolve(appIconSet, filename), encodePng(render(allShapes, inset(pixels, MACOS_ARTWORK_FRACTION)), pixels))
-    catalogue.push({ filename, idiom: 'mac', scale: `${scale}x`, size: `${points}x${points}` })
-  }
-}
-emit(
-  resolve(appIconSet, 'Contents.json'),
-  Buffer.from(
-    `${JSON.stringify(
-      {
-        images: catalogue.map(entry => ({
-          filename: entry.filename,
-          idiom: entry.idiom,
-          scale: entry.scale,
-          size: entry.size
-        })),
-        info: { author: 'hermie', version: 1 }
-      },
-      null,
-      2
-    )}\n`,
-    'utf8'
-  )
-)
-
-// A stray PNG in the icon set is worse than a missing one: Xcode compiles what
-// Contents.json names and silently ships the rest as dead weight.
-if (!checkOnly) {
-  const expected = new Set([...catalogue.map(entry => entry.filename), 'Contents.json'])
-  for (const entry of readdirSync(appIconSet)) {
-    if (!expected.has(entry) && statSync(resolve(appIconSet, entry)).isFile()) {
-      rmSync(resolve(appIconSet, entry))
-      console.log(`removed ${relative(repoRoot, resolve(appIconSet, entry))}`)
-    }
-  }
-}
 
 if (checkOnly) {
   if (stale.length > 0) {

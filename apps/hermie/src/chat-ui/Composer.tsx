@@ -7,7 +7,7 @@
  *   - The draft is controlled from outside. A chat's draft belongs to the chat,
  *     survives navigating away, and is what the store persists.
  *   - Keyboard avoidance uses `KeyboardAvoidingView`, not a keyboard-controller
- *     library: those are new-architecture only, and macOS runs the old one.
+ *     library: ADR-0010 keeps every gesture library out of the chat surface.
  *   - The slash popover is fed by props. The composer asks (`onQuerySlash`) and
  *     paints what it is given; it never calls the gateway itself.
  */
@@ -24,6 +24,7 @@ import {
   View
 } from 'react-native'
 
+import { RUNS_ON_MAC } from '../platform/runs-on-mac'
 import { KEYBOARD_AVOID_BEHAVIOR } from '../ui/keyboard'
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
@@ -51,13 +52,13 @@ export interface ComposerProps {
   placeholder?: string
   botName?: string
   /**
-   * A bare Enter sends instead of inserting a newline.
+   * A bare Return sends instead of inserting a newline.
    *
-   * Only on macOS by default, and deliberately not on iPad: neither iOS nor
-   * iPadOS tells React Native whether a keyboard is physical, and a bare Enter
-   * that sends would leave a touch user with no way to type a newline at all.
-   * Cmd/Ctrl+Enter and Escape work everywhere regardless — a software keyboard
-   * cannot produce either.
+   * On by default only on a Mac, and deliberately not on an iPhone or iPad:
+   * neither iOS nor iPadOS tells React Native whether a keyboard is physical,
+   * and a bare Return that sends would leave a touch user with no way to type a
+   * newline at all. A Mac window always has a real keyboard, which is the whole
+   * reason `RUNS_ON_MAC` exists.
    */
   hardwareKeyboard?: boolean
   /**
@@ -131,7 +132,7 @@ export function Composer({
   queuedText,
   placeholder,
   botName,
-  hardwareKeyboard = Platform.OS === 'macos',
+  hardwareKeyboard = RUNS_ON_MAC,
   keyboardAvoiding = false,
   testID = 'composer'
 }: ComposerProps) {
@@ -157,9 +158,9 @@ export function Composer({
   /**
    * What Enter does: send, or nothing.
    *
-   * It deliberately does NOT stop a running turn. On macOS a bare Enter is the
+   * It deliberately does NOT stop a running turn. On a Mac a bare Return is the
    * send key, and while a reply streamed that same key cancelled the turn — so
-   * typing the next message and pressing Enter killed the answer being written
+   * typing the next message and pressing Return killed the answer being written
    * instead of queueing the message. A prompt sent mid-turn is parked by the
    * gateway, which is what the queued chip reports; only the red button, and
    * Escape, stop anything.
@@ -184,14 +185,24 @@ export function Composer({
   }
 
   /**
-   * Hardware-keyboard shortcuts.
+   * Modifier chords and Escape.
    *
-   * `onKeyPress` is the only hook RN gives a `TextInput` that fires BEFORE the
-   * character lands, which is what makes swallowing Enter possible at all. The
-   * modifier flags are on the native event on macOS; on iPadOS they are not, so
-   * Shift+Enter there is recognised by the newline the field has already
-   * accepted rather than by the flag — hence the `preventDefault` guard rather
-   * than an unconditional send.
+   * Read this together with `submitBehavior` below, because the two halves of
+   * "Enter sends" live in different places and for a reason.
+   *
+   * `onKeyPress` cannot carry a bare Return on iOS. React Native derives its
+   * `key` from the text a `UITextView` is about to insert, and the payload it
+   * builds (`TextInputEventEmitter::keyPressMetricsPayload`) is exactly
+   * `{ key, eventCount }` — **no `shiftKey`, `metaKey` or `ctrlKey`**. Those
+   * flags only ever arrived from react-native-macos. So on the platforms Hermie
+   * ships today the two branches below are a contract rather than a live path:
+   * correct if a modifier ever shows up, inert while it does not. The same goes
+   * for Escape, which inserts no text and therefore never reaches this handler
+   * on iOS at all.
+   *
+   * `preventDefault` is not the reason a Return does not land, either — by the
+   * time this fires the insertion has already been accepted. `submitBehavior`
+   * is what suppresses it, one layer lower.
    */
   const onKeyPress = (event: NativeSyntheticEvent<TextInputKeyPressEventData>) => {
     const native = event.nativeEvent as TextInputKeyPressEventData & {
@@ -223,7 +234,9 @@ export function Composer({
     }
 
     // Shift+Enter is always the newline. A bare Enter only sends where a
-    // hardware keyboard is certain.
+    // hardware keyboard is certain — and there `submitBehavior` has already
+    // dealt with it, so this branch is the fallback for a platform that
+    // reports the key without suppressing the insertion.
     if (!hardwareKeyboard || native.shiftKey) {
       return
     }
@@ -233,25 +246,30 @@ export function Composer({
   }
 
   /**
-   * react-native-macos hands a key to JS only when the field was told to pass
-   * it up; without `keyDownEvents` AppKit swallows Return and Escape and
-   * `onKeyPress` never fires. The prop does not exist on the other platforms,
-   * so it is spread in rather than written inline.
+   * What a bare Return does, decided one layer below `onKeyPress`.
+   *
+   * `submitBehavior` is a real native prop, and on a multiline iOS field it is
+   * the ONLY thing that can stop a Return from becoming a newline.
+   * `RCTBackedTextInputDelegateAdapter` intercepts a replacement text of exactly
+   * `"\n"`, asks the delegate whether to submit, and on `'submit'` fires
+   * `onSubmitEditing` and returns `NO` — no newline, no `onKeyPress`, and no
+   * blur (only `'blurAndSubmit'` blurs). On `'newline'`, the multiline default,
+   * it falls through and the newline lands.
+   *
+   * So the two modes are mutually exclusive by construction, which is what
+   * makes a double send impossible: where Return submits it never reaches
+   * `onKeyPress`, and where it inserts a newline `hardwareKeyboard` is false.
+   *
+   * The cost, and it is a real one: iOS hands JS no modifier state for a text
+   * field, and Shift+Return inserts the same `"\n"` as Return. On a Mac the
+   * composer therefore has no key that makes a newline. `docs/platform-notes.md`
+   * records it; closing it needs a native key-command seam, not a prop.
    */
-  const keyEvents =
-    Platform.OS === 'macos' ? ({ keyDownEvents: [{ key: 'Enter' }, { key: 'Escape' }] } as Record<string, unknown>) : {}
+  const submitBehavior = hardwareKeyboard ? 'submit' : 'newline'
 
   const pick = (name: string) => {
     onChangeText(`/${name} `)
-
-    // Not on macOS. A programmatic focus dispatches a native command, and
-    // `-[RCTTextInputComponentView focus]` was observed aborting the app inside
-    // AppKit's `_realMakeFirstResponder:` (see `docs/platform-notes.md`). The
-    // command runs on the main thread, so a JS try/catch would not save it.
-    // The draft is already updated; the user taps the field to carry on.
-    if (Platform.OS !== 'macos') {
-      inputRef.current?.focus()
-    }
+    inputRef.current?.focus()
   }
 
   return (
@@ -259,11 +277,7 @@ export function Composer({
     // exactly what the composer wants inside a screen that already has one.
     // Declaring the component conditionally instead would give React a new
     // type on every render and remount the text field under the caret.
-    <KeyboardAvoidingView
-      behavior={keyboardAvoiding ? KEYBOARD_AVOID_BEHAVIOR : undefined}
-      // macOS has no soft keyboard to avoid; the view is inert there.
-      testID={testID}
-    >
+    <KeyboardAvoidingView behavior={keyboardAvoiding ? KEYBOARD_AVOID_BEHAVIOR : undefined} testID={testID}>
       {showSuggestions ? (
         <View
           style={{
@@ -372,9 +386,9 @@ export function Composer({
           <Pressable
             accessibilityLabel={chatStrings.composer.attach}
             accessibilityRole="button"
-            // Greyed out is not the same as announced as unavailable: on macOS
-            // there is no document picker, and a screen reader has no other way
-            // to learn that.
+            // Greyed out is not the same as announced as unavailable, and a
+            // screen reader has no other way to learn that a caller left the
+            // picker out.
             accessibilityState={{ disabled: !onAttach }}
             disabled={!onAttach}
             // The slot is one line tall; the 44pt touch target comes from the
@@ -400,8 +414,9 @@ export function Composer({
             multiline
             onChangeText={onChangeText}
             onKeyPress={onKeyPress}
+            // Only reached where `submitBehavior` is 'submit', i.e. on a Mac.
+            onSubmitEditing={submit}
             placeholder={placeholder ?? chatStrings.composer.placeholder}
-            {...keyEvents}
             placeholderTextColor={theme.colors.textMuted}
             ref={inputRef}
             style={{
@@ -417,6 +432,7 @@ export function Composer({
               paddingTop: Platform.OS === 'ios' ? 7 : 4,
               paddingBottom: Platform.OS === 'ios' ? 7 : 4
             }}
+            submitBehavior={submitBehavior}
             testID="composer-input"
             value={value}
           />

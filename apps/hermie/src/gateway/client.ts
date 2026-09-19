@@ -9,9 +9,10 @@ import {
   type TokenSet,
   type TokenStore
 } from '@hermie/gateway-client'
-import { AppState, Platform } from 'react-native'
+import NetInfo from '@react-native-community/netinfo'
+import { AppState } from 'react-native'
 
-import { subscribeToConnectivity } from '../platform/net-info'
+import { RUNS_ON_MAC } from '../platform/runs-on-mac'
 import { secretStore } from '../platform/secret-store'
 import { PlatformWebSocket } from '../platform/socket'
 import { SECRET_KEYS } from './config'
@@ -147,26 +148,39 @@ export function createGatewayConnection(options: CreateConnectionOptions): Gatew
 }
 
 /**
- * Follow the app lifecycle and the network: on iOS and Android a backgrounded
- * app must close its socket rather than have the OS kill it half-open, and a
- * device with no connectivity should not burn battery on the dial ladder.
- * macOS windows stay live, so AppState is ignored there.
+ * Follow the app lifecycle and the network: a backgrounded app must close its
+ * socket rather than have the OS kill it half-open, and a device with no
+ * connectivity should not burn battery on the dial ladder.
+ *
+ * **A Mac never pauses.** `pause()` tears the socket down, and on a phone that is
+ * the right trade — the OS is about to kill a half-open socket anyway. A Mac
+ * window that is hidden, minimised or simply behind another app is still a live
+ * window with a live network, and closing its socket every time it lost the
+ * front is what put "gateway not connected" in front of the reader on a build
+ * that was connected a second earlier. The old native macOS target skipped
+ * AppState entirely for this reason; `RUNS_ON_MAC` is how that survives into the
+ * iPad build, which reports iOS's AppState values like any other iOS app.
+ *
+ * `resume()` is still wired on a Mac, and cheaply: it returns immediately unless
+ * the connection is actually paused or stopped, so on a window coming forward it
+ * is a no-op — and if anything else did pause it, this is the recovery.
+ *
+ * `isConnected` is `null` while the OS is still deciding, which counts as
+ * online: a cold start should not sit out its first dial waiting for an answer.
  */
 export function attachLifecycle(connection: GatewayConnection): () => void {
   const subscriptions: (() => void)[] = []
 
-  if (Platform.OS !== 'macos') {
-    const appState = AppState.addEventListener('change', next => {
-      if (next === 'active') {
-        connection.resume()
-      } else if (next === 'background') {
-        connection.pause()
-      }
-    })
-    subscriptions.push(() => appState.remove())
-  }
+  const appState = AppState.addEventListener('change', next => {
+    if (next === 'active') {
+      connection.resume()
+    } else if (next === 'background' && !RUNS_ON_MAC) {
+      connection.pause()
+    }
+  })
+  subscriptions.push(() => appState.remove())
 
-  subscriptions.push(subscribeToConnectivity(online => connection.setOnline(online)))
+  subscriptions.push(NetInfo.addEventListener(state => connection.setOnline(state.isConnected !== false)))
 
   return () => {
     for (const unsubscribe of subscriptions) {

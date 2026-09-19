@@ -7,8 +7,8 @@
  * while the draft does not build.
  *
  * There is no native date picker here on purpose. `@react-native-community/
- * datetimepicker` has no macOS target, and one of the four platforms losing the
- * editor is a worse trade than typing `09:00` into a field. The Once mode takes
+ * datetimepicker` is a second look and feel to keep in step with the tokens for
+ * something that reads fine as `09:00` typed into a field. The Once mode takes
  * text for the same reason.
  */
 import { useMemo } from 'react'

@@ -3,9 +3,9 @@
  * control and a disclosure row.
  *
  * They are built from `Pressable` and `Animated` rather than from the platform
- * `Switch`/`SegmentedControl`, for the same reason the bottom sheet is: the
- * four targets do not share one set of those, and a control that looks
- * different on macOS than on iOS would undo the point of having tokens.
+ * `Switch`/`SegmentedControl`, for the same reason the bottom sheet is: iOS and
+ * Android do not share one set of those, and a control that looks different on
+ * each would undo the point of having tokens.
  */
 import { useEffect, useRef } from 'react'
 import { Animated, Pressable, View } from 'react-native'

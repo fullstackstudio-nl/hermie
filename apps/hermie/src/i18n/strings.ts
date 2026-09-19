@@ -207,7 +207,6 @@ export const strings = {
   },
 
   chat: {
-    placeholder: 'Message',
     send: 'Send',
     stop: 'Stop',
     hydrating: 'Loading the conversation…',

@@ -28,16 +28,6 @@ The decision and its rationale are recorded in
 [docs/adr/0003-vendor-hermes-shared.md](docs/adr/0003-vendor-hermes-shared.md), and the rewrites are
 documented in [packages/hermes-shared/README.md](packages/hermes-shared/README.md).
 
-## React Native macOS — project template
-
-- **Project:** [microsoft/react-native-macos](https://github.com/microsoft/react-native-macos)
-- **Copyright:** Microsoft Corporation and Meta Platforms, Inc. and affiliates
-- **Licence:** MIT
-- **Vendored path:** `apps/hermie/macos/`
-
-The macOS Xcode project, Podfile and application delegate started as the react-native-macos 0.81
-template and have been adapted for this app. `docs/platform-notes.md` lists the changes.
-
 ## Contributor Covenant — code of conduct
 
 - **Project:** [Contributor Covenant](https://www.contributor-covenant.org)

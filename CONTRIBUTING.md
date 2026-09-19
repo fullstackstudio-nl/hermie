@@ -5,14 +5,19 @@ the conventions that are easy to get wrong.
 
 ## What you need installed
 
-| Tool        | Version                                 | Needed for           |
-| ----------- | --------------------------------------- | -------------------- |
-| Node        | 22 or newer (`.nvmrc` pins the minimum) | everything           |
-| npm         | 10 or newer                             | workspaces           |
-| Xcode       | 16.1 or newer                           | iOS and macOS builds |
-| CocoaPods   | 1.15 or newer                           | iOS and macOS pods   |
-| JDK         | 17                                      | Android builds       |
-| Android SDK | platform 35, build-tools 35             | Android builds       |
+| Tool        | Version                                 | Needed for         |
+| ----------- | --------------------------------------- | ------------------ |
+| Node        | 22 or newer (`.nvmrc` pins the minimum) | everything         |
+| npm         | 10 or newer                             | workspaces         |
+| Xcode       | 16.1 or newer                           | iOS and Mac builds |
+| CocoaPods   | 1.15 or newer                           | the iOS pods       |
+| JDK         | 17                                      | Android builds     |
+| Android SDK | platform 35, build-tools 35             | Android builds     |
+
+A Mac build needs one more thing: an **Apple Developer team**. It is the iOS app
+built for the "Designed for iPad" destination, and that configuration runs App
+Store validation, so it cannot be built unsigned. Set `HERMIE_APPLE_TEAM_ID` to
+your ten-character team identifier.
 
 Set `ANDROID_HOME` to your SDK location (usually `~/Library/Android/sdk` on macOS) before building
 for Android.
@@ -47,12 +52,19 @@ npm run sync:hermes-shared:check   # drift check on the vendored protocol source
 ```sh
 npm run ios
 npm run android
-npm run macos
+npm run mac                       # needs HERMIE_APPLE_TEAM_ID
+npm run mac -- --no-open          # build only
+npm run mac -- --debug            # against Metro
 ```
 
-The Metro bundler is shared: `npm run start --workspace @hermie/app` starts it once and serves iOS,
-Android and macOS. macOS uses the `macos` platform, which is configured in
-`apps/hermie/metro.config.js`.
+The Metro bundler is shared: `npm run start --workspace @hermie/app` starts it once and serves all
+three, because the Mac IS the iOS bundle — see
+[docs/adr/0011-mac-via-the-ipad-build.md](docs/adr/0011-mac-via-the-ipad-build.md).
+
+`npm run mac` generates `ios/` if it is missing, installs pods when `Podfile.lock` has moved on,
+builds Release for `platform=macOS,variant=Designed for iPad`, and then wraps the product: a bare iOS
+`.app` fails to open with "incorrect executable format", so it goes inside
+`Hermie.app/Wrapper/Hermie.app` with a relative `WrappedBundle` symlink beside it.
 
 ## The fake gateway
 
@@ -95,10 +107,14 @@ scratch.
 
 - `apps/hermie/ios` and `apps/hermie/android` are **generated**. They are not committed. Change
   `apps/hermie/app.config.ts` or a config plugin under `apps/hermie/plugins/`, never the generated
-  files — `npx expo prebuild --clean` will throw your edits away.
-- `apps/hermie/macos` is **committed and maintained by hand**. It came from the react-native-macos
-  template and has been adapted; `docs/platform-notes.md` records what was changed and why. Keep
-  changes there small and explain them in the commit message.
+  files — `npx expo prebuild --clean` will throw your edits away. There is no third native project:
+  the Mac is the iOS one.
+- `apps/hermie/modules` holds local Expo modules, and is **committed**. Today there is one,
+  `hermie-mac`, which exposes `ProcessInfo.processInfo.isiOSAppOnMac` as a constant because React
+  Native exposes nothing equivalent. Expo autolinks anything under `modules/` with no configuration,
+  so a module needs `package.json`, `expo-module.config.json` and its native sources and nothing
+  else. Note that a module's `ios/` directory is **not** the generated project: ignore rules that say
+  `ios/` without anchoring will swallow it, which `npx expo-doctor` catches.
 
 ## Vendored protocol sources
 
@@ -131,12 +147,12 @@ rewrite and why it exists.
 ## Releasing
 
 [docs/release.md](docs/release.md) is the process: the version numbers and the script that sets all
-four of them, what a `v*` tag sets off, the secrets the macOS signing and notarisation steps look
-for, and the TestFlight and Play steps that are still done by hand.
+three of them, what a `v*` tag sets off, and the TestFlight and Play steps that are still done by
+hand. A Mac release is the iOS one — there is no separate artefact to sign.
 
 The icons are generated, not drawn per size. `design/icon.svg` is the source; `npm run icons`
 rewrites every PNG from it and `npm run icons:check` — which CI runs — fails if one of them has
-drifted. Never edit a PNG in `apps/hermie/assets` or the macOS asset catalogue directly.
+drifted. Never edit a PNG in `apps/hermie/assets` directly.
 
 ## Commits
 
@@ -145,7 +161,7 @@ Conventional commits, in the imperative, in English:
 ```
 feat(chats): resume the canonical session on connect
 fix(gateway-client): mint a fresh ticket for every dial
-docs(adr): record why macOS goes through react-native-macos
+docs(adr): record why the Mac is the iPad build
 chore(deps): move to Expo SDK 54.0.37
 ```
 
@@ -170,4 +186,5 @@ node scripts/check-no-trailers.mjs origin/main..HEAD
 
 Keep them scoped to one thing. Fill in the template: what changed, why, and how you verified it.
 State plainly which platforms you actually built and ran — "not verified on Android" is useful
-information and nobody will hold it against you.
+information and nobody will hold it against you. A Mac build and a Mac RUN are different claims: the
+build is scripted, and the run needs a window nobody else's copy is already holding.

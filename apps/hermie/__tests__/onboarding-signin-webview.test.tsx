@@ -13,10 +13,9 @@ const PROPS = {
 }
 
 describe('webViewMayCarryHeaders', () => {
-  it('refuses Android and allows the platforms that drop headers on a cross-origin redirect', () => {
+  it('refuses Android and allows WKWebView, which drops them at the origin boundary', () => {
     expect(webViewMayCarryHeaders('android')).toBe(false)
     expect(webViewMayCarryHeaders('ios')).toBe(true)
-    expect(webViewMayCarryHeaders('macos')).toBe(true)
   })
 })
 

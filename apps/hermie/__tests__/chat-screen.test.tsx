@@ -38,8 +38,6 @@ jest.mock('../src/platform/haptics', () => ({ haptic: jest.fn() }))
 // The picker is a native module with no test implementation; the screen only
 // ever awaits what it returns.
 jest.mock('../src/features/chats/attachments', () => ({
-  attachmentKind: 'photo',
-  attachmentsSupported: true,
   MAX_ATTACHMENT_EDGE: 1568,
   openAppSettings: jest.fn(),
   pickAttachment: jest.fn(async () => null)

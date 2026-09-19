@@ -2,8 +2,8 @@ version: 2
 
 # Weekly and grouped. Ungrouped updates on a repository with this many React
 # Native packages produce a dozen pull requests a week, all of which need the
-# same iOS, Android and macOS builds run against them, and the Expo SDK pins
-# most of the interesting versions anyway.
+# same iOS and Android builds run against them, and the Expo SDK pins most of
+# the interesting versions anyway.
 updates:
   - package-ecosystem: npm
     directory: /
@@ -12,10 +12,9 @@ updates:
       day: monday
     open-pull-requests-limit: 5
     # The Expo SDK pins React, React Native, TypeScript and the test tooling to
-    # versions that work together; react-native-macos pins React Native from
-    # the other side. Those move with a deliberate SDK upgrade, never with a
-    # dependency bump, so only patch releases are offered here. Everything
-    # else may move freely within its major version.
+    # versions that work together. Those move with a deliberate SDK upgrade,
+    # never with a dependency bump, so only patch releases are offered here.
+    # Everything else may move freely within its major version.
     ignore:
       - dependency-name: 'expo*'
         update-types: ['version-update:semver-major', 'version-update:semver-minor']

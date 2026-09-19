@@ -43,9 +43,7 @@ export interface OnboardingNavigatorProps {
  *
  * The wizard is one screen with steps rather than a navigator: it owns a single
  * draft that every step reads and writes, the steps are strictly ordered, and
- * nothing about it wants a back stack with its own history. It also has to run
- * on macOS, where react-native-screens — and therefore the native stack — does
- * not exist.
+ * nothing about it wants a back stack with its own history.
  */
 export function OnboardingNavigator({
   resumeConfig = null,

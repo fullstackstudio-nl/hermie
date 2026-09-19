@@ -71,7 +71,7 @@ export function resolveImageUri(href: string, baseUrl?: string): string {
 }
 
 /**
- * Android has no Menlo and iOS/macOS have no family called `monospace`; naming
+ * Android has no Menlo and iOS has no family called `monospace`; naming
  * a font that does not exist falls back to the UI face, which is precisely what
  * a command or a diff must not render in.
  */

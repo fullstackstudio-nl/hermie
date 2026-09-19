@@ -9,7 +9,6 @@ import { Modal, Text } from 'react-native'
 import { AgentsSheet } from '../../src/chat-ui'
 import { approvalItem, clarifyItem, subagentTree } from '../../src/chat-ui/fixtures'
 import { BottomSheet } from '../../src/ui/BottomSheet'
-import { BottomSheet as MacosBottomSheet } from '../../src/ui/BottomSheet.macos'
 import { ApprovalSheet, ChatOptionsSheet, ClarifySheet } from '../../src/ui/sheets'
 import { renderScreen, withProviders } from '../support/render'
 
@@ -60,7 +59,7 @@ describe('BottomSheet', () => {
     expect(view.queryByTestId('sheet')).toBeNull()
   })
 
-  it('presents through a Modal on the platforms that have one', () => {
+  it('presents through a Modal, which is what puts it above the navigator', () => {
     const view = renderScreen(
       <BottomSheet onRequestClose={jest.fn()} testID="sheet" visible>
         <Text>Body</Text>
@@ -80,61 +79,6 @@ describe('BottomSheet', () => {
     expect(screen.queryByLabelText('Drag handle')).toBeNull()
     // The way out IS announced.
     expect(screen.getByLabelText('Dismiss')).toBeTruthy()
-  })
-})
-
-/**
- * react-native-macos has no `RCTModalHostView` — the class is wrapped in
- * `#if !TARGET_OS_OSX` — so a `Modal` red-boxes on a Mac and every sheet in the
- * app went with it. The macOS variant paints the same body into an absolutely
- * positioned overlay instead, and this is the assertion that keeps a `Modal`
- * from creeping back into it.
- */
-describe('BottomSheet.macos', () => {
-  it('paints the sheet without a Modal anywhere in it', () => {
-    const view = renderScreen(
-      <MacosBottomSheet onRequestClose={jest.fn()} testID="sheet" visible>
-        <Text>Body</Text>
-      </MacosBottomSheet>
-    )
-
-    expect(view.UNSAFE_queryAllByType(Modal)).toHaveLength(0)
-    expect(screen.getByText('Body')).toBeTruthy()
-    expect(screen.getByTestId('sheet-backdrop')).toBeTruthy()
-  })
-
-  it('still dismisses on a backdrop tap, and still refuses while blocking', () => {
-    const onRequestClose = jest.fn()
-
-    const view = renderScreen(
-      <MacosBottomSheet onRequestClose={onRequestClose} testID="sheet" visible>
-        <Text>Body</Text>
-      </MacosBottomSheet>
-    )
-
-    fireEvent.press(screen.getByTestId('sheet-backdrop'))
-    expect(onRequestClose).toHaveBeenCalledTimes(1)
-
-    view.rerender(
-      withProviders(
-        <MacosBottomSheet blocking onRequestClose={onRequestClose} testID="sheet" visible>
-          <Text>Body</Text>
-        </MacosBottomSheet>
-      )
-    )
-
-    fireEvent.press(screen.getByTestId('sheet-backdrop'))
-    expect(onRequestClose).toHaveBeenCalledTimes(1)
-  })
-
-  it('renders nothing while closed', () => {
-    const view = renderScreen(
-      <MacosBottomSheet onRequestClose={jest.fn()} testID="sheet" visible={false}>
-        <Text>Body</Text>
-      </MacosBottomSheet>
-    )
-
-    expect(view.queryByTestId('sheet')).toBeNull()
   })
 })
 

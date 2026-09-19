@@ -4,225 +4,28 @@ What actually works on each platform, what had to be changed to get there, and w
 Findings are dated, because the answers change with every SDK bump.
 
 Everything below was measured on: macOS 27.0 (Darwin 27.0.0, Apple Silicon), Xcode 27.0, Node 26.8.2,
-npm 11.19.1, CocoaPods 1.17.0, Expo SDK 54.0.37, React Native 0.81.5, react-native-macos 0.81.9.
+npm 11.19.1, CocoaPods 1.17.0, Expo SDK 54.0.37, React Native 0.81.5.
+
+There are three targets and two builds. iOS and Android are what you expect; the Mac is the **iOS
+build** running as "Designed for iPad" (ADR-0011). Sections dated before 2026-09-19 that talk about a
+native macOS target described a platform that no longer exists — they were removed rather than
+rewritten, and git history has them.
 
 ## Summary
 
-| Question                                    | Answer                                       | Date       |
-| ------------------------------------------- | -------------------------------------------- | ---------- |
-| Does `expo start` serve `platform=macos`?   | Yes                                          | 2026-09-18 |
-| Does the macOS app build?                   | Yes, Debug, after the changes below          | 2026-09-18 |
-| Does the macOS app run?                     | Yes — sidebar shell, system dark mode        | 2026-09-19 |
-| Do the navigation libraries build on macOS? | No — react-native-screens has no macOS slice | 2026-09-18 |
-| Is `TextDecoder` present at runtime?        | Not verified; the guard ships either way     | 2026-09-18 |
-| Is expo-secure-store available on macOS?    | No                                           | 2026-09-18 |
-| Is expo-sqlite available on macOS?          | Yes, links and compiles                      | 2026-09-18 |
-| Is expo-crypto available on macOS?          | Yes, and it runs                             | 2026-09-19 |
-| Is react-native-webview available on macOS? | Native module loads; rendering unverified    | 2026-09-19 |
-| Is NetInfo available on macOS?              | No — importing it crashes the app            | 2026-09-19 |
+| Question                                         | Answer                                         | Date       |
+| ------------------------------------------------ | ---------------------------------------------- | ---------- |
+| Does the iOS app build for a Mac?                | Yes — Release, signed, wrapped, `npm run mac`  | 2026-09-19 |
+| Is the empty strip under the title bar gone?     | Fixed in code; **unverified at runtime**       | 2026-09-19 |
+| Does a bare Return send on a Mac?                | Implemented; **unverified at runtime**         | 2026-09-19 |
+| Is Shift+Return a newline on a Mac?              | No, and it cannot be — see below               | 2026-09-19 |
+| Is `expo-secure-store` keychain-backed on a Mac? | Linked and entitled; **unverified at runtime** | 2026-09-19 |
+| What AppState does a Mac window report?          | **Unverified** — see "A Mac never pauses"      | 2026-09-19 |
+| Is `TextDecoder` present at runtime?             | Not verified; the guard ships either way       | 2026-09-18 |
 
-"Links and compiles" is exactly that: the pod is linked into the macOS app and the app builds. It is
-not a statement that the module behaves correctly at runtime — that gets verified when the feature
-using it is built.
-
-## Metro and the macOS platform
-
-**`expo start` serves the `macos` platform.** A separate `react-native start` is not needed, which
-removes the uncertainty the plan flagged. Verified by requesting a macOS bundle from the running dev
-server and by the app fetching its bundle from it:
-
-```
-macos Bundled 1265ms apps/hermie/index.js (1014 modules)
-```
-
-The bundle contains 585 references to `node_modules/react-native-macos/` and no real references to
-`node_modules/react-native/`, so the import rewrite in `metro.config.js` covers the whole graph,
-including the deep `react-native/Libraries/...` imports that libraries use.
-
-Two things to know about the dev server in this monorepo:
-
-- **Metro's server root is the repository root, not `apps/hermie`.** Expo's default config watches
-  every workspace package, and Metro takes the common ancestor as its server root. So the bundle URL
-  is `/apps/hermie/index.bundle` or `/.expo/.virtual-metro-entry.bundle`, not `/index.bundle`. This
-  is why the macOS `AppDelegate` asks for the bundle root `.expo/.virtual-metro-entry` rather than
-  `index` as the react-native-macos template does.
-- **Do not add the workspace root to `watchFolders`.** It looks harmless and expo-doctor will even
-  ask for it if you replace the defaults, but it moves the server root and breaks the entry
-  resolution. Leave `watchFolders` and `resolver.nodeModulesPaths` exactly as Expo computed them.
-
-The dev server logs `Using src/app as the root directory for Expo Router` on start. That is a
-false positive: expo-router is not installed and the entry point is `index.js`. The message comes
-from the directory being named `app`.
-
-## macOS: what had to change relative to the template
-
-`apps/hermie/macos/` was generated from the react-native-macos 0.81.9 template and then adapted. The
-template was produced by `react-native-macos-init@2.1.3`, which **does not run inside an npm
-workspace** — it shells out to `npm install --save`, which npm refuses in a workspace root
-("This command does not support workspaces"). It was run in a scratch directory with a matching
-`package.json` and the result was copied in.
-
-Changes made to the generated output:
-
-1. **`Podfile`** — rewritten to load Expo's autolinking, call `use_expo_modules!` with an exclusion
-   list, resolve the React Native path through Expo's autolinking config (`#{config[:reactNativePath]}-macos`),
-   and raise the deployment target floor. See the two sections below.
-2. **`Podfile`, `post_install`** — `REACT_NATIVE_PATH` is corrected. CocoaPods writes it as
-   `${PODS_ROOT}/../../node_modules/react-native`, which is wrong twice over here: npm workspaces
-   hoist the package to the repository root, and the macOS build needs `react-native-macos`. The
-   Hermes and codegen script phases both read this setting, and the build fails with
-   `No such file or directory` on `with-environment.sh` until it is right.
-3. **`AppDelegate.mm`, `moduleName`** — changed from `@"Hermie"` to `@"main"`. Expo's
-   `registerRootComponent` registers the root under `main`; the template assumes the product name.
-   With the wrong name the app launches, fetches its bundle and shows an **empty grey window with no
-   error** — there is no red box for a missing root component, which makes this an expensive hour if
-   you do not know to look for it.
-4. **`AppDelegate.mm`, `bundleURL`** — bundle root changed from `index` to
-   `.expo/.virtual-metro-entry`, per the react-native-macos guide for Expo modules and because of the
-   server root described above.
-5. **`project.pbxproj`, "Bundle React Native code and images"** — replaced with Expo's bundling
-   script, adapted for macOS: it resolves the entry with `expo/scripts/resolveAppEntry` for the
-   `macos` platform, bundles through `@expo/cli` with `export:embed`, and calls
-   `react-native-macos/scripts/react-native-xcode.sh`. The template's version calls a relative path
-   into `../node_modules/react-native`, which does not exist in a workspace.
-6. **`project.pbxproj`, `PRODUCT_BUNDLE_IDENTIFIER`** — set to `nl.fullstackstudio.hermie` in all
-   four build configurations.
-7. **`Podfile`, platform** — `platform :macos, '14.0'`. react-native-macos 0.81 sets its own floor at
-   14.0 (`Helpers::Constants.min_macos_version_supported`); the generated codegen podspecs inherit it
-   and `pod install` fails outright against a lower target.
-8. **`AppDelegate.mm`, window title** — `RCTAppDelegate` titles the window after the registered
-   module, so with the fix above the window said "main". The product name is set explicitly after
-   `super`.
-
-## macOS: run `pod install` after every dependency install
-
-`npm ci` and `npm install` replace `node_modules`, and the macOS Pods project holds absolute paths
-into it. Building without re-running `pod install` fails inside a dependency rather than at the
-project level — the observed failure was
-`SQLiteModule.swift: error: cannot find 'exsqlite3_open' in scope`, which reads like an expo-sqlite
-bug and is not one. `cd apps/hermie/macos && pod install` and a clean build fix it.
-
-iOS does not have this problem because `expo run:ios` reinstalls pods as part of its own flow.
-
-## macOS: Expo module availability in SDK 54
-
-Read from the podspecs in `node_modules`. A module is only linkable on macOS if its podspec declares
-an `:osx` platform.
-
-| Module                                                           | macOS      | Notes                                |
-| ---------------------------------------------------------------- | ---------- | ------------------------------------ |
-| `expo` / `ExpoModulesCore`                                       | yes (11.0) | the foundation is there              |
-| `expo-asset`, `expo-font`, `expo-file-system`, `expo-keep-awake` | yes        | pulled in by `expo` itself           |
-| `expo-constants`, `expo-manifests`, `expo-updates-interface`     | yes        |                                      |
-| `expo-sqlite`                                                    | yes        | the chat cache can use it            |
-| `expo-crypto`                                                    | yes        | PKCE can use it                      |
-| `expo-web-browser`                                               | yes        |                                      |
-| `expo-secure-store`                                              | **no**     | ios/tvos only                        |
-| `expo-splash-screen`                                             | **no**     |                                      |
-| `expo-system-ui`                                                 | **no**     |                                      |
-| `expo-dev-client` and its dependencies                           | **no**     | no dev menu or dev launcher on macOS |
-| `expo-json-utils`                                                | **no**     | a dependency of the dev-client stack |
-
-These are listed in `EXPO_MODULES_WITHOUT_MACOS` in `apps/hermie/macos/Podfile`. Linking any of them
-makes `pod install` fail, so the list is load-bearing and has to be re-checked on every SDK bump.
-
-**The secure-store gap is the significant one.** There is no keystore-backed `SecretStore` on macOS.
-`src/platform/secret-store.macos.ts` keeps values in memory for the session and mirrors them into
-AsyncStorage, which is an unencrypted file in the app container. A macOS build is therefore a
-development build; it should not be pointed at a production gateway. Closing this means either a
-macOS-capable keychain library or a small native module of our own, and it is a prerequisite for
-shipping macOS.
-
-## macOS: third-party native modules
-
-| Package                                           | macOS                            | Notes                                                                                                  |
-| ------------------------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `react-native-webview` 13.15.0                    | yes                              | declares `:osx` and ships a `macos/` source directory                                                  |
-| `@react-native-async-storage/async-storage` 2.2.0 | yes                              | declares `:osx`                                                                                        |
-| `react-native-safe-area-context` 5.6.x            | podspec says yes, sources say no | it declares an `osx` deployment target but has no `macos/` source directory; the iOS sources are UIKit |
-| `react-native-screens` 4.16.x                     | **no**                           | no `:osx` platform at all                                                                              |
-| `@react-native-community/netinfo` 11.4.1          | podspec says yes, not linked     | its podspec declares `:osx`, but Expo's autolinking produces no macOS pod for it                       |
-
-**react-native-screens has no macOS support**, which means `@react-navigation/native-stack` cannot be
-used there. This is why the regular (sidebar plus detail) shell deliberately uses plain views instead
-of a navigator, and why `Shell.macos.tsx` selects it unconditionally: the compact shell — and with it
-the whole navigation stack — never enters the macOS bundle. `react-native.config.js` excludes both
-packages from macOS autolinking.
-
-Note that Expo's autolinking resolver does **not** honour `react-native.config.js` platform
-exclusions: `react-native-safe-area-context` still ends up in `Podfile.lock` for macOS. It compiles,
-so this is currently harmless, but the JavaScript side does not call it — `safe-area.macos.tsx`
-returns zero insets, which is correct for a Mac window anyway.
-
-The macOS bundle is 611 modules against 1009 for iOS, which is the difference these exclusions make.
-
-## macOS: what M2 measured at runtime
-
-The table above used to say "links and compiles" for three modules, which is a statement about
-`pod install` and nothing else. Onboarding is the first feature that uses them, so they were measured
-in the running macOS app on 2026-09-19 by evaluating expressions against it over Metro's inspector.
-
-**`@react-native-community/netinfo` has no native module on macOS, and importing it is fatal.** The
-app died on launch with `[runtime not ready]: Error: @react-native-community/netinfo:
-NativeModule.RNCNetInfo is null`, before rendering anything. The package's podspec declares
-`:osx => 10.14` and it ships a `macos/` directory, but that directory holds only a legacy
-`.xcodeproj` and the podspec's `source_files` are `ios/**` — and in practice Expo's autolinking
-resolver produces no entry for it at all, so `macos/Podfile.lock` has never contained it. The
-package's JavaScript throws the moment it is imported, so a runtime `Platform.OS` check is too late:
-the import itself has to be kept out of the bundle.
-
-The fix follows the pattern the navigation libraries already use: `src/platform/net-info.ts` is the
-seam, and `net-info.macos.ts` reports "always online" without importing the package. That is not a
-loss of behaviour — the offline state exists to stop a phone burning battery on the dial ladder with
-no signal, and a desktop losing its link is already covered by the connection's own reconnect ladder.
-The package is also listed in `react-native.config.js` alongside the other macOS exclusions.
-
-**`expo-crypto` works.** Not just linked: `expo.modules.ExpoCrypto.getRandomBase64String(16)`
-returns real bytes in the running macOS app. PKCE therefore uses the same entropy source on macOS as
-everywhere else. `src/platform/random.ts` still probes it once and falls back to the runtime's
-`crypto.getRandomValues`, because a module that links is not a module that runs and the cost of
-finding that out the hard way is a sign-in with a predictable verifier.
-
-**`expo-secure-store` is confirmed absent.** The Expo module registry in the running macOS app lists
-`ExpoFetchModule`, `ExpoCrypto`, `ExpoKeepAwake`, `ExpoAsset`, `ExpoWebBrowser`, `ExpoFontLoader`,
-`ExpoModulesCoreJSLogger`, `ExponentConstants`, `ExponentFileSystem`, `ExpoFontUtils`, `FileSystem`
-and `ExpoSQLite` — and no `ExpoSecureStore`. The AsyncStorage-backed shim in
-`src/platform/secret-store.macos.ts` is load-bearing, and the warning above it stands: a macOS build
-stores its tokens unencrypted and must not be pointed at a production gateway.
-
-**`react-native-webview` is half-verified.** Its native module `RNCWebViewModule` is present in the
-running macOS app, so the package's native side does load, and it is in `macos/Podfile.lock`. Whether
-the view itself renders was **not** established: the onboarding screens could not be driven on macOS
-from this environment, and the lazy view-manager registry gives no answer before a view is mounted.
-`NativeSignInWebView` is therefore built so that the answer does not have to be known in advance — an
-error boundary around the web view falls back to the system browser plus a pasted redirect, and that
-fallback is also reachable deliberately from a link that is always visible while the web view is
-open. The parser is shared, so the fallback is a text field rather than a second implementation.
-
-## macOS runtime
-
-Verified on 2026-09-19: the app launches, fetches its bundle from Metro over the `macos` platform and
-renders the regular shell — sidebar with the section list, detail pane, and colours following the
-system appearance (dark, in the run that was checked). Window title "Hermie".
-
-Re-verified after onboarding landed, once the NetInfo crash above was fixed: a macOS build with no
-stored gateway opens the setup wizard, in dark mode, with the form as a centred column capped at its
-maximum width rather than stretched across the window.
-
-The one runtime wrinkle worth knowing: a Debug build shows "Downloading 100%..." indefinitely if
-Metro is not reachable at `localhost:8081`, with no error and no red box. Start Metro before
-launching a Debug build.
-
-## New architecture on macOS
-
-`newArchEnabled` is `true` in `app.config.ts`, which covers iOS and Android. The macOS Podfile passes
-`:fabric_enabled => ENV['RCT_NEW_ARCH_ENABLED'] == '1'`, so unless that variable is set the macOS
-build uses the old architecture while the Fabric pods are still installed as part of React Native
-core.
-
-**Not verified:** whether Fabric actually works on react-native-macos 0.81, and whether the new
-architecture-only libraries the plan holds back (Reanimated 4, FlashList 2, MMKV 3) can be adopted.
-This needs its own spike before any of them is introduced.
+"Unverified at runtime" is exact: the app builds, is signed and is wrapped, and the code path was read
+rather than watched. The owner's own Hermie was running on this machine, and two copies of one bundle
+identifier cannot both run, so nothing was launched.
 
 ## TextDecoder
 
@@ -276,8 +79,8 @@ to get a JDK, how the emulator was set up, and what an actual run on a device fo
 
 ### The sign-in WebView is not given the gateway's extra headers on Android
 
-`react-native-webview`'s `source.headers` are applied per load. On iOS and macOS (WKWebView) they
-stay with the request that carried them. Android's WebView re-sends them on cross-origin redirects
+`react-native-webview`'s `source.headers` are applied per load. On WKWebView they stay with the
+request that carried them. Android's WebView re-sends them on cross-origin redirects
 instead of dropping them at the origin boundary.
 
 A native sign-in redirects to the identity provider by design — that is the whole flow — so on
@@ -293,7 +96,7 @@ code exchange is a plain `fetch` from the app, which does send them, safely.
 Consequences worth knowing:
 
 - An Android user behind Cloudflare Access signs in through their browser, not in the app. The
-  redirect-paste step is the same one macOS already uses.
+  redirect-paste step is the same one the web view's error boundary falls back to on any platform.
 - Android **without** extra headers is unaffected and still signs in inside the app.
 - If `react-native-webview` ever grows a per-origin header API, this is the place to revisit; the
   seam is one exported predicate.
@@ -314,8 +117,6 @@ on a device or in a crash report, not inferred from documentation.
   every item kind only mounts the newest ten and the rows further up are simply absent from the tree.
   `__tests__/chat-ui/transcript-list.test.tsx` therefore renders one list per kind rather than one
   list of everything.
-- **macOS: not exercised at runtime.** The macOS build launches and evaluates the whole chat kit (see
-  below), but the transcript could not be opened — onboarding cannot be completed there yet.
 
 ### Nested scroll views
 
@@ -333,87 +134,14 @@ gallery:
 ### `Modal`-based bottom sheets
 
 - **iOS: works.** `src/ui/BottomSheet.tsx` is `Modal` + `Animated.timing` on the JS driver
-  (`useNativeDriver: false` — layout properties are not native-driver eligible on the old
-  architecture, which is what macOS runs). The approval sheet was driven end to end on the simulator:
+  (`useNativeDriver: false` — layout properties are not native-driver eligible). The approval sheet
+  was driven end to end on the simulator:
   it slides up, dims the content behind it, and renders exactly the server's `choices` in the
   server's order.
-- **Dismissal is taps only.** No gesture library is involved, which is both an ADR-0010 requirement
-  and the only portable option: macOS has no `react-native-gesture-handler`.
+- **Dismissal is taps only.** No gesture library is involved anywhere in the app, which is an
+  ADR-0010 requirement: a swipe that lands on "Allow" is not consent.
 - **`blocking` really does block.** The backdrop `Pressable` is `disabled`, and `onRequestClose` is
   left undefined so a hardware back press cannot answer an agent's question either.
-- **macOS: not exercised at runtime**, for the same reason as the transcript.
-
-### react-native-macos text input
-
-Two findings from the macOS run, both about `TextInput` and both outside this kit's own code:
-
-- **`secureTextEntry` renders characters but does not emit `onChangeText`.** Typing into the
-  onboarding gateway-address field (a plain `TextInput`) updates the draft and the probe runs; typing
-  the same way into the session-token field (`secureTextEntry`) shows the dots but leaves the draft
-  empty, so "Continue" stays disabled and onboarding cannot be finished on macOS. The plain field on
-  the previous step proves the keystrokes themselves arrive.
-
-  **Fixed** by `src/ui/primitives/SecretField.tsx`: masking is off when `Platform.OS === 'macos'`
-  (`SECURE_TEXT_ENTRY_SUPPORTED`), and every secret field — the session token, the extra-header
-  values, the developer screen's token — offers a "Show token" toggle on all platforms, so the choice
-  belongs to the reader rather than to the platform. Any new masked field must go through
-  `SecretField`; a bare `secureTextEntry` re-introduces the bug.
-
-- **A programmatic `.focus()` can abort the app.** `Hermie-2026-09-19-024734.ips`:
-  `-[RCTTextInputComponentView focus]` → `-[NSWindow _realMakeFirstResponder:]` → `objc_exception_rethrow`
-  → `SIGABRT`. The command runs on the main thread, so a JS `try/catch` around `focus()` would not
-  catch it. `Composer` therefore skips the focus it would otherwise do after picking a slash command
-  when `Platform.OS === 'macos'`; the draft is already updated, so the only cost is that the caret
-  does not return by itself.
-
-### Platform-variant modules resolve to themselves
-
-`attachments.macos.ts` first shipped with `export { MAX_ATTACHMENT_EDGE } from './attachments'`, and
-the app died at startup with `RangeError: Maximum call stack size exceeded (native stack depth)` and
-a stack of nothing but `get`.
-
-Inside a `.macos` file, the specifier `./attachments` resolves back to **that same file**: Metro
-picks the platform variant for every importer, including the variant itself. A value re-export
-written that way is a self-referencing getter. Type-only imports are erased and therefore safe, which
-is what makes this easy to miss — the types looked fine.
-
-The fix is structural, not a rule to remember: anything two variants share lives in a third module
-with no `.macos` sibling (`attachment-contract.ts`), which cannot be captured that way.
-
-### An Expo module without a macOS slice must be required lazily
-
-`expo-document-picker` has no macOS implementation, and importing it at module scope threw
-`Cannot find native module 'ExpoDocumentPicker'` before the first screen rendered — not a failed
-attachment, a blank app. `attachments.macos.ts` therefore requires it inside the picker, behind a
-`try`, and exports `attachmentsSupported`; the composer renders its "+" disabled when that is false.
-The same shape applies to any Expo module added later: assume no macOS slice until proven otherwise.
-
-### Driving the macOS app from a script
-
-Screenshots work (`screencapture -l <windowId>`; never capture the whole desktop). Input largely does
-not:
-
-| Mechanism                                         | Result                                     |
-| ------------------------------------------------- | ------------------------------------------ |
-| System Events `click at {x, y}`                   | no effect on any react-native-macos view   |
-| System Events `click button 1 of window`          | AXPress returns `missing value`; no effect |
-| System Events `keystroke`                         | no effect on a focused `TextInput`         |
-| `CGEvent` mouse events posted to `.cghidEventTap` | **works** — buttons respond                |
-| `CGEvent` keyboard events with a unicode string   | no effect; the field keeps its placeholder |
-
-So a script can walk the wizard's buttons but cannot fill its fields, and an automated macOS
-onboarding run is not currently possible. macOS onboarding has to be completed by hand, from a real
-keyboard, before any post-onboarding screen can be reported on.
-
-### What the macOS build does prove
-
-`npm run macos` builds and launches (`** BUILD SUCCEEDED **`, window renders in dark mode), and the
-onboarding wizard renders and advances: Welcome → Gateway address was walked with synthetic mouse
-events. `App.tsx` imports the shell, which imports `SettingsScreen`, which imports `GalleryScreen`,
-which imports the whole chat kit — so `marked`, `highlight.js/lib/core` with its fifteen grammars,
-and every component module are evaluated under react-native-macos at startup without throwing. What
-is _not_ proven on macOS is anything past the address step: the chat list, a conversation, sending,
-and the sidebar layout have not been seen running there.
 
 ## Bot-to-bot and sub-agents (2026-09-19)
 
@@ -462,14 +190,11 @@ item of the same kind with the same text and no `rowId` yet, and adopts the dura
 
 ### iPadOS does not tell React Native whether a keyboard is physical
 
-Enter-to-send is safe on macOS and not on iPad: neither iOS nor iPadOS exposes whether the keyboard
-is hardware, so a bare Enter that sends would leave a touch user with no way to type a newline.
-Hermie therefore sends on a bare Enter only on macOS, and on `Cmd`/`Ctrl+Enter` everywhere —
-a modifier can only come from a physical keyboard — with `Escape` stopping a running turn.
-
-react-native-macos needs one extra thing for any of this to fire: AppKit swallows Return and Escape
-unless the field is told to pass them up, via the platform-only `keyDownEvents` prop on `TextInput`.
-Without it `onKeyPress` is simply never called for those keys on macOS.
+A bare Return that sends is safe on a desktop and not on a tablet: neither iOS nor iPadOS exposes
+whether the attached keyboard is hardware, so sending on Return would leave a touch user with no way
+to type a newline at all. Hermie therefore only does it where the window IS a desktop window — see
+"Enter-to-send" under the Mac section below, which is where that turned out to be harder than it
+looks.
 
 ### U+21A9 renders as an emoji on iOS unless you ask for text
 
@@ -480,19 +205,13 @@ variation selector (U+FE0E) is what makes it render as text.
 ### `expo-haptics` is wired through a platform seam
 
 M4 asked for haptics on send, approve/deny and `message.complete`. `expo-haptics` (`~15.0.8`, the
-Expo 54 bundled version) is now a dependency, behind `src/platform/haptics.ts` with a `.macos.ts`
-no-op beside it: a Mac has no haptic engine and the module ships no macOS slice, so importing it
-there would fail the way `@react-native-community/netinfo` does.
+Expo 54 bundled version) is a dependency, behind `src/platform/haptics.ts`.
 
-Two things about that seam are load-bearing:
-
-- The macOS variant **declares** `HapticMoment` rather than re-exporting it from `./haptics`, because
-  inside a `.macos` file that specifier resolves back to itself (see "Platform-variant modules
-  resolve to themselves" above). A type-only re-export would have been safe; declaring it is safe
-  under any later edit.
-- `haptic()` swallows everything. The engine is absent on a simulator, switchable off in system
-  settings, and missing on some Android builds, and none of those is a reason for a message not to
-  send.
+The seam is a closed set of three moments rather than a pass-through of the Expo API, and one rule:
+`haptic()` swallows everything. The engine is absent on a simulator, switchable off in system
+settings, missing on some Android builds, and there is nothing under a cursor on a Mac to buzz — and
+none of those is a reason for a message not to send. That is also why the Mac needs no branch here:
+the call is already allowed to do nothing.
 
 Only three moments buzz — a submitted message, an answered approval or clarify, and a reply landing
 while the chat is on screen. The last one lives in a `ChatScreen` effect rather than in the
@@ -604,9 +323,10 @@ anchored to the bottom stays underneath the keyboard:
 
 The fix is to give Android `behavior="padding"` as well. RN drives `padding` from the
 `keyboardDidShow` metrics rather than from a window resize, so it works whether or not the window
-moves. Three call sites: `src/chat-ui/Composer.tsx`, `src/features/chats/ChatScreen.tsx` and
-`src/ui/bottom-sheet/SheetBody.tsx`. It was deliberately **not** applied in this round — those are shared files
-and the change wants to be made and re-verified together with the rest of the UI pass.
+moves. Three call sites: `src/chat-ui/Composer.tsx`, `src/features/chats/ChatScreen.tsx` and the sheet
+body, which lived in `src/ui/bottom-sheet/SheetBody.tsx` at the time and is part of
+`src/ui/BottomSheet.tsx` now. It was deliberately **not** applied in this round — those are shared
+files and the change wants to be made and re-verified together with the rest of the UI pass.
 
 ### What a full pass did confirm
 
@@ -644,38 +364,6 @@ A round of UI fixes that touched all four targets. What is worth keeping is not 
 — the diff has that — but the handful of platform facts the round uncovered, and the two places
 where the fix is a shape rather than a line.
 
-### macOS has no `Modal` at all, so every sheet red-boxed
-
-`react-native-macos`'s `React/Views/RCTModalHostView.m` is wrapped in `#if !TARGET_OS_OSX`. There is
-no `RCTModalHostView` view manager on a Mac, so `<Modal>` is an unknown component and every sheet in
-the app — options, agents, approval, clarify — red-boxed the moment it mounted. It went unnoticed
-because the macOS build is hard to drive: the only way to open a sheet without typing is the
-Component gallery behind Settings → Developer.
-
-The sheet is therefore split three ways:
-
-| File                                | Role                                                        |
-| ----------------------------------- | ----------------------------------------------------------- |
-| `src/ui/bottom-sheet/SheetBody.tsx` | Props, animation, backdrop, panel. **No `.macos` sibling.** |
-| `src/ui/BottomSheet.tsx`            | iOS/Android: wraps the body in a `Modal`.                   |
-| `src/ui/BottomSheet.macos.tsx`      | macOS: wraps it in an absolutely positioned overlay.        |
-
-The shared module having no `.macos` sibling is the load-bearing part, not an accident of layout:
-inside a `.macos` file a relative specifier resolves back to that same file (see "Platform-variant
-modules resolve to themselves"), so `BottomSheet.macos.tsx` may not import `./BottomSheet` — but it
-may import `./bottom-sheet/SheetBody`, because that module has exactly one variant.
-
-Two things about the macOS overlay a reader should know before changing it:
-
-- It is **not** a portal. There is no portal host in this app, so the overlay fills the `Screen` it
-  was rendered into. On the regular (sidebar + detail) shell that means the detail pane, not the
-  window: the sidebar stays visible and usable behind the sheet. That is a deliberate trade, not a
-  bug, and it is the same thing `accessibilityViewIsModal` promises and macOS does not enforce.
-- **Escape is wired but unverified.** The overlay passes the macOS-only `keyDownEvents`/`onKeyDown`
-  pair, which is what AppKit needs before it will hand Escape to JS. It could not be exercised from a
-  script: as the table above records, no scripted mechanism delivers a key to a react-native-macos
-  view. The backdrop tap is the dismissal that IS verified.
-
 ### One sheet per chat, not four
 
 `ChatScreen` used to render four sheets side by side and let each decide its own visibility. On iOS
@@ -701,8 +389,7 @@ else, or withdrawn, waits for the reader, because they never saw what happened t
 
 The Android section above worked out why `adjustResize` is a no-op under SDK 54's edge-to-edge
 layout, and left the fix for this round. It is now `src/ui/keyboard.ts`:
-`KEYBOARD_AVOID_BEHAVIOR` is `'padding'` everywhere except macOS, which has no soft keyboard and
-wants `undefined`. Four call sites use it: the composer, the chat screen, the sheet body and the
+`KEYBOARD_AVOID_BEHAVIOR` is `'padding'`, everywhere. Four call sites use it: the composer, the chat screen, the sheet body and the
 onboarding wizard — which had no keyboard avoidance at all, so its Continue button sat under the
 keyboard on **every** platform, iOS included.
 
@@ -718,10 +405,9 @@ put `<StatusBar style="auto" />` in a `safe-area.android.tsx`; that follows the 
 is the wrong one for a reader who pinned the app to Light while the phone is Dark.
 
 It now lives in `ThemeProvider`, which is the one component that knows which of the pinned and the
-system scheme won, and which sits above every screen so it survives navigation. `expo-status-bar` has
-no macOS slice, so it goes through the usual seam: `src/platform/status-bar.tsx` with a `.macos.tsx`
-that renders `null`. `safe-area.android.tsx` was deleted — there is one status bar and one place that
-decides its ink.
+system scheme won, and which sits above every screen so it survives navigation.
+`safe-area.android.tsx` was deleted — there is one status bar and one place that decides its ink. On a
+Mac there is no status bar to paint and the call is inert.
 
 ### `Subagent.startedAt` is milliseconds
 
@@ -770,3 +456,187 @@ attempts at this fix, which is why the number is derived rather than picked.
 `__tests__/chat-ui/composer.test.tsx` asserts the invariant rather than pixels — the test renderer
 lays nothing out — and the two heights that make overflow impossible: the button is never taller than
 the line box, and the buttons, the input and the field all agree on that one number.
+
+## Mac: the iPad build (2026-09-19)
+
+The day the native macOS target was deleted. [ADR-0011](adr/0011-mac-via-the-ipad-build.md) is the
+decision and the list of what react-native-macos cost; this is what the replacement actually does.
+
+### The destination string, and where the product lands
+
+```sh
+xcodebuild -workspace Hermie.xcworkspace -scheme Hermie -configuration Release \
+  -destination 'platform=macOS,variant=Designed for iPad' \
+  -derivedDataPath build/MacDerivedData \
+  -allowProvisioningUpdates DEVELOPMENT_TEAM="$HERMIE_APPLE_TEAM_ID" CODE_SIGN_STYLE=Automatic build
+```
+
+`npm run mac` is that, plus the prebuild and the pods and the wrapping below. Two things about it:
+
+- **The products directory is `Release-iphoneos`**, not `Release-maccatalyst` and not anything with
+  `macos` in it. The Mac build is the iOS slice; only the destination differs.
+  `apps/hermie/scripts/run-mac.mjs` reads the directory rather than hard-coding that name.
+- **Signing is not optional.** The App Store validation step runs on this configuration, so
+  `CODE_SIGNING_ALLOWED=NO` is not a way out — the build needs a real Apple Developer team, automatic
+  signing, and `-allowProvisioningUpdates` to mint the profile. The team identifier comes from
+  `HERMIE_APPLE_TEAM_ID` or `--team`, never from a file: this is a public repository. The resulting
+  bundle is signed `Apple Development`, with `application-identifier` set to
+  `<team>.nl.fullstackstudio.hermie`.
+
+### A bare iOS .app will not launch — it has to be wrapped
+
+Opening the built `Hermie.app` directly fails with _"has an incorrect executable format"_. macOS
+expects the shape the App Store installs:
+
+```
+Hermie.app/
+  Wrapper/Hermie.app     ← the iOS bundle, unchanged
+  WrappedBundle -> Wrapper/Hermie.app
+```
+
+The symlink is **relative**; an absolute one only works on the machine that built it. `ditto` does the
+copy rather than `cp -R`, because a `.app` is a bundle of symlinks and extended attributes. Verified
+by hand before this change, and reproduced by the script: `open` on the wrapped bundle is accepted.
+
+### `isiOSAppOnMac`, and why `Platform.isMacCatalyst` is not it
+
+React Native exposes no way to tell a Mac window from an iPad. `Platform.isMacCatalyst` looks like the
+answer and is not: `RCTPlatform.mm` sets it from `#if TARGET_OS_MACCATALYST`, a **compile-time** flag,
+and a "Designed for iPad" app is an unmodified iOS binary, so it is false. Nothing in `node_modules`
+exposes `isiOSAppOnMac` either — checked across every installed package.
+
+So there is a local Expo module, `apps/hermie/modules/hermie-mac`, exporting one constant from
+`ProcessInfo.processInfo.isiOSAppOnMac`, read through `src/platform/runs-on-mac.ts`. Four things about
+it are worth knowing:
+
+- **`apps/hermie/modules/` is autolinked with no configuration.** Expo's
+  `nativeModulesDir` defaults to `./modules` relative to the package that holds `package.json`.
+  Verified: `HermieMac` appears in `ios/Podfile.lock`, in `Pods-Hermie.release.xcconfig`, in the
+  generated `ExpoModulesProvider.swift`, and `HermieMacModule.o` is linked into the app binary.
+  `ios/` stays fully generated — nothing in it is edited by hand.
+- **It is Apple-only.** `expo-module.config.json` declares no Android platform, so autolinking resolves
+  25 modules for Apple and 24 for Android with the module absent from the second. That is one less
+  Kotlin file and one less `build.gradle` than an Android stub that could only ever return `false`.
+- **`requireOptionalNativeModule` returns `null`, it does not throw.** Measured under Jest. So the
+  JavaScript reads `false` on Android and in tests without any mock, and a test that wants the Mac
+  case mocks the module (`__tests__/mac-safe-area.test.tsx`).
+- **`.easignore` needed teaching.** Its `ios/` and `android/` patterns are unanchored — they match at
+  any depth — so they also swallowed `modules/hermie-mac/ios/`, which would have produced an EAS build
+  with no native module in it. `npx expo-doctor` fails on exactly this, which is how it was found. The
+  patterns now name their parent directory.
+
+### The empty strip under the title bar
+
+A Mac window showed a band of roughly 25pt between the macOS title bar and Hermie's own header, on
+every screen. It is the **iPad status-bar safe-area inset**: an iOS app on a Mac is told it has one,
+`Screen` turns `insets.top` into `paddingTop`, and nothing occupies the result because the title bar
+is outside the app's window.
+
+`src/platform/safe-area.tsx` now drops the top inset when `RUNS_ON_MAC`. Only the top: the other three
+are either zero on a Mac already or genuinely describe the window, and zeroing them would be a guess.
+iPhone and iPad are untouched, which is what `__tests__/mac-safe-area.test.tsx` asserts.
+
+**Unverified at runtime.** Not seen in a window — see the note under Summary.
+
+One thing left open: in a Mac window dragged narrow enough for the compact shell, the native stack
+draws its own header and insets itself from the same safe area. That inset is applied natively, below
+JavaScript, and this fix does not reach it.
+
+### Enter-to-send: `submitBehavior`, not `onKeyPress`
+
+This is the part that did not work the way the old macOS code implied, and the reason is worth writing
+down because it is invisible from the JavaScript side.
+
+**On iOS, `onKeyPress` carries no modifier state.** React Native derives the event's `key` from the
+text the field is about to insert (`TextInputEventEmitter::keyPressMetricsPayload`) and the payload it
+builds is exactly `{ key, eventCount }`. `shiftKey`, `metaKey` and `ctrlKey` only ever arrived from
+react-native-macos. `Composer` still handles them — the branches are correct if a platform ever
+delivers them — but on the platforms Hermie ships they do not fire. The same goes for `Escape`, which
+inserts no text and so never reaches a `UITextView` delegate at all.
+
+**`preventDefault` does not suppress a Return, either.** By the time `onKeyPress` runs the insertion
+has been accepted.
+
+**What does work is `submitBehavior`.** In `RCTBackedTextInputDelegateAdapter`, a multiline field
+intercepts a replacement text of exactly `"\n"`, asks the delegate whether to submit, and on
+`'submit'` fires `onSubmitEditing` and returns `NO`: no newline, no `onKeyPress`, and no blur — only
+`'blurAndSubmit'` blurs. On `'newline'`, the multiline default, it falls through and the newline lands.
+
+So the composer sets `submitBehavior` from `RUNS_ON_MAC` and sends from `onSubmitEditing`. The two
+modes are mutually exclusive by construction, which is what makes a double send impossible rather than
+guarded against.
+
+**The cost: a Mac has no newline key in the composer.** Shift+Return inserts the same `"\n"` as
+Return, iOS gives JavaScript no modifier to tell them apart, and `UIKeyCommand` is not reachable
+through a React Native `TextInput`. Enter-to-send is worth more on a desktop than the newline key is,
+so that is the trade that shipped. Closing it needs a small native key-command view, not a prop.
+
+**Unverified at runtime**, both halves.
+
+### A Mac never pauses: AppState and the socket
+
+The native macOS target ignored `AppState` outright — "macOS windows stay live" — and deleting that
+target nearly deleted the rule with it. It matters more than it looks:
+
+`GatewayConnection.pause()` calls `teardown()`. It closes the socket. On a phone that is the right
+trade, because the OS is about to kill a half-open socket anyway and a backgrounded app should not
+hold one. On a Mac it is the difference between a window you Cmd+Tab away from and a window that says
+**"This conversation could not be opened: gateway not connected"** when you come back — which the
+owner reports seeing on the Mac build, and which is exactly what a socket closed on every loss of the
+front looks like.
+
+So `RUNS_ON_MAC` gates the pause, in two places:
+
+- `src/gateway/client.ts`, `attachLifecycle` — `background` does not pause on a Mac. `active` still
+  calls `resume()` everywhere, which is free: it returns immediately unless the connection really is
+  paused or stopped, so on a Mac it is a no-op and anywhere else it is the recovery.
+- `src/features/chats/ChatRuntime.tsx` — `background` does not call `controller.onBackground()` on a
+  Mac. That call clears `foregrounded`, which stops the approval and subagent polls; with the socket
+  still up, stopping them would leave an agent's question unanswered while the window sat behind
+  another app. `foregrounded` starts `true`, so not calling it leaves a Mac in the state the old
+  target was permanently in. `persistAll()` still runs on both — writing the cache when the window is
+  hidden costs nothing and is the one moment worth writing at.
+
+`__tests__/mac-lifecycle.test.ts` and the AppState block in `__tests__/chat-runtime.test.tsx` pin both
+halves, with the seam mocked either way.
+
+**What AppState actually reports in a Mac window is unverified.** Nothing was launched (see Summary),
+so this has not been watched. What the code assumes, and what would falsify it:
+
+- A window that merely loses focus reports `inactive`, which neither place acts on. If a Mac reports
+  `background` for a simple app switch, the guard above is what saves the socket — that case is
+  covered either way.
+- A minimised or hidden window is assumed to report `background` rather than terminating. If macOS
+  ever suspends the process outright the socket dies with it regardless of this code, and the
+  connection's own reconnect ladder is what brings it back on `active`.
+- The one thing worth measuring when the app can next be run: log every `AppState` change while
+  hiding, minimising, Cmd+Tabbing and switching Spaces. Until then this is reasoning from iOS's
+  documented values, not an observation.
+
+### Layout: nothing macOS-specific was lost
+
+`Shell.macos.tsx` selected the sidebar shell unconditionally because react-native-screens had no macOS
+slice, so the compact shell could not be bundled there at all. `useLayoutMode` already gives any window
+at or above `REGULAR_LAYOUT_MIN_WIDTH` (700) the sidebar shell and anything narrower the compact stack,
+and a Mac window is just a window — so deleting the variant changed nothing a Mac user sees at a normal
+size, and a narrow Mac window now folds the same way a narrow iPad split view does.
+
+`RegularShell` had its own one-pane fallback for a Mac window dragged narrow. That is now unreachable —
+`useLayoutMode` gates the same threshold from the same `useWindowDimensions` in the same render — so it
+was removed rather than left as code that cannot run.
+
+### What the Mac build does and does not prove
+
+Proved, on this machine, today:
+
+- `npm run mac -- --no-open` ends in `** BUILD SUCCEEDED **`, signed, and produces the wrapped bundle.
+- The local native module is compiled into that binary.
+- The iPhone 17 Pro simulator still builds with the module present (`** BUILD SUCCEEDED **`).
+- `npx expo prebuild --platform android --no-install` succeeds and Android's module set is unchanged.
+
+Not proved:
+
+- Anything at runtime in a Mac window: the strip, Enter-to-send, the keychain, the sign-in web view on
+  THIS build. The owner's Hermie was running and two copies of one bundle identifier cannot coexist.
+- The Android APK. There is still no JDK on this machine (`/usr/libexec/java_home -v 17` finds none),
+  so Gradle was not run. "Building without a system JDK" above is how to get one.

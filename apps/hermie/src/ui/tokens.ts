@@ -1,5 +1,5 @@
-// Design tokens. Everything visual resolves through here so that the macOS and
-// mobile shells cannot drift apart, and so a future theme is a data change.
+// Design tokens. Everything visual resolves through here so that the compact
+// and regular shells cannot drift apart, and so a future theme is a data change.
 //
 // The values are the Messenger direction from `design/tokens.md`: an
 // iMessage/Telegram feel, system sans, and blue bubble shades deliberately

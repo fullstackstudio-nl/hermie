@@ -11,14 +11,9 @@ coverage/
 apps/hermie/ios/
 apps/hermie/android/
 
-# macOS native project: sources and Podfile.lock are committed, build products are not
-apps/hermie/macos/Pods/
-apps/hermie/macos/build/
-apps/hermie/macos/*.xcworkspace/xcuserdata/
-apps/hermie/macos/*.xcodeproj/xcuserdata/
-apps/hermie/macos/*.xcodeproj/project.xcworkspace/xcuserdata/
-apps/hermie/macos/.xcode.env.local
+# Xcode build products, including the wrapped Mac bundle `npm run mac` writes
 DerivedData/
+apps/hermie/build/
 
 # Logs and local state
 *.log

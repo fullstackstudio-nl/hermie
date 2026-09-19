@@ -7,11 +7,12 @@
  * from the stores, so nothing re-renders because a controller did something.
  */
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { AppState, Platform } from 'react-native'
+import { AppState } from 'react-native'
 
 import { useGateway } from '../../gateway'
 import { chatGatewayFor } from '../../gateway/link'
 import { chatCache } from '../../platform/chat-cache'
+import { RUNS_ON_MAC } from '../../platform/runs-on-mac'
 import { useBotsStore } from '../../store/bots'
 import { useChatsStore } from '../../store/chats'
 import { useSettingsStore } from '../../store/settings'
@@ -98,13 +99,21 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     void value.bots.refresh().catch(() => undefined)
   }, [status, value])
 
+  /**
+   * The chat side of the app lifecycle, and the one place a Mac differs.
+   *
+   * `onBackground()` clears `foregrounded`, which stops the approval and
+   * subagent polls — right on a phone, where a backgrounded app has no socket
+   * either (see `attachLifecycle`). A Mac window keeps its socket, so stopping
+   * the polls would leave an agent's question unanswered while the window sat
+   * one Cmd+Tab away. The native macOS target ignored AppState outright for
+   * this; `foregrounded` starts `true`, so simply not calling it keeps a Mac in
+   * the state that target was always in.
+   *
+   * `persistAll()` runs either way. Writing the cache when the window is hidden
+   * costs nothing and is the one moment worth writing at.
+   */
   useEffect(() => {
-    // macOS windows are never backgrounded the way a phone app is, and its
-    // AppState reports states this would misread.
-    if (Platform.OS === 'macos') {
-      return
-    }
-
     const subscription = AppState.addEventListener('change', state => {
       const runtime = valueRef.current
 
@@ -115,7 +124,10 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       if (state === 'active') {
         void runtime.controller.onForeground()
       } else if (state === 'background') {
-        runtime.controller.onBackground()
+        if (!RUNS_ON_MAC) {
+          runtime.controller.onBackground()
+        }
+
         void runtime.controller.persistAll()
       }
     })

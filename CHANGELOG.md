@@ -9,12 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The Mac, as the iPad build.** `npm run mac` builds the iOS app for
+  `platform=macOS,variant=Designed for iPad`, signs it with the team in `HERMIE_APPLE_TEAM_ID`, and
+  wraps the product so macOS will launch it — a bare iOS `.app` refuses to open with "incorrect
+  executable format", and the shape it wants is `Hermie.app/Wrapper/Hermie.app` with a relative
+  `WrappedBundle` symlink. `--no-open` builds without launching, `--debug` builds against Metro.
+- One seam that answers "is this the iOS app running on a Mac?": a local Expo module,
+  `apps/hermie/modules/hermie-mac`, exposing `ProcessInfo.processInfo.isiOSAppOnMac` as a constant
+  behind `src/platform/runs-on-mac.ts`. React Native exposes nothing equivalent —
+  `Platform.isMacCatalyst` reads a compile-time flag that is false for a "Designed for iPad" binary.
+  The module is Apple-only, so Android and the test environment read `false` with no second
+  implementation.
+- [ADR-0011](docs/adr/0011-mac-via-the-ipad-build.md), which supersedes ADR-0002 and lists what a day
+  of building on react-native-macos actually cost.
 - Project skeleton: npm workspaces, TypeScript project references, ESLint, Prettier, commit-message
   rules and a CI check job.
-- `apps/hermie`, an Expo SDK 54 app targeting iOS, iPadOS, Android and macOS, with the compact and
+- `apps/hermie`, an Expo SDK 54 app targeting iOS, iPadOS, Android and the Mac, with the compact and
   regular shells, design tokens, theming and the platform storage abstractions.
-- A hand-maintained macOS project built on react-native-macos, with Expo modules linked through
-  CocoaPods.
 - `@hermes/shared`: the Hermes protocol sources, vendored from a pinned upstream commit by
   `scripts/sync-hermes-shared.mjs`. The rewrites are asserted, `--check` fails on drift, and the
   upstream tests are vendored with the sources and run unchanged.
@@ -48,8 +59,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   developer connection test.
 - English UI strings collected in `src/i18n/strings.ts`, and design tokens updated to the Messenger
   direction from `design/tokens.md`.
-- A connectivity seam (`src/platform/net-info.ts`) so that macOS, where NetInfo has no native module,
-  no longer fails at startup.
 - `@hermie/transcript`: the chat engine — one item model that both history rows and live events
   project onto, a reducer that never filters and never invents an author, stable-id reconciliation,
   and verbosity as read-time selectors.
@@ -69,8 +78,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   subagent steer, interrupt and tail; slash completion and execution; and the chat options (YOLO,
   fast, reasoning effort, model) scoped to the session so the gateway's global configuration is never
   rewritten behind the user's back.
-- A bots screen and a chat screen wired into both shells, with the bot list as the sidebar on iPad
-  and macOS.
+- A bots screen and a chat screen wired into both shells, with the bot list as the sidebar on a wide
+  window.
 - `ChatCache`, a SQLite store for the roster and the last two hundred items per chat, so a chat
   paints before the gateway answers. It downgrades to memory if the database cannot be opened.
 - The fake gateway grew the surface a chat needs: profile assets, the active list, the command
@@ -115,25 +124,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inventory from `model.options`, and to the per-chat view settings for verbosity, bot-to-bot and
   thinking. A chat that pins its own view says so and offers to follow the default again. A model the
   gateway flags as expensive is confirmed before it is set.
-- Attachments: the photo library on iOS and Android, the file picker on macOS, resized to 1568 px on
+- Attachments: the photo library, resized to 1568 px on
   the longest edge before they are encoded — a camera-roll photo is several megabytes and
   `image.attach_bytes` shares the socket the transcript streams on.
 - A Chat section in Settings for the default verbosity, bot-to-bot and thinking, and an Appearance
   section that pins the app to light or dark instead of following the system.
 - An app icon: a speech bubble carrying an H whose crossbar lifts like a wing, drawn by hand as
   `design/icon.svg`. `scripts/generate-app-icons.mjs` rasterises it into every size the app ships —
-  the iOS and Android icons, the Android adaptive foreground, the splash image, the favicon and the
-  macOS asset catalogue — with a scan-converter written for the purpose, so the icons need no image
+  the iOS and Android icons, the Android adaptive foreground, the splash image and the favicon — with
+  a scan-converter written for the purpose, so the icons need no image
   tooling installed and come out byte-identical on every machine. CI fails if any of them has drifted
   from the SVG.
-- A release process. `.github/workflows/release.yml` builds the macOS app and an Android APK on a
-  `v*` tag and publishes a GitHub release with the CHANGELOG section for that version; the macOS app
-  is signed with a Developer ID and notarised when the secrets are present, and unsigned when they
-  are not, so a fork can cut a release too. `docs/release.md` is the runbook, including the halves a
-  machine cannot do: TestFlight and Play internal testing through EAS.
-- `scripts/set-version.mjs` sets the version in all four places that carry it — both package.json
-  files, `app.config.ts` and the macOS `Info.plist` — and fails loudly rather than skipping a file
-  whose shape has changed. `scripts/changelog-section.mjs` reads one version's notes out of this
+- A release process. `.github/workflows/release.yml` builds an Android APK on a `v*` tag and publishes
+  a GitHub release with the CHANGELOG section for that version. `docs/release.md` is the runbook,
+  including the halves a machine cannot do: TestFlight and Play internal testing through EAS.
+- `scripts/set-version.mjs` sets the version in every place that carries it — both package.json files
+  and `app.config.ts` — and fails loudly rather than skipping a file whose shape has changed. `scripts/changelog-section.mjs` reads one version's notes out of this
   file, which is what the release workflow publishes.
 - Repository furniture for a public project: a Contributor Covenant code of conduct, issue forms for
   bugs and feature requests, and grouped weekly Dependabot updates for npm and the actions.
@@ -167,31 +173,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The transcript can be asked to scroll to one item, with the `onScrollToIndexFailed` recovery a
   virtualised list needs, and it reports honestly when the item is not in the visible set — a chat on
   Quiet genuinely does not contain every row.
-- Hardware-keyboard shortcuts in the composer: `Cmd`/`Ctrl+Enter` sends and `Escape` stops a running
-  turn on every platform, and a bare `Enter` sends on macOS where a physical keyboard is certain.
-  `Shift+Enter` is always a newline.
-- The regular shell folds to a single pane when a macOS window is dragged below the two-pane
-  threshold, with a way back to the list, instead of squeezing a 320pt sidebar against an unreadable
-  chat.
+- Hardware-keyboard handling in the composer: `Cmd`/`Ctrl+Enter` sends and `Escape` stops a running
+  turn wherever a platform reports them, and a bare `Return` sends where a physical keyboard is
+  certain. See the Changed entry below for what that turned out to mean on iOS.
 - The fake gateway's delegation is now three children over several seconds with one of them failing,
   wrapped in a real `delegate_task` call, plus `subagent.list`, `delegation.status`, `agents.list` and
   a live `message_agent` hand-off whose reply comes back as a `process_complete` row. A fan-out that
   finished inside one frame could not be looked at, let alone steered.
 
+### Removed
+
+- **The native macOS target.** `apps/hermie/macos/` and its hand-maintained Xcode project, Podfile and
+  application delegate; the `react-native-macos` dependency; the `macos` Metro platform and the
+  `react-native` → `react-native-macos` import rewrite; `react-native.config.js`; every
+  `*.macos.ts(x)` variant in `src/`; `docs/macos-smoke.md`; the macOS asset catalogue; the macOS CI
+  job; and the macOS build, Developer ID signing and notarisation steps in the release workflow, with
+  the four secrets that fed them. Git history keeps all of it, and
+  [ADR-0002](docs/adr/0002-macos-via-react-native-macos.md) keeps the reasoning.
+- `expo-document-picker`, which existed only for the macOS attachment picker.
+
 ### Changed
+
+- **The Mac version is the iOS app** running as "Designed for iPad" on Apple Silicon, instead of a
+  native react-native-macos target. Eight platform seams collapsed back into one implementation each —
+  bottom sheets, safe area, haptics, the status bar, the secret store, attachments, connectivity and
+  the shell — and the Mac now has a real keychain, a real `Modal`, a real navigator and every Expo
+  module. Apple Silicon only, and distribution moves to TestFlight and the App Store, which offer an
+  iPhone/iPad app on a Mac from the same listing.
+- A bare `Return` sends on a Mac through `submitBehavior="submit"` and `onSubmitEditing`, not through
+  `onKeyPress`. On iOS a text field's key event carries no modifier state and cannot suppress the
+  insertion, so `submitBehavior` is the only thing that can stop a Return becoming a newline. The cost
+  is that Shift+Return cannot be told apart from Return, so the composer has no newline key on a Mac;
+  `docs/platform-notes.md` says so plainly.
+- A Mac window no longer pauses the gateway connection when it leaves the front. `pause()` closes the
+  socket, which is right on a phone and wrong for a window that is merely hidden or behind another
+  app — and is consistent with "gateway not connected" appearing on a Mac build that was connected a
+  moment earlier. The approval and subagent polls keep running there for the same reason.
+- `expo-secure-store` is the secret store on the Mac too, so the AsyncStorage fallback and the warning
+  that a Mac build must not be pointed at a production gateway are both gone. Linked and entitled;
+  **not yet exercised in a running Mac window**.
+- The version script writes three places, not four, and has no `--build` flag: the hand-maintained
+  macOS `Info.plist` was the only file that carried a build number by hand, and EAS owns that number.
+- `.easignore` names the parent directory of the two generated native projects. A bare `ios/` pattern
+  matches at any depth and also swallowed the local Expo module's `ios/`, which would have produced an
+  EAS build with no native module in it. `npx expo-doctor` fails on exactly that.
+- The `overrides` entry pinning `react-native` and `react` in the root `package.json` is gone. It
+  existed so react-native-macos resolved against Expo's runtime, and removing it changed no
+  resolution in the lockfile.
 
 - The flat-colour placeholder artwork and the script that wrote it are gone, replaced by the icon set
   above.
 - The native CI jobs run on release tags as well as on demand, build with signing switched off, and
-  keep what they produced: the Android APK, and the macOS app as a zip. macOS builds Release rather
-  than Debug, because only Release bundles the JavaScript into the app.
+  keep the Android APK.
 - Android asks for the network and the photo library and nothing else; `VIBRATE` and
   `WRITE_EXTERNAL_STORAGE`, both pulled in by dependencies rather than wanted, are blocked. iOS
   answers the export-compliance question in advance, the splash screen now hands over to the app's own
   background colours, and the Android adaptive icon sits on the blue from the middle of the icon's
   gradient.
-- The macOS bundle knows what it is: the compiled app icon, a display name, an application category,
-  a copyright line, and the version the rest of the repository is on rather than the template's 1.0.
 - An answered approval leaves a receipt that says what was decided and about what — `Allowed once ·
   rm -rf ./build`, with the command truncated — instead of `Answered: once`, which said neither.
 - A finished reply only shows its duration next to something that explains it. A bare `0.1s` under a
@@ -204,6 +242,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The empty band under the title bar on a Mac. An iOS app on a Mac is told it has an iPad's status
+  bar, and `Screen` turned that ~25pt top safe-area inset into padding nothing occupied, because the
+  macOS title bar is outside the app's window. The top inset is dropped on a Mac and only there;
+  iPhone and iPad are untouched. Fixed in code, **unverified in a window**.
+
 - A reply that arrived after a tool call was painted twice — once as the partially streamed copy and
   once as the clean final — while the gateway had stored a single row. The tool boundary seals the
   streaming bubble, so the completion had nowhere to land; it now settles onto that sealed bubble
@@ -212,9 +255,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The approval sheet labelled its buttons from a vocabulary the gateway never sends. Hermes answers
   with `once`, `session`, `always` and `deny`, so every approval showed raw protocol words instead of
   "Allow once" and "Always allow".
-- `secureTextEntry` on macOS: the field renders dots but never reports what was typed, which left the
-  session token empty and onboarding impossible to finish. Masking is off on macOS, and every secret
-  field now offers to show its value.
+- Every secret field offers to show its value, so a pasted token can be checked before it is saved.
 - `expo-image-picker` needs an explicit photo-library usage string; without one iOS terminates the
   app the moment the permission is requested, with no dialog and no crash report.
 - Every message you sent appeared twice a moment later. `prompt.submit` answers with a status and no
@@ -228,4 +269,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Activity timeline's `↩` rendered as an emoji on iOS, which is what U+21A9 means without an
   explicit text variation selector.
 
-[Unreleased]: https://github.com/fullstackstudio/hermie/compare/main...HEAD
+[Unreleased]: https://github.com/fullstackstudio-nl/hermie/compare/main...HEAD

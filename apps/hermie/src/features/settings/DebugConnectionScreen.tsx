@@ -4,8 +4,8 @@ import { Platform, Pressable, ScrollView, TextInput, View } from 'react-native'
 
 import { createGatewayConnection } from '../../gateway'
 import { strings } from '../../i18n/strings'
-import { entropySource } from '../../platform/random'
-import { Button, Screen, SECURE_TEXT_ENTRY_SUPPORTED, Text } from '../../ui/primitives'
+import { RUNS_ON_MAC } from '../../platform/runs-on-mac'
+import { Button, Screen, Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 
 /**
@@ -22,7 +22,7 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
   const theme = useTheme()
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL)
   const [sessionToken, setSessionToken] = useState('fake-session-token')
-  const [showToken, setShowToken] = useState(!SECURE_TEXT_ENTRY_SUPPORTED)
+  const [showToken, setShowToken] = useState(false)
   const [probe, setProbe] = useState<ProbeResult | null>(null)
   const [status, setStatus] = useState<ConnectionStatus>('disconnected')
   const [transitions, setTransitions] = useState<string[]>([])
@@ -125,8 +125,7 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
             onChangeText={setSessionToken}
             autoCapitalize="none"
             autoCorrect={false}
-            // macOS masks but never reports the typing; see `SecretField`.
-            secureTextEntry={SECURE_TEXT_ENTRY_SUPPORTED && !showToken}
+            secureTextEntry={!showToken}
             style={inputStyle}
           />
           <Pressable accessibilityRole="button" hitSlop={8} onPress={() => setShowToken(current => !current)}>
@@ -163,8 +162,8 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
 
         <View style={{ gap: theme.space.xxs }}>
           <Text variant="heading">Runtime</Text>
-          <Text color="textMuted" testID="debug-entropy">
-            random bytes: {entropySource()}
+          <Text color="textMuted" testID="debug-runs-on-mac">
+            iOS app on a Mac: {String(RUNS_ON_MAC)}
           </Text>
         </View>
 

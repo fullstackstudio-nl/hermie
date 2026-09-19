@@ -55,8 +55,9 @@ jobs:
         run: node scripts/check-no-trailers.mjs origin/${{ github.base_ref }}..HEAD
 
   # The native builds are the slow, expensive half: they run on demand and on
-  # every release tag, not on every push. Nothing here signs anything — signing
-  # and notarisation live in release.yml, behind secrets. See docs/release.md.
+  # every release tag, not on every push. Nothing here signs anything. The Mac
+  # is not a job of its own: it is the iOS build, run on a different destination
+  # (ADR-0011), and a GitHub runner cannot sign one without a real team.
   android:
     name: Android debug build
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
@@ -128,53 +129,3 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \
             build
-
-  macos:
-    name: macOS build
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - name: Install
-        run: npm ci
-
-      - name: Pods
-        run: pod install
-        working-directory: apps/hermie/macos
-
-      # Release rather than Debug: only a Release build runs the phase that
-      # bundles the JavaScript into the app, so a Debug product is not something
-      # anyone can run without a Metro server.
-      - name: Build
-        working-directory: apps/hermie/macos
-        run: |
-          xcodebuild \
-            -workspace Hermie.xcworkspace \
-            -scheme Hermie-macOS \
-            -configuration Release \
-            -derivedDataPath build/DerivedData \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            build
-
-      # ditto, not zip: a .app is a bundle with symlinks and resource forks, and
-      # a plain zip of one does not survive the round trip.
-      - name: Package
-        working-directory: apps/hermie/macos
-        run: |
-          ditto -c -k --sequesterRsrc --keepParent \
-            build/DerivedData/Build/Products/Release/Hermie.app \
-            Hermie-macos-unsigned.zip
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: hermie-macos-unsigned
-          path: apps/hermie/macos/Hermie-macos-unsigned.zip
-          if-no-files-found: error

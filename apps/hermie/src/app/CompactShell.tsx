@@ -80,9 +80,8 @@ function ActivityRoute() {
 export function CompactShell() {
   const theme = useTheme()
 
-  // The navigation container lives with the stack rather than at the root: the
-  // regular shell has no navigator, and on macOS neither @react-navigation/native
-  // nor react-native-screens should end up in the bundle at all.
+  // The navigation container lives with the stack rather than at the root,
+  // because the regular shell has no navigator at all.
   return (
     <NavigationContainer>
       <Stack.Navigator

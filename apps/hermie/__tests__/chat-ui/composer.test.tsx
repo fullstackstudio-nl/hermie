@@ -204,62 +204,85 @@ describe('the Composer field', () => {
 })
 
 /**
- * The keyboard path, which is the only way to send on macOS.
+ * The keyboard path, which is the only way to send on a Mac.
  *
- * The rule it enforces: Enter SENDS, or does nothing. It used to fall through
+ * Two mechanisms, and which one fires is decided by `submitBehavior`. Where a
+ * bare Return sends, iOS suppresses the newline and calls `onSubmitEditing`
+ * instead, and `onKeyPress` never sees the key at all — that is what makes a
+ * double send structurally impossible rather than guarded against.
+ *
+ * The rule both enforce: Return SENDS, or does nothing. It used to fall through
  * to the same handler as the round button, so while a reply was streaming the
- * send key cancelled the turn — typing the next message and pressing Enter
+ * send key cancelled the turn — typing the next message and pressing Return
  * killed the answer being written. A prompt sent mid-turn is parked by the
  * gateway; stopping is the button's job, and Escape's.
  */
 describe('the Composer keyboard', () => {
-  const enter = (extra: Record<string, unknown> = {}) =>
-    fireEvent(screen.getByTestId('composer-input'), 'keyPress', { nativeEvent: { key: 'Enter', ...extra } })
+  const submitEditing = () => fireEvent(screen.getByTestId('composer-input'), 'submitEditing')
 
-  it('sends on a bare Enter where a hardware keyboard is certain', () => {
+  const keyPress = (key: string, extra: Record<string, unknown> = {}) =>
+    fireEvent(screen.getByTestId('composer-input'), 'keyPress', { nativeEvent: { key, ...extra } })
+
+  it('asks the platform to submit on Return where a hardware keyboard is certain', () => {
+    renderComposer({ hardwareKeyboard: true, value: 'Ship it' })
+
+    expect(screen.getByTestId('composer-input').props.submitBehavior).toBe('submit')
+  })
+
+  it('leaves Return as the newline everywhere else', () => {
+    renderComposer({ hardwareKeyboard: false, value: 'Ship it' })
+
+    expect(screen.getByTestId('composer-input').props.submitBehavior).toBe('newline')
+  })
+
+  it('sends on the Return the platform turned into a submit', () => {
     const handlers = renderComposer({ hardwareKeyboard: true, value: 'Ship it' })
 
-    enter()
+    submitEditing()
     expect(handlers.onSend).toHaveBeenCalledWith('Ship it')
   })
 
-  it('does not stop a running turn on Enter', () => {
+  it('does not stop a running turn on Return', () => {
     const handlers = renderComposer({ hardwareKeyboard: true, running: true, value: 'the next message' })
 
-    enter()
+    submitEditing()
     expect(handlers.onStop).not.toHaveBeenCalled()
     expect(handlers.onSend).toHaveBeenCalledWith('the next message')
   })
 
-  it('does nothing at all on Enter with nothing to send', () => {
+  it('does nothing at all on Return with nothing to send', () => {
     const handlers = renderComposer({ hardwareKeyboard: true, running: true, value: '' })
 
-    enter()
+    submitEditing()
     expect(handlers.onStop).not.toHaveBeenCalled()
     expect(handlers.onSend).not.toHaveBeenCalled()
   })
 
-  it('keeps Shift+Enter as the newline', () => {
+  it('leaves a bare Enter alone where it is the newline', () => {
+    const handlers = renderComposer({ hardwareKeyboard: false, value: 'first line' })
+
+    keyPress('Enter')
+    expect(handlers.onSend).not.toHaveBeenCalled()
+  })
+
+  it('keeps Shift+Enter as the newline where the flag arrives', () => {
     const handlers = renderComposer({ hardwareKeyboard: true, value: 'first line' })
 
-    enter({ shiftKey: true })
+    keyPress('Enter', { shiftKey: true })
     expect(handlers.onSend).not.toHaveBeenCalled()
   })
 
   it('sends on Cmd+Enter even where a bare Enter is a newline', () => {
     const handlers = renderComposer({ hardwareKeyboard: false, value: 'Ship it' })
 
-    enter()
-    expect(handlers.onSend).not.toHaveBeenCalled()
-
-    enter({ metaKey: true })
+    keyPress('Enter', { metaKey: true })
     expect(handlers.onSend).toHaveBeenCalledWith('Ship it')
   })
 
   it('leaves Escape as the only key that stops a turn', () => {
     const handlers = renderComposer({ hardwareKeyboard: true, running: true, value: 'ignored' })
 
-    fireEvent(screen.getByTestId('composer-input'), 'keyPress', { nativeEvent: { key: 'Escape' } })
+    keyPress('Escape')
     expect(handlers.onStop).toHaveBeenCalled()
   })
 })

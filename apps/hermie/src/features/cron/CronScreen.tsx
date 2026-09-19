@@ -3,10 +3,9 @@
  *
  * NAVIGATION. This is one screen with early-return sub-screens, the same shape
  * Settings uses for its connection test and gallery. It is not a navigator on
- * purpose: `react-native-screens` has no macOS target, the compact and regular
- * shells own their own navigation and disagree about what "push" means, and a
- * feature that carries its own three-deep stack works identically in both and
- * on all four platforms.
+ * purpose: the compact and regular shells own their own navigation and disagree
+ * about what "push" means, and a feature that carries its own three-deep stack
+ * works identically in both.
  *
  * The list itself is the WS `cron.manage` answer, split into Active and Paused.
  * Its banner is the one thing on the screen that is not about a single job:

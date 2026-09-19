@@ -1,40 +1,47 @@
 # Releasing Hermie
 
-Two halves. The half a machine can do on its own — build the macOS app and an
-Android APK, and publish them against a tag with the right CHANGELOG section —
-is `.github/workflows/release.yml`. The half that needs an account someone owns
-— TestFlight, Play internal testing, a Developer ID certificate — is written out
-below, because it is done by hand until somebody decides otherwise.
+Two halves. The half a machine can do on its own — build an Android APK and
+publish it against a tag with the right CHANGELOG section — is
+`.github/workflows/release.yml`. The half that needs an account someone owns —
+TestFlight and Play internal testing — is written out below, because it is done by
+hand until somebody decides otherwise.
+
+**The Mac is not a third release.** Since
+[ADR-0011](adr/0011-mac-via-the-ipad-build.md) it is the iOS build, and Apple
+offers an iPhone/iPad app on Apple Silicon Macs from the same App Store listing
+unless it is opted out under **App Store Connect → the app → Pricing and
+Availability**. A TestFlight tester on a Mac installs the same build the same way.
+So there is nothing Mac-specific to build, sign, notarise or upload; `npm run mac`
+exists for developing, not for releasing.
 
 ## Version numbers
 
-One number, written down in four places: the root `package.json`, the app's
-`package.json`, `version` in `apps/hermie/app.config.ts`, and
-`CFBundleShortVersionString` in the hand-maintained macOS `Info.plist`. Setting
-them by hand is how three of them end up stale, so:
+One number, written down in three places: the root `package.json`, the app's
+`package.json`, and `version` in `apps/hermie/app.config.ts`. Setting them by hand
+is how two of them end up stale, so:
 
 ```sh
 npm run set-version -- 0.2.0            # the marketing version
-npm run set-version -- 0.2.0 --build 7  # and the build number
 npm run set-version -- 0.2.0 --check    # report, change nothing
 ```
 
 The script fails if a pattern stops matching rather than skipping the file. Read
 the diff before committing it.
 
-The build number is separate on purpose: App Store Connect and Play both refuse
-a second upload with a build number they have already seen, and that happens on
-a rhythm of its own. On iOS and Android EAS owns it — `production` has
-`autoIncrement` set, so EAS raises it per build. On macOS it is
-`CFBundleVersion`, and `--build` is how it moves.
+There used to be a fourth place and a `--build` flag for it: the hand-maintained
+macOS `Info.plist` carried both the marketing version and `CFBundleVersion`,
+because nothing generated them. Both are gone. The build number belongs to EAS —
+the `production` profile has `autoIncrement` set, so it rises per build — which is
+the right rhythm anyway: App Store Connect and Play both refuse a second upload
+with a number they have already seen.
 
 `eas.json` sets `cli.appVersionSource` to **`local`**: the version EAS builds is
 the one in `app.config.ts`, in the commit being built. The alternative,
 `remote`, keeps it on EAS's servers, which is convenient for a team that
-releases from a dashboard and wrong for a repository where the macOS project
-cannot read it — with `remote`, the number in the macOS app and the number on
-the phone drift apart with nothing to catch it. Local keeps the tag, the
-CHANGELOG and all four platforms on the same number.
+releases from a dashboard and wrong for a repository where the tag is the record:
+with `remote`, the number EAS builds and the number in the commit drift apart with
+nothing to catch it. Local keeps the tag, the CHANGELOG and every platform on the
+same number.
 
 ## Cutting a release
 
@@ -51,24 +58,27 @@ CHANGELOG and all four platforms on the same number.
    git tag v0.2.0
    git push origin main v0.2.0
    ```
-5. The tag triggers two workflows. `ci.yml` runs the checks and the three native
-   builds; `release.yml` builds the macOS app and the Android APK, and publishes
-   a GitHub release with them attached and the CHANGELOG section as its notes.
+5. The tag triggers two workflows. `ci.yml` runs the checks and both native
+   builds; `release.yml` builds the Android APK and publishes a GitHub release
+   with it attached and the CHANGELOG section as its notes.
 6. Then the store halves, below.
 
 A release can also be rehearsed without a tag: run **Release** from the Actions
-tab. It builds and uploads both artefacts and skips the publish step.
+tab. It builds and uploads the artefact and skips the publish step.
 
 ## What the automated release produces
 
-| Artefact                   | What it is                                                                       |
-| -------------------------- | -------------------------------------------------------------------------------- |
-| `Hermie-macos.zip`         | The macOS app. Signed and notarised when the secrets are set, unsigned when not. |
-| `Hermie-android-debug.apk` | A debug-signed APK, installable on any device with unknown sources allowed.      |
+| Artefact                   | What it is                                                                  |
+| -------------------------- | --------------------------------------------------------------------------- |
+| `Hermie-android-debug.apk` | A debug-signed APK, installable on any device with unknown sources allowed. |
 
-The Android artefact is a **debug** build on purpose: a release APK needs an
-upload key this workflow does not have, and an unsigned one cannot be installed
-at all. The Play artefact comes from EAS instead.
+It is a **debug** build on purpose: a release APK needs an upload key this
+workflow does not have, and an unsigned one cannot be installed at all. The Play
+artefact comes from EAS instead.
+
+There is no iOS or Mac artefact here, and there cannot be a useful one: an iOS app
+that anybody can install has to be signed by a real Apple Developer team, which is
+what TestFlight and the App Store are for.
 
 ## Secrets
 
@@ -76,83 +86,14 @@ All of these are repository secrets in GitHub → Settings → Secrets and varia
 → Actions. Every one of them is optional: with none set, the release workflow
 still produces working unsigned artefacts, which is what a fork gets.
 
-| Secret                        | Used for                                                   |
-| ----------------------------- | ---------------------------------------------------------- |
-| `MACOS_CERTIFICATE_P12`       | Base64 of the Developer ID Application certificate and key |
-| `MACOS_CERTIFICATE_PASSWORD`  | The password on that .p12                                  |
-| `APPLE_ID`                    | The Apple ID that submits to the notary service            |
-| `APPLE_TEAM_ID`               | The ten-character team identifier                          |
-| `APPLE_APP_SPECIFIC_PASSWORD` | An app-specific password for that Apple ID                 |
-| `EXPO_TOKEN`                  | An EAS access token, if EAS builds are ever moved into CI  |
+| Secret       | Used for                                                  |
+| ------------ | --------------------------------------------------------- |
+| `EXPO_TOKEN` | An EAS access token, if EAS builds are ever moved into CI |
 
-The workflow reads them once into step outputs, because a step's `if:` cannot
-see the `secrets` context. Missing certificate secrets mean an unsigned build;
-missing notarisation secrets mean a signed but un-notarised one. Both say so in
-the job's annotations rather than failing.
-
-## macOS: signing and notarisation
-
-Needed because macOS refuses to open a downloaded app that is neither signed nor
-notarised without the user going through Gatekeeper by hand — which is exactly
-the kind of instruction nobody should be following.
-
-**Once, to set the secrets up:**
-
-1. In the Apple Developer account, create a **Developer ID Application**
-   certificate and install it in the login keychain.
-2. Export it from Keychain Access as a .p12, with a password, including the
-   private key. Then:
-   ```sh
-   base64 -i DeveloperID.p12 | pbcopy
-   ```
-   Paste that into `MACOS_CERTIFICATE_P12`, and the export password into
-   `MACOS_CERTIFICATE_PASSWORD`.
-3. At appleid.apple.com, create an app-specific password for the Apple ID that
-   will submit to the notary service. That is `APPLE_APP_SPECIFIC_PASSWORD`;
-   `APPLE_ID` is the address itself.
-4. The team identifier is in the Apple Developer membership page.
-   `APPLE_TEAM_ID`.
-
-**What the workflow then does**, and what to run locally to reproduce it:
-
-```sh
-cd apps/hermie/macos
-pod install
-xcodebuild -workspace Hermie.xcworkspace -scheme Hermie-macOS \
-  -configuration Release -derivedDataPath build/DerivedData \
-  CODE_SIGN_STYLE=Manual \
-  CODE_SIGN_IDENTITY='Developer ID Application' \
-  DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-  OTHER_CODE_SIGN_FLAGS='--timestamp --options runtime' \
-  build
-
-ditto -c -k --sequesterRsrc --keepParent \
-  build/DerivedData/Build/Products/Release/Hermie.app Hermie-macos.zip
-
-xcrun notarytool submit Hermie-macos.zip \
-  --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
-  --password "$APPLE_APP_SPECIFIC_PASSWORD" --wait
-
-xcrun stapler staple build/DerivedData/Build/Products/Release/Hermie.app
-# and rebuild the zip from the stapled bundle, or the download still warns
-```
-
-Three things bite here:
-
-- **`--options runtime`.** Without the hardened runtime the notary service
-  rejects the submission, with a report that does not obviously say so.
-- **`ditto`, not `zip`.** A `.app` is a bundle of symlinks; a plain zip of one
-  arrives at the notary service broken.
-- **Staple, then repackage.** The ticket is attached to the app, not to the
-  archive that was submitted. A zip made before stapling still makes the user
-  click through a warning.
-
-Release must be used rather than Debug: only the Release configuration runs the
-build phase that bundles the JavaScript into the app. A Debug product needs a
-Metro server to start at all.
-
-If `notarytool` rejects a submission, `xcrun notarytool log <submission-id>`
-with the same credentials prints the reason per binary.
+That is the whole list now. The Developer ID certificate, its password, the notary
+service Apple ID and its app-specific password were all for the macOS `.app`, and
+that artefact no longer exists — a Mac user installs from TestFlight or the App
+Store, where EAS holds the credentials.
 
 ## iOS: TestFlight
 
@@ -175,6 +116,11 @@ build; the marketing version is whatever `set-version` put in `app.config.ts`.
 
 For a build on somebody's device before that, `preview` is an internal
 distribution build; for a build that runs on a simulator, `development`.
+
+**This is also the Mac release.** Check App Store Connect → Pricing and
+Availability and leave "Make this app available on Mac" on; a TestFlight tester on
+an Apple Silicon Mac then installs the same build. Nothing else is needed, and
+nothing here is Mac-specific.
 
 ## Android: Play internal testing
 
@@ -199,9 +145,10 @@ them block a tagged GitHub release.
   `SYSTEM_ALERT_WINDOW` in the Android manifest. Play asks about that
   permission. Move the plugin behind a condition on the EAS profile, or accept
   the question and answer it.
-- **macOS has no keystore-backed secret store.** `SECURITY.md` and
-  `docs/platform-notes.md` both say so. A macOS download is a development build
-  until that is fixed.
+- **The Mac build has not been exercised at runtime.** The keychain, Return-to-send
+  and the missing status-bar strip are all reasoned from source and unverified in a
+  window. `docs/platform-notes.md` lists them; verify them before the listing says
+  the app runs on a Mac.
 - **Privacy answers.** App Store Connect and the Play data-safety form both ask
   what leaves the device. Hermie sends what the user types to the gateway the
   user configured, and to nothing else; there is no analytics SDK and no
@@ -212,8 +159,8 @@ them block a tagged GitHub release.
 ## The icons
 
 `design/icon.svg` is the source. Everything the app ships — the iOS and Android
-icons, the adaptive foreground, the splash image, the favicon and the macOS
-asset catalogue — is rasterised from it:
+icons, the adaptive foreground, the splash image and the favicon — is rasterised
+from it:
 
 ```sh
 npm run icons          # rewrite them

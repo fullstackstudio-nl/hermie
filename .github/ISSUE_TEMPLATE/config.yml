@@ -1,7 +1,7 @@
 blank_issues_enabled: true
 contact_links:
   - name: Security issue
-    url: https://github.com/fullstackstudio/hermie/security/policy
+    url: https://github.com/fullstackstudio-nl/hermie/security/policy
     about: Report anything exploitable privately instead of opening an issue.
   - name: Hermes Agent
     url: https://github.com/NousResearch/Hermes-Agent

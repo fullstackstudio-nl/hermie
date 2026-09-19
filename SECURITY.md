@@ -28,15 +28,20 @@ Knowing this helps when assessing an issue:
 
 - **Secrets** — access token, refresh token, session token and any extra request headers — go in the
   platform keystore through `SecretStore`. On iOS and Android that is the system keychain, with a
-  device-only, after-first-unlock accessibility class.
+  device-only, after-first-unlock accessibility class. A Mac runs the same iOS build (ADR-0011) and
+  therefore the same `expo-secure-store`.
 - **Non-secret configuration** — the gateway URL, display preferences — goes in plain key-value
   storage.
 - **Chat transcripts** are cached locally so the app can paint before the gateway answers. They are
   not encrypted beyond the protection the operating system gives the app container.
 
-There is one known gap: on macOS there is no keystore-backed `SecretStore` yet, and the fallback
-writes to unencrypted app storage. A macOS build is therefore a development build, not something to
-point at a production gateway. This is tracked in `docs/platform-notes.md`.
+The gap that used to be here — macOS had no keystore-backed `SecretStore`, so tokens went to
+unencrypted app storage — is closed. The native macOS target is gone, and the Mac runs the iOS build
+with the iOS keychain. One honest caveat: `expo-secure-store` links into the Mac build and the app is
+signed with `application-identifier`, which is its default keychain access group, but reading and
+writing a key **has not yet been exercised in a running Mac window**. It is the same binary and the
+same API as on an iPhone, where it is exercised; `docs/platform-notes.md` tracks it as unverified
+rather than claiming it.
 
 ## Supported versions
 

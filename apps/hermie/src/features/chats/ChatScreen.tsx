@@ -49,13 +49,7 @@ import { KEYBOARD_AVOID_BEHAVIOR } from '../../ui/keyboard'
 import { Screen, Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { CONTROL_MIN_HEIGHT, TAP_SLOP } from '../../ui/tokens'
-import {
-  attachmentKind,
-  attachmentsSupported,
-  openAppSettings,
-  pickAttachment,
-  type PickedAttachment
-} from './attachments'
+import { openAppSettings, pickAttachment, type PickedAttachment } from './attachments'
 import { ChatSheetHost, type RequestItem } from './ChatSheetHost'
 import type { ModelChoice } from './chat-controller'
 import type { ManualSheet } from './sheet-host'
@@ -719,16 +713,12 @@ function Conversation({
         <Composer
           attachments={composerAttachments}
           botName={display}
-          // Omitted where no picker exists (macOS without the document picker):
-          // the composer then renders its "+" disabled instead of offering a
-          // button whose only outcome is an error.
-          {...(attachmentsSupported ? { onAttach: () => void attach() } : {})}
+          onAttach={() => void attach()}
           onChangeText={chat.setDraft}
           onQuerySlash={querySlash}
           onRemoveAttachment={id => setAttachments(current => current.filter(file => file.id !== id))}
           onSend={text => void send(text)}
           onStop={() => void chat.stop()}
-          placeholder={attachmentKind === 'file' ? strings.chat.placeholder : undefined}
           running={busy}
           suggestions={suggestions}
           value={chat.draft}

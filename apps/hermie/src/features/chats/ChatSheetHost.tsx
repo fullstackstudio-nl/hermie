@@ -22,7 +22,7 @@ import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 
 import { AgentsSheet, type AgentsSheetProps } from '../../chat-ui'
 import { ApprovalSheet, ChatOptionsSheet, ClarifySheet, type ChatOptionsSheetProps } from '../../ui/sheets'
-import { SHEET_ANIMATION_MS } from '../../ui/bottom-sheet/SheetBody'
+import { SHEET_ANIMATION_MS } from '../../ui/BottomSheet'
 import { initialSheetHostState, isSheetVisible, sheetHostReducer, targetSheet, type ManualSheet } from './sheet-host'
 
 export type RequestItem = ApprovalItem | ClarifyItem

@@ -21,7 +21,7 @@ see both sides of it, because a reply you cannot trace back to a question is
 just a machine talking to itself.
 
 It is one Expo and React Native codebase running on iPhone, iPad, Android and
-macOS, and it talks to nothing but your gateway.
+the Mac, and it talks to nothing but your gateway.
 
 <table>
   <tr>
@@ -35,8 +35,6 @@ macOS, and it talks to nothing but your gateway.
     <td>An approval, asked and answered</td>
   </tr>
 </table>
-
-![Hermie on macOS, at the gateway address step of setup, having probed the address and found a gateway](docs/screenshots/macos.png)
 
 ## What it does
 
@@ -95,15 +93,14 @@ from scratch.
 Hermie has not had a release yet. When it does:
 
 - **iPhone and iPad** — TestFlight _(link to follow)_
+- **Mac** — the same TestFlight build, or the same App Store listing: Apple
+  offers an iPhone/iPad app on Apple Silicon Macs unless it is opted out
 - **Android** — Play internal testing _(link to follow)_
-- **macOS** — a signed `.app` on the [releases
-  page](https://github.com/fullstackstudio/hermie/releases) _(from the first tag
-  onwards)_
 
 Until then, and any time you would rather build it yourself:
 
 ```sh
-git clone https://github.com/fullstackstudio/hermie.git
+git clone https://github.com/fullstackstudio-nl/hermie.git
 cd hermie
 nvm use                 # Node 22 or newer
 npm ci
@@ -114,12 +111,14 @@ Then pick a platform:
 ```sh
 npm run ios             # iOS simulator
 npm run android         # Android emulator or device
-npm run macos           # macOS
+HERMIE_APPLE_TEAM_ID=XXXXXXXXXX npm run mac    # this Mac
 ```
 
-`npm run ios` and `npm run android` generate the native projects on first run;
-`ios/` and `android/` are not committed. `macos/` is committed and maintained by
-hand — read [CONTRIBUTING.md](CONTRIBUTING.md) before changing it.
+All three generate the native projects on first run; `ios/` and `android/` are
+not committed. `npm run mac` builds the iOS app for the "Designed for iPad"
+destination and wraps it so macOS will launch it — it needs an Apple Developer
+team identifier, because a Mac build has to be signed. `--no-open` builds without
+launching, `--debug` builds against Metro.
 
 You do not need a real gateway to try it:
 
@@ -175,31 +174,34 @@ say stays between you and the machine you run them on.
 
 ## Platforms
 
-| Platform  | State                                                                                                     |
-| --------- | --------------------------------------------------------------------------------------------------------- |
-| iOS 15.1+ | The primary target                                                                                        |
-| iPadOS    | The same build, with a sidebar layout on wide windows                                                     |
-| Android   | Builds and runs; exercised least of the four                                                              |
-| macOS 14+ | Through react-native-macos. Several Expo modules have no macOS implementation and are shimmed — see below |
+| Platform             | State                                                                           |
+| -------------------- | ------------------------------------------------------------------------------- |
+| iOS 15.1+            | The primary target                                                              |
+| iPadOS               | The same build, with a sidebar layout on wide windows                           |
+| Android              | Builds and runs; exercised least of the three                                   |
+| macOS, Apple Silicon | The same build again, as "Designed for iPad" — a window with the sidebar layout |
 
-macOS is a real target rather than a port, but it is the one with rough edges:
-there is no keystore-backed secret store yet, so a macOS build is a development
-build rather than something to point at a production gateway.
-[docs/platform-notes.md](docs/platform-notes.md) records what is shimmed and why,
-and [SECURITY.md](SECURITY.md) states the gap plainly.
+The Mac is not a separate port. It is the iOS app, which Apple runs on Apple
+Silicon Macs unmodified, so it has the same keychain, the same modules and the
+same code paths — and one seam, `isiOSAppOnMac`, for the few things a window
+should do differently from a tablet. That is a deliberate reversal:
+[ADR-0011](docs/adr/0011-mac-via-the-ipad-build.md) records what a native
+react-native-macos target cost and why it was dropped, and
+[docs/platform-notes.md](docs/platform-notes.md) records what has and has not
+been verified on a Mac.
 
 ## Roadmap
 
-| Milestone                                                      | State       |
-| -------------------------------------------------------------- | ----------- |
-| Skeleton: one codebase on four platforms                       | Done        |
-| The protocol sources and the connection state machine          | Done        |
-| Setup and sign-in                                              | Done        |
-| Bot chats: streaming, tools, approvals, reconnection           | Done        |
-| Bot-to-bot messages, subagents and the Activity timeline       | Done        |
-| iPad and macOS layout, the transcript cache, image attachments | Done        |
-| Routines                                                       | Done        |
-| Release: icons, build profiles, signing, this README           | In progress |
+| Milestone                                                    | State       |
+| ------------------------------------------------------------ | ----------- |
+| Skeleton: one codebase on four platforms                     | Done        |
+| The protocol sources and the connection state machine        | Done        |
+| Setup and sign-in                                            | Done        |
+| Bot chats: streaming, tools, approvals, reconnection         | Done        |
+| Bot-to-bot messages, subagents and the Activity timeline     | Done        |
+| iPad and Mac layout, the transcript cache, image attachments | Done        |
+| Routines                                                     | Done        |
+| Release: icons, build profiles, signing, this README         | In progress |
 
 After that: paging back through long history, notifications, and an Android pass
 that deserves the name.
@@ -208,8 +210,7 @@ that deserves the name.
 
 Issues and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers
 the toolchain, the checks that have to pass, and the conventions that are easy to
-get wrong — the vendored protocol sources and the hand-maintained macOS project
-in particular. [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) applies.
+get wrong — the vendored protocol sources in particular. [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) applies.
 
 Security issues go privately to the address in [SECURITY.md](SECURITY.md), not
 into an issue.
@@ -217,7 +218,7 @@ into an issue.
 The repository is an npm workspace:
 
 ```
-apps/hermie              the Expo app, including the macOS project
+apps/hermie              the Expo app, and the local Expo module under modules/
 packages/hermes-shared   protocol sources vendored from Hermes Agent
 packages/gateway-client  connection state machine, credentials, PKCE — no React
 packages/transcript      the chat engine: item model, reducer, reconciliation, selectors

@@ -1,12 +1,11 @@
 /**
- * The iPad/macOS shell: sidebar plus detail.
+ * The wide-window shell — an iPad or a Mac: sidebar plus detail.
  *
- * There is no navigator here — both panes are always mounted — so the whole
- * behaviour is which pane is on screen and which row is marked selected. That
- * is exactly what a test can assert, and what a screenshot of a Mac window
- * cannot: `docs/platform-notes.md` records that react-native-macos cannot be
- * driven past a text field by a script, so macOS is verified by build plus
- * these assertions rather than by walking the UI.
+ * There is no navigator here, both panes are always mounted, and a window too
+ * narrow for two never reaches this component (`useLayoutMode` hands that case
+ * to the compact stack). So the whole behaviour is which pane is on screen and
+ * which row is marked selected, which is exactly what a test can assert and
+ * what a screenshot of a Mac window cannot.
  */
 import { fireEvent, screen } from '@testing-library/react-native'
 import { useWindowDimensions } from 'react-native'
@@ -41,7 +40,6 @@ const bot = (name: string, displayName: string): Bot => ({
 })
 
 const wide = () => mockDimensions.mockReturnValue({ width: 1024, height: 1366, scale: 2, fontScale: 1 })
-const narrow = () => mockDimensions.mockReturnValue({ width: 520, height: 900, scale: 2, fontScale: 1 })
 
 beforeEach(() => {
   useBotsStore.getState().reset()
@@ -88,30 +86,11 @@ describe('RegularShell', () => {
     expect(screen.getByTestId('bot-row-researcher').props.accessibilityState).toMatchObject({ selected: false })
   })
 
-  it('shows one pane at a time in a window too narrow for two', () => {
-    narrow()
-    renderScreen(<RegularShell />)
-
-    // The list first, with no detail beside it.
-    expect(screen.getByTestId('bot-row-researcher')).toBeTruthy()
-    expect(screen.queryByTestId('regular-back-to-list')).toBeNull()
-
-    fireEvent.press(screen.getByTestId('bot-row-researcher'))
-
-    // …and then the chat, with a way back.
-    expect(screen.getByTestId('regular-back-to-list')).toBeTruthy()
-    expect(screen.queryByTestId('bot-row-researcher')).toBeNull()
-
-    fireEvent.press(screen.getByTestId('regular-back-to-list'))
-    expect(screen.getByTestId('bot-row-researcher')).toBeTruthy()
-  })
-
-  it('keeps both panes when the window is wide enough', () => {
+  it('keeps both panes mounted while a chat is open', () => {
     renderScreen(<RegularShell />)
 
     fireEvent.press(screen.getByTestId('bot-row-researcher'))
 
-    expect(screen.queryByTestId('regular-back-to-list')).toBeNull()
     expect(screen.getByTestId('bot-row-writer')).toBeTruthy()
   })
 })
