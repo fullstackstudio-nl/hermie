@@ -1,5 +1,5 @@
 /**
- * Routines: the list, and the stack that hangs off it.
+ * Crons: the list, and the stack that hangs off it.
  *
  * NAVIGATION. This is one screen with early-return sub-screens, the same shape
  * Settings uses for its connection test and gallery. It is not a navigator on
@@ -7,14 +7,16 @@
  * about what "push" means, and a feature that carries its own three-deep stack
  * works identically in both.
  *
- * The list itself is the WS `cron.manage` answer, split into Active and Paused.
- * Its banner is the one thing on the screen that is not about a single job:
- * `gateway_running === false` means the scheduler process is down, and every
- * routine below is then a plan rather than a promise.
+ * The list itself is the HTTP `GET /api/cron/jobs?profile=all` answer, split
+ * into Active and Paused, and it spans every profile — see the controller for
+ * why the socket cannot do that. Its banner is the one thing on the screen that
+ * is not about a single job: `gateway_running === false` means the scheduler
+ * process is down, and every cron below is then a plan rather than a promise.
  */
 import { useCallback, useMemo, useState } from 'react'
 import { Pressable, RefreshControl, SectionList, View } from 'react-native'
 
+import { useBotsStore } from '../../store/bots'
 import { useCronStore } from '../../store/cron'
 import { Screen, Text } from '../../ui/primitives'
 import { useEscapeKey } from '../../ui/useEscapeKey'
@@ -48,6 +50,11 @@ export function CronScreen() {
   const error = useCronStore(state => state.error)
   const gatewayRunning = useCronStore(state => state.gatewayRunning)
   const targets = useCronStore(state => state.deliveryTargets)
+  const bots = useBotsStore(state => state.bots)
+
+  // The roster IS the profile list — a bot is a Hermes profile — and a gateway
+  // that serves one of them gets no picker rather than a picker with one option.
+  const profiles = useMemo(() => (bots.length > 1 ? bots.map(bot => bot.name) : []), [bots])
 
   const [view, setView] = useState<CronView>({ screen: 'list' })
   const [refreshing, setRefreshing] = useState(false)
@@ -99,6 +106,11 @@ export function CronScreen() {
     ]
   }, [jobs])
 
+  // The REST list tags EVERY row with its store, so on a single-profile gateway
+  // each one would read "Profile: default" — a column of the same word. It is
+  // shown only where it tells two rows apart.
+  const showProfiles = useMemo(() => new Set(jobs.map(job => job.profile)).size > 1, [jobs])
+
   const selected = view.screen === 'list' ? null : (jobs.find(job => job.id === view.jobId) ?? null)
 
   // Escape goes back ONE level. A sub page registers on top of whatever is
@@ -141,6 +153,7 @@ export function CronScreen() {
           job={editing.job}
           onCancel={() => setEditing({ open: false, job: null })}
           onSave={input => void save(input)}
+          profiles={profiles}
           saving={saving}
           targets={targets}
           visible={editing.open}
@@ -159,7 +172,11 @@ export function CronScreen() {
         keyExtractor={job => job.id}
         refreshControl={<RefreshControl onRefresh={refresh} refreshing={refreshing} />}
         renderItem={({ item }) => (
-          <RoutineRow job={item} onPress={() => setView({ screen: 'detail', jobId: item.id })} />
+          <RoutineRow
+            job={item}
+            onPress={() => setView({ screen: 'detail', jobId: item.id })}
+            showProfile={showProfiles}
+          />
         )}
         renderSectionHeader={({ section }) => (
           <Text
@@ -187,6 +204,7 @@ export function CronScreen() {
         job={editing.job}
         onCancel={() => setEditing({ open: false, job: null })}
         onSave={input => void save(input)}
+        profiles={profiles}
         saving={saving}
         targets={targets}
         visible={editing.open}
@@ -258,14 +276,19 @@ function EmptyState({ loading, error }: { loading: boolean; error: string | null
   )
 }
 
-function RoutineRow({ job, onPress }: { job: CronJob; onPress: () => void }) {
+function RoutineRow({ job, onPress, showProfile }: { job: CronJob; onPress: () => void; showProfile: boolean }) {
   const theme = useTheme()
   const status = cronStatusOf(job)
   const nextRun = relativeTime(job.nextRunAt)
   const summary = lastErrorSummary(job.lastError)
 
+  // Two profiles may hold a cron of the same name, so the name alone does not
+  // identify the row to somebody reading it out.
+  const owner = showProfile && job.profile ? job.profile : null
+  const label = owner ? `${job.name}, ${cronStrings.list.profile(owner)}` : job.name
+
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={job.name} onPress={onPress} testID={`cron-row-${job.id}`}>
+    <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} testID={`cron-row-${job.id}`}>
       {({ pressed }) => (
         <View
           style={{
@@ -295,6 +318,11 @@ function RoutineRow({ job, onPress }: { job: CronJob; onPress: () => void }) {
             <Text color="textMuted" style={{ flex: 1 }} variant="caption">
               {job.deliver ? `@${job.deliver}` : ''}
             </Text>
+            {owner ? (
+              <Text color="textMuted" variant="caption" testID={`cron-profile-${job.id}`}>
+                {cronStrings.list.profile(owner)}
+              </Text>
+            ) : null}
             <Text color="textMuted" variant="caption">
               {nextRun ? cronStrings.list.nextRun(nextRun) : cronStrings.list.noNextRun}
             </Text>

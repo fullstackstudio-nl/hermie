@@ -1,24 +1,35 @@
 /**
- * The Routines list, driven end to end through the real controller and store
- * with a hand-written connection underneath. What is worth pinning here is the
- * reading of the gateway's answer rather than the pixels: which section a job
- * lands in, that `gateway_running: false` raises the banner, and that a
- * scheduler exception is shown as its first sentence rather than as a stack.
+ * The Crons list, driven end to end through the real controller and store with
+ * a hand-written connection underneath. What is worth pinning here is the
+ * reading of the gateway's answer rather than the pixels: which surface the
+ * list comes off, which section a job lands in, that `gateway_running: false`
+ * raises the banner, and that a scheduler exception is shown as its first
+ * sentence rather than as a stack.
+ *
+ * The rows are in the STORED job shape, which is what the REST routes answer
+ * with and which differs from the socket's `_format_job` rows in more than the
+ * key for the id: the schedule is a parsed object with the readable form beside
+ * it, and `repeat` is a counter rather than a rendered phrase.
  */
-import { screen, waitFor } from '@testing-library/react-native'
+import { fireEvent, screen, waitFor } from '@testing-library/react-native'
 
 import { renderScreen } from './support/render'
 import { CronScreen } from '../src/features/cron'
+import { useBotsStore } from '../src/store/bots'
 import { useCronStore } from '../src/store/cron'
 
 const mockRequest = jest.fn()
 const mockHttpGet = jest.fn()
+const mockHttpPost = jest.fn()
 
 // One frozen value, the way `GatewayProvider` hands one out: the connection and
 // its `http` are refs there, and a fresh object per render would restart the
 // controller on every paint.
 jest.mock('../src/gateway', () => {
-  const http = { get: (...args: unknown[]) => mockHttpGet(...args) }
+  const http = {
+    get: (...args: unknown[]) => mockHttpGet(...args),
+    post: (...args: unknown[]) => mockHttpPost(...args)
+  }
   const connection = {
     request: (...args: unknown[]) => mockRequest(...args),
     on: () => () => undefined,
@@ -31,52 +42,72 @@ jest.mock('../src/gateway', () => {
   return { useGateway: () => ({ connection, http }) }
 })
 
+/** A stored cron job, as `_annotate_cron_job` hands one to the dashboard. */
+const storedJob = (overrides: Record<string, unknown>) => ({
+  schedule: { kind: 'interval', display: 'every 2h', seconds: 7200 },
+  schedule_display: 'every 2h',
+  prompt: 'Check the VM.',
+  deliver: 'local',
+  enabled: true,
+  state: 'scheduled',
+  next_run_at: null,
+  last_run_at: null,
+  last_status: null,
+  last_error: null,
+  repeat: { times: null, completed: 0 },
+  skills: [],
+  profile: 'default',
+  profile_name: 'default',
+  is_default_profile: true,
+  ...overrides
+})
+
 const JOBS = [
-  {
-    job_id: 'job-heartbeat',
+  storedJob({
+    id: 'job-heartbeat',
     name: 'VM heartbeat',
-    schedule: 'every 2h',
-    prompt_preview: 'Check the VM.',
-    deliver: 'local',
-    enabled: true,
-    state: 'active',
     next_run_at: new Date(Date.now() + 7_200_000).toISOString(),
     last_run_at: new Date(Date.now() - 3_600_000).toISOString(),
-    last_status: 'ok',
-    last_error: null
-  },
-  {
-    job_id: 'job-digest',
+    last_status: 'ok'
+  }),
+  storedJob({
+    id: 'job-digest',
     name: 'Weekly digest',
-    schedule: 'weekdays at 9am',
-    prompt_preview: 'Write the digest.',
-    deliver: 'bot-chat:researcher',
-    enabled: true,
-    state: 'active',
-    next_run_at: null,
+    schedule: { kind: 'cron', display: 'weekdays at 9am', expr: '0 9 * * 1-5' },
+    schedule_display: 'weekdays at 9am',
     last_run_at: new Date(Date.now() - 7_200_000).toISOString(),
     last_status: 'error',
     last_error: "RuntimeError: Cron job 'Weekly digest' has no model configured. Set one with `hermes cron edit`."
-  },
-  {
-    job_id: 'job-cleanup',
+  }),
+  // The one the old code could not see: it lives in a bot's own cron store, so
+  // the socket list — which reads the launch profile's store — never mentions it.
+  storedJob({
+    id: 'job-inbox-scan',
+    name: 'Source scan',
+    schedule_display: 'every 4h',
+    deliver: 'bot-chat:researcher',
+    profile: 'researcher',
+    profile_name: 'researcher',
+    is_default_profile: false,
+    last_status: 'ok'
+  }),
+  storedJob({
+    id: 'job-cleanup',
     name: 'Inbox cleanup',
-    schedule: 'every day at 6pm',
-    prompt_preview: 'Archive what is answered.',
-    deliver: 'local',
+    schedule_display: 'every day at 6pm',
     enabled: false,
     state: 'paused',
-    next_run_at: null,
-    last_run_at: null,
-    last_status: null,
-    last_error: null
-  }
+    paused_at: new Date(Date.now() - 86_400_000).toISOString(),
+    paused_reason: 'Paused from the desktop app'
+  })
 ]
 
 function answerWith(gatewayRunning: boolean): void {
   mockRequest.mockImplementation(async (method: string) => {
     if (method === 'cron.manage') {
-      return { success: true, jobs: JOBS, count: JOBS.length, gateway_running: gatewayRunning }
+      // The scheduler flag and nothing else: on a real gateway this answer is
+      // the launch profile's jobs, which is precisely what must not be listed.
+      return { success: true, jobs: [], count: 0, gateway_running: gatewayRunning }
     }
 
     return {}
@@ -85,18 +116,66 @@ function answerWith(gatewayRunning: boolean): void {
 
 beforeEach(() => {
   useCronStore.getState().reset()
+  useBotsStore.getState().setBots([])
   mockRequest.mockReset()
   mockHttpGet.mockReset()
-  mockHttpGet.mockResolvedValue({ targets: [{ id: 'local', name: 'Local (save only)' }] })
+  mockHttpPost.mockReset()
+  mockHttpPost.mockResolvedValue({})
+  mockHttpGet.mockImplementation(async (path: string) => {
+    if (path.startsWith('/api/cron/jobs')) {
+      return JOBS
+    }
+
+    return { targets: [{ id: 'local', name: 'Local (save only)' }] }
+  })
   answerWith(true)
 })
 
-it('asks for the disabled jobs too, or the Paused section could never fill', async () => {
+it('reads the list over HTTP for every profile, not off the socket', async () => {
+  renderScreen(<CronScreen />)
+
+  await waitFor(() => expect(mockHttpGet).toHaveBeenCalledWith('/api/cron/jobs?profile=all'))
+})
+
+it('lists a cron that lives in a bot profile, and says whose it is', async () => {
+  renderScreen(<CronScreen />)
+
+  expect(await screen.findByText('Source scan')).toBeTruthy()
+  expect(screen.getByTestId('cron-profile-job-inbox-scan')).toHaveTextContent('Profile: researcher')
+  expect(screen.getByTestId('cron-profile-job-heartbeat')).toHaveTextContent('Profile: default')
+})
+
+it('leaves the profile off every row when they all share one', async () => {
+  mockHttpGet.mockImplementation(async (path: string) =>
+    path.startsWith('/api/cron/jobs')
+      ? JOBS.filter(job => job.profile === 'default')
+      : { targets: [{ id: 'local', name: 'Local (save only)' }] }
+  )
+  renderScreen(<CronScreen />)
+
+  await screen.findByText('VM heartbeat')
+
+  // A column of "Profile: default" tells nobody anything.
+  expect(screen.queryByTestId('cron-profile-job-heartbeat')).toBeNull()
+})
+
+it('still asks the socket for the scheduler flag, and only for that', async () => {
   renderScreen(<CronScreen />)
 
   await waitFor(() => expect(mockRequest).toHaveBeenCalled())
 
+  // `include_disabled` rides along because the flag is attached to a non-empty
+  // job list; a gateway whose jobs are all paused would otherwise never say.
   expect(mockRequest).toHaveBeenCalledWith('cron.manage', { action: 'list', include_disabled: true }, undefined)
+})
+
+it('renders the list even when the socket cannot answer the scheduler flag', async () => {
+  mockRequest.mockRejectedValue(new Error('socket closed'))
+  renderScreen(<CronScreen />)
+
+  expect(await screen.findByText('VM heartbeat')).toBeTruthy()
+  // Unknown, which is not the same as "not running": no banner either way.
+  expect(screen.queryByTestId('cron-gateway-banner')).toBeNull()
 })
 
 it('splits the list into Active and Paused', async () => {
@@ -109,13 +188,15 @@ it('splits the list into Active and Paused', async () => {
 
   // The paused job carries the paused dot, not the "never run" one.
   expect(screen.getAllByTestId('cron-status-paused')).toHaveLength(1)
-  expect(screen.getAllByTestId('cron-status-ok')).toHaveLength(1)
+  expect(screen.getAllByTestId('cron-status-ok')).toHaveLength(2)
   expect(screen.getAllByTestId('cron-status-failed')).toHaveLength(1)
 })
 
-it('renders the schedule as a sentence and the next run as a relative time', async () => {
+it('reads the schedule out of the stored job, where it is an object', async () => {
   renderScreen(<CronScreen />)
 
+  // `schedule` on a stored row is the parsed spec; the readable form is beside
+  // it, and taking the wrong one leaves the row blank.
   expect(await screen.findByText('Every 2 hours')).toBeTruthy()
   expect(screen.getByText('Next: in 2h')).toBeTruthy()
   // Nothing scheduled must not read as "now".
@@ -135,7 +216,7 @@ it('raises the banner when the scheduler process is down', async () => {
   answerWith(false)
   renderScreen(<CronScreen />)
 
-  expect(await screen.findByText('Routines will not run: the Hermes gateway process is not running')).toBeTruthy()
+  expect(await screen.findByText('Crons will not run: the Hermes gateway process is not running')).toBeTruthy()
 })
 
 it('keeps the banner down while the gateway says the scheduler is up', async () => {
@@ -147,8 +228,103 @@ it('keeps the banner down while the gateway says the scheduler is up', async () 
 })
 
 it('explains a failed list read instead of showing an empty list', async () => {
-  mockRequest.mockRejectedValue(new Error('socket closed'))
+  mockHttpGet.mockRejectedValue(new Error('socket closed'))
   renderScreen(<CronScreen />)
 
-  expect(await screen.findByText('Could not load the routines: socket closed')).toBeTruthy()
+  expect(await screen.findByText('Could not load the crons: socket closed')).toBeTruthy()
+})
+
+/**
+ * Every mutation has to name the profile.
+ *
+ * `cron.manage` binds HERMES_HOME to it and looks nowhere else, so a pause
+ * without it does not pause the wrong job — it reports no such job. The HTTP
+ * routes do search, which is worse in its own way: two profiles that named a
+ * cron the same thing make the unscoped call a coin toss.
+ */
+describe('mutations carry the owning profile', () => {
+  const openScanRow = async () => {
+    renderScreen(<CronScreen />)
+    fireEvent.press(await screen.findByTestId('cron-row-job-inbox-scan'))
+
+    return screen.findByText('Run now')
+  }
+
+  it('scopes pause to the profile the job came from', async () => {
+    await openScanRow()
+
+    fireEvent.press(screen.getByText('Pause'))
+
+    await waitFor(() =>
+      expect(mockRequest).toHaveBeenCalledWith(
+        'cron.manage',
+        { action: 'pause', name: 'job-inbox-scan', profile: 'researcher' },
+        undefined
+      )
+    )
+  })
+
+  it('scopes the detail read and Run now to it too', async () => {
+    await openScanRow()
+
+    await waitFor(() => expect(mockHttpGet).toHaveBeenCalledWith('/api/cron/jobs/job-inbox-scan?profile=researcher'))
+
+    fireEvent.press(screen.getByText('Run now'))
+
+    await waitFor(() =>
+      expect(mockHttpPost).toHaveBeenCalledWith('/api/cron/jobs/job-inbox-scan/trigger?profile=researcher', {})
+    )
+  })
+})
+
+/**
+ * Creating a cron picks its store, because that is the only way to create one
+ * for a bot: the profile is the scope the create runs under, not a field on the
+ * job. The picker only appears where there is a choice to make.
+ */
+describe('the editor chooses a profile on create', () => {
+  beforeEach(() => {
+    useBotsStore.getState().setBots([
+      {
+        name: 'researcher',
+        displayName: 'Researcher',
+        description: '',
+        model: '',
+        provider: '',
+        isDefault: false,
+        hasAvatar: false,
+        uiMetaRevision: 0
+      },
+      {
+        name: 'writer',
+        displayName: 'Writer',
+        description: '',
+        model: '',
+        provider: '',
+        isDefault: false,
+        hasAvatar: false,
+        uiMetaRevision: 0
+      }
+    ])
+  })
+
+  it('sends the chosen profile with the create', async () => {
+    renderScreen(<CronScreen />)
+
+    await screen.findByText('VM heartbeat')
+    fireEvent.press(screen.getByTestId('cron-create'))
+
+    fireEvent.changeText(screen.getByTestId('cron-editor-name'), 'Nightly sweep')
+    fireEvent.changeText(screen.getByTestId('cron-editor-prompt'), 'Sweep the logs.')
+    fireEvent.press(screen.getByTestId('cron-editor-profile-researcher'))
+    fireEvent.press(screen.getByTestId('cron-editor-save'))
+
+    await waitFor(() =>
+      expect(mockRequest).toHaveBeenCalledWith(
+        'cron.manage',
+        expect.objectContaining({ action: 'add', name: 'Nightly sweep', profile: 'researcher' }),
+        undefined
+      )
+    )
+  })
 })

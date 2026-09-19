@@ -299,6 +299,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is not coming.
 - A reply addressed at another bot is drawn slightly quieter than one addressed at you.
 - Dragging the transcript down now lowers the keyboard with the finger.
+- The scheduled-prompts feature is called **Crons**, not Routines. The gateway, its CLI
+  (`hermes cronjob list`) and its dashboard all say cron, and a second name for the same thing only
+  cost the reader a translation step. Where the list spans more than one profile, each row now says
+  which one it belongs to, and creating a cron picks the profile it is created for.
 
 ### Fixed
 
@@ -316,6 +320,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bar, and `Screen` turned that ~25pt top safe-area inset into padding nothing occupied, because the
   macOS title bar is outside the app's window. The top inset is dropped on a Mac and only there;
   iPhone and iPad are untouched. Fixed in code, **unverified in a window**.
+- The cron list showed nothing for a cron that lives in a bot's profile, while the gateway dashboard
+  listed it. The list was read over the socket, and `cron.manage` is profile-scoped: it binds
+  HERMES_HOME to its `profile` parameter and answers from that one store, so an unscoped call
+  reported the launch profile's jobs and silently omitted every other profile's. The list is now
+  `GET /api/cron/jobs?profile=all`, the only surface that walks every profile and the only one that
+  says which store a job came out of; one socket call rides along for `gateway_running`, which no
+  HTTP route reports, and its failure no longer costs you the list. Every detail read, run history,
+  pause, resume, trigger, edit and delete now names the owning profile.
+- A cron read over HTTP showed no schedule and always claimed to repeat until removed. The stored job
+  keeps the parsed schedule as an object with the readable form beside it under `schedule_display`,
+  and `repeat` as `{times, completed}` rather than a count — both were read as if they were the
+  socket's already-flattened strings, so both came out empty.
+
 - A reply that arrived after a tool call was painted twice — once as the partially streamed copy and
   once as the clean final — while the gateway had stored a single row. The tool boundary seals the
   streaming bubble, so the completion had nowhere to land; it now settles onto that sealed bubble

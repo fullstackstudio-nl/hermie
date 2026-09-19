@@ -1,30 +1,37 @@
 /**
- * Every literal the Routines feature paints.
+ * Every literal the Crons feature paints.
+ *
+ * The gateway calls these cron jobs and so does its dashboard, so Hermie calls
+ * them crons too: a second name for the same thing only costs the reader a
+ * translation step when they go looking for one in `hermes cronjob list`. The
+ * identifiers in this feature still say `cron`, which they always did.
  *
  * Its own file rather than `src/i18n/strings.ts`, for the same reason the chat
  * kit keeps `chat-ui/strings.ts`: the feature is self-contained, and copy that
  * lives next to the screen it belongs to moves with it.
  */
 export const cronStrings = {
-  title: 'Routines',
+  title: 'Crons',
   subtitle: 'A little progress, on repeat.',
   sections: {
     active: 'ACTIVE',
     paused: 'PAUSED'
   },
   list: {
-    add: 'New routine',
-    empty: 'No routines yet. Create one to have a bot work while you are away.',
-    loading: 'Loading routines…',
-    failed: (reason: string) => `Could not load the routines: ${reason}`,
+    add: 'New cron',
+    empty: 'No crons yet. Create one to have a bot work while you are away.',
+    loading: 'Loading crons…',
+    failed: (reason: string) => `Could not load the crons: ${reason}`,
     nextRun: (when: string) => `Next: ${when}`,
     neverRun: 'Never run',
     noNextRun: 'Not scheduled',
     lastRun: (when: string) => `Last run ${when}`,
     refreshedNever: 'Not refreshed yet',
-    refreshedAt: (when: string) => `Refreshed ${when}`
+    refreshedAt: (when: string) => `Refreshed ${when}`,
+    /** Which bot's cron store a job lives in. Two profiles may name a cron the same thing. */
+    profile: (name: string) => `Profile: ${name}`
   },
-  gatewayBanner: 'Routines will not run: the Hermes gateway process is not running',
+  gatewayBanner: 'Crons will not run: the Hermes gateway process is not running',
   status: {
     ok: 'Success',
     failed: 'Failed',
@@ -33,10 +40,10 @@ export const cronStrings = {
     running: 'Running'
   },
   detail: {
-    back: 'Routines',
+    back: 'Crons',
     nextRun: 'NEXT RUN',
     instructions: 'Instructions',
-    noPrompt: 'This routine runs a script and has no prompt.',
+    noPrompt: 'This cron runs a script and has no prompt.',
     schedule: 'Schedule',
     scheduleLabel: 'Schedule',
     deliverLabel: 'Delivers to',
@@ -56,49 +63,54 @@ export const cronStrings = {
     pause: 'Pause',
     resume: 'Resume',
     edit: 'Edit',
-    delete: 'Delete routine',
+    delete: 'Delete cron',
     runHistory: 'RUN HISTORY',
-    noRuns: 'This routine has not run yet.',
+    noRuns: 'This cron has not run yet.',
     runsFailed: (reason: string) => `Could not load the run history: ${reason}`,
     loadingRuns: 'Loading runs…',
     loading: 'Loading…',
     unknown: '—'
   },
   confirmDelete: {
-    eyebrow: 'DELETE ROUTINE',
+    eyebrow: 'DELETE CRON',
     title: (name: string) => `Delete “${name}”?`,
     body: 'The schedule is removed from the gateway. Run transcripts already recorded stay where they are.',
     confirm: 'Delete',
     cancel: 'Keep it'
   },
   run: {
-    back: 'Routine',
+    back: 'Cron',
     title: 'Run',
     empty: 'This run recorded no messages.',
     failed: (reason: string) => `Could not load this run: ${reason}`,
     loading: 'Loading the run…',
-    readOnly: 'Read-only: a routine run cannot be continued from here.'
+    readOnly: 'Read-only: a cron run cannot be continued from here.'
   },
   editor: {
-    createEyebrow: 'NEW ROUTINE',
-    editEyebrow: 'EDIT ROUTINE',
-    createTitle: 'New routine',
-    editTitle: 'Edit routine',
+    createEyebrow: 'NEW CRON',
+    editEyebrow: 'EDIT CRON',
+    createTitle: 'New cron',
+    editTitle: 'Edit cron',
     name: 'Name',
     namePlaceholder: 'Morning briefing',
     prompt: 'Instructions',
     promptPlaceholder: 'Summarize overnight updates and list three takeaways.',
     deliver: 'Delivers to',
     deliverLocal: 'Local (save only)',
+    profile: 'Profile',
+    profileHint: 'Whose cron store the job is written to. It runs as that bot.',
+    /** The profile `hermes serve` itself was launched with; the gateway's own default. */
+    profileDefault: 'This gateway',
+    profileLocked: 'A cron cannot be moved to another profile after it is created.',
     schedule: 'Schedule',
     preview: (schedule: string) => `Sends to the gateway as: ${schedule}`,
     nextRunHint: 'The gateway decides the next run; it appears here once saved.',
-    save: 'Save routine',
+    save: 'Save cron',
     saving: 'Saving…',
     cancel: 'Cancel',
-    nameRequired: 'Give the routine a name.',
+    nameRequired: 'Give the cron a name.',
     promptRequired: 'Write the instructions the bot should follow.',
-    saveFailed: (reason: string) => `The gateway refused the routine: ${reason}`
+    saveFailed: (reason: string) => `The gateway refused the cron: ${reason}`
   },
   schedule: {
     mode: 'Repeat',

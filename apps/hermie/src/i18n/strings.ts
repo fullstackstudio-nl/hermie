@@ -278,7 +278,7 @@ export const strings = {
   tabs: {
     chats: 'Chats',
     activity: 'Activity',
-    routines: 'Routines',
+    routines: 'Crons',
     settings: 'Settings'
   },
 

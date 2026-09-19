@@ -56,7 +56,7 @@ it('says the run is read-only and offers no composer', async () => {
 
   await screen.findByText('Check the VM and report.')
 
-  expect(screen.getByText('Read-only: a routine run cannot be continued from here.')).toBeTruthy()
+  expect(screen.getByText('Read-only: a cron run cannot be continued from here.')).toBeTruthy()
   expect(screen.queryByTestId('composer-input')).toBeNull()
 })
 

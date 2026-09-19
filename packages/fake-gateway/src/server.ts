@@ -114,8 +114,14 @@ export interface FakeGatewayState {
   profiles: ProfileRow[]
   cronJobs: CronJob[]
   /**
+   * The profile `hermes serve` was launched with. `cron.manage` binds
+   * HERMES_HOME to its `profile` param and falls back to this one, so it is the
+   * only store an unscoped socket call can see.
+   */
+  cronLaunchProfile: string
+  /**
    * `gateway_running` in every `cron.manage` answer: whether the scheduler
-   * process is up. Flip it to false to drive the Routines banner.
+   * process is up. Flip it to false to drive the Crons banner.
    */
   cronGatewayRunning: boolean
   /** Stored ids of the sessions the gateway reports as busy. */
@@ -202,6 +208,12 @@ interface ProfileRow {
 interface CronJob {
   id: string
   name: string
+  /**
+   * Whose cron store holds it. There is no such field on a real stored job —
+   * each profile has its own `cron/jobs.json` — so it is stripped from every WS
+   * row and re-attached on HTTP ones the way `_annotate_cron_job` does.
+   */
+  profile: string
   schedule: string
   prompt: string
   deliver: string
@@ -248,6 +260,13 @@ export interface FakeGateway {
   dropSockets(): void
   close(): Promise<void>
 }
+
+/**
+ * The profile `hermes serve` runs as. The fixture bots (`researcher`,
+ * `writer`) are secondary profiles, so a cron in one of them is only reachable
+ * with an explicit scope.
+ */
+const LAUNCH_PROFILE = 'default'
 
 const WS_PATH = '/api/ws'
 const GATEWAY_WS_PROTOCOL = 'hermes-gateway-v1'
@@ -345,7 +364,13 @@ const AVATAR_PNG_BASE64 =
  */
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
 
-/** `tools/cronjob_job_args.py::_format_job` — the row `cron.manage list` answers with. */
+/**
+ * `tools/cronjob_job_args.py::_format_job` — the row `cron.manage list` answers
+ * with. Deliberately carries NO `profile`: the socket answers out of one
+ * profile's store, so a row has no owner to name, and a client that wants to
+ * know has to use the REST list. Dropping it here is what makes a client that
+ * lists over the socket and then mutates fail in the test rather than in the app.
+ */
 function formatCronJob(job: CronJob): Record<string, unknown> {
   return {
     job_id: job.id,
@@ -368,19 +393,47 @@ function formatCronJob(job: CronJob): Record<string, unknown> {
 }
 
 /**
+ * `hermes_cli/web_server_cron.py::_annotate_cron_job` — what the REST routes
+ * add to a stored job on the way out. The dashboard reads `profile` off this,
+ * and so does Hermie: it is the only surface that says which store a job came
+ * from, because the stored record itself does not know.
+ *
+ * `runs` is dropped: the run sessions live behind `/runs` on a real gateway,
+ * not inside the job.
+ */
+function annotateCronJob(job: CronJob): Record<string, unknown> {
+  const { runs: _runs, ...stored } = job
+
+  return {
+    ...stored,
+    profile: job.profile,
+    profile_name: job.profile,
+    hermes_home: `/root/.hermes/profiles/${job.profile}`,
+    is_default_profile: job.profile === 'default',
+    scheduler_heartbeat_age_s: 4
+  }
+}
+
+/**
  * A cron run: an ordinary session whose id is `cron_{job_id}_{timestamp}`.
  *
  * That is the whole binding between a job and its runs on a real gateway — the
  * id prefix plus `source='cron'` — so the fake keeps run transcripts in the
  * same session map as chats and answers `session.history` for them unchanged.
  */
-function makeCronRunSession(jobId: string, startedAt: number, prompt: string, answer: string): FakeSession {
+function makeCronRunSession(
+  jobId: string,
+  startedAt: number,
+  prompt: string,
+  answer: string,
+  profile: string
+): FakeSession {
   const id = `cron_${jobId}_${startedAt}`
 
   return {
     id,
     storedId: id,
-    profile: 'default',
+    profile,
     title: `Cron: ${jobId}`,
     seq: 0,
     ring: [],
@@ -469,7 +522,8 @@ function initialState(options: FakeGatewayOptions): FakeGatewayState {
         job.id,
         run.started_at,
         job.prompt,
-        run.status === 'error' ? 'The check did not complete.' : 'Done — nothing needs your attention.'
+        run.status === 'error' ? 'The check did not complete.' : 'Done — nothing needs your attention.',
+        job.profile
       )
 
       session.id = run.id
@@ -525,14 +579,21 @@ function initialState(options: FakeGatewayOptions): FakeGatewayState {
     liveSubagents: new Map<string, LiveSubagent>(),
     agentProcesses: new Map<string, { session_id: string; command: string; status: string; startedAt: number }>(),
     cronGatewayRunning: true,
+    cronLaunchProfile: LAUNCH_PROFILE,
     cronJobs
   }
 }
 
 /**
- * Three routines, chosen to cover the three rows the list has to draw: a
- * healthy one with run history, one whose last attempt failed (with the
- * exception-wrapped `last_error` the scheduler really writes), and a paused one.
+ * The rows the list has to draw: a healthy one with run history, one whose last
+ * attempt failed (with the exception-wrapped `last_error` the scheduler really
+ * writes), and a paused one — all three in the launch profile — plus one that
+ * lives in `researcher`'s own cron store.
+ *
+ * That last one is the whole point of the fixture set. It is invisible to
+ * `cron.manage {action:'list'}` without a `profile`, exactly as on a real
+ * gateway, so a client that lists over the socket silently loses it while the
+ * dashboard shows it.
  */
 function initialCronJobs(): CronJob[] {
   const hourAgo = Math.floor(Date.now() / 1000) - 3_600
@@ -541,6 +602,7 @@ function initialCronJobs(): CronJob[] {
   return [
     {
       id: 'job-heartbeat',
+      profile: LAUNCH_PROFILE,
       name: 'VM heartbeat',
       schedule: 'every 2h',
       prompt: 'Check the VM, summarize disk and memory, and flag anything unusual.',
@@ -581,6 +643,7 @@ function initialCronJobs(): CronJob[] {
     },
     {
       id: 'job-digest',
+      profile: LAUNCH_PROFILE,
       name: 'Weekly digest',
       schedule: 'every friday 16:30',
       prompt: 'Write a short digest of this week for the team.',
@@ -599,7 +662,29 @@ function initialCronJobs(): CronJob[] {
       runs: []
     },
     {
+      // The profile-owned one: `cron.manage` without a `profile` cannot see it.
+      id: 'job-inbox-scan',
+      profile: 'researcher',
+      name: 'Source scan',
+      schedule: 'every 4h',
+      prompt: 'Scan the watched sources and note anything new worth reading.',
+      deliver: 'bot-chat:researcher',
+      enabled: true,
+      state: 'active',
+      next_run_at: new Date(Date.now() + 14_400_000).toISOString(),
+      last_run_at: new Date((hourAgo - 1_800) * 1000).toISOString(),
+      last_status: 'ok',
+      last_error: null,
+      paused_at: null,
+      paused_reason: null,
+      repeat: null,
+      skills: ['research'],
+      model: null,
+      runs: []
+    },
+    {
       id: 'job-cleanup',
+      profile: LAUNCH_PROFILE,
       name: 'Inbox cleanup',
       schedule: 'every day at 6pm',
       prompt: 'Archive anything already answered and list what is still open.',
@@ -910,7 +995,7 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     }
 
     if (path.startsWith('/api/cron/jobs')) {
-      await handleCron(req, res, path, method)
+      await handleCron(req, res, path, method, url.searchParams)
 
       return
     }
@@ -1005,18 +1090,33 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
    * (no `{job: …}` wrapper), `/runs` answers `{runs, limit}` of session rows,
    * and `DELETE` answers `{ok: true}`.
    */
-  async function handleCron(req: IncomingMessage, res: ServerResponse, path: string, method: string): Promise<void> {
+  async function handleCron(
+    req: IncomingMessage,
+    res: ServerResponse,
+    path: string,
+    method: string,
+    query: URLSearchParams
+  ): Promise<void> {
+    const profile = (query.get('profile') ?? '').trim()
+
     if (path === '/api/cron/jobs') {
       if (method === 'GET') {
-        json(res, 200, state.cronJobs)
+        // `_list_cron_jobs_sync` defaults to "all" and walks every profile's
+        // store; anything else is one profile. Either way each row comes back
+        // annotated with the profile it was read out of.
+        const wanted = profile || 'all'
+        const rows =
+          wanted.toLowerCase() === 'all' ? state.cronJobs : state.cronJobs.filter(entry => entry.profile === wanted)
+
+        json(res, 200, rows.map(annotateCronJob))
 
         return
       }
 
       if (method === 'POST') {
         const body = await readBody(req)
-        const job = addCronJob(body)
-        json(res, 200, job)
+        const job = addCronJob({ ...body, profile: profile || state.cronLaunchProfile })
+        json(res, 200, annotateCronJob(job))
 
         return
       }
@@ -1031,7 +1131,11 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     }
 
     const wanted = decodeURIComponent(match[1] as string)
-    const job = state.cronJobs.find(entry => entry.id === wanted || entry.name === wanted)
+    // `_job_profile`: the given profile, else the first store that has a job by
+    // that id or name. The walk is why these routes work without the parameter
+    // and why two profiles with the same job name make it a coin toss.
+    const candidates = profile ? state.cronJobs.filter(entry => entry.profile === profile) : state.cronJobs
+    const job = candidates.find(entry => entry.id === wanted || entry.name === wanted)
 
     if (!job) {
       json(res, 404, { detail: 'Unknown job' })
@@ -1052,19 +1156,19 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     if (action === 'pause' || action === 'resume') {
       setCronPaused(job, action === 'pause')
       publish('cron.changed', undefined, {})
-      json(res, 200, job)
+      json(res, 200, annotateCronJob(job))
 
       return
     }
 
     if (action === 'trigger') {
-      json(res, 200, triggerCronJob(job))
+      json(res, 200, annotateCronJob(triggerCronJob(job)))
 
       return
     }
 
     if (method === 'GET') {
-      json(res, 200, job)
+      json(res, 200, annotateCronJob(job))
 
       return
     }
@@ -1081,7 +1185,7 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       }
 
       publish('cron.changed', undefined, {})
-      json(res, 200, job)
+      json(res, 200, annotateCronJob(job))
 
       return
     }
@@ -1101,6 +1205,9 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     const schedule = typeof body.schedule === 'string' && body.schedule ? body.schedule : 'every 1h'
     const job: CronJob = {
       id: `job-${randomUUID().slice(0, 8)}`,
+      // Which store it lands in is decided by the caller's scope, never by a
+      // field in the payload — there is no owner field on a stored job.
+      profile: typeof body.profile === 'string' && body.profile ? body.profile : state.cronLaunchProfile,
       name: typeof body.name === 'string' && body.name ? body.name : 'New job',
       schedule,
       prompt: typeof body.prompt === 'string' ? body.prompt : '',
@@ -1154,7 +1261,13 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     job.last_status = 'ok'
     job.last_error = null
 
-    const session = makeCronRunSession(job.id, startedAt, job.prompt, 'Done — nothing needs your attention.')
+    const session = makeCronRunSession(
+      job.id,
+      startedAt,
+      job.prompt,
+      'Done — nothing needs your attention.',
+      job.profile
+    )
     state.sessions.set(run.id, session)
 
     publish('cron.changed', undefined, {})
@@ -1816,13 +1929,23 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
   function cronManage(params: Record<string, unknown>): Record<string, unknown> {
     const action = typeof params.action === 'string' ? params.action : 'list'
     const name = typeof params.name === 'string' ? params.name : ''
-    const listed = () => state.cronJobs.map(formatCronJob)
+    // The scope, exactly as `_profile_scoped_rpc` resolves it: the `profile`
+    // param when there is one, the launch profile otherwise. Nothing outside it
+    // exists for the rest of this call — not to list, not to find, not to touch.
+    const requested = typeof params.profile === 'string' ? params.profile.trim() : ''
+    const scope = requested || state.cronLaunchProfile
+    const inScope = () => state.cronJobs.filter(entry => entry.profile === scope)
+    const listed = () => inScope().map(formatCronJob)
+    // `scoped` proves the profile was honoured; the real handler adds it only
+    // when one was passed, and clients key an older-gateway fallback off that.
+    const scopedEcho = requested ? { scoped: requested } : {}
 
     if (action === 'list') {
       return {
         success: true,
         jobs: listed(),
-        count: state.cronJobs.length,
+        count: inScope().length,
+        ...scopedEcho,
         gateway_running: state.cronGatewayRunning
       }
     }
@@ -1833,7 +1956,8 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
         schedule: params.schedule,
         prompt: params.prompt,
         deliver: params.deliver,
-        repeat: params.repeat
+        repeat: params.repeat,
+        profile: scope
       })
 
       return {
@@ -1841,12 +1965,13 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
         job: formatCronJob(job),
         job_id: job.id,
         jobs: listed(),
+        ...scopedEcho,
         next_run_at: job.next_run_at,
         gateway_running: state.cronGatewayRunning
       }
     }
 
-    const job = state.cronJobs.find(entry => entry.name === name || entry.id === name)
+    const job = inScope().find(entry => entry.name === name || entry.id === name)
 
     if (!job) {
       return { success: false, error: `No such job: ${name}` }
@@ -1860,6 +1985,7 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
         success: true,
         removed_job: { id: job.id, name: job.name, schedule: job.schedule },
         jobs: listed(),
+        ...scopedEcho,
         gateway_running: state.cronGatewayRunning
       }
     }
@@ -1867,7 +1993,13 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     setCronPaused(job, action === 'pause')
     publish('cron.changed', undefined, {})
 
-    return { success: true, job: formatCronJob(job), jobs: listed(), gateway_running: state.cronGatewayRunning }
+    return {
+      success: true,
+      job: formatCronJob(job),
+      jobs: listed(),
+      ...scopedEcho,
+      gateway_running: state.cronGatewayRunning
+    }
   }
 
   /**
