@@ -127,6 +127,34 @@ function mergeWithLive(fresh: TranscriptItem, current: TranscriptItem): Transcri
   return merged
 }
 
+/**
+ * Put a merged list back into the gateway's own row order.
+ *
+ * `reconcileTail` splices rows it has never seen in front of the live tail,
+ * which is right whenever they were written after everything on screen — and
+ * wrong the moment they were not. A teammate's delivery or a cron turn written
+ * while the user was still typing carries a LOWER row id than the message they
+ * then sent, so arrival order shows the two the wrong way round, and the ids
+ * that say so only arrive with the tail.
+ *
+ * Row ids are the order the gateway holds, so a persisted item sorts by its own.
+ * An item with no row id yet sorts with the newest row above it, which keeps a
+ * streaming bubble under the prompt it answers and keeps a row genuinely newer
+ * than the whole live tail behind that tail, exactly as the splice intended.
+ */
+function inRowOrder(list: readonly TranscriptItem[]): TranscriptItem[] {
+  let newestAbove = -1
+  const keyed = list.map((item, index) => {
+    const key = item.rowId ?? newestAbove
+
+    newestAbove = Math.max(newestAbove, item.rowId ?? -1)
+
+    return { item, key, index }
+  })
+
+  return keyed.sort((a, b) => a.key - b.key || a.index - b.index).map(entry => entry.item)
+}
+
 function rebuild(state: ChatState, list: readonly TranscriptItem[]): ChatState {
   const next: ChatState = {
     ...state,
@@ -411,7 +439,7 @@ export function reconcileTail(state: ChatState, tailItems: readonly TranscriptIt
     }
   }
 
-  const next = rebuild(state, merged)
+  const next = rebuild(state, inRowOrder(merged))
 
   next.turn = { ...next.turn, foreignReconcilePending: stillPending ? true : undefined }
 
