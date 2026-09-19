@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { reconcile, reconcileTail } from './reconcile'
-import { applyEvent, applyResumeSnapshot, applyServerRequest, beginLocalTurn } from './reducer'
+import { applyEvent, applyResumeSnapshot, applyServerRequest, beginLocalTurn, confirmSubmit } from './reducer'
 import { rowsToItems, type TranscriptRow } from './rows-to-items'
 import { approvalRequest, dmDispatchTurn, streamedTurn } from './__fixtures__/events'
 import { cronBotChatText, dmReplyProcessText, rpcHistoryRows } from './__fixtures__/rows'
@@ -145,11 +145,13 @@ describe('reconcileTail', () => {
   })
 
   it('drops a placeholder the tail turned out not to need', () => {
-    // Our own queued prompt: the optimistic bubble is already there, so the
-    // row pairs with it by text and never reaches the placeholder. Nothing
-    // will ever fill that bubble, so it must not stay on screen.
+    // A turn that started without us, whose row the tail then turns out to
+    // describe as ours: the optimistic bubble is already there, so the row
+    // pairs with it by text and never reaches the placeholder. Nothing will
+    // ever fill that bubble, so it must not stay on screen.
     let live = beginLocalTurn(fresh(), 'and then deploy', undefined, NOW)
 
+    live = confirmSubmit(live, { status: 'streaming' }, NOW)
     live = applyEvent(live, { type: 'message.start', seq: 1 }, NOW)
     live = { ...live, turn: { ...live.turn, local: false } }
     live = applyEvent(live, { type: 'message.start', seq: 2 }, NOW)
