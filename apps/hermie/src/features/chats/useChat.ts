@@ -37,11 +37,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { describeConnectionError, useGateway } from '../../gateway'
 import { strings } from '../../i18n/strings'
 import { type Bot, useBotsStore } from '../../store/bots'
-import { useChatsStore } from '../../store/chats'
+import { useChatsStore, type QueuedMessage } from '../../store/chats'
 import { useChatView } from '../../store/settings'
 import type { AttachmentInput, ChatOptionKey, ModelChoice, SetOptionResult } from './chat-controller'
 import { FileUploadError, type UploadableFile, type UploadedFile } from './file-upload'
 import { type ChatRuntimeValue, useChatRuntime } from './ChatRuntime'
+
+/** One array for every chat with nothing parked, so the hook's result settles. */
+const EMPTY_QUEUE: QueuedMessage[] = []
 
 export interface UseChatResult {
   bot: Bot | undefined
@@ -70,6 +73,18 @@ export interface UseChatResult {
   subagentTree: SubagentNode[]
   /** A prompt the backend parked behind the running turn. */
   queuedText: string | undefined
+  /**
+   * Messages THIS client parked behind the running turn, oldest first.
+   *
+   * Ours rather than the gateway's, because the reader can still steer, edit or
+   * delete one — see `QueuedMessage`.
+   */
+  queued: QueuedMessage[]
+  /** Inject a parked message into the running turn now. */
+  steerQueued: (id: string) => Promise<string>
+  /** Take one back for editing; answers the text to put in the field. */
+  editQueued: (id: string) => string | undefined
+  deleteQueued: (id: string) => void
   /** The gateway's view of this session: yolo, fast, reasoning effort, model. */
   info: SessionLiveInfo | undefined
   /**
@@ -136,6 +151,7 @@ export function useChat(botName: string): UseChatResult {
   const { status, lastError, config } = useGateway()
   const bot = useBotsStore(state => state.byName[botName])
   const chat = useChatsStore(state => state.chats[botName])
+  const queued = useChatsStore(state => state.queues[botName]) ?? EMPTY_QUEUE
   const view = useChatView(botName)
   const [error, setError] = useState<string | null>(null)
 
@@ -263,6 +279,16 @@ export function useChat(botName: string): UseChatResult {
     subagents,
     subagentTree: tree,
     queuedText: chat?.queued?.text,
+    queued,
+    steerQueued: useCallback(
+      (id: string) => (controller ? controller.steerQueued(botName, id) : notReady()),
+      [botName, controller, notReady]
+    ),
+    editQueued: useCallback(
+      (id: string) => (controller ? controller.editQueued(botName, id) : undefined),
+      [botName, controller]
+    ),
+    deleteQueued: useCallback((id: string) => controller?.deleteQueued(botName, id), [botName, controller]),
     info: chat?.info,
     // A stale message from a previous connection must not outlive it: the retry
     // it offers is the reconnect that already happened.

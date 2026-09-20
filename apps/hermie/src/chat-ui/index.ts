@@ -22,12 +22,14 @@ export { ErrorCard, type ErrorCardProps } from './ErrorCard'
 export { JumpToLatestPill, type JumpToLatestPillProps } from './JumpToLatestPill'
 export { NoticePill, type NoticePillProps } from './NoticePill'
 export { QueuedChip, type QueuedChipProps } from './QueuedChip'
+export { QueuedRow, type QueuedRowProps } from './QueuedRow'
 export { ReasoningDisclosure, type ReasoningDisclosureProps } from './ReasoningDisclosure'
 export { StatusRow, type StatusRowProps } from './StatusRow'
 export { SubagentGroupCard, type SubagentGroupCardProps } from './SubagentGroupCard'
 export { ToolCard, type ToolCardProps } from './ToolCard'
 export {
   TranscriptList,
+  type QueuedRowEntry,
   type TranscriptContext,
   type TranscriptListHandle,
   type TranscriptListProps

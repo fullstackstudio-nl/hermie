@@ -151,6 +151,22 @@ export const chatStrings = {
   },
 
   /**
+   * A message the reader sent while the bot was still working.
+   *
+   * "Queued" says where it is, and the three verbs under it are the three
+   * things that can still be done about it: put it into the turn that is
+   * running, take it back to the field, or drop it.
+   */
+  queue: {
+    label: 'Queued',
+    steer: 'Steer',
+    edit: 'Edit',
+    delete: 'Delete',
+    steered: 'Handed to the running turn',
+    steerRejected: 'Too late to steer — the turn was already finishing. It is back in the queue.'
+  },
+
+  /**
    * A message's own context menu — what a secondary click on a bubble offers.
    *
    * `copyText` and `copyMarkdown` are both here because a reply IS markdown and the

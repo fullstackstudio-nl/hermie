@@ -399,9 +399,17 @@ export function Composer({
     setCaret(undefined)
   }
 
-  /** The round button: stop while a turn runs, send otherwise. */
+  /**
+   * The round button: send whenever there is something to send, stop otherwise.
+   *
+   * It used to stop the turn whenever one was running, whatever was in the
+   * field — so the only way to say something mid-turn was the Return key, and
+   * the button under the words you had just typed threw away the reply instead.
+   * Sending is always possible; the message is parked behind the running turn
+   * (see `QueuedRow`) and the stop square is what an EMPTY field offers.
+   */
   const press = () => {
-    if (running) {
+    if (running && !canSend) {
       onStop?.()
 
       return
@@ -409,6 +417,9 @@ export function Composer({
 
     submit()
   }
+
+  /** Stop, rather than send: a running turn and nothing typed. */
+  const stopping = running && !canSend
 
   /**
    * Modifier chords, for any platform that reports them.
@@ -773,7 +784,7 @@ export function Composer({
 
           {/* Accent while it sends, a red stop SQUARE while a turn runs. */}
           <Pressable
-            accessibilityLabel={running ? chatStrings.composer.stop : chatStrings.composer.send}
+            accessibilityLabel={stopping ? chatStrings.composer.stop : chatStrings.composer.send}
             accessibilityRole="button"
             disabled={!running && !canSend}
             onPress={press}
@@ -784,12 +795,12 @@ export function Composer({
               opacity: !running && !canSend ? 0.35 : pressed ? 0.85 : 1,
               width: round
             })}
-            testID={running ? 'composer-stop' : 'composer-send'}
+            testID={stopping ? 'composer-stop' : 'composer-send'}
           >
             <View
               style={{
                 alignItems: 'center',
-                backgroundColor: running ? theme.colors.danger : theme.accent().fill,
+                backgroundColor: stopping ? theme.colors.danger : theme.accent().fill,
                 borderRadius: round / 2,
                 height: round,
                 justifyContent: 'center',
@@ -806,7 +817,7 @@ export function Composer({
               }}
               testID="composer-send-circle"
             >
-              {running ? (
+              {stopping ? (
                 <View style={{ backgroundColor: theme.colors.onAccent, borderRadius: 2, height: 12, width: 12 }} />
               ) : (
                 <Text color="onAccent" style={{ fontSize: 18, fontWeight: '700', lineHeight: 21 }}>

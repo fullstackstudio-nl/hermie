@@ -37,6 +37,7 @@ import {
 import type {
   CommandsCatalogResult,
   CompletionItem,
+  CorrectionStatus,
   OpenRequestEntry,
   SessionLiveInfo,
   SessionResumeResult
@@ -46,7 +47,7 @@ import type { ServerRequest as GatewayServerRequest } from '@hermes/shared/json-
 import type { ChatGateway } from '../../gateway/link'
 import type { ChatCache } from '../../platform/chat-cache'
 import type { Bot, BotCanonicalSession, BotsState } from '../../store/bots'
-import type { ChatsState } from '../../store/chats'
+import type { ChatsState, QueuedMessage } from '../../store/chats'
 import { liveChatNames } from '../../store/chats'
 import type { BotsController } from '../bots/bots-controller'
 import {
@@ -150,6 +151,14 @@ export class ChatController {
   private unsubscribes: (() => void)[] = []
   /** Approval request ids already acknowledged, so the ack is sent once. */
   private readonly acknowledged = new Set<string>()
+
+  /**
+   * The bytes behind a queued message, by queue id, and the counter that names
+   * them. The store holds what the transcript draws; this holds what the send
+   * will need if and when it runs.
+   */
+  private readonly queuedAttachments = new Map<string, AttachmentInput[]>()
+  private queueSeq = 0
 
   /** The gateway's model inventory, read once per connection. */
   private models: ModelChoice[] | null = null
@@ -544,6 +553,7 @@ export class ChatController {
       }
 
       void this.persist(botName)
+      void this.drainQueue(botName)
     }
   }
 
@@ -1017,6 +1027,15 @@ export class ChatController {
       throw new Error(`${botName}'s chat is not attached to the gateway yet.`)
     }
 
+    // A turn is running: the message is parked HERE rather than on the gateway.
+    // See `QueuedMessage` — `prompt.submit` would take it, and would then be the
+    // only one holding it, with nothing to read it back or take it out again.
+    if (chat.turn.active) {
+      this.queue(botName, text, attachments)
+
+      return
+    }
+
     const sessionId = chat.runtimeSessionId
     const files = attachments.filter(isFileAttachment)
     const images = attachments.filter((attachment): attachment is ImageAttachmentInput => !isFileAttachment(attachment))
@@ -1052,6 +1071,128 @@ export class ChatController {
 
       throw error
     }
+  }
+
+  // ── the queue behind a running turn ────────────────────────────────────────
+
+  /**
+   * Park a message, and give the transcript a row for it.
+   *
+   * The attachments stay in this map and never reach the store: they are bytes
+   * and paths, the store draws names. They leave together with the entry,
+   * whichever way it leaves.
+   */
+  private queue(botName: string, text: string, attachments: AttachmentInput[]): void {
+    const id = `q:${(this.queueSeq += 1)}`
+
+    this.queuedAttachments.set(id, attachments)
+    this.chats.getState().enqueue(botName, {
+      id,
+      text,
+      ...(attachments.length ? { attachments: attachmentReferences(attachments) } : {})
+    })
+  }
+
+  /** Every queued message for one bot, oldest first. */
+  private queueOf(botName: string): QueuedMessage[] {
+    return this.chats.getState().queues[botName] ?? []
+  }
+
+  private takeQueued(
+    botName: string,
+    id: string
+  ): { entry: QueuedMessage; attachments: AttachmentInput[] } | undefined {
+    const entry = this.queueOf(botName).find(candidate => candidate.id === id)
+
+    if (!entry) {
+      return undefined
+    }
+
+    const attachments = this.queuedAttachments.get(id) ?? []
+
+    this.queuedAttachments.delete(id)
+    this.chats.getState().dropQueued(botName, id)
+
+    return { attachments, entry }
+  }
+
+  /**
+   * The turn ended: submit the oldest parked message, if there is one.
+   *
+   * ONE per completion. The message it sends starts a turn of its own, and that
+   * turn's completion comes back through here — so a queue of three goes out in
+   * order, each one after the reply to the one before it, which is the order the
+   * reader wrote them in and the only one that makes the replies readable.
+   */
+  private async drainQueue(botName: string): Promise<void> {
+    const next = this.queueOf(botName)[0]
+
+    if (!next) {
+      return
+    }
+
+    const taken = this.takeQueued(botName, next.id)
+
+    if (!taken) {
+      return
+    }
+
+    try {
+      await this.send(botName, taken.entry.text, taken.attachments)
+    } catch {
+      // The send painted its own failure — and putting the message back would
+      // start a loop against a gateway that is refusing it.
+    }
+  }
+
+  /** Take a parked message back for editing. Returns the text to put in the field. */
+  editQueued(botName: string, id: string): string | undefined {
+    return this.takeQueued(botName, id)?.entry.text
+  }
+
+  deleteQueued(botName: string, id: string): void {
+    this.takeQueued(botName, id)
+  }
+
+  /**
+   * Inject a parked message into the turn that is running, now.
+   *
+   * `session.steer` is the gateway's own word for it: the text is handed to the
+   * agent with its next tool result, without interrupting anything. The answer
+   * can be `rejected` — a turn past its final tool batch has nothing left to
+   * hand it to — and then the message goes back into the queue rather than
+   * disappearing into a turn that never heard it.
+   */
+  async steerQueued(botName: string, id: string): Promise<CorrectionStatus> {
+    const sessionId = this.requireRuntime(botName)
+    const taken = this.takeQueued(botName, id)
+
+    if (!taken) {
+      return 'rejected'
+    }
+
+    try {
+      const result = await this.gateway.request('session.steer', {
+        session_id: sessionId,
+        profile: botName,
+        text: taken.entry.text
+      })
+
+      if (result?.status === 'rejected') {
+        this.requeue(botName, taken)
+      }
+
+      return result?.status ?? 'queued'
+    } catch (error) {
+      this.requeue(botName, taken)
+
+      throw error
+    }
+  }
+
+  private requeue(botName: string, taken: { entry: QueuedMessage; attachments: AttachmentInput[] }): void {
+    this.queuedAttachments.set(taken.entry.id, taken.attachments)
+    this.chats.getState().enqueue(botName, taken.entry)
   }
 
   /**

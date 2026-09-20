@@ -410,6 +410,139 @@ describe('sending', () => {
   })
 })
 
+/**
+ * The queue behind a running turn.
+ *
+ * `prompt.submit` will park a prompt on the gateway — it answers `queued` — and
+ * that is exactly what the client cannot use: the gateway's queue is one opaque
+ * prompt with no method to read it back, edit it or take it out. So a message
+ * sent mid-turn is held HERE, drawn in the transcript as the reader's own
+ * bubble, and submitted when the turn that was running finishes.
+ */
+describe('the queue behind a running turn', () => {
+  const queueOf = (name = 'researcher') => useChatsStore.getState().queues[name] ?? []
+
+  /** Open a chat and leave a turn running in it. */
+  async function busy() {
+    const kit = setup()
+
+    kit.gateway.reply('prompt.submit', { status: 'streaming' })
+    kit.controller.start()
+    await kit.controller.openChat(RESEARCHER)
+    await kit.controller.send('researcher', 'go')
+
+    expect(chatOf().turn.active).toBe(true)
+
+    return kit
+  }
+
+  const complete = (gateway: FakeChatGateway, seq: number) =>
+    gateway.emit({ type: 'message.complete', session_id: 'runtime-1', seq, payload: {} })
+
+  it('parks a message rather than submitting it, and submits it when the turn ends', async () => {
+    const { gateway, controller } = await busy()
+    const before = gateway.methodOrder().filter(method => method === 'prompt.submit').length
+
+    await controller.send('researcher', 'and one more thing')
+
+    // Nothing went to the gateway…
+    expect(gateway.methodOrder().filter(method => method === 'prompt.submit')).toHaveLength(before)
+    expect(queueOf()).toEqual([expect.objectContaining({ text: 'and one more thing' })])
+
+    // …until the running turn finished.
+    complete(gateway, 20)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(gateway.lastCall('prompt.submit')).toMatchObject({ text: 'and one more thing' })
+    expect(queueOf()).toEqual([])
+  })
+
+  it('sends several in the order they were written, one turn at a time', async () => {
+    const { gateway, controller } = await busy()
+
+    await controller.send('researcher', 'first')
+    await controller.send('researcher', 'second')
+
+    expect(queueOf().map(entry => entry.text)).toEqual(['first', 'second'])
+
+    complete(gateway, 21)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(gateway.lastCall('prompt.submit')).toMatchObject({ text: 'first' })
+    // The second is still parked: it goes out after the reply to the first.
+    expect(queueOf().map(entry => entry.text)).toEqual(['second'])
+
+    complete(gateway, 22)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(gateway.lastCall('prompt.submit')).toMatchObject({ text: 'second' })
+    expect(queueOf()).toEqual([])
+  })
+
+  it('hands a parked message back for editing, and takes it out of the queue', async () => {
+    const { controller } = await busy()
+
+    await controller.send('researcher', 'wait, I meant')
+
+    const id = queueOf()[0]!.id
+
+    expect(controller.editQueued('researcher', id)).toBe('wait, I meant')
+    expect(queueOf()).toEqual([])
+    // A second attempt has nothing to hand back.
+    expect(controller.editQueued('researcher', id)).toBeUndefined()
+  })
+
+  it('deletes one without sending anything', async () => {
+    const { gateway, controller } = await busy()
+    const before = gateway.methodOrder().filter(method => method === 'prompt.submit').length
+
+    await controller.send('researcher', 'never mind')
+    controller.deleteQueued('researcher', queueOf()[0]!.id)
+
+    expect(queueOf()).toEqual([])
+
+    // And the turn ending finds nothing to submit.
+    complete(gateway, 23)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(gateway.methodOrder().filter(method => method === 'prompt.submit')).toHaveLength(before)
+  })
+
+  it('steers one into the turn that is running, through session.steer', async () => {
+    const { gateway, controller } = await busy()
+
+    gateway.reply('session.steer', { status: 'queued', text: 'use the cached copy' })
+
+    await controller.send('researcher', 'use the cached copy')
+    const status = await controller.steerQueued('researcher', queueOf()[0]!.id)
+
+    expect(status).toBe('queued')
+    expect(gateway.lastCall('session.steer')).toMatchObject({
+      session_id: 'runtime-1',
+      text: 'use the cached copy'
+    })
+    expect(queueOf()).toEqual([])
+  })
+
+  it('puts a rejected steer back in the queue rather than losing it', async () => {
+    // `session.steer` answers `rejected` when the turn is past its final tool
+    // batch: there is nothing left to hand the text to. The message has not been
+    // sent anywhere, so it goes back to where it was.
+    const { gateway, controller } = await busy()
+
+    gateway.reply('session.steer', { status: 'rejected', text: 'too late' })
+
+    await controller.send('researcher', 'too late')
+
+    expect(await controller.steerQueued('researcher', queueOf()[0]!.id)).toBe('rejected')
+    expect(queueOf()).toEqual([expect.objectContaining({ text: 'too late' })])
+  })
+})
+
 describe('approvals', () => {
   it('acknowledges the card, then answers the request the agent is waiting on', async () => {
     const { gateway, controller } = setup()

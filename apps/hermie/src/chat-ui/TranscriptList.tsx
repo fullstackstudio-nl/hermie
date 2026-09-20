@@ -81,6 +81,7 @@ import { SelectTextOverlay } from './SelectTextOverlay'
 import { StatusRow } from './StatusRow'
 import { SubagentGroupCard } from './SubagentGroupCard'
 import { ToolCard } from './ToolCard'
+import { QueuedRow } from './QueuedRow'
 import { TypingIndicator } from './TypingIndicator'
 import { UserBubble } from './UserBubble'
 import { useLedgerWidth } from './primitives/Bubble'
@@ -173,6 +174,17 @@ export interface TranscriptListProps extends Omit<TranscriptContext, 'onSelectTe
   header?: ReactNode
   /** A turn is running but no text has arrived: shows the typing bubble. */
   typing?: boolean
+  /**
+   * Messages the reader sent while the turn was running, oldest first.
+   *
+   * They are rows at the very END of the conversation — below the dots, because
+   * they are the newest thing the reader did — and they are the reader's own
+   * bubbles, not a notice about them. See `QueuedRow`.
+   */
+  queued?: readonly QueuedRowEntry[]
+  onSteerQueued?: (id: string) => void
+  onEditQueued?: (id: string) => void
+  onDeleteQueued?: (id: string) => void
   /** Messages that landed while the reader was scrolled away. */
   newMessageCount?: number
   onScrolledAwayFromBottom?: (away: boolean) => void
@@ -821,6 +833,9 @@ export function holdCorrection(held: number | undefined, offset: number): number
 /** A stable empty array, so the context memo does not churn on every render. */
 const EMPTY_HANDLES: readonly string[] = []
 
+/** The same, for a chat with nothing parked behind its turn. */
+const EMPTY_QUEUE: readonly QueuedRowEntry[] = []
+
 /**
  * The typing bubble's own row, at index 0 of the inverted list.
  *
@@ -841,11 +856,27 @@ const TYPING_ROW = { typing: true } as const
 /** The key the typing row keeps for as long as it exists. */
 const TYPING_ROW_KEY = 'transcript-typing'
 
-/** What the list actually holds: the visible items, plus the dots at the end. */
-type ListRow = VisibleItem | typeof TYPING_ROW
+/** One parked message, as the list takes it. */
+export interface QueuedRowEntry {
+  id: string
+  text: string
+  attachments?: readonly string[]
+}
+
+/** A parked message, wrapped so it cannot be mistaken for a transcript item. */
+interface QueuedListRow {
+  queued: QueuedRowEntry
+}
+
+/** What the list actually holds: the items, the dots, and the parked messages. */
+type ListRow = VisibleItem | typeof TYPING_ROW | QueuedListRow
 
 function isTypingRow(row: ListRow): row is typeof TYPING_ROW {
   return 'typing' in row
+}
+
+function isQueuedRow(row: ListRow): row is QueuedListRow {
+  return 'queued' in row
 }
 
 /** One shared object, so a row with no layout of its own still memoizes. */
@@ -900,6 +931,10 @@ function TranscriptListBody({
   items,
   header,
   typing = false,
+  queued = EMPTY_QUEUE,
+  onSteerQueued,
+  onEditQueued,
+  onDeleteQueued,
   newMessageCount = 0,
   onScrolledAwayFromBottom,
   onEndReached,
@@ -1021,7 +1056,15 @@ function TranscriptListBody({
    * the typing row is what puts it under the last message and nowhere else.
    */
   const showTyping = typing && !streamingTail
-  const rows = useMemo<ListRow[]>(() => (showTyping ? [TYPING_ROW, ...data] : data), [data, showTyping])
+  const rows = useMemo<ListRow[]>(() => {
+    const tail: ListRow[] = queued.map(entry => ({ queued: entry })).reverse()
+
+    if (showTyping) {
+      tail.push(TYPING_ROW)
+    }
+
+    return tail.length ? [...tail, ...data] : data
+  }, [data, queued, showTyping])
 
   /**
    * A jump the LIST started, not the reader.
@@ -1281,7 +1324,7 @@ function TranscriptListBody({
     forwarded,
     () => ({
       scrollToItem(itemId) {
-        const index = rows.findIndex(row => !isTypingRow(row) && row.item.id === itemId)
+        const index = rows.findIndex(row => !isTypingRow(row) && !isQueuedRow(row) && row.item.id === itemId)
 
         if (index < 0) {
           return false
@@ -1315,7 +1358,17 @@ function TranscriptListBody({
 
   const renderItem = useCallback(
     ({ item: entry }: { item: ListRow }) =>
-      isTypingRow(entry) ? (
+      isQueuedRow(entry) ? (
+        <View style={{ marginTop: BUBBLE_GAP.grouped }} testID={`transcript-queued-${entry.queued.id}`}>
+          <QueuedRow
+            {...entry.queued}
+            {...(handlers.accent ? { accent: handlers.accent } : {})}
+            {...(onDeleteQueued ? { onDelete: onDeleteQueued } : {})}
+            {...(onEditQueued && !entry.queued.attachments?.length ? { onEdit: onEditQueued } : {})}
+            {...(onSteerQueued ? { onSteer: onSteerQueued } : {})}
+          />
+        </View>
+      ) : isTypingRow(entry) ? (
         /*
           The dots are a turn starting, so they open the same gap above them as
           any other change of speaker — `gapAbove` would say `BUBBLE_GAP.separate`
@@ -1333,7 +1386,7 @@ function TranscriptListBody({
           {...(entry.item.id === lastOwnId && receipt ? { receipt } : {})}
         />
       ),
-    [context, dmRoles, lastOwnId, layout, receipt, testID]
+    [context, dmRoles, handlers.accent, lastOwnId, layout, onDeleteQueued, onEditQueued, onSteerQueued, receipt, testID]
   )
 
   return (
@@ -1363,7 +1416,7 @@ function TranscriptListBody({
             ]}
             data={rows}
             inverted
-            keyExtractor={row => (isTypingRow(row) ? TYPING_ROW_KEY : row.item.id)}
+            keyExtractor={row => (isTypingRow(row) ? TYPING_ROW_KEY : isQueuedRow(row) ? row.queued.id : row.item.id)}
             // Dragging the transcript down lowers the keyboard with the finger, which
             // is what every messenger does and what the inverted list makes possible
             // without a gesture handler. Android has no interactive dismissal — the

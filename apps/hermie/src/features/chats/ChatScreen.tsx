@@ -994,6 +994,34 @@ function Conversation({
     [chat]
   )
 
+  /*
+    The three things that can still be done about a message the reader sent
+    while the bot was working. They are here rather than in the list because two
+    of them end somewhere the list cannot reach: the composer, and the banner.
+  */
+  const editQueued = useCallback(
+    (id: string) => {
+      const text = chat.editQueued(id)
+
+      if (text !== undefined) {
+        // Appended rather than assigned: the reader may have started typing the
+        // next one while this was parked, and their words outrank ours.
+        chat.setDraft(chat.draft ? `${chat.draft}\n${text}` : text)
+      }
+    },
+    [chat]
+  )
+
+  const steerQueued = useCallback(
+    (id: string) => {
+      void chat
+        .steerQueued(id)
+        .then(status => setNotice(status === 'rejected' ? chatStrings.queue.steerRejected : null))
+        .catch(error => setNotice(messageOf(error)))
+    },
+    [chat]
+  )
+
   const lockClarify = useCallback(
     (item: ClarifyItem, qid: string, answer: string) => {
       void chat.lockClarify(item.requestId, qid, answer).catch(error => setNotice(messageOf(error)))
@@ -1075,6 +1103,10 @@ function Conversation({
             // The TURN is running and nothing has been said yet: three dots. Not
             // `busy` — that also covers a tool or a child still working, and dots
             // under a finished reply promise a sentence that is not coming.
+            onDeleteQueued={chat.deleteQueued}
+            onEditQueued={editQueued}
+            onSteerQueued={steerQueued}
+            queued={chat.queued}
             typing={chat.turnActive && !hasStreamingText(chat.items)}
             typingHandles={typing}
           />

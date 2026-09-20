@@ -97,8 +97,21 @@ describe('Composer', () => {
     expect(handlers.onSend).toHaveBeenCalledWith('Check the release notes')
   })
 
-  it('turns into a stop button while a turn runs', () => {
-    const handlers = renderComposer({ running: true, value: 'ignored' })
+  it('sends what is typed even while a turn runs, rather than stopping it', () => {
+    // Sending is always possible: the message is parked behind the running turn
+    // and appears at the end of the transcript as a queued bubble. The button
+    // under the words you just typed must not throw the reply away.
+    const handlers = renderComposer({ running: true, value: 'and one more thing' })
+
+    expect(screen.queryByTestId('composer-stop')).toBeNull()
+
+    fireEvent.press(screen.getByTestId('composer-send'))
+    expect(handlers.onSend).toHaveBeenCalledWith('and one more thing')
+    expect(handlers.onStop).not.toHaveBeenCalled()
+  })
+
+  it('is a stop button while a turn runs and there is nothing to send', () => {
+    const handlers = renderComposer({ running: true })
 
     expect(screen.queryByTestId('composer-send')).toBeNull()
 
@@ -341,7 +354,7 @@ describe('the composer row', () => {
   })
 
   it('keeps the stop button on exactly the same geometry', () => {
-    renderComposer({ running: true, value: 'ignored' })
+    renderComposer({ running: true })
 
     expect(styleOf('composer-stop').height).toBe(COMPOSER_ROUND_SIZE)
     expect(styleOf('composer-send-circle').height).toBe(COMPOSER_ROUND_SIZE)
@@ -359,8 +372,9 @@ describe('the composer row', () => {
  * The rule both enforce: Return SENDS, or does nothing. It used to fall through
  * to the same handler as the round button, so while a reply was streaming the
  * send key cancelled the turn — typing the next message and pressing Return
- * killed the answer being written. A prompt sent mid-turn is parked by the
- * gateway; stopping is the button's job, and Escape's.
+ * killed the answer being written. A prompt sent mid-turn is parked in the
+ * queue; stopping is what the button does with an EMPTY field, and what Escape
+ * does always.
  */
 describe('the Composer keyboard', () => {
   const submitEditing = () => fireEvent(screen.getByTestId('composer-input'), 'submitEditing')

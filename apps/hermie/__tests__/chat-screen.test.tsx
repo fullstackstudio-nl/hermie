@@ -77,6 +77,9 @@ function makeController() {
     respondApproval: jest.fn(async () => undefined),
     respondClarify: jest.fn(async () => undefined),
     lockClarify: jest.fn(async () => undefined),
+    steerQueued: jest.fn(async () => 'queued'),
+    editQueued: jest.fn(() => 'and one more thing'),
+    deleteQueued: jest.fn(),
     steerSubagent: jest.fn(async () => 'ok'),
     interruptSubagent: jest.fn(async () => true),
     tailSubagent: jest.fn(async () => ''),
@@ -719,6 +722,69 @@ describe('following a DM across chats', () => {
 
     // No focus target rather than a wrong one: the chat opens at its bottom.
     expect(onOpenBot).toHaveBeenCalledWith('writer', undefined)
+  })
+})
+
+describe('a message sent while the bot is working', () => {
+  it('stands at the end of the transcript as your own bubble, with its three actions', async () => {
+    renderChat()
+
+    act(() => {
+      useChatsStore.getState().beginTurn('researcher', 'go')
+      useChatsStore.getState().enqueue('researcher', { id: 'q:1', text: 'and one more thing' })
+    })
+
+    await waitFor(() => expect(screen.getByTestId('queued-q:1')).toBeTruthy())
+    expect(screen.getByTestId('queued-label-q:1')).toHaveTextContent('Queued')
+    expect(screen.getByText('and one more thing')).toBeTruthy()
+
+    // Steer: into the turn that is running, now.
+    fireEvent.press(screen.getByTestId('queued-steer-q:1'))
+    await waitFor(() => expect(mockController.steerQueued).toHaveBeenCalledWith('researcher', 'q:1'))
+
+    // Edit: back into the field it came from.
+    fireEvent.press(screen.getByTestId('queued-edit-q:1'))
+    await waitFor(() => expect(useChatsStore.getState().chats.researcher?.draft).toBe('and one more thing'))
+
+    fireEvent.press(screen.getByTestId('queued-delete-q:1'))
+    expect(mockController.deleteQueued).toHaveBeenCalledWith('researcher', 'q:1')
+  })
+
+  it('offers no Edit for one carrying an attachment, which the field cannot take back', async () => {
+    renderChat()
+
+    act(() => {
+      useChatsStore.getState().beginTurn('researcher', 'go')
+      useChatsStore
+        .getState()
+        .enqueue('researcher', { id: 'q:2', text: 'look at this', attachments: ['@image:shot.png'] })
+    })
+
+    await waitFor(() => expect(screen.getByTestId('queued-q:2')).toBeTruthy())
+
+    expect(screen.getByTestId('queued-steer-q:2')).toBeTruthy()
+    expect(screen.getByTestId('queued-delete-q:2')).toBeTruthy()
+    expect(screen.queryByTestId('queued-edit-q:2')).toBeNull()
+  })
+
+  it('can be sent at all while a turn runs, which the round button used to refuse', async () => {
+    renderChat()
+
+    act(() => {
+      useChatsStore.getState().beginTurn('researcher', 'go')
+    })
+
+    await waitFor(() => expect(screen.getByTestId('composer-stop')).toBeTruthy())
+
+    // Typing turns the stop square back into a send arrow: the message is
+    // parked behind the turn, and the reply is not thrown away for it.
+    fireEvent.changeText(screen.getByTestId('composer-input'), 'and one more thing')
+
+    expect(screen.queryByTestId('composer-stop')).toBeNull()
+    fireEvent.press(screen.getByTestId('composer-send'))
+
+    await waitFor(() => expect(mockController.send).toHaveBeenCalledWith('researcher', 'and one more thing', []))
+    expect(mockController.stopTurn).not.toHaveBeenCalled()
   })
 })
 
