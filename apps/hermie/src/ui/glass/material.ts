@@ -11,6 +11,12 @@
  *    collapses to its rung of the elevation ladder, which is exactly what that
  *    ladder is defined for.
  *
+ * The web gets `blur`, not `solid`: `expo-blur` there is `backdrop-filter`,
+ * which really does blur what is behind the surface, and every browser this
+ * bundle runs in has had it for years. `expo-glass-effect` has no web build at
+ * all, which is why both probes come through `./native-effect` (see the note
+ * there) rather than from the package.
+ *
  * Two checks, not one. `isLiquidGlassAvailable()` answers whether the app is
  * built against the Liquid Glass design at all; `isGlassEffectAPIAvailable()`
  * exists because some iOS 26 betas ship the design without a working
@@ -22,12 +28,16 @@
  * running against a binary built before the dependency was added. The throw is
  * caught here so that the app degrades to `blur` rather than failing to start.
  */
-import { isGlassEffectAPIAvailable, isLiquidGlassAvailable } from 'expo-glass-effect'
+import { isGlassEffectAPIAvailable, isLiquidGlassAvailable } from './native-effect'
 import { Platform } from 'react-native'
 
 export type GlassMaterial = 'native' | 'blur' | 'solid'
 
 function detect(): GlassMaterial {
+  if (Platform.OS === 'web') {
+    return 'blur'
+  }
+
   if (Platform.OS !== 'ios') {
     return 'solid'
   }

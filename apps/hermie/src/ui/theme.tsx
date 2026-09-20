@@ -1,7 +1,7 @@
-import { StatusBar } from 'expo-status-bar'
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { AccessibilityInfo, Appearance, useColorScheme } from 'react-native'
 
+import { SystemStatusBar } from '../platform/status-bar'
 import { useSettingsStore } from '../store/settings'
 import {
   ACCENTS,
@@ -267,9 +267,19 @@ export function ThemeProvider({ children, forceScheme, forceWallpaper }: ThemePr
    * so deriving the pin from what `useColorScheme()` says would be a loop with
    * nothing to break it. `system` is only ever READ when nothing is pinned, which
    * is exactly when no override is in place and the value is honest again.
+   *
+   * **react-native-web does not have it.** Its `Appearance` module exposes the
+   * listener and the getter and stops there, because a page cannot override the
+   * user agent's colour scheme for anything but itself — and it does not need
+   * to: on the web every surface in this app is drawn by our own token set, and
+   * the one native material that reads the trait collection does not exist
+   * there. So the call is guarded rather than seamed: there is nothing for a
+   * web implementation to DO.
    */
   useEffect(() => {
-    Appearance.setColorScheme(pinned)
+    if (typeof Appearance.setColorScheme === 'function') {
+      Appearance.setColorScheme(pinned)
+    }
   }, [pinned])
 
   const theme = useMemo(
@@ -283,12 +293,12 @@ export function ThemeProvider({ children, forceScheme, forceWallpaper }: ThemePr
   // navigation. Android needs it said out loud: the window starts with
   // `windowLightStatusBar` unset — white icons — and edge-to-edge makes the bar
   // transparent, so on a light wallpaper the clock, the battery and the signal
-  // bars simply disappear. `style` is the INK, not the background, so a dark app
+  // bars simply disappear. `ink` is the INK, not the background, so a dark app
   // needs light icons. On a Mac there is no status bar to paint and the call is
-  // inert.
+  // inert, and in a browser the seam renders nothing at all.
   return (
     <ThemeContext.Provider value={theme}>
-      <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
+      <SystemStatusBar ink={scheme === 'dark' ? 'light' : 'dark'} />
       {children}
     </ThemeContext.Provider>
   )

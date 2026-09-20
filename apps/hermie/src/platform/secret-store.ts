@@ -1,15 +1,8 @@
 import * as SecureStore from 'expo-secure-store'
 
-/**
- * Storage for values that must never land in a plain-text preference file:
- * access and refresh tokens, the ungated session token, and any extra request
- * headers the operator configured.
- */
-export type SecretStore = {
-  get(key: string): Promise<string | null>
-  set(key: string, value: string): Promise<void>
-  delete(key: string): Promise<void>
-}
+import type { SecretStore } from './platform-contracts'
+
+export type { SecretStore } from './platform-contracts'
 
 // Hermie reconnects from the background, so the keychain item has to survive a
 // locked screen after the first unlock. It is deliberately not synced to iCloud

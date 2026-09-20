@@ -1,14 +1,8 @@
 import * as Haptics from 'expo-haptics'
 
-/**
- * The three moments a chat is allowed to buzz.
- *
- * Deliberately a closed set rather than a pass-through of the Expo API. Haptics
- * read as punctuation: one on committing a message, one on committing an answer
- * to a question the agent asked, one when a reply lands. Anything more and the
- * phone is vibrating at the user for things they did not do.
- */
-export type HapticMoment = 'send' | 'choice' | 'complete'
+import type { HapticMoment } from './platform-contracts'
+
+export type { HapticMoment } from './platform-contracts'
 
 /**
  * Fire one, and never fail because of it.

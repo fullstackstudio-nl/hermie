@@ -14,20 +14,26 @@
  * avoid, and base64 would inflate it by a third on the way.
  *
  * There is no "is this supported" flag, for the same reason `attachments.ts` no
- * longer has one: `expo-document-picker` has an implementation on every target
- * this builds for, the Mac included, where the iPad build gets UIKit's own
- * document picker. A flag that is always true only invites a caller to branch on
- * it.
+ * longer has one: every target this builds for has a picker — UIKit's document
+ * picker on the Mac's iPad build, an `<input type="file">` in a browser. Which
+ * one, and what it hands back, is `src/platform/attachments-picker.ts`. A flag
+ * that is always true only invites a caller to branch on it.
  */
-import * as DocumentPicker from 'expo-document-picker'
+import { openFilePicker } from '../../platform/attachments-picker'
 
 export interface PickedFile {
   name: string
   /** Bytes. `0` when the platform did not say; the upload then finds out. */
   size: number
   mimeType: string
-  /** A local `file://` URI. Handed to `FormData` as-is, never read here. */
+  /** A local `file://` URI on the phones, an object URL in a browser. */
   uri: string
+  /**
+   * The part the upload appends to its `FormData`, exactly as the platform
+   * handed it over: a `File` in a browser, React Native's `{uri, name, type}`
+   * blob everywhere else. See `src/platform/attachments-picker.ts`.
+   */
+  body: unknown
 }
 
 const FALLBACK_MIME_TYPE = 'application/octet-stream'
@@ -52,24 +58,19 @@ function nameFor(uri: string, given: string | null | undefined): string {
  * function returns before the upload starts.
  */
 export async function pickFile(): Promise<PickedFile | null> {
-  const picked = await DocumentPicker.getDocumentAsync({
-    type: '*/*',
-    multiple: false,
-    copyToCacheDirectory: true
-  })
+  const picked = await openFilePicker()
 
-  const asset = picked.canceled ? undefined : picked.assets?.[0]
-
-  if (!asset?.uri) {
+  if (!picked?.uri) {
     // Cancelled, or a picker that answered with nothing: not an error, and
     // nothing to show for it.
     return null
   }
 
   return {
-    name: nameFor(asset.uri, asset.name),
-    size: typeof asset.size === 'number' && Number.isFinite(asset.size) ? asset.size : 0,
-    mimeType: asset.mimeType || FALLBACK_MIME_TYPE,
-    uri: asset.uri
+    name: nameFor(picked.uri, picked.name),
+    size: Number.isFinite(picked.size) ? picked.size : 0,
+    mimeType: picked.mimeType || FALLBACK_MIME_TYPE,
+    uri: picked.uri,
+    body: picked.body
   }
 }

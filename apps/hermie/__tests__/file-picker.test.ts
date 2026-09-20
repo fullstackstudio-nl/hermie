@@ -49,7 +49,15 @@ it('projects the asset onto what the upload needs and nothing else', async () =>
     name: 'report.csv',
     size: 2048,
     mimeType: 'text/csv',
-    uri: 'file:///var/mobile/Containers/Data/tmp/report.csv'
+    uri: 'file:///var/mobile/Containers/Data/tmp/report.csv',
+    // The part the upload appends as-is. On this platform it is React Native's
+    // own `{uri, name, type}` blob, which the native layer streams from disk; in
+    // a browser the seam hands over a `File` instead.
+    body: {
+      uri: 'file:///var/mobile/Containers/Data/tmp/report.csv',
+      name: 'report.csv',
+      type: 'text/csv'
+    }
   })
 })
 

@@ -21,7 +21,6 @@
  *    number rather than a function of whatever is behind it.
  */
 import { BlurView } from 'expo-blur'
-import { GlassContainer, GlassView } from 'expo-glass-effect'
 import { LinearGradient } from 'expo-linear-gradient'
 import { createContext, useContext, type ReactNode } from 'react'
 import { StyleSheet, View, type StyleProp, type ViewProps, type ViewStyle } from 'react-native'
@@ -29,6 +28,7 @@ import { StyleSheet, View, type StyleProp, type ViewProps, type ViewStyle } from
 import { useTheme } from '../theme'
 import type { GlassVariant, ShadowName } from '../tokens'
 import { GLASS_MATERIAL } from './material'
+import { GlassContainer, GlassView } from './native-effect'
 
 /** How many glass surfaces are already between this one and the wallpaper. */
 const GlassDepth = createContext(0)

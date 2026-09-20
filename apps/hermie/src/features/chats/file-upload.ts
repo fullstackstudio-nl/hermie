@@ -66,6 +66,13 @@ export interface UploadableFile {
   size: number
   mimeType: string
   uri: string
+  /**
+   * The `FormData` part the picker handed over, when the platform has one of
+   * its own. A browser gives a `File`, which is the only shape a browser's
+   * `FormData` can stream; without it the `{uri}` blob below is used, which is
+   * React Native's.
+   */
+  body?: unknown
 }
 
 export interface UploadedFile {
@@ -218,12 +225,19 @@ export async function uploadFile(options: UploadFileOptions): Promise<UploadedFi
   // `file`, plus `path` and `overwrite` as form fields.
   body.append('path', path)
   body.append('overwrite', 'true')
-  body.append(
-    'file',
-    // React Native's FormData takes this shape where the web takes a Blob; the
-    // cast is the documented seam and there is no DOM type for it.
-    { uri: file.uri, name: sanitiseUploadName(file.name), type: file.mimeType } as unknown as Blob
-  )
+  if (file.body === undefined) {
+    // React Native's `FormData` takes this shape where a browser takes a Blob;
+    // the cast is the documented seam and there is no DOM type for it. The
+    // filename rides INSIDE the part, which is why no third argument is passed:
+    // a standards-compliant `FormData` rejects a non-Blob value outright the
+    // moment one is, which is exactly what the Jest environment does.
+    body.append('file', { uri: file.uri, name: sanitiseUploadName(file.name), type: file.mimeType } as unknown as Blob)
+  } else {
+    // A browser handed over a real `File`, which carries a name of its own —
+    // hence the third argument, so the name that travels is the sanitised one
+    // rather than whatever the file system called it.
+    body.append('file', file.body as Blob, sanitiseUploadName(file.name))
+  }
 
   const headers = await http.requestHeaders()
   const doFetch = options.fetchImpl ?? fetch
