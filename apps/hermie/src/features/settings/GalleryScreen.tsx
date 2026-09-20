@@ -62,6 +62,7 @@ import {
   errorAssistantItem,
   failedDmOutItem,
   failedToolItem,
+  foldTableStraddleItem,
   galleryTranscript,
   inlineCodeRegressionItem,
   interimAssistantItem,
@@ -404,6 +405,17 @@ const SECTIONS: readonly GallerySection[] = [
       // The fold's state lives above the list, so the gallery provides one.
       <ExpandedProvider>
         <AssistantBubble item={longReportItem} presentation="full" showFooter />
+      </ExpandedProvider>
+    )
+  },
+  {
+    id: 'fold-table',
+    title: 'Fold — a table across the cut',
+    render: () => (
+      // The fold moves its cut UP to the table's top rather than slicing a row
+      // of cells in half. Only a rendered bubble can show whether it did.
+      <ExpandedProvider>
+        <AssistantBubble item={foldTableStraddleItem} presentation="full" />
       </ExpandedProvider>
     )
   },

@@ -13,13 +13,15 @@ import { act, fireEvent, screen, waitFor } from '@testing-library/react-native'
 import { ActivityScreen } from '../src/features/activity'
 import { type Bot, useBotsStore } from '../src/store/bots'
 import { useChatsStore } from '../src/store/chats'
-import { renderScreen } from './support/render'
+import { renderScreen, withProviders } from './support/render'
 
 let mockController: Record<string, jest.Mock>
 let mockBots: Record<string, jest.Mock>
 
+const gateway = { status: 'ready' as string }
+
 jest.mock('../src/gateway', () => ({
-  useGateway: () => ({ status: 'ready' })
+  useGateway: () => gateway
 }))
 
 jest.mock('../src/features/chats/ChatRuntime', () => ({
@@ -94,6 +96,7 @@ beforeEach(() => {
     inFlightDeliveries: jest.fn(async () => 1)
   }
   mockBots = { watchRunning: jest.fn(() => () => undefined) }
+  gateway.status = 'ready'
   seed()
 })
 
@@ -174,5 +177,83 @@ describe('ActivityScreen', () => {
     renderScreen(<ActivityScreen />)
 
     await waitFor(() => expect(screen.getByTestId('activity-empty')).toBeTruthy())
+  })
+})
+
+/**
+ * The race this screen lost on every launch that opened it first.
+ *
+ * A `GatewayConnection` — and therefore the whole chat runtime — exists from the
+ * moment a gateway is CONFIGURED, long before its socket is up. The background
+ * load used to run on mount regardless, the roster read under it failed with
+ * "gateway not connected", `loadActivity` swallows a failed roster as "no bots",
+ * and the timeline settled on the empty state for good, because nothing asked
+ * again. On a simulator opened straight onto `overlay:activity` that happened
+ * every single time, and every row here passed while it did.
+ */
+describe('the background load and the connection', () => {
+  it('does not read anything while the socket is still dialling', async () => {
+    gateway.status = 'connecting'
+
+    act(() => {
+      useChatsStore.getState().reset()
+    })
+    renderScreen(<ActivityScreen />)
+
+    // Still "reading", because the connection is still on its way: a dialling
+    // socket is not a verdict about what the bots have said.
+    await waitFor(() => expect(screen.getByTestId('activity-empty')).toHaveTextContent(/Reading/u))
+    expect(mockController.loadActivity).not.toHaveBeenCalled()
+  })
+
+  it('reads as soon as the connection is ready, and once', async () => {
+    gateway.status = 'connecting'
+
+    const view = renderScreen(<ActivityScreen />)
+
+    gateway.status = 'ready'
+    view.rerender(withProviders(<ActivityScreen />))
+
+    await waitFor(() => expect(mockController.loadActivity).toHaveBeenCalledTimes(1))
+
+    // …and a re-render while it stays ready does not read the whole roster again.
+    view.rerender(withProviders(<ActivityScreen />))
+    view.rerender(withProviders(<ActivityScreen />))
+
+    expect(mockController.loadActivity).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads again after a reconnect', async () => {
+    renderScreen(<ActivityScreen />)
+
+    await waitFor(() => expect(mockController.loadActivity).toHaveBeenCalledTimes(1))
+
+    act(() => {
+      gateway.status = 'reconnecting'
+    })
+    screen.rerender(withProviders(<ActivityScreen />))
+    screen.rerender(withProviders(<ActivityScreen />))
+
+    act(() => {
+      gateway.status = 'ready'
+    })
+    screen.rerender(withProviders(<ActivityScreen />))
+
+    await waitFor(() => expect(mockController.loadActivity).toHaveBeenCalledTimes(2))
+  })
+
+  /**
+   * A connection that has stopped trying must hand the screen back, or the
+   * spinner sits on top of the notice that says why there is nothing to show.
+   */
+  it('stops saying it is reading once the connection has given up', async () => {
+    gateway.status = 'disconnected'
+
+    act(() => {
+      useChatsStore.getState().reset()
+    })
+    renderScreen(<ActivityScreen />)
+
+    await waitFor(() => expect(screen.getByTestId('activity-empty')).toHaveTextContent(/out of reach/u))
   })
 })

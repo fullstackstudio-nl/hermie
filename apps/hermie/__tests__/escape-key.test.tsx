@@ -17,6 +17,8 @@ import { useState } from 'react'
 import { Pressable, Text } from 'react-native'
 
 import { OverlayPanel } from '../src/app/OverlayPanel'
+import { AgentsSheet, type SubagentTranscript } from '../src/chat-ui'
+import { subagentTree } from '../src/chat-ui/fixtures'
 import { BottomSheet } from '../src/ui/BottomSheet'
 import { ChatOptionsSheet } from '../src/ui/sheets'
 import { useEscapeKey } from '../src/ui/useEscapeKey'
@@ -365,5 +367,92 @@ describe('Escape inside a sheet that has pages', () => {
 
     expect(screen.getByTestId('option-colour')).toBeTruthy()
     expect(onClose).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * The agents sheet, which has a page of its own.
+ *
+ * Same arrangement as the options sheet and the same reason it needs saying: a
+ * child's transcript is not a second component mounted over the sheet, it is the
+ * sheet drawing something else. `AgentsSheet` registers "pop the page" after its
+ * own `BottomSheet` has registered "close" — effects flush child-first — so the
+ * page holds the key while it is open. Nothing coordinates that, which is exactly
+ * why it is worth a test.
+ *
+ * The page is a controlled PROP here, not internal state, so the harness owns it
+ * the way `ChatSheetHost` does.
+ */
+describe('Escape inside the agents sheet', () => {
+  const transcriptFor = (subagentId: string): SubagentTranscript => ({
+    goal: 'Check recovery',
+    loading: false,
+    source: 'stored',
+    subagentId,
+    text: '> Check recovery\n· read_file(README.md)'
+  })
+
+  function Harness({ onClose }: { onClose: () => void }) {
+    const [transcript, setTranscript] = useState<SubagentTranscript | null>(null)
+
+    return (
+      <AgentsSheet
+        onClose={onClose}
+        onCloseTranscript={() => setTranscript(null)}
+        onOpenTranscript={subagentId => setTranscript(transcriptFor(subagentId))}
+        transcript={transcript}
+        tree={subagentTree}
+        visible
+      />
+    )
+  }
+
+  it('pops the transcript page first and leaves the sheet standing', () => {
+    const onClose = jest.fn()
+
+    renderScreen(<Harness onClose={onClose} />)
+
+    // sa-2 is the child with a session behind it, so it is the one that offers a
+    // transcript at all.
+    fireEvent.press(screen.getByTestId('agent-transcript-sa-2'))
+    expect(screen.getByTestId('agent-transcript')).toBeTruthy()
+    expect(screen.queryByTestId('agent-row-sa-1')).toBeNull()
+
+    pressEscape()
+
+    // Back to the tree, with the sheet still open.
+    expect(screen.queryByTestId('agent-transcript')).toBeNull()
+    expect(screen.getByTestId('agent-row-sa-1')).toBeTruthy()
+    expect(onClose).not.toHaveBeenCalled()
+
+    // And only now does the sheet get it.
+    pressEscape()
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('closes the sheet on the first Escape when no page is open', () => {
+    const onClose = jest.fn()
+
+    renderScreen(<Harness onClose={onClose} />)
+
+    pressEscape()
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * A host that cannot close the page must not swallow the key.
+   *
+   * The gallery renders this sheet with a transcript and no `onCloseTranscript`;
+   * holding Escape there would leave a sheet nothing could dismiss.
+   */
+  it('lets the sheet have the key when the page cannot be closed', () => {
+    const onClose = jest.fn()
+
+    renderScreen(<AgentsSheet onClose={onClose} transcript={transcriptFor('sa-2')} tree={subagentTree} visible />)
+
+    pressEscape()
+
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 })

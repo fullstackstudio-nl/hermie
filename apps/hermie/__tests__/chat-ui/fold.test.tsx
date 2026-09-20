@@ -10,6 +10,8 @@ import { useState } from 'react'
 import { Text as RNText, View } from 'react-native'
 
 import { ExpandedProvider, Fold, needsReadingTreatment, useExpanded } from '../../src/chat-ui'
+import { foldCut, type FoldBlock } from '../../src/chat-ui/primitives/Fold'
+import { FOLD_HEIGHT, FOLD_LINES } from '../../src/ui/tokens'
 import { renderScreen } from '../support/render'
 
 /** A row that can be unmounted and re-mounted, the way `FlatList` does it. */
@@ -114,6 +116,85 @@ describe('Fold', () => {
     renderFold(4000, true)
 
     expect(screen.queryByTestId('fold-toggle')).toBeNull()
+  })
+})
+
+/**
+ * Where the cut lands.
+ *
+ * Two rules, and the second is the one that cannot be seen in a component test at
+ * all: the clip is a whole number of LINES so the last visible line is a whole
+ * line, and a table or a fenced code block is never cut THROUGH — half a row of
+ * cells under a gradient is damage, not a fade, so the cut moves up to that
+ * block's top and the block fades out entire.
+ *
+ * `foldCut` is exported for exactly this: asserting either rule off a rendered
+ * bubble would mean measuring pixels the test renderer never lays out.
+ */
+describe('foldCut', () => {
+  const LEADING = 25
+  const LINES = FOLD_LINES.compact
+  const block = (over: Partial<FoldBlock> = {}): FoldBlock => ({
+    atomic: true,
+    height: 120,
+    index: 0,
+    top: 0,
+    ...over
+  })
+
+  it('cuts on a line multiple when nothing is in the way', () => {
+    const cut = foldCut(LINES, LEADING, FOLD_HEIGHT.compact)
+
+    expect(cut).toBe(LINES * LEADING)
+    expect(cut % LEADING).toBe(0)
+  })
+
+  it('falls back to the fixed height when the caller knows no leading', () => {
+    expect(foldCut(LINES, undefined, FOLD_HEIGHT.compact)).toBe(FOLD_HEIGHT.compact)
+    expect(foldCut(LINES, 0, FOLD_HEIGHT.compact)).toBe(FOLD_HEIGHT.compact)
+  })
+
+  it('moves the cut up to the top of a block the line multiple would slice', () => {
+    // The limit is 275; the table runs 200→320, so the cut falls inside it.
+    const table = block({ height: 120, top: 200 })
+
+    expect(foldCut(LINES, LEADING, FOLD_HEIGHT.compact, [table])).toBe(200)
+  })
+
+  it('leaves the line multiple alone for a block that ends above it', () => {
+    expect(foldCut(LINES, LEADING, FOLD_HEIGHT.compact, [block({ height: 100, top: 100 })])).toBe(LINES * LEADING)
+  })
+
+  it('leaves the line multiple alone for a block that starts below it', () => {
+    expect(foldCut(LINES, LEADING, FOLD_HEIGHT.compact, [block({ height: 200, top: 300 })])).toBe(LINES * LEADING)
+  })
+
+  it('ignores a paragraph straddling the cut, which is what the gradient is for', () => {
+    expect(foldCut(LINES, LEADING, FOLD_HEIGHT.compact, [block({ atomic: false, height: 120, top: 200 })])).toBe(
+      LINES * LEADING
+    )
+  })
+
+  /**
+   * The guard, not a preference: a table that opens the reply would move the cut
+   * to nothing, and an empty fold with a `Show more` under it is worse than a
+   * sliced table. Three lines is the floor.
+   */
+  it('never folds a block that starts at the top away to nothing', () => {
+    expect(foldCut(LINES, LEADING, FOLD_HEIGHT.compact, [block({ height: 900, top: 0 })])).toBe(LINES * LEADING)
+    expect(foldCut(LINES, LEADING, FOLD_HEIGHT.compact, [block({ height: 900, top: LEADING * 2 })])).toBe(
+      LINES * LEADING
+    )
+    // At the floor exactly, the rule applies again.
+    expect(foldCut(LINES, LEADING, FOLD_HEIGHT.compact, [block({ height: 900, top: LEADING * 3 })])).toBe(LEADING * 3)
+  })
+
+  it('takes the first straddling block when the reporter has holes in it', () => {
+    // `useFoldBlocks` writes into a sparse array by index, so a caller may hand
+    // over gaps — an undefined entry must not throw.
+    const blocks = [undefined as unknown as FoldBlock, block({ height: 120, index: 1, top: 200 })]
+
+    expect(foldCut(LINES, LEADING, FOLD_HEIGHT.compact, blocks)).toBe(200)
   })
 })
 

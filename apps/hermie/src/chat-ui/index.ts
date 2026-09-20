@@ -36,7 +36,7 @@ export { TypingDots, TypingIndicator, type TypingIndicatorProps } from './Typing
 export { UserBubble, type UserBubbleProps } from './UserBubble'
 
 export { Avatar, type AvatarProps } from './primitives/Avatar'
-export { Bubble, resolveBubbleWidth, useBubbleWidth, type BubbleProps } from './primitives/Bubble'
+export { Bubble, resolveBubbleWidth, useBubbleWidth, useLedgerWidth, type BubbleProps } from './primitives/Bubble'
 export { BubbleColumn, useBubbleColumnWidth } from './primitives/BubbleColumn'
 export { Chip, type ChipProps } from './primitives/Chip'
 export { Fold, useFoldHeight, type FoldProps } from './primitives/Fold'

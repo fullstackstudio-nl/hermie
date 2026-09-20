@@ -78,6 +78,32 @@ export interface TranscriptRow {
   reasoning?: string | null
 }
 
+/**
+ * One row as the REST transcript route answers it, rather than as the socket does.
+ *
+ * `sessions.py` reads `dict(messages_row)`, so the body is **`content`**, with
+ * `display_content` and `display_kind` beside it as projections — and it carries
+ * `id`, the messages table's own primary key, on every row including a tool
+ * call. The socket's `session.history` is the surface that says `text` and
+ * `row_id`. The fake used to answer `text` on both, so the path a real gateway
+ * ALWAYS takes was the one path nothing here ever exercised.
+ */
+function restMessageRow(row: TranscriptRow, index: number): Record<string, unknown> {
+  return {
+    id: row.row_id ?? index + 1,
+    role: row.role,
+    content: row.text ?? '',
+    ...(row.display_kind ? { display_content: row.text ?? '', display_kind: row.display_kind } : {}),
+    ...(row.display_metadata ? { display_metadata: row.display_metadata } : {}),
+    ...(row.timestamp === undefined ? {} : { timestamp: row.timestamp }),
+    ...(row.name === undefined || row.name === null ? {} : { name: row.name }),
+    ...(row.tool_id === undefined || row.tool_id === null ? {} : { tool_id: row.tool_id }),
+    ...(row.context === undefined || row.context === null ? {} : { context: row.context }),
+    ...(row.args === undefined || row.args === null ? {} : { args: row.args }),
+    ...(row.reasoning === undefined || row.reasoning === null ? {} : { reasoning: row.reasoning })
+  }
+}
+
 interface RingEntry {
   type: string
   session_id: string
@@ -239,16 +265,28 @@ interface CronJob {
   runs: CronRunRow[]
 }
 
-/** A run session, in the `list_sessions_rich` row shape `/runs` answers with. */
+/**
+ * A run session, in the `list_sessions_rich` row shape `/runs` answers with.
+ *
+ * `end_reason` and NOT `status`: a session row is `dict(sqlite_row)` over the
+ * sessions table, and that table has no status column at all. The fake used to
+ * invent one, which meant the app's run history read "ok" against this server
+ * whatever it said — and would have read "ok" against a real gateway for every
+ * run, including the ones that died.
+ */
 interface CronRunRow {
   id: string
+  source: string
   title: string
-  status: string
+  end_reason: string | null
   started_at: number
   ended_at: number | null
   last_active: number
   message_count: number
   preview: string
+  archived: boolean
+  is_active: boolean
+  profile: string
 }
 
 export interface FakeGateway {
@@ -778,7 +816,7 @@ function initialState(options: FakeGatewayOptions): FakeGatewayState {
         job.id,
         run.started_at,
         job.prompt,
-        run.status === 'error' ? 'The check did not complete.' : 'Done — nothing needs your attention.',
+        run.end_reason === 'done' ? 'Done — nothing needs your attention.' : 'The check did not complete.',
         job.profile
       )
 
@@ -863,6 +901,39 @@ function initialState(options: FakeGatewayOptions): FakeGatewayState {
  * gateway, so a client that lists over the socket silently loses it while the
  * dashboard shows it.
  */
+/**
+ * One run row, with the keys a session row really carries.
+ *
+ * `hermes_state_portability.py::list_sessions_rich` hands back the whole
+ * sessions row plus `preview` and `last_active`, and the cron route stamps
+ * `is_active`, `archived` and `profile` on top. The outcome lives in
+ * `end_reason`; there is no status column to read.
+ */
+function cronRunRow(row: {
+  id: string
+  title: string
+  profile: string
+  started_at: number
+  ended_at: number
+  preview: string
+  end_reason?: string
+}): CronRunRow {
+  return {
+    id: row.id,
+    source: 'cron',
+    title: row.title,
+    end_reason: row.end_reason ?? 'done',
+    started_at: row.started_at,
+    ended_at: row.ended_at,
+    last_active: row.ended_at,
+    message_count: 3,
+    preview: row.preview,
+    archived: false,
+    is_active: false,
+    profile: row.profile
+  }
+}
+
 function initialCronJobs(): CronJob[] {
   const hourAgo = Math.floor(Date.now() / 1000) - 3_600
   const yesterday = hourAgo - 86_400
@@ -876,7 +947,7 @@ function initialCronJobs(): CronJob[] {
       prompt: 'Check the VM, summarize disk and memory, and flag anything unusual.',
       deliver: 'local',
       enabled: true,
-      state: 'active',
+      state: 'scheduled',
       next_run_at: new Date(Date.now() + 7_200_000).toISOString(),
       last_run_at: new Date(hourAgo * 1000).toISOString(),
       last_status: 'ok',
@@ -887,26 +958,25 @@ function initialCronJobs(): CronJob[] {
       skills: [],
       model: null,
       runs: [
-        {
+        cronRunRow({
           id: `cron_job-heartbeat_${hourAgo}`,
           title: 'VM heartbeat',
-          status: 'ok',
+          profile: LAUNCH_PROFILE,
           started_at: hourAgo,
           ended_at: hourAgo + 42,
-          last_active: hourAgo + 42,
-          message_count: 3,
           preview: 'Done — nothing needs your attention.'
-        },
-        {
+        }),
+        // The one that did NOT finish. A run history where every row says the
+        // same word cannot show that the row is reading anything at all.
+        cronRunRow({
           id: `cron_job-heartbeat_${yesterday}`,
           title: 'VM heartbeat',
-          status: 'ok',
+          profile: LAUNCH_PROFILE,
           started_at: yesterday,
           ended_at: yesterday + 38,
-          last_active: yesterday + 38,
-          message_count: 3,
-          preview: 'Done — nothing needs your attention.'
-        }
+          end_reason: 'interrupted',
+          preview: 'The check did not complete.'
+        })
       ]
     },
     {
@@ -917,7 +987,7 @@ function initialCronJobs(): CronJob[] {
       prompt: 'Write a short digest of this week for the team.',
       deliver: 'bot-chat:researcher',
       enabled: true,
-      state: 'active',
+      state: 'scheduled',
       next_run_at: new Date(Date.now() + 86_400_000).toISOString(),
       last_run_at: new Date((hourAgo - 7_200) * 1000).toISOString(),
       last_status: 'error',
@@ -938,7 +1008,7 @@ function initialCronJobs(): CronJob[] {
       prompt: 'Scan the watched sources and note anything new worth reading.',
       deliver: 'bot-chat:researcher',
       enabled: true,
-      state: 'active',
+      state: 'scheduled',
       next_run_at: new Date(Date.now() + 14_400_000).toISOString(),
       last_run_at: new Date((hourAgo - 1_800) * 1000).toISOString(),
       last_status: 'ok',
@@ -1118,7 +1188,15 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
         auth_required: gated(),
         auth_providers: gated() ? ['self-hosted'] : [],
         auth_flows: gated() ? ['cookie', 'native_pkce'] : [],
-        profiles: state.profiles.map(profile => profile.name),
+        // `status.py` puts the TOPOLOGY rows here, not a list of names. Nothing
+        // in the app reads them, which is exactly why the fake could get away
+        // with a different type for as long as it did.
+        profiles: state.profiles.map(profile => ({
+          name: profile.name,
+          path: profile.path,
+          display_name: profile.display_name,
+          is_default: profile.name === LAUNCH_PROFILE
+        })),
         overall: 'ok'
       })
 
@@ -1261,7 +1339,7 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       json(res, 200, {
         targets: [
           { id: 'local', name: 'Local (save only)', home_target_set: true, home_env_var: null },
-          { id: 'bot-chat:researcher', name: 'Bot chat · researcher', home_target_set: true, home_env_var: null }
+          { id: 'bot-chat:researcher', name: 'Bot Chat (researcher)', home_target_set: true, home_env_var: null }
         ]
       })
 
@@ -1286,9 +1364,18 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       }
 
       const limit = Number.parseInt(url.searchParams.get('limit') ?? '200', 10)
+      const offset = Number.parseInt(url.searchParams.get('offset') ?? '0', 10)
       const order = url.searchParams.get('order') ?? 'latest'
       const rows = order === 'latest' ? session.messages.slice(-limit) : session.messages.slice(0, limit)
-      json(res, 200, { messages: rows, count: rows.length })
+      // `sessions.py::_get_session_messages` — the envelope names the session it
+      // read and pages with `pagination`. It has no `count`, which is what the
+      // fake used to send and what nothing on either side ever read.
+      json(res, 200, {
+        session_id: session.storedId,
+        profile: session.profile,
+        messages: rows.map(restMessageRow),
+        pagination: { limit, offset, order, returned: rows.length }
+      })
 
       return
     }
@@ -1409,7 +1496,14 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     // that id or name. The walk is why these routes work without the parameter
     // and why two profiles with the same job name make it a coin toss.
     const candidates = profile ? state.cronJobs.filter(entry => entry.profile === profile) : state.cronJobs
-    const job = candidates.find(entry => entry.id === wanted || entry.name === wanted)
+    const action = match[3]
+    // …but WHICH job, once the store is chosen, is `get_job`, and that matches
+    // on the id alone. Only `/trigger` goes through `resolve_job_ref`, which is
+    // the one place a name is allowed to stand in for an id. Accepting names
+    // everywhere made `GET /api/cron/jobs/VM heartbeat` work here and 404 on a
+    // real gateway.
+    const byName = action === 'trigger'
+    const job = candidates.find(entry => entry.id === wanted || (byName && entry.name === wanted))
 
     if (!job) {
       json(res, 404, { detail: 'Unknown job' })
@@ -1417,12 +1511,13 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       return
     }
 
-    const action = match[3]
-
     if (action === 'runs') {
-      // Newest first, the way the id-range scan returns them.
-      const runs = [...job.runs].sort((a, b) => b.started_at - a.started_at)
-      json(res, 200, { runs, limit: runs.length })
+      // Newest first, the way the id-range scan returns them. The echoed limit
+      // is the REQUESTED one clamped to 1..100, not how many came back.
+      const asked = Number.parseInt(query.get('limit') ?? '20', 10)
+      const limit = Number.isFinite(asked) ? Math.min(100, Math.max(1, asked)) : 20
+      const runs = [...job.runs].sort((a, b) => b.started_at - a.started_at).slice(0, limit)
+      json(res, 200, { runs, limit })
 
       return
     }
@@ -1576,7 +1671,7 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       prompt: typeof body.prompt === 'string' ? body.prompt : '',
       deliver: typeof body.deliver === 'string' && body.deliver ? body.deliver : 'local',
       enabled: true,
-      state: 'active',
+      state: 'scheduled',
       next_run_at: nextRunFor(schedule),
       last_run_at: null,
       last_status: null,
@@ -1599,7 +1694,7 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
 
   function setCronPaused(job: CronJob, paused: boolean): void {
     job.enabled = !paused
-    job.state = paused ? 'paused' : 'active'
+    job.state = paused ? 'paused' : 'scheduled'
     job.paused_at = paused ? new Date().toISOString() : null
     job.paused_reason = paused ? 'Paused from Hermie' : null
     job.next_run_at = paused ? null : nextRunFor(job.schedule)
@@ -1608,16 +1703,14 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
   /** Fire now: record a run, register its transcript, and answer the refreshed job. */
   function triggerCronJob(job: CronJob): CronJob {
     const startedAt = nowSeconds()
-    const run: CronRunRow = {
+    const run = cronRunRow({
       id: `cron_${job.id}_${startedAt}`,
       title: job.name,
-      status: 'ok',
+      profile: job.profile,
       started_at: startedAt,
       ended_at: startedAt + 9,
-      last_active: startedAt + 9,
-      message_count: 3,
       preview: 'Done — nothing needs your attention.'
-    }
+    })
 
     job.runs.push(run)
     job.last_run_at = new Date(startedAt * 1000).toISOString()

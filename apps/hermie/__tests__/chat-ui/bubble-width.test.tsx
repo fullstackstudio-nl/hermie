@@ -17,7 +17,7 @@
 import { fireEvent, screen } from '@testing-library/react-native'
 import { StyleSheet, useWindowDimensions, View, type ViewStyle } from 'react-native'
 
-import { Bubble, BubbleColumn, resolveBubbleWidth, useBubbleWidth } from '../../src/chat-ui'
+import { Bubble, BubbleColumn, LedgerRow, resolveBubbleWidth, useBubbleWidth } from '../../src/chat-ui'
 import { Text } from '../../src/ui/primitives'
 import { BUBBLE_MAX, REGULAR_LAYOUT_MIN_WIDTH, SIDEBAR_WIDTH, WINDOW_GAP } from '../../src/ui/tokens'
 import { renderScreen } from '../support/render'
@@ -126,6 +126,59 @@ describe('the rule itself', () => {
     expect(resolveBubbleWidth(BUBBLE_MAX.regular, 500)).toBe(340)
     expect(resolveBubbleWidth(BUBBLE_MAX.regular, 2000)).toBe(BUBBLE_MAX.regular.points)
     expect(REGULAR_LAYOUT_MIN_WIDTH).toBeGreaterThan(0)
+  })
+})
+
+/**
+ * The ledger takes the same cap, and only inside the transcript.
+ *
+ * §6.4 gives tool rows, thinking, cron deliveries and outgoing DMs the bubble's
+ * left edge and a different silhouette. They had no right edge at all, so on the
+ * wide window a one-line tool row ran the full width of the column while every
+ * bubble beside it stopped at 640 — the column read as two layouts stacked on
+ * each other. The same rows are drawn by the Activity timeline, which has no
+ * column and must keep filling its own box, and that is the whole reason this is
+ * a second hook rather than `useBubbleWidth` with a different name.
+ */
+describe('the ledger cap', () => {
+  function ledgerCap(columnWidth: number): unknown {
+    renderScreen(
+      <BubbleColumn style={{ flex: 1 } as ViewStyle} testID="column">
+        <LedgerRow glyph="◌" testID="row" title="Thought for 8s" />
+      </BubbleColumn>
+    )
+
+    fireEvent(screen.getByTestId('column'), 'layout', {
+      nativeEvent: { layout: { width: columnWidth, height: 800, x: 0, y: 0 } }
+    })
+
+    return (StyleSheet.flatten(screen.getByTestId('row').props.style as never) as { maxWidth?: unknown }).maxWidth
+  }
+
+  it('is the bubble’s number, measured off the same column', () => {
+    size(LANDSCAPE.width, LANDSCAPE.height)
+
+    expect(ledgerCap(1000)).toBe(resolveBubbleWidth(BUBBLE_MAX.regular, 1000))
+    expect(ledgerCap(1000)).toBe(capInColumn(1000))
+  })
+
+  it('is a number on a phone too, not the whole window', () => {
+    size(PHONE.width, PHONE.height)
+
+    expect(ledgerCap(PHONE.width)).toBe(resolveBubbleWidth(BUBBLE_MAX.compact, PHONE.width))
+  })
+
+  it('is absent outside a transcript, where the row is filling its own box', () => {
+    size(LANDSCAPE.width, LANDSCAPE.height)
+    renderScreen(
+      <View>
+        <LedgerRow glyph="◌" testID="row" title="Thought for 8s" />
+      </View>
+    )
+
+    expect(
+      (StyleSheet.flatten(screen.getByTestId('row').props.style as never) as { maxWidth?: unknown }).maxWidth
+    ).toBe(undefined)
   })
 })
 

@@ -120,14 +120,24 @@ describe('the cron delivery row', () => {
     expect(cron.text).toContain(`"${String(jobs[0]?.name)}"`)
   })
 
-  it('reaches the REST transcript route as the same row', async () => {
+  /**
+   * The same row over REST, in the shape REST actually answers with.
+   *
+   * `sessions.py` reads `dict(messages_row)`: the body is `content` and the key
+   * is `id`. `session.history` is the surface that says `text` and `row_id`. The
+   * fake used to answer `text` on both, so the branch `rowsToItems(rows, 'rest')`
+   * takes against every real gateway was the one branch nothing here drove.
+   */
+  it('reaches the REST transcript route as the same row, in the REST shape', async () => {
     const { id } = await researcherChat()
     const body = (await fetch(`${gateway.url}/api/sessions/${encodeURIComponent(id)}/messages`).then(r =>
       r.json()
-    )) as { messages: TranscriptRow[] }
-    const cron = body.messages.find(row => row.text?.startsWith('[Cronjob '))
+    )) as { messages: Record<string, unknown>[] }
+    const cron = body.messages.find(row => String(row.content ?? '').startsWith('[Cronjob '))
 
-    expect(cron?.row_id).toBe(5)
+    expect(cron?.id).toBe(5)
+    expect(cron?.content).toBeTypeOf('string')
+    expect(cron?.text).toBeUndefined()
     expect(cron?.display_kind).toBeUndefined()
   })
 })

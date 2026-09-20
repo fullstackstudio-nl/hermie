@@ -451,6 +451,47 @@ export const longReportItem: AssistantItem = {
 }
 
 /**
+ * A reply whose TABLE sits across the fold.
+ *
+ * The rule in `Fold` that no component test can see: where the line multiple
+ * would cut through a table or a fenced block, the clip moves UP to that block's
+ * top and the block fades out entire — because half a row of cells under a
+ * gradient is damage rather than a fade. `longReportItem` cannot show it: its
+ * table is in the first few lines, well above any cut.
+ *
+ * The prose above the table is sized so the cut lands inside it on BOTH layouts:
+ * about nine wrapped lines in a phone bubble and about six in a 640pt one, with a
+ * table tall enough to still be open at line fourteen.
+ */
+export const foldTableStraddleMarkdown = `The scheduler restarted at 02:14, so every job that was mid-flight at that moment is recorded as interrupted rather than as finished. That is the whole of the difference between this board and yesterday's digest, and none of it is anything the jobs themselves did. Here is where the eleven of them stand this morning.
+
+| Job | Last run | Outcome | Next run |
+| --- | --- | --- | --- |
+| VM heartbeat | 02:14 | interrupted | 04:14 |
+| Weekly digest | 02:14 | interrupted | Friday |
+| Source scan | 02:14 | interrupted | 06:00 |
+| Inbox cleanup | 18:00 | done | 18:00 |
+| Backup check | 01:00 | done | 01:00 |
+| Cert expiry | 00:30 | done | 00:30 |
+| Ledger sweep | 09:00 | done | Monday |
+| Link rot | 05:00 | done | 05:00 |
+| Disk report | 03:00 | done | 03:00 |
+| Mail digest | 07:00 | done | 07:00 |
+| Uptime probe | 02:00 | interrupted | 02:00 |
+| Log rotate | 00:05 | done | 00:05 |
+
+None of the interrupted ones left an error behind, so nothing is wrong with the jobs themselves. What is worth doing is pinning the scheduler's restart, which is one line in the unit file.`
+
+export const foldTableStraddleItem: AssistantItem = {
+  ...base('a-fold-table', 31),
+  interim: false,
+  kind: 'assistant',
+  status: 'complete',
+  streaming: false,
+  text: foldTableStraddleMarkdown
+}
+
+/**
  * The inline-code regression, as the owner actually hit it.
  *
  * Both halves in one sentence: a code span near the end of a line (which used to

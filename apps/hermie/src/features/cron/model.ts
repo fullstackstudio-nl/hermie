@@ -149,7 +149,9 @@ export function cronJobFromRow(row: CronJobRow | Record<string, unknown>): CronJ
     lastRunAt: nullableStr(record.last_run_at),
     lastStatus: nullableStr(record.last_status),
     lastError:
-      nullableStr(record.last_error) ?? nullableStr(record.last_fire_error) ?? nullableStr(record.last_delivery_error),
+      nullableStr(record.last_error) ??
+      lastFireError(record.last_fire_error) ??
+      nullableStr(record.last_delivery_error),
     pausedAt: nullableStr(record.paused_at),
     pausedReason: nullableStr(record.paused_reason),
     repeat: repeatTimes(record.repeat),
@@ -161,14 +163,37 @@ export function cronJobFromRow(row: CronJobRow | Record<string, unknown>): CronJ
   }
 }
 
-/** One `/runs` row. They are ordinary session rows, in `list_sessions_rich` shape. */
+/**
+ * A missed fire, which the gateway records as an OBJECT.
+ *
+ * `last_error` and `last_delivery_error` are strings; `last_fire_error` is
+ * `{at, detail}` — the scheduler stamps when it could not start the job. Read as
+ * a string it was silently dropped, so a cron that never got off the ground
+ * showed no error at all in this app. The detail is the sentence worth showing.
+ */
+function lastFireError(value: unknown): string | null {
+  if (isRecord(value)) {
+    return nullableStr(value.detail)
+  }
+
+  return nullableStr(value)
+}
+
+/**
+ * One `/runs` row. They are ordinary session rows, in `list_sessions_rich` shape.
+ *
+ * A session row has NO `status` column — the outcome is `end_reason`, which the
+ * portability layer copies straight out of the sessions table. Reading `status`
+ * alone meant every run rendered as the "ok" it fell back to, including the ones
+ * that were interrupted or died, and nothing said otherwise.
+ */
 export function cronRunFromRow(row: Record<string, unknown>): CronRun {
   return {
     id: str(row.id),
     startedAt: num(row.started_at),
     endedAt: num(row.ended_at),
     lastActive: num(row.last_active),
-    status: nullableStr(row.status),
+    status: nullableStr(row.status) ?? nullableStr(row.end_reason),
     messageCount: num(row.message_count) ?? 0,
     preview: str(row.preview),
     title: str(row.title)

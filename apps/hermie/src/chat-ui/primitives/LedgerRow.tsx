@@ -11,6 +11,11 @@
  *
  * The row itself is not glass and has no blur. It is a hairline, a glyph well and
  * type — a hundred of these scroll, and a hundred blur views do not.
+ *
+ * Inside a transcript it also takes the bubble's width cap (`useLedgerWidth`):
+ * "same left edge" is only half a silhouette if the right one is the window.
+ * Elsewhere — the Activity timeline draws these too — there is no column and no
+ * cap, and the row fills what it is given.
  */
 import type { ReactNode } from 'react'
 import { Pressable, View } from 'react-native'
@@ -20,6 +25,7 @@ import { GlassSurface } from '../../ui/glass'
 import { Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { TAP_SLOP, type ColorRole } from '../../ui/tokens'
+import { useLedgerWidth } from './Bubble'
 
 export interface LedgerRowProps {
   /** One character, in the glyph well. Machine events all carry one. */
@@ -63,6 +69,7 @@ export function LedgerRow({
 }: LedgerRowProps) {
   const theme = useTheme()
   const ink = TONE_INK[tone]
+  const maxWidth = useLedgerWidth()
 
   const line = (
     <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.sm, minHeight: 28 }}>
@@ -113,7 +120,7 @@ export function LedgerRow({
   )
 
   return (
-    <View style={{ gap: theme.space.xs }} testID={testID}>
+    <View style={{ gap: theme.space.xs, maxWidth }} testID={testID}>
       {onToggle ? (
         <Pressable
           accessibilityLabel={accessibilityLabel}

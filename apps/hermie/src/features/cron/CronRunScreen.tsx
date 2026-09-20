@@ -57,15 +57,16 @@ export function CronRunScreen({ controller, job, run, onClose }: CronRunScreenPr
   }, [load])
 
   const started = relativeEpoch(run.startedAt ?? run.lastActive)
+  const title = run.title || cronStrings.run.title
+  // A run session is TITLED with its job's name, so printing the job under it
+  // said the same words twice in two sizes — the stutter the crons list and
+  // Activity were already cured of. The subtitle earns its line only where the
+  // run calls itself something else.
+  const subtitle = [title === job.name ? '' : job.name, started].filter(Boolean).join(' · ')
 
   return (
     <Screen padded={false}>
-      <ScreenHeader
-        back={cronStrings.run.back}
-        onBack={onClose}
-        title={run.title || cronStrings.run.title}
-        subtitle={[job.name, started].filter(Boolean).join(' · ')}
-      />
+      <ScreenHeader back={cronStrings.run.back} onBack={onClose} title={title} subtitle={subtitle} />
 
       <Text color="textMuted" variant="meta" style={{ paddingHorizontal: theme.space.lg }}>
         {cronStrings.run.readOnly}

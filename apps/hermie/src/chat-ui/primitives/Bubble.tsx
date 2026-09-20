@@ -104,6 +104,32 @@ export function resolveBubbleWidth(rule: ResolvedBubbleWidth, columnWidth: numbe
 }
 
 /**
+ * The same cap, for the things in the ledger that are not bubbles.
+ *
+ * §6.4 puts tool rows, thinking, cron deliveries and outgoing DMs in the bot's
+ * gutter — "same left edge, distinct silhouette". They had the left edge and no
+ * right one, so on a wide window a one-line tool row and a cron card ran the
+ * full width of the column while every bubble beside them stopped at 640pt. The
+ * column reads as two different layouts stacked on each other.
+ *
+ * `undefined` OUTSIDE a transcript, which is the difference from
+ * `useBubbleWidth`: a bubble with no column still needs a number so its first
+ * frame is not zero-width, whereas a ledger row rendered somewhere else — the
+ * Activity timeline, a gallery section — is filling that box on purpose and must
+ * keep doing so.
+ */
+export function useLedgerWidth(): number | undefined {
+  const { width } = useWindowDimensions()
+  const column = useBubbleColumnWidth()
+
+  if (column === null) {
+    return undefined
+  }
+
+  return resolveBubbleWidth(width >= REGULAR_LAYOUT_MIN_WIDTH ? BUBBLE_MAX.regular : BUBBLE_MAX.compact, column)
+}
+
+/**
  * The tail, filled flat.
  *
  * Flat is correct rather than convenient: it sits at the bubble's lower edge,

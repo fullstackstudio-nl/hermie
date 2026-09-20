@@ -31,6 +31,7 @@ import { useExpanded } from './expanded'
 import { formatClock, previewLine } from './format'
 import { chatStrings } from './strings'
 import { Chip } from './primitives/Chip'
+import { useLedgerWidth } from './primitives/Bubble'
 import type { DmCounterpartQuery } from './TranscriptList'
 import type { BotDmOutItem, DispatchStatus, Presentation } from './types'
 
@@ -123,6 +124,7 @@ export function BotDmOutLine({
   testID
 }: BotDmOutLineProps) {
   const theme = useTheme()
+  const maxWidth = useLedgerWidth()
   const [expanded, toggle] = useExpanded(item.id)
 
   if (presentation === 'hidden-placeholder') {
@@ -150,7 +152,7 @@ export function BotDmOutLine({
   const replyPreview = hasReply(item) ? previewLine(item.reply?.text ?? '', 18) : ''
 
   return (
-    <View style={{ gap: theme.space.xs }} testID={testID ?? `bot-dm-out-${item.id}`}>
+    <View style={{ gap: theme.space.xs, maxWidth }} testID={testID ?? `bot-dm-out-${item.id}`}>
       <Pressable
         accessibilityHint={chatStrings.botDm.lineTo(handle)}
         accessibilityRole="button"

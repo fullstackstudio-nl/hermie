@@ -23,6 +23,7 @@ import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
 import { TAP_SLOP } from '../ui/tokens'
 import { formatClock } from './format'
+import { useLedgerWidth } from './primitives/Bubble'
 import { chatStrings } from './strings'
 
 export interface CronDeliveryCardProps {
@@ -52,10 +53,11 @@ export function CronDeliveryCard({
   testID
 }: CronDeliveryCardProps) {
   const theme = useTheme()
+  const maxWidth = useLedgerWidth()
   const time = formatClock(ts)
 
   return (
-    <GlassSurface contentStyle={{ padding: theme.space.md }} testID={testID} variant="card">
+    <GlassSurface contentStyle={{ padding: theme.space.md }} style={{ maxWidth }} testID={testID} variant="card">
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded }}

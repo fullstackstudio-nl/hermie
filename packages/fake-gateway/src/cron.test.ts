@@ -160,7 +160,9 @@ describe('cron.manage over the socket', () => {
       unknown
     >
 
-    expect(resumed).toMatchObject({ enabled: true, state: 'active' })
+    // `scheduled`, which is the word `cron/jobs.py::_job_state` produces. There
+    // is no `active` state on a real gateway.
+    expect(resumed).toMatchObject({ enabled: true, state: 'scheduled' })
     expect(resumed.next_run_at).toBeTypeOf('string')
   })
 

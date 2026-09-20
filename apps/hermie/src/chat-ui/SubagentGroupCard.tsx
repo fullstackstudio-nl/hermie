@@ -11,6 +11,7 @@ import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
 import type { ColorRole } from '../ui/tokens'
 import { Chip } from './primitives/Chip'
+import { useLedgerWidth } from './primitives/Bubble'
 import { clipInline, formatDuration } from './format'
 import { chatStrings } from './strings'
 import type { Presentation, Subagent, SubagentGroupItem, SubagentStatus } from './types'
@@ -58,6 +59,7 @@ export function SubagentGroupCard({
   onOpenTranscript
 }: SubagentGroupCardProps) {
   const theme = useTheme()
+  const maxWidth = useLedgerWidth()
 
   if (presentation === 'hidden-placeholder') {
     return null
@@ -80,6 +82,7 @@ export function SubagentGroupCard({
         gap: theme.space.xs,
         marginRight: 26,
         marginVertical: theme.space.md,
+        maxWidth,
         padding: theme.space.md
       }}
       testID={`subagent-group-${item.id}`}

@@ -39,6 +39,10 @@ the Mac, and it talks to nothing but your gateway.
 <!--
   These three images predate the Liquid Glass pass and the gateway card's
   removal: they show the previous surfaces, not the ones the app draws today.
+  Two things in them are named differently or not there at all now, and the alt
+  text above is written around both: the green "Connected" line under the title
+  is gone — the connection speaks in one line under the header instead — and the
+  tab reading "Routines" is called Crons everywhere.
   Regenerating them is its own job — docs/screenshots/ is published material
   (CONTRIBUTING.md), so it wants fixture data and stripped metadata, not a
   hurried retake.
@@ -61,7 +65,18 @@ the Mac, and it talks to nothing but your gateway.
   somewhere else says so instead of going stale.
 - **Crons.** The gateway's scheduled jobs, under the name the gateway and its
   dashboard use: what they run, when they run next, pause, resume, run now, and
-  the transcript of any past run.
+  the transcript of any past run. A delivery lands in the chat it was addressed
+  to as its own card, with the cron itself one tap away.
+- **Files and images.** Anything the picker will give you goes up to the gateway
+  and into the conversation — a photo, a PDF, a spreadsheet — as its own chip,
+  which says while it is uploading and says so on the chip if it is refused.
+- **Who is busy, at a glance.** Every chat carries a bead: offline, needs input,
+  working, online, in that order of urgency. It is the only thing in the app that
+  animates, and only for the one state that is waiting on a person.
+- **Your list, arranged your way.** Rows reorder, named dividers group them,
+  chats archive, and each one can carry its own colour. None of it is sent to the
+  gateway: the arrangement is yours and it is per gateway, because a different
+  machine's bots are a different list.
 - **Offline-tolerant.** The last stretch of every conversation is cached, so a
   chat paints before the gateway answers and is still readable on a plane.
 

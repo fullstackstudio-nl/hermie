@@ -42,6 +42,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Activity showed an empty timeline against a working gateway.** A
+  `GatewayConnection` — and so the whole chat runtime — exists from the moment a gateway is
+  CONFIGURED, long before its socket is up, and Activity's background load ran the instant the screen
+  mounted. The roster read under it failed with _"gateway not connected"_, a failed roster is
+  swallowed as "no bots", and the screen settled on _"your bots have not talked to each other yet"_ —
+  permanently, because nothing asked again. It now waits for the connection to be ready and reads
+  again after every reconnect, which is the rule the chat roster already had. Opening the panel
+  straight after launch lost that race every time.
+- **A cron's run history said `Success` for every run, including the ones that died.** A `/runs` row
+  is an ordinary session row, and the sessions table has no status column: the outcome is
+  `end_reason`. Reading `status` alone meant the screen always fell through to its "ok" default. A
+  missed FIRE was invisible for a related reason — `last_fire_error` is `{at, detail}` rather than a
+  string, so it was dropped on the way in; its detail is now shown like any other cron error.
+- **Tool cards and the rest of the ledger ran edge to edge on a wide window** while every bubble
+  beside them stopped at the §4 cap, so the column read as two layouts stacked on each other. Tool
+  rows, thinking, cron cards, DM lines and roll-ups, and the request cards now take the same measured
+  column rule a bubble takes. Outside a transcript — the Activity timeline draws the same rows —
+  there is no column and no cap, which is what it should be.
 - **The fold cuts on a line boundary, and the fade is a fade.** It clipped at a fixed height, so it
   landed wherever that height fell — half a line of x-height under a gradient, which reads as a
   sliced row. The clip is now `lines × leading`, the leading comes from the renderer

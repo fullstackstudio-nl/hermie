@@ -72,6 +72,7 @@ import { SubagentGroupCard } from './SubagentGroupCard'
 import { ToolCard } from './ToolCard'
 import { TypingIndicator } from './TypingIndicator'
 import { UserBubble } from './UserBubble'
+import { useLedgerWidth } from './primitives/Bubble'
 import { BubbleColumn } from './primitives/BubbleColumn'
 import { Chip } from './primitives/Chip'
 import { ExpandedProvider, useExpanded } from './expanded'
@@ -216,6 +217,7 @@ function RequestRow({
   onOpen?: (item: ApprovalItem | ClarifyItem) => void
 }) {
   const theme = useTheme()
+  const maxWidth = useLedgerWidth()
 
   if (presentation === 'hidden-placeholder') {
     return null
@@ -243,7 +245,7 @@ function RequestRow({
   return (
     <GlassSurface
       contentStyle={{ gap: theme.space.sm, padding: theme.space.md }}
-      style={{ borderColor: theme.accent().fill }}
+      style={{ borderColor: theme.accent().fill, maxWidth }}
       testID={`request-${item.id}`}
       variant="card"
     >

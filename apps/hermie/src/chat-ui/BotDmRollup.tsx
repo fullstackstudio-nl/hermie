@@ -17,6 +17,7 @@ import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
 import { TAP_SLOP } from '../ui/tokens'
 import { useExpanded } from './expanded'
+import { useLedgerWidth } from './primitives/Bubble'
 import { chatStrings } from './strings'
 import type { DmRun } from './dm-rollup'
 
@@ -27,6 +28,7 @@ export interface BotDmRollupProps {
 
 export function BotDmRollup({ run, testID }: BotDmRollupProps) {
   const theme = useTheme()
+  const maxWidth = useLedgerWidth()
   const [expanded, toggle] = useExpanded(`rollup:${run.id}`)
 
   // Expanded: the member lines draw themselves, so the summary gets out of the
@@ -43,7 +45,7 @@ export function BotDmRollup({ run, testID }: BotDmRollupProps) {
       accessibilityState={{ expanded }}
       hitSlop={TAP_SLOP}
       onPress={toggle}
-      style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+      style={({ pressed }) => ({ maxWidth, opacity: pressed ? 0.6 : 1 })}
       testID={testID ?? `bot-dm-rollup-${run.id}`}
     >
       <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.sm, minHeight: 24 }}>

@@ -22,6 +22,7 @@ import { clipInline, formatDuration } from './format'
 import { chatStrings } from './strings'
 import { argumentRows, extractToolErrorMessage, formatToolResultSummary } from './tool-result-summary'
 import { isSilentTool, toolFamily, toolGlyph } from './tool-render-class'
+import { useLedgerWidth } from './primitives/Bubble'
 import type { Presentation, ToolItem } from './types'
 
 export interface ToolCardProps {
@@ -101,6 +102,7 @@ function oneLineSummary(item: ToolItem): string {
 
 export function ToolCard({ item, presentation = 'collapsed', expanded, onToggleExpanded }: ToolCardProps) {
   const theme = useTheme()
+  const maxWidth = useLedgerWidth()
   // `null` means "the user has not decided", so a verbosity change still opens
   // or closes the card; one tap pins it and verbosity stops overriding it.
   const [selfExpanded, setSelfExpanded] = useState<boolean | null>(null)
@@ -140,8 +142,12 @@ export function ToolCard({ item, presentation = 'collapsed', expanded, onToggleE
         borderLeftColor: failed ? theme.colors.danger : 'transparent',
         borderLeftWidth: failed ? 3 : 0,
         borderRadius: theme.radii.xl,
+        // Inside a transcript the cap is the bubble's; the margin is what keeps
+        // a card off the gutter on a column narrow enough for the cap to be the
+        // whole of it.
         marginRight: 26,
         marginVertical: theme.space.md,
+        maxWidth,
         overflow: 'hidden'
       }}
       testID={`tool-card-${item.id}`}
