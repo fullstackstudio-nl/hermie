@@ -12,6 +12,12 @@ export interface JsonRequest {
   timeoutMs?: number
   signal?: AbortSignal
   fetchImpl?: FetchLike
+  /**
+   * `credentials` as `fetch` means it. Only the browser build sets it, to
+   * `include`, so the gateway's session cookie rides along; everywhere else it
+   * is absent and the platform default applies.
+   */
+  credentials?: RequestCredentials
 }
 
 export interface JsonResponse {
@@ -116,6 +122,7 @@ export async function requestText(url: string, request: JsonRequest = {}): Promi
       method: request.method ?? 'GET',
       headers,
       ...(body === undefined ? {} : { body }),
+      ...(request.credentials === undefined ? {} : { credentials: request.credentials }),
       signal: controller.signal
     })
 

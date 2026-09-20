@@ -22,6 +22,11 @@ export interface AuthHeaderOptions {
  */
 export interface CredentialProvider {
   readonly mode: GatewayAuthMode
+  /**
+   * `credentials` for every `fetch` this client makes, when the flow needs one
+   * that is not the platform default. Only the cookie flow sets it.
+   */
+  readonly fetchCredentials?: RequestCredentials
   /** Auth headers for one REST call. */
   httpAuthHeaders(options?: AuthHeaderOptions): Promise<Record<string, string>>
   /** Mint everything one WebSocket dial needs. Called immediately before connecting. */
@@ -72,7 +77,16 @@ export class NativePkceCredentials implements CredentialProvider {
   }
 
   async dialPlan(wsUrl: string, extraHeaders: Record<string, string>): Promise<DialPlan> {
-    const ticket = await this.mintTicket(extraHeaders)
+    const ticket = await mintWsTicket({
+      baseUrl: this.options.baseUrl,
+      headers: {
+        ...normalizeHeaders(this.options.extraHeaders),
+        ...extraHeaders,
+        ...(await this.httpAuthHeaders())
+      },
+      ...(this.options.fetchImpl ? { fetchImpl: this.options.fetchImpl } : {}),
+      ...(this.options.timeline ? { timeline: this.options.timeline } : {})
+    })
 
     return {
       url: wsUrl,
@@ -93,74 +107,83 @@ export class NativePkceCredentials implements CredentialProvider {
   async signOut(): Promise<void> {
     await this.options.coordinator.clear()
   }
+}
 
-  /**
-   * One ticket for one dial.
-   *
-   * This is the ONLY place in a dial where an expired access token shows itself:
-   * the mint is an ordinary authenticated POST, so upstream's gate answers 401
-   * here, whereas the WebSocket upgrade verifies no token at all and can only
-   * ever refuse the ticket. The two must stay distinguishable, which is why the
-   * mint's status is recorded.
-   */
-  private async mintTicket(extraHeaders: Record<string, string>): Promise<string> {
-    const timeline = this.options.timeline ?? NULL_AUTH_TIMELINE
-    const url = apiUrl(this.options.baseUrl, '/api/auth/ws-ticket')
-    const auth = await this.httpAuthHeaders()
-    let response
+export interface MintWsTicketOptions {
+  baseUrl: string
+  headers: Record<string, string>
+  fetchImpl?: FetchLike
+  credentials?: RequestCredentials
+  timeline?: AuthTimelineSink
+}
 
-    try {
-      response = await requestText(url, {
-        method: 'POST',
-        headers: { ...normalizeHeaders(this.options.extraHeaders), ...extraHeaders, ...auth },
-        body: {},
-        fetchImpl: this.options.fetchImpl
-      })
-    } catch (error) {
-      timeline.record({
-        event: 'ticket.failed',
-        ...(error instanceof GatewayError ? { kind: error.kind } : {})
-      })
+/**
+ * One ticket for one dial: `POST /api/auth/ws-ticket`, single-use, 30 s TTL.
+ *
+ * Shared by both flows that dial with a ticket, because this is the ONLY place
+ * in a dial where a stale credential shows itself. The mint is an ordinary
+ * authenticated POST, so the gateway's gate answers 401 here, whereas the
+ * WebSocket upgrade verifies no credential at all and can only ever refuse the
+ * ticket. The two must stay distinguishable, which is why the mint's status is
+ * recorded.
+ */
+export async function mintWsTicket(options: MintWsTicketOptions): Promise<string> {
+  const timeline = options.timeline ?? NULL_AUTH_TIMELINE
+  const url = apiUrl(options.baseUrl, '/api/auth/ws-ticket')
+  let response
 
-      throw error
-    }
+  try {
+    response = await requestText(url, {
+      method: 'POST',
+      headers: options.headers,
+      body: {},
+      ...(options.credentials === undefined ? {} : { credentials: options.credentials }),
+      ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {})
+    })
+  } catch (error) {
+    timeline.record({
+      event: 'ticket.failed',
+      ...(error instanceof GatewayError ? { kind: error.kind } : {})
+    })
 
-    if (response.status === 401 || response.status === 403) {
-      timeline.record({ event: 'ticket.failed', kind: 'auth', status: response.status })
-
-      throw new GatewayError('auth', 'The gateway refused to mint a WebSocket ticket. Sign in again.', {
-        status: response.status
-      })
-    }
-
-    if (response.status >= 500) {
-      timeline.record({ event: 'ticket.failed', kind: 'server', status: response.status })
-
-      throw new GatewayError('server', `The gateway answered HTTP ${response.status} while minting a ticket.`, {
-        status: response.status
-      })
-    }
-
-    if (!response.ok) {
-      timeline.record({ event: 'ticket.failed', kind: 'protocol', status: response.status })
-
-      throw new GatewayError('protocol', `Minting a WebSocket ticket failed with HTTP ${response.status}.`, {
-        status: response.status
-      })
-    }
-
-    const body = parseJsonObject(response.text, url, 'protocol')
-
-    if (typeof body.ticket !== 'string' || !body.ticket) {
-      timeline.record({ event: 'ticket.failed', kind: 'protocol', status: response.status })
-
-      throw new GatewayError('protocol', `${url} answered without a ticket.`)
-    }
-
-    timeline.record({ event: 'ticket.minted' })
-
-    return body.ticket
+    throw error
   }
+
+  if (response.status === 401 || response.status === 403) {
+    timeline.record({ event: 'ticket.failed', kind: 'auth', status: response.status })
+
+    throw new GatewayError('auth', 'The gateway refused to mint a WebSocket ticket. Sign in again.', {
+      status: response.status
+    })
+  }
+
+  if (response.status >= 500) {
+    timeline.record({ event: 'ticket.failed', kind: 'server', status: response.status })
+
+    throw new GatewayError('server', `The gateway answered HTTP ${response.status} while minting a ticket.`, {
+      status: response.status
+    })
+  }
+
+  if (!response.ok) {
+    timeline.record({ event: 'ticket.failed', kind: 'protocol', status: response.status })
+
+    throw new GatewayError('protocol', `Minting a WebSocket ticket failed with HTTP ${response.status}.`, {
+      status: response.status
+    })
+  }
+
+  const body = parseJsonObject(response.text, url, 'protocol')
+
+  if (typeof body.ticket !== 'string' || !body.ticket) {
+    timeline.record({ event: 'ticket.failed', kind: 'protocol', status: response.status })
+
+    throw new GatewayError('protocol', `${url} answered without a ticket.`)
+  }
+
+  timeline.record({ event: 'ticket.minted' })
+
+  return body.ticket
 }
 
 export interface SessionTokenCredentialsOptions {
@@ -194,5 +217,80 @@ export class SessionTokenCredentials implements CredentialProvider {
 
   async signOut(): Promise<void> {
     // Nothing is cached here; the app clears the stored token itself.
+  }
+}
+
+export interface CookieSessionCredentialsOptions {
+  baseUrl: string
+  fetchImpl?: FetchLike
+  /** Where the mint record goes, so a 4401 can be read next to the ticket it refused. */
+  timeline?: AuthTimelineSink
+}
+
+/**
+ * The gateway's own browser session, used from a page it serves.
+ *
+ * Nothing here holds a credential, and that is the whole design. The session is
+ * an `HttpOnly` cookie set by `/auth/callback` or `/auth/password-login`; the
+ * page cannot read it, cannot copy it into a header, and cannot put it on a
+ * WebSocket upgrade. So:
+ *
+ *  - **REST** carries no auth header at all. `credentials: 'include'` is what
+ *    makes the browser attach the cookie, and it is only honoured because
+ *    Hermie Web serves the app and proxies the gateway on ONE origin.
+ *  - **The socket** uses the ticket subprotocol, minted by a cookie-authenticated
+ *    POST immediately before the dial. This is exactly why the gateway grew
+ *    tickets in the first place: `new WebSocket(url, protocols)` is all a
+ *    browser has.
+ *  - **A rejection is always `reauth`.** There is no refresh token in reach —
+ *    the gateway rotates its own behind the cookie — so a 401 means the session
+ *    has genuinely lapsed and the user has to sign in again.
+ *
+ * `signOut` is a plain `POST /auth/logout`; the gateway answers with a 302 and
+ * the `Max-Age=0` cookie deletions, which the browser applies whether or not the
+ * redirect is followed.
+ */
+export class CookieSessionCredentials implements CredentialProvider {
+  readonly mode: GatewayAuthMode = 'cookie'
+  readonly fetchCredentials: RequestCredentials = 'include'
+
+  constructor(private readonly options: CookieSessionCredentialsOptions) {}
+
+  async httpAuthHeaders(): Promise<Record<string, string>> {
+    return {}
+  }
+
+  async dialPlan(wsUrl: string, extraHeaders: Record<string, string>): Promise<DialPlan> {
+    const ticket = await mintWsTicket({
+      baseUrl: this.options.baseUrl,
+      headers: extraHeaders,
+      credentials: this.fetchCredentials,
+      ...(this.options.fetchImpl ? { fetchImpl: this.options.fetchImpl } : {}),
+      ...(this.options.timeline ? { timeline: this.options.timeline } : {})
+    })
+
+    return {
+      url: wsUrl,
+      protocols: [GATEWAY_WS_PROTOCOL, `${GATEWAY_WS_TICKET_PREFIX}${ticket}`]
+      // Deliberately no `headers`: a browser cannot set any on an upgrade.
+    }
+  }
+
+  async onRejected(): Promise<'retry' | 'reauth'> {
+    return 'reauth'
+  }
+
+  async signOut(): Promise<void> {
+    try {
+      await requestText(apiUrl(this.options.baseUrl, '/auth/logout'), {
+        method: 'POST',
+        credentials: this.fetchCredentials,
+        ...(this.options.fetchImpl ? { fetchImpl: this.options.fetchImpl } : {})
+      })
+    } catch {
+      // A sign-out the server never heard about still has to look like a
+      // sign-out here: the app clears its own state either way, and the cookie
+      // lapses on its own.
+    }
   }
 }

@@ -26,9 +26,13 @@ export {
 export {
   type AuthHeaderOptions,
   bearerFrom,
+  CookieSessionCredentials,
+  type CookieSessionCredentialsOptions,
   type CredentialProvider,
   GATEWAY_WS_PROTOCOL,
   GATEWAY_WS_TICKET_PREFIX,
+  mintWsTicket,
+  type MintWsTicketOptions,
   NativePkceCredentials,
   type NativePkceCredentialsOptions,
   SESSION_TOKEN_HEADER,

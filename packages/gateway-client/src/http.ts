@@ -142,6 +142,9 @@ export class GatewayHttp {
       method,
       headers: { ...this.extraHeaders, ...auth },
       ...(body === undefined ? {} : { body }),
+      ...(this.options.credentials.fetchCredentials === undefined
+        ? {}
+        : { credentials: this.options.credentials.fetchCredentials }),
       timeoutMs: options.timeoutMs ?? this.options.defaultTimeoutMs ?? DEFAULT_REST_TIMEOUT_MS,
       ...(options.signal ? { signal: options.signal } : {}),
       ...(this.options.fetchImpl ? { fetchImpl: this.options.fetchImpl } : {})
