@@ -10,6 +10,7 @@ import type {
 } from '@hermie/gateway-client'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
+import { seedDevGateway } from '../dev/seed-gateway'
 import { createPersistentAuthTimeline } from './auth-timeline'
 import { attachLifecycle, createGatewayConnection, createTokenCoordinator } from './client'
 import { clearCredentials, clearGateway, type GatewaySetup, loadGatewaySetup, type StoredGatewayConfig } from './config'
@@ -124,6 +125,12 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
     // One ring for the app's whole life, not one per connect: it has to span the
     // sign-out and the reconnect that follow, which is the sequence worth reading.
     timelineRef.current ??= await createPersistentAuthTimeline()
+
+    // Development only, and BEFORE the read below rather than beside it: a launch
+    // argument may name a gateway, and the point of it is that the ordinary read
+    // then finds a configured one. Compiled out of a production bundle with the
+    // rest of `src/dev`; see `seed-gateway.ts` for the three gates.
+    await seedDevGateway()
 
     const loaded = await loadGatewaySetup()
 

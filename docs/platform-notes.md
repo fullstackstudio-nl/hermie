@@ -13,35 +13,38 @@ rewritten, and git history has them.
 
 ## Summary
 
-| Question                                         | Answer                                          | Date       |
-| ------------------------------------------------ | ----------------------------------------------- | ---------- |
-| Does the iOS app build for a Mac?                | Yes — Release, signed, wrapped, `npm run mac`   | 2026-09-19 |
-| Is the empty strip under the title bar gone?     | Chat column yes, sidebar no — now fixed         | 2026-09-19 |
-| Does a bare Return send on a Mac?                | **Yes** — used by hand                          | 2026-09-19 |
-| Is Shift+Return a newline on a Mac?              | **Yes** — used by hand                          | 2026-09-19 |
-| Does Escape close a sheet on a Mac?              | **Yes** — used by hand                          | 2026-09-19 |
-| Is `GCKeyboard` populated for an iOS app on Mac? | **Yes** — the three keys above prove it         | 2026-09-19 |
-| Is `expo-secure-store` keychain-backed on a Mac? | **Yes** — signed in across a quit and relaunch  | 2026-09-19 |
-| Does the app launch on iOS 27?                   | **Yes, since scene adoption** — simulator       | 2026-09-20 |
-| Does `AppState` survive the scene life cycle?    | **Yes** — measured, background and foreground   | 2026-09-20 |
-| Can a Release build reach a gateway over http?   | **Yes, since the ATS key** — iOS 27 simulator   | 2026-09-20 |
-| Can it reach a REAL tailnet name over http?      | **Yes** — Headscale `.internal`, iOS 27         | 2026-09-20 |
-| Does a simulator get the tailnet's split DNS?    | **Yes** — resolved over `utun8`, from the app   | 2026-09-20 |
-| Can the app tell a bad certificate from no host? | **No** — both arrive as one flat failure        | 2026-09-20 |
-| What AppState does a Mac window report?          | **Unverified** — see "A Mac never pauses"       | 2026-09-19 |
-| Does a mouse drag still scroll a list on a Mac?  | Fixed in code; **unverified** — no Mac window   | 2026-09-20 |
-| Can a drag SELECT text in a bubble?              | **No** — RN copies the whole block; see below   | 2026-09-20 |
-| Why does replacing the .app sign the owner out?  | **Unresolved** — group made explicit; see below | 2026-09-20 |
-| Can the simulators here be tapped and typed in?  | **Yes**, through the dedicated simulator tool   | 2026-09-20 |
-| Is the sidebar tab strip present in portrait?    | **Yes** in the real shell; the gallery lied     | 2026-09-20 |
-| Does `contrast:check` cover avatar tints?        | **No** — measure those by hand                  | 2026-09-20 |
-| Is `TextDecoder` present at runtime?             | Not verified; the guard ships either way        | 2026-09-18 |
-| Does the Android app build, Debug and Release?   | **Yes** — both, with no change to the project   | 2026-09-20 |
-| Is the Android release APK shippable?            | **No** — debug-signed; there is no keystore     | 2026-09-20 |
-| Does a RELEASE build reach http on Android?      | **Yes** — measured on an emulator, not read     | 2026-09-20 |
-| Does Android's back button close a panel?        | **Yes, since `useHardwareBack`** — it did not   | 2026-09-20 |
-| Does a default AVD report Reduce Motion?         | **Yes** — its animation scales ship at 0        | 2026-09-20 |
-| Does the Android native sign-in work?            | **Unverified** — `--auth native` was not run    | 2026-09-20 |
+| Question                                          | Answer                                          | Date       |
+| ------------------------------------------------- | ----------------------------------------------- | ---------- |
+| Does the iOS app build for a Mac?                 | Yes — Release, signed, wrapped, `npm run mac`   | 2026-09-19 |
+| Is the empty strip under the title bar gone?      | Chat column yes, sidebar no — now fixed         | 2026-09-19 |
+| Does a bare Return send on a Mac?                 | **Yes** — used by hand                          | 2026-09-19 |
+| Is Shift+Return a newline on a Mac?               | **Yes** — used by hand                          | 2026-09-19 |
+| Does Escape close a sheet on a Mac?               | **Yes** — used by hand                          | 2026-09-19 |
+| Is `GCKeyboard` populated for an iOS app on Mac?  | **Yes** — the three keys above prove it         | 2026-09-19 |
+| Is `expo-secure-store` keychain-backed on a Mac?  | **Yes** — signed in across a quit and relaunch  | 2026-09-19 |
+| Does the app launch on iOS 27?                    | **Yes, since scene adoption** — simulator       | 2026-09-20 |
+| Does `AppState` survive the scene life cycle?     | **Yes** — measured, background and foreground   | 2026-09-20 |
+| Can a Release build reach a gateway over http?    | **Yes, since the ATS key** — iOS 27 simulator   | 2026-09-20 |
+| Can it reach a REAL tailnet name over http?       | **Yes** — Headscale `.internal`, iOS 27         | 2026-09-20 |
+| Does a simulator get the tailnet's split DNS?     | **Yes** — resolved over `utun8`, from the app   | 2026-09-20 |
+| Can the app tell a bad certificate from no host?  | **No** — both arrive as one flat failure        | 2026-09-20 |
+| What AppState does a Mac window report?           | **Unverified** — see "A Mac never pauses"       | 2026-09-19 |
+| Does a mouse drag still scroll a list on a Mac?   | Fixed in code; **unverified** — no Mac window   | 2026-09-20 |
+| Can a drag SELECT text in a bubble?               | **No** — RN copies the whole block; see below   | 2026-09-20 |
+| Why does replacing the .app sign the owner out?   | **Unresolved** — group made explicit; see below | 2026-09-20 |
+| Can the simulators here be tapped and typed in?   | **Yes**, through the dedicated simulator tool   | 2026-09-20 |
+| Can a simulator be given a LANDSCAPE iPad window? | **No, not any more** — the plist trick is dead  | 2026-09-20 |
+| Can a screenshot reach a connected app, no taps?  | **Yes** — `--hermieGateway` / `--hermieToken`   | 2026-09-20 |
+| Is the dev launch argument inert in Release?      | **Yes** — folded; its parser string survives    | 2026-09-20 |
+| Is the sidebar tab strip present in portrait?     | **Yes** in the real shell; the gallery lied     | 2026-09-20 |
+| Does `contrast:check` cover avatar tints?         | **No** — measure those by hand                  | 2026-09-20 |
+| Is `TextDecoder` present at runtime?              | Not verified; the guard ships either way        | 2026-09-18 |
+| Does the Android app build, Debug and Release?    | **Yes** — both, with no change to the project   | 2026-09-20 |
+| Is the Android release APK shippable?             | **No** — debug-signed; there is no keystore     | 2026-09-20 |
+| Does a RELEASE build reach http on Android?       | **Yes** — measured on an emulator, not read     | 2026-09-20 |
+| Does Android's back button close a panel?         | **Yes, since `useHardwareBack`** — it did not   | 2026-09-20 |
+| Does a default AVD report Reduce Motion?          | **Yes** — its animation scales ship at 0        | 2026-09-20 |
+| Does the Android native sign-in work?             | **Unverified** — `--auth native` was not run    | 2026-09-20 |
 
 "Unverified at runtime" is exact: the app builds, is signed and is wrapped, and the code path was read
 rather than watched. Several rows that said so were closed on 2026-09-19 by a hand session in a real
@@ -3294,3 +3297,74 @@ and costs this project nothing.
 - **A `.ts.net` name.** Still never typed into the app. `.internal` is a real tailnet name on a real
   Headscale network, which is closer than the previous round's `nip.io`, but the MagicDNS suffix itself
   remains untested.
+
+## Reaching a connected app without typing (2026-09-20, later)
+
+The README's screenshots had been stale for three design passes for one reason
+recorded twice already: `chat:` and `overlay:` need a configured gateway, and
+configuring one meant completing the five-step wizard on a simulator by hand.
+`--hermieGateway <url>` with `--hermieToken <token>` now seeds the same two stores
+the wizard's Done step writes — `saveGatewaySetup` with a config built by
+`configFromDraft` — so the ordinary startup read finds a configured gateway and the
+app lands on the connected shell. It is the only development argument that WRITES
+anything; see `apps/hermie/src/dev/seed-gateway.ts`.
+
+### The `__DEV__` gate, measured instead of asserted
+
+`npx expo export:embed --platform ios --dev false --entry-file apps/hermie/index.js`
+(run from `apps/hermie`; the entry path resolves from the monorepo ROOT, which is
+why `--entry-file index.js` fails with "Unable to resolve module ./index.js"),
+then read back:
+
+| In the production bundle                          | Found                      |
+| ------------------------------------------------- | -------------------------- |
+| `devLaunchArguments` (the native property)        | **0 occurrences**          |
+| `requireOptionalNativeModule` in that module      | **0 occurrences**          |
+| `DEV_LAUNCH_INTENT`                               | `var v = null`, literally  |
+| `seedDevGateway`                                  | `function*(){ return !1 }` |
+| `parseDevLaunchArguments` and `'--hermiegateway'` | **present**                |
+
+The last row is the one worth writing down, because the previous claim in both
+`launch-intent.ts` and CONTRIBUTING was that Metro "folds the code out of a
+production bundle", and that is not what it does: the parser is a module export
+and Metro will not drop one, so its string literals — every flag name — survive.
+Nothing calls it, since the intent it feeds is the folded `null`, and the seeder's
+whole body including `saveGatewaySetup` really is gone. The honest claim is that
+the argument is **inert** in Release, not that its parser is absent, and a
+`strings` check that expects to find nothing will "fail" for a harmless reason.
+
+### The installed-bundle landscape trick no longer produces a landscape scene
+
+"The wide layout, on an iPad simulator" (earlier today) documents forcing a
+landscape-PROPORTIONED window by rewriting `UISupportedInterfaceOrientations` in
+the **installed** bundle's `Info.plist` with `plutil -replace`. That was tried
+again here on the iPad Pro 13" (M5), iOS 26.5, with both
+`UISupportedInterfaceOrientations` and `UISupportedInterfaceOrientations~ipad`
+replaced by the two landscape values, verified still in the file after the launch.
+The scene came back **portrait**, 2064 × 2752.
+
+The difference from the earlier pass is scene adoption: the bundle now carries
+`UIApplicationSceneManifest` with `HermieSceneDelegate` and `UIRequiresFullScreen`
+is `false`, and a multitasking-capable iPad app does not get its scene sized from
+that key — the system hands it a scene and the orientation list only says which
+way the app may rotate. So there is currently **no way to produce a landscape iPad
+window on this machine**: `simctl` still has no rotate verb (`simctl ui` offers
+appearance, contrast and content size and nothing else), and the plist route is
+now closed too.
+
+What that costs: the 640pt bubble ceiling and the new 760pt wide one are still
+unverified at a real 1366pt window. `docs/screenshots/wide.png` is the iPad Pro 13"
+in **portrait** (1032pt), which does get the sidebar-plus-detail shell —
+`REGULAR_LAYOUT_MIN_WIDTH` is 700 — so it shows the wide layout honestly, but its
+content column is ~650pt and therefore below `BUBBLE_MAX.regular.wideColumnFrom`.
+
+### Taps and typing, second confirmation
+
+The dedicated simulator tool tapped the composer, typed three prompts and sent
+them, and answered the approval sheet — so the approval screenshot is a real
+server→client request raised by a prompt containing "approve", not a gallery
+fixture. Two cautions from this run, both costing a retake: a tap lands on
+whatever is under the coordinate at the moment it arrives, so a tap meant to
+dismiss the keyboard opened a tool card instead; and the back chevron did not
+respond while the keyboard was up. Relaunching with a different `--hermieOpen` is
+cheaper than navigating, and that is what the final list shot was taken with.

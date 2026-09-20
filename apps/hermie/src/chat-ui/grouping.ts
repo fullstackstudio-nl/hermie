@@ -48,7 +48,18 @@ export function speakerKey(item: TranscriptItem): string | null {
       // An interim note and the answer are the same bot, but the note is muted
       // and the answer is not, so a run that mixes them reads as a rendering
       // bug. They stay apart.
-      return item.interim ? 'bot-interim' : 'bot'
+      if (item.interim) {
+        return 'bot-interim'
+      }
+
+      // A reply addressed at a teammate bot is its own turn, not a continuation
+      // of the one before it: it carries the "REPLY TO @handle" eyebrow, and an
+      // eyebrow is a heading. Grouped, it was drawn 3pt under the previous
+      // bubble's bottom edge with nothing between them, which is what the owner
+      // read as jammed. Keyed by the HANDLE so two consecutive replies to the
+      // same teammate still group — and then only the first of that run carries
+      // the eyebrow, which is the point of having one.
+      return item.replyToBotHandle ? `bot-reply:${item.replyToBotHandle}` : 'bot'
     case 'bot_dm_in':
       return `dm:${item.senderHandle ?? item.senderName.toLowerCase()}`
     default:

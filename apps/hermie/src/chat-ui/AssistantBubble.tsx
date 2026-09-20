@@ -25,7 +25,7 @@ import { useTheme } from '../ui/theme'
 import { ErrorCard } from './ErrorCard'
 import { ReasoningDisclosure } from './ReasoningDisclosure'
 import { TypingDots } from './TypingIndicator'
-import { Bubble } from './primitives/Bubble'
+import { Bubble, bubblePaddingX, TAIL_REACH } from './primitives/Bubble'
 import { Fold, useFoldBlocks } from './primitives/Fold'
 import { MetaLine } from './primitives/MetaLine'
 import { useExpanded } from './expanded'
@@ -104,11 +104,28 @@ export function AssistantBubble({
   const reading = hasBody && needsReadingTreatment(body)
   const variant = reading ? 'inRead' : 'in'
   const recipe = theme.bubbles[variant]
+  const bodyInset = bubblePaddingX(theme.space, reading)
 
   return (
     <View testID={`assistant-${item.id}`}>
-      {item.replyToBotHandle ? (
-        <Text color="textFaint" style={{ marginBottom: theme.space.xxs }} variant="micro">
+      {/*
+        The eyebrow, and only on the FIRST bubble of the run it heads: a heading
+        repeated over every bubble of one turn is not a heading. `grouped` is the
+        run's own fact, and `speakerKey` keys a reply-to-bot by its handle, so a
+        second reply to the same teammate continues the run and stays bare.
+
+        Indented to the bubble's TEXT, not to its outer edge. The bubble's body
+        starts `TAIL_REACH` (the tail's own gutter) plus the bubble's horizontal
+        padding in from this row's left edge, and an eyebrow that starts at the
+        row edge instead reads as a stray line in the margin rather than as this
+        bubble's label.
+      */}
+      {item.replyToBotHandle && !grouped ? (
+        <Text
+          color="textFaint"
+          style={{ marginBottom: theme.space.xs, marginLeft: TAIL_REACH + bodyInset }}
+          variant="micro"
+        >
           {chatStrings.assistant.replyTo(item.replyToBotHandle).toUpperCase()}
         </Text>
       ) : null}
@@ -164,7 +181,15 @@ export function AssistantBubble({
             <TypingDots testID={`assistant-typing-${item.id}`} />
           )}
 
-          {hasBody ? <MetaLine testID={`assistant-meta-${item.id}`} time={time} /> : null}
+          {/*
+            One clock per RUN, on the bubble that ends it. Four consecutive
+            replies from one bot are one turn as far as a reader is concerned, and
+            a timestamp inside each of them is three repetitions of a fact that
+            has not changed — it is also what stopped the run from reading as one
+            block. The tail marks the same bubble, so the clock and the tail land
+            together, which is where the mockup puts both.
+          */}
+          {hasBody && tail ? <MetaLine testID={`assistant-meta-${item.id}`} time={time} /> : null}
         </Bubble>
       ) : null}
 

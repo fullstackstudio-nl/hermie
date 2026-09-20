@@ -148,6 +148,37 @@ xcrun simctl launch <udid> nl.fullstackstudio.hermie \
 | `--hermieOpen overlay:<s>[/p]` | `activity`, `crons`, `settings`, and `settings/licences`     |
 | `--hermieTheme light\|dark`    | pin the scheme (a simulator's appearance cannot be set here) |
 | `--hermieWallpaper <name>`     | pin the wallpaper                                            |
+| `--hermieGateway <url>`        | seed that gateway's configuration and skip onboarding        |
+| `--hermieToken <token>`        | the session token to seed beside it                          |
+
+**`--hermieGateway` is how you reach a connected app without typing.** `chat:`
+and `overlay:` need a configured gateway, and configuring one meant completing
+the five-step wizard on the simulator by hand — finding a field in a screenshot,
+typing an address, waiting for a probe, typing a token, tapping through a
+connection test. That is what kept `docs/screenshots/` stale through three design
+passes. With the fake gateway running in session-token mode:
+
+```sh
+npm run fake-gateway -- --auth token --token demo
+
+xcrun simctl launch <udid> nl.fullstackstudio.hermie \
+  --initialUrl http://localhost:8081 \
+  --hermieGateway http://localhost:9119 --hermieToken demo \
+  --hermieTheme light --hermieWallpaper blue --hermieOpen chat:researcher
+```
+
+It writes the same two stores the wizard's Done step writes, in the same shape,
+through the same `saveGatewaySetup` and `configFromDraft` — so what you photograph
+afterwards is the app a reader gets, not a code path that only exists for
+screenshots. It does NOT probe, so Settings shows "Unknown" for the gateway
+version and the user until a real wizard run fills those in. An address with no
+scheme is read as `http://`, unlike the wizard's resolver, because there is no
+probe here to discover which one answers and the only gateways this names are a
+loopback port or a LAN address. `--hermieToken` on its own does nothing: a
+credential with no gateway beside it is a secret in the keychain that no stored
+configuration explains. Only the session-token flow can be seeded — a native PKCE
+credential is minted by a round trip through an identity provider and there is
+nothing to copy from a command line.
 
 `--hermieOpen=<value>` works too. Section ids come from `GALLERY_SECTION_IDS` in
 `apps/hermie/src/features/settings/GalleryScreen.tsx`, which is the registry the
@@ -158,13 +189,24 @@ well. `sheet:` shorthands are pinned against that list by
 
 A gallery section needs no gateway and no onboarding: it is decided before the
 connection phase is, so a clean simulator is enough. `chat:` and `overlay:` do
-need a configured gateway.
+need a configured gateway — which is what `--hermieGateway` above is for.
 
 **None of this reaches a release build**, by three independent gates: the native
 constant it reads is inside `#if DEBUG` in `modules/hermie-mac/ios/HermieMacModule.swift`,
-the JavaScript is behind `__DEV__` (which Metro folds out of a production bundle),
-and nothing is registered with the system — no URL scheme, no `CFBundleURLTypes`,
-no entitlement. Launch arguments are visible only to the process itself.
+the JavaScript is behind `__DEV__`, and nothing is registered with the system — no
+URL scheme, no `CFBundleURLTypes`, no entitlement. Launch arguments are visible
+only to the process itself.
+
+What the `__DEV__` gate removes was measured on 2026-09-20 rather than assumed
+(`npx expo export:embed --platform ios --dev false`): in the production bundle the
+native property `devLaunchArguments` appears zero times, `DEV_LAUNCH_INTENT`
+compiles to the literal `null`, and `seedDevGateway` compiles to a function whose
+whole body is `return false` — the `saveGatewaySetup` call is not in the bundle.
+`parseDevLaunchArguments` IS still there with the flag names as string literals,
+because Metro does not drop a module export, so `strings` on a release bundle will
+find `--hermieGateway`. Nothing calls it and nothing can, since the intent it
+would feed is folded to `null`. The argument is inert in Release; its parser is
+not absent.
 
 ## Native projects
 
@@ -214,7 +256,10 @@ rewrite and why it exists.
   its scripted commands and transcripts. No real gateway address, no real bot, no real conversation,
   and nothing that names a person.
 - **Strip the metadata.** A screenshot carries EXIF and XMP that nobody looks at and everybody
-  publishes. Remove it before committing.
+  publishes. Remove it before committing — and check that you did: `sips -s format png` does NOT
+  strip it, it WRITES it, adding an `eXIf` chunk and an Adobe XMP packet to a file that had
+  neither. Drop the `eXIf`, `iTXt`, `tEXt`, `zTXt` and `tIME` chunks and keep `IHDR`, `gAMA`,
+  `cHRM`, `IDAT` and `IEND`; `xxd file.png | grep -ic exif` should answer 0.
 - **Say what is in the picture.** Every image in the README has alt text that describes the screen,
   not the file.
 

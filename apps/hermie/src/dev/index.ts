@@ -11,11 +11,13 @@ export { DevGallery } from './DevGallery'
 export {
   DEV_LAUNCH_INTENT,
   parseDevLaunchArguments,
+  type DevGatewaySeed,
   type DevLaunchIntent,
   type DevOpenTarget,
   type DevOverlaySection,
   type DevSettingsPage
 } from './launch-intent'
+export { seedDevGateway } from './seed-gateway'
 
 /**
  * Where a shell should start, when a launch argument said so.

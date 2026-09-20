@@ -25,9 +25,9 @@ the Mac, and it talks to nothing but your gateway.
 
 <table>
   <tr>
-    <td width="33%"><img src="docs/screenshots/chats.png" alt="The chat list, showing the bots Researcher and Writer with their last messages and an unread badge"></td>
-    <td width="33%"><img src="docs/screenshots/conversation.png" alt="A conversation with the Researcher bot: a delivered message to @writer with the reply folded into it, and an incoming message from the Writer bot"></td>
-    <td width="33%"><img src="docs/screenshots/approval.png" alt="The approval sheet asking whether to allow the command rm -rf ./build, with the choices Allow once, Allow for this session, Always allow and Deny"></td>
+    <td width="33%"><img src="docs/screenshots/chats.png" alt="The chat list on an iPhone: a search field, the filters All, Unread, Working and Needs input, then two rows — Researcher with a photo avatar and Writer with a generated W on a tinted disc, each carrying a green online bead, and a blue unread dot beside Writer"></td>
+    <td width="33%"><img src="docs/screenshots/conversation.png" alt="A conversation with the Researcher bot: a card for the cron job Source scan that was delivered to this chat, an outgoing bot-to-bot line reading Message to @writer, and a long report folded after a few lines behind a Show more link"></td>
+    <td width="33%"><img src="docs/screenshots/approval.png" alt="The approval sheet over a dimmed conversation, headed Permission request for @researcher and asking whether to allow the command rm -rf ./build, with the choices Allow once, Allow for this session, Always allow and Deny"></td>
   </tr>
   <tr>
     <td>The chat list</td>
@@ -35,29 +35,6 @@ the Mac, and it talks to nothing but your gateway.
     <td>An approval, asked and answered</td>
   </tr>
 </table>
-
-<!--
-  These three images predate the Liquid Glass pass and the gateway card's
-  removal: they show the previous surfaces, not the ones the app draws today.
-  Two things in them are named differently or not there at all now, and the alt
-  text above is written around both: the green "Connected" line under the title
-  is gone — the connection speaks in one line under the header instead — and the
-  tab reading "Routines" is called Crons everywhere.
-  Regenerating them is its own job — docs/screenshots/ is published material
-  (CONTRIBUTING.md), so it wants fixture data and stripped metadata, not a
-  hurried retake.
-
-  One dead end already walked, so nobody walks it twice: the obvious source is
-  the developer gallery, which needs no gateway (`--hermieOpen gallery:list`,
-  `gallery:chat`, `gallery:shell`), and it cannot produce a publishable list.
-  Presence is computed from `status === 'ready'`, so with no gateway every row
-  reads "Offline" and the connection line says "Reconnecting…" — a picture that
-  makes a working app look broken. The arrangement in those shots is real; the
-  beads are not. A publishable set wants the real shell against
-  `npm run fake-gateway`, which means completing the setup wizard on the
-  simulator by hand first: GatewayProvider stays in the onboarding phase until a
-  credential exists.
--->
 
 ## What it does
 
@@ -279,6 +256,8 @@ On a window too small to hold both, asking for the list back lays it over the
 conversation instead of squeezing it again, and it closes as soon as you pick a
 chat. Whether it starts open follows the window's width until you say otherwise;
 after that it is remembered, per gateway, like the rest of your arrangement.
+
+<img src="docs/screenshots/wide.png" alt="Hermie on an iPad: the chat list as a sidebar on the left with Researcher selected, and the conversation filling the panel beside it — incoming replies against the left edge of that panel, the owner's own messages against its right edge, and a tool card and a cron result between them" width="760">
 
 The Mac is not a separate port. It is the iOS app, which Apple runs on Apple
 Silicon Macs unmodified, so it has the same keychain, the same modules and the

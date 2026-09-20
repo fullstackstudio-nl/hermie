@@ -72,8 +72,25 @@ export interface BubbleProps {
   testID?: string
 }
 
-/** How far the tail sticks out past the bubble. A whole number, deliberately. */
-const TAIL_REACH = TAIL.width - TAIL_OVERLAP
+/**
+ * How far the tail sticks out past the bubble. A whole number, deliberately.
+ *
+ * Exported because anything drawn ABOVE a bubble and meant to line up with its
+ * text has to clear the same gutter — the reply eyebrow, a sender chip — and a
+ * second copy of the number is a second thing to forget when the tail changes.
+ */
+export const TAIL_REACH = TAIL.width - TAIL_OVERLAP
+
+/**
+ * The bubble's own horizontal padding: how far its body sits in from its edge.
+ *
+ * A long reply takes the wider reading padding (§7.1), so "where does the text
+ * start" is not one number, and a caller that wants to align to it needs the same
+ * branch rather than a guess at the common case.
+ */
+export function bubblePaddingX(space: { md: number; lg: number }, reading: boolean): number {
+  return reading ? space.lg : space.md + 2
+}
 
 /**
  * The cap a bubble may grow to, in points.
@@ -100,7 +117,11 @@ export function useBubbleWidth(): number {
 
 /** The rule applied to one column width. Exported so a test can state both. */
 export function resolveBubbleWidth(rule: ResolvedBubbleWidth, columnWidth: number): number {
-  return Math.round(Math.min((columnWidth * rule.percent) / 100, rule.points))
+  // The wide ceiling only exists on the regular rule, and only above the column
+  // width where the base one starts to look mean. See `BUBBLE_MAX`.
+  const points = 'widePoints' in rule && columnWidth > rule.wideColumnFrom ? rule.widePoints : rule.points
+
+  return Math.round(Math.min((columnWidth * rule.percent) / 100, points))
 }
 
 /**
@@ -201,12 +222,27 @@ export function Bubble({
     <View
       style={{
         alignItems: own ? 'flex-end' : 'flex-start',
+        // `alignSelf` and NOT the default stretch, which is the whole of the
+        // owner's "the right half of the panel is empty" report. A stretched box
+        // with a `maxWidth` is exactly `maxWidth` wide and sits at the START of
+        // the row, so an outgoing bubble was right-aligned inside a 640pt box
+        // pinned to the LEFT edge of a 1500pt column — it ended at x≈640 with
+        // half the panel blank beside it. Aligning the box itself makes the cap
+        // a cap on the bubble rather than a width for the row, so an outgoing
+        // one hugs the column's right edge and an incoming one its left, which
+        // is what §6.1 means by the two sides.
+        alignSelf: own ? 'flex-end' : 'flex-start',
         maxWidth: max + TAIL_REACH,
+
         // The tail lives in this padding rather than hanging over the list's
         // gutter, so the bubble and its tail are one box as far as layout is
         // concerned.
         ...(own ? { paddingRight: TAIL_REACH } : { paddingLeft: TAIL_REACH })
       }}
+      // The alignment lives here and the cap lives here, so this is the box a
+      // test has to be able to reach: asserting the bubble's own style proves
+      // only half the rule.
+      testID={testID ? `${testID}-box` : undefined}
     >
       {tail ? <Tail color={tailColor} side={side} /> : null}
 
@@ -230,7 +266,7 @@ export function Bubble({
 
         <View
           style={{
-            paddingHorizontal: reading ? theme.space.lg : theme.space.md + 2,
+            paddingHorizontal: bubblePaddingX(theme.space, reading),
             paddingVertical: theme.space.sm + 2
           }}
         >

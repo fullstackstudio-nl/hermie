@@ -104,7 +104,13 @@ export function UserBubble({
         </View>
       ) : null}
 
-      <MetaLine onAccent receipt={receipt} testID={`user-meta-${item.id}`} time={time} />
+      {/*
+        One clock per run, on the bubble that ends it — the same rule the reply
+        side follows. `receipt` keeps it alive independently: the tick is the only
+        thing that says a message left the device, so a bubble carrying one shows
+        its line even mid-run, which is the case where the two facts disagree.
+      */}
+      {tail || receipt ? <MetaLine onAccent receipt={receipt} testID={`user-meta-${item.id}`} time={time} /> : null}
     </Bubble>
   )
 }

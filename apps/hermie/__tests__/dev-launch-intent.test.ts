@@ -69,6 +69,47 @@ describe('parseDevLaunchArguments', () => {
     })
   })
 
+  it('reads a gateway and its session token, in either order', () => {
+    // The pair that reaches a connected app without typing. `demo` is the fake
+    // gateway's fixture token (`npm run fake-gateway -- --auth token --token
+    // demo`), not a person's credential.
+    expect(parseDevLaunchArguments(['--hermieToken', 'demo', '--hermieGateway', 'http://localhost:9119'])).toEqual({
+      gateway: { baseUrl: 'http://localhost:9119', token: 'demo' }
+    })
+  })
+
+  it('defaults a scheme-less gateway to http, not https', () => {
+    // The opposite of `normalizeBaseUrl`, on purpose: there is no probe behind
+    // this argument to discover which scheme answers, and the only gateways it
+    // names are a loopback port or a LAN address.
+    expect(parseDevLaunchArguments(['--hermieGateway', 'localhost:9119'])?.gateway).toEqual({
+      baseUrl: 'http://localhost:9119'
+    })
+    expect(parseDevLaunchArguments(['--hermieGateway=https://gateway.example/api'])?.gateway).toEqual({
+      baseUrl: 'https://gateway.example/api'
+    })
+  })
+
+  it('does not keep a token that has no gateway to belong to', () => {
+    // Writing one would leave a secret in the keychain that no stored
+    // configuration explains.
+    expect(parseDevLaunchArguments(['--hermieToken', 'demo'])).toBeNull()
+  })
+
+  it('keeps a token exactly as it was typed', () => {
+    // Every other value here is lowercased. A session token is opaque and the
+    // gateway compares it byte for byte.
+    expect(
+      parseDevLaunchArguments(['--hermieGateway', 'localhost:9119', '--hermieToken', 'AbC-Demo'])?.gateway
+    ).toEqual({ baseUrl: 'http://localhost:9119', token: 'AbC-Demo' })
+  })
+
+  it('ignores a gateway address that is not one', () => {
+    expect(parseDevLaunchArguments(['--hermieGateway', 'ftp://host/'])).toBeNull()
+    expect(parseDevLaunchArguments(['--hermieGateway', 'http://'])).toBeNull()
+    expect(parseDevLaunchArguments(['--hermieGateway', '--hermieTheme', 'dark'])).toEqual({ scheme: 'dark' })
+  })
+
   it('ignores a target, a theme or a wallpaper it does not recognise', () => {
     expect(parseDevLaunchArguments(['--hermieOpen', 'nonsense:thing'])).toBeNull()
     expect(parseDevLaunchArguments(['--hermieOpen', 'overlay:nowhere'])).toBeNull()

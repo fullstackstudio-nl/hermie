@@ -21,14 +21,33 @@
  *
  *  1. the constant it reads is inside `#if DEBUG` in `HermieMacModule.swift`, so
  *     a Release binary does not define it at all;
- *  2. `__DEV__` is checked here, and Metro's minifier folds `if (false)` and the
- *     code inside it out of a production bundle;
+ *  2. `__DEV__` is checked here, and Metro inlines it as `false` in a production
+ *     bundle, which folds the native read and everything reached through it;
  *  3. nothing is registered with the system — no URL scheme, no
  *     `CFBundleURLTypes`, no entitlement, no associated domain. Launch arguments
  *     are visible only to the process itself, and nothing but a debugger or
  *     `simctl` can set them on a device.
  *
- * `__tests__/dev-launch-intent.test.ts` asserts the `__DEV__` gate.
+ * **What gate 2 actually removes, measured** rather than assumed — the claim used
+ * to be that the minifier folds "the code" out, and that is not quite true.
+ * `npx expo export:embed --platform ios --dev false` on 2026-09-20 produced a
+ * bundle in which:
+ *
+ *  - `devLaunchArguments`, the native property, appears **zero** times: the read
+ *    and `requireOptionalNativeModule` are gone from this module entirely;
+ *  - this module's `DEV_LAUNCH_INTENT` compiles to the literal `var v = null`;
+ *  - `seedDevGateway` compiles to `function*(){ return !1 }` — its body, and the
+ *    `saveGatewaySetup` call inside it, are not in the bundle at all;
+ *  - but `parseDevLaunchArguments` IS still there, with `'--hermiegateway'` and
+ *    the rest of the grammar as string literals, because it is a module export
+ *    and Metro will not drop one. Nothing calls it, and with `DEV_LAUNCH_INTENT`
+ *    folded to `null` nothing can. So the right claim is that the argument is
+ *    INERT in Release, not that its parser is absent — `strings` on a release
+ *    bundle will find these flag names, and that is expected.
+ *
+ * `__tests__/dev-launch-intent.test.ts` asserts the `__DEV__` gate, and
+ * `__tests__/dev-seed-gateway.test.ts` asserts that the seeder writes nothing
+ * with the flag down.
  *
  * **The grammar**, deliberately tiny and order-independent:
  *
@@ -40,10 +59,24 @@
  * | `--hermieOpen overlay:<s>[/p]`| Activity / Crons / Settings, and a settings page |
  * | `--hermieTheme light\|dark`   | pin the scheme, whatever the simulator is set to |
  * | `--hermieWallpaper <name>`    | pin the wallpaper                                |
+ * | `--hermieGateway <url>`       | seed that gateway and skip the wizard            |
+ * | `--hermieToken <token>`       | the session token to seed beside it               |
  *
  * `--hermieOpen=<value>` is accepted as well, because a shell quoting habit
  * should not be the reason a screenshot comes back wrong.
+ *
+ * **Why `--hermieGateway` exists**, since it is the one argument that writes
+ * something rather than only choosing what to draw: `chat:` and `overlay:` need a
+ * configured gateway, and the only way to configure one was to complete the
+ * five-step wizard by hand — which means finding a text field in a screenshot,
+ * typing an address, waiting for a probe, typing a token, and tapping through a
+ * connection test. That is four rounds of coordinate arithmetic against a screen
+ * that re-renders under the tap, and it is why the README's screenshots sat stale
+ * through three design passes. It seeds the same two stores the wizard's last step
+ * writes, in the same shape, through the same functions — see `seedDevGateway` in
+ * `seed-gateway.ts`.
  */
+import { hasExplicitScheme, normalizeBaseUrl } from '@hermie/gateway-client'
 import { requireOptionalNativeModule } from 'expo'
 
 import { WALLPAPER_ORDER, type Scheme, type WallpaperName } from '../ui/tokens'
@@ -59,10 +92,24 @@ export type DevOpenTarget =
   | { kind: 'chat'; bot: string }
   | { kind: 'overlay'; section: DevOverlaySection; page?: DevSettingsPage }
 
+/**
+ * A gateway to seed before the app reads its configuration.
+ *
+ * `token` is optional and the difference is worth stating: with one, the app
+ * reaches the connected shell outright; without one, the address is seeded and
+ * nothing else, so the wizard opens on its sign-in step with the address already
+ * filled — the same state a sign-out leaves behind.
+ */
+export interface DevGatewaySeed {
+  baseUrl: string
+  token?: string
+}
+
 export interface DevLaunchIntent {
   open?: DevOpenTarget
   scheme?: Scheme
   wallpaper?: WallpaperName
+  gateway?: DevGatewaySeed
 }
 
 const OVERLAY_SECTIONS: Record<string, DevOverlaySection> = {
@@ -95,6 +142,32 @@ const SHEET_SECTIONS: Record<string, string> = {
   model: 'sheet-options-model-page',
   options: 'sheet-options',
   reasoning: 'sheet-options-reasoning-page'
+}
+
+/**
+ * A gateway address from the command line, or `undefined` if it is not one.
+ *
+ * A scheme-less address resolves to `http://`, which is the one place this
+ * deliberately disagrees with `normalizeBaseUrl`. That function answers `https://`
+ * because the wizard then PROBES both and tells the reader which one answered;
+ * there is no probe here, and the only gateways this argument ever names are a
+ * loopback port or a LAN address, so defaulting to https would turn the common
+ * case into a connection that cannot succeed.
+ */
+function parseGatewayUrl(value: string): string | undefined {
+  const trimmed = value.trim()
+
+  if (!trimmed) {
+    return undefined
+  }
+
+  try {
+    return normalizeBaseUrl(hasExplicitScheme(trimmed) ? trimmed : `http://${trimmed}`)
+  } catch {
+    // Not an address at all. Ignored like every other unrecognised value here,
+    // so a typo produces the wizard rather than a crash on launch.
+    return undefined
+  }
 }
 
 function parseTarget(value: string): DevOpenTarget | undefined {
@@ -141,6 +214,11 @@ function parseTarget(value: string): DevOpenTarget | undefined {
  */
 export function parseDevLaunchArguments(argv: readonly string[]): DevLaunchIntent | null {
   const intent: DevLaunchIntent = {}
+  // Collected apart from the intent because the two arguments are order
+  // independent like everything else here: the token can be read before the
+  // address it belongs to.
+  let gatewayUrl: string | undefined
+  let token: string | undefined
 
   const valueAt = (index: number, inline: string | undefined): string => {
     if (inline !== undefined) {
@@ -185,10 +263,31 @@ export function parseDevLaunchArguments(argv: readonly string[]): DevLaunchInten
       if ((WALLPAPER_ORDER as readonly string[]).includes(value)) {
         intent.wallpaper = value as WallpaperName
       }
+
+      return
+    }
+
+    if (flag === '--hermiegateway') {
+      gatewayUrl = parseGatewayUrl(valueAt(index, inline))
+
+      return
+    }
+
+    if (flag === '--hermietoken') {
+      // NOT lowercased, unlike every other value here: a session token is opaque
+      // and case-sensitive, and the gateway compares it byte for byte.
+      token = valueAt(index, inline).trim() || undefined
     }
   })
 
-  return intent.open || intent.scheme || intent.wallpaper ? intent : null
+  if (gatewayUrl) {
+    // A token with no address seeds nothing: there is no gateway for it to be a
+    // credential for, and writing one to the keychain on its own would leave a
+    // secret behind that no configuration can explain.
+    intent.gateway = { baseUrl: gatewayUrl, ...(token ? { token } : {}) }
+  }
+
+  return intent.open || intent.scheme || intent.wallpaper || intent.gateway ? intent : null
 }
 
 type DevLaunchModule = { devLaunchArguments?: unknown }

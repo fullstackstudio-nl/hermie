@@ -76,13 +76,17 @@ describe('the cap on the wide layout', () => {
   it('stops at the point ceiling on a landscape window, where the column is wide enough', () => {
     size(LANDSCAPE.width, LANDSCAPE.height)
 
-    // The 640pt ceiling has never been verified on a device — the previous
-    // round could not produce a landscape window at all. At 1376pt it bites
-    // even beside the sidebar, which is the case worth holding still.
+    // Beside the sidebar the column is ~994pt: under `wideColumnFrom`, so the
+    // base 640 ceiling is the one that binds and 68 % of the column is not.
     const column = LANDSCAPE.width - (SIDEBAR_WIDTH + WINDOW_GAP * 3)
 
+    expect(column).toBeLessThan(BUBBLE_MAX.regular.wideColumnFrom)
     expect(capInColumn(column)).toBe(BUBBLE_MAX.regular.points)
-    expect(capInColumn(LANDSCAPE.width)).toBe(BUBBLE_MAX.regular.points)
+
+    // With the sidebar collapsed the column is the window, which is past the
+    // threshold — so the wide ceiling applies. This is the case the owner was
+    // looking at when he reported the empty right half.
+    expect(capInColumn(LANDSCAPE.width)).toBe(BUBBLE_MAX.regular.widePoints)
   })
 
   it('does not fall back to the compact rule because the COLUMN is under the threshold', () => {
@@ -124,8 +128,62 @@ describe('before the column has been laid out', () => {
 describe('the rule itself', () => {
   it('is the smaller of the percentage and the ceiling, both halves live', () => {
     expect(resolveBubbleWidth(BUBBLE_MAX.regular, 500)).toBe(340)
-    expect(resolveBubbleWidth(BUBBLE_MAX.regular, 2000)).toBe(BUBBLE_MAX.regular.points)
+    expect(resolveBubbleWidth(BUBBLE_MAX.regular, 1000)).toBe(BUBBLE_MAX.regular.points)
     expect(REGULAR_LAYOUT_MIN_WIDTH).toBeGreaterThan(0)
+  })
+
+  it('steps up to the wide ceiling once the column is wide enough to look empty', () => {
+    // The owner's window: a ~1500pt content column, where a 640pt bubble uses
+    // under half of it and the transcript reads as a strip down one side.
+    expect(resolveBubbleWidth(BUBBLE_MAX.regular, 1500)).toBe(BUBBLE_MAX.regular.widePoints)
+
+    // …and not one point below the threshold, so the step is a step.
+    expect(resolveBubbleWidth(BUBBLE_MAX.regular, BUBBLE_MAX.regular.wideColumnFrom)).toBe(BUBBLE_MAX.regular.points)
+  })
+})
+
+/**
+ * Which EDGE a bubble hangs off, which is a different question from how wide it
+ * may be — and the one the cap was silently answering.
+ *
+ * The wrapper around a bubble carries the cap as a `maxWidth`. A stretched box
+ * with a `maxWidth` is exactly that wide and sits at the start of the row, so an
+ * outgoing bubble was right-aligned inside a 640pt box pinned to the LEFT of a
+ * 1500pt column: it ended at x≈640 and the right half of the panel was empty.
+ * Both facts have to hold at once — capped AND on the correct edge — so they are
+ * asserted together.
+ */
+describe('which edge a bubble hangs off', () => {
+  function wrapperStyle(side: 'own' | 'other', columnWidth: number): ViewStyle {
+    size(LANDSCAPE.width, LANDSCAPE.height)
+    renderScreen(
+      <BubbleColumn style={{ flex: 1 } as ViewStyle} testID="column">
+        <Bubble side={side} testID="bubble">
+          <Text>Hello</Text>
+        </Bubble>
+      </BubbleColumn>
+    )
+
+    fireEvent(screen.getByTestId('column'), 'layout', {
+      nativeEvent: { layout: { width: columnWidth, height: 800, x: 0, y: 0 } }
+    })
+
+    // The box around the bubble: the bubble itself carries the corners and the
+    // cap, this carries the alignment and the tail's gutter.
+    return StyleSheet.flatten(screen.getByTestId('bubble-box').props.style as never) as ViewStyle
+  }
+
+  it('puts an outgoing bubble on the column’s right edge, still capped', () => {
+    const style = wrapperStyle('own', 1500)
+
+    expect(style.alignSelf).toBe('flex-end')
+    // Not `stretch`, and not absent — absent IS stretch, which is the bug.
+    expect(style.alignSelf).not.toBe('stretch')
+    expect(style.maxWidth).toBeLessThanOrEqual(BUBBLE_MAX.regular.widePoints + 7)
+  })
+
+  it('puts an incoming bubble on the column’s left edge', () => {
+    expect(wrapperStyle('other', 1500).alignSelf).toBe('flex-start')
   })
 })
 

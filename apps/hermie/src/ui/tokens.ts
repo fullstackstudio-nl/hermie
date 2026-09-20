@@ -583,9 +583,20 @@ export const TAIL_OVERLAP = 6
  *
  * 68 % is too narrow to read at phone width, hence the override; the 640pt cap
  * is what keeps a long report from spanning a Mac window.
+ *
+ * **`widePoints` is a second ceiling, for a column wide enough that the first one
+ * looks mean.** 640pt is a comfortable measure, and on a 13" iPad in landscape or
+ * a full-screen Mac window the content column is around 1500pt — so a capped
+ * bubble uses under half of it and the transcript reads as a narrow strip with a
+ * large empty margin, which is what the owner reported. Above `wideColumnFrom`
+ * the ceiling steps to 760: still a measure rather than a wall (about 85
+ * characters at the reading size), and still far short of the column. The step is
+ * deliberately a step and not a curve — a bubble that grows continuously with the
+ * window changes width every time the sidebar is collapsed, and a measure that
+ * moves while you read is worse than one that is slightly wrong.
  */
 export const BUBBLE_MAX = {
-  regular: { percent: 68, points: 640 },
+  regular: { percent: 68, points: 640, widePoints: 760, wideColumnFrom: 1100 },
   compact: { percent: 78, points: 320 }
 } as const
 
@@ -622,8 +633,16 @@ export const FOLD_LINES = { regular: 14, compact: 11 } as const
  */
 export const FOLD_FADE_LINES = 2.5
 
-/** How many consecutive bubbles from one sender sit this far apart. */
-export const BUBBLE_GAP = { grouped: 3, separate: 10 } as const
+/**
+ * How far apart two bubbles sit: within one sender's run, and between two turns.
+ *
+ * The ratio is what makes a run read as one block rather than as four separate
+ * rounded rectangles — 3pt is "the same person, still talking" and the separate
+ * gap is "somebody else now". At 10 the two were close enough that the grouping
+ * was hard to see at a glance on a large window; 12 is the scale's own step
+ * below `lg` and reads as a turn boundary without opening a hole in the column.
+ */
+export const BUBBLE_GAP = { grouped: 3, separate: 12 } as const
 
 /**
  * Consecutive bot-to-bot lines, from §6.6.
