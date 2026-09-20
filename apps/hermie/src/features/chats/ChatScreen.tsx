@@ -708,6 +708,23 @@ function Conversation({
 
       haptic('send')
 
+      /*
+        Your own message goes to the END of the conversation, wherever you were
+        reading when you sent it.
+
+        The end of an INVERTED list is offset 0, and `scrollToLatest` is the same
+        animated jump the "Jump to latest" pill makes — one `scrollToOffset` to
+        zero, never a `scrollToIndex`, whose recovery path multiplies an average
+        row height by an index and can land anywhere.
+
+        It runs BEFORE the await on purpose. The jump also clears `away`, which
+        takes `maintainVisibleContentPosition` off the scroll view, so the
+        optimistic bubble that lands a moment later arrives at a list with
+        nothing to correct — rather than mid-animation with an anchor moving
+        under it.
+      */
+      listRef.current?.scrollToLatest()
+
       try {
         await chat.send(body, files)
 

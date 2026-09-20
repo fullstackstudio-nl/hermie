@@ -10,6 +10,7 @@
  * `chat-mockController.test.ts`.
  */
 import { act, fireEvent, screen, waitFor } from '@testing-library/react-native'
+import { FlatList } from 'react-native'
 
 import { ChatScreen } from '../src/features/chats/ChatScreen'
 import { haptic } from '../src/platform/haptics'
@@ -148,6 +149,43 @@ describe('ChatScreen', () => {
     await waitFor(() => expect(mockController.send).toHaveBeenCalledWith('researcher', 'hello', []))
     expect(useChatsStore.getState().chats.researcher?.draft).toBe('')
     expect(haptic).toHaveBeenCalledWith('send')
+  })
+
+  it('goes to the END of the conversation on send, from wherever the reader was', async () => {
+    // Reported from the iPad build: the transcript jumped to the TOP right after
+    // a message went. Whatever produced it, the requirement is one line — your
+    // own message is at the bottom and the bottom is where you are — and on an
+    // inverted list that bottom is offset 0. Anything that scrolls by INDEX can
+    // land at the far end; this never asks for one.
+    const scrollToOffset = jest.spyOn(FlatList.prototype, 'scrollToOffset').mockImplementation(() => {})
+
+    try {
+      renderChat()
+
+      // Up in the history, which is the case the jump was reported from.
+      fireEvent.scroll(screen.getByTestId('transcript-list-scroll'), {
+        nativeEvent: {
+          contentOffset: { x: 0, y: 900 },
+          contentSize: { height: 4000, width: 402 },
+          layoutMeasurement: { height: 800, width: 402 }
+        }
+      })
+
+      scrollToOffset.mockClear()
+
+      fireEvent.changeText(screen.getByTestId('composer-input'), 'hello')
+      fireEvent.press(screen.getByTestId('composer-send'))
+
+      await waitFor(() => expect(mockController.send).toHaveBeenCalled())
+
+      expect(scrollToOffset).toHaveBeenCalledWith({ animated: true, offset: 0 })
+      // Nothing ever asked for the other end.
+      for (const [call] of scrollToOffset.mock.calls) {
+        expect((call as { offset: number }).offset).toBe(0)
+      }
+    } finally {
+      scrollToOffset.mockRestore()
+    }
   })
 
   it('keeps a staged attachment on screen until the send is actually accepted', async () => {
