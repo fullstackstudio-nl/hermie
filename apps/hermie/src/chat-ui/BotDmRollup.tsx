@@ -45,7 +45,10 @@ export function BotDmRollup({ run, testID }: BotDmRollupProps) {
       accessibilityRole="button"
       accessibilityState={{ expanded }}
       hitSlop={TAP_SLOP}
-      onPress={toggle}
+      // Wrapped: `toggle` takes the row's height change, and a Pressable would
+      // hand it a gesture event instead. This row cannot measure one, so it says
+      // nothing and the list holds the plain offset.
+      onPress={() => toggle()}
       style={({ pressed }) => ({ maxWidth, opacity: pressed ? 0.6 : 1 })}
       testID={testID ?? `bot-dm-rollup-${run.id}`}
     >

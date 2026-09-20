@@ -64,7 +64,18 @@ export interface FoldBlock {
 
 export interface FoldProps {
   expanded: boolean
-  onToggle: () => void
+  /**
+   * Open or close, and by HOW MUCH the row is about to change height.
+   *
+   * The number is the point of it. An inverted list pins a growing cell's
+   * BOTTOM edge, so a body that opens grows upward and takes the line the reader
+   * was on up with it; keeping that line still means moving the content offset
+   * by exactly the growth, and this is the only place that number is known
+   * before the layout happens — `natural` is measured on a view nothing
+   * constrains, so the full height is already on hand while the body is clipped.
+   * Positive when opening, negative when closing.
+   */
+  onToggle: (growth: number) => void
   /** What the mask fades into: the bubble's own lower colour. */
   fadeTo: string
   /**
@@ -240,7 +251,7 @@ export function Fold({ expanded, onToggle, fadeTo, lineHeight, blocks, bleed = 0
           accessibilityRole="button"
           accessibilityState={{ expanded }}
           hitSlop={TAP_SLOP}
-          onPress={onToggle}
+          onPress={() => onToggle(expanded ? limit - natural : natural - limit)}
           style={{ justifyContent: 'center', marginTop: theme.space.xs, minHeight: 20 }}
           testID={testID ? `${testID}-toggle` : undefined}
         >

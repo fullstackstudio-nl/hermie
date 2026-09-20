@@ -44,6 +44,8 @@ import { TranscriptList } from '../../src/chat-ui'
 import { assistantItem, subagentMap, userItem } from '../../src/chat-ui/fixtures'
 import { holdCorrection } from '../../src/chat-ui/TranscriptList'
 import type { AssistantItem, VisibleItem } from '../../src/chat-ui/types'
+import { markdownLeading } from '../../src/markdown'
+import { FOLD_LINES, type as typeScale } from '../../src/ui/tokens'
 import { renderScreen, withProviders } from '../support/render'
 
 const visible = (items: { id: string }[]): VisibleItem[] =>
@@ -149,12 +151,14 @@ function within(root: { findAll: (predicate: (node: unknown) => boolean) => unkn
 /**
  * The second half of the same invariant, for the reader rather than for a turn.
  *
- * **Opening a disclosure must not move the offset.** On paper an inverted list
- * gives that for free: the growing cell's origin does not move, so it grows
- * upward and its `Show more` stays pinned to the cell's screen bottom, under the
- * finger. On the owner's phone it did not, and a guarantee that rests on a layout
- * pass nobody controls is not a guarantee — so the place is recorded when the
- * finger goes down and restored if anything moves it.
+ * **Opening a disclosure must not move the text the reader is looking at.** That
+ * is NOT the same as leaving the offset alone, and believing it was is how the
+ * owner reported `Show more` twice. An inverted list pins a growing cell's
+ * BOTTOM edge, so a body that opens grows upward and carries the line under the
+ * finger up with it; leaving the offset where it was keeps the END of the
+ * message on screen. Keeping the message's TOP still means moving the offset by
+ * exactly the growth — which is why `holdCorrection` takes a target rather than
+ * a memory, and why `Fold` reports how much taller it is about to be.
  */
 describe('holdCorrection', () => {
   it('asks for nothing while no place is held', () => {
@@ -179,32 +183,43 @@ describe('holdCorrection', () => {
 })
 
 describe('opening a disclosure', () => {
-  const long = { ...assistantItem, id: 'a-long', streaming: false, text: 'x'.repeat(4000) }
+  const HEIGHT = 4000
+  const long = { ...assistantItem, id: 'a-long', streaming: false, text: 'x'.repeat(HEIGHT) }
+
+  /** The clip the fold applies, so the growth it reports can be named exactly. */
+  const limit = FOLD_LINES.regular * markdownLeading(typeScale.body.fontSize)
+  const growth = HEIGHT - limit
 
   function press(): void {
     act(() => {
       fireEvent(screen.getByTestId(`assistant-fold-${long.id}-body`), 'layout', {
-        nativeEvent: { layout: { height: 4000 } }
+        nativeEvent: { layout: { height: HEIGHT } }
       })
     })
 
     fireEvent.press(screen.getByTestId(`assistant-fold-${long.id}-toggle`))
   }
 
-  it('holds the offset the finger went down at, and lets it go on a drag', () => {
+  it('moves the reader by the growth, so the message opens downward', () => {
+    // The owner's report, twice over: `Show more` still threw the transcript to
+    // the end of the message. An inverted list pins a growing cell's BOTTOM
+    // edge, so holding the offset the finger went down at keeps the END of the
+    // message under the finger and sends everything the reader was reading up
+    // and off the screen. The target is that offset PLUS the growth, which
+    // keeps the message's top edge still.
     const scrollToOffset = jest.spyOn(FlatList.prototype, 'scrollToOffset').mockImplementation(() => {})
 
     try {
       renderScreen(<TranscriptList items={visible([userItem, long])} subagents={subagentMap} />)
 
-      // The reader is 420pt up in the history when they reach for `Show more`.
       scrollTo(420)
       press()
       scrollToOffset.mockClear()
 
-      // The expansion lands them at the bottom; the list puts them back.
+      // The growth lands them somewhere else; the list puts them where the top
+      // of the message still is.
       scrollTo(0)
-      expect(scrollToOffset).toHaveBeenCalledWith({ animated: false, offset: 420 })
+      expect(scrollToOffset).toHaveBeenCalledWith({ animated: false, offset: 420 + growth })
 
       // A drag is the reader deciding where to be, and outranks the hold.
       scrollToOffset.mockClear()
@@ -216,7 +231,28 @@ describe('opening a disclosure', () => {
     }
   })
 
-  it('corrects nothing when the offset did not move, which is the normal case', () => {
+  it('never leaves the reader at the end of the message they just opened', () => {
+    // The shape of the bug as reported: at the bottom of the conversation the
+    // held offset was zero, and zero on an inverted list is the newest content —
+    // the END of the reply they had just asked to read.
+    const scrollToOffset = jest.spyOn(FlatList.prototype, 'scrollToOffset').mockImplementation(() => {})
+
+    try {
+      renderScreen(<TranscriptList items={visible([userItem, long])} subagents={subagentMap} />)
+
+      scrollTo(0)
+      press()
+      scrollToOffset.mockClear()
+      scrollTo(0)
+
+      expect(scrollToOffset).toHaveBeenCalledWith({ animated: false, offset: growth })
+      expect(scrollToOffset).not.toHaveBeenCalledWith({ animated: false, offset: 0 })
+    } finally {
+      scrollToOffset.mockRestore()
+    }
+  })
+
+  it('corrects nothing once the reader is already where they belong', () => {
     const scrollToOffset = jest.spyOn(FlatList.prototype, 'scrollToOffset').mockImplementation(() => {})
 
     try {
@@ -225,7 +261,7 @@ describe('opening a disclosure', () => {
       scrollTo(420)
       press()
       scrollToOffset.mockClear()
-      scrollTo(420)
+      scrollTo(420 + growth)
 
       expect(scrollToOffset).not.toHaveBeenCalled()
     } finally {

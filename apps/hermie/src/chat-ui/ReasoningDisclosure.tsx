@@ -95,7 +95,10 @@ export function ReasoningDisclosure({
           accessibilityRole="button"
           accessibilityState={{ expanded }}
           hitSlop={TAP_SLOP}
-          onPress={toggle}
+          // Wrapped: `toggle` takes the row's height change, and a Pressable would
+          // hand it a gesture event instead. This row cannot measure one, so it
+          // says nothing and the list holds the plain offset.
+          onPress={() => toggle()}
           // `flex-start` so the tap target is the line, not the whole column
           // width — a thought is narrow and the bubble under it is not.
           style={({ pressed }) => ({ alignSelf: 'flex-start', opacity: pressed ? 0.6 : 1 })}

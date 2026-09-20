@@ -16,7 +16,15 @@ import { createContext, useCallback, useContext, useMemo, useRef, useState, type
 
 export interface ExpandedApi {
   isExpanded: (id: string) => boolean
-  toggle: (id: string) => void
+  /**
+   * Open or close one disclosure.
+   *
+   * `growth` is how many points the row is about to change height by, where the
+   * caller knows — a `Fold` does, because it measures its own unclipped body.
+   * It is passed straight through to `onToggle` below; a caller that hands over
+   * nothing is saying "I cannot tell you", not "nothing will move".
+   */
+  toggle: (id: string, growth?: number) => void
   /** Used by a card that opens itself once and then follows the reader. */
   setExpanded: (id: string, expanded: boolean) => void
 }
@@ -39,14 +47,15 @@ export interface ExpandedProviderProps {
   /**
    * Called just BEFORE a reader-driven toggle changes the set.
    *
-   * This is the hook the header above promises: the list decides that opening
-   * something must not move the viewport, and it cannot decide that from inside a
-   * row. `TranscriptList` passes the function that records where the list is
-   * sitting right now, so the frames after the growth can be put back there. It
-   * fires on `toggle` only — a card that opens ITSELF through `setExpanded` is not
-   * a finger on a `Show more` and has no place to hold.
+   * This is the hook the header above promises: the list decides where the
+   * viewport must be after something opens, and it cannot decide that from
+   * inside a row. `TranscriptList` passes the function that works out where the
+   * list should end up — which is NOT simply where it is now, on an inverted
+   * list: see `holdCorrection`. It fires on `toggle` only — a card that opens
+   * ITSELF through `setExpanded` is not a finger on a `Show more` and has no
+   * place to hold.
    */
-  onToggle?: (id: string) => void
+  onToggle?: (id: string, growth: number) => void
 }
 
 export function ExpandedProvider({ children, onToggle }: ExpandedProviderProps) {
@@ -55,8 +64,8 @@ export function ExpandedProvider({ children, onToggle }: ExpandedProviderProps) 
 
   before.current = onToggle
 
-  const toggle = useCallback((id: string) => {
-    before.current?.(id)
+  const toggle = useCallback((id: string, growth = 0) => {
+    before.current?.(id, growth)
 
     setIds(current => {
       const next = new Set(current)
@@ -101,10 +110,10 @@ export function ExpandedProvider({ children, onToggle }: ExpandedProviderProps) 
  * Returns a tuple rather than the whole API so a row cannot accidentally read or
  * write another row's state, which is how the memo key stays honest.
  */
-export function useExpanded(id: string): [boolean, () => void] {
+export function useExpanded(id: string): [boolean, (growth?: number) => void] {
   const api = useContext(ExpandedContext)
 
-  return [api.isExpanded(id), useCallback(() => api.toggle(id), [api, id])]
+  return [api.isExpanded(id), useCallback((growth?: number) => api.toggle(id, growth), [api, id])]
 }
 
 /** For a component that needs the whole API — a group card toggling its children. */

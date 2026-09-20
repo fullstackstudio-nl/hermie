@@ -720,19 +720,6 @@ const DISMISS_DRAG = 24
 const AWAY_ANCHOR = { minIndexForVisible: 0 } as const
 
 /**
- * Where the list has to be put back after a disclosure grew, or `undefined` when
- * there is nothing to correct.
- *
- * Exported because this is the only part of "Show more keeps its place" that a
- * test renderer can watch. The rest is a scroll view moving, and the requirement
- * itself is a NUMBER: the offset delta across the expansion is zero. An inverted
- * list gets that for free on paper — the growing cell's origin does not move, so
- * it grows upward with its `Show more` pinned to the cell's screen bottom — but
- * "on paper" is exactly what the owner's phone disagreed with, and a guarantee
- * that rests on a layout pass nobody controls is not a guarantee. So the place is
- * recorded when the finger goes down and restored if anything moves it.
- */
-/**
  * Has this drag gone far enough towards the history to put the keyboard away?
  *
  * **On an inverted list, "scroll up to read" is an offset that GROWS.** Offset 0
@@ -751,6 +738,30 @@ export function dismissesKeyboard(dragStartedAt: number | undefined, offset: num
   return dragStartedAt !== undefined && offset - dragStartedAt > DISMISS_DRAG
 }
 
+/**
+ * Where the list has to be put, given where the reader asked to stay.
+ *
+ * `held` is a TARGET, not a memory. That distinction is the whole of the
+ * owner's second report — `Show more` still threw the transcript to the end of
+ * the message — and it comes from how an inverted list grows.
+ *
+ * A cell's content origin is its BOTTOM edge on screen. So a body that opens
+ * pins its own bottom and grows UPWARD, taking the line the reader was on up
+ * with it, and the rest of the history above it moves by the same amount. The
+ * previous version recorded the offset at the moment of the tap and restored
+ * exactly that, which pins the bottom — and for a reader sitting at the bottom
+ * of the conversation with the last message folded, "exactly that" is offset
+ * zero: the correction put them at the END of the message they had just asked
+ * to read. Nothing about it was a jump the list failed to catch; it was the
+ * list catching the offset and holding it in the wrong place.
+ *
+ * The target is therefore the offset at the tap PLUS the growth the row
+ * reported, which keeps the message's top edge where it was and lets it grow
+ * downward. `Fold` is the one place that number exists before the layout does.
+ *
+ * Exported because this is the only part of it a test renderer can watch. The
+ * rest is a scroll view moving.
+ */
 export function holdCorrection(held: number | undefined, offset: number): number | undefined {
   if (held === undefined || Math.abs(offset - held) <= HOLD_SLOP) {
     return undefined
@@ -941,16 +952,37 @@ function TranscriptListBody({
   /**
    * The reader's place across a disclosure opening.
    *
-   * `offsetNow` is the last offset the scroll view reported; `holdingTo` is that
-   * number frozen at the moment a `Show more` (or a tool card, or a roll-up) was
-   * tapped. While it is frozen, any offset that differs is put back — which is
-   * the whole of "the expansion stays under the finger", including at the bottom
-   * of the inverted list where a growth that overshoots lands the reader at the
-   * newest message instead of at the paragraph they were reading.
+   * `offsetNow` is the last offset the scroll view reported; `holdingTo` is
+   * where the list must END UP, worked out at the moment a `Show more` (or a
+   * tool card, or a roll-up) was tapped. Not where it was — see
+   * `holdCorrection`, which is where the difference between those two is the
+   * whole bug.
    */
   const offsetNow = useRef(0)
   const holdingTo = useRef<number | undefined>(undefined)
   const holding = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  /**
+   * How many rows the list had when the place was taken.
+   *
+   * A hold is a promise about ONE expansion. A row arriving underneath it — the
+   * typing indicator appearing, a reply landing — changes the content by its own
+   * height as well, and forcing the offset to a target computed before that row
+   * existed would undo the correction the anchor just made and move the reader
+   * by the row's height. So a changed row count retires the hold, the same way a
+   * drag does.
+   */
+  const rowCount = useRef(0)
+  const holdingRows = useRef(0)
+
+  // Read in the render body, below, where `data` is what the list is about to
+  // show. A ref rather than state: nothing renders differently because of it.
+  rowCount.current = data.length
+
+  // A row came or went while a place was held; see `holdingRows`.
+  if (rowCount.current !== holdingRows.current && holdingTo.current !== undefined) {
+    holdingTo.current = undefined
+  }
 
   /**
    * Where the current drag started, and `undefined` once the keyboard has been
@@ -972,16 +1004,47 @@ function TranscriptListBody({
     holdingTo.current = undefined
   }, [])
 
-  const holdPlace = useCallback(() => {
+  /**
+   * Where the reader must end up, worked out at the moment of the tap.
+   *
+   * `growth` is what the row says it is about to add — see `Fold`, which is the
+   * only place that number exists before the layout does. Adding it is what
+   * keeps the opened message's TOP edge still and lets the body grow downward;
+   * holding the bare offset pins its bottom instead, which on an inverted list
+   * is how `Show more` used to land the reader at the end of the message.
+   */
+  const holdPlace = useCallback((_id: string, growth: number) => {
     if (holding.current) {
       clearTimeout(holding.current)
     }
 
-    holdingTo.current = offsetNow.current
+    holdingTo.current = Math.max(0, offsetNow.current + growth)
+    holdingRows.current = rowCount.current
     holding.current = setTimeout(() => {
       holding.current = null
       holdingTo.current = undefined
     }, HOLD_SETTLE_MS)
+  }, [])
+
+  /**
+   * The correction, applied as soon as the content has actually changed size.
+   *
+   * `onContentSizeChange` is the earliest moment the scroll view can be moved to
+   * a place that did not exist before the growth, and it fires in the same
+   * commit as the layout rather than one scroll event later. The scroll handler
+   * below still carries the same correction, because a growth that produces no
+   * scroll event at all would otherwise never be answered — but by then the
+   * reader has seen the frame this is meant to prevent.
+   */
+  const settleHold = useCallback(() => {
+    const correction = holdCorrection(holdingTo.current, offsetNow.current)
+
+    if (correction === undefined) {
+      return
+    }
+
+    offsetNow.current = correction
+    listRef.current?.scrollToOffset({ animated: false, offset: correction })
   }, [])
 
   useEffect(() => releaseHold, [releaseHold])
@@ -1186,6 +1249,7 @@ function TranscriptListBody({
            * which is where this is now off.
            */
           maintainVisibleContentPosition={away ? AWAY_ANCHOR : undefined}
+          onContentSizeChange={settleHold}
           onEndReached={onEndReached}
           onEndReachedThreshold={0.4}
           onMomentumScrollEnd={endJump}

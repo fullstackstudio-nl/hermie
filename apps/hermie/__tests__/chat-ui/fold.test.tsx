@@ -265,3 +265,58 @@ describe('needsReadingTreatment', () => {
     expect(needsReadingTreatment('| a | b |\n| --- | --- |\n| 1 | 2 |')).toBe(true)
   })
 })
+
+/**
+ * What the fold TELLS the list when it opens.
+ *
+ * The number is the whole of the second `Show more` report. An inverted list
+ * pins a growing cell's bottom edge, so the list can only keep the reader's line
+ * still if it knows how much taller the row is about to be — and the fold is the
+ * one place that is knowable before the layout happens, because `natural` is
+ * measured on a view nothing constrains.
+ */
+describe('what a fold reports when it opens', () => {
+  const LEADING = 20
+  const NATURAL = 900
+  // The test renderer reports a window at the regular breakpoint, which is the
+  // branch `useFoldLines` takes — so this is the cut the rendered fold applies.
+  const limit = FOLD_LINES.regular * LEADING
+
+  function renderFold(onToggle: (id: string, growth: number) => void, expanded = false) {
+    renderScreen(
+      <ExpandedProvider onToggle={onToggle}>
+        <Fold
+          expanded={expanded}
+          fadeTo="#fff"
+          lineHeight={LEADING}
+          onToggle={growth => onToggle('x', growth)}
+          testID="fold"
+        >
+          <RNText>body</RNText>
+        </Fold>
+      </ExpandedProvider>
+    )
+
+    act(() => {
+      fireEvent(screen.getByTestId('fold-body'), 'layout', { nativeEvent: { layout: { height: NATURAL } } })
+    })
+  }
+
+  it('reports the height it is about to add', () => {
+    const onToggle = jest.fn()
+
+    renderFold(onToggle)
+    fireEvent.press(screen.getByTestId('fold-toggle'))
+
+    expect(onToggle).toHaveBeenCalledWith('x', NATURAL - limit)
+  })
+
+  it('reports the same height as a LOSS when it closes', () => {
+    const onToggle = jest.fn()
+
+    renderFold(onToggle, true)
+    fireEvent.press(screen.getByTestId('fold-toggle'))
+
+    expect(onToggle).toHaveBeenCalledWith('x', limit - NATURAL)
+  })
+})
