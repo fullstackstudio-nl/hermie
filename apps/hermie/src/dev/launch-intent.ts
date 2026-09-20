@@ -69,6 +69,7 @@
  * | `--hermieWallpaper <name>`    | pin the wallpaper                                |
  * | `--hermieGateway <url>`       | seed that gateway and skip the wizard            |
  * | `--hermieToken <token>`       | the session token to seed beside it               |
+ * | `--hermieTraceScroll`         | log the transcript's offsets and row heights      |
  *
  * `--hermieOpen=<value>` is accepted as well, because a shell quoting habit
  * should not be the reason a screenshot comes back wrong.
@@ -118,6 +119,13 @@ export interface DevLaunchIntent {
   scheme?: Scheme
   wallpaper?: WallpaperName
   gateway?: DevGatewaySeed
+  /**
+   * Trace the transcript's scroll offsets and row heights to the log.
+   *
+   * The one flag here that takes no value, because it asks for nothing to be
+   * drawn — see `trace-scroll.ts` for what it prints and why it is kept.
+   */
+  traceScroll?: boolean
 }
 
 const OVERLAY_SECTIONS: Record<string, DevOverlaySection> = {
@@ -281,6 +289,16 @@ export function parseDevLaunchArguments(argv: readonly string[]): DevLaunchInten
       return
     }
 
+    if (flag === '--hermietracescroll') {
+      // A bare flag is on, and `--hermieTraceScroll false` is off: a shell habit
+      // of passing every flag a value should not turn a trace on by accident.
+      const value = valueAt(index, inline).toLowerCase()
+
+      intent.traceScroll = value !== 'false' && value !== '0'
+
+      return
+    }
+
     if (flag === '--hermietoken') {
       // NOT lowercased, unlike every other value here: a session token is opaque
       // and case-sensitive, and the gateway compares it byte for byte.
@@ -295,7 +313,9 @@ export function parseDevLaunchArguments(argv: readonly string[]): DevLaunchInten
     intent.gateway = { baseUrl: gatewayUrl, ...(token ? { token } : {}) }
   }
 
-  return intent.open || intent.scheme || intent.wallpaper || intent.gateway ? intent : null
+  return intent.open || intent.scheme || intent.wallpaper || intent.gateway || intent.traceScroll !== undefined
+    ? intent
+    : null
 }
 
 type DevLaunchModule = { devLaunchArguments?: unknown }

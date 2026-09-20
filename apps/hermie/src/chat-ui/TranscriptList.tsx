@@ -50,11 +50,13 @@ import {
   FlatList,
   Platform,
   View,
+  type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   type ViewStyle
 } from 'react-native'
 
+import { traceBlankRow, traceItems, traceRow, traceScroll, TRACING } from '../dev/trace-scroll'
 import type { MarkdownImageSource } from '../markdown'
 import { copyToClipboard } from '../platform/clipboard'
 import { ContextMenuHost } from '../platform/context-menu'
@@ -494,17 +496,53 @@ function gapAbove(layout: RowLayout): number {
  * above a row is therefore the row's own margin, which is what lets it say
  * whether it continues the run above it.
  */
+/**
+ * The two `onLayout` hooks the scroll trace needs, and nothing when it is off.
+ *
+ * Both are spread props rather than always-present callbacks on purpose: an
+ * `onLayout` on every row is a measurement callback per row per layout pass, and a
+ * virtualised transcript is the one place in the app where that is a real cost. With
+ * the flag down this returns two frozen empty objects, so the rows render exactly as
+ * they did before the trace existed.
+ *
+ * The WRAPPER height is the row's contribution to the content, gap included. The
+ * CONTENT height is what the row actually drew. A wrapper with height over content
+ * with none is a blank row — the sixty points of nothing the owner photographed.
+ */
+function useRowTrace(key: string): { wrapper: object; content: object } {
+  const wrapper = useRef(0)
+
+  return useMemo(() => {
+    if (!TRACING) {
+      return { content: {}, wrapper: {} }
+    }
+
+    return {
+      content: {
+        onLayout: (event: LayoutChangeEvent) => traceBlankRow(key, wrapper.current, event.nativeEvent.layout.height)
+      },
+      wrapper: {
+        onLayout: (event: LayoutChangeEvent) => {
+          wrapper.current = event.nativeEvent.layout.height
+          traceRow(key, wrapper.current)
+        }
+      }
+    }
+  }, [key])
+}
+
 function TranscriptRowFrame({ entry, context, receipt, layout, dmRole }: RowProps) {
   const runId = dmRole?.role === 'rollupMember' ? dmRole.runId : ''
   const runExpanded = useRollupExpanded(runId)
   const menu = useMessageMenu(entry.item, context)
+  const trace = useRowTrace(`${entry.item.kind}-${entry.item.id}`)
 
   if (!rowDraws(entry, dmRole, runExpanded)) {
     return null
   }
 
   return (
-    <View style={{ marginTop: gapAbove(layout) }} testID={`transcript-row-${entry.item.id}`}>
+    <View {...trace.wrapper} style={{ marginTop: gapAbove(layout) }} testID={`transcript-row-${entry.item.id}`}>
       {/*
         The whole row is the menu's target, not the bubble inside it. A secondary
         click on the metadata line under a reply, or on the gap beside a short one,
@@ -518,13 +556,15 @@ function TranscriptRowFrame({ entry, context, receipt, layout, dmRole }: RowProp
         testID={`transcript-menu-${entry.item.id}`}
       >
         {/* Inverted, so a stamp ABOVE a row renders after it. */}
-        <TranscriptRow
-          context={context}
-          {...(dmRole ? { dmRole } : {})}
-          entry={entry}
-          layout={layout}
-          {...(receipt ? { receipt } : {})}
-        />
+        <View {...trace.content}>
+          <TranscriptRow
+            context={context}
+            {...(dmRole ? { dmRole } : {})}
+            entry={entry}
+            layout={layout}
+            {...(receipt ? { receipt } : {})}
+          />
+        </View>
       </ContextMenuHost>
       {layout.dateStamp ? <DateSeparator label={layout.dateStamp} /> : null}
     </View>
@@ -739,6 +779,18 @@ function TranscriptListBody({
   // Inverted: newest first.
   const data = useMemo(() => [...items].reverse(), [items])
 
+  if (TRACING) {
+    // In the render body rather than in an effect, so the line lands BEFORE the
+    // layout it describes rather than after it. A trace whose lines are in the
+    // wrong order is worse than no trace: the whole question is what changed
+    // height between two offsets.
+    traceItems(
+      `${items.length} rows, newest=${data[0]?.item.kind}:${data[0]?.item.id}${
+        data[0]?.item.kind === 'assistant' && data[0].item.streaming ? ' streaming' : ''
+      }`
+    )
+  }
+
   const lastOwnId = useMemo(() => {
     for (const entry of data) {
       if (entry.item.kind === 'user' && !entry.item.unknownAuthor) {
@@ -776,12 +828,16 @@ function TranscriptListBody({
   useEffect(() => endJump, [endJump])
 
   const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
+
+    traceScroll(contentOffset.y, contentSize.height, layoutMeasurement.height)
+
     if (jumping.current) {
       return
     }
 
     // Inverted list: offset 0 IS the bottom of the conversation.
-    setAway(event.nativeEvent.contentOffset.y > AWAY_THRESHOLD)
+    setAway(contentOffset.y > AWAY_THRESHOLD)
   }, [])
 
   /**
@@ -930,7 +986,10 @@ function TranscriptListBody({
         onScrollToIndexFailed={recoverScroll}
         ref={listRef}
         renderItem={renderItem}
-        scrollEventThrottle={64}
+        // A frame apart while tracing: a correction and the animated scroll back
+        // to the bottom are two events inside 300ms, and at 64ms the first of
+        // them is the one that gets dropped.
+        scrollEventThrottle={TRACING ? 16 : 64}
         testID={`${testID}-scroll`}
       />
 
