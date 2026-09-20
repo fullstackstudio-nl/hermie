@@ -29,7 +29,7 @@ import {
 import { assistantItem, subagentMap, userItem } from '../../src/chat-ui/fixtures'
 import { dateStampFor } from '../../src/chat-ui/grouping'
 import { Text } from '../../src/ui/primitives'
-import { BUBBLE_GAP, INLINE_META_GAP, radii } from '../../src/ui/tokens'
+import { BUBBLE_GAP, INLINE_META_GAP, radii, TAIL, TAIL_OVERLAP } from '../../src/ui/tokens'
 import { renderScreen } from '../support/render'
 
 jest.mock('react-native/Libraries/Utilities/useWindowDimensions')
@@ -230,8 +230,8 @@ describe('the clock on a bubble’s last line', () => {
  * sender's: right for outgoing, left for incoming.
  */
 describe('the corners, per run position', () => {
-  it('is 16 with a 4pt tail-side corner', () => {
-    expect(radii.bubble).toBe(16)
+  it('is 18 with a 4pt tail-side corner', () => {
+    expect(radii.bubble).toBe(18)
     expect(radii.tail).toBe(4)
   })
 
@@ -408,5 +408,72 @@ describe('the typing bubble', () => {
 
     expect(dots).toBeTruthy()
     expect(screen.getByLabelText('Replying')).toBeTruthy()
+  })
+})
+
+/**
+ * The tail's silhouette, as the four facts the eye is judging.
+ *
+ * A path is one string, and a hand-edited string is exactly the sort of thing
+ * that comes back as "there is a sliver under the corner" a week later. So the
+ * points are parsed out of it and checked against the box they have to live in —
+ * which is not a style question: a point past the bottom is drawn half a point
+ * off the bubble's baseline, and a point short of the full width is a tail that
+ * does not reach where the layout has already reserved room for it.
+ */
+describe('the tail', () => {
+  /** Every ON-PATH point the command list names, in order. */
+  function points(path: string): [number, number][] {
+    const tokens = path.match(/[A-Za-z]|-?\d*\.?\d+/gu) ?? []
+    // How many numbers each command takes, and how many of those trail the point.
+    const arity: Record<string, number> = { M: 2, L: 2, A: 7, Z: 0 }
+    const out: [number, number][] = []
+    let index = 0
+
+    while (index < tokens.length) {
+      const command = tokens[index]!.toUpperCase()
+
+      expect(arity).toHaveProperty(command)
+      index += 1
+
+      const count = arity[command]!
+      const numbers = tokens.slice(index, index + count).map(Number)
+
+      index += count
+
+      if (count >= 2) {
+        out.push([numbers[count - 2]!, numbers[count - 1]!])
+      }
+    }
+
+    return out
+  }
+
+  const shape = points(TAIL.path)
+
+  it('stays inside its own box, so nothing is clipped and nothing overhangs', () => {
+    for (const [x, y] of shape) {
+      expect({ x: x >= 0 && x <= TAIL.width, y: y >= 0 && y <= TAIL.height }).toEqual({ x: true, y: true })
+    }
+  })
+
+  it('comes to its point on the bubble’s bottom line, at the full reach', () => {
+    expect(shape).toContainEqual([TAIL.width, TAIL.height])
+  })
+
+  it('leaves the bubble’s edge rather than floating beside it', () => {
+    // x = TAIL_OVERLAP is where the bubble's own edge stands inside this box.
+    expect(shape.some(([x]) => x === TAIL_OVERLAP)).toBe(true)
+  })
+
+  it('reaches past the bubble by the gutter the column reserves for it', () => {
+    expect(TAIL_REACH).toBe(TAIL.width - TAIL_OVERLAP)
+    expect(TAIL_REACH).toBe(7)
+  })
+
+  it('is drawn in whole points, which is what the Mac’s scaling needs', () => {
+    for (const [x, y] of shape) {
+      expect({ x: Number.isInteger(x), y: Number.isInteger(y) }).toEqual({ x: true, y: true })
+    }
   })
 })

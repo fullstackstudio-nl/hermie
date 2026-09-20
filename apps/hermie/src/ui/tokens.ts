@@ -139,12 +139,13 @@ export const radii = {
   /**
    * A speech bubble's outer corner.
    *
-   * 16, not the 22 this was: WhatsApp's proportions are a small radius on a tight
-   * bubble, and 22 on a bubble whose content box is 10pt tall leaves the corner
-   * arc taller than the text it surrounds — a one-word message read as a lozenge
-   * rather than as a bubble, which is what the owner was comparing against.
+   * 18. It was 22 once, which on a bubble whose content box is 10pt tall left the
+   * corner arc taller than the text it surrounds — a one-word message read as a
+   * lozenge rather than as a bubble. 16 fixed that and undershot the reference
+   * the owner is holding this against; 18 is the radius that goes with the
+   * droplet tail below.
    */
-  bubble: 16,
+  bubble: 18,
   sheet: 28,
   panel: 30,
   pill: 999,
@@ -630,19 +631,54 @@ export const darkBubbles: Record<BubbleVariant, BubbleRecipe> = {
 }
 
 /**
- * The tail, as ONE path that belongs to the bubble.
+ * The tail, as ONE path that belongs to the bubble: the classic droplet.
  *
- * 13 × 17, drawn for the sender's side and mirrored with `scaleX(-1)` for the
- * other. It is offset `TAIL_OVERLAP` into the bubble so it covers the 6pt
- * sender-side bottom corner rather than sitting beside it. There is deliberately
- * no separately positioned tail VIEW: the previous build drew the tail as an
- * absolutely positioned square with one rounded corner, and at certain bubble
- * heights the square's straight corners escaped the bubble's own rounding and
- * painted the stray block the owner reported. A path cannot do that.
+ * 20 × 25, drawn for the sender's side and mirrored with `scaleX(-1)` for the
+ * other. It is offset `TAIL_OVERLAP` into the bubble, so within this box the
+ * bubble's own edge stands at x = 13 and the tail reaches 7 past it. There is
+ * deliberately no separately positioned tail VIEW: the build before last drew the
+ * tail as an absolutely positioned square with one rounded corner, and at certain
+ * bubble heights the square's straight corners escaped the bubble's own rounding
+ * and painted the stray block the owner reported. A path cannot do that.
+ *
+ * ### Where the numbers come from
+ *
+ * The shape is the one the well-known CSS construction produces, resolved to a
+ * single closed outline because our backgrounds are glass and a
+ * background-coloured mask over glass is a grey patch, not a cut. That
+ * construction is two boxes 25 tall sitting on the bubble's bottom edge: a piece
+ * of bubble colour reaching 7 past the edge, and a background-coloured piece
+ * starting AT the edge whose 10pt bottom-left rounding cuts the curl. What
+ * survives the cut is the only part that was ever visible, and it is this path:
+ *
+ *  - `13,15 → 20,25` is that 10pt cut, as an arc. It is the tail's whole visible
+ *    silhouette — a concave edge leaving the bubble 10pt above its bottom,
+ *    sweeping down and out to a point on the bubble's own bottom line, 7 out.
+ *  - the rest is behind the bubble and exists only so the shape is closed and
+ *    covers what it must.
+ *
+ * ### The underside is flat to x = 6, and that is not a simplification
+ *
+ * The colour piece's own bottom-left rounding is wide (16 × 14), which lifts the
+ * outline off the bubble's bottom line well before the bubble's body is there to
+ * hide it: the bubble's tail-side bottom corner is `radii.tail`, so between the
+ * end of that corner arc and the bubble's bottom line there is a wedge the bubble
+ * does NOT paint. With a wide curl the tail does not paint it either, and the gap
+ * reads as a notch under the corner — which is the same artefact, by a different
+ * route, that the positioned-square tail was replaced for. So the outline stays
+ * on the bottom line until x = 6, which is comfortably inside the corner, and
+ * tucks up from there where only the bubble can see it.
+ *
+ * Every number is whole. The Mac renders the iPad build scaled, so a sub-point
+ * offset that is invisible at 3x is a visible sliver there.
  */
-export const TAIL = { width: 13, height: 17, path: 'M0 0 L5 0 C5 7 7.6 13.4 13 16 C8.4 17.7 3 16 0 12.4 Z' } as const
+export const TAIL = {
+  width: 20,
+  height: 25,
+  path: 'M0 0 L13 0 L13 15 A10 10 0 0 0 20 25 L6 25 A6 14 0 0 1 0 11 Z'
+} as const
 
-export const TAIL_OVERLAP = 6
+export const TAIL_OVERLAP = 13
 
 /**
  * Max bubble width — the rule that fixes edge-to-edge text walls.

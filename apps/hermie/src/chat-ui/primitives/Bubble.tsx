@@ -1,7 +1,7 @@
 /**
  * A speech bubble, and the only thing in the kit allowed to be one.
  *
- * Geometry from `design/liquid-glass-tokens.md` §4 and §6.1: radius 16 with a 4pt
+ * Geometry from `design/liquid-glass-tokens.md` §4 and §6.1: radius 18 with a 4pt
  * corner down the sender's side, a width cap that is a percentage plus a point
  * cap, and a tail that is ONE path belonging to the bubble.
  *
@@ -176,10 +176,12 @@ export function useLedgerWidth(): number | undefined {
 /**
  * The tail.
  *
- * The viewBox is a point taller than the shape's nominal height
- * because the path's lowest control point reaches 17.7 and a 17-high box would
- * clip the curve's last half point — which at Mac scaling is a flat edge where a
- * curve should be.
+ * The box is the shape's own extent exactly — no slack. The previous path was
+ * drawn with control points that overshot its nominal height, so the view had to
+ * be a point taller than the shape to keep the curve's last half point from being
+ * clipped into a flat edge at Mac scaling. `TAIL.path` is now derived rather than
+ * eyeballed and touches 0 and `TAIL.height` and nothing beyond them, so the slack
+ * would only move the shape half a point off the bubble's bottom line.
  */
 function Tail({ side, color }: { side: 'own' | 'other'; color: string }) {
   const own = side === 'own'
@@ -193,7 +195,7 @@ function Tail({ side, color }: { side: 'own' | 'other'; color: string }) {
       pointerEvents="none"
       style={{
         bottom: 0,
-        height: TAIL.height + 1,
+        height: TAIL.height,
         position: 'absolute',
         width: TAIL.width,
         ...(own ? { right: 0 } : { left: 0 }),
@@ -202,7 +204,7 @@ function Tail({ side, color }: { side: 'own' | 'other'; color: string }) {
         ...(own ? {} : { transform: [{ scaleX: -1 }] })
       }}
     >
-      <Svg height={TAIL.height + 1} viewBox={`0 0 ${TAIL.width} ${TAIL.height + 1}`} width={TAIL.width}>
+      <Svg height={TAIL.height} viewBox={`0 0 ${TAIL.width} ${TAIL.height}`} width={TAIL.width}>
         <Path d={TAIL.path} fill={color} />
       </Svg>
     </View>
