@@ -34,7 +34,7 @@ import {
   SIDEBAR_WIDTH,
   SIDEBAR_WIDTH_NARROW
 } from '../src/ui/tokens'
-import { renderScreen } from './support/render'
+import { renderScreen, withProviders } from './support/render'
 
 const gateway = { status: 'ready', config: { baseUrl: 'https://gateway.example.com', authMode: 'native_pkce' } }
 
@@ -142,6 +142,91 @@ describe('resolveSidebarCollapsed', () => {
         expect(resolveSidebarCollapsed(choice, width)).toBe(resolveSidebarCollapsed(choice, width))
       }
     }
+  })
+})
+
+describe('the width the collapse reads', () => {
+  /**
+   * The owner's report: the sidebar collapsed by itself on the Mac.
+   *
+   * Nothing was flipping. `resolveSidebarCollapsed` is a comparison against one
+   * number and a still window cannot produce two answers — the NUMBER was the
+   * problem. A window going to the background, a sheet being presented and a live
+   * resize each push intermediate widths through `useWindowDimensions`, and one of
+   * them dipping under 900 for a frame is indistinguishable, to a function that
+   * compares, from the window really being dragged narrow.
+   */
+  function shell() {
+    return renderScreen(<RegularShell />)
+  }
+
+  /** Re-render the shell at `next`, the way a dimensions change does. */
+  function resizeTo(next: { width: number; height: number }, view: ReturnType<typeof shell>) {
+    act(() => {
+      size(next)
+      view.rerender(withProviders(<RegularShell />))
+    })
+  }
+
+  beforeEach(() => jest.useFakeTimers())
+  afterEach(() => jest.useRealTimers())
+
+  it('ignores a width that only passes through on the way somewhere else', () => {
+    const view = shell()
+
+    expect(sidebarWidthOf()).toBe(SIDEBAR_WIDTH)
+
+    // A resize animation: three frames under the threshold, none of them held.
+    for (const width of [1100, 860, 700]) {
+      resizeTo({ width, height: WIDE.height }, view)
+      act(() => jest.advanceTimersByTime(40))
+    }
+
+    resizeTo(WIDE, view)
+    act(() => jest.advanceTimersByTime(300))
+
+    expect(sidebarWidthOf()).toBe(SIDEBAR_WIDTH)
+  })
+
+  it('takes a width the window actually settled on', () => {
+    const view = shell()
+
+    resizeTo(NARROW, view)
+    act(() => jest.advanceTimersByTime(300))
+
+    expect(sidebarWidthOf()).toBe(SIDEBAR_RAIL_WIDTH)
+  })
+
+  /**
+   * A window that is not on screen measures nothing. Committing that would
+   * collapse the sidebar while the owner is in another app and hand it back to
+   * them collapsed — which is exactly what they described.
+   */
+  it('never takes a measurement of a window that is not there', () => {
+    const view = shell()
+
+    for (const width of [0, -1, Number.NaN]) {
+      resizeTo({ width, height: WIDE.height }, view)
+      act(() => jest.advanceTimersByTime(300))
+
+      expect(sidebarWidthOf()).toBe(SIDEBAR_WIDTH)
+    }
+  })
+
+  /**
+   * And the other half of the owner's rule, which is already true by
+   * construction: once there is an explicit Hide or Show on record, no width
+   * changes it. `resolveSidebarCollapsed` reads the choice first.
+   */
+  it('leaves an explicit choice alone however the window is resized', () => {
+    const view = shell()
+
+    act(() => useChatLayoutStore.getState().setSidebarCollapsed(false))
+
+    resizeTo(NARROW, view)
+    act(() => jest.advanceTimersByTime(300))
+
+    expect(sidebarWidthOf()).toBe(SIDEBAR_WIDTH_NARROW)
   })
 })
 
