@@ -8,6 +8,10 @@ export default config(
   {
     ignores: [
       '**/node_modules/**',
+      // Scratch worktrees checked out inside the repo. They hold another commit
+      // of this same tree, so linting them lints every file twice and reports
+      // whatever that other commit happened to be mid-change on.
+      '.claude/**',
       '**/dist/**',
       '**/coverage/**',
       '**/.expo/**',
