@@ -25,6 +25,9 @@ rewritten, and git history has them.
 | Does the app launch on iOS 27?                   | **Yes, since scene adoption** — simulator       | 2026-09-20 |
 | Does `AppState` survive the scene life cycle?    | **Yes** — measured, background and foreground   | 2026-09-20 |
 | Can a Release build reach a gateway over http?   | **Yes, since the ATS key** — iOS 27 simulator   | 2026-09-20 |
+| Can it reach a REAL tailnet name over http?      | **Yes** — Headscale `.internal`, iOS 27         | 2026-09-20 |
+| Does a simulator get the tailnet's split DNS?    | **Yes** — resolved over `utun8`, from the app   | 2026-09-20 |
+| Can the app tell a bad certificate from no host? | **No** — both arrive as one flat failure        | 2026-09-20 |
 | What AppState does a Mac window report?          | **Unverified** — see "A Mac never pauses"       | 2026-09-19 |
 | Does a mouse drag still scroll a list on a Mac?  | Fixed in code; **unverified** — no Mac window   | 2026-09-20 |
 | Can a drag SELECT text in a bubble?              | **No** — RN copies the whole block; see below   | 2026-09-20 |
@@ -3129,3 +3132,165 @@ is new; check for a change you made before reading anything else into it.
   five notice kinds and `SubagentGroupCard`'s five statuses are still characters.
   They are marks inside cards rather than controls, and each needs its own designed
   shape, so they were left rather than half-converted.
+
+## A real tailnet name, and the advice that broke it (2026-09-20, later)
+
+The ATS section above closed with a list of what it had NOT verified, and the first item on that list
+was "a real tailnet. No Tailscale or Headscale node was involved." This closes it, against the
+owner's own gateway, and the answer is not the one the report predicted.
+
+**The report.** The gateway moved to a Headscale tailnet, reachable only as `hermes.fss.internal`
+(100.64.0.11). Typing that into the wizard's address step produced the red line **"Could not reach
+hermes.fss.internal. Check the address, and that the gateway is running and reachable from this
+device."** From the Mac's shell the same name resolved, `https://` failed on a self-signed
+certificate, and `http://` answered HTTP 200 — and `resolveGatewayAddress` run under Node returned
+`{ baseUrl: 'http://hermes.fss.internal', foundOverHttp: true }` in 251 ms. So the suspicion was that
+something in the app differed: DNS inside a sandbox, ATS, or an https attempt hanging long enough to
+lose a race.
+
+None of those. **The app works.** Release build, iPhone 18 Pro on iOS 27.0, driven by hand, against
+the real gateway over the real tailnet. Typing `hermes.fss.internal` finds it:
+
+> Hermes 0.21.3 · sign-in required via Self-Hosted OIDC · Found over http://
+
+### The measured NSURLError sequence, from the simulator's own log
+
+`xcrun simctl spawn <udid> log stream --predicate 'process == "Hermie" OR subsystem ==
+"com.apple.network"'`, while the probe ran:
+
+Offsets are from the first task resuming, and each row gives the moment the request started and the
+moment it was answered.
+
+| Task | Request                                         | Outcome                        | Started | Answered |
+| ---- | ----------------------------------------------- | ------------------------------ | ------- | -------- |
+| 3    | `https://hermes.fss.internal/api/status`        | **-1202**, certificate invalid | +0 ms   | +39 ms   |
+| 4    | `http://hermes.fss.internal/api/status`         | **200**                        | +49 ms  | +147 ms  |
+| 5    | `http://hermes.fss.internal/api/auth/providers` | **200**                        | +166 ms | +179 ms  |
+
+The whole resolution takes about 180 ms. Two suspects die in that table:
+
+- **DNS is fine inside the app.** `nw_resolver_host_resolve_callback [C3.1.1] … error=NoError(0)
+hostname=hermes.fss.internal. addr=IPv4#…`, and the flow attached over **`interface: utun8`** — the
+  tailnet's own interface. Tailscale's split DNS (`scutil --dns` shows a Supplemental and a Scoped
+  resolver for `fss.internal.` on utun8, via MagicDNS at 100.100.100.100) reaches a sandboxed
+  simulator app exactly as it reaches the shell. There is no `/etc/resolver` file involved and none is
+  needed. Safari in the same simulator loads the status JSON too.
+- **ATS is fine.** The cleartext request in row 4 was not refused; there is no `-1022` anywhere in the
+  log. The built Release `Info.plist` carries `NSAllowsArbitraryLoads` and nothing else, which is the
+  single-key rule from the section above still holding.
+
+And one suspect is confirmed but harmless: the https attempt **fails fast** (39 ms), so the sequence
+guard and the 500 ms debounce never get a chance to drop the http result.
+
+### What actually produced the owner's red line
+
+The wizard's own advice did. `classifyHost` read `hermes.fss.internal` as a **public** address —
+`.internal` is not `.ts.net`, and it has dots in it, so it fell through to the last branch — and the
+address step therefore printed, under a perfectly good result:
+
+> Plain http:// to a public address. Anyone on the path can read your messages and your sign-in. Use
+> https://, or reach the gateway over a private network such as Tailscale.
+>
+> **Use https instead**
+
+Tapping that rewrites the field to `https://hermes.fss.internal`. An explicit scheme is never
+downgraded (ADR-0014, deliberately), so the resolver now tries https and only https, gets **-1202**
+from the self-signed certificate, and — because React Native's `fetch` throws the `NSError` away —
+classifies it as a flat `network` failure. Which prints:
+
+> Could not reach hermes.fss.internal. Check the address, and that the gateway is running and
+> reachable from this device.
+
+Reproduced on the simulator, screenshot for screenshot. So the app told a user on a WireGuard tunnel
+that his private gateway was public, offered him the one action that breaks it, and then blamed the
+gateway for being unreachable while it was answering.
+
+Three things were wrong and all three are now fixed:
+
+- **`.internal` is a private name.** ICANN reserved it for private use and it will never be delegated
+  in the public root, so a name under it is exactly as unresolvable from outside as a `.local` one.
+  `classifyHost` returns `local_name` for it, the warning and the `Use https instead` action are gone
+  for this host, and the line reads "Plain http://, to an address on a local network." A Headscale
+  operator who picks `.internal` for their base domain now gets the calm sentence; one who picks a
+  name under a public suffix still gets the warning, because that name really is one the public DNS
+  can answer for.
+- **A pinned `https://` that fails flat no longer names the wrong cause.** The app cannot tell a
+  rejected certificate from a dead host — see below — so it names both, and the way out:
+  `strings.errors.networkOverHttps`. "Check that the gateway is running" was actively false here.
+- **The claim that Node sees a real error message was wrong**, and the comment saying so in
+  `fetch-json.ts` is corrected. See the next heading.
+
+### Node's `fetch` flattens the reason too, which nothing had checked
+
+`looksLikeTlsFailure` carried a comment saying it "earns its place in Node, where a real message
+arrives". It does not. Node 22's global `fetch` is undici, and against this gateway it rejects with:
+
+```
+TypeError: fetch failed
+  cause: Error: self-signed certificate   (code: DEPTH_ZERO_SELF_SIGNED_CERT)
+```
+
+`requestText` reads `error.message` and never `error.cause`, so `'fetch failed'` matches neither
+predicate — exactly as `'Network request failed'` does not on a device. Both strings are now pinned in
+`fetch-json.test.ts` so the claim cannot come back.
+
+The consequence is that **neither predicate fires for any real `fetch`, on any runtime.** They are
+exercised by the tests, which throw descriptive messages on purpose. Reading the cause chain would
+make them fire in Node — and would then stop the scheme fallback for a self-signed https server, which
+is precisely the gateway shape the fallback exists to reach. That is a trade, not an oversight, and it
+is left alone here on purpose: today the owner's gateway is found over http on both runtimes, and
+"fixing" the predicate would have made Node report a TLS error and stop.
+
+### What the owner can change on his side, if he wants https
+
+Nothing is required — the app reaches the gateway as it stands. If the self-signed certificate is
+meant to be used rather than fallen past, one of these is the fix, and none of them is in Hermie:
+
+- **Drop TLS.** On a tailnet it protects nothing WireGuard has not already protected (ADR-0014). Serve
+  `hermes serve` in the clear, set `dashboard.public_url` to the `http://` address, and the wizard
+  finds it with no warning now that `.internal` reads as private.
+- **Use a certificate the device already trusts.** `tailscale serve` issues one for a `.ts.net` name;
+  with Headscale, a reverse proxy with a certificate from a CA the device trusts does the same. A name
+  under `.internal` cannot get a publicly-issued certificate, so this means a private CA installed and
+  trusted on every device.
+- **Install the self-signed certificate as a trusted root on the device.** iOS needs both steps:
+  install the profile, then switch it on under Settings → General → About → Certificate Trust
+  Settings.
+
+### Pinning a self-signed certificate per gateway: what it would cost
+
+Not built, and not small. Written down so it does not have to be re-derived.
+
+The decision point is `URLSession`'s `urlSession(_:didReceive:completionHandler:)`, and React Native's
+networking owns that delegate. So it needs native code on both platforms and it needs it in **three**
+places, because they do not share a transport:
+
+- **`fetch`** — `RCTHTTPRequestHandler` holds the `NSURLSession`; the challenge handler would have to
+  be reached through a config plugin or a native module that swaps the handler in. On Android the same
+  decision lives in OkHttp's `SSLSocketFactory` and `HostnameVerifier`.
+- **The WebSocket.** `RCTSRWebSocket` builds its own stream with its own TLS settings, entirely
+  separate from the `fetch` session. A pin that covers the probe and not the dial gets the user
+  through setup and then fails on connect.
+- **The `WKWebView`** that renders the sign-in page, which has its own
+  `webView(_:didReceive:completionHandler:)` and honours nothing set on either of the above.
+
+Beyond the wiring, the design questions are the real cost: the fingerprint has to be shown before it is
+trusted and stored against that one gateway; it has to be re-shown and re-approved when it changes,
+because a changed certificate is the one case this feature must not paper over; and the whole thing has
+to be per-gateway rather than a global "accept anything", which is the version that would be easy and
+would be worth nothing. Trusting the certificate at the OS level, as above, costs the user four taps
+and costs this project nothing.
+
+### What this pass did NOT verify
+
+- **The Mac window.** The report came from the Mac app and every measurement here is from an iOS 27
+  simulator. Same binary, same `Info.plist`, same JavaScript, and the cause found is in the JavaScript
+  — so the fix applies — but nothing was run in a Mac window this round. If the Mac turns out to fail
+  where the simulator does not, macOS 15+ **Local Network privacy** against a destination reached over
+  `utun` is the first thing to measure, not DNS and not ATS.
+- **The sign-in, and anything past the address step.** Only `/api/status` and `/api/auth/providers`
+  were requested, unauthenticated, because it is the owner's real gateway. No credentials were sent,
+  nothing was posted, and the WebSocket was never dialled against it.
+- **A `.ts.net` name.** Still never typed into the app. `.internal` is a real tailnet name on a real
+  Headscale network, which is closer than the previous round's `nip.io`, but the MagicDNS suffix itself
+  remains untested.

@@ -77,8 +77,13 @@ Permission is not use, and four things keep it that way:
 - **The app says what it ended up on.** The probe line reads `Found over http://` when the fallback
   ran, and a cleartext address carries one line describing it. The tone comes from
   `classifyHost` in `packages/gateway-client/src/host-privacy.ts`: loopback, RFC 1918, link-local,
-  CGNAT, `.ts.net`, `.local` and unqualified names are stated as fact, and everything else is a
-  warning with a `Use https instead` action next to it. Settings repeats only the warning.
+  CGNAT, `.ts.net`, `.local`, `.internal` and unqualified names are stated as fact, and everything
+  else is a warning with a `Use https instead` action next to it. Settings repeats only the warning.
+  `.internal` was added later the same day, after that warning fired on a real Headscale gateway and
+  its `Use https instead` action walked the owner into a self-signed certificate; ICANN reserved the
+  suffix for private use and it is never delegated in the public root, so it is as unresolvable from
+  outside as `.local`. The measurement is in the 2026-09-20 tailnet section of
+  [docs/platform-notes.md](../platform-notes.md).
 
 Whether the transport is appropriate stays the operator's decision. Hermie states the facts and
 does not refuse.

@@ -142,12 +142,25 @@ would rather host the control server yourself. Both use the same clients.
   `http://host.tailnet.ts.net:9119` as happily as to an https address, says so on
   screen when it does, and only warns when the address is one anybody could be on
   the path to.
+- **A name under `.internal` counts as private too.** ICANN reserved that suffix
+  for private use and it will never be delegated in the public root, so it is a
+  common choice for a Headscale base domain. Hermie states it as calmly as a
+  `.ts.net` name. A base domain under a public suffix — `hermes.example.com`
+  pointing at a tailnet address — cannot be told apart from any other domain, so
+  that one still gets the cleartext warning.
 - TLS there is **optional**, and worth the trouble in two cases: an identity
   provider that insists on an `https` redirect URI, and wanting a
   browser-trusted certificate for the dashboard. `tailscale serve` puts one for
   the machine's tailnet name in front of `hermes serve` and passes WebSocket
   upgrades through; with Headscale, a reverse proxy with its own certificate does
   the same job.
+- **A self-signed certificate is worse than no certificate here.** Hermie has no
+  "trust this certificate anyway", so an address you typed `https://` on in front
+  of one simply fails — and on a phone the platform hands JavaScript no reason
+  for the failure, so the app can only say it could not reach the gateway and
+  name the certificate as one of the two possibilities. Either serve in the clear
+  and let Hermie find it, or use a certificate the device already trusts, or
+  install your own CA on every device.
 - Set `dashboard.public_url` to the address you actually use — **scheme
   included**. It is what the gateway builds sign-in redirects from, so
   `http://host.tailnet.ts.net:9119` and `https://host.tailnet.ts.net` are not
