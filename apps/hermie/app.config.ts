@@ -1,4 +1,35 @@
+import { execFileSync } from 'node:child_process'
+
 import type { ExpoConfig } from 'expo/config'
+
+/**
+ * Which build this is, decided here rather than typed by hand.
+ *
+ * Two facts, both read from git at config-evaluation time:
+ *
+ *  - `commit` is the short hash, so a screenshot of the About line names the
+ *    exact tree it was taken from. A checkout with no git (a release tarball, a
+ *    CI step that fetched without history) answers `dev`.
+ *  - `buildNumber` is the commit COUNT, which is the only monotonic number a git
+ *    history hands out for free. Apple wants a build number that never goes
+ *    backwards within a version and Play wants an integer `versionCode` that
+ *    never repeats, and both are satisfied by the same value — so there is one
+ *    place to get it wrong instead of two.
+ *
+ * Neither may ever fail the build: an `execFileSync` that throws is caught and
+ * answered with a default, because a missing `git` is not a reason for the app
+ * not to compile.
+ */
+function git(args: string[], fallback: string): string {
+  try {
+    return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || fallback
+  } catch {
+    return fallback
+  }
+}
+
+const COMMIT = git(['rev-parse', '--short', 'HEAD'], 'dev')
+const BUILD_NUMBER = Number.parseInt(git(['rev-list', '--count', 'HEAD'], '1'), 10) || 1
 
 const BUNDLE_ID = 'nl.fullstackstudio.hermie'
 const IOS_DEPLOYMENT_TARGET = '15.1'
@@ -36,8 +67,13 @@ const config: ExpoConfig = {
   runtimeVersion: {
     policy: 'appVersion'
   },
+  extra: {
+    commit: COMMIT,
+    buildNumber: BUILD_NUMBER
+  },
   ios: {
     bundleIdentifier: BUNDLE_ID,
+    buildNumber: String(BUILD_NUMBER),
     supportsTablet: true,
     /*
      * Name the keychain access group instead of inheriting one.
@@ -96,6 +132,7 @@ const config: ExpoConfig = {
   },
   android: {
     package: BUNDLE_ID,
+    versionCode: BUILD_NUMBER,
     adaptiveIcon: {
       foregroundImage: './assets/adaptive-icon.png',
       backgroundColor: ICON_BACKGROUND
@@ -163,7 +200,7 @@ const config: ExpoConfig = {
     // it names lives in modules/hermie-scene.
     './plugins/with-ios-scene-lifecycle'
   ]
-  // extra.eas.projectId is deliberately absent. `eas init` writes it, and it
+  // `extra.eas.projectId` is deliberately absent. `eas init` writes it, and it
   // ties the repository to one EAS account — a fork should get its own rather
   // than inherit ours. See docs/release.md.
 }
