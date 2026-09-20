@@ -48,6 +48,7 @@ import {
 } from 'react'
 import {
   FlatList,
+  Keyboard,
   Platform,
   View,
   type LayoutChangeEvent,
@@ -673,6 +674,16 @@ const HOLD_SETTLE_MS = 400
 const HOLD_SLOP = 0.5
 
 /**
+ * How far the reader has to drag towards older messages before the keyboard is
+ * put away, in points.
+ *
+ * Far enough that a settling finger or a rubber-band bounce is not a dismissal,
+ * short enough that it happens while the drag is still going and reads as part of
+ * it rather than as something that happened afterwards.
+ */
+const DISMISS_DRAG = 24
+
+/**
  * The anchor held while the reader is scrolled away. One object, so toggling it
  * on does not hand the scroll view a new identity on every render.
  */
@@ -691,6 +702,25 @@ const AWAY_ANCHOR = { minIndexForVisible: 0 } as const
  * that rests on a layout pass nobody controls is not a guarantee. So the place is
  * recorded when the finger goes down and restored if anything moves it.
  */
+/**
+ * Has this drag gone far enough towards the history to put the keyboard away?
+ *
+ * **On an inverted list, "scroll up to read" is an offset that GROWS.** Offset 0
+ * is the newest message, so the finger moving down the screen — the gesture every
+ * messenger dismisses on — walks the offset upwards. That sign is the whole
+ * reason this function exists rather than a `keyboardDismissMode` value:
+ * `interactive` is set on iOS and does not behave on an inverted list, because
+ * `inverted` is a `scaleY: -1` on the scroll view itself and UIKit's own
+ * dismissal reads the pan in that flipped space — so it looks for a drag away
+ * from the keyboard where the reader is making one towards it. The other two
+ * suspects were checked and cleared: there is exactly ONE `KeyboardAvoidingView`
+ * over this screen (the composer's own is off by default for precisely that
+ * reason), and `keyboardShouldPersistTaps` governs taps, not drags.
+ */
+export function dismissesKeyboard(dragStartedAt: number | undefined, offset: number): boolean {
+  return dragStartedAt !== undefined && offset - dragStartedAt > DISMISS_DRAG
+}
+
 export function holdCorrection(held: number | undefined, offset: number): number | undefined {
   if (held === undefined || Math.abs(offset - held) <= HOLD_SLOP) {
     return undefined
@@ -879,6 +909,17 @@ function TranscriptListBody({
   const holdingTo = useRef<number | undefined>(undefined)
   const holding = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  /**
+   * Where the current drag started, and `undefined` once the keyboard has been
+   * put away for it. One dismissal per drag: `Keyboard.dismiss()` on every frame
+   * of a long scroll is a native call per event for no further effect.
+   *
+   * It is armed on `onScrollBeginDrag` and deliberately NOT cleared when the
+   * finger lifts. A flick up the history crosses the threshold during the
+   * momentum that follows it, and that momentum is the same gesture.
+   */
+  const dragFrom = useRef<number | undefined>(undefined)
+
   const releaseHold = useCallback(() => {
     if (holding.current) {
       clearTimeout(holding.current)
@@ -917,6 +958,11 @@ function TranscriptListBody({
     traceScroll(contentOffset.y, contentSize.height, layoutMeasurement.height)
 
     offsetNow.current = contentOffset.y
+
+    if (dismissesKeyboard(dragFrom.current, contentOffset.y)) {
+      dragFrom.current = undefined
+      Keyboard.dismiss()
+    }
 
     // A disclosure is growing: put the list back where the finger left it, and
     // say nothing about `away` — the offset it would read is the one being undone.
@@ -957,6 +1003,7 @@ function TranscriptListBody({
    * callback as the one that ends a programmatic jump, for the same reason.
    */
   const beginDrag = useCallback(() => {
+    dragFrom.current = offsetNow.current
     releaseHold()
     endJump()
   }, [endJump, releaseHold])
