@@ -23,6 +23,8 @@
     "test:app": "npm run test --workspace @hermie/app",
     "sync:hermes-shared": "node scripts/sync-hermes-shared.mjs",
     "sync:hermes-shared:check": "node scripts/sync-hermes-shared.mjs --check",
+    "contrast": "tsx scripts/check-contrast.ts",
+    "contrast:check": "tsx scripts/check-contrast.ts --check",
     "icons": "node scripts/generate-app-icons.mjs",
     "icons:check": "node scripts/generate-app-icons.mjs --check",
     "licences": "node scripts/generate-third-party-licenses.mjs",

@@ -50,6 +50,9 @@ jobs:
       - name: Icons match the design source
         run: npm run icons:check
 
+      - name: Ink clears AA on every composited surface
+        run: npm run contrast:check
+
       - name: Third-party licences match the dependency tree
         run: npm run licences:check
 

@@ -43,7 +43,13 @@ npm run format                 # prettier --check
 npm test                       # vitest: the workspace packages
 npm run test:app               # jest-expo: the app
 npm run sync:hermes-shared:check   # drift check on the vendored protocol sources
+npm run contrast:check         # every ink clears AA on every composited surface
 ```
+
+`npm run contrast` prints the whole table instead of only the failures. It reads
+`apps/hermie/src/ui/tokens.ts`, so a colour changed there is measured there — see
+`scripts/check-contrast.ts` for what "composited" means and why a token measured
+against a token proves nothing.
 
 `npm run format:write` and `npm run lint:fix` apply the automatic fixes.
 

@@ -1,14 +1,14 @@
 import { type GatewayConnection, probeGateway, type ConnectionStatus, type ProbeResult } from '@hermie/gateway-client'
 import { formatTranscriptDiagnostics } from '@hermie/transcript'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Platform, Pressable, ScrollView, TextInput, View } from 'react-native'
+import { Platform, Pressable, ScrollView, View } from 'react-native'
 
 import { createGatewayConnection } from '../../gateway'
 import { strings } from '../../i18n/strings'
 import { hasHardwareKeyboard } from '../../platform/keyboard-modifiers'
 import { RUNS_ON_MAC } from '../../platform/runs-on-mac'
 import { useChatsStore } from '../../store/chats'
-import { Button, Screen, Text } from '../../ui/primitives'
+import { Button, Screen, Text, TextField } from '../../ui/primitives'
 import { GLASS_MATERIAL } from '../../ui/glass'
 import { useTheme } from '../../ui/theme'
 
@@ -88,16 +88,6 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
 
   const transcriptLines = Object.entries(chats).flatMap(([botName, chat]) => formatTranscriptDiagnostics(botName, chat))
 
-  const inputStyle = {
-    backgroundColor: theme.elevation.e3c,
-    borderColor: theme.hairline,
-    borderWidth: 1,
-    borderRadius: theme.radii.md,
-    color: theme.colors.text,
-    paddingHorizontal: theme.space.md,
-    paddingVertical: theme.space.sm
-  }
-
   return (
     <Screen>
       <ScrollView contentContainerStyle={{ gap: theme.space.md, paddingVertical: theme.space.lg }}>
@@ -111,15 +101,13 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
           <Text variant="meta" color="textMuted">
             GATEWAY ADDRESS
           </Text>
-          <TextInput
+          <TextField
             value={baseUrl}
             onChangeText={setBaseUrl}
             autoCapitalize="none"
             autoCorrect={false}
             inputMode="url"
             placeholder={DEFAULT_BASE_URL}
-            placeholderTextColor={theme.colors.textMuted}
-            style={inputStyle}
           />
         </View>
 
@@ -127,13 +115,12 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
           <Text variant="meta" color="textMuted">
             SESSION TOKEN
           </Text>
-          <TextInput
+          <TextField
             value={sessionToken}
             onChangeText={setSessionToken}
             autoCapitalize="none"
             autoCorrect={false}
             secureTextEntry={!showToken}
-            style={inputStyle}
           />
           <Pressable accessibilityRole="button" hitSlop={8} onPress={() => setShowToken(current => !current)}>
             <Text color="accent" variant="meta">

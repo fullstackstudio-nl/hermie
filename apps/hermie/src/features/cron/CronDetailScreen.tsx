@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, View } from 'react-native'
 
+import { humaniseStatus } from '../../i18n/humanise'
 import { BottomSheet, SheetEyebrow } from '../../ui/BottomSheet'
 import { Button, InsetGroup, InsetRow, InsetValueRow, Screen, Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
@@ -145,7 +146,9 @@ export function CronDetailScreen({ controller, job, onClose, onOpenRun, onEdit, 
           <InsetValueRow label={cronStrings.detail.lastRunLabel} value={lastRun ?? cronStrings.list.neverRun} />
           <InsetValueRow
             label={cronStrings.detail.lastStatusLabel}
-            value={detail.lastStatus ?? cronStrings.detail.unknown}
+            // The gateway's own word, made readable. Printing `ok` two rows
+            // under a humanised `Success` read as two different facts.
+            value={humaniseStatus(detail.lastStatus) ?? cronStrings.detail.unknown}
           />
           {detail.model ? <InsetValueRow label={cronStrings.detail.modelLabel} value={detail.model} /> : null}
           {detail.skills.length ? (
@@ -261,8 +264,8 @@ function RunRow({ run, onPress }: { run: CronRun; onPress: () => void }) {
             <Text style={{ flex: 1 }} numberOfLines={1}>
               {started ?? run.id}
             </Text>
-            <Text color={ok ? 'ok' : 'dangerText'} variant="meta">
-              {run.status ?? cronStrings.status.ok}
+            <Text color={ok ? 'okText' : 'dangerText'} variant="meta">
+              {humaniseStatus(run.status) ?? cronStrings.status.ok}
             </Text>
           </View>
           {run.preview ? (

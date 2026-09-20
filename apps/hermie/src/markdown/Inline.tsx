@@ -7,7 +7,7 @@
  */
 import { Fragment, useState, type ReactNode } from 'react'
 import { Image, StyleSheet, Text, type TextStyle, View } from 'react-native'
-import type { Token, Tokens } from 'marked'
+import type { Token, Tokens } from './marked-compat'
 
 import { MONOSPACE, resolveImageUri, type MarkdownContext } from './context'
 

@@ -8,7 +8,7 @@
  */
 import { memo, useMemo } from 'react'
 import { ScrollView, Text, View } from 'react-native'
-import { marked, type Token, type Tokens } from 'marked'
+import { marked, type Token, type Tokens } from './marked-compat'
 
 import { CodeBlock } from './CodeBlock'
 import { Inline } from './Inline'
@@ -56,15 +56,52 @@ function ListBlock({ token, context }: { token: Tokens.List; context: MarkdownCo
   )
 }
 
+/**
+ * A column is as wide as its widest WORD, within reason.
+ *
+ * Every column used to be 150pt flat, which broke `docs.example.org` across two
+ * lines mid-word and left a single orphaned letter under the row — an effect
+ * that reads as a rendering fault rather than as a wrapped cell, and that the
+ * fold's fade happened to land on in the report. A domain, a path or an id is
+ * one word and wrapping it anywhere is wrong, so the width is derived instead
+ * of fixed. The table already scrolls horizontally, which is what pays for it:
+ * widening a column costs a scroll, not a squeeze on the column beside it.
+ *
+ * Estimated from the character count rather than measured, because measuring
+ * means a layout pass per cell and a table that reflows after it is on screen.
+ * Both bounds matter: the floor keeps a column of `on` / `off` from collapsing
+ * to nothing, and the ceiling keeps a prose cell wrapping like prose.
+ */
+const COLUMN_MIN = 110
+const COLUMN_MAX = 280
+const COLUMN_PADDING = 20
+/** A rough advance width per character for the body face, as a fraction of em. */
+const CHARACTER_EM = 0.58
+function columnWidth(cells: readonly string[], fontSize: number): number {
+  // The longest CELL, not the longest word: `Registrar One` wrapping after
+  // `Registrar` is a tidier fault than `docs.example.org` wrapping after the
+  // `r`, but it is still a fault, and a column wide enough for the whole value
+  // has neither.
+  const characters = Math.max(...cells.map(cell => cell.length), 1)
+
+  return Math.min(COLUMN_MAX, Math.max(COLUMN_MIN, Math.ceil(characters * fontSize * CHARACTER_EM) + COLUMN_PADDING))
+}
+
+/** Every column's width, derived once per table. */
+export function tableColumnWidths(token: Tokens.Table, fontSize: number): number[] {
+  return token.header.map((header, index) =>
+    columnWidth([header.text, ...token.rows.map(row => row[index]?.text ?? '')], fontSize)
+  )
+}
+
 function TableBlock({ token, context }: { token: Tokens.Table; context: MarkdownContext }) {
-  const columnWidth = 150
+  const widths = useMemo(() => tableColumnWidths(token, context.fontSize), [token, context.fontSize])
 
   const cellStyle = {
     borderColor: context.borderColor,
     borderRightWidth: 1,
     paddingHorizontal: 10,
-    paddingVertical: 8,
-    width: columnWidth
+    paddingVertical: 8
   } as const
 
   return (
@@ -86,7 +123,7 @@ function TableBlock({ token, context }: { token: Tokens.Table; context: Markdown
       >
         <View style={{ backgroundColor: context.blockBackground, flexDirection: 'row' }}>
           {token.header.map((cell, index) => (
-            <View key={index} style={cellStyle}>
+            <View key={index} style={[cellStyle, { width: widths[index] }]}>
               <Inline
                 context={context}
                 style={{ fontWeight: '600', textAlign: cell.align ?? 'left' }}
@@ -99,7 +136,7 @@ function TableBlock({ token, context }: { token: Tokens.Table; context: Markdown
         {token.rows.map((row, rowIndex) => (
           <View key={rowIndex} style={{ borderColor: context.borderColor, borderTopWidth: 1, flexDirection: 'row' }}>
             {row.map((cell, cellIndex) => (
-              <View key={cellIndex} style={cellStyle}>
+              <View key={cellIndex} style={[cellStyle, { width: widths[cellIndex] }]}>
                 <Inline context={context} style={{ textAlign: cell.align ?? 'left' }} tokens={cell.tokens} />
               </View>
             ))}

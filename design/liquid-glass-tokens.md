@@ -15,14 +15,28 @@ composited surfaces, not on the raw hex values.
 | -------------------------- | --------- | --------- |
 | `text`                     | `#12151C` | `#F3F6FB` |
 | `textMuted`                | `#4B5462` | `#C8D2E0` |
-| `textFaint` (metadata)     | `#5E6777` | `#ADB7C6` |
+| `textFaint` (metadata)     | `#586171` | `#CBD5E4` |
 | `onAccent` (bubble/button) | `#FFFFFF` | `#FFFFFF` |
 | `accent` (solid fill)      | `#1668E3` | `#2C7BEA` |
 | `accentText` (on glass)    | `#0B57C4` | `#B4D6FF` |
 | `danger` (fill)            | `#C0293A` | `#D8465A` |
-| `dangerText`               | `#A81F30` | `#FF9AA6` |
-| `ok`                       | `#1C8547` | `#5CCB86` |
-| `warnText`                 | `#8A5A00` | `#FFC65C` |
+| `dangerText`               | `#A81F30` | `#FFC2CD` |
+| `ok` (status dot fill)     | `#1C8547` | `#5CCB86` |
+| `okText`                   | `#116038` | `#8FE3B0` |
+| `warnText`                 | `#865600` | `#FFCB61` |
+
+`ok` is a FILL, the way `danger` is, and `okText` is the ink beside it. Until
+this round there was only one value and it was used as both, which measured
+3.47–4.54 : 1 as ink on every surface but the dark sunk tint — so a `Success`
+line was below AA everywhere anybody would read one. The four other values above
+moved for the same reason: `textFaint` and `dangerText` cleared AA on a panel and
+failed on a dark bubble, which is precisely where a metadata line and a failed
+delivery live.
+
+Every pair in this table is checked on the COMPOSITED surface by
+`npm run contrast:check`, which reads `apps/hermie/src/ui/tokens.ts` rather than
+a copy of it. 4.5 : 1 for ink, 3 : 1 for a mark. Change a value here and there,
+and let the check say whether it holds.
 
 ### 1.2 Outgoing bubble gradient (default chat)
 

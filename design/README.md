@@ -42,15 +42,13 @@ reply`. It is still one indicator and still static; it is strictly more informat
   not built yet. All four are now addressable (`gallery:cron-detail`, `gallery:cron-detail-paused`,
   `gallery:cron-run`, `overlay:crons`, `overlay:activity`), which is what the restyle was waiting
   for.
-- **The agents bar and the interiors of the four sheets are still Part-1 too.** This round brought
-  their TITLES onto §3's `sheetTitle` and the eyebrow onto `micro`; the bodies are unchanged.
-- **`ok` has no readable variant.** §1.1 gives `danger` a fill and `dangerText` an ink, and gives
-  `ok` only one value — which is used as ink and measures 3.47–4.54 : 1 on every surface but the dark
-  sunk tint. Either the mockup grows an `okText` or the app stops using `ok` as ink; until then a
-  `Success` line is below AA. Measurements are in docs/platform-notes.md.
-- **The colour page's Default swatch is an unlabelled hollow ring.** §1.3 says "eight curated
-  colours, or Default"; drawn as a ring with nothing in it on a dark sheet it reads as a hole rather
-  than as the ninth choice.
+- **The agents bar and the interiors of the four sheets are still Part-1 too.** An earlier round
+  brought their TITLES onto §3's `sheetTitle` and the eyebrow onto `micro`; the bodies are
+  unchanged. Every text field in them now carries the shared sunk-well treatment, which is what the
+  cron editor was missing entirely.
+- **A table's columns are as wide as their longest value**, between 110 and 280pt, rather than the
+  150pt the mockup's table uses. A flat width broke `docs.example.org` mid-word and left one letter
+  under the row. The table scrolls horizontally either way, which is what pays for it.
 - **The jump-to-latest pill carries the count as a badge**, not as its whole label. §6.10 says "with
   the count of messages that arrived since"; `3 new` alone stopped saying what tapping it does, so
   the pill keeps its name and the count rides beside it.

@@ -22,6 +22,7 @@ import { RefreshControl, SectionList, Pressable, View } from 'react-native'
 
 import { formatClock } from '../../chat-ui'
 import { useGateway } from '../../gateway'
+import { humaniseStatus } from '../../i18n/humanise'
 import { strings } from '../../i18n/strings'
 import { useBotsStore } from '../../store/bots'
 import { Screen, Text } from '../../ui/primitives'
@@ -209,8 +210,11 @@ function Row({
         ? strings.activity.reply(label(entry.fromHandle), label(entry.toHandle ?? ''))
         : strings.activity.to(label(entry.fromHandle), label(entry.toHandle ?? ''))
 
+  // A delegation has its own wording; everything else, including a status this
+  // build has never seen, still arrives as words rather than as an identifier.
   const status =
-    entry.kind === 'delegation' ? (strings.activity.groupStatus[entry.status ?? ''] ?? entry.status) : entry.status
+    (entry.kind === 'delegation' ? strings.activity.groupStatus[entry.status ?? ''] : undefined) ??
+    humaniseStatus(entry.status)
 
   return (
     <Pressable

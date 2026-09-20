@@ -58,7 +58,7 @@ export function TestConnectionStep({ draft, update }: TestConnectionStepProps) {
 
       {current && draft.test ? (
         <View style={{ gap: theme.space.xs }}>
-          <Text color="ok" testID="test-result">
+          <Text color="okText" testID="test-result">
             {authModeOf(draft.probe) === 'native_pkce' && draft.test.userDisplayName
               ? strings.onboarding.test.connectedAs(draft.test.userDisplayName, draft.test.botCount)
               : strings.onboarding.test.connected(draft.test.botCount)}

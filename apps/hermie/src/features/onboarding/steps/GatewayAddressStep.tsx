@@ -211,7 +211,7 @@ function ProbeLine({ busy, error, draft }: { busy: boolean; error: string | null
 
   if (!probe.authRequired) {
     return (
-      <Text color="ok" testID="probe-result">
+      <Text color="okText" testID="probe-result">
         {strings.onboarding.address.sessionTokenRequired(probe.version)}
       </Text>
     )
@@ -226,7 +226,7 @@ function ProbeLine({ busy, error, draft }: { busy: boolean; error: string | null
   }
 
   return (
-    <Text color="ok" testID="probe-result">
+    <Text color="okText" testID="probe-result">
       {strings.onboarding.address.signInRequired(
         probe.version,
         probe.providers.map(provider => provider.displayName)

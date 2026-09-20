@@ -94,7 +94,7 @@ export function SignInStep({ draft, update }: SignInStepProps) {
 
           {draft.tokens ? (
             <View style={{ gap: theme.space.sm }}>
-              <Text color="ok" testID="signin-result">
+              <Text color="okText" testID="signin-result">
                 {draft.tokens.userId
                   ? strings.onboarding.signIn.signedInAs(draft.tokens.userId)
                   : strings.onboarding.signIn.signedIn}

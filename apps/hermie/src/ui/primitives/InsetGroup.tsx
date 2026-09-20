@@ -1,4 +1,4 @@
-import { Children, isValidElement, type ReactNode } from 'react'
+import { Children, createContext, isValidElement, useContext, type ReactNode } from 'react'
 import { Pressable, type PressableProps, View, type ViewProps } from 'react-native'
 
 import { useTheme } from '../theme'
@@ -67,23 +67,39 @@ export function InsetGroup({ header, footer, children, style, ...rest }: InsetGr
 export type InsetRowProps = ViewProps & { compact?: boolean }
 
 /** One row inside an `InsetGroup`. */
+/**
+ * True inside an inset row, where the row itself is already the field's chrome.
+ *
+ * A `TextField` draws its own sunk well everywhere else — a sheet has no rows to
+ * lend it one, which is how the cron editor ended up with placeholder text
+ * floating on the glass. Inside a row that well would be a second box around the
+ * first, so the row says so rather than every caller remembering to.
+ */
+const InsetRowContext = createContext(false)
+
+export function useInsetRow(): boolean {
+  return useContext(InsetRowContext)
+}
+
 export function InsetRow({ compact = false, style, ...rest }: InsetRowProps) {
   const theme = useTheme()
 
   return (
-    <View
-      {...rest}
-      style={[
-        {
-          paddingHorizontal: theme.space.lg,
-          paddingVertical: compact ? theme.space.sm : theme.space.md,
-          minHeight: CONTROL_MIN_HEIGHT,
-          justifyContent: 'center',
-          gap: theme.space.xxs
-        },
-        style
-      ]}
-    />
+    <InsetRowContext.Provider value>
+      <View
+        {...rest}
+        style={[
+          {
+            paddingHorizontal: theme.space.lg,
+            paddingVertical: compact ? theme.space.sm : theme.space.md,
+            minHeight: CONTROL_MIN_HEIGHT,
+            justifyContent: 'center',
+            gap: theme.space.xxs
+          },
+          style
+        ]}
+      />
+    </InsetRowContext.Provider>
   )
 }
 

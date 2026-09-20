@@ -45,6 +45,7 @@ import {
   type BubbleVariant,
   type ResolvedBubbleWidth
 } from '../../ui/tokens'
+import { useBubbleColumnWidth } from './BubbleColumn'
 
 export interface BubbleProps {
   side: 'own' | 'other'
@@ -75,17 +76,31 @@ export interface BubbleProps {
 const TAIL_REACH = TAIL.width - TAIL_OVERLAP
 
 /**
- * The cap a bubble may grow to.
+ * The cap a bubble may grow to, in points.
  *
- * Both halves matter: the percentage keeps a short line off the far gutter, and
- * the point cap is what stops a long report from spanning a Mac window. React
- * Native takes one `maxWidth`, so the percentage goes on the bubble and the point
- * cap on the wrapper around it.
+ * Both halves of §4's rule matter: the percentage keeps a short line off the far
+ * gutter, and the point cap is what stops a long report from spanning a Mac
+ * window. They are resolved to ONE number here rather than left as two styles,
+ * because a percentage in the style resolves against whatever Yoga decides the
+ * parent is — which, for a parent sized by its own `maxWidth`, is nothing at all.
+ *
+ * Which RULE applies is the layout's question: a phone reads a 68 % bubble as a
+ * narrow ribbon, hence the wider percentage below the threshold. Which NUMBER it
+ * produces is the COLUMN's, because the column is the box the bubble is in — on
+ * the wide layout that is the chat panel, not the window that also holds the
+ * sidebar.
  */
-export function useBubbleWidth(): ResolvedBubbleWidth {
+export function useBubbleWidth(): number {
   const { width } = useWindowDimensions()
+  const column = useBubbleColumnWidth()
+  const rule = width >= REGULAR_LAYOUT_MIN_WIDTH ? BUBBLE_MAX.regular : BUBBLE_MAX.compact
 
-  return width >= REGULAR_LAYOUT_MIN_WIDTH ? BUBBLE_MAX.regular : BUBBLE_MAX.compact
+  return resolveBubbleWidth(rule, column ?? width)
+}
+
+/** The rule applied to one column width. Exported so a test can state both. */
+export function resolveBubbleWidth(rule: ResolvedBubbleWidth, columnWidth: number): number {
+  return Math.round(Math.min((columnWidth * rule.percent) / 100, rule.points))
 }
 
 /**
@@ -160,7 +175,7 @@ export function Bubble({
     <View
       style={{
         alignItems: own ? 'flex-end' : 'flex-start',
-        maxWidth: max.points + TAIL_REACH,
+        maxWidth: max + TAIL_REACH,
         // The tail lives in this padding rather than hanging over the list's
         // gutter, so the bubble and its tail are one box as far as layout is
         // concerned.
@@ -169,7 +184,7 @@ export function Bubble({
     >
       {tail ? <Tail color={tailColor} side={side} /> : null}
 
-      <View style={[corners, { maxWidth: `${max.percent}%`, overflow: 'hidden' }, style]} testID={testID}>
+      <View style={[corners, { maxWidth: max, overflow: 'hidden' }, style]} testID={testID}>
         <LinearGradient
           colors={gradient ? [gradient.top, gradient.bottom] : recipe.gradient}
           end={{ x: 0, y: 1 }}

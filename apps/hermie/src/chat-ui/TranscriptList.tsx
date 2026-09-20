@@ -72,6 +72,7 @@ import { SubagentGroupCard } from './SubagentGroupCard'
 import { ToolCard } from './ToolCard'
 import { TypingIndicator } from './TypingIndicator'
 import { UserBubble } from './UserBubble'
+import { BubbleColumn } from './primitives/BubbleColumn'
 import { Chip } from './primitives/Chip'
 import { ExpandedProvider, useExpanded } from './expanded'
 import { rollupDmRuns, type DmRowRole } from './dm-rollup'
@@ -678,7 +679,9 @@ function TranscriptListBody({
   )
 
   return (
-    <View style={{ flex: 1 }} testID={testID}>
+    // The transcript IS the chat column, so it is the thing that knows how wide
+    // a bubble may be. See `BubbleColumn`.
+    <BubbleColumn style={{ flex: 1 }} testID={testID}>
       {header}
 
       <FlatList
@@ -723,6 +726,6 @@ function TranscriptListBody({
           <JumpToLatestPill count={newMessageCount} onPress={jump} />
         </View>
       ) : null}
-    </View>
+    </BubbleColumn>
   )
 }

@@ -192,7 +192,7 @@ export function ClarifySheet({ visible, item, onLock, onSubmit, onSkip, onClose,
         ) : null}
 
         {isLocked ? (
-          <Text color="ok" variant="meta" testID="clarify-locked">
+          <Text color="okText" variant="meta" testID="clarify-locked">
             {chatStrings.clarify.locked}
           </Text>
         ) : null}

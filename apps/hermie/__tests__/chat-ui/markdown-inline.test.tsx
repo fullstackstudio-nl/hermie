@@ -18,6 +18,7 @@ import type { ReactElement } from 'react'
 import { StyleSheet, type TextStyle } from 'react-native'
 import type { Token } from 'marked'
 
+import { inlineCodeRegressionItem } from '../../src/chat-ui/fixtures'
 import { Markdown } from '../../src/markdown/Markdown'
 import { resetBlockCache } from '../../src/markdown/blocks'
 import { MONOSPACE } from '../../src/markdown/context'
@@ -103,6 +104,31 @@ describe('bold a model opened with a stray space', () => {
 
     expect(chips).toHaveLength(1)
     expect(textOf(chips[0] as RenderedNode)).toContain('example.nl')
+  })
+
+  /**
+   * The whole sentence, not the fragment.
+   *
+   * The fragment passed here while the device printed the asterisks, because
+   * what broke was the mask over the OTHER two code spans in the same line
+   * (see `src/markdown/marked-compat.ts`). Rendering the real reply is the only
+   * version of this test that would have caught it.
+   */
+  it('renders the reply that reported it, every code span in place', () => {
+    const nodes = renderNodes(inlineCodeRegressionItem.text ?? '')
+    const line = textOf(nodes[0] as RenderedNode)
+
+    expect(line).not.toContain('**')
+    // The two characters an off-by-two closing delimiter ate on the device.
+    expect(line).toContain('autorenew=off')
+
+    const bold = boldNodes(nodes)
+
+    expect(bold).toHaveLength(1)
+    expect(textOf(bold[0] as RenderedNode)).toContain('staat op autorenew=off')
+
+    // All three chips survive: the two outside the bold span and the one in it.
+    expect(codeNodes(nodes)).toHaveLength(3)
   })
 
   it('renders the mirror shape bold too', () => {

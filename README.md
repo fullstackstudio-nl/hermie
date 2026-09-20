@@ -25,7 +25,7 @@ the Mac, and it talks to nothing but your gateway.
 
 <table>
   <tr>
-    <td width="33%"><img src="docs/screenshots/chats.png" alt="The chat list, showing the bots Researcher and Writer with their last messages, an unread badge and a green Connected indicator"></td>
+    <td width="33%"><img src="docs/screenshots/chats.png" alt="The chat list, showing the bots Researcher and Writer with their last messages and an unread badge"></td>
     <td width="33%"><img src="docs/screenshots/conversation.png" alt="A conversation with the Researcher bot: a delivered message to @writer with the reply folded into it, and an incoming message from the Writer bot"></td>
     <td width="33%"><img src="docs/screenshots/approval.png" alt="The approval sheet asking whether to allow the command rm -rf ./build, with the choices Allow once, Allow for this session, Always allow and Deny"></td>
   </tr>
@@ -35,6 +35,14 @@ the Mac, and it talks to nothing but your gateway.
     <td>An approval, asked and answered</td>
   </tr>
 </table>
+
+<!--
+  These three images predate the Liquid Glass pass and the gateway card's
+  removal: they show the previous surfaces, not the ones the app draws today.
+  Regenerating them is its own job — docs/screenshots/ is published material
+  (CONTRIBUTING.md), so it wants fixture data and stripped metadata, not a
+  hurried retake.
+-->
 
 ## What it does
 
@@ -51,8 +59,9 @@ the Mac, and it talks to nothing but your gateway.
 - **Questions as sheets.** Approvals and clarifications come up as a bottom
   sheet, answered only by an explicit tap, and a question that was answered
   somewhere else says so instead of going stale.
-- **Routines.** The gateway's scheduled jobs: what they run, when they run next,
-  pause, resume, run now, and the transcript of any past run.
+- **Crons.** The gateway's scheduled jobs, under the name the gateway and its
+  dashboard use: what they run, when they run next, pause, resume, run now, and
+  the transcript of any past run.
 - **Offline-tolerant.** The last stretch of every conversation is cached, so a
   chat paints before the gateway answers and is still readable on a plane.
 
@@ -222,7 +231,7 @@ been verified on a Mac.
 | Bot chats: streaming, tools, approvals, reconnection         | Done        |
 | Bot-to-bot messages, subagents and the Activity timeline     | Done        |
 | iPad and Mac layout, the transcript cache, image attachments | Done        |
-| Routines                                                     | Done        |
+| Crons                                                        | Done        |
 | Release: icons, build profiles, signing, this README         | In progress |
 
 After that: paging back through long history, notifications, and an Android pass

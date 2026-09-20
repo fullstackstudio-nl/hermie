@@ -10,6 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Ink contrast is a check, not a paragraph.** `npm run contrast:check` composites every ink role
+  onto every surface the way the surface is actually painted — the thinnest gradient stop over its
+  rung or over the worst point of each wallpaper — and fails under 4.5 : 1 for anything read as text
+  and 3 : 1 for a mark. It reads `apps/hermie/src/ui/tokens.ts` rather than a copy of the palette,
+  which is the whole point, and CI runs it beside `icons:check`. 153 pairs, all clear.
+- **`okText`.** `ok` had one value doing two jobs and measured 3.47–4.54 : 1 as ink on almost every
+  surface, so a `Success` line was below AA wherever anybody would read one. `ok` is now the status
+  dot's fill and `okText` is the ink beside it, the way `danger` and `dangerText` have always been
+  split.
+
 - **Every surface can be opened directly from the command line, in development.** The simulators on
   this machine can be launched and photographed and nothing else, so three rounds in a row shipped
   sheets and option pages nobody had ever seen. A Debug build now reads launch arguments —
@@ -55,6 +65,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   real gateway shows for most bots — was unreachable from a run against it.
 
 ### Fixed
+
+- **Bold around an inline code span printed its asterisks, on a device only.** Hermes resolves the
+  backreference in marked's `blockSkip` rule as the empty string, so the mask marked lays over inline
+  code before it looks for a closing emphasis delimiter covered the wrong span — and because that
+  mask has to stay character-aligned with the source, emphasis was not found at all. Every Node test
+  passed throughout, which is how it survived two rounds. `src/markdown/marked-compat.ts` rewrites
+  the rule without a backreference, and is the only place `marked` is imported from now.
+- **A bubble on a wide window was capped at 435pt however wide the column was.** The percentage half
+  of the §4 rule lived in the style as `maxWidth: '68%'` on a bubble whose parent was sized by its
+  own `maxWidth`, so Yoga had no base to resolve it against and dropped it — leaving the point cap as
+  the only rule that ever applied, on every layout. The transcript now measures the chat COLUMN and
+  the cap is one number: `min(68 % of the column, 640)` wide, the phone rule compact. On a 1376pt
+  iPad window a long reply grew from 435pt to the 640pt ceiling; on an iPhone from 250pt to 313pt.
+- **A table cell wrapped mid-word.** `docs.example.org` broke after the `r` and left one letter under
+  the row, because every column was 150pt flat. A column is now as wide as its longest value, between
+  110 and 280pt; the table already scrolled horizontally, which is what pays for it.
+- **A text field on a sheet had no chrome.** `TextField` drew nothing of its own, so the cron
+  editor's Name, Instructions and Every fields were placeholder text floating on the glass. It now
+  draws the sunk well with its hairline everywhere, and nothing inside an `InsetRow`, where the row
+  is already the chrome — read from the row rather than passed, so neither side can forget. The
+  connection-test screen's two hand-rolled inputs are the same primitive now.
+- **The Default swatch was an unlabelled hollow ring** that read as a hole in the row on a dark
+  sheet. It carries its name, and every swatch says whether it is the chosen one with a check mark
+  rather than only with a thicker ring.
+- **Raw gateway enums reached the screen.** The cron detail printed `ok` two rows under a humanised
+  `Success`; the run history and Activity printed whatever the gateway sent. One humaniser gives the
+  known statuses the design board's words and makes an unknown one readable rather than dropping it.
 
 - **A resume during a turn this client did not author no longer paints it twice.** `message.start`
   carries no author, so the reducer stands a blank placeholder up and waits for a tail fetch to name

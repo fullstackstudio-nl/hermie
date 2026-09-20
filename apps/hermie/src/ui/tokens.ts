@@ -37,6 +37,7 @@ export type ColorRole =
   | 'danger'
   | 'dangerText'
   | 'ok'
+  | 'okText'
   | 'warnText'
 
 export type ColorScale = Record<ColorRole, string>
@@ -44,27 +45,29 @@ export type ColorScale = Record<ColorRole, string>
 export const lightColors: ColorScale = {
   text: '#12151C',
   textMuted: '#4B5462',
-  textFaint: '#5E6777',
+  textFaint: '#586171',
   onAccent: '#FFFFFF',
   accent: '#1668E3',
   accentText: '#0B57C4',
   danger: '#C0293A',
   dangerText: '#A81F30',
   ok: '#1C8547',
-  warnText: '#8A5A00'
+  okText: '#116038',
+  warnText: '#865600'
 }
 
 export const darkColors: ColorScale = {
   text: '#F3F6FB',
   textMuted: '#C8D2E0',
-  textFaint: '#ADB7C6',
+  textFaint: '#CBD5E4',
   onAccent: '#FFFFFF',
   accent: '#2C7BEA',
   accentText: '#B4D6FF',
   danger: '#D8465A',
-  dangerText: '#FF9AA6',
+  dangerText: '#FFC2CD',
   ok: '#5CCB86',
-  warnText: '#FFC65C'
+  okText: '#8FE3B0',
+  warnText: '#FFCB61'
 }
 
 /**

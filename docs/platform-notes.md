@@ -1392,3 +1392,110 @@ White on the outgoing bubble's lighter (top) stop clears AA for all nine accents
   type scale.
 - **Android**, **the Mac window**, **Reduce Transparency** and **Reduce Motion**,
   all as the previous rounds left them.
+
+## What a green test suite did not know (2026-09-20)
+
+The round that went looking for the bugs the previous one had SEEN, on the
+device, rather than reasoning about them from the code. Two of the three had a
+cause nobody would have guessed from a diff, and both were invisible to the test
+suite by construction.
+
+### The iPad's landscape window is 1376pt, drawn at 0.75 scale
+
+The measurement everything else in this section depends on, and the previous
+round got it wrong. Forcing `UISupportedInterfaceOrientations` to landscape on
+the installed bundle does not hand the app a 1032pt window letterboxed inside the
+portrait screen: it hands it a **1376 × 1032 pt** window — the real landscape
+iPad size — and displays it scaled to fit the 1032pt-wide screen. The app's own
+`useWindowDimensions()` says `1376 × 1032`, and a `simctl` screenshot is
+2064 × 2752 px, so the conversion is **1.5 px per point**, not 2.
+
+That one factor explains the previous round's headline number. The bubble it
+measured at "~324pt, which is the compact cap" was 652px ÷ 1.5 = **435pt**, and
+435 is exactly `68 % × 640` — the regular rule, misapplied. The compact branch
+was never taken and the window was never narrow. Anyone measuring off these
+screenshots again: divide by 1.5.
+
+It also means the 640pt bubble cap and the header button group CAN be judged
+here, which the previous round recorded as impossible.
+
+### A percentage `maxWidth` on a parent with no definite width does nothing
+
+`useBubbleWidth` returned `{ percent, points }` and the two halves were applied
+to different views: the point cap to the wrapper, `maxWidth: '68%'` to the bubble
+inside it. The wrapper has no width — it is sized by its own `maxWidth` — so Yoga
+had no base to resolve the percentage against and dropped it silently. The
+consequence is not subtle once stated: **the percentage half of §4's rule has
+never applied on any layout**, and a bubble was `min(68 % × 640, content)` on a
+Mac window and `min(78 % × 320, content)` on a phone regardless of the column.
+
+The fix is to stop expressing the rule in two places: `BubbleColumn` measures the
+transcript's own box with `onLayout` and `useBubbleWidth` returns ONE number.
+Which rule applies is still the layout's question (a phone reads a 68 % bubble as
+a ribbon); which number it produces is the column's.
+
+| Window  | Column | Before | After |
+| ------- | ------ | ------ | ----- |
+| 1376 pt | 1374   | 435    | 640   |
+| 1376 pt | 990    | 435    | 640   |
+| 1032 pt | 646    | 435    | 439   |
+| 402 pt  | 402    | 250    | 313   |
+
+### Hermes resolves a backreference in marked's mask as the empty string
+
+The one worth the round. `** \`example.nl\` staat op autorenew=off**` printed its
+asterisks on a device while every Node test of the same string passed — including
+a rendering test written for that exact string in the previous round.
+
+`preprocessMarkdown` was innocent: a probe rendered INSIDE the app returned the
+repaired `**\`example.nl\` …**`. So was `Inline`. What differed was `marked`
+itself:
+
+```js
+'a `x` b'.match(Lexer.rules.inline.gfm.blockSkip) // node:   ['`x`']
+// Hermes: ['` b']
+```
+
+`blockSkip` masks inline code, links and tags out of a line before `emStrong`
+looks for a closing delimiter, and its code-run construct is ``(?<b>`+)[^`]+\k<b>``
+— "the same run of backticks again". On Hermes that backreference matches
+nothing, so the pattern degrades to "any run of backticks, then anything" and
+masks the wrong span. Because `emStrong` slices the masked string by the source's
+length, a mis-masked span does not merely lose a code chip: emphasis is not found
+at all. Every bold or italic span CONTAINING inline code was affected, not only
+the reported one.
+
+Things that were tried and are NOT the cause, each measured on the device:
+
+- Unicode property escapes. `/[\p{P}\p{S}]/u` matches a backtick there.
+- Lookbehind. `/(?<=a)b/` works.
+- The NAME. Rewriting `\k<b>` to `\3` changed nothing, and dropping the names
+  with it changed nothing.
+- Backreferences in general. `/(`+)[^`]+\1(?!`)/` matches `` `x` `` on Hermes.
+
+So it is something about that backreference in that alternation, and the app does
+not need to know what: `src/markdown/marked-compat.ts` rewrites the rule to say
+the same thing without one. One intermediate attempt is worth recording because
+it failed in a new way — spelling the run out as an eight-way alternation over
+run lengths made Hermes match the pattern as the EMPTY string, which showed up as
+a mask two characters longer than its source. The version that works stays as
+close to marked's own pattern as possible.
+
+Two states of the same bubble, on the iPad, as evidence of how partial a fix can
+look: with the mask misaligned by two characters the bold span closed early and
+ate `ff` from `autorenew=off` — worse than the original bug, and only visible on
+a device.
+
+### What this pass did NOT verify
+
+- **The four sheet interiors, the agents bar, the cron surfaces and Activity**
+  are still as Part 1 left them; this round stopped after the bug list. Their
+  gallery ids exist, so they can be photographed the moment somebody restyles
+  them.
+- **The Mac window.** The build was run; the app was not opened on it.
+- **Light theme on the iPad** and **dark on the phone**: one of each was
+  photographed, not all four.
+- **Android**, **Reduce Transparency** and **Reduce Motion**, as every round
+  before this one left them.
+- **The contrast numbers against a real screen.** They are computed from the
+  token values and the compositing rules, not sampled off a device.
