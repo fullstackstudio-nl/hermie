@@ -1,11 +1,11 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { View } from 'react-native'
 
 import { describeConnectionError } from '../../../gateway/errors'
 import { strings } from '../../../i18n/strings'
 import { Button, Text } from '../../../ui/primitives'
 import { useTheme } from '../../../ui/theme'
-import { authModeOf, isTestCurrent, type OnboardingDraft } from '../draft'
+import { authModeOf, connectionPayloadKey, isTestCurrent, type OnboardingDraft } from '../draft'
 import { StatusLine, type StatusTone } from '../StatusLine'
 import { runConnectionTest, type ConnectionTestStage } from '../test-connection'
 
@@ -23,6 +23,24 @@ const STAGE_LABEL: Record<ConnectionTestStage, string> = {
   profiles: strings.onboarding.test.checklist.profiles
 }
 
+/**
+ * The test runs ITSELF the moment the step appears.
+ *
+ * It used to be a button, and the button was a question with one answer: the
+ * wizard cannot be finished without a passing test, so "Test connection" asked
+ * the reader to confirm that they wanted the only thing this step does. What it
+ * actually bought was a wait — the reader reads the step, presses, and then
+ * waits for a dial that could have started while they were reading.
+ *
+ * So the button is gone from the success path and kept for the failure one,
+ * where it means something different and useful: try that again. The
+ * invalidation rule is unchanged and is what makes the automatic run safe —
+ * `connectionPayloadKey` identifies everything the test exercised, so changing
+ * the address, a header, the provider or the credential produces a new key, and
+ * arriving at the step with a key this instance has not run yet starts a run.
+ * Arriving with the same key does not, or a failed test would retry itself in a
+ * loop nobody asked for.
+ */
 export function TestConnectionStep({ draft, update }: TestConnectionStepProps) {
   const theme = useTheme()
   const [busy, setBusy] = useState(false)
@@ -32,6 +50,11 @@ export function TestConnectionStep({ draft, update }: TestConnectionStepProps) {
   // credential, the socket refused is a reverse proxy that drops upgrades.
   const [reached, setReached] = useState<ConnectionTestStage | null>(null)
   const current = isTestCurrent(draft)
+  const payloadKey = connectionPayloadKey(draft)
+  // Which payload this instance has already dialled for. A ref rather than
+  // state: it must not itself cause a render, and the effect below reads it in
+  // the same tick it writes it.
+  const attempted = useRef<string | null>(null)
 
   const run = useCallback(async () => {
     setBusy(true)
@@ -52,6 +75,15 @@ export function TestConnectionStep({ draft, update }: TestConnectionStepProps) {
     }
   }, [draft, update])
 
+  useEffect(() => {
+    if (current || busy || attempted.current === payloadKey) {
+      return
+    }
+
+    attempted.current = payloadKey
+    void run()
+  }, [busy, current, payloadKey, run])
+
   const passed = current && draft.test !== null
 
   return (
@@ -68,16 +100,19 @@ export function TestConnectionStep({ draft, update }: TestConnectionStepProps) {
         ))}
       </View>
 
-      <Button
-        busy={busy}
-        onPress={() => void run()}
-        title={busy ? strings.onboarding.test.running : strings.onboarding.test.run}
-      />
+      {busy ? (
+        <StatusLine testID="test-running" tone="checking">
+          {strings.onboarding.test.running}
+        </StatusLine>
+      ) : null}
 
       {error ? (
-        <StatusLine testID="test-error" tone="error">
-          {error}
-        </StatusLine>
+        <View style={{ gap: theme.space.md }}>
+          <StatusLine testID="test-error" tone="error">
+            {error}
+          </StatusLine>
+          <Button onPress={() => void run()} testID="test-retry" title={strings.onboarding.test.retry} />
+        </View>
       ) : null}
 
       {passed && draft.test ? (

@@ -86,7 +86,7 @@ describe('the wizard as a whole', () => {
     fireEvent.press(primaryButton('Continue'))
     expect(screen.getByTestId('step-counter')).toHaveTextContent('Step 3 of 4')
     // The heading and the button share a label, so the gate line identifies the step.
-    expect(screen.getByTestId('test-required')).toBeTruthy()
+    expect(screen.getByTestId('test-stage-rest')).toBeTruthy()
   })
 
   it('holds every step in one card on the wallpaper, with the actions inside it', () => {
@@ -150,7 +150,7 @@ describe('the wizard as a whole', () => {
 })
 
 describe('the test-connection gate', () => {
-  it('refuses to move on until the test has run', async () => {
+  it('runs on arrival, with no button to press, and opens Continue when it passes', async () => {
     const draft = signedInDraft()
     runConnectionTest.mockResolvedValue({
       key: connectionPayloadKey(draft),
@@ -160,15 +160,29 @@ describe('the test-connection gate', () => {
 
     renderScreen(<OnboardingNavigator onComplete={jest.fn()} initialStep="test" initialDraft={draft} />)
 
+    // Nothing was pressed, and Continue is shut until the dial answers.
     expect(isDisabled('Continue')).toBe(true)
-    expect(screen.getByTestId('test-required')).toHaveTextContent('Run the test before finishing setup.')
-
-    fireEvent.press(primaryButton('Test connection'))
+    expect(runConnectionTest).toHaveBeenCalledTimes(1)
 
     await waitFor(() =>
       expect(screen.getByTestId('test-result')).toHaveTextContent('Connected as Fake Tester · 2 bots')
     )
     expect(isDisabled('Continue')).toBe(false)
+    expect(screen.queryByTestId('test-retry')).toBeNull()
+  })
+
+  it('does not dial twice for the same payload', async () => {
+    const draft = signedInDraft()
+    runConnectionTest.mockResolvedValue({
+      key: connectionPayloadKey(draft),
+      userDisplayName: 'Fake Tester',
+      botCount: 2
+    })
+
+    renderScreen(<OnboardingNavigator onComplete={jest.fn()} initialStep="test" initialDraft={draft} />)
+
+    await waitFor(() => expect(screen.getByTestId('test-result')).toBeTruthy())
+    expect(runConnectionTest).toHaveBeenCalledTimes(1)
   })
 
   it('adopts a credential the test rotated, and stays passed afterwards', async () => {
@@ -186,7 +200,6 @@ describe('the test-connection gate', () => {
 
     const onComplete = jest.fn()
     renderScreen(<OnboardingNavigator onComplete={onComplete} initialStep="test" initialDraft={draft} />)
-    fireEvent.press(primaryButton('Test connection'))
 
     await waitFor(() => expect(screen.getByTestId('test-result')).toBeTruthy())
 
@@ -202,39 +215,60 @@ describe('the test-connection gate', () => {
     expect(secretStore.set).not.toHaveBeenCalledWith(SECRET_KEYS.refreshToken, 'refresh-1')
   })
 
-  it('reports a rejected credential and stays shut', async () => {
+  it('reports a rejected credential, stays shut, and offers a retry', async () => {
     runConnectionTest.mockRejectedValue(new GatewayError('auth', 'raw', { closeCode: 4401 }))
 
     renderScreen(<OnboardingNavigator onComplete={jest.fn()} initialStep="test" initialDraft={signedInDraft()} />)
-    fireEvent.press(primaryButton('Test connection'))
 
     await waitFor(() => expect(screen.getByTestId('test-error')).toHaveTextContent(/rejected the credentials/))
     expect(isDisabled('Continue')).toBe(true)
+    expect(screen.getByTestId('test-retry')).toBeTruthy()
+  })
+
+  it('retries only when asked, so a failure does not loop', async () => {
+    const draft = signedInDraft()
+    runConnectionTest.mockRejectedValue(new GatewayError('network', 'raw'))
+
+    renderScreen(<OnboardingNavigator onComplete={jest.fn()} initialStep="test" initialDraft={draft} />)
+
+    await waitFor(() => expect(screen.getByTestId('test-error')).toBeTruthy())
+    expect(runConnectionTest).toHaveBeenCalledTimes(1)
+
+    runConnectionTest.mockResolvedValue({
+      key: connectionPayloadKey(draft),
+      userDisplayName: 'Fake Tester',
+      botCount: 2
+    })
+    fireEvent.press(screen.getByTestId('test-retry'))
+
+    await waitFor(() => expect(screen.getByTestId('test-result')).toBeTruthy())
+    expect(runConnectionTest).toHaveBeenCalledTimes(2)
   })
 
   it('names the gateway address as the fix behind a 4403 close', async () => {
     runConnectionTest.mockRejectedValue(new GatewayError('config', 'raw', { closeCode: 4403 }))
 
     renderScreen(<OnboardingNavigator onComplete={jest.fn()} initialStep="test" initialDraft={signedInDraft()} />)
-    fireEvent.press(primaryButton('Test connection'))
 
     await waitFor(() => expect(screen.getByTestId('test-error')).toHaveTextContent(/dashboard\.public_url/))
   })
 
-  it('treats a result from a different payload as no result at all', () => {
+  it('treats a result from a different payload as no result at all, and dials again', async () => {
     const draft = signedInDraft()
     const stale: OnboardingDraft = {
       ...draft,
       test: { key: 'a key from an earlier address', userDisplayName: 'Fake Tester', botCount: 2 }
     }
+    runConnectionTest.mockRejectedValue(new GatewayError('network', 'raw'))
 
     renderScreen(<OnboardingNavigator onComplete={jest.fn()} initialStep="test" initialDraft={stale} />)
 
     expect(isDisabled('Continue')).toBe(true)
-    expect(screen.getByTestId('test-required')).toHaveTextContent(
-      'Something changed since the last test. Run it again.'
-    )
     expect(screen.queryByTestId('test-result')).toBeNull()
+
+    // The stale result does not stand in for a run: arriving with a payload
+    // this instance has not dialled for starts one.
+    await waitFor(() => expect(runConnectionTest).toHaveBeenCalledTimes(1))
   })
 })
 
