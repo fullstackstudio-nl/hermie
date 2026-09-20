@@ -35,7 +35,10 @@ export type HostPrivacy =
   | 'cgnat'
   /** A `.ts.net` MagicDNS name, or Tailscale's own `fd7a:115c:a1e0::/48`. */
   | 'tailnet'
-  /** A `.local` name or a name with no dots in it: resolvable on one network only. */
+  /**
+   * A `.local` or `.internal` name, or a name with no dots in it: resolvable on
+   * one network only.
+   */
   | 'local_name'
   /** Anything else. A name the public DNS can answer, or a routable address. */
   | 'public'
@@ -251,7 +254,21 @@ function classifyName(host: string): HostPrivacy {
     return 'tailnet'
   }
 
-  if (host.endsWith('.local') || (host.length > 0 && !host.includes('.'))) {
+  /*
+   * `.internal` is reserved for private use and will never be delegated in the
+   * public root, so a name under it cannot be one anybody outside the network
+   * that defines it can resolve — the same property `.local` has. It is the
+   * suffix a Headscale operator reaches for when they want names of their own,
+   * and calling it public produced the worst sentence this module can produce:
+   * a gateway on a WireGuard tunnel warned about as readable by every hop, with
+   * `Use https instead` next to it. Measured on iOS 27 against the owner's
+   * gateway — see the 2026-09-20 tailnet section of docs/platform-notes.md.
+   */
+  if (host.endsWith('.local') || host === 'internal' || host.endsWith('.internal')) {
+    return 'local_name'
+  }
+
+  if (host.length > 0 && !host.includes('.')) {
     return 'local_name'
   }
 

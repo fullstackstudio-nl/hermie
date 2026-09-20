@@ -23,14 +23,31 @@ export interface JsonResponse {
 /**
  * Did the secure channel fail, whatever the reason?
  *
- * Worth knowing where this DOES and does not fire. React Native's `fetch` is
- * `whatwg-fetch` over its own `XMLHttpRequest`, and the polyfill's `onerror`
- * rejects with a flat `TypeError('Network request failed')` — the `NSError` and
- * OkHttp's exception are both discarded before JavaScript sees them. Measured
- * on iOS 27: CFNetwork logged `NSURLErrorDomain -1200 "A TLS error caused the
- * secure connection to fail."` for a request the app reported as unreachable.
- * So in the app this predicate is never true; it earns its place in Node, where
- * a real message arrives, and it is what the fallback in `probe.ts` reads.
+ * Worth knowing where this DOES and does not fire, because the honest answer is
+ * "nowhere a real `fetch` runs", and an earlier version of this comment claimed
+ * otherwise.
+ *
+ * React Native's `fetch` is `whatwg-fetch` over its own `XMLHttpRequest`, and
+ * the polyfill's `onerror` rejects with a flat `TypeError('Network request
+ * failed')` — the `NSError` and OkHttp's exception are both discarded before
+ * JavaScript sees them. Measured on iOS 27 against a gateway serving a
+ * self-signed certificate: CFNetwork logged `NSURLErrorDomain -1202 "The
+ * certificate for this server is invalid"` for a request the app reported as
+ * unreachable.
+ *
+ * Node is NOT the exception it was said to be. Node 22's global `fetch` is
+ * undici, and it rejects with `TypeError('fetch failed')`; the real reason
+ * (`DEPTH_ZERO_SELF_SIGNED_CERT`, "self-signed certificate") is one level down
+ * in `error.cause`, which `requestText` does not read. Measured the same day,
+ * against the same gateway.
+ *
+ * So what these predicates actually serve is the tests, where a descriptive
+ * message is thrown on purpose, and any future caller that hands them a message
+ * it has dug out itself. Reading the cause chain would make them fire for real
+ * — and would also stop the scheme fallback for a self-signed https server,
+ * which is the shape of gateway this fallback exists to reach. That trade is a
+ * decision, not an oversight; `docs/adr/0014-plain-http-on-private-networks.md`
+ * is where it belongs.
  */
 export function looksLikeTlsFailure(message: string): boolean {
   const lowered = message.toLowerCase()

@@ -140,6 +140,48 @@ describe('the gateway address step', () => {
     )
   })
 
+  /*
+   * A transport failure arrives as a flat `network` on a device whatever caused
+   * it — React Native's fetch throws the NSError away — so a rejected
+   * certificate and a dead host are the same kind here. When the reader pinned
+   * `https://` themselves the resolver never tried the other scheme, and
+   * "check that the gateway is running and reachable" then sends somebody
+   * whose gateway is running, reachable and serving a self-signed certificate
+   * to look at the gateway. Measured against the owner's own gateway on iOS 27:
+   * NSURLErrorDomain -1202, "the certificate for this server is invalid".
+   */
+  it('offers to drop the scheme when an address the reader pinned https:// on fails flat', async () => {
+    resolveGatewayAddress.mockRejectedValue(new GatewayError('network', 'raw'))
+    renderScreen(<Harness />)
+    type('https://hermes.fss.internal')
+
+    await waitFor(() =>
+      expect(screen.getByTestId('probe-error')).toHaveTextContent(
+        'Could not reach hermes.fss.internal over https://. It is either not answering there, or serving a certificate this device does not trust. Leave the https:// off and Hermie will try http:// as well.'
+      )
+    )
+  })
+
+  it('keeps the plain wording when no scheme was pinned, because both were tried', async () => {
+    resolveGatewayAddress.mockRejectedValue(new GatewayError('network', 'raw'))
+    renderScreen(<Harness />)
+    type('hermes.fss.internal')
+
+    await waitFor(() =>
+      expect(screen.getByTestId('probe-error')).toHaveTextContent(/Could not reach hermes\.fss\.internal\. Check/)
+    )
+  })
+
+  it('keeps the plain wording for a pinned http://, which has no certificate to blame', async () => {
+    resolveGatewayAddress.mockRejectedValue(new GatewayError('network', 'raw'))
+    renderScreen(<Harness />)
+    type('http://hermes.fss.internal')
+
+    await waitFor(() =>
+      expect(screen.getByTestId('probe-error')).toHaveTextContent(/Could not reach hermes\.fss\.internal\. Check/)
+    )
+  })
+
   it('explains a 503 from the gateway itself', async () => {
     resolveGatewayAddress.mockRejectedValue(new GatewayError('server', 'raw', { status: 503 }))
     renderScreen(<Harness />)

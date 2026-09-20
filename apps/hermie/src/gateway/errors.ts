@@ -28,8 +28,16 @@ function fallbackMessage(error: unknown): string {
   return strings.errors.unknown
 }
 
-/** The unauthenticated probe the address step runs while the user is typing. */
-export function describeProbeError(error: unknown, baseUrl: string): string {
+/**
+ * The unauthenticated probe the address step runs while the user is typing.
+ *
+ * `httpsWasPinned` is the one thing the resolver's error cannot carry: whether
+ * the reader typed `https://` themselves. It decides nothing about the failure
+ * and everything about the sentence — a scheme-less address has already been
+ * tried both ways by the time anything is thrown, and a pinned `https://` has
+ * not been tried in the clear at all.
+ */
+export function describeProbeError(error: unknown, baseUrl: string, httpsWasPinned = false): string {
   if (!isGatewayError(error)) {
     return fallbackMessage(error)
   }
@@ -38,7 +46,7 @@ export function describeProbeError(error: unknown, baseUrl: string): string {
 
   switch (error.kind) {
     case 'network':
-      return strings.errors.network(host)
+      return httpsWasPinned ? strings.errors.networkOverHttps(host) : strings.errors.network(host)
     case 'tls':
       return strings.errors.tls(host)
     case 'timeout':

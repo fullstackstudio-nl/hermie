@@ -71,6 +71,11 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
       return
     }
 
+    // Not `normalized.startsWith('https://')` on its own: `normalizeBaseUrl`
+    // puts that scheme on an address that named none, and those are the two
+    // cases this has to tell apart.
+    const httpsWasPinned = hasExplicitScheme(raw) && normalized.startsWith('https://')
+
     const ticket = ++sequence.current
     let cancelled = false
     setBusy(true)
@@ -95,7 +100,7 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
 
           setBusy(false)
           setFoundOverHttp(false)
-          setError(describeProbeError(probeError, normalized))
+          setError(describeProbeError(probeError, normalized, httpsWasPinned))
           updateRef.current({ probe: null, baseUrl: null })
         })
     }, debounceMs)

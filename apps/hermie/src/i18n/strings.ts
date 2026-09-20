@@ -521,6 +521,17 @@ export const strings = {
     network: (host: string) =>
       `Could not reach ${host}. Check the address, and that the gateway is running and reachable from this device.`,
     /**
+     * The same failure, for an address the reader pinned `https://` on
+     * themselves. React Native's fetch discards the underlying error, so a
+     * certificate this device will not accept and a host that never answered
+     * arrive here as the same flat failure — and only one of the two is worth
+     * checking the gateway over. Both are named, and so is the way out that
+     * costs nothing to try, because the resolver never looked at http:// for a
+     * scheme the reader pinned.
+     */
+    networkOverHttps: (host: string) =>
+      `Could not reach ${host} over https://. It is either not answering there, or serving a certificate this device does not trust. Leave the https:// off and Hermie will try http:// as well.`,
+    /**
      * Covers both halves of a failed handshake: a certificate this device will
      * not accept, and a port that is not speaking TLS at all. The second is
      * common on a private network, and naming only the certificate sent people

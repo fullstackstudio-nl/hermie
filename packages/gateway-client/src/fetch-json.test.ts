@@ -69,6 +69,24 @@ describe('classifying a failed secure connection', () => {
     expect(looksLikeTlsFailure('getaddrinfo ENOTFOUND hermes.test')).toBe(false)
   })
 
+  /*
+   * The two messages a real `fetch` actually throws, on the two runtimes this
+   * package runs on. Neither carries a reason, so neither predicate fires for a
+   * genuine transport failure anywhere — and a comment in fetch-json.ts used to
+   * claim Node was the exception. Measured 2026-09-20 against a gateway with a
+   * self-signed certificate: React Native rejects with `Network request
+   * failed`, and Node 22's undici rejects with `fetch failed` and hides
+   * `DEPTH_ZERO_SELF_SIGNED_CERT` in `error.cause`, which `requestText` does
+   * not read. Pinned so the claim cannot quietly come back.
+   */
+  it.each(['Network request failed', 'fetch failed'])(
+    'reads %s — what a real fetch throws — as no kind of TLS failure',
+    message => {
+      expect(looksLikeTlsFailure(message)).toBe(false)
+      expect(looksLikeCertificateFailure(message)).toBe(false)
+    }
+  )
+
   it.each([
     'unable to verify the first certificate',
     'The certificate for this server is invalid',

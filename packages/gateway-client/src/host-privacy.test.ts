@@ -122,11 +122,21 @@ describe('classifyHost: names', () => {
     expect(privacyOf('http://hermes:9119')).toBe('local_name')
   })
 
+  it('reads a .internal name, which the public root will never answer for', () => {
+    expect(privacyOf('hermes.fss.internal')).toBe('local_name')
+    expect(privacyOf('http://Hermes.FSS.Internal:9119/')).toBe('local_name')
+    // The label alone, with nothing in front of it.
+    expect(privacyOf('internal')).toBe('local_name')
+  })
+
   it('reads an ordinary domain as public, Headscale base domain included', () => {
     expect(privacyOf('hermes.example.com')).toBe('public')
     // A Headscale base domain is a name of the operator's choosing, so it is
-    // indistinguishable from any other domain and is treated as one.
+    // indistinguishable from any other domain and is treated as one — unless
+    // the operator chose one under `.internal`, which the test above covers.
     expect(privacyOf('hermes.tailnet.example.org')).toBe('public')
+    // Not a suffix match on the letters: `.internal` has to be the whole label.
+    expect(privacyOf('hermes.notinternal')).toBe('public')
   })
 
   it('answers something for an empty host rather than throwing', () => {
@@ -141,6 +151,7 @@ describe('isExposedCleartext', () => {
     expect(isExposedCleartext('https://hermes.example.com')).toBe(false)
     expect(isExposedCleartext('http://100.101.102.103:9119')).toBe(false)
     expect(isExposedCleartext('http://hermes.tail9f3c.ts.net')).toBe(false)
+    expect(isExposedCleartext('http://hermes.fss.internal')).toBe(false)
     expect(isExposedCleartext('http://127.0.0.1:9119')).toBe(false)
   })
 })
