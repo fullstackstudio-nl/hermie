@@ -82,6 +82,35 @@ builds Release for `platform=macOS,variant=Designed for iPad`, and then wraps th
 `.app` fails to open with "incorrect executable format", so it goes inside
 `Hermie.app/Wrapper/Hermie.app` with a relative `WrappedBundle` symlink beside it.
 
+### Web
+
+The browser build is served by Hermie Web, the small Node process in `packages/hermie-web` — see
+[docs/web.md](docs/web.md) for what it is and [ADR-0015](docs/adr/0015-web-variant-on-its-own-port.md)
+for why.
+
+```sh
+npm run web:build    # compile the server, then export the browser bundle
+npm run web          # both, in front of the fake gateway, at http://127.0.0.1:9120
+```
+
+`web:build` is two steps in two workspaces, and they land beside each other:
+`tsc -b` writes the server to `packages/hermie-web/dist/server`, and
+`apps/hermie/scripts/export-web.mjs` runs `expo export --platform web` into
+`packages/hermie-web/dist/web`. That is the directory the server looks in when `--static` is not
+given, and the export **empties** it first — Expo writes hashed bundle names, so a second export
+would otherwise leave the previous one behind for ever. CI runs `npm run web:build` on every pull
+request, because a native-only import added to a shared file compiles, typechecks and lints perfectly
+and then fails to bundle for the web.
+
+`npm run web` builds and then starts two processes through `scripts/dev-web.mjs`: the fake gateway on
+9119 in **cookie** mode, and Hermie Web on 9120 in front of it with self-update switched off. Sign in
+as `tester` / `hunter2`.
+
+The fake gateway is started with `--public-host 127.0.0.1:9119`, which arms its `Host`/`Origin`
+guard against a name it will only ever see if Hermie Web rewrote the headers. That is deliberate: the
+development loop exercises the same guard a real `hermes serve` applies, so a broken proxy fails here
+rather than looking healthy until somebody deploys it.
+
 ## The fake gateway
 
 `packages/fake-gateway` stands in for `hermes serve`. It speaks the public status endpoints, both

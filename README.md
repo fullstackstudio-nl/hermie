@@ -6,26 +6,41 @@
 
 <p align="center">
   A client for <a href="https://github.com/NousResearch/Hermes-Agent">Hermes Agent</a>.<br>
-  Your bots, as chats, on your phone, your tablet and your Mac.<br>
+  Your bots, as chats, on your phone, your tablet, your Mac and in a browser.<br>
   <a href="https://hermie.dev">hermie.dev</a>
 </p>
 
 ---
 
-Hermes Agent runs agents on a machine you control. Hermie is the client for it:
-it points at one gateway, signs in, and turns every bot on that gateway into a
-conversation you can open and talk to. Tool calls stream in as they run.
-Questions the agent needs answered — a command it wants to run, a detail it is
-missing — arrive as a sheet you tap. And when your bots talk to each other, you
-see both sides of it, because a reply you cannot trace back to a question is
-just a machine talking to itself.
+**Hermes Agent runs agents on a machine you control** — your own server, a
+laptop, a box on your tailnet. They have their own prompts, their own tools and
+their own memory, and they run commands on that machine. `hermes serve` puts a
+gateway in front of them: one WebSocket, a REST surface beside it, and its own
+sign-in.
 
-It is one Expo and React Native codebase running on iPhone, iPad, Android and
-the Mac, and it talks to nothing but your gateway.
+**Hermie is a client for that gateway, and nothing else talks to your bots.** It
+points at one gateway, signs in, and turns every bot on it into a conversation
+you can open and talk to. Tool calls stream in as they run. Questions the agent
+needs answered — a command it wants to run, a detail it is missing — arrive as a
+sheet you tap. And when your bots talk to each other, you see both sides of it,
+because a reply you cannot trace back to a question is just a machine talking to
+itself.
+
+It is for people who already run their own agents and would rather reach them
+the way they reach everyone else: from the phone in their pocket, on a train,
+without a terminal and without a tunnel to open first.
+
+One Expo and React Native codebase runs in **five places — iPhone, iPad, Android,
+the Mac and a browser**. The Mac is not a port: it is the iPad build, which Apple
+runs on Apple Silicon unmodified. The browser is not a hosted service: it is the
+same app, served by one small process you run next to your own gateway.
+
+What it is not: there is no Hermie server, no account to create, no analytics and
+no third-party network call. The only address Hermie knows is the one you typed.
 
 <table>
   <tr>
-    <td width="33%"><img src="docs/screenshots/chats.png" alt="The chat list on an iPhone: a search field, the filters All, Unread, Working and Needs input, then two rows — Researcher with a photo avatar and Writer with a generated W on a tinted disc, each carrying a green online bead, and a blue unread dot beside Writer"></td>
+    <td width="33%"><img src="docs/screenshots/chats.png" alt="The chat list on an iPhone: a search field above two rows — Researcher with a photo avatar and Writer with a generated W on a tinted disc, each carrying a green online bead, and a blue unread dot beside Writer"></td>
     <td width="33%"><img src="docs/screenshots/conversation.png" alt="A conversation with the Researcher bot: a card for the cron job Source scan that was delivered to this chat, an outgoing bot-to-bot line reading Message to @writer, and a long report folded after a few lines behind a Show more link"></td>
     <td width="33%"><img src="docs/screenshots/approval.png" alt="The approval sheet over a dimmed conversation, headed Permission request for @researcher and asking whether to allow the command rm -rf ./build, with the choices Allow once, Allow for this session, Always allow and Deny"></td>
   </tr>
@@ -151,12 +166,20 @@ given, so the VPN only has to be connected before the app is.
 
 ## Getting it
 
-Hermie has not had a release yet. When it does:
+Nothing has been published to a store yet. When it is:
 
 - **iPhone and iPad** — TestFlight _(link to follow)_
 - **Mac** — the same TestFlight build, or the same App Store listing: Apple
   offers an iPhone/iPad app on Apple Silicon Macs unless it is opted out
 - **Android** — Play internal testing _(link to follow)_
+- **A browser** — `npx hermie-web`, or the `hermie-web.zip` a tagged release
+  carries; see [Web](#web)
+
+The Android half is the furthest along: the upload key exists, and a tagged build
+produces an APK and an app bundle signed with it alongside the web artefacts.
+What is left there is registering that key with Play, which happens once per app.
+[docs/release.md](docs/release.md) has what is automated and what is still done
+by hand.
 
 Until then, and any time you would rather build it yourself:
 
@@ -173,13 +196,21 @@ Then pick a platform:
 npm run ios             # iOS simulator
 npm run android         # Android emulator or device
 HERMIE_APPLE_TEAM_ID=XXXXXXXXXX npm run mac    # this Mac
+npm run web:build       # the browser build and the server that serves it
 ```
 
-All three generate the native projects on first run; `ios/` and `android/` are
-not committed. `npm run mac` builds the iOS app for the "Designed for iPad"
+The first three generate the native projects on first run; `ios/` and `android/`
+are not committed. `npm run mac` builds the iOS app for the "Designed for iPad"
 destination and wraps it so macOS will launch it — it needs an Apple Developer
 team identifier, because a Mac build has to be signed. `--no-open` builds without
 launching, `--debug` builds against Metro.
+
+`npm run web:build` needs no native toolchain at all. Point the result at your
+own gateway:
+
+```sh
+node packages/hermie-web/bin/hermie-web.js --gateway http://127.0.0.1:9119
+```
 
 You do not need a real gateway to try it:
 
@@ -239,13 +270,13 @@ say stays between you and the machine you run them on.
 
 ## Platforms
 
-| Platform              | State                                                                                   |
-| --------------------- | --------------------------------------------------------------------------------------- |
-| iOS 15.1+             | The primary target                                                                      |
-| iPadOS                | The same build, with a sidebar layout on wide windows — and the sidebar hides           |
-| Android 7.0+ (API 24) | Builds and runs, driven end to end on an emulator; never on hardware, and no upload key |
-| macOS, Apple Silicon  | The same build again, as "Designed for iPad" — a window with the sidebar layout         |
-| A browser             | Served by Hermie Web, a small process next to the gateway — see **Web** below           |
+| Platform              | State                                                                                                                                                                  |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| iOS 15.1+             | The primary target                                                                                                                                                     |
+| iPadOS                | The same build, with a sidebar layout on wide windows — and the sidebar hides                                                                                          |
+| Android 7.0+ (API 24) | Builds and runs, driven end to end on an emulator — not yet on physical hardware. Signed release: the upload key exists and CI builds an APK and an app bundle with it |
+| macOS, Apple Silicon  | The same build again, as "Designed for iPad" — a window with the sidebar layout                                                                                        |
+| A browser             | Served by Hermie Web, a small process next to the gateway — see **Web** below                                                                                          |
 
 **On a wide window the chat list is a sidebar, and the sidebar can be put away.**
 The chat header's round button hides it, ⌘⇧S brings it back, and the Mac's Chats
@@ -271,7 +302,7 @@ been verified on a Mac.
 
 ## Web
 
-There is a fourth way to reach your bots, and it installs nothing: run one small
+The fifth place is the one that installs nothing on the device: run one small
 process next to `hermes serve` and open Hermie in a browser.
 
 ```sh
@@ -294,11 +325,17 @@ wizard has no address step, because there is nothing to type — the gateway is
 whatever Hermie Web is in front of, and it tells you which one that is.
 
 It binds to `127.0.0.1` and authenticates nobody itself, so anything beyond the
-machine it runs on wants TLS in front of it. Caddy, nginx and Tailscale Serve
-configurations, a systemd unit, the Docker image and the gateway settings it
-needs are in [deploy/web/README.md](deploy/web/README.md);
-[ADR-0015](docs/adr/0015-web-variant-on-its-own-port.md) is why it is shaped
-this way.
+machine it runs on wants TLS in front of it. It can also replace itself: Settings
+→ **Hermie Web** shows the running version and offers an **Update** button where
+the install shape allows it, which downloads the release zip, checks it against
+the release's `SHA256SUMS` and exits for the supervisor to restart.
+
+Three pages, in the order you are likely to want them:
+[docs/web.md](docs/web.md) is how it works and why the gateway is reached
+_through_ it; [deploy/web/README.md](deploy/web/README.md) is the runbook — Caddy,
+nginx and Tailscale Serve configurations, a systemd unit, the Docker image and
+the two gateway settings it needs; [ADR-0015](docs/adr/0015-web-variant-on-its-own-port.md)
+is the decision and the options that were rejected.
 
 Two things a browser genuinely cannot do, and the app does not pretend
 otherwise: there is no keychain (the session stays in the browser's cookie jar,
@@ -328,18 +365,22 @@ npm run web         # both, in front of the fake gateway, at http://127.0.0.1:91
 | The interface redesign                                       | Done        |
 | The Mac, as the iPad build rather than a port                | Done        |
 | Android, built and driven on an emulator                     | Done        |
+| Hermie Web: the same app in a browser, same-origin           | Done        |
 | Release: TestFlight and Play                                 | In progress |
 
-"Release" is waiting on two accounts rather than on code: TestFlight and the App
-Store need a paid Apple Developer team, and a Play upload has to be signed with a
-keystore registered once per app. Both are being arranged.
-[docs/release.md](docs/release.md) has what each one unblocks — including why a
+The automated half of a release is finished: a `v*` tag builds the Android
+artefacts and `hermie-web.zip`, signs the Android release with the upload key when
+the signing secrets are set, and publishes them with `SHA256SUMS` beside them. The
+half that needs an account someone owns is not: nothing has gone to TestFlight or
+to Play internal testing yet, and registering the upload key with Play is a
+once-per-app step that has not happened.
+[docs/release.md](docs/release.md) is the process for both halves, including why a
 build signed by a free Apple team stops launching after seven days.
 
 After that: paging back through long history, notifications, and Android on real
 hardware — the emulator pass is done and written up in
 [docs/platform-notes.md](docs/platform-notes.md), but no physical device has run
-this yet and the release APK is still debug-signed.
+this yet.
 
 ## Contributing
 
@@ -353,11 +394,13 @@ into an issue.
 The repository is an npm workspace:
 
 ```
-apps/hermie              the Expo app, and the local Expo module under modules/
+apps/hermie              the Expo app, and the local Expo modules under modules/
 packages/hermes-shared   protocol sources vendored from Hermes Agent
 packages/gateway-client  connection state machine, credentials, PKCE — no React
 packages/transcript      the chat engine: item model, reducer, reconciliation, selectors
+packages/hermie-web      Hermie Web: the server that serves the browser build and proxies the gateway
 packages/fake-gateway    a gateway stand-in for tests and offline development
+deploy/web               how to run Hermie Web on your own server
 design/                  the interface reference and the icon source
 docs/                    architecture decisions, glossary, platform notes, runbooks
 ```
