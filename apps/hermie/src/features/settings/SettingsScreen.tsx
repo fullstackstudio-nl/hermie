@@ -13,6 +13,7 @@ import { InsetButtonRow, InsetGroup, InsetValueRow, Screen } from '../../ui/prim
 import { SegmentedRow, SwitchRow } from '../../ui/sheets'
 import { useTheme } from '../../ui/theme'
 import { useEscapeKey } from '../../ui/useEscapeKey'
+import { useHardwareBack } from '../../ui/useHardwareBack'
 import { FORM_MAX_WIDTH, WALLPAPER_ORDER, type WallpaperName } from '../../ui/tokens'
 import { DebugConnectionScreen } from './DebugConnectionScreen'
 import { GALLERY_ROW_TITLE, GalleryScreen } from './GalleryScreen'
@@ -62,6 +63,20 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
   // Escape goes back ONE level: out of a screen Settings opened and into
   // Settings, and only then out of whatever is holding Settings.
   useEscapeKey(
+    () => {
+      setShowConnectionTest(false)
+      setShowGallery(false)
+      setShowLicences(false)
+    },
+    showConnectionTest || showGallery || showLicences
+  )
+
+  // The same one level for Android's back button, which is not Escape and has
+  // to be said separately (see `useHardwareBack`). Without it a back press from
+  // Licences popped the whole of Settings on a phone and left the app on the
+  // wide layout, because these pages are state inside this screen rather than
+  // anything the navigator or a Modal knows about.
+  useHardwareBack(
     () => {
       setShowConnectionTest(false)
       setShowGallery(false)

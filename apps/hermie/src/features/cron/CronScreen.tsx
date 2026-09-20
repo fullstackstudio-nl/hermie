@@ -23,6 +23,7 @@ import { useCronStore } from '../../store/cron'
 import { BottomSheet, SheetEyebrow } from '../../ui/BottomSheet'
 import { Button, Screen, Text } from '../../ui/primitives'
 import { useEscapeKey } from '../../ui/useEscapeKey'
+import { useHardwareBack } from '../../ui/useHardwareBack'
 import { useTheme } from '../../ui/theme'
 import { CONTROL_MIN_HEIGHT, withAlpha } from '../../ui/tokens'
 import type { CronJobInput } from './cron-controller'
@@ -179,6 +180,14 @@ export function CronScreen({ initialJobId }: CronScreenProps = {}) {
   // first Escape returns to the list here and only the second closes the panel
   // around it. Mount order does the ordering; see `useEscapeKey`.
   useEscapeKey(
+    () =>
+      setView(current => (current.screen === 'run' ? { screen: 'detail', jobId: current.jobId } : { screen: 'list' })),
+    view.screen !== 'list'
+  )
+
+  // And the same one level for Android's back button, which is a separate stack
+  // from Escape for the reason `useHardwareBack` gives.
+  useHardwareBack(
     () =>
       setView(current => (current.screen === 'run' ? { screen: 'detail', jobId: current.jobId } : { screen: 'list' })),
     view.screen !== 'list'

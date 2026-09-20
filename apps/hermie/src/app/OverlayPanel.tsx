@@ -27,6 +27,7 @@ import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
 import { OVERLAY_MAX_WIDTH, SCRIM_COLOR, TAP_SLOP, WINDOW_GAP } from '../ui/tokens'
 import { useEscapeKey } from '../ui/useEscapeKey'
+import { useHardwareBack } from '../ui/useHardwareBack'
 
 export type OverlayPanelProps = {
   visible: boolean
@@ -43,6 +44,12 @@ export function OverlayPanel({ children, onClose, title, visible }: OverlayPanel
   const [present, setPresent] = useState(visible)
 
   useEscapeKey(onClose, visible)
+  // Android's back button is the same question as Escape, and this panel is the
+  // one surface that never heard either: a sheet is a `Modal`, which consumes
+  // the press and answers `onRequestClose`, but this is a plain view, so the
+  // press reached the activity and backgrounded the app with the panel still
+  // open. Measured on an emulator — back on Settings left for the launcher.
+  useHardwareBack(onClose, visible)
 
   useEffect(() => {
     if (visible) {
