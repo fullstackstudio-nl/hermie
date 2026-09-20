@@ -3829,3 +3829,305 @@ the upload appends whichever part the platform produced — a `File` here, React
 - **A phone-sized browser window.** The layout was seen at 1024×768 and at the wizard's own width.
 - **TLS in front.** Every configuration in `deploy/web/README.md` is written from the gateway's
   forwarded-header handling, not measured.
+
+## Selecting text, dropping files, and four things a Mac window reported (2026-09-21)
+
+Six items in one round, five of them from the owner running the Mac build. What
+they have in common is that almost every one is a UIKit behaviour reached through
+a view React Native does not expose — so most of what follows is reasoned from
+Apple's own APIs and from React Native's source, and the manual test at the end is
+the part that settles it.
+
+### `Text selectable` still does not select — and this time that was measured
+
+The brief for this round said that on the new architecture `Text selectable` is
+backed by a `UITextView` called `RCTParagraphTextView` and supports real range
+selection. **It does not**, in the pinned React Native (0.81.5), and the file the
+brief pointed at is the file that says so:
+
+```
+node_modules/react-native/React/Fabric/Mounting/ComponentViews/Text/RCTParagraphComponentView.mm
+```
+
+- `RCTParagraphTextView` is declared `@interface RCTParagraphTextView : UIView` —
+  its own comment calls it "an auxiliary view we set as contentView so the drawing
+  can happen on top of the layers manipulated by RCTViewComponentView". It draws
+  an attributed string in `drawRect:`, and its `hitTest:` returns `nil`.
+- `isSelectable` still installs a `UILongPressGestureRecognizer` plus a
+  `UIEditMenuInteraction`, `canPerformAction:` answers yes to exactly one selector
+  (`copy:`), and `copy:` copies
+  `dataFromRange:NSMakeRange(0, attributedText.length)` — the whole paragraph.
+
+So there is no selection range in the component on either renderer, nothing for a
+mouse drag to move, and no combination of props that changes it. The earlier
+finding (2026-09-20) stands, and parts (a), (b) and (c) of the brief rest on a
+premise the source contradicts:
+
+- **(a) is already true and buys nothing.** The markdown renderer threads
+  `selectable` through its context. It defaults to OFF where the native context
+  menu exists, and that is deliberate — with both, a secondary click on a bubble
+  races two interactions for one gesture, which is the owner's earlier "it also
+  starts selecting". Turning it back on for the Mac would reinstate that bug in
+  exchange for a long press that copies the whole block, which the context menu
+  already does better and with a choice of words or markdown.
+- **(b) has nothing to reach.** `RCTParagraphTextView.hitTest:` returns `nil`, so
+  loosening `canCancelContentTouches` / `delaysContentTouches` on the transcript
+  hands the drag to a view that refuses it. The `allowedTouchTypes` change from
+  the previous round is kept exactly as it was.
+- **(c) is unchanged.** `UIContextMenuInteraction` already opens on a secondary
+  click and on a long press; there is no `Pressable` around a bubble swallowing
+  anything.
+
+### So the selection is a second presentation, and it is real
+
+`UITextView` over an `NSAttributedString` is the only thing in UIKit that
+drag-selects rich text, and our renderer emits views a text view cannot hold — a
+horizontally scrolling code block, a table built out of boxes. So the bubble keeps
+its renderer and the message gets a second, flat presentation:
+
+- `src/markdown/attributed.ts` flattens the same lexer output to styled RUNS: one
+  block role (body, heading 1–3, code, quote) plus bold / italic / strike / mono /
+  href. Pure, and the mapping is `__tests__/markdown-attributed.test.ts`.
+- `HermieSelectableTextView` (in `modules/hermie-mac`) builds the attributed string
+  and puts it in a non-editable, selectable `UITextView` that takes first
+  responder on `didMoveToWindow`. Drag, double and triple click, shift-click, ⌘A,
+  ⌘C and the system edit menu are all UIKit's rather than ours.
+- `Select text` in a message's context menu opens it, Mac only. `Copy as Markdown`
+  was already there — it has shipped since the menu did — and is left alone.
+- Where there is no native view (an iPhone, Android, the test renderer) the same
+  runs render as ONE nested `Text selectable` tree, so the menu entry never opens
+  an empty panel.
+
+Three deliberate losses in the flattening, each of which would otherwise need a
+container: a table becomes tab-separated rows, a list writes its markers out as
+characters, an image becomes its alt text.
+
+### Dropping files on the chat
+
+`modules/hermie-drop` is a new module and it is one view: a drop belongs to a
+REGION — the conversation takes a file, the sidebar beside it does not — and a
+module-level event could not tell them apart. `UIDropInteraction` accepts
+`UTType.item` (the root of the type tree, so any file), `.image` and `.fileURL`,
+always as `.copy`, and copies each item into `tmp/hermie-drop/<uuid>/<name>`
+before JavaScript hears about it. That copy is load-bearing:
+`loadFileRepresentation` deletes its URL when the completion handler returns, and
+the upload starts several turns later.
+
+`DropZone` wraps the whole conversation, shows a dimmed panel saying **Drop file
+to attach** while a drag is over it, and feeds `stageFile` — the same function the
+`+` menu's picker now calls, so a dropped file and a picked one travel one road.
+It is inert wherever there is no native view, children rendered bare.
+
+### The attachment is now IN the field, and survives a failed send
+
+Two changes the owner asked for, both about the same thing being visible:
+
+- the tray moved INSIDE the composer's pill, above the caret, instead of floating
+  as a strip above the row. What is attached is attached to the message you are
+  typing.
+- attachments are cleared AFTER `chat.send` resolves, not before it. They used to
+  go optimistically beside the draft, so a failed send put the words back and lost
+  the file — the one thing the reader could not retype.
+
+### The pointer highlight over the conversation
+
+Reported: moving the mouse over the chat window draws a blur over it. That is
+`UIContextMenuInteraction`'s own pointer effect, at the wrong size. The host view
+was built for a list row, where a row-sized highlight is how the system says a row
+is actionable; a transcript row is as wide as the window and as tall as a reply.
+
+`ContextMenuHost` now takes `hoverEffect` (default true, false only from
+`TranscriptList`) and `cornerRadius`. The native side answers both: an empty
+`UIPointerStyle` where the effect is off — deliberately NOT `UIPointerStyle.hidden()`,
+which hides the cursor — and a `UITargetedPreview` whose parameters clear the
+background, or cut it to the row's own radius where the effect stays on. That
+radius is also the answer to the chat row whose grey hover block had square
+corners under a rounded row: `BotRow` hands over the same `radii.card` its selected
+surface uses. Our own hover background was already rounded; the square one was the
+system's, drawn over the top.
+
+### A bottom sheet appeared instead of arriving
+
+`useSheetPresence` started its progress value at `visible ? 1 : 0`. Every sheet in
+this app is MOUNTED at the moment it becomes visible — `ChatSheetHost` renders one
+only once there is one to show — so the first render already stood at 1 and the
+opening animation ran from 1 to 1. Closing animated 1 → 0 and looked right, which
+is why it survived a round. It now always starts at 0, and `reduceMotion`
+collapses the duration rather than skipping the animation, so the completion
+callback that unmounts a closed sheet still runs on the same path.
+
+### Stuck Shift: the polled HID state, and what it cannot see
+
+Reported: Return sometimes inserts a newline instead of sending, and pressing
+Shift once fixes it. GameController delivers key changes to the app that is in
+front, so a Shift held while the window loses focus has its key-UP delivered
+somewhere else and `isPressed` stays true until the next Shift press corrects it.
+
+`isShiftDown()` is now the AND of two sources that fail in different directions:
+the polled state, which can stick ON, and a latch this process maintains from
+`keyChangedHandler` (both directions) and clears on `UIScene.didActivateNotification`,
+`UIApplication.didBecomeActiveNotification` and `GCKeyboardDidConnect`.
+
+`UIKey.modifierFlags` in `pressesBegan` was considered and not used: the first
+responder while typing is React Native's own `RCTUITextView`, so reading the flag
+off the Return would mean subclassing or swizzling a renderer-owned class, and the
+failure is the latch going stale rather than the poll being wrong in principle.
+
+The JavaScript decision is now one table, `shouldSend(key, modifiers)`, shared by
+`onKeyPress` and `onSubmitEditing`. One asymmetry is load-bearing and is commented
+where it lives: reaching `onSubmitEditing` at all IS the platform having decided to
+submit, so that site passes `hardwareKeyboard: true` and asks only about the
+modifier. Passing the prop through instead turns a software keyboard's Return —
+which has already inserted its newline — into a second one.
+
+### `-allowProvisioningDeviceRegistration`
+
+`npm run mac` now passes it beside `-allowProvisioningUpdates`.
+`-allowProvisioningUpdates` renews profiles for devices the team already knows; for
+a Mac that has never built this app, automatic signing fails with "doesn't include
+the currently selected device". Noted in docs/release.md.
+
+### An inline code chip broke where it had not asked to
+
+Photographed on the iPad build: `sc-domain:hermie.dev` and
+`WACHT OP VERIFICATIE` grew EMPTY to the end of the line and then continued, mid
+span, on the next one — a grey tail with nothing in it.
+
+Two things combined. UAX #14 offers a line-break opportunity after a colon and
+after a dot, and inside a run of capitals with a space in it, so CoreText took
+one; and React Native paints the background of every line fragment of a nested
+`Text`'s range, so the fragment that ended at that opportunity was painted across
+the rest of the line.
+
+`src/markdown/Inline.tsx` now puts U+2060 WORD JOINER between every pair of
+characters in a chip. Between EVERY pair rather than at a list of known
+punctuation: the list would be a guess at one line-breaking implementation, and
+the property wanted is simply "nowhere". That gives the owner's three rules in
+order — a chip that fits on the next line goes there whole, a chip wider than the
+line falls back to CoreText's character break, and every fragment that can exist
+holds glyphs. The zero-width space that used to invite a break at the chip's own
+word gaps is gone; that was the break he did not want.
+
+The joiners are on the clipboard if a reader long-presses and copies a whole
+paragraph on a phone. They are zero-width and invisible, and neither the context
+menu's Copy nor the Mac's Select text panel sees them — both go through the
+markdown source.
+
+**`attributed.ts` is deliberately NOT given the same treatment.** The panel exists
+to copy exact text, and ⌘C there copies the runs' characters. TextKit paints an
+`NSBackgroundColorAttributeName` over the glyph range on each line fragment rather
+than to the line's end, so the bug this fixes is React Native's rather than
+CoreText's.
+
+### Enter did not send on an iPad
+
+The same build sent on a Mac. `hardwareKeyboard` defaulted to `RUNS_ON_MAC`, which
+is a proxy for "is there a keyboard" and is false on exactly the device the owner
+was holding. It is now `RUNS_ON_MAC || hasHardwareKeyboard()`, evaluated per
+render, so a keyboard connected mid-session is picked up on the next one. A device
+with nothing attached keeps a Return that breaks the line.
+
+### A sheet's lower corners, and the strip of window under it
+
+The square bottom was said by overriding four style keys on two of `GlassSurface`'s
+three layers. The one it missed is the native material, which a parent's corner
+mask does not clip the way it clips a plain layer. `GlassSurface` takes
+`radiusBottom` now and spells all four corners out, so one number reaches every
+layer. Whether the residual gap under the card was that material's rounded corner
+or something else is NOT established from here — see the manual test.
+
+### The filter chips are gone
+
+All / Unread / Working / Needs input are removed from the chat list, with their
+strings, their model (`ChatFilter`, `CHAT_FILTERS`, `matchesFilter`) and their
+tests. `presenceOf` stays — the bead and the header still read it.
+
+### What is verified, and what is only reasoned
+
+**Verified on this machine:**
+
+- `npm run typecheck`, `npx eslint .`, `npm run format`, `npm test`,
+  `npm run test:app` and `npm run contrast:check` all green.
+- The Markdown → runs mapping, the menu entries, the send-key table, the drop
+  payload normalisation, the drop overlay's appear/disappear, the attachment
+  showing inside the composer field and surviving a failed send, the sheet's
+  opening animation starting off-screen, and the transcript asking for no hover
+  effect — all by unit test.
+- That `Text selectable` cannot drag-select, by reading
+  `RCTParagraphComponentView.mm` in the pinned React Native. Evidence about the
+  renderer, not about a Mac.
+
+**Reasoned, not watched — every native line in this round:**
+
+- That a `UITextView` in the overlay drag-selects, and that ⌘A and ⌘C reach it
+  because it takes first responder on `didMoveToWindow`.
+- That `UIDropInteraction` accepts a Finder drag at all, that `suggestedName` is
+  the name the reader sees, and that the copy into tmp outlives the gesture.
+- That an empty `UIPointerStyle` and a cleared `UITargetedPreview` stop UIKit
+  drawing the platter, and that a rounded `visiblePath` rounds it on a chat row.
+- That the Shift latch closes the real gap. The stale case cannot be produced
+  without two windows and a keyboard.
+
+**None of the native code in this round has been compiled into a Mac build here.**
+`modules/hermie-drop` is new, so it needs a `pod install` — `npm run mac` does one
+when the lockfile is stale, and this round did not run it.
+
+### The manual test, for a Mac window
+
+1. **Select text.** Right-click a reply → `Select text`. Drag across the panel:
+   the selection must follow the mouse. ⌘A selects everything, ⌘C copies it with
+   its formatting, Esc closes the panel. Headings, code, lists and links must
+   look like the message they came from.
+2. **Copy as Markdown** on the same menu still copies the raw source, and
+   `Copy text` the stripped words.
+3. **Drag a file** out of the Finder onto the conversation: a dimmed panel saying
+   "Drop file to attach" appears while it is over the window, and goes when the
+   drag leaves. Let go: the file appears as a chip INSIDE the composer's field,
+   with the caret under it and an × to take it off. Type something and send:
+   both go, and the chip disappears only once the send lands. Drag two files at
+   once — two chips, in the order dragged.
+4. **Move the mouse across the transcript.** Nothing should light up, blur or
+   lift. A secondary click must still open the message menu.
+5. **Move the mouse down the chat list.** The grey hover background must have the
+   same rounded corners as the selected row.
+6. **Open Chat options.** The sheet must slide up from the bottom with the
+   backdrop fading in, not appear.
+7. **Stuck Shift.** Hold Shift, click into another app, release Shift there, click
+   back into Hermie, type and press Return: it must SEND. Then Shift+Return must
+   still put in a newline.
+8. **The filter chips** are gone from above the chat list.
+9. **A long inline code span** — a message containing `sc-domain:hermie.dev` and
+   one containing `WACHT OP VERIFICATIE` — must move to the next line WHOLE rather
+   than breaking, and its grey background must hug the text with no empty tail. A
+   span wider than the whole line is the one case that may break, and then per
+   character.
+10. **On an iPad with a keyboard case**: Enter sends, Shift+Enter breaks the line.
+    With the keyboard detached, the on-screen Return breaks the line as before.
+11. **A sheet's lower edge** sits on the window's bottom with square corners and
+    no strip of window beneath it, on all three.
+
+### Still open after this round
+
+Reported while the round was running and NOT started, with what is already known:
+
+- **Every thought appears twice with Show thinking on.** One item per thought is
+  wanted, the interim replaced rather than appended, and a thought drawn as
+  secondary text rather than as a bubble. Wants a reducer test over
+  reasoning → interim → interim → complete.
+- **The bubble tails.** The owner wants the iMessage droplet: the outer bottom
+  corner running out into a short curve that ends in a point. The STRUCTURE is
+  already what he describes — `Bubble.tsx` draws one SVG path behind the bubble,
+  at a fixed 10×10, only on the last message of a run, and `bubbleCorners` already
+  tucks the tail-side corners of a grouped bubble. What is wrong is the SHAPE, so
+  the change is `TAIL.path` and `TAIL` in `src/ui/tokens.ts`, plus `radii.bubble`
+  if 16 should become 18. Drawing that blind is how a round gets spent; it wants
+  somebody looking at it.
+- **The typing indicator should be the last row of the transcript.** Note that it
+  is pinned outside the list ON PURPOSE, and the reason is written where it lives:
+  anything whose height comes and goes at the bottom of an inverted list moves the
+  first cell's origin, which is the view `maintainVisibleContentPosition` anchors
+  on while the reader is scrolled away. Moving it in means making the anchor logic
+  count it as a row, which is the actual work.
+- **The header status should say what the bot is doing** — Thinking, Typing,
+  Running <tool>, Waiting for you, Delegating — from the event stream, as a
+  `turnActivity(chat)` selector in `@hermie/transcript`.
