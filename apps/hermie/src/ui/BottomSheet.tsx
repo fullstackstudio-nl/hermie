@@ -69,10 +69,37 @@ function noop(): void {
 /**
  * `mounted` trails `visible` by one animation, so the sheet can slide out
  * before it stops existing.
+ *
+ * ## The opening animation, and the one character that had eaten it
+ *
+ * The value used to start at `visible ? 1 : 0`, and every sheet in this app is
+ * mounted AT THE MOMENT it becomes visible — `ChatSheetHost` renders one only
+ * when there is one to show. So the first render already had `visible === true`,
+ * the value already stood at 1, and the effect then animated 1 → 1: the sheet
+ * was simply THERE, fully up, with no slide and no backdrop fade. Closing
+ * animated 1 → 0 and looked correct, which is exactly why this survived — the
+ * owner's report is "they appear instantly and only animate when closing".
+ *
+ * It now always starts at 0 and is animated up, on mount and on every
+ * `visible` → true. There is no case that wants the old behaviour: a sheet
+ * mounted invisible renders nothing at all, so starting from 0 costs it nothing.
+ *
+ * `reduceMotion` collapses the duration rather than skipping the animation, so
+ * the completion callback — which is what unmounts a closed sheet — still runs
+ * on exactly the same path.
+ *
+ * The driver is left on the JavaScript side. `opacity` and `translateY` would
+ * both be native-driver eligible, but the closing half has always run this way
+ * and looked right, so the driver is not what was wrong here; changing it would
+ * be an unverifiable change riding along with a verifiable one.
  */
-function useSheetPresence(visible: boolean, onClosed?: () => void): { mounted: boolean; progress: Animated.Value } {
+function useSheetPresence(
+  visible: boolean,
+  reduceMotion: boolean,
+  onClosed?: () => void
+): { mounted: boolean; progress: Animated.Value } {
   const [mounted, setMounted] = useState(visible)
-  const progress = useRef(new Animated.Value(visible ? 1 : 0)).current
+  const progress = useRef(new Animated.Value(0)).current
   const closed = useRef(onClosed)
 
   closed.current = onClosed
@@ -83,9 +110,8 @@ function useSheetPresence(visible: boolean, onClosed?: () => void): { mounted: b
     }
 
     const animation = Animated.timing(progress, {
-      duration: SHEET_ANIMATION_MS,
+      duration: reduceMotion ? 0 : SHEET_ANIMATION_MS,
       toValue: visible ? 1 : 0,
-      // Layout properties are not native-driver eligible.
       useNativeDriver: false
     })
 
@@ -97,7 +123,7 @@ function useSheetPresence(visible: boolean, onClosed?: () => void): { mounted: b
     })
 
     return () => animation.stop()
-  }, [progress, visible])
+  }, [progress, reduceMotion, visible])
 
   return { mounted, progress }
 }
@@ -138,7 +164,7 @@ export function BottomSheet({
   const theme = useTheme()
   const insets = useSafeAreaInsets()
   const window = useWindowDimensions()
-  const { mounted, progress } = useSheetPresence(visible, onClosed)
+  const { mounted, progress } = useSheetPresence(visible, theme.reduceMotion, onClosed)
 
   /**
    * Escape closes the sheet — unless it is blocking, in which case it is
