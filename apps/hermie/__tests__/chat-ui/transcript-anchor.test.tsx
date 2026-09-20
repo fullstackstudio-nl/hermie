@@ -276,6 +276,13 @@ describe('opening a disclosure', () => {
   const limit = FOLD_LINES.regular * markdownLeading(typeScale.body.fontSize)
   const growth = HEIGHT - limit
 
+  /** One layout pass for a row, the way the list hears about it. */
+  function layoutRow(id: string, height: number): void {
+    act(() => {
+      fireEvent(screen.getByTestId(`transcript-row-${id}`), 'layout', { nativeEvent: { layout: { height } } })
+    })
+  }
+
   function press(): void {
     act(() => {
       fireEvent(screen.getByTestId(`assistant-fold-${long.id}-body`), 'layout', {
@@ -335,6 +342,70 @@ describe('opening a disclosure', () => {
       expect(scrollToOffset).not.toHaveBeenCalledWith({ animated: false, offset: 0 })
     } finally {
       scrollToOffset.mockRestore()
+    }
+  })
+
+  it('follows a row that grows in two stages, not just the one it predicted', () => {
+    // The owner's third report: `Show more` on a message containing a TABLE
+    // still moved the text up by about 212pt. `Fold` measures its own unclipped
+    // body and can say how much taller the text is about to be — but the table
+    // measures its columns a pass later, and that second stage was in nobody's
+    // number. So the prediction is the first estimate and every frame the row
+    // reports after it is measured.
+    const scrollToOffset = jest.spyOn(FlatList.prototype, 'scrollToOffset').mockImplementation(() => {})
+    const TABLE = 212
+
+    try {
+      renderScreen(<TranscriptList items={visible([userItem, long])} subagents={subagentMap} />)
+
+      scrollTo(420)
+      press()
+      scrollToOffset.mockClear()
+
+      // Stage one: the row reports the height the fold already predicted. That
+      // is the baseline, and it must move nothing.
+      layoutRow(long.id, 1000)
+      expect(scrollToOffset).not.toHaveBeenCalled()
+
+      // Stage two: the table arrives.
+      layoutRow(long.id, 1000 + TABLE)
+      expect(scrollToOffset).toHaveBeenCalledWith({ animated: false, offset: 420 + growth + TABLE })
+
+      // And a third pass that changes nothing asks for nothing.
+      scrollToOffset.mockClear()
+      layoutRow(long.id, 1000 + TABLE)
+      expect(scrollToOffset).not.toHaveBeenCalled()
+    } finally {
+      scrollToOffset.mockRestore()
+    }
+  })
+
+  it('stops measuring once the hold has been let go', () => {
+    // The window is `HOLD_SETTLE_MS`. A row that goes on changing height after
+    // it — an image landing, a stream continuing — is not the expansion the
+    // reader asked for, and must not move them.
+    jest.useFakeTimers()
+
+    const scrollToOffset = jest.spyOn(FlatList.prototype, 'scrollToOffset').mockImplementation(() => {})
+
+    try {
+      renderScreen(<TranscriptList items={visible([userItem, long])} subagents={subagentMap} />)
+
+      scrollTo(420)
+      press()
+      layoutRow(long.id, 1000)
+
+      act(() => {
+        jest.advanceTimersByTime(1000)
+      })
+
+      scrollToOffset.mockClear()
+      layoutRow(long.id, 1600)
+
+      expect(scrollToOffset).not.toHaveBeenCalled()
+    } finally {
+      scrollToOffset.mockRestore()
+      jest.useRealTimers()
     }
   })
 
