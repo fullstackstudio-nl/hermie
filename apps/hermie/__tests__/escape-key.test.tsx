@@ -7,10 +7,10 @@
  * `Modal` leaves. That leaves the routing to JavaScript, and the rule is the one a
  * reader expects: the thing that opened last closes first.
  *
- * The case worth the most care is the blocking sheet. ADR-0010 says an agent's
- * question is answered by an explicit tap, so Escape must not dismiss it — and
- * must not fall through to whatever is underneath either, or it would stop the
- * very turn that is waiting for the answer.
+ * The case worth the most care is a sheet carrying an agent's question. Escape
+ * closes it — dismissing is not answering, and ADR-0010 only ever governed the
+ * answer — but it must never fall through to whatever is underneath, or it
+ * would stop the very turn that is waiting for the question.
  */
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native'
 import { useState } from 'react'
@@ -144,26 +144,13 @@ describe('BottomSheet and Escape', () => {
     expect(onRequestClose).toHaveBeenCalledTimes(1)
   })
 
-  it('does not dismiss a blocking sheet', () => {
-    const onRequestClose = jest.fn()
-
-    renderScreen(
-      <BottomSheet blocking onRequestClose={onRequestClose} testID="sheet" visible>
-        <Text>Body</Text>
-      </BottomSheet>
-    )
-
-    pressEscape()
-
-    expect(onRequestClose).not.toHaveBeenCalled()
-  })
-
   /**
-   * The load-bearing half of the rule. A blocking sheet SWALLOWS Escape: if it
-   * merely ignored the key, the handler underneath would get it, and underneath
-   * an approval sheet is the composer running the turn that asked the question.
+   * The load-bearing half of the rule. A sheet takes Escape and STOPS it: if it
+   * merely closed and let the key past, the handler underneath would get it too,
+   * and underneath an approval sheet is the composer running the turn that asked
+   * the question.
    */
-  it('swallows Escape rather than letting it through to what is underneath', () => {
+  it('stops Escape rather than letting it through to what is underneath', () => {
     const underneath = jest.fn()
     const onRequestClose = jest.fn()
 
@@ -171,7 +158,7 @@ describe('BottomSheet and Escape', () => {
       withProviders(
         <>
           <Taker label="underneath" onEscape={underneath} />
-          <BottomSheet blocking onRequestClose={onRequestClose} testID="sheet" visible>
+          <BottomSheet onRequestClose={onRequestClose} testID="sheet" visible>
             <Text>Body</Text>
           </BottomSheet>
         </>
@@ -180,8 +167,8 @@ describe('BottomSheet and Escape', () => {
 
     pressEscape()
 
+    expect(onRequestClose).toHaveBeenCalledTimes(1)
     expect(underneath).not.toHaveBeenCalled()
-    expect(onRequestClose).not.toHaveBeenCalled()
   })
 
   it('gives Escape back once the sheet has gone', async () => {

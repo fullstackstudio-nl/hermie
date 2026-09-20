@@ -7,8 +7,9 @@
  *     Never a hard-coded set — the gateway decides what may be answered, and
  *     inventing an "Always allow" the server did not offer would send a choice
  *     it will reject.
- *  2. Only an explicit tap answers. The sheet is `blocking`, so the backdrop
- *     does nothing, and there is no gesture anywhere near it.
+ *  2. Only an explicit tap ANSWERS. The sheet can be dismissed — backdrop,
+ *     Escape, a drag down — and none of those is an answer: the question stays
+ *     open and comes back from its own row in the transcript.
  *  3. A 400 ms guard after mount. A sheet that appears under a finger already
  *     travelling toward the screen would otherwise answer a question the user
  *     never read. It guards the MOUNT only; a tap that gets through answers at
@@ -134,9 +135,6 @@ export function ApprovalSheet({
   return (
     <BottomSheet
       accessibilityLabel={chatStrings.approval.title}
-      // Still blocking once answered: the sheet then shows why it closed, and
-      // a stray backdrop tap should not race the reason off the screen.
-      blocking
       onClosed={onClosed}
       onRequestClose={onClose}
       testID="approval-sheet"

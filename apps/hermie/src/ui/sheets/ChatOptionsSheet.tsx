@@ -242,7 +242,6 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
     return (
       <BottomSheet
         accessibilityLabel={chatStrings.options.expensiveTitle}
-        blocking
         onClosed={props.onClosed}
         onRequestClose={() => props.onCancelExpensiveModel?.()}
         testID="chat-options-sheet"

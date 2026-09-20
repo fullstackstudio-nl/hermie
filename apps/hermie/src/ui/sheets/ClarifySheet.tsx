@@ -95,7 +95,6 @@ export function ClarifySheet({ visible, item, onLock, onSubmit, onSkip, onClose,
     return (
       <BottomSheet
         accessibilityLabel={chatStrings.clarify.title}
-        blocking
         onClosed={onClosed}
         onRequestClose={onClose}
         testID="clarify-sheet"
@@ -125,7 +124,6 @@ export function ClarifySheet({ visible, item, onLock, onSubmit, onSkip, onClose,
   return (
     <BottomSheet
       accessibilityLabel={chatStrings.clarify.title}
-      blocking
       onClosed={onClosed}
       onRequestClose={onClose}
       testID="clarify-sheet"

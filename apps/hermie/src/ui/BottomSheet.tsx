@@ -1,26 +1,43 @@
 /**
- * The app's bottom sheet: `Modal` + `Animated`, and nothing else.
+ * The app's bottom sheet: `Modal` + `Animated` + one `PanResponder`.
  *
  * It slides with `Animated` on the JS driver — `useNativeDriver` is unavailable
- * for layout properties — and dismisses on an explicit tap, never on a drag.
- * That last part is a decision, not a limitation: ADR-0010 says an agent's
- * question is answered by an explicit tap, because a swipe that lands on
- * "Allow" is not consent, so no gesture library is involved anywhere here.
+ * for layout properties — and it goes three ways: a tap on the backdrop, Escape
+ * from a hardware keyboard, and a drag down that follows the finger.
+ *
+ * ## Why a question can be dismissed now, and ADR-0010 is still intact
+ *
+ * The sheet used to take a `blocking` flag that switched all three off for an
+ * agent's question, because "a swipe that lands on Allow is not consent". That
+ * reading was one word too wide. ADR-0010 is about ANSWERING: an answer is an
+ * explicit tap on a named choice, and no gesture here produces one. Dismissing
+ * is not an answer — the question stays open on the gateway and stays in the
+ * transcript as a row with an `Answer` button that brings the sheet back — so
+ * the rule that matters is untouched, and the reader is no longer trapped
+ * under a panel they wanted to look behind.
+ *
+ * `PanResponder` rather than `react-native-gesture-handler`: the app does not
+ * depend on the latter, and this is one vertical drag with one threshold.
  *
  * This used to be three files. `react-native-macos` had no `RCTModalHostView`,
  * so a `Modal` red-boxed on a Mac and the sheet was split into a shared body
  * plus one presenter per platform. The Mac is the iPad build now (ADR-0011) and
  * has a real `Modal`, so the split is gone.
  */
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Animated,
   KeyboardAvoidingView,
   Modal,
+  PanResponder,
   Pressable,
   ScrollView,
   useWindowDimensions,
   View,
+  type GestureResponderEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+  type PanResponderGestureState,
   type ViewStyle
 } from 'react-native'
 
@@ -36,14 +53,15 @@ import { useEscapeKey } from './useEscapeKey'
 
 export interface BottomSheetProps {
   visible: boolean
-  /** Called for a backdrop tap or a hardware back press. Ignored when blocking. */
-  onRequestClose: () => void
   /**
-   * A question that must be answered on the sheet: the backdrop stops
-   * dismissing and the grabber is hidden, so the only ways out are the sheet's
-   * own buttons.
+   * The reader asked for this sheet to go: a backdrop tap, Escape, a hardware
+   * back press, or a drag past the dismissal threshold.
+   *
+   * It is never an ANSWER. A sheet carrying an agent's question hands this to
+   * the same handler that the `Later` button uses — the question is put aside,
+   * not resolved.
    */
-  blocking?: boolean
+  onRequestClose: () => void
   children: ReactNode
   /** Sheet content scrolls by default; a sheet that manages its own scrolling opts out. */
   scrollable?: boolean
@@ -62,8 +80,118 @@ export interface BottomSheetProps {
 
 export const SHEET_ANIMATION_MS = 220
 
-function noop(): void {
-  // A blocking sheet takes Escape and does nothing with it. See `useEscapeKey`.
+/** Far enough that a settling finger is not a drag; short enough to feel direct. */
+const DRAG_SLOP = 6
+
+/** Past a third of the sheet's own height, letting go dismisses it. */
+const DRAG_DISMISS_FRACTION = 1 / 3
+
+/**
+ * …or a flick: 500 pt/s, which `PanResponder` reports in points per
+ * MILLISECOND. A fast, short drag is still a dismissal.
+ */
+const DRAG_DISMISS_VELOCITY = 0.5
+
+/**
+ * Is this gesture a dismissal starting, rather than a scroll or a tap?
+ *
+ * Downward, past the slop, and more vertical than horizontal. Exported because
+ * a test renderer can ask this directly, and cannot drag anything.
+ */
+export function beginsSheetDrag(gesture: { dx: number; dy: number }): boolean {
+  return gesture.dy > DRAG_SLOP && Math.abs(gesture.dy) > Math.abs(gesture.dx)
+}
+
+/**
+ * Where a drag of `dy` points puts the slide-in's own 0…1 value.
+ *
+ * The SAME value the sheet opened on, which is what makes the drag and the
+ * animation one motion rather than two things that agree: 1 is fully up, 0 is
+ * one sheet-height below the window.
+ *
+ * Upward is CLAMPED rather than rubber-banded, and that is a deliberate
+ * departure from the usual bounce. A sheet is anchored to the window's bottom
+ * edge and its lower corners are square against it; lifting it by even a few
+ * points opens a strip of window underneath — which is the defect the previous
+ * round went and removed. So the sheet's own place is as high as it goes.
+ */
+export function sheetDragProgress(dy: number, height: number): number {
+  if (height <= 0) {
+    return 1
+  }
+
+  return Math.max(0, Math.min(1, 1 - dy / height))
+}
+
+/** Does letting go here dismiss the sheet, or spring it back? */
+export function releaseDismissesSheet(gesture: { dy: number; vy: number }, height: number): boolean {
+  if (gesture.dy <= 0) {
+    return false
+  }
+
+  return gesture.dy > height * DRAG_DISMISS_FRACTION || gesture.vy > DRAG_DISMISS_VELOCITY
+}
+
+export interface SheetDrag {
+  /** The slide-in's own value, which the drag writes to directly. */
+  progress: Animated.Value
+  /** The sheet's height right now. Read per gesture, not captured. */
+  height: () => number
+  /** Is the content inside scrolled to its top? */
+  atTop: () => boolean
+  onRequestClose: () => void
+}
+
+/**
+ * The whole drag, as the configuration `PanResponder.create` takes.
+ *
+ * A function rather than inline callbacks so that the behaviour can be exercised
+ * without a touch screen: `PanResponder` computes its gesture state from a
+ * stream of native touches and there is no honest way to synthesise one, but the
+ * four callbacks below are exactly what it would call, and a test can call them
+ * with the gesture it means.
+ */
+export function sheetDragConfig({ progress, height, atTop, onRequestClose }: SheetDrag) {
+  const springBack = () => Animated.spring(progress, { bounciness: 0, toValue: 1, useNativeDriver: false }).start()
+
+  return {
+    /*
+      Two questions, and the difference between them is the whole of "scrollable
+      content only drag-dismisses when scrolled to top".
+
+      The CAPTURE phase runs from the root down, so answering yes there takes the
+      gesture away from the `ScrollView` inside. That is only allowed while the
+      content is already at its top, where there is nothing left to scroll and a
+      downward drag can only mean the sheet.
+
+      The bubble phase runs from the touched view up, and is reached only when
+      nothing deeper claimed the gesture — which is what makes the grip bar
+      (outside the scroll view) a handle without any code of its own.
+    */
+    onMoveShouldSetPanResponder: (_event: GestureResponderEvent, gesture: PanResponderGestureState) =>
+      beginsSheetDrag(gesture),
+    onMoveShouldSetPanResponderCapture: (_event: GestureResponderEvent, gesture: PanResponderGestureState) =>
+      atTop() && beginsSheetDrag(gesture),
+
+    // The sheet may still be sliding IN when a finger lands on it.
+    onPanResponderGrant: () => progress.stopAnimation(),
+    onPanResponderMove: (_event: GestureResponderEvent, gesture: PanResponderGestureState) =>
+      progress.setValue(sheetDragProgress(gesture.dy, height())),
+
+    onPanResponderRelease: (_event: GestureResponderEvent, gesture: PanResponderGestureState) => {
+      if (releaseDismissesSheet(gesture, height())) {
+        // Nothing is animated here. `visible` goes false, and the presence
+        // effect carries the value the finger left behind the rest of the way
+        // down — one motion, from the drag straight into the slide-out.
+        onRequestClose()
+
+        return
+      }
+
+      springBack()
+    },
+    onPanResponderTerminate: springBack
+  }
 }
 
 /**
@@ -154,7 +282,6 @@ export function BottomSheet({
   visible,
   onClosed,
   onRequestClose,
-  blocking = false,
   children,
   scrollable = true,
   accessibilityLabel,
@@ -167,22 +294,52 @@ export function BottomSheet({
   const { mounted, progress } = useSheetPresence(visible, theme.reduceMotion, onClosed)
 
   /**
-   * Escape closes the sheet — unless it is blocking, in which case it is
-   * SWALLOWED rather than ignored.
+   * Escape closes the sheet — the topmost one, and only that one.
    *
-   * The difference matters. A blocking sheet is an agent's question, and ADR-0010
-   * says those are answered by an explicit tap; letting Escape fall through would
-   * hand the key to whatever is underneath, so the composer would stop the very
-   * turn that is waiting for the answer. Registering a handler that does nothing
-   * is how a modal says "the key stops here".
+   * `useEscapeKey` is a stack, so the key never falls through to what is under
+   * the sheet: the composer will not stop a turn because someone closed a panel
+   * over it. That was the whole reason a question used to register a handler
+   * that did nothing, and a handler that closes swallows the key just as well.
    */
-  useEscapeKey(blocking ? noop : onRequestClose, mounted)
+  useEscapeKey(onRequestClose, mounted)
+
+  const { left, maxHeight, maxWidth } = sheetBox(window.width, window.height)
+
+  /**
+   * What the drag needs to know, read from inside a responder that was built
+   * once: how tall the sheet is, whether its scroll view is at the top, and
+   * where to send a dismissal.
+   */
+  const height = useRef(maxHeight)
+  const atTop = useRef(true)
+  const close = useRef(onRequestClose)
+
+  height.current = maxHeight
+  close.current = onRequestClose
+
+  const pan = useMemo(
+    () =>
+      PanResponder.create(
+        sheetDragConfig({
+          atTop: () => atTop.current,
+          height: () => height.current,
+          onRequestClose: () => close.current(),
+          progress
+        })
+      ),
+    [progress]
+  )
+
+  const onScroll = useMemo(
+    () => (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      atTop.current = event.nativeEvent.contentOffset.y <= 0
+    },
+    []
+  )
 
   if (!mounted) {
     return null
   }
-
-  const { left, maxHeight, maxWidth } = sheetBox(window.width, window.height)
 
   const body = (
     <View
@@ -190,29 +347,30 @@ export function BottomSheet({
         gap: theme.space.md,
         paddingBottom: insets.bottom + theme.space.lg,
         paddingHorizontal: theme.space.xl,
-        paddingTop: theme.space.md
+        paddingTop: theme.space.xs
       }}
     >
-      {blocking ? null : (
-        <View
-          // The bar is decoration, not a control: this sheet never listens to a
-          // drag (ADR-0010 — a swipe that lands on "Allow" is not consent), so
-          // announcing a "Drag handle" would promise a gesture that does not
-          // exist. The way out is the backdrop, which IS labelled.
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-          style={{
-            alignSelf: 'center',
-            backgroundColor: theme.hairline,
-            borderRadius: 3,
-            height: 5,
-            marginBottom: theme.space.xs,
-            width: 40
-          }}
-          testID="sheet-grabber"
-        />
-      )}
       {children}
+    </View>
+  )
+
+  /*
+    The grip bar, OUTSIDE the scroll view.
+
+    That placement is what makes it a handle. A drag is offered to the deepest
+    view first, and a `ScrollView` takes every vertical one; up here nothing
+    claims the gesture, so it reaches the panel's responder whatever the content
+    below is doing. The bar stays silent to VoiceOver — it is a target for a
+    gesture, and the labelled way out is the backdrop's `Dismiss`.
+  */
+  const grip = (
+    <View
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={{ alignItems: 'center', paddingBottom: theme.space.xs, paddingTop: theme.space.md }}
+      testID="sheet-grip"
+    >
+      <View style={{ backgroundColor: theme.hairline, borderRadius: 3, height: 5, width: 40 }} testID="sheet-grabber" />
     </View>
   )
 
@@ -223,7 +381,7 @@ export function BottomSheet({
       // than leaving two opaque strips above and below a dimmed screen. The
       // navigation-bar flag is only honoured together with the status-bar one.
       navigationBarTranslucent
-      onRequestClose={blocking ? undefined : onRequestClose}
+      onRequestClose={onRequestClose}
       statusBarTranslucent
       transparent
       visible={mounted}
@@ -233,11 +391,8 @@ export function BottomSheet({
       <View style={{ flex: 1, justifyContent: 'flex-end' }} testID={testID}>
         <Animated.View style={{ flex: 1, opacity: progress }}>
           <Pressable
-            accessibilityLabel={blocking ? undefined : 'Dismiss'}
-            accessibilityRole={blocking ? undefined : 'button'}
-            // A blocking sheet still paints a backdrop; it just does not answer
-            // to it.
-            disabled={blocking}
+            accessibilityLabel="Dismiss"
+            accessibilityRole="button"
             onPress={onRequestClose}
             style={{ backgroundColor: SCRIM_COLOR, flex: 1 }}
             testID={testID ? `${testID}-backdrop` : 'sheet-backdrop'}
@@ -257,6 +412,7 @@ export function BottomSheet({
           <Animated.View
             accessibilityLabel={accessibilityLabel}
             accessibilityViewIsModal
+            {...pan.panHandlers}
             style={{
               maxHeight,
               maxWidth,
@@ -291,10 +447,16 @@ export function BottomSheet({
               radiusBottom={0}
               variant="sheet"
             >
+              {grip}
               {scrollable ? (
                 <ScrollView
                   keyboardShouldPersistTaps="handled"
+                  onScroll={onScroll}
                   ref={directTouchPanRef}
+                  // The drag has to know whether the content is at its top, and
+                  // 16ms is the interval that makes the answer true for the
+                  // frame the gesture starts on.
+                  scrollEventThrottle={16}
                   showsVerticalScrollIndicator={false}
                 >
                   {body}

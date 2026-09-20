@@ -248,7 +248,6 @@ export function CronDetailScreen({ controller, job, onClose, onOpenRun, onEdit, 
 
       <BottomSheet
         accessibilityLabel={cronStrings.confirmDelete.title(detail.name)}
-        blocking
         onRequestClose={() => setConfirmingDelete(false)}
         testID="cron-delete-sheet"
         visible={confirmingDelete}

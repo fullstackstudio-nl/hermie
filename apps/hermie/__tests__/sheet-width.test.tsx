@@ -104,14 +104,14 @@ describe('the grabber', () => {
     expect(screen.getByTestId('sheet-grabber', { includeHiddenElements: true })).toBeTruthy()
   })
 
-  it('is not there on a blocking one, which has no way out but its own buttons', () => {
+  it('is there on a question too, because every sheet can now be dragged away', () => {
     size(PHONE.width, PHONE.height)
     renderScreen(
-      <BottomSheet blocking onRequestClose={jest.fn()} testID="sheet" visible>
+      <BottomSheet accessibilityLabel="Allow this command?" onRequestClose={jest.fn()} testID="sheet" visible>
         <View testID="sheet-body" />
       </BottomSheet>
     )
 
-    expect(screen.queryByTestId('sheet-grabber', { includeHiddenElements: true })).toBeNull()
+    expect(screen.getByTestId('sheet-grabber', { includeHiddenElements: true })).toBeTruthy()
   })
 })

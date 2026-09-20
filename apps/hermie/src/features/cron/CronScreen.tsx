@@ -298,9 +298,9 @@ export function CronScreen({ initialJobId }: CronScreenProps = {}) {
  * One component for both because the two sheets differ only in their words: the
  * shape is an eyebrow, a question, the consequence in one sentence, and two
  * buttons with the dangerous one first — which is the shape the detail screen's
- * delete confirmation already had, and it is `blocking` for the same reason
- * (ADR-0010: a question is answered by an explicit tap, so Escape must not answer
- * it either).
+ * delete confirmation already had. Dismissing it — backdrop, Escape, a drag —
+ * is the same as Cancel, which is the only safe reading of "the reader made it
+ * go away".
  */
 function ConfirmSheet({
   confirming,
@@ -318,7 +318,6 @@ function ConfirmSheet({
   return (
     <BottomSheet
       accessibilityLabel={words.title(name)}
-      blocking
       onRequestClose={onCancel}
       testID="cron-row-confirm-sheet"
       visible={confirming !== null}

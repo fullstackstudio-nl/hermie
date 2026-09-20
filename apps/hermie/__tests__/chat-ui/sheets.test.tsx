@@ -1,7 +1,7 @@
 /**
  * The bottom sheets, and the three rules that matter more than their looks:
- * a tap guard, exactly the server's choices, and a backdrop that answers
- * nothing while a question is open.
+ * a tap guard, exactly the server's choices, and a dismissal that answers
+ * nothing.
  */
 import { act, fireEvent, screen } from '@testing-library/react-native'
 import { Modal, Text } from 'react-native'
@@ -36,17 +36,20 @@ describe('BottomSheet', () => {
     expect(onRequestClose).toHaveBeenCalledTimes(1)
   })
 
-  it('ignores the backdrop while blocking', () => {
+  it('asks to close rather than answering, which is what a question can allow', () => {
+    // Every sheet takes a backdrop tap now, including one carrying an agent's
+    // question. ADR-0010 is about ANSWERING — an explicit tap on a named choice
+    // — and this is not one: the caller puts the question aside.
     const onRequestClose = jest.fn()
 
     renderScreen(
-      <BottomSheet blocking onRequestClose={onRequestClose} testID="sheet" visible>
+      <BottomSheet onRequestClose={onRequestClose} testID="sheet" visible>
         <Text>Body</Text>
       </BottomSheet>
     )
 
     fireEvent.press(screen.getByTestId('sheet-backdrop'))
-    expect(onRequestClose).not.toHaveBeenCalled()
+    expect(onRequestClose).toHaveBeenCalledTimes(1)
   })
 
   it('renders nothing while closed', () => {
