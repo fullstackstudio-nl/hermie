@@ -99,8 +99,9 @@ public final class HermieContextMenuView: ExpoView, UIContextMenuInteractionDele
   ) -> UIPointerStyle? {
     guard hoverEffect else {
       // NOT `UIPointerStyle.hidden()`, which hides the CURSOR — over a wall of text the cursor is
-      // the one thing that must stay. An empty style is "the system arrow, and no effect".
-      return UIPointerStyle(shape: nil, constrainedAxes: [])
+      // the one thing that must stay. `.system()` is "the system arrow, and no effect"; the shape
+      // initialiser no longer accepts nil on the iOS 27 SDK.
+      return UIPointerStyle.system()
     }
 
     return nil
