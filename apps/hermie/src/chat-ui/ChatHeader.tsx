@@ -15,6 +15,7 @@
 import { Pressable, View } from 'react-native'
 
 import { GlassGroup, GlassSurface } from '../ui/glass'
+import { Icon, ICON_SIZE, type IconName } from '../ui/Icon'
 import { PresenceBead } from '../ui/PresenceBead'
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
@@ -44,6 +45,17 @@ export interface ChatHeaderProps {
   accentFill?: string
   onBack?: () => void
   onOpenOptions: () => void
+  /**
+   * Hide the wide layout's chat list.
+   *
+   * Absent on the compact shell, which has no sidebar — the leading group there
+   * carries Back instead — and absent on the wide one while the list is ALREADY
+   * hidden, because the rail that replaces it carries the control to bring it
+   * back. Measured on an iPad: with a button in both places, a collapsed window
+   * drew two identical sidebar icons about 90pt apart doing the same thing. So
+   * this only ever hides, which is why it needs no state to name.
+   */
+  onToggleSidebar?: () => void
   testID?: string
 }
 
@@ -62,20 +74,29 @@ function stateLabel(presence: PresenceState, lastSeenAt?: number): string {
   return presence === 'working' ? chatStrings.header.running : chatStrings.header.idle
 }
 
-/** A round glass button. The header has two and they merge where they touch. */
+/**
+ * A round glass button. The header has up to three and they merge where they touch.
+ *
+ * The mark is a drawn icon rather than a character, for the reason the tab strip's
+ * are: `‹` and `•••` come from different fonts with different ideas about how much
+ * of the em box to fill, so at one `fontSize` they were two different weights
+ * inside two identical circles. `src/ui/Icon.tsx` has the rest of it.
+ */
 function RoundButton({
   label,
-  glyph,
+  icon,
   onPress,
   size,
   testID
 }: {
   label: string
-  glyph: string
+  icon: IconName
   onPress: () => void
   size: number
   testID: string
 }) {
+  const theme = useTheme()
+
   return (
     <GlassSurface radius={size / 2} shadow="card" style={{ height: size, width: size }} variant="control">
       <Pressable
@@ -92,11 +113,29 @@ function RoundButton({
         })}
         testID={testID}
       >
-        <Text color="accentText" style={{ fontSize: 17, lineHeight: 20 }}>
-          {glyph}
-        </Text>
+        <Icon color={theme.colors.accentText} name={icon} size={ICON_SIZE.control} />
       </Pressable>
     </GlassSurface>
+  )
+}
+
+/**
+ * The sidebar control on its own, for a column that has no header to put it in.
+ *
+ * The wide layout's empty state — before a chat has been picked — is the case: no
+ * chat means no `ChatHeader`, which would leave hiding the list reachable only from
+ * a keyboard. It is the same `RoundButton` and the same label rather than a second
+ * button that looks like this one, so the two cannot drift apart.
+ */
+export function SidebarToggleButton({ onPress }: { onPress: () => void }) {
+  return (
+    <RoundButton
+      icon="sidebar"
+      label={chatStrings.header.hideSidebar}
+      onPress={onPress}
+      size={CONTROL_SIZE.regular}
+      testID="chat-header-sidebar"
+    />
   )
 }
 
@@ -110,6 +149,7 @@ export function ChatHeader({
   accentFill,
   onBack,
   onOpenOptions,
+  onToggleSidebar,
   testID = 'chat-header'
 }: ChatHeaderProps) {
   const theme = useTheme()
@@ -133,8 +173,29 @@ export function ChatHeader({
       testID={testID}
       variant="float"
     >
+      {/*
+        The leading group. Back belongs to a stack and the sidebar control belongs
+        to a window, so the two are never both here: the compact shell passes
+        `onBack` and no `onToggleSidebar`, and the wide shell the other way round.
+      */}
       {onBack ? (
-        <RoundButton glyph="‹" label={chatStrings.header.back} onPress={onBack} size={size} testID="chat-header-back" />
+        <RoundButton
+          icon="chevronLeft"
+          label={chatStrings.header.back}
+          onPress={onBack}
+          size={size}
+          testID="chat-header-back"
+        />
+      ) : null}
+
+      {onToggleSidebar ? (
+        <RoundButton
+          icon="sidebar"
+          label={chatStrings.header.hideSidebar}
+          onPress={onToggleSidebar}
+          size={size}
+          testID="chat-header-sidebar"
+        />
       ) : null}
 
       {/* The ring is the chat's colour; the bead is the bot's state. Two facts,
@@ -162,7 +223,7 @@ export function ChatHeader({
 
       <GlassGroup spacing={theme.space.sm} style={{ flexDirection: 'row', gap: theme.space.sm }}>
         <RoundButton
-          glyph="•••"
+          icon="ellipsis"
           label={chatStrings.header.options}
           onPress={onOpenOptions}
           size={size}

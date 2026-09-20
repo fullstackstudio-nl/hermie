@@ -16,6 +16,7 @@ import { ActivityIndicator, Pressable, View } from 'react-native'
 import { MONOSPACE } from '../markdown'
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
+import { Icon, ICON_SIZE } from '../ui/Icon'
 import { CONTROL_MIN_HEIGHT, TAP_SLOP } from '../ui/tokens'
 import { DiffView } from './DiffView'
 import { clipInline, formatDuration } from './format'
@@ -191,9 +192,11 @@ export function ToolCard({ item, presentation = 'collapsed', expanded, onToggleE
             </Text>
           ) : null}
 
-          <Text color="textMuted" style={{ fontSize: 16 }}>
-            {isExpanded ? '⌄' : '›'}
-          </Text>
+          <Icon
+            color={theme.colors.textMuted}
+            name={isExpanded ? 'chevronDown' : 'chevronRight'}
+            size={ICON_SIZE.inline}
+          />
         </View>
       </Pressable>
 

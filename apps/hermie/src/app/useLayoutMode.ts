@@ -1,6 +1,7 @@
 import { useWindowDimensions } from 'react-native'
 
-import { REGULAR_LAYOUT_MIN_WIDTH, sidebarWidth } from '../ui/tokens'
+import { resolveSidebarCollapsed, useChatLayoutStore } from '../store/chat-layout'
+import { REGULAR_LAYOUT_MIN_WIDTH, SIDEBAR_AUTO_COLLAPSE_MAX_WIDTH, sidebarWidth } from '../ui/tokens'
 
 export type LayoutMode = 'compact' | 'regular'
 
@@ -32,4 +33,27 @@ export function useSidebarWidth(): number {
   const { width } = useWindowDimensions()
 
   return sidebarWidth(width)
+}
+
+/**
+ * Whether the sidebar is collapsed right now, and whether hiding it at this width
+ * means a rail or an overlay.
+ *
+ * Both answers come from the same window measurement, which is why they are one
+ * hook: a shell that read the collapse from here and the band from somewhere else
+ * would be two readings of one number.
+ *
+ * `overlays` is the second half of the owner's decision. Below 900pt the chat
+ * column is the thing worth protecting, so asking for the list back must not push
+ * the chat aside again — it lays the list OVER it and takes it away on the next
+ * tap. At 900 and above there is room for both, so Show simply shows.
+ */
+export function useSidebarState(): { collapsed: boolean; overlays: boolean } {
+  const { width } = useWindowDimensions()
+  const choice = useChatLayoutStore(state => state.sidebarCollapsed)
+
+  return {
+    collapsed: resolveSidebarCollapsed(choice, width),
+    overlays: width < SIDEBAR_AUTO_COLLAPSE_MAX_WIDTH
+  }
 }

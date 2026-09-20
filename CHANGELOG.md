@@ -10,6 +10,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The wide layout's sidebar can be hidden.** A round button in the chat header, ⌘⇧S / ⌃⇧S on a
+  hardware keyboard, and **Hide Sidebar** / **Show Sidebar** in the Mac's Chats menu all reach the
+  same toggle. Hiding it leaves a 56pt glass rail carrying the way back and the three tab-strip
+  destinations, so Activity, Crons and Settings stay one tap away, and the chat column takes every
+  point the list gave up. Below 900pt the layout starts hidden, because that is where the chat
+  column measurably has nothing left to give — at 834pt portrait a bubble caps around 335pt, about
+  38 characters — and asking for the list back there lays it **over** the chat behind a scrim rather
+  than squeezing the chat again, closing as soon as a chat is picked. Above 900pt it starts open and
+  Show simply shows. An explicit Hide or Show wins at either width and is remembered per gateway with
+  the rest of the arrangement (ADR-0012); nothing flips itself while the window stays the size it
+  was. Exactly one sidebar control is ever on screen: the header's, which always hides, or the
+  rail's, which always shows and carries the unread total the hidden rows would otherwise have said.
+- **The icons are drawn instead of typed.** The tab strip's four marks were the characters `◉ ⇄ ◷ ⚙`,
+  and the owner reported the consequence: chats and crons drew visibly smaller than activity and
+  settings. No `fontSize` fixes that — the four come from four different fonts that disagree about
+  how much of the em box a mark should fill. They are now paths in one 24×24 viewBox at one size, in
+  one 24pt slot so the labels sit on a line (`src/ui/Icon.tsx`), and the same component replaced the
+  glyphs on the search field, the new-cron button, the back and options buttons, every disclosure
+  caret and the bot-to-bot arrows. Two smaller faults went with them: iOS was giving the gear its
+  emoji presentation without a trailing `U+FE0E`, and a character missing from every font on Android
+  draws the empty box.
+
 - **A secondary click opens the platform's own context menu.** A right click on a chat row, on a
   message, on a section heading or on a cron — and a press and hold on a touch screen — now opens a
   real `UIMenu` through `UIContextMenuInteraction`, not a sheet the app drew. The system's glass and

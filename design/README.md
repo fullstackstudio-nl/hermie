@@ -55,10 +55,6 @@ reply`. It is still one indicator and still static; it is strictly more informat
   detail behind its confirm, and a transcript card is a receipt for a run that already happened —
   one tap from starting another one is not where that belongs.
 
-- **The tab strip's icons are text glyphs, not the mockup's line art.** §6.8 draws four stroked
-  SVG icons; the strip uses `◉ ⇄ ◷ ⚙︎`. They read as a monochrome set at strip size and cost
-  no assets, but the chat glyph in particular is a filled circle where the mockup has a speech
-  bubble. Replacing them is a `react-native-svg` job now that the dependency is in.
 - **A screen inside the overlay panel does not repeat its own title.** §6.11 draws the crons list
   with `Crons` at the top of it. Both shells already title the destination — the overlay panel's
   header on the wide layout, the stack's title bar on the phone — so the screen printing it again
@@ -105,9 +101,39 @@ reply`. It is still one indicator and still static; it is strictly more informat
   a spinner is neither. A waiting state is a hollow ring in the accent; an answer is a filled dot.
   The shape, not only the colour, is what separates the two.
 
-- **The disclosure caret is a text glyph (`▸` / `▾`), like the tab strip's icons**, and it does not
-  rotate. Same two reasons: the app ships no vector icon set, and §5 does not spend motion on a
-  disclosure.
+- **The disclosure caret does not rotate.** It is a drawn chevron that swaps between its down and
+  its right form, rather than one chevron turning ninety degrees: §5 does not spend motion on a
+  disclosure, and a rotation is the only part of the usual treatment that would be motion.
+
+- **The wide layout can hide its sidebar, and the mockup has no control for one.** The layout was
+  measured as too tight below 900pt — at 834pt portrait the chat column keeps 492pt and the bubble
+  cap lands around 335pt, about 38 characters — and the only remaining lever was the list itself.
+  Frame A of `liquid-glass.html` now draws the collapsed state beside the expanded one, so the
+  reference is not silent about a state the app has. Four decisions inside it are ours:
+
+  - **A 56pt glass RAIL, not nothing.** Collapsing to zero loses the only way back that does not
+    involve knowing a keyboard shortcut, and takes Activity, Crons and Settings with it — the strip
+    that reaches them is at the foot of the list. The brief's other option was to move those three
+    into the chat header's `…` menu; that menu is the CHAT's options (verbosity, colour, model), and
+    app destinations dropped into it would make one menu answer two scopes, which is the confusion
+    the tab strip exists to avoid. The rail keeps every destination one tap away, at the same depth.
+  - **One control on screen at a time.** The chat column's round sidebar button exists only while the
+    list is SHOWING and always says _Hide sidebar_; the rail's exists only while it is hidden and
+    always says _Show sidebar_. With both, an iPad drew two identical sidebar icons about 90pt apart
+    doing the same thing. It also settles the wording: neither has to describe a state the other is in.
+    The Mac's menu bar item does still carry both, because a menu has no rail to look at.
+  - **Below 900pt the list comes back as an OVERLAY**, over the chat and behind a scrim, and closes
+    as soon as a chat is picked. Re-expanding in place at that width would squeeze the chat column,
+    which is the thing the collapse was for. At 900 and above Show simply shows.
+  - **The collapse itself is instant; only the overlay animates.** §5 reserves motion, and the owner
+    allowed one short static-feeling ease for this. The overlay takes it, because something arriving
+    over content with no transition reads as a rendering fault — 200ms, zero under Reduce Motion. The
+    in-place collapse takes none: there the panel is not arriving, it is resizing, and a resizing
+    panel full of list rows is the most expensive thing in the app to animate for the least benefit.
+
+- **The rail's Show control carries the unread total as a badge.** Nothing in §6.8 has one. A hidden
+  list still receives messages and every bead and per-row badge went with the rows, so without it the
+  collapsed state silently swallows the one fact the list exists to report.
 
 `messenger.html` and `tokens.md` are the **superseded** Messenger direction. They are kept because the app still carries a few token names from them while the second half of the Liquid Glass pass lands, and because the reasoning in them about bubble contrast has not changed. Do not take layout, colour or motion from them.
 

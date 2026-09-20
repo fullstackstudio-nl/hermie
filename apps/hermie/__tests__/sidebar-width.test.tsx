@@ -109,8 +109,16 @@ describe('the sidebar width rule', () => {
 })
 
 describe('the shell applies it', () => {
+  /**
+   * 834pt now STARTS collapsed — it is under `SIDEBAR_AUTO_COLLAPSE_MAX_WIDTH`,
+   * which is the lever this file's own measurement asked for — so the width rule is
+   * asserted with the list explicitly shown. Which of the two widths a shown
+   * sidebar takes is still the question here; whether it is shown at all is
+   * `sidebar-collapse.test.tsx`.
+   */
   it('gives an 11" portrait window the narrow sidebar', () => {
     size(PORTRAIT_11.width, PORTRAIT_11.height)
+    useChatLayoutStore.getState().setSidebarCollapsed(false)
     renderScreen(<RegularShell />)
 
     expect(sidebarStyle().width).toBe(SIDEBAR_WIDTH_NARROW)

@@ -5,6 +5,7 @@ module.exports = {
   fakeTimers: { doNotFake: ['nextTick', 'queueMicrotask', 'setImmediate'] },
   preset: 'jest-expo',
   setupFiles: ['<rootDir>/jest.setup.js'],
+  setupFilesAfterEnv: ['<rootDir>/jest.after-env.js'],
   testMatch: ['<rootDir>/__tests__/**/*.test.ts?(x)', '<rootDir>/src/**/*.test.ts?(x)'],
   transformIgnorePatterns: [
     // `@noble/hashes` (PKCE, via @hermie/gateway-client) ships ESM only, so it

@@ -12,6 +12,7 @@ import { Animated, Pressable, View } from 'react-native'
 
 import { Text } from '../primitives'
 import { useTheme } from '../theme'
+import { Icon, ICON_SIZE } from '../Icon'
 import { CONTROL_MIN_HEIGHT } from '../tokens'
 
 /**
@@ -214,9 +215,7 @@ export function DisclosureRow({ label, value, onPress, testID }: DisclosureRowPr
               {value}
             </Text>
           ) : null}
-          <Text color="textMuted" style={{ fontSize: 18 }}>
-            {'›'}
-          </Text>
+          <Icon color={theme.colors.textMuted} name="chevronRight" size={ICON_SIZE.inline} />
         </View>
       )}
     </Pressable>

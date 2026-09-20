@@ -24,6 +24,7 @@ import { MONOSPACE } from '../../markdown'
 import { GlassSurface } from '../../ui/glass'
 import { Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
+import { Icon, ICON_SIZE } from '../../ui/Icon'
 import { TAP_SLOP, type ColorRole } from '../../ui/tokens'
 import { useLedgerWidth } from './Bubble'
 
@@ -112,9 +113,7 @@ export function LedgerRow({
       ) : null}
 
       {onToggle ? (
-        <Text color="textFaint" variant="meta">
-          {expanded ? '⌄' : '›'}
-        </Text>
+        <Icon color={theme.colors.textFaint} name={expanded ? 'chevronDown' : 'chevronRight'} size={ICON_SIZE.marker} />
       ) : null}
     </View>
   )

@@ -30,6 +30,7 @@ import { GlassSurface } from './glass'
 import { KEYBOARD_AVOID_BEHAVIOR } from './keyboard'
 import { Text } from './primitives'
 import { useTheme } from './theme'
+import { Icon, ICON_SIZE } from './Icon'
 import { REGULAR_LAYOUT_MIN_WIDTH, SCRIM_COLOR, SHEET_MAX_WIDTH, SIDEBAR_WIDTH, TAP_SLOP, WINDOW_GAP } from './tokens'
 import { useEscapeKey } from './useEscapeKey'
 
@@ -330,9 +331,7 @@ export function SheetPage({
           style={{ alignItems: 'center', justifyContent: 'center', minHeight: 32, minWidth: 24 }}
           testID={testID}
         >
-          <Text color="accentText" style={{ fontSize: 22, lineHeight: 26 }}>
-            {'‹'}
-          </Text>
+          <Icon color={theme.colors.accentText} name="chevronLeft" size={ICON_SIZE.control} />
         </Pressable>
         <Text style={{ flex: 1 }} variant="sheetTitle">
           {title}

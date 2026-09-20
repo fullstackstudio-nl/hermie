@@ -72,7 +72,7 @@ export default config(
   {
     // Test suites and their setup run under Jest, which supplies `jest` and a
     // CommonJS `require` that mock factories are expected to use.
-    files: ['apps/*/jest.setup.js', '**/__tests__/**', '**/*.test.ts', '**/*.test.tsx'],
+    files: ['apps/*/jest.setup.js', 'apps/*/jest.after-env.js', '**/__tests__/**', '**/*.test.ts', '**/*.test.tsx'],
     languageOptions: {
       globals: { ...globals.node, ...globals.jest }
     },

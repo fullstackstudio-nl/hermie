@@ -129,6 +129,7 @@ describe('the overlay panel', () => {
 
   // The panel stays mounted for its own slide-out — one that unmounted on the
   // first frame of its exit would simply vanish — so these wait for it to go.
+  // `jest.setup.js` says why the wait is allowed five seconds.
   it('closes on the round close button', async () => {
     renderScreen(<RegularShell />)
 

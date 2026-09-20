@@ -838,6 +838,34 @@ export const SIDEBAR_WIDTH_NARROW = 300
 export const SIDEBAR_WIDE_MIN_WIDTH = 1100
 
 /**
+ * The width band that decides whether the sidebar STARTS hidden.
+ *
+ * A THIRD breakpoint, and the reason it is its own number rather than a reuse of
+ * either of the other two: 700 is "do two panels fit at all" and 1100 is "can the
+ * wider sidebar be afforded", while this one is "is a 300pt list worth what it
+ * costs the prose beside it". Measured, in the 2026-09-20 portrait pass: at 834pt
+ * portrait the chat column keeps 492pt and the bubble cap lands around 335pt,
+ * which is about 38 characters — short of a comfortable measure and the finding
+ * that asked for a collapse in the first place. Above 900 there is enough left
+ * over that starting hidden would be taking something away for nothing.
+ *
+ * It only ever answers for a window the owner has expressed NO opinion about; an
+ * explicit Hide or Show wins at every width. See `resolveSidebarCollapsed`.
+ */
+export const SIDEBAR_AUTO_COLLAPSE_MAX_WIDTH = 900
+
+/**
+ * The slim rail the collapsed sidebar leaves behind.
+ *
+ * Not zero, and that is the decision rather than an oversight: the rail keeps the
+ * Show control and the three tab-strip destinations one tap away, so collapsing
+ * the list costs the reader the list and nothing else. 56 is a 38pt round control
+ * plus the panel's own hairline and breathing room on each side — narrow enough
+ * that the swap is worth about 250pt of prose at the 834pt window this exists for.
+ */
+export const SIDEBAR_RAIL_WIDTH = 56
+
+/**
  * Which of the two applies, as a function of the WINDOW.
  *
  * A function rather than a second constant at each call site: the shell, the

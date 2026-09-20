@@ -21,6 +21,7 @@ import { Markdown } from '../markdown'
 import { GlassSurface } from '../ui/glass'
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
+import { Icon, ICON_SIZE } from '../ui/Icon'
 import { TAP_SLOP } from '../ui/tokens'
 import { formatClock } from './format'
 import { useLedgerWidth } from './primitives/Bubble'
@@ -94,9 +95,11 @@ export function CronDeliveryCard({
             </Text>
           </View>
 
-          <Text color="textFaint" variant="meta">
-            {expanded ? '⌄' : '›'}
-          </Text>
+          <Icon
+            color={theme.colors.textFaint}
+            name={expanded ? 'chevronDown' : 'chevronRight'}
+            size={ICON_SIZE.marker}
+          />
         </View>
       </Pressable>
 

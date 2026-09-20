@@ -24,6 +24,7 @@ import { Pressable, View } from 'react-native'
 import { Markdown } from '../markdown'
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
+import { Icon, ICON_SIZE } from '../ui/Icon'
 import { TAP_SLOP, type ColorRole } from '../ui/tokens'
 import { GlassSurface } from '../ui/glass'
 import { hasReply } from './dm-rollup'
@@ -163,9 +164,7 @@ export function BotDmOutLine({
         testID={`bot-dm-out-line-${item.id}`}
       >
         <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.sm, minHeight: 24 }}>
-          <Text color="textFaint" style={{ fontSize: 12, lineHeight: 16 }}>
-            {'→'}
-          </Text>
+          <Icon color={theme.colors.textFaint} name="arrowRight" size={ICON_SIZE.marker} />
 
           <Text color="textMuted" numberOfLines={1} style={{ flexShrink: 0 }} variant="meta">
             {chatStrings.botDm.lineTo(handle)}

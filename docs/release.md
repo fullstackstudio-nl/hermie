@@ -95,6 +95,28 @@ service Apple ID and its app-specific password were all for the macOS `.app`, an
 that artefact no longer exists — a Mac user installs from TestFlight or the App
 Store, where EAS holds the credentials.
 
+## The two accounts this is waiting on
+
+Neither half of the store release can be rehearsed yet, and the reason is the same
+in both cases: an account with a payment behind it, which the owner is arranging.
+Written down here so the next reader does not spend an afternoon rediscovering it.
+
+- **A paid Apple Developer team.** Without one, TestFlight and the App Store listing
+  are both out of reach, and the difference shows up long before either: a free
+  Apple ID signs an app with a **7-day** provisioning profile, so a build installed
+  on a device or on a Mac stops launching a week later and has to be rebuilt. A paid
+  team's profiles last a **year**. `npm run mac` works either way — it takes whatever
+  `HERMIE_APPLE_TEAM_ID` names — so a free team is fine for developing and is the
+  reason a Mac build sometimes "breaks" after a week for no other reason.
+- **A Play upload keystore.** Play signs what it serves, but it will only accept an
+  upload signed by a key it has already seen registered, and that registration
+  happens once per app and cannot be undone. Until there is one, the release
+  workflow's APK stays debug-signed — installable by hand, not by Play — and
+  `eas build --profile production` has nothing to sign its app bundle with.
+
+Neither belongs in this repository. The keystore is a secret and the Apple team is
+an account, so both live with the owner; nothing here should ever hold either.
+
 ## iOS: TestFlight
 
 Not in CI. It needs an EAS project, which ties the repository to one Expo
@@ -149,6 +171,8 @@ them block a tagged GitHub release.
   and the missing status-bar strip are all reasoned from source and unverified in a
   window. `docs/platform-notes.md` lists them; verify them before the listing says
   the app runs on a Mac.
+- **The two accounts above.** A paid Apple Developer team and a Play upload keystore
+  are both prerequisites rather than polish, and both are being arranged.
 - **Privacy answers.** App Store Connect and the Play data-safety form both ask
   what leaves the device. Hermie sends what the user types to the gateway the
   user configured, and to nothing else; there is no analytics SDK and no

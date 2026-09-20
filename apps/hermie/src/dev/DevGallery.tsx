@@ -32,10 +32,12 @@
 import { useEffect } from 'react'
 import { useWindowDimensions, View } from 'react-native'
 
+import { Shell } from '../app/Shell'
 import { BotsScreen } from '../features/bots'
 import { GalleryScreen, GALLERY_CHAT_SECTION } from '../features/settings/GalleryScreen'
 import { useSafeAreaInsets } from '../platform/safe-area'
 import { useBotsStore, type Bot } from '../store/bots'
+import { useChatLayoutStore } from '../store/chat-layout'
 import { GlassSurface, Wallpaper } from '../ui/glass'
 import { REGULAR_LAYOUT_MIN_WIDTH, sidebarWidth, WINDOW_GAP } from '../ui/tokens'
 
@@ -111,6 +113,68 @@ const FIXTURE_ROSTER: Bot[] = [
   }
 ]
 
+/**
+ * The chat list, alone, over the fixture roster — the screen the README's first
+ * image is.
+ *
+ * It is the REAL `BotsScreen`, not a drawing of one, for the same reason the wide
+ * frame's sidebar is: a fixture copy would be a second chat list to keep in step
+ * with the first, and the whole point of photographing it is that the picture
+ * shows what the app shows.
+ */
+export const GALLERY_LIST_SECTION = 'list'
+
+/**
+ * The whole wide shell, over the fixture roster and with no gateway.
+ *
+ * `gallery:chat`'s wide frame is a MIMIC of `RegularShell` — two panels assembled
+ * by hand here — and a mimic can only ever be photographed in the states somebody
+ * remembered to build into it. It has already lied once: it mounted `BotsScreen`
+ * without `onOpenSection`, so it drew a sidebar with no tab strip and the missing
+ * strip was reported as a portrait bug in the real shell, which has one at every
+ * height (docs/platform-notes.md, 2026-09-20).
+ *
+ * This section mounts the real thing instead, so the collapse, the rail, the
+ * temporary list overlay and the header's sidebar button can be looked at on a
+ * device without a gateway, a keychain or a sign-in. The mimic stays where it is:
+ * it exists to frame ONE gallery section in the shell's proportions, which is a
+ * different job.
+ */
+export const GALLERY_SHELL_SECTION = 'shell'
+
+/**
+ * Enough state for the list to show what a list does.
+ *
+ * A roster alone draws four idle rows, which is a truthful picture of nothing in
+ * particular: no section headings, every bead the same, no unread anywhere. This
+ * seeds the three things the list exists to say — an arrangement, a presence and
+ * an unread — and it seeds them as the stores' own values rather than as props, so
+ * the rows resolve them through exactly the code the app runs.
+ */
+function seedFixtureState(): void {
+  const bots = useBotsStore.getState()
+
+  if (bots.bots.length === 0) {
+    bots.setBots(FIXTURE_ROSTER, { fromCache: true })
+  }
+
+  // Writer is mid-turn; the other three are not. `running` is keyed by name here
+  // because there is no gateway to attribute a session id to one.
+  useBotsStore.getState().setRunning(['writer'])
+
+  // Researcher has been read, so the unread marks that remain say something.
+  useBotsStore.getState().markSeen('researcher', Math.floor(Date.now() / 1000))
+
+  const layout = useChatLayoutStore.getState()
+
+  if (!layout.entries.some(entry => entry.kind === 'divider')) {
+    layout.reconcile(FIXTURE_ROSTER.map(bot => bot.name))
+    layout.addDividerAbove('bookkeeper', 'Money')
+    layout.setAccent('bookkeeper', 'teal')
+    layout.setAccent('writer', 'violet')
+  }
+}
+
 export function DevGallery({ section }: { section: string }) {
   const insets = useSafeAreaInsets()
   const { width } = useWindowDimensions()
@@ -118,12 +182,30 @@ export function DevGallery({ section }: { section: string }) {
   // Only the chat demo is about its layout, and only a wide window has a second
   // layout to be wrong about.
   const wideChat = section === GALLERY_CHAT_SECTION && width >= REGULAR_LAYOUT_MIN_WIDTH
+  const list = section === GALLERY_LIST_SECTION
+  const shell = section === GALLERY_SHELL_SECTION
 
   useEffect(() => {
-    if (wideChat && useBotsStore.getState().bots.length === 0) {
-      useBotsStore.getState().setBots(FIXTURE_ROSTER, { fromCache: true })
+    if (wideChat || list || shell) {
+      seedFixtureState()
     }
-  }, [wideChat])
+  }, [list, shell, wideChat])
+
+  // The real shell, whichever of its two layouts this window is. It draws its own
+  // wallpaper and its own window padding, so there is nothing to wrap it in.
+  if (shell) {
+    return <Shell />
+  }
+
+  if (list) {
+    return (
+      <Wallpaper style={{ flex: 1 }} testID="wallpaper">
+        <GlassSurface contentStyle={{ flex: 1 }} radius={0} shadow="none" style={{ flex: 1 }} variant="panel">
+          <BotsScreen onOpenSection={() => undefined} />
+        </GlassSurface>
+      </Wallpaper>
+    )
+  }
 
   if (wideChat) {
     return (

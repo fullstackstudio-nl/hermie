@@ -184,6 +184,16 @@ export const chatStrings = {
   header: {
     back: 'Back to chats',
     options: 'Chat options',
+    /**
+     * The wide layout's sidebar control, which says what the tap will do rather
+     * than what the button is.
+     *
+     * Only Hide: the button exists only while the list is showing, because the rail
+     * that replaces the list carries the control to bring it back. `strings.layout`
+     * has the rail's Show and `strings.menuBar` the Title Case pair the Mac's menu
+     * needs; the kit keeps its own copy because the kit travels on its own.
+     */
+    hideSidebar: 'Hide sidebar',
     running: 'Running',
     idle: 'Online',
     needsInput: 'Waiting for you',

@@ -51,6 +51,7 @@ import { isUnread, useBotsStore, type Bot } from '../../store/bots'
 import { archivedOf, dividersOf, sectionsOf, useChatLayoutStore } from '../../store/chat-layout'
 import { useChatsStore } from '../../store/chats'
 import { GlassSurface } from '../../ui/glass'
+import { Icon, ICON_SIZE } from '../../ui/Icon'
 import { Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { useHover } from '../../ui/useHover'
@@ -64,6 +65,7 @@ import { CHAT_FILTERS, matchesFilter, presenceOf, type ChatFilter, type Presence
 import { parseRowMenuAction } from './row-menu-items'
 import { RowMenu } from './RowMenu'
 import { SidebarFooter, type BotsSection, type TabKey } from './SidebarFooter'
+import { SidebarRail } from './SidebarRail'
 import { useRowDrag } from './use-row-drag'
 
 export type { BotsSection }
@@ -75,7 +77,18 @@ export interface BotsScreenProps {
   onOpenSection?: (section: BotsSection) => void
   /** Which footer tab reads as current; the wide shell drives this from its overlay. */
   currentTab?: TabKey
-  variant?: 'screen' | 'sidebar'
+  /**
+   * `rail` is the collapsed wide layout: the same component, the same state, the
+   * slim column instead of the list.
+   *
+   * It is a variant rather than a component of its own because ⌘1…9, ⌘↑/↓ and the
+   * Mac menu bar's nine named chats all hang off state only this component derives.
+   * Swapping it out to draw a rail would take those with the rows — see
+   * `SidebarRail`'s own note.
+   */
+  variant?: 'screen' | 'sidebar' | 'rail'
+  /** Rail only: ask the shell for the list back. */
+  onShowList?: () => void
 }
 
 /**
@@ -110,6 +123,7 @@ export function BotsScreen({
   currentTab = 'chats',
   onOpenBot,
   onOpenSection,
+  onShowList,
   selectedBot,
   variant = 'screen'
 }: BotsScreenProps) {
@@ -142,6 +156,7 @@ export function BotsScreen({
   const [archiveOpen, setArchiveOpen] = useState(false)
   const [menuFor, setMenuFor] = useState<string | null>(null)
 
+  const rail = variant === 'rail'
   const sidebar = variant === 'sidebar'
   const signedOut = status === 'needs_signin'
 
@@ -318,6 +333,18 @@ export function BotsScreen({
     [items]
   )
 
+  /**
+   * Unread messages across the visible chats, for the rail's badge.
+   *
+   * The one fact a hidden list would otherwise swallow: the rows are gone, so every
+   * bead and every per-row badge is gone with them, and a message arriving while the
+   * sidebar is collapsed would leave nothing at all on screen to say so.
+   */
+  const unreadTotal = useMemo(
+    () => visibleBots.reduce((total, bot) => total + unreadFor(bot.name).count, 0),
+    [unreadFor, visibleBots]
+  )
+
   /** One stable array for every row's menu; see `BotRow.menuSections`. */
   const menuSections = useMemo(
     () => [{ id: null, name: strings.layout.topGroup }, ...dividers.map(d => ({ id: d.id, name: d.name }))],
@@ -359,7 +386,10 @@ export function BotsScreen({
     [openBot, visibleBots]
   )
 
-  useShortcut('search', () => searchRef.current?.focus())
+  // ⌘K on the rail has no field to land in, so it asks for the list back instead —
+  // which is where the field is. Silently focusing a ref that is null would be a
+  // shortcut that reports success and does nothing.
+  useShortcut('search', () => (rail ? onShowList?.() : searchRef.current?.focus()))
   useNumberedShortcuts(openIndex)
 
   /**
@@ -409,13 +439,19 @@ export function BotsScreen({
   /**
    * Hand the Mac's menu bar the same nine chats ⌘1…9 reaches, with the app's own
    * wording. A no-op on every other platform — see `platform/desktop-shortcuts`.
+   *
+   * The sidebar item's wording is resolved HERE because `variant` is the answer: a
+   * rail is a hidden list and a sidebar is a showing one, so the menu says the
+   * thing the keystroke will do without anybody measuring a window. On the phone's
+   * Chats screen the item is still sent and still does nothing — the same as ⌘W on
+   * a bare list, and a phone has no menu bar to read it in.
    */
   useEffect(() => {
     setMenuBar(
-      strings.menuBar,
+      { ...strings.menuBar, toggleSidebar: rail ? strings.menuBar.showSidebar : strings.menuBar.hideSidebar },
       visibleBots.slice(0, 9).map(bot => bot.displayName)
     )
-  }, [visibleBots])
+  }, [rail, visibleBots])
 
   /**
    * One selection from either menu.
@@ -488,6 +524,25 @@ export function BotsScreen({
   // A chat-level failure must not compete with the signed-out card: a dead
   // session is not a roster problem and showing both makes neither readable.
   const rosterError = signedOut ? null : error
+
+  /*
+   * The collapsed sidebar, after every hook above has run.
+   *
+   * Placed here rather than at the top of the component on purpose: the roster
+   * poll, the layout reconcile, the numbered shortcuts and the menu bar are all
+   * registered above, and they are exactly what a rail must not switch off. An
+   * early return before them would be the bug this variant exists to avoid.
+   */
+  if (rail) {
+    return (
+      <SidebarRail
+        current={currentTab}
+        unread={unreadTotal}
+        {...(onOpenSection ? { onOpenSection } : {})}
+        {...(onShowList ? { onShowList } : {})}
+      />
+    )
+  }
 
   return (
     // The sidebar sits inside a panel the shell has already inset; the phone
@@ -727,9 +782,7 @@ function Head({
             contentStyle={{ alignItems: 'center', height: 38, justifyContent: 'center', width: 38 }}
             variant="control"
           >
-            <Text color="textMuted" style={{ fontSize: 18 }}>
-              {'⊕'}
-            </Text>
+            <Icon color={theme.colors.textMuted} name="plus" size={ICON_SIZE.control} />
           </GlassSurface>
         </Pressable>
       ) : null}
@@ -802,7 +855,7 @@ function SearchField({
         paddingHorizontal: theme.space.md
       }}
     >
-      <Text color="textFaint">{'⌕'}</Text>
+      <Icon color={theme.colors.textFaint} name="search" size={ICON_SIZE.inline} />
       <TextInput
         accessibilityLabel={strings.bots.search}
         autoCapitalize="none"
@@ -1107,15 +1160,9 @@ function ArchiveHeader({ count, onToggle, open }: { count: number; onToggle: () 
       testID="archived-row"
       {...hover.props}
     >
-      {/* Decorative: the row's own expanded state is what a screen reader reads. */}
-      <Text
-        accessibilityElementsHidden
-        color="textMuted"
-        importantForAccessibility="no-hide-descendants"
-        style={{ fontSize: 13 }}
-      >
-        {open ? '⌄' : '›'}
-      </Text>
+      {/* Decorative: the row's own expanded state is what a screen reader reads,
+          and `Icon` keeps itself out of the tree so it cannot say it twice. */}
+      <Icon color={theme.colors.textMuted} name={open ? 'chevronDown' : 'chevronRight'} size={ICON_SIZE.marker} />
       <Text color="textMuted" style={{ fontWeight: '600' }} variant="preview">
         {strings.layout.archived(count)}
       </Text>

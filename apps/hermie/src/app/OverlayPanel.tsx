@@ -23,6 +23,7 @@ import { Animated, Easing, Pressable, StyleSheet, View } from 'react-native'
 
 import { strings } from '../i18n/strings'
 import { GlassSurface } from '../ui/glass'
+import { Icon, ICON_SIZE } from '../ui/Icon'
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
 import { OVERLAY_MAX_WIDTH, SCRIM_COLOR, TAP_SLOP, WINDOW_GAP } from '../ui/tokens'
@@ -141,9 +142,7 @@ export function OverlayPanel({ children, onClose, title, visible }: OverlayPanel
                 contentStyle={{ alignItems: 'center', height: 38, justifyContent: 'center', width: 38 }}
                 variant="control"
               >
-                <Text color="textMuted" style={{ fontSize: 17 }}>
-                  {'✕'}
-                </Text>
+                <Icon color={theme.colors.textMuted} name="close" size={ICON_SIZE.inline} />
               </GlassSurface>
             </Pressable>
           </View>

@@ -159,6 +159,15 @@ import UIKit
       commands.append(command(title: close, key: "w", id: "close"))
     }
 
+    // The one item whose TITLE is state. JavaScript sends "Hide Sidebar" or "Show Sidebar" already
+    // resolved, because whether the sidebar is showing is a question about a window width and a
+    // stored preference, and neither of those is knowable from here.
+    if let toggleSidebar = titles["toggleSidebar"] {
+      commands.append(
+        command(title: toggleSidebar, key: "s", id: "toggleSidebar", modifiers: [.command, .shift])
+      )
+    }
+
     let numbered = chats.enumerated().map { index, name in
       command(title: name, key: String(index + 1), id: "chat\(index + 1)")
     }
@@ -183,12 +192,17 @@ import UIKit
     )
   }
 
-  private static func command(title: String, key: String, id: String) -> UIKeyCommand {
+  private static func command(
+    title: String,
+    key: String,
+    id: String,
+    modifiers: UIKeyModifierFlags = .command
+  ) -> UIKeyCommand {
     UIKeyCommand(
       title: title,
       action: #selector(HermieMenuBar.hermieMenuCommand(_:)),
       input: key,
-      modifierFlags: .command,
+      modifierFlags: modifiers,
       propertyList: id
     )
   }

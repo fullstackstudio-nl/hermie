@@ -1,0 +1,227 @@
+/**
+ * The app's line icons, drawn as paths rather than typed as characters.
+ *
+ * **Why this exists at all.** Every icon in the app used to be a Unicode glyph —
+ * `◉ ⇄ ◷ ⚙` in the tab strip, `⌕` in the search field, `›`/`⌄` on every
+ * disclosure. A glyph is rendered by whichever font on the device happens to
+ * cover that code point, and the four tab characters come from four different
+ * fonts with four different design sizes: at one `fontSize` the chat circle and
+ * the clock drew visibly smaller than the exchange arrows and the gear, which is
+ * what the owner reported. There is no font metric that fixes that, because the
+ * glyphs do not agree about how much of their em box the mark should fill. A path
+ * in a known viewBox does.
+ *
+ * Two smaller problems it also removes: iOS gives several of these characters
+ * their EMOJI presentation unless asked for the text one (the gear was a
+ * colourful sticker in a monochrome strip without a trailing U+FE0E), and a glyph
+ * that is missing from every font on Android draws the empty box.
+ *
+ * ## The slot is not the drawing
+ *
+ * `size` is how big the mark is drawn; `slot` is the box it is centred in. They
+ * are separate because a row of icons aligns on its BOXES — four 24pt slots put
+ * four labels on one baseline whatever each mark's own weight wants to be — while
+ * the marks inside them are sized for legibility. `slot` defaults to `size`,
+ * which is what a lone icon in a round button wants.
+ *
+ * ## Conventions
+ *
+ * One 24 × 24 viewBox for every icon, stroked rather than filled, round caps and
+ * joins, `strokeWidth` scaled to the drawn size so a 14pt caret is not a hairline
+ * and a 22pt one is not a slab. `color` is a resolved colour string, never a role
+ * name: the caller already has a theme and the active/inactive decision belongs to
+ * it, not here.
+ *
+ * Icons are decorative by default. Every one of them sits beside a label, inside a
+ * `Pressable` with its own `accessibilityLabel`, or both — so the mark repeats
+ * something a screen reader has already read, and repeating it is how a tab gets
+ * announced twice.
+ */
+import { View, type StyleProp, type ViewStyle } from 'react-native'
+import Svg, { Circle, Path, Rect } from 'react-native-svg'
+
+export type IconName =
+  | 'chats'
+  | 'activity'
+  | 'crons'
+  | 'settings'
+  | 'sidebar'
+  | 'search'
+  | 'plus'
+  | 'close'
+  | 'chevronLeft'
+  | 'chevronRight'
+  | 'chevronDown'
+  | 'ellipsis'
+  | 'arrowRight'
+
+export interface IconProps {
+  name: IconName
+  /** How big the mark is drawn. */
+  size?: number
+  /** The box the mark is centred in; defaults to `size`. */
+  slot?: number
+  /** A resolved colour, not a role — see the note above. */
+  color: string
+  /** Overrides the weight derived from `size`. */
+  strokeWidth?: number
+  style?: StyleProp<ViewStyle>
+  testID?: string
+}
+
+/**
+ * The icon sizes the app actually uses, named for where they are.
+ *
+ * `tab` is the mark in the bottom strip and `tabSlot` the box around it; the two
+ * differ, which is the whole point of the pair. `control` is the mark inside a
+ * round glass button, `inline` a caret or a marker sitting in a line of text.
+ */
+export const ICON_SIZE = { tab: 20, tabSlot: 24, control: 19, inline: 15, marker: 13 } as const
+
+/** The default weight, as a fraction of the drawn size. 1.7 at 20pt, 1.3 at 15. */
+function weightFor(size: number): number {
+  return Math.max(1.2, Math.min(2.2, size * 0.086))
+}
+
+export function Icon({ color, name, size = ICON_SIZE.control, slot, strokeWidth, style, testID }: IconProps) {
+  const box = slot ?? size
+  const stroke = strokeWidth ?? weightFor(size)
+
+  return (
+    <View
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={[{ alignItems: 'center', height: box, justifyContent: 'center', width: box }, style]}
+      // The slot and the mark are two different numbers, and a test that checks a
+      // row of icons aligns has to be able to reach the first one. It cannot get
+      // there from the mark: `react-native-svg` puts a wrapper of its own around
+      // the view it renders, so "the parent" is its box rather than this one.
+      testID={testID ? `${testID}-box` : undefined}
+    >
+      <Svg height={size} testID={testID} viewBox="0 0 24 24" width={size}>
+        <Glyph color={color} name={name} stroke={stroke} />
+      </Svg>
+    </View>
+  )
+}
+
+/** One stroked path with the shared caps, which is what most of these are. */
+function Line({ color, d, stroke }: { color: string; d: string; stroke: number }) {
+  return <Path d={d} fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={stroke} />
+}
+
+/**
+ * The gear's eight teeth, as short radial stubs just outside its ring.
+ *
+ * Generated rather than written out: eight hand-typed coordinate pairs are eight
+ * chances for one tooth to sit a degree off, and the arithmetic is the drawing.
+ *
+ * The first attempt drew them long and thin, from r5.1 to r8.1, and on the iPad
+ * it read as a SUN rather than a gear — thin rays radiating from a circle are a
+ * sun, whatever they were meant to be. Teeth are short and thick and start at the
+ * ring they belong to, so the mark reads as one toothed wheel instead of a disc
+ * with spokes around it.
+ */
+const GEAR_RING = 6.1
+
+const GEAR_TEETH = Array.from({ length: 8 }, (_, index) => {
+  const angle = (index * Math.PI) / 4
+  const at = (radius: number) =>
+    `${(12 + radius * Math.cos(angle)).toFixed(2)} ${(12 + radius * Math.sin(angle)).toFixed(2)}`
+
+  return `M${at(GEAR_RING - 0.4)} L${at(GEAR_RING + 2.1)}`
+}).join(' ')
+
+function Glyph({ color, name, stroke }: { color: string; name: IconName; stroke: number }) {
+  switch (name) {
+    /**
+     * A speech bubble, which is what §6.8 of the token document draws and what the
+     * filled circle it replaces never was.
+     */
+    case 'chats':
+      return (
+        <Line
+          color={color}
+          d="M7.8 4H16.2A3.8 3.8 0 0 1 20 7.8V13.2A3.8 3.8 0 0 1 16.2 17H10.8L7.8 20.3V17A3.8 3.8 0 0 1 4 13.2V7.8A3.8 3.8 0 0 1 7.8 4Z"
+          stroke={stroke}
+        />
+      )
+
+    /** Two arrows passing each other: one bot's message, and the reply coming back. */
+    case 'activity':
+      return (
+        <>
+          <Line color={color} d="M4 9H17.5M14.5 6L17.5 9L14.5 12" stroke={stroke} />
+          <Line color={color} d="M20 15H6.5M9.5 12L6.5 15L9.5 18" stroke={stroke} />
+        </>
+      )
+
+    case 'crons':
+      return (
+        <>
+          <Circle cx={12} cy={12} fill="none" r={8} stroke={color} strokeWidth={stroke} />
+          <Line color={color} d="M12 7.2V12.2L15.6 14.4" stroke={stroke} />
+        </>
+      )
+
+    case 'settings':
+      return (
+        <>
+          <Line color={color} d={GEAR_TEETH} stroke={stroke * 1.55} />
+          <Circle cx={12} cy={12} fill="none" r={GEAR_RING} stroke={color} strokeWidth={stroke} />
+          {/* The bore. Without it the ring plus its teeth is a cog seen as a disc,
+              and a gear is a thing with a hole in the middle. */}
+          <Circle cx={12} cy={12} fill="none" r={2.3} stroke={color} strokeWidth={stroke * 0.9} />
+        </>
+      )
+
+    /** A panel with its leading column drawn in: the thing the button hides and shows. */
+    case 'sidebar':
+      return (
+        <>
+          <Rect fill="none" height={14} rx={3} stroke={color} strokeWidth={stroke} width={17} x={3.5} y={5} />
+          <Line color={color} d="M9.6 5V19" stroke={stroke} />
+        </>
+      )
+
+    case 'search':
+      return (
+        <>
+          <Circle cx={10.6} cy={10.6} fill="none" r={5.9} stroke={color} strokeWidth={stroke} />
+          <Line color={color} d="M15 15L19.6 19.6" stroke={stroke} />
+        </>
+      )
+
+    case 'plus':
+      return <Line color={color} d="M12 5V19M5 12H19" stroke={stroke} />
+
+    case 'close':
+      return <Line color={color} d="M6.6 6.6L17.4 17.4M17.4 6.6L6.6 17.4" stroke={stroke} />
+
+    case 'chevronLeft':
+      return <Line color={color} d="M14.8 5.4L8.2 12L14.8 18.6" stroke={stroke} />
+
+    case 'chevronRight':
+      return <Line color={color} d="M9.2 5.4L15.8 12L9.2 18.6" stroke={stroke} />
+
+    case 'chevronDown':
+      return <Line color={color} d="M5.4 9.2L12 15.8L18.6 9.2" stroke={stroke} />
+
+    /**
+     * Filled dots rather than three stroked rings: at control size a ring of this
+     * radius closes up into a blob anyway, and a blob with a lighter middle reads
+     * as a printing fault.
+     */
+    case 'ellipsis':
+      return (
+        <>
+          <Circle cx={5.6} cy={12} fill={color} r={1.75} />
+          <Circle cx={12} cy={12} fill={color} r={1.75} />
+          <Circle cx={18.4} cy={12} fill={color} r={1.75} />
+        </>
+      )
+
+    case 'arrowRight':
+      return <Line color={color} d="M4 12H18.6M14 7.4L18.6 12L14 16.6" stroke={stroke} />
+  }
+}

@@ -25,12 +25,12 @@ import UIKit
  the podspec does.
 
  **`onShortcut`** is the same mechanism as `onEscape`, widened to an allow-list of desktop
- shortcuts — ⌘K, ⌘,, ⌘W, ⌘1…9, ⌘↑/↓ and ⌃Tab. It is deliberately NOT a general key event: nothing
- is emitted unless Command (or Control, for Tab) is held, so ordinary typing never crosses into
- JavaScript and a keystroke cannot be read off this seam. GameController rather than `UIKeyCommand`
- for the same reason Escape is: a presented `Modal` leaves the responder chain, and a shortcut that
- stops working while a sheet is open is a shortcut nobody trusts. The menu bar's own items reach the
- same place — see `HermieMenuBar`.
+ shortcuts — ⌘K, ⌘,, ⌘W, ⌘⇧S, ⌘1…9, ⌘↑/↓ and ⌃Tab. It is deliberately NOT a general key event:
+ nothing is emitted unless Command (or Control, for Tab and for ⌃⇧S) is held, so ordinary typing
+ never crosses into JavaScript and a keystroke cannot be read off this seam. GameController rather
+ than `UIKeyCommand` for the same reason Escape is: a presented `Modal` leaves the responder chain,
+ and a shortcut that stops working while a sheet is open is a shortcut nobody trusts. The menu bar's
+ own items reach the same place — see `HermieMenuBar`.
 
  **`devLaunchArguments`** is the fifth thing, and the only one that is not about keyboards. It is
  this process's own `ProcessInfo.processInfo.arguments`, which is how `xcrun simctl launch` can tell a
@@ -271,25 +271,36 @@ public class HermieMacModule: Module {
    then matching a fixed table means a password typed into the composer produces no events at all —
    there is no path from a letter to JavaScript through here.
 
-   Shift disqualifies everything. ⌘⇧K is not ⌘K, and a shortcut that fires for both would steal a
-   keystroke some other part of the app may want later.
+   Shift disqualifies everything EXCEPT the one shortcut that is defined with it. ⌘⇧K is not ⌘K, and
+   a shortcut that fired for both would steal a keystroke some other part of the app may want later —
+   so the sidebar's ⌘⇧S is matched on the whole combination FIRST, before that rule runs, rather than
+   by loosening it. The table stays closed: ⇧ plus anything else still produces nothing.
 
-   ⌃Tab is the one non-Command entry, because that is what it is on every platform.
+   ⌃Tab is the one non-Command entry, because that is what it is on every platform, and ⌃⇧S is
+   accepted alongside ⌘⇧S because an iPad with a PC keyboard in a case has no Command key to press.
    */
   private static func shortcut(for keyCode: GCKeyCode, input: GCKeyboardInput) -> String? {
     func down(_ codes: GCKeyCode...) -> Bool {
       codes.contains { input.button(forKeyCode: $0)?.isPressed == true }
     }
 
-    if down(.leftShift, .rightShift) {
+    let shift = down(.leftShift, .rightShift)
+    let control = down(.leftControl, .rightControl)
+    let command = down(.leftGUI, .rightGUI)
+
+    if keyCode == .keyS, shift, command || control {
+      return "toggleSidebar"
+    }
+
+    if shift {
       return nil
     }
 
-    if keyCode == .tab, down(.leftControl, .rightControl) {
+    if keyCode == .tab, control {
       return "nextChat"
     }
 
-    guard down(.leftGUI, .rightGUI) else {
+    guard command else {
       return nil
     }
 

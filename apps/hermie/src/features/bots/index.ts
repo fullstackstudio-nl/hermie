@@ -18,4 +18,5 @@ export {
   type PresenceState
 } from './presence'
 export { ConnectionLine } from './ConnectionLine'
-export { SidebarFooter, type BotsSection, type TabKey } from './SidebarFooter'
+export { SidebarFooter, TABS, type BotsSection, type TabKey } from './SidebarFooter'
+export { SidebarRail, type SidebarRailProps } from './SidebarRail'

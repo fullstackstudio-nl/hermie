@@ -258,7 +258,19 @@ export const strings = {
       graphite: 'Graphite'
     },
     rowActions: (name: string) => `Actions for ${name}`,
-    close: 'Close'
+    close: 'Close',
+
+    /**
+     * The rail's control, which says what the tap will DO rather than where it is.
+     *
+     * There is no matching `hideSidebar` here: the rail only ever shows, and the
+     * only thing that hides is the chat column's button, whose wording travels
+     * with the kit that draws it (`src/chat-ui/strings.ts`). One label per control
+     * rather than a pair each has to pick from.
+     */
+    showSidebar: 'Show sidebar',
+    /** The rail's own name, for the reader who lands on it with VoiceOver. */
+    sidebarRail: 'Sidebar, hidden'
   },
 
   /**
@@ -272,7 +284,15 @@ export const strings = {
     chats: 'Chats',
     search: 'Search…',
     settings: 'Settings…',
-    close: 'Close'
+    close: 'Close',
+    /**
+     * Title Case, unlike everything else in this file, because a Mac menu bar is
+     * the one surface where sentence case looks wrong next to the standard items
+     * it sits among — View ▸ Enter Full Screen is Apple's, and `Hide sidebar`
+     * beside it reads as a typo.
+     */
+    hideSidebar: 'Hide Sidebar',
+    showSidebar: 'Show Sidebar'
   },
 
   /**

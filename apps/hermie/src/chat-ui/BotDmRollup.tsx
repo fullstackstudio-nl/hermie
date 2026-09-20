@@ -15,6 +15,7 @@ import { Pressable, View } from 'react-native'
 
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
+import { Icon, ICON_SIZE } from '../ui/Icon'
 import { TAP_SLOP } from '../ui/tokens'
 import { useExpanded } from './expanded'
 import { useLedgerWidth } from './primitives/Bubble'
@@ -49,17 +50,13 @@ export function BotDmRollup({ run, testID }: BotDmRollupProps) {
       testID={testID ?? `bot-dm-rollup-${run.id}`}
     >
       <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.sm, minHeight: 24 }}>
-        <Text color="textFaint" style={{ fontSize: 12, lineHeight: 16 }}>
-          {'→'}
-        </Text>
+        <Icon color={theme.colors.textFaint} name="arrowRight" size={ICON_SIZE.marker} />
 
         <Text color="textMuted" variant="meta">
           {label}
         </Text>
 
-        <Text color="textFaint" variant="meta">
-          {expanded ? '⌄' : '›'}
-        </Text>
+        <Icon color={theme.colors.textFaint} name={expanded ? 'chevronDown' : 'chevronRight'} size={ICON_SIZE.marker} />
       </View>
     </Pressable>
   )

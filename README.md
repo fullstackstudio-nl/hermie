@@ -46,6 +46,17 @@ the Mac, and it talks to nothing but your gateway.
   Regenerating them is its own job — docs/screenshots/ is published material
   (CONTRIBUTING.md), so it wants fixture data and stripped metadata, not a
   hurried retake.
+
+  One dead end already walked, so nobody walks it twice: the obvious source is
+  the developer gallery, which needs no gateway (`--hermieOpen gallery:list`,
+  `gallery:chat`, `gallery:shell`), and it cannot produce a publishable list.
+  Presence is computed from `status === 'ready'`, so with no gateway every row
+  reads "Offline" and the connection line says "Reconnecting…" — a picture that
+  makes a working app look broken. The arrangement in those shots is real; the
+  beads are not. A publishable set wants the real shell against
+  `npm run fake-gateway`, which means completing the setup wizard on the
+  simulator by hand first: GatewayProvider stays in the onboarding phase until a
+  credential exists.
 -->
 
 ## What it does
@@ -238,12 +249,23 @@ say stays between you and the machine you run them on.
 
 ## Platforms
 
-| Platform              | State                                                                           |
-| --------------------- | ------------------------------------------------------------------------------- |
-| iOS 15.1+             | The primary target                                                              |
-| iPadOS                | The same build, with a sidebar layout on wide windows                           |
-| Android 7.0+ (API 24) | Debug and release both build and run — driven on an emulator, never on hardware |
-| macOS, Apple Silicon  | The same build again, as "Designed for iPad" — a window with the sidebar layout |
+| Platform              | State                                                                                   |
+| --------------------- | --------------------------------------------------------------------------------------- |
+| iOS 15.1+             | The primary target                                                                      |
+| iPadOS                | The same build, with a sidebar layout on wide windows — and the sidebar hides           |
+| Android 7.0+ (API 24) | Builds and runs, driven end to end on an emulator; never on hardware, and no upload key |
+| macOS, Apple Silicon  | The same build again, as "Designed for iPad" — a window with the sidebar layout         |
+
+**On a wide window the chat list is a sidebar, and the sidebar can be put away.**
+The chat header's round button hides it, ⌘⇧S brings it back, and the Mac's Chats
+menu carries the same item. What is left is a slim rail with the way back and the
+Activity, Crons and Settings destinations, so nothing moves further away than one
+tap — and the conversation takes every point the list gave up, which on an 11"
+iPad in portrait is the difference between a comfortable measure and a narrow one.
+On a window too small to hold both, asking for the list back lays it over the
+conversation instead of squeezing it again, and it closes as soon as you pick a
+chat. Whether it starts open follows the window's width until you say otherwise;
+after that it is remembered, per gateway, like the rest of your arrangement.
 
 The Mac is not a separate port. It is the iOS app, which Apple runs on Apple
 Silicon Macs unmodified, so it has the same keychain, the same modules and the
@@ -265,7 +287,16 @@ been verified on a Mac.
 | Bot-to-bot messages, subagents and the Activity timeline     | Done        |
 | iPad and Mac layout, the transcript cache, image attachments | Done        |
 | Crons                                                        | Done        |
-| Release: icons, build profiles, signing, this README         | In progress |
+| The interface redesign                                       | Done        |
+| The Mac, as the iPad build rather than a port                | Done        |
+| Android, built and driven on an emulator                     | Done        |
+| Release: TestFlight and Play                                 | In progress |
+
+"Release" is waiting on two accounts rather than on code: TestFlight and the App
+Store need a paid Apple Developer team, and a Play upload has to be signed with a
+keystore registered once per app. Both are being arranged.
+[docs/release.md](docs/release.md) has what each one unblocks — including why a
+build signed by a free Apple team stops launching after seven days.
 
 After that: paging back through long history, notifications, and Android on real
 hardware — the emulator pass is done and written up in

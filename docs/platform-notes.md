@@ -3042,3 +3042,90 @@ does, and the only evidence is the fixture in `duplicate-turns.test.ts` written 
 pass. The fake gateway does not rewrite image directives at all, so an image-only send against it
 persists a row that projects to nothing and is dropped; the image-only path is pinned by unit tests
 with a hand-written row, not by a run.
+
+## Hiding the sidebar, and four icons that were never the same size (2026-09-20, later)
+
+Two things measured on iPad Pro 11" (834pt portrait) and 13" (1032pt portrait)
+simulators, both iOS 26.5, against the real `RegularShell` rather than the
+gallery's mimic of it.
+
+### The mimic could not have shown either of them, so the gallery now mounts the real shell
+
+`--hermieOpen gallery:chat` frames one gallery section in two hand-built panels
+here in `DevGallery.tsx`. That mimic has already lied once — it mounted
+`BotsScreen` without `onOpenSection`, so it drew a sidebar with no tab strip and
+the missing strip was reported as a portrait bug in the real shell, which has one
+at every height — and it can only ever be photographed in the states somebody
+remembered to build into it. A collapsed sidebar was not one of them.
+
+`--hermieOpen gallery:shell` now mounts `Shell` itself over a seeded fixture
+roster, with no gateway, no keychain and no sign-in. `gallery:list` does the same
+for the chat list alone. The mimic stays where it is; framing one component in the
+shell's proportions is a different job from being the shell.
+
+**What that still cannot show, and it matters for screenshots.** Presence is
+computed from `status === 'ready'` (`presenceOf`, via `BotsScreen`), and the
+gallery has no gateway, so every row reads `Offline` and the connection line says
+`Reconnecting…` or `Disconnected` however the roster is seeded. The arrangement —
+dividers, accents, unread marks — is real; the beads are not. A screenshot meant to
+show a working app needs a configured connection, and configuring one means
+completing the wizard by hand, because `GatewayProvider` requires
+`loaded.hasCredentials` before it leaves the onboarding phase.
+
+### 834pt starts collapsed, and that is the lever the portrait pass asked for
+
+The earlier portrait pass ended with "335pt is about 38 characters, still short of
+a comfortable measure — a collapsible sidebar is the remaining lever". It is built.
+`SIDEBAR_AUTO_COLLAPSE_MAX_WIDTH` is 900: under it the wide layout starts with the
+list hidden, at or above it with the list showing, and an explicit Hide or Show
+wins at either width. Measured on the running app:
+
+| At 834pt portrait | Sidebar | Chat column |
+| ----------------- | ------- | ----------- |
+| List showing      | 300     | 492         |
+| List hidden       | 56      | 736         |
+
+The rail keeps the way back and the three tab-strip destinations, so what the
+reader gives up by hiding the list is the list.
+
+### Three things the running app said that the tests could not
+
+- **The gear read as a SUN.** The first draw was eight thin strokes from r5.1 to
+  r8.1 around a circle, which is a sun whatever it was meant to be. Teeth are short
+  and thick and start at the ring they belong to now, with a bore in the middle,
+  and it reads as a gear at 19pt in both themes. No unit test could have said this;
+  it is the kind of thing only a screenshot knows.
+- **Two sidebar controls, 90pt apart, doing the same thing.** With a button in the
+  chat header AND one on the rail, a collapsed window drew two identical icons side
+  by side. The header's control now exists only while the list is showing and the
+  rail's only while it is hidden, which also settles the wording — one always hides,
+  one always shows, neither describes a state the other is in.
+- **The overlay arrived under the clock.** Yoga positions an absolutely placed child
+  against its parent's PADDING edge, not its content edge, so inside the shell's
+  padded row `top: 0` is the top of the window rather than the top of the column the
+  overlay stands in for. It carries the window inset itself now. Worth knowing before
+  positioning anything else absolutely inside `shell-window`.
+
+### A simulator can serve a stale bundle and say nothing
+
+The 13" iPad answered a `gallery:shell` launch with the PREVIOUS round's bundle —
+old glyph tab icons, the old wide-chat mimic — and looked like a perfectly healthy
+app. A second launch with a longer wait picked up the current one. So the first
+screenshot off a simulator that has been idle is not evidence until something in it
+is new; check for a change you made before reading anything else into it.
+
+### What this pass did NOT verify
+
+- **A Mac window**, at any width. The collapse's 700–900pt band is exactly what a
+  Mac window dragged narrow lands in, and no window was dragged.
+- **Anything with a live gateway.** Every screenshot here is the gallery's
+  gateway-free path, so presence, unread counts and the connection line are not
+  under test — see the note above.
+- **Reduce Motion and Reduce Transparency**, unchanged from previous passes. The
+  overlay's 200ms slide collapses to zero under Reduce Motion by construction; that
+  is asserted in code, not watched.
+- **Android**, unchanged.
+- **The status-mark alphabets.** `toolGlyph` (seven tool families), `NoticePill`'s
+  five notice kinds and `SubagentGroupCard`'s five statuses are still characters.
+  They are marks inside cards rather than controls, and each needs its own designed
+  shape, so they were left rather than half-converted.

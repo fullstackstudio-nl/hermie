@@ -17,6 +17,7 @@
 import { Pressable, View } from 'react-native'
 
 import { strings } from '../../i18n/strings'
+import { Icon, ICON_SIZE, type IconName } from '../../ui/Icon'
 import { Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 
@@ -26,18 +27,25 @@ export type BotsSection = 'activity' | 'cron' | 'settings'
 export type TabKey = 'chats' | BotsSection
 
 /**
- * The trailing U+FE0E is load-bearing on the gear.
+ * Four drawn icons at one size, which four Unicode glyphs could not be.
  *
- * iOS gives several of these characters their EMOJI presentation by default, so
- * `⚙` comes out as a colourful sticker in the middle of a monochrome tab strip.
- * The text variation selector is what asks for the glyph instead — the same
- * thing the Activity timeline needs for its return arrow.
+ * The strip used to carry a filled circle, a pair of exchange arrows, a clock and
+ * a gear as CHARACTERS, and the owner reported the obvious consequence: chats and
+ * crons drew visibly smaller than activity and settings. Nothing was wrong with
+ * the `fontSize` — the four characters come from four different fonts that
+ * disagree about how much of the em box a mark should fill, and no font metric
+ * reconciles that. There was a second cost in the same place: one of them needed
+ * a trailing U+FE0E to stop iOS drawing it as a colourful emoji sticker in the
+ * middle of a monochrome strip. `src/ui/Icon.tsx` carries the full reasoning.
+ *
+ * Exported so a test can walk the same four entries the strip renders, rather
+ * than repeating the list and then agreeing with itself.
  */
-const TABS: { key: TabKey; label: string; glyph: string }[] = [
-  { key: 'chats', label: strings.tabs.chats, glyph: '◉' },
-  { key: 'activity', label: strings.tabs.activity, glyph: '\u21c4' },
-  { key: 'cron', label: strings.tabs.routines, glyph: '\u25f7' },
-  { key: 'settings', label: strings.tabs.settings, glyph: '\u2699\ufe0e' }
+export const TABS: { key: TabKey; label: string; icon: IconName }[] = [
+  { key: 'chats', label: strings.tabs.chats, icon: 'chats' },
+  { key: 'activity', label: strings.tabs.activity, icon: 'activity' },
+  { key: 'cron', label: strings.tabs.routines, icon: 'crons' },
+  { key: 'settings', label: strings.tabs.settings, icon: 'settings' }
 ]
 
 export function SidebarFooter({
@@ -92,16 +100,20 @@ function TabStrip({ current, onOpenSection }: { current: TabKey; onOpenSection: 
             }}
             testID={`tab-${tab.key}`}
           >
-            <Text
-              color={selected ? 'text' : 'textMuted'}
-              style={{ fontSize: 17, lineHeight: 20 }}
-              // The glyph repeats the label, so a screen reader would read every
-              // tab twice.
-              accessibilityElementsHidden
-              importantForAccessibility="no-hide-descendants"
-            >
-              {tab.glyph}
-            </Text>
+            {/*
+              One drawn size for all four marks, and one SLOT around each of them
+              so the labels sit on one line whatever the mark's own weight wants.
+              The icon is decorative: the label under it is what a screen reader
+              reads, and `Icon` hides itself from the tree so the tab is not
+              announced twice.
+            */}
+            <Icon
+              color={selected ? theme.colors.text : theme.colors.textMuted}
+              name={tab.icon}
+              size={ICON_SIZE.tab}
+              slot={ICON_SIZE.tabSlot}
+              testID={`tab-icon-${tab.key}`}
+            />
             <Text color={selected ? 'text' : 'textMuted'} numberOfLines={1} variant="micro">
               {tab.label}
             </Text>

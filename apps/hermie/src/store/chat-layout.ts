@@ -2,12 +2,12 @@
  * How the chat list is arranged — and that is ALL it is.
  *
  * The order of the rows, the named dividers between them, which bots are
- * archived and what colour each chat carries are the owner's arrangement of
- * their own list. None of it is sent to the gateway, for the same reason
- * verbosity is not (ADR-0008): the gateway's settings are global, so a divider
- * called "Finance" created on a phone would rearrange Hermes Desktop and the TUI
- * as well, and there is no per-client scope to put it in. ADR-0012 is the
- * decision; this is the implementation.
+ * archived, what colour each chat carries and whether the list is showing at all
+ * on the wide layout are the owner's arrangement of their own list. None of it is
+ * sent to the gateway, for the same reason verbosity is not (ADR-0008): the
+ * gateway's settings are global, so a divider called "Finance" created on a phone
+ * would rearrange Hermes Desktop and the TUI as well, and there is no per-client
+ * scope to put it in. ADR-0012 is the decision; this is the implementation.
  *
  * Two consequences worth stating, because they are the ones a reader will hit:
  *
@@ -23,7 +23,7 @@
 import { create } from 'zustand'
 
 import { keyValueStore } from '../platform/key-value-store'
-import { ACCENTS, type AccentName } from '../ui/tokens'
+import { ACCENTS, SIDEBAR_AUTO_COLLAPSE_MAX_WIDTH, type AccentName } from '../ui/tokens'
 
 export const CHAT_LAYOUT_KEY = 'hermie.chats.layout'
 
@@ -39,6 +39,20 @@ export interface PersistedLayout {
   entries: LayoutEntry[]
   archived: string[]
   accents: Record<string, AccentName>
+  /**
+   * Whether the owner has hidden the list on the wide layout.
+   *
+   * ABSENT is a third value and it is the one that matters: it means nobody has
+   * asked for either, so the window's own width decides (`resolveSidebarCollapsed`
+   * below). Stored as a boolean once the owner touches the control, and stored
+   * HERE rather than in the settings store because the question it answers is
+   * "how is this gateway's chat list arranged", which is what ADR-0012 scopes to
+   * a gateway: the arrangement survives Sign out, because the address and the list
+   * it described both survive, and starts empty after Change gateway, because a
+   * different machine's bots are a different list. A settings-store copy would
+   * survive Change gateway too, which is the one thing it must not do.
+   */
+  sidebarCollapsed?: boolean
 }
 
 type LayoutsOnDisk = Record<string, PersistedLayout>
@@ -49,6 +63,12 @@ export interface ChatLayoutState {
   entries: LayoutEntry[]
   archived: Record<string, true>
   accents: Record<string, AccentName>
+  /**
+   * The owner's explicit choice about the wide layout's sidebar, or `undefined`
+   * while they have not made one. Read through `resolveSidebarCollapsed`, never
+   * directly: on its own it does not say what the shell should draw.
+   */
+  sidebarCollapsed?: boolean
   /** False until the disk read finishes; the list paints the roster order meanwhile. */
   loaded: boolean
 
@@ -65,6 +85,8 @@ export interface ChatLayoutState {
   removeDivider: (id: string) => void
   setArchived: (botName: string, archived: boolean) => void
   setAccent: (botName: string, accent: AccentName) => void
+  /** Record an explicit Hide/Show. There is no "back to automatic" — see the type. */
+  setSidebarCollapsed: (collapsed: boolean) => void
   reset: () => void
 }
 
@@ -73,6 +95,7 @@ const INITIAL = {
   entries: [] as LayoutEntry[],
   archived: {} as Record<string, true>,
   accents: {} as Record<string, AccentName>,
+  sidebarCollapsed: undefined as boolean | undefined,
   loaded: false
 }
 
@@ -135,7 +158,11 @@ function asLayout(value: unknown): PersistedLayout {
     archived: (Array.isArray(raw.archived) ? raw.archived : []).filter(
       (name): name is string => typeof name === 'string' && name.length > 0
     ),
-    accents
+    accents,
+    // Only a real boolean counts. Anything else — a missing key, a string an
+    // older build wrote — has to read as "never chosen", because that is the
+    // value the width bands are allowed to answer for.
+    ...(typeof raw.sidebarCollapsed === 'boolean' ? { sidebarCollapsed: raw.sidebarCollapsed } : {})
   }
 }
 
@@ -150,10 +177,18 @@ function newDividerId(): string {
 
 export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
   const save = (): void => {
-    const { gatewayKey, entries, archived, accents } = get()
+    const { gatewayKey, entries, archived, accents, sidebarCollapsed } = get()
 
     if (gatewayKey) {
-      persist(gatewayKey, { entries, archived: Object.keys(archived), accents })
+      persist(gatewayKey, {
+        entries,
+        archived: Object.keys(archived),
+        accents,
+        // Omitted while nobody has chosen, so that "never chosen" survives a
+        // round trip as the absence it is rather than as a `false` the width
+        // bands would then never get to answer for.
+        ...(sidebarCollapsed === undefined ? {} : { sidebarCollapsed })
+      })
     }
   }
 
@@ -174,7 +209,14 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
         archived[name] = true
       }
 
-      set({ gatewayKey, entries: stored.entries, archived, accents: stored.accents, loaded: true })
+      set({
+        gatewayKey,
+        entries: stored.entries,
+        archived,
+        accents: stored.accents,
+        sidebarCollapsed: stored.sidebarCollapsed,
+        loaded: true
+      })
     },
 
     /**
@@ -385,6 +427,11 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
       save()
     },
 
+    setSidebarCollapsed(collapsed) {
+      set({ sidebarCollapsed: collapsed })
+      save()
+    },
+
     reset() {
       set(INITIAL)
     }
@@ -436,4 +483,27 @@ export function dividersOf(entries: readonly LayoutEntry[]): { id: string; name:
 /** One chat's colour. Part 2's header and outgoing bubble read this too. */
 export function useChatAccent(botName: string): AccentName {
   return useChatLayoutStore(state => state.accents[botName] ?? 'default')
+}
+
+/**
+ * Whether the wide layout should be drawing the sidebar collapsed.
+ *
+ * Two inputs and one rule, and the rule is the owner's: **the window decides
+ * only where the owner has not.** An explicit Hide or Show wins at every width,
+ * for as long as it is stored; with no choice on record the band answers, and the
+ * band is a comparison against one number, which is what makes the second half of
+ * the owner's rule true by construction — the same window width cannot produce two
+ * answers, so nothing flips while the reader sits still and looks at it.
+ *
+ * Pure, and exported separately from the store because the shell, the rail, the
+ * header button and the Mac's menu bar all have to agree about the answer. Three
+ * copies of this comparison is how they would stop agreeing.
+ *
+ * Resizing DOES change the answer where there is no choice on record — dragging a
+ * Mac window from 1200 to 800 collapses the list — which is the intended reading of
+ * "start collapsed below 900": the window size is what changed, so the rule about
+ * not flipping under a still reader does not apply.
+ */
+export function resolveSidebarCollapsed(choice: boolean | undefined, windowWidth: number): boolean {
+  return choice ?? windowWidth < SIDEBAR_AUTO_COLLAPSE_MAX_WIDTH
 }

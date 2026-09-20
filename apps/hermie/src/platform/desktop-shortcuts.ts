@@ -10,11 +10,16 @@
  * ## An allow-list, not a key event
  *
  * The native side emits only for a fixed table of modified keys: ⌘K, ⌘,, ⌘W,
- * ⌘1…9, ⌘↑, ⌘↓ and ⌃Tab. It never emits for an unmodified key, which matters more
- * than it looks: the handler it reads from is GameController's, below the responder
- * chain, so it sees every keystroke in the app including the ones typed into the
- * composer and into a password field. Nothing that is not on the list crosses into
- * JavaScript at all.
+ * ⌘⇧S, ⌘1…9, ⌘↑, ⌘↓ and ⌃Tab. It never emits for an unmodified key, which matters
+ * more than it looks: the handler it reads from is GameController's, below the
+ * responder chain, so it sees every keystroke in the app including the ones typed
+ * into the composer and into a password field. Nothing that is not on the list
+ * crosses into JavaScript at all.
+ *
+ * ⌘⇧S is the one entry that WANTS Shift, and the native table had to be opened for
+ * it: everything else is disqualified by Shift on purpose, so that ⌘⇧K cannot be
+ * mistaken for ⌘K. It is matched on the full combination rather than by relaxing
+ * that rule — see `HermieMacModule.swift`.
  *
  * ## Why not `UIKeyCommand` for the keyboard half
  *
@@ -35,6 +40,7 @@ export type ShortcutAction =
   | 'search'
   | 'settings'
   | 'close'
+  | 'toggleSidebar'
   | 'nextChat'
   | 'previousChat'
   | 'chat1'
@@ -51,6 +57,7 @@ const ACTIONS: readonly ShortcutAction[] = [
   'search',
   'settings',
   'close',
+  'toggleSidebar',
   'nextChat',
   'previousChat',
   'chat1',
@@ -71,6 +78,16 @@ export interface MenuBarTitles {
   search: string
   settings: string
   close: string
+  /**
+   * "Hide Sidebar" or "Show Sidebar" — the caller picks, because only the caller
+   * knows which one is true.
+   *
+   * The one menu item in the bar whose WORDING is state, which is why it is a
+   * single key rather than two: the Swift side builds whatever string it is
+   * handed and holds no opinion about the sidebar, so the two cannot disagree
+   * about which way round they are.
+   */
+  toggleSidebar: string
 }
 
 type ShortcutModule = {

@@ -34,6 +34,7 @@ import {
   Composer,
   type ComposerAttachment,
   type PickerOption,
+  SidebarToggleButton,
   type SlashSuggestion,
   type SubagentTranscript,
   TranscriptList,
@@ -88,6 +89,11 @@ export type ChatScreenProps = {
    * and a cron card in the transcript then offers no `Open cron` at all.
    */
   onOpenCron?: (jobId: string) => void
+  /**
+   * Hide or show the wide layout's chat list. Absent on the compact shell, where
+   * there is no second pane and the header's leading slot is Back's.
+   */
+  onToggleSidebar?: () => void
 }
 
 const REASONING_OPTIONS: PickerOption[] = [
@@ -101,7 +107,15 @@ const REASONING_OPTIONS: PickerOption[] = [
   { value: 'ultra', label: 'Ultra' }
 ]
 
-export function ChatScreen({ route, bot, focusItemId, onBack, onOpenBot, onOpenCron }: ChatScreenProps) {
+export function ChatScreen({
+  route,
+  bot,
+  focusItemId,
+  onBack,
+  onOpenBot,
+  onOpenCron,
+  onToggleSidebar
+}: ChatScreenProps) {
   const { status } = useGateway()
   const botName = bot ?? route?.params?.bot ?? ''
   const focus = focusItemId ?? route?.params?.focusItemId
@@ -120,7 +134,7 @@ export function ChatScreen({ route, bot, focusItemId, onBack, onOpenBot, onOpenC
   }
 
   if (!botName) {
-    return <NoBotSelected />
+    return <NoBotSelected onToggleSidebar={onToggleSidebar} />
   }
 
   // Keyed on the bot so that switching conversations in the regular shell
@@ -134,15 +148,31 @@ export function ChatScreen({ route, bot, focusItemId, onBack, onOpenBot, onOpenC
       onBack={onBack}
       onOpenBot={onOpenBot}
       onOpenCron={onOpenCron}
+      onToggleSidebar={onToggleSidebar}
     />
   )
 }
 
-function NoBotSelected() {
+/**
+ * The wide layout's empty content column, before a chat has been picked.
+ *
+ * It carries the sidebar control, which looks like a duplicate of the chat
+ * header's and is not: on first launch there is no chat, therefore no header,
+ * therefore nowhere to hide the list FROM. Only the shortcut and the Mac menu bar
+ * reached it, and a control that exists only on a keyboard is a control most
+ * readers will never find. The compact shell passes no handler and draws none.
+ */
+function NoBotSelected({ onToggleSidebar }: { onToggleSidebar?: (() => void) | undefined }) {
   const theme = useTheme()
 
   return (
     <Screen testID="chat-empty">
+      {onToggleSidebar ? (
+        <View style={{ padding: theme.space.md }}>
+          <SidebarToggleButton onPress={onToggleSidebar} />
+        </View>
+      ) : null}
+
       <View style={{ alignItems: 'center', flex: 1, gap: theme.space.sm, justifyContent: 'center' }}>
         <Text color="textMuted">{strings.chat.pickBot}</Text>
       </View>
@@ -184,13 +214,15 @@ function Conversation({
   focusItemId,
   onBack,
   onOpenBot,
-  onOpenCron
+  onOpenCron,
+  onToggleSidebar
 }: {
   botName: string
   focusItemId?: string
   onBack?: () => void
   onOpenBot?: (botName: string, options?: OpenChatOptions) => void
   onOpenCron?: (jobId: string) => void
+  onToggleSidebar?: () => void
 }) {
   const chat = useChat(botName)
   const cronJobs = useCronStore(state => state.jobs)
@@ -899,6 +931,7 @@ function Conversation({
         name={display}
         onBack={onBack}
         onOpenOptions={openOptions}
+        onToggleSidebar={onToggleSidebar}
         // The resolved state, from the same function the chat list uses. It is
         // what keeps the header from saying "Connecting…" over a live chat: the
         // socket's own status is not a bot's state.
