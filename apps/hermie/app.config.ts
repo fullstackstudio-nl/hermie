@@ -39,6 +39,32 @@ const config: ExpoConfig = {
   ios: {
     bundleIdentifier: BUNDLE_ID,
     supportsTablet: true,
+    /*
+     * Name the keychain access group instead of inheriting one.
+     *
+     * `expo-secure-store` sets `kSecAttrAccessGroup` only when a caller passes
+     * `accessGroup`, and nothing here does, so every credential this app writes
+     * lands in whatever the system decides the app's FIRST access group is. With
+     * no `keychain-access-groups` entitlement that group is derived implicitly
+     * from the signing identity — and `scripts/run-mac.mjs` re-signs the Mac
+     * bundle from scratch on every build, under a seven-day automatic
+     * provisioning profile that is minted again whenever it has lapsed.
+     *
+     * `$(AppIdentifierPrefix)nl.fullstackstudio.hermie` is the same string the
+     * implicit default already resolves to, and it is FIRST on purpose: writes
+     * go to the first entry and reads search every entry, so naming it changes
+     * where nothing is written and leaves every existing item readable. What it
+     * buys is that the group is now declared by this repository rather than
+     * inferred from build metadata, and it is auditable in `codesign
+     * -d --entitlements -`.
+     *
+     * This is prophylactic, not a proven fix: see the 2026-09-20 section of
+     * docs/platform-notes.md for what was and was not established about the
+     * sign-out that follows replacing the .app bundle.
+     */
+    entitlements: {
+      'keychain-access-groups': [`$(AppIdentifierPrefix)${BUNDLE_ID}`]
+    },
     infoPlist: {
       // Everything Hermie sends goes over the platform's own TLS or HTTP stack,
       // with no cryptography of its own. Saying so here is what keeps App Store

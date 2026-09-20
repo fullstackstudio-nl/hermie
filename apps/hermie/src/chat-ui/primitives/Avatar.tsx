@@ -3,6 +3,24 @@
  *
  * The tint is derived from the name, so a bot keeps the same colour in the
  * chat list, the header and a forwarded DM without anyone persisting one.
+ *
+ * **The tint has to separate the circle from the PANEL, not only the initial
+ * from the circle.** Those are two different measurements and only the second
+ * one was ever made. The first palette cleared 5.4 : 1 for its letters and then
+ * put the circle itself 1.02–1.20 : 1 from the glass behind it, so on an iPad
+ * the avatars read as faint smudges with a letter floating in them — reported
+ * as "washed out", and easy to mistake for a missing accent ring. It is not the
+ * ring: §1.3 gives the ring to the eight per-chat colours and withholds it from
+ * Default on purpose, so a Default chat correctly has none. The numbers below
+ * are circle-against-panel (`elevation.e1`, the rung the sidebar panel sits on)
+ * and initial-against-circle:
+ *
+ *   light  separation 1.38–1.51,  initial 5.73–6.47
+ *   dark   separation 1.45–1.67,  initial 6.59–7.05
+ *
+ * `npm run contrast:check` does NOT cover these — it reads composited surfaces
+ * out of `tokens.ts`, and an avatar tint is neither a surface nor a token — so
+ * changing one means measuring it by hand.
  */
 import { useEffect, useState } from 'react'
 import { Image, View, type ImageStyle, type ViewStyle } from 'react-native'
@@ -12,17 +30,17 @@ import { useTheme } from '../../ui/theme'
 import { initialFor, tintIndex } from '../format'
 
 const LIGHT_TINTS = [
-  { background: '#DCEBFC', foreground: '#175B9E' },
-  { background: '#E9DFFA', foreground: '#6A4494' },
-  { background: '#DDEEE9', foreground: '#25624C' },
-  { background: '#F7E8D5', foreground: '#825321' }
+  { background: '#B9D8F7', foreground: '#0E477F' },
+  { background: '#D6C4F3', foreground: '#53307B' },
+  { background: '#B4DDD1', foreground: '#1A4E3B' },
+  { background: '#EFCB9C', foreground: '#6B4113' }
 ]
 
 const DARK_TINTS = [
-  { background: '#173049', foreground: '#9FCBF5' },
-  { background: '#2C2140', foreground: '#CBB0F0' },
-  { background: '#173029', foreground: '#8FD4B5' },
-  { background: '#3A2A16', foreground: '#EEC79A' }
+  { background: '#2A4E76', foreground: '#CFE4FB' },
+  { background: '#4A3975', foreground: '#E0CEFA' },
+  { background: '#245244', foreground: '#BEE9D4' },
+  { background: '#5C4222', foreground: '#F7DCBC' }
 ]
 
 export interface AvatarProps {

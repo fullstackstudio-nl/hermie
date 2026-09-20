@@ -128,6 +128,13 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
     const loaded = await loadGatewaySetup()
 
     if (!loaded || !loaded.hasCredentials) {
+      // A configured gateway with no credential beside it is the shape of the
+      // "signed out after replacing the app bundle" report, and the ring is the
+      // only thing that outlives the launch to say which of the two happened.
+      if (loaded) {
+        timelineRef.current.record(loaded.credentialError ? { event: 'token.read_failed' } : { event: 'token.absent' })
+      }
+
       teardown()
       setSetup(loaded)
       setResumeConfig(loaded?.config ?? null)
@@ -140,7 +147,10 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
   }, [connect, teardown])
 
   useEffect(() => {
-    void reload()
+    // A rejection here used to escape into nothing and leave the app on the
+    // splash screen for ever. Whatever went wrong, the wizard is a better
+    // answer than a spinner with no end.
+    void reload().catch(() => setPhase('onboarding'))
 
     return () => {
       teardown()

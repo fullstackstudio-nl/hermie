@@ -66,7 +66,7 @@ describe('the gateway address step', () => {
 
     await waitFor(() =>
       expect(screen.getByTestId('probe-result')).toHaveTextContent(
-        'Hermes 2026.9.14 · sign-in required via Self-Hosted OIDC'
+        'Hermes 2026.9.14 · sign-in required via Self-Hosted OIDC · Found over https://'
       )
     )
   })
@@ -183,7 +183,7 @@ describe('the gateway address step', () => {
     type('hermes.example.com')
     await waitFor(() => expect(resolveGatewayAddress).toHaveBeenCalled())
 
-    fireEvent.press(screen.getByText('+ Advanced'))
+    fireEvent.press(screen.getByText('▸ Advanced'))
     fireEvent.press(screen.getByText('Add a header'))
     fireEvent.changeText(screen.getAllByLabelText('Header')[0]!, 'CF-Access-Client-Id')
     fireEvent.changeText(screen.getAllByLabelText('Value')[0]!, 'client-id')
@@ -201,7 +201,7 @@ describe('the gateway address step', () => {
     type('hermes.example.com')
     await waitFor(() => expect(resolveGatewayAddress).toHaveBeenCalled())
 
-    fireEvent.press(screen.getByText('+ Advanced'))
+    fireEvent.press(screen.getByText('▸ Advanced'))
     fireEvent.press(screen.getByText('Add a header'))
     fireEvent.changeText(screen.getAllByLabelText('Header')[0]!, 'Authorization')
 
@@ -219,14 +219,44 @@ describe('the gateway address step: a cleartext gateway', () => {
     await waitFor(() => expect(screen.getByTestId('probe-result')).toHaveTextContent(/Found over http:\/\//))
   })
 
-  it('says nothing about the scheme when https answered', async () => {
+  // The step used to say nothing when https answered. The owner asked for the
+  // opposite: he could not tell that a scheme-less address is resolved at all,
+  // so the successful case has to name the scheme it landed on too. The notice
+  // — which is about cleartext, not about the resolution — still stays away.
+  it('names https as the scheme it found when the reader left the scheme out', async () => {
     resolveGatewayAddress.mockResolvedValue(at('https://hermes.example.com'))
     renderScreen(<Harness />)
     type('hermes.example.com')
 
-    await waitFor(() => expect(screen.getByTestId('probe-result')).toBeTruthy())
+    await waitFor(() => expect(screen.getByTestId('probe-result')).toHaveTextContent(/Found over https:\/\//))
     expect(screen.queryByTestId('transport-notice')).toBeNull()
-    expect(screen.queryByText(/Found over http/)).toBeNull()
+  })
+
+  it('says nothing about the scheme when the reader pinned one', async () => {
+    resolveGatewayAddress.mockResolvedValue(at('https://hermes.example.com'))
+    renderScreen(<Harness />)
+    type('https://hermes.example.com')
+
+    await waitFor(() => expect(screen.getByTestId('probe-result')).toBeTruthy())
+    expect(screen.queryByText(/Found over/)).toBeNull()
+  })
+
+  it('says which scheme it is trying while the probe is in flight', async () => {
+    resolveGatewayAddress.mockReturnValue(new Promise(() => {}))
+    renderScreen(<Harness />)
+    type('hermes.example.com')
+
+    await waitFor(() =>
+      expect(screen.getByTestId('probe-result')).toHaveTextContent('Checking https://, then http://…')
+    )
+  })
+
+  it('names the pinned scheme while the probe is in flight', async () => {
+    resolveGatewayAddress.mockReturnValue(new Promise(() => {}))
+    renderScreen(<Harness />)
+    type('http://192.0.2.10:9119')
+
+    await waitFor(() => expect(screen.getByTestId('probe-result')).toHaveTextContent('Checking http://…'))
   })
 
   it('states a tailnet address calmly and offers no way out of it', async () => {

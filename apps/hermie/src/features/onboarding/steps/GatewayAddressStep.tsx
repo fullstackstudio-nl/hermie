@@ -1,4 +1,4 @@
-import { normalizeBaseUrl, resolveGatewayAddress } from '@hermie/gateway-client'
+import { hasExplicitScheme, normalizeBaseUrl, resolveGatewayAddress } from '@hermie/gateway-client'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Pressable, View } from 'react-native'
 
@@ -8,6 +8,7 @@ import { strings } from '../../../i18n/strings'
 import { InsetButtonRow, InsetGroup, InsetRow, SecretField, Text, TextField } from '../../../ui/primitives'
 import { useTheme } from '../../../ui/theme'
 import { headerError, headerRecord, newHeaderRow, type OnboardingDraft } from '../draft'
+import { StatusLine } from '../StatusLine'
 
 /** Long enough that typing an address does not fire a probe per keystroke. */
 export const PROBE_DEBOUNCE_MS = 500
@@ -38,6 +39,10 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
 
   const raw = draft.rawAddress.trim()
   const headersKey = JSON.stringify(headerRecord(draft.headers))
+  // The resolver tries https first and falls back to http only when the reader
+  // left the scheme out, so which of the two is in flight is knowable here
+  // without instrumenting the resolver.
+  const pinnedScheme = raw && hasExplicitScheme(raw) ? raw.slice(0, raw.indexOf('://') + 3).toLowerCase() : null
 
   useEffect(() => {
     if (!raw) {
@@ -118,39 +123,43 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
   )
 
   return (
-    <View style={{ gap: theme.space.xl }}>
+    <View style={{ gap: theme.space.lg }}>
       <View style={{ gap: theme.space.sm }}>
-        <Text variant="title">{strings.onboarding.address.title}</Text>
-        <Text color="textMuted">{strings.onboarding.address.subtitle}</Text>
+        <Text color="textMuted" variant="micro">
+          {strings.onboarding.address.label}
+        </Text>
+        {/*
+          Outside an `InsetRow` on purpose, so `TextField` draws the sunk well
+          the design board gives every editable thing. A row would have lent it
+          its own chrome, which inside a card is a box around a box.
+        */}
+        <TextField
+          accessibilityLabel={strings.onboarding.address.label}
+          autoCapitalize="none"
+          autoCorrect={false}
+          inputMode="url"
+          keyboardType="url"
+          onChangeText={next => update({ rawAddress: next })}
+          placeholder={strings.onboarding.address.placeholder}
+          // The address is one line and the probe runs while you type, so
+          // Return has nothing left to submit; it should put the keyboard
+          // away and uncover the rest of the card.
+          returnKeyType="done"
+          testID="gateway-address"
+          textContentType="URL"
+          value={draft.rawAddress}
+        />
+        <Text color="textFaint" style={{ marginHorizontal: theme.space.xs }} variant="meta">
+          {strings.onboarding.address.hint}
+        </Text>
       </View>
 
-      <InsetGroup header={strings.onboarding.address.label} footer={strings.onboarding.address.hint}>
-        <InsetRow>
-          <TextField
-            testID="gateway-address"
-            value={draft.rawAddress}
-            onChangeText={next => update({ rawAddress: next })}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="url"
-            textContentType="URL"
-            inputMode="url"
-            // The address is one line and the probe runs while you type, so
-            // Return has nothing left to submit; it should put the keyboard
-            // away and uncover the footer.
-            returnKeyType="done"
-            placeholder={strings.onboarding.address.placeholder}
-            accessibilityLabel={strings.onboarding.address.label}
-          />
-        </InsetRow>
-      </InsetGroup>
-
       <View style={{ gap: theme.space.sm }}>
-        <ProbeLine busy={busy} error={error} draft={draft} foundOverHttp={foundOverHttp} />
+        <ProbeLine busy={busy} draft={draft} error={error} foundOverHttp={foundOverHttp} pinnedScheme={pinnedScheme} />
         <TransportNotice
           baseUrl={busy || error ? null : draft.baseUrl}
-          testID="transport-notice"
           onUseHttps={useHttpsInstead}
+          testID="transport-notice"
         />
       </View>
 
@@ -158,11 +167,13 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ expanded: advanced }}
-          onPress={() => setAdvanced(current => !current)}
           hitSlop={8}
+          onPress={() => setAdvanced(current => !current)}
+          style={({ pressed }) => ({ alignSelf: 'flex-start', opacity: pressed ? 0.6 : 1 })}
         >
-          <Text variant="preview" color="accent">
-            {advanced ? `− ${strings.onboarding.address.advanced}` : `+ ${strings.onboarding.address.advanced}`}
+          <Text color="accentText" variant="preview">
+            {/* A static caret: a disclosure is not a thing that needs the reader. */}
+            {advanced ? `▾ ${strings.onboarding.address.advanced}` : `▸ ${strings.onboarding.address.advanced}`}
           </Text>
         </Pressable>
 
@@ -171,40 +182,40 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
             {draft.headers.map(row => (
               <InsetRow key={row.id} style={{ gap: theme.space.sm }}>
                 <TextField
-                  label={strings.onboarding.address.headerName}
-                  value={row.name}
-                  onChangeText={name => setHeader(row.id, { name })}
                   autoCapitalize="none"
                   autoCorrect={false}
-                  returnKeyType="done"
+                  label={strings.onboarding.address.headerName}
+                  onChangeText={name => setHeader(row.id, { name })}
                   placeholder="CF-Access-Client-Id"
+                  returnKeyType="done"
+                  value={row.name}
                   {...(headerError(row) ? { error: headerError(row) } : {})}
                 />
                 <SecretField
-                  label={strings.onboarding.address.headerValue}
-                  value={row.value}
-                  onChangeText={value => setHeader(row.id, { value })}
                   autoCapitalize="none"
                   autoCorrect={false}
-                  returnKeyType="done"
                   concealLabel={strings.onboarding.address.hideValue}
+                  label={strings.onboarding.address.headerValue}
+                  onChangeText={value => setHeader(row.id, { value })}
+                  returnKeyType="done"
                   revealLabel={strings.onboarding.address.showValue}
+                  value={row.value}
                 />
                 <Pressable
-                  accessibilityRole="button"
                   accessibilityLabel={strings.onboarding.address.removeHeader(row.name)}
-                  onPress={() => update({ headers: draft.headers.filter(other => other.id !== row.id) })}
+                  accessibilityRole="button"
                   hitSlop={8}
+                  onPress={() => update({ headers: draft.headers.filter(other => other.id !== row.id) })}
                 >
-                  <Text variant="meta" color="dangerText">
+                  <Text color="dangerText" variant="meta">
                     {strings.common.remove}
                   </Text>
                 </Pressable>
               </InsetRow>
             ))}
             <InsetButtonRow
-              title={strings.onboarding.address.addHeader}
               onPress={() => update({ headers: [...draft.headers, newHeaderRow()] })}
+              title={strings.onboarding.address.addHeader}
             />
           </InsetGroup>
         ) : null}
@@ -217,26 +228,29 @@ function ProbeLine({
   busy,
   error,
   draft,
-  foundOverHttp
+  foundOverHttp,
+  pinnedScheme
 }: {
   busy: boolean
   error: string | null
   draft: OnboardingDraft
   foundOverHttp: boolean
+  /** The scheme the reader typed, or `null` when they left it out. */
+  pinnedScheme: string | null
 }) {
   if (busy) {
     return (
-      <Text color="textMuted" testID="probe-result">
-        {strings.onboarding.address.probing}
-      </Text>
+      <StatusLine testID="probe-result" tone="checking">
+        {pinnedScheme ? strings.onboarding.address.probingScheme(pinnedScheme) : strings.onboarding.address.probingBoth}
+      </StatusLine>
     )
   }
 
   if (error) {
     return (
-      <Text color="dangerText" testID="probe-error">
+      <StatusLine testID="probe-error" tone="error">
         {error}
-      </Text>
+      </StatusLine>
     )
   }
 
@@ -246,32 +260,38 @@ function ProbeLine({
     return null
   }
 
-  // The scheme the address ended up on is part of what the probe found, so it
-  // belongs on the same line rather than in a notice the eye can skip.
-  const found = foundOverHttp ? ` · ${strings.transport.foundOverHttp}` : ''
+  // Which scheme answered is part of what the probe found, so it belongs on the
+  // same line rather than in a notice the eye can skip. It is only said when
+  // the reader left the scheme out, because that is the only time it was an
+  // open question.
+  const found = pinnedScheme
+    ? ''
+    : foundOverHttp
+      ? ` · ${strings.transport.foundOverHttp}`
+      : ` · ${strings.transport.foundOverHttps}`
 
   if (!probe.authRequired) {
     return (
-      <Text color="okText" testID="probe-result">
+      <StatusLine testID="probe-result" tone="ok">
         {`${strings.onboarding.address.sessionTokenRequired(probe.version)}${found}`}
-      </Text>
+      </StatusLine>
     )
   }
 
   if (probe.providers.length === 0) {
     return (
-      <Text color="dangerText" testID="probe-result">
+      <StatusLine testID="probe-result" tone="error">
         {`${strings.onboarding.address.signInRequiredNoProviders(probe.version)}${found}`}
-      </Text>
+      </StatusLine>
     )
   }
 
   return (
-    <Text color="okText" testID="probe-result">
+    <StatusLine testID="probe-result" tone="ok">
       {`${strings.onboarding.address.signInRequired(
         probe.version,
         probe.providers.map(provider => provider.displayName)
       )}${found}`}
-    </Text>
+    </StatusLine>
   )
 }

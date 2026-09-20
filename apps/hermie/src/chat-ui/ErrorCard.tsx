@@ -12,6 +12,7 @@ import { View } from 'react-native'
 
 import { Button, Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
+import { useLedgerWidth } from './primitives/Bubble'
 import { chatStrings } from './strings'
 
 export interface ErrorCardProps {
@@ -24,6 +25,7 @@ export interface ErrorCardProps {
 
 export function ErrorCard({ message, retryable = false, recoverable = false, onRetry, testID }: ErrorCardProps) {
   const theme = useTheme()
+  const maxWidth = useLedgerWidth()
 
   return (
     <View
@@ -34,7 +36,14 @@ export function ErrorCard({ message, retryable = false, recoverable = false, onR
         borderRadius: theme.radii.xl,
         borderWidth: 1,
         gap: theme.space.sm,
+        // §6.4's column rule, the same one every other ledger card takes: inside
+        // a transcript the cap is the bubble's, and the margin keeps the card off
+        // the gutter where the cap is the whole of a narrow column. Outside one
+        // `useLedgerWidth` is undefined and the card fills its box, which is what
+        // a gallery section and the Activity timeline want.
+        marginRight: 26,
         marginVertical: theme.space.sm,
+        maxWidth,
         padding: theme.space.md
       }}
       testID={testID}
@@ -53,7 +62,17 @@ export function ErrorCard({ message, retryable = false, recoverable = false, onR
       ) : null}
 
       {retryable && !recoverable && onRetry ? (
-        <Button onPress={onRetry} testID={`${testID ?? 'error-card'}-retry`} title={chatStrings.assistant.retry} />
+        <Button
+          onPress={onRetry}
+          // Content width, not the card's. A one-word action stretched across a
+          // 600pt card reads as the card's own bottom edge rather than as a
+          // button, and the mockup's `.btn` is sized by its label. The 44pt
+          // minimum lives on `Button`'s inner view, so capping the Pressable
+          // here narrows it without shortening it.
+          style={{ alignSelf: 'flex-start' }}
+          testID={`${testID ?? 'error-card'}-retry`}
+          title={chatStrings.assistant.retry}
+        />
       ) : null}
     </View>
   )

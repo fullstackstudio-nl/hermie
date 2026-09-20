@@ -122,6 +122,14 @@ export const BotRow = memo(function BotRow({
           // The accent ring is how a per-chat colour shows up in the list. A
           // chat on Default gets no ring at all rather than a blue one, so the
           // ring means "this one was given a colour".
+          //
+          // §1.3 is the authority: Default is not one of the eight curated
+          // colours, and the four things a colour tints start with "the avatar
+          // ring in the list and the header". So a ringless Default row is
+          // correct and is NOT the cause of a washed-out avatar — that was the
+          // tint's separation from the panel, fixed in `Avatar`. Keyed on the
+          // accent alone, never on whether the bot has a picture: a ring that
+          // came and went with an asset would make the colour mean two things.
           style={
             accent === 'default'
               ? undefined

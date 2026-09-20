@@ -21,6 +21,14 @@ export interface RowLayout {
   grouped: boolean
   /** Last of its run, so it carries the tail. */
   tail: boolean
+  /**
+   * Follows another outgoing bot-to-bot line.
+   *
+   * Not `grouped`: a dispatch is a ledger line, not speech (§6.4), so it has no
+   * tail and no corner to tuck. It does have a rhythm of its own — §6.6's nine
+   * points between consecutive lines — and that is the only thing this says.
+   */
+  ledgerRun: boolean
   /** A date stamp belongs directly ABOVE this row. */
   dateStamp?: string
 }
@@ -104,14 +112,18 @@ export function layoutRows(entries: readonly VisibleItem[], now = Date.now() / 1
 
     const tail = key === null || next === undefined || speakerKey(next) !== key || !withinWindow(item.ts, next.ts)
 
-    const stamp = item.ts ? dateStampFor(item.ts, now) : undefined
+    const ledgerRun = item.kind === 'bot_dm_out' && previous?.kind === 'bot_dm_out'
+
+    // A hidden row draws nothing, so it must not swallow the day's stamp either:
+    // the stamp passes to the first row of that day the reader can actually see.
+    const stamp = entry.presentation === 'hidden-placeholder' || !item.ts ? undefined : dateStampFor(item.ts, now)
     const dateStamp = stamp && stamp !== lastStamp ? stamp : undefined
 
     if (stamp) {
       lastStamp = stamp
     }
 
-    layout[item.id] = { grouped, tail, ...(dateStamp ? { dateStamp } : {}) }
+    layout[item.id] = { grouped, ledgerRun, tail, ...(dateStamp ? { dateStamp } : {}) }
   }
 
   return layout

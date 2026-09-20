@@ -10,6 +10,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The setup wizard is one glass card on the wallpaper.** Every step used to be a flat full-screen
+  form: an eyebrow, a title, a paragraph, a tall empty middle, a hairline, and a pinned footer
+  holding Continue and Back. It is now a single centred card, at most 520pt wide, whose height
+  follows its content, with the step's actions inside it under the content they act on and the
+  divider gone. A slim four-segment rail carries the progress, static like every other status
+  indicator in the app. On a phone the card takes the window's width; on a Mac or an iPad it is
+  centred in both directions. The keyboard behaviour the pinned footer existed for is kept — the
+  card scrolls rather than being covered.
+- **The address step says what it actually does.** The hint under the field now states the
+  behaviour that has been there since ADR-0014 and that nobody could see: leave the scheme out and
+  the address is tried over `https://` first and `http://` second, and typing a scheme pins it.
+  While the probe is in flight the line names the scheme it is trying; when it answers, it names the
+  scheme it found — `Found over https://` as well as `Found over http://`, but only when the reader
+  left the scheme out, because that is the only time it was an open question.
+- **The connection test is a checklist, not a verdict.** REST, WebSocket and Profiles each get a
+  static dot that fills in as the run reaches them, so a failure says WHICH half failed. That
+  distinction is the whole value of the step: REST refused is a credential, the socket refused is a
+  reverse proxy that does not pass upgrades through.
+- **`Open in browser instead` is offered before you need it.** The system-browser sign-in path used
+  to exist only inside the in-app web view, behind a caption under a page that may never load. It is
+  now a quiet action on the sign-in step itself, and it opens straight onto the same paste-the-
+  redirect form Android already gets.
+- **Every onboarding step state is addressable** through `--hermieOpen gallery:onboarding-*`,
+  including the error states — a probe that found nothing, a gateway that requires a sign-in but
+  lists no providers, a gateway too old for native sign-in, and both ways the connection test fails.
+  The wizard is the one screen nobody can reach twice, and the states worth looking at need a
+  gateway broken in a particular way.
+
 - **A gateway can be reached over plain `http://`, and the app says so.** On a tailnet — Tailscale,
   or Headscale — WireGuard has already encrypted the path, so `http://100.x.y.z:9119` or
   `http://host.tailnet.ts.net` is a complete and correct setup, and until now the operating system
@@ -70,6 +98,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A collapsed run of bot-to-bot messages is one line again.** Every transcript row carried the gap
+  above it, including the rows a roll-up swallows — so five dispatches collapsed into
+  `5 messages to @writer` still left five turn gaps behind them, about 55pt of nothing between that
+  one line and the next bubble. A row that draws nothing now takes no space at all.
+- **Consecutive bot-to-bot lines sit nine points apart**, the rhythm §6.6 gives them, rather than the
+  ten that separates two turns of speech. A dispatch is a ledger line, not a bubble.
+- **The typing bubble gets the gap that any new turn gets.** It was the list's header rather than one
+  of its rows, so the grouping never saw it and nothing gave it a margin: it sat against the message
+  above with its tail reaching into the bubble's bottom corner. Nothing was added below it — the
+  space there was always the list's own padding plus the composer's.
+- **The Answer button on a question in the transcript is as wide as its label.** On a wide window it
+  ran the whole card.
+- **A day that changes on a hidden row now stamps the first row the reader can see.** A hidden
+  placeholder was advancing the date stamp while drawing nothing, so a day boundary that happened to
+  land on one went unmarked entirely.
+- **Error cards in the transcript take the column rule instead of spanning it.** "Something went
+  wrong" ran the full width of the chat column while every bubble beside it stopped at the bubble
+  cap, and its Retry button stretched edge to edge with it. On an iPad Pro 13" in portrait the card
+  went from 620pt to 469pt, in line with the bubbles, and Retry is now sized by its label — with the
+  44pt minimum touch height intact.
+- **The sidebar is 300pt on a window narrower than 1100, and 340 above it.** It was 344 everywhere,
+  which is a landscape number: in portrait that is a third of an iPad Pro 13" and two fifths of an
+  11". On an 11" in portrait the chat column goes from 448pt to 492pt and the bubble cap from about
+  305pt to about 335 — the old number made a tablet read NARROWER than an iPhone 17 Pro, whose
+  bubbles cap at 314. It is still tighter than a comfortable measure at that size; a collapsible
+  sidebar is the remaining lever and the design board has no control for one yet.
+- **The filter pills scroll.** At 300pt of sidebar "Needs input" no longer fits beside the other
+  three, and it was already one text-size step from clipping at 344 — so the row scrolls
+  horizontally, which also covers a longer translation and a larger Dynamic Type setting.
+- **Avatar tints are deep enough to see.** The circle behind a bot's initial sat 1.02–1.20 : 1 from
+  the panel behind it, so at iPad width a row read as a letter floating on the glass; the initial
+  itself was always fine, which is why measuring only the ink missed it. The circle now separates at
+  1.38–1.51 : 1 in light and 1.45–1.67 in dark, with the initial still above 5.7 : 1. A Default chat
+  still gets no accent ring — §1.3 gives the ring to the eight curated colours, and that is correct.
+- **A keychain that refuses to answer no longer strands the launch on the splash screen.** The
+  startup read of the stored credentials had no `try`/`catch` and its caller was invoked without
+  `await`, so a rejection — a missing entitlement, a locked keychain — escaped into nothing and the
+  app waited for a phase that would never arrive. It now falls through to the wizard, which is a
+  worse answer than connecting and a far better one than a spinner with no end.
+- **A launch that finds the gateway address but no credential now says which of the two happened.**
+  `expo-secure-store` resolves a missing item and an item in an unreadable keychain access group to
+  the same `null`, so the ring recorded nothing that could tell them apart after the fact. The auth
+  timeline gains `token.absent` for a clean miss, beside the existing `token.read_failed` for a
+  refusal. This is what the "signed out after replacing the .app bundle" report needed and did not
+  have; `docs/platform-notes.md` records what that investigation could and could not establish.
+
 - **The transport's TLS classification was built on a message that does not exist.**
   `looksLikeTlsFailure` matched `ssl`, `certificate` and the literal `-1200`, with a comment saying
   iOS puts the NSURLError code in the message. Measured on iOS 27: CFNetwork logs
@@ -85,9 +159,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The iOS build names its keychain access group instead of inheriting one.**
+  `keychain-access-groups` is now `$(AppIdentifierPrefix)nl.fullstackstudio.hermie`, the same string
+  the implicit default already resolved to and first in the list, so writes go where they always
+  went and every existing item stays readable — there is no migration, and nothing a user has to do.
+  What changes is that the group is declared by this repository and auditable in `codesign` rather
+  than inferred from whatever signing metadata a build happened to produce. It is a precaution
+  against the "signed out after replacing the .app bundle" report, not a proven fix for it: see
+  `docs/platform-notes.md` for exactly what was and was not established.
+
 - **The wording that made https sound compulsory.** The address hint read "Without a scheme, Hermie
-  assumes https://.", which reads as a requirement; it now says what is true — https is assumed, and
-  http works for a gateway on a private network. The README's "Keep the gateway off the public
+  assumes https://.", which reads as a requirement. It then said https is assumed and http works on
+  a private network, and it now goes one step further and states the resolution itself — see the
+  address-step entry under Added, which supersedes this wording. The README's "Keep the gateway off the public
   internet" told you to run `tailscale serve` in front of the gateway as though TLS were needed on a
   tailnet: it is optional there, and useful mainly when an identity provider insists on an https
   redirect URI or you want a browser-trusted certificate. "Reach it over HTTPS if it is not on the

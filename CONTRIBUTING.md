@@ -111,11 +111,16 @@ scratch.
 
 ## Opening the app on one screen (development only)
 
-Most of the interface is behind a tap, and the simulators on this machine can be
-launched and photographed and nothing else — there is no `Simulator.app`, so
-`simctl` has no tap, swipe or rotate verb (see
-[docs/platform-notes.md](docs/platform-notes.md)). Launch arguments are the one
-channel that is left, so a Debug build reads them:
+Most of the interface is behind a tap, and `xcrun simctl` has no tap, swipe or
+rotate verb — there is no `Simulator.app` on this machine, and `idb`, `fbsimctl`,
+`maestro` and `appium` are all absent (see
+[docs/platform-notes.md](docs/platform-notes.md)). Some tooling can drive a
+simulator by other means, but none of it can rotate one, and a tool that works
+from screenshot coordinates will miss a screen that re-renders under it.
+
+Launch arguments need none of that. They are deterministic, they cost no
+coordinate arithmetic, and they are the only thing that still works when two
+changes are in flight against one Metro instance — so a Debug build reads them:
 
 ```sh
 xcrun simctl launch <udid> nl.fullstackstudio.hermie \

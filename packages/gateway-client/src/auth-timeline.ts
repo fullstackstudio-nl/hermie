@@ -35,6 +35,17 @@ export type AuthEventName =
   | 'token.served'
   /** The token store could not be read. */
   | 'token.read_failed'
+  /**
+   * A launch found the gateway's address but no credential beside it.
+   *
+   * Recorded because it is otherwise indistinguishable from a keychain that
+   * REFUSED to answer: `SecItemCopyMatching` returns `errSecItemNotFound` both
+   * when an item was never written and when it was written under an access
+   * group this process can no longer see, and `expo-secure-store` resolves both
+   * to `null`. Until this existed, a launch that dropped the owner back into
+   * the wizard left nothing at all in the ring to read afterwards.
+   */
+  | 'token.absent'
   /** A rotated token set reached the store. */
   | 'token.write_ok'
   /** A rotated token set did NOT reach the store — the next launch will be signed out. */

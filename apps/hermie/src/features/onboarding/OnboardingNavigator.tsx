@@ -1,14 +1,8 @@
 import { useCallback, useState } from 'react'
-import { KeyboardAvoidingView, ScrollView, View } from 'react-native'
 
 import { saveGatewaySetup, type StoredGatewayConfig } from '../../gateway/config'
 import { describeConnectionError } from '../../gateway/errors'
 import { strings } from '../../i18n/strings'
-import { directTouchPanRef } from '../../platform/pointer-drag'
-import { KEYBOARD_AVOID_BEHAVIOR } from '../../ui/keyboard'
-import { Button, Screen, Text } from '../../ui/primitives'
-import { useTheme } from '../../ui/theme'
-import { FORM_MAX_WIDTH } from '../../ui/tokens'
 import {
   authModeOf,
   configFromDraft,
@@ -21,6 +15,7 @@ import {
   type OnboardingDraft,
   type OnboardingStep
 } from './draft'
+import { OnboardingCard } from './OnboardingCard'
 import { DoneStep } from './steps/DoneStep'
 import { GatewayAddressStep } from './steps/GatewayAddressStep'
 import { SignInStep } from './steps/SignInStep'
@@ -45,6 +40,14 @@ export interface OnboardingNavigatorProps {
  * The wizard is one screen with steps rather than a navigator: it owns a single
  * draft that every step reads and writes, the steps are strictly ordered, and
  * nothing about it wants a back stack with its own history.
+ *
+ * **The chrome lives in `OnboardingCard`, and the heading with it.** Every step
+ * used to draw its own title and lead, which is why the two were easy to get
+ * out of step with each other — one step used `title`, another an inset group
+ * header — and why the wizard read as five loosely related screens instead of
+ * one. A step now contributes its body and nothing else; what it is called and
+ * what moves it forward are decided here, in one place, where the order already
+ * is.
  */
 export function OnboardingNavigator({
   resumeConfig = null,
@@ -53,7 +56,6 @@ export function OnboardingNavigator({
   initialDraft,
   probeDebounceMs
 }: OnboardingNavigatorProps) {
-  const theme = useTheme()
   const [draft, setDraft] = useState<OnboardingDraft>(
     () => initialDraft ?? (resumeConfig ? draftFromConfig(resumeConfig) : emptyDraft())
   )
@@ -145,63 +147,50 @@ export function OnboardingNavigator({
           : strings.onboarding.done.finish
         : strings.common.continue
 
-  const counter = NUMBERED_STEPS.indexOf(step)
+  const authMode = authModeOf(draft.probe)
+
+  const heading: { title: string; lead: string } =
+    step === 'welcome'
+      ? { title: strings.onboarding.welcome.title, lead: strings.onboarding.welcome.body }
+      : step === 'address'
+        ? { title: strings.onboarding.address.title, lead: strings.onboarding.address.subtitle }
+        : step === 'signin'
+          ? {
+              title: strings.onboarding.signIn.title,
+              lead:
+                authMode === 'session_token'
+                  ? strings.onboarding.signIn.subtitleToken
+                  : strings.onboarding.signIn.subtitleNative
+            }
+          : step === 'test'
+            ? { title: strings.onboarding.test.title, lead: strings.onboarding.test.subtitle }
+            : { title: strings.onboarding.done.title, lead: strings.onboarding.done.subtitle }
 
   return (
-    <Screen padded={false}>
-      {/* The wizard is a form with a pinned footer, and the footer holds the
-          only way forward. Without this the soft keyboard covered "Continue"
-          on every step that has a field — the session token, the gateway
-          address, a proxy header — and the way out was to dismiss the keyboard
-          first, which nothing on screen said. */}
-      <KeyboardAvoidingView behavior={KEYBOARD_AVOID_BEHAVIOR} style={{ flex: 1 }}>
-        <ScrollView
-          ref={directTouchPanRef}
-          contentContainerStyle={{
-            padding: theme.space.lg,
-            gap: theme.space.lg,
-            width: '100%',
-            maxWidth: FORM_MAX_WIDTH,
-            alignSelf: 'center'
-          }}
-          keyboardShouldPersistTaps="handled"
-        >
-          {counter >= 0 ? (
-            <Text variant="meta" color="textMuted" testID="step-counter">
-              {strings.onboarding.stepCounter(counter + 1, NUMBERED_STEPS.length)}
-            </Text>
-          ) : null}
-
-          {step === 'welcome' ? <WelcomeStep /> : null}
-          {step === 'address' ? (
-            <GatewayAddressStep
-              draft={draft}
-              update={update}
-              {...(probeDebounceMs === undefined ? {} : { debounceMs: probeDebounceMs })}
-            />
-          ) : null}
-          {step === 'signin' ? <SignInStep draft={draft} update={update} /> : null}
-          {step === 'test' ? <TestConnectionStep draft={draft} update={update} /> : null}
-          {step === 'done' ? <DoneStep draft={draft} error={saveError} /> : null}
-        </ScrollView>
-
-        <View
-          style={{
-            padding: theme.space.lg,
-            gap: theme.space.sm,
-            width: '100%',
-            maxWidth: FORM_MAX_WIDTH,
-            alignSelf: 'center',
-            borderTopWidth: 1,
-            borderTopColor: theme.hairline
-          }}
-        >
-          <Button title={primaryLabel} onPress={advance} disabled={!canAdvance()} busy={saving} />
-          {step === 'welcome' ? null : (
-            <Button title={strings.common.back} variant="secondary" onPress={goBack} disabled={saving} />
-          )}
-        </View>
-      </KeyboardAvoidingView>
-    </Screen>
+    <OnboardingCard
+      backDisabled={saving}
+      cover={step === 'welcome'}
+      lead={heading.lead}
+      onBack={step === 'welcome' ? undefined : goBack}
+      onPrimary={advance}
+      primaryBusy={saving}
+      primaryDisabled={!canAdvance()}
+      primaryLabel={primaryLabel}
+      stepCount={NUMBERED_STEPS.length}
+      stepIndex={NUMBERED_STEPS.indexOf(step)}
+      title={heading.title}
+    >
+      {step === 'welcome' ? <WelcomeStep /> : null}
+      {step === 'address' ? (
+        <GatewayAddressStep
+          draft={draft}
+          update={update}
+          {...(probeDebounceMs === undefined ? {} : { debounceMs: probeDebounceMs })}
+        />
+      ) : null}
+      {step === 'signin' ? <SignInStep draft={draft} update={update} /> : null}
+      {step === 'test' ? <TestConnectionStep draft={draft} update={update} /> : null}
+      {step === 'done' ? <DoneStep draft={draft} error={saveError} /> : null}
+    </OnboardingCard>
   )
 }

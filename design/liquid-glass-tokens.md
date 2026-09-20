@@ -259,7 +259,11 @@ window frame 22.
 
 **Sizes**: list avatar 48, header avatar 38, inline avatar 26. Round glass controls
 38 on the wide layout, 40 on phone; list rows 74 (72 on phone); every primary
-control is at least 44 tall on phone. Sidebar width 344.
+control is at least 44 tall on phone. Sidebar width **340 above 1100pt of window width, 300 below
+it** — this said 344 flat, which is a landscape number wearing no label: in portrait 344 is a third
+of an iPad Pro 13" (344 of 1032) and two fifths of an 11" (344 of 834), and what it takes comes out
+of the one column that has to hold prose. `sidebarWidth()` in `apps/hermie/src/ui/tokens.ts` is the
+one place that decides.
 
 **Max bubble width** — the rule that fixes edge-to-edge text walls:
 

@@ -10,8 +10,9 @@ import { SettingsScreen } from '../features/settings'
 import { strings } from '../i18n/strings'
 import { useSafeAreaInsets } from '../platform/safe-area'
 import { GlassSurface, Wallpaper } from '../ui/glass'
-import { SIDEBAR_WIDTH, WINDOW_GAP } from '../ui/tokens'
+import { WINDOW_GAP } from '../ui/tokens'
 import { OverlayPanel } from './OverlayPanel'
+import { useSidebarWidth } from './useLayoutMode'
 
 /**
  * Two floating glass panels over a wallpaper, for a wide window — an iPad, or a
@@ -35,6 +36,7 @@ import { OverlayPanel } from './OverlayPanel'
  */
 export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
   const insets = useSafeAreaInsets()
+  const sidebar = useSidebarWidth()
   const [section, setSection] = useState<BotsSection | null>(initial?.section ?? null)
   const [selectedBot, setSelectedBot] = useState<string | undefined>(initial?.bot)
   const [focusItemId, setFocusItemId] = useState<string | undefined>(undefined)
@@ -76,12 +78,7 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
         }}
         testID="shell-window"
       >
-        <GlassSurface
-          contentStyle={{ flex: 1 }}
-          style={{ width: SIDEBAR_WIDTH }}
-          testID="shell-sidebar"
-          variant="panel"
-        >
+        <GlassSurface contentStyle={{ flex: 1 }} style={{ width: sidebar }} testID="shell-sidebar" variant="panel">
           <BotsScreen
             currentTab={section ?? 'chats'}
             onOpenBot={bot => openBot(bot.name)}

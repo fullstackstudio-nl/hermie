@@ -26,7 +26,7 @@
  * gateway card are in both, because both mockup frames show them.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { FlatList, Pressable, RefreshControl, TextInput, View } from 'react-native'
+import { FlatList, Pressable, RefreshControl, ScrollView, TextInput, View } from 'react-native'
 
 import { unreadCountSince } from '@hermie/transcript'
 
@@ -510,17 +510,42 @@ function SearchField({ onChangeText, value }: { onChangeText: (value: string) =>
   )
 }
 
+/**
+ * The four filter pills.
+ *
+ * A ROW THAT SCROLLS, not a row that fits. Four pills whose widths are four
+ * translated words never fit a fixed box by arithmetic: at the narrow sidebar
+ * width "Needs input" lost its last letters, and it was already one Dynamic Type
+ * step from doing the same at the wide one. A horizontal scroller is the only
+ * version of this row that survives a narrower sidebar, a longer translation and
+ * a larger text size at the same time — and with nothing to scroll it is
+ * indistinguishable from the fixed row.
+ *
+ * `flexGrow: 1` on the content is what keeps it left-aligned rather than
+ * stretched when the pills DO fit, which is the common case.
+ *
+ * The padding is `sm`, not `md`, for the same reason. Measured in English at the
+ * narrow sidebar the four pills wanted 311pt in a 260pt row; at `sm`, and with
+ * the row's own gutter one step in, they want 271 in 268 — near enough that the
+ * scroller only has to cover translations and Dynamic Type rather than the
+ * default case.
+ */
 function Filters({ current, onChange }: { current: ChatFilter; onChange: (filter: ChatFilter) => void }) {
   const theme = useTheme()
 
   return (
-    <View
-      style={{
+    <ScrollView
+      contentContainerStyle={{
         flexDirection: 'row',
+        flexGrow: 1,
         gap: 6,
-        paddingBottom: theme.space.md,
-        paddingHorizontal: theme.space.lg
+        paddingHorizontal: theme.space.md
       }}
+      horizontal
+      // The pills are a filter, not a scroll surface: a bar under four chips
+      // reads as a second, broken scrollbar for the list below them.
+      showsHorizontalScrollIndicator={false}
+      style={{ flexGrow: 0, marginBottom: theme.space.md }}
     >
       {CHAT_FILTERS.map(filter => {
         const selected = filter === current
@@ -536,18 +561,25 @@ function Filters({ current, onChange }: { current: ChatFilter; onChange: (filter
               borderColor: selected ? 'transparent' : theme.hairlineSoft,
               borderRadius: theme.radii.pill,
               borderWidth: 1,
-              paddingHorizontal: theme.space.md,
+              paddingHorizontal: theme.space.sm,
               paddingVertical: 6
             }}
             testID={`filter-${filter}`}
           >
-            <Text color={selected ? 'onAccent' : 'textMuted'} style={{ fontWeight: '600' }} variant="meta">
+            <Text
+              color={selected ? 'onAccent' : 'textMuted'}
+              // The pill is sized by its label, so the label must not wrap — a
+              // two-line chip changes the row's height instead of its width.
+              numberOfLines={1}
+              style={{ fontWeight: '600' }}
+              variant="meta"
+            >
               {strings.bots.filters[filter]}
             </Text>
           </Pressable>
         )
       })}
-    </View>
+    </ScrollView>
   )
 }
 

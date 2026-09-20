@@ -13,6 +13,17 @@ import {
 export const CONNECTION_TEST_TIMEOUT_MS = 30_000
 
 /**
+ * The three things the test exercises, in order.
+ *
+ * Reported as each one STARTS, so the step can show which half of the transport
+ * a failure belongs to. That distinction is the whole value of the step: REST
+ * refused is a credential, the socket refused is a reverse proxy that does not
+ * pass upgrades through, and one line saying "it did not work" tells you
+ * neither.
+ */
+export type ConnectionTestStage = 'rest' | 'socket' | 'profiles'
+
+/**
  * Wait for the connection to reach `ready`, or fail at the first sign that it
  * will not.
  *
@@ -80,7 +91,9 @@ function waitForReady(connection: GatewayConnection, timeoutMs: number): Promise
  */
 export async function runConnectionTest(
   draft: OnboardingDraft,
-  timeoutMs: number = CONNECTION_TEST_TIMEOUT_MS
+  timeoutMs: number = CONNECTION_TEST_TIMEOUT_MS,
+  /** Called as each stage starts. Reporting only; it decides nothing. */
+  onStage: (stage: ConnectionTestStage) => void = () => {}
 ): Promise<ConnectionTestOutcome> {
   const baseUrl = draft.baseUrl
 
@@ -109,6 +122,8 @@ export async function runConnectionTest(
   try {
     let userDisplayName = ''
 
+    onStage('rest')
+
     if (authMode === 'native_pkce') {
       const identity = await connection.http.authMe()
       userDisplayName = identity.displayName || identity.email || identity.userId
@@ -118,8 +133,10 @@ export async function runConnectionTest(
       await connection.http.get('/api/profiles')
     }
 
+    onStage('socket')
     await waitForReady(connection, timeoutMs)
 
+    onStage('profiles')
     const result = await connection.request('profiles.list', { include_sessions: true })
     // Read the coordinator back rather than the draft: if the dial rotated the
     // pair, this is the only place the live one exists. The payload key is

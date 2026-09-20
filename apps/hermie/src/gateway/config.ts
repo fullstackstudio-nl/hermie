@@ -41,6 +41,17 @@ export interface GatewaySetup {
   sessionToken: string | null
   /** False after a sign-out: the address is known, the credentials are not. */
   hasCredentials: boolean
+  /**
+   * Set when the secret store REFUSED rather than came back empty.
+   *
+   * The two are indistinguishable downstream — `expo-secure-store` resolves a
+   * missing item and an item in an unreadable access group to the same `null` —
+   * so the difference has to be captured at the one place where it still
+   * exists, which is here. Without it, a launch that lands on the sign-in step
+   * leaves nothing behind saying whether the credential was gone or merely out
+   * of reach.
+   */
+  credentialError?: string
 }
 
 export interface SaveGatewaySetupInput {
@@ -69,11 +80,20 @@ export async function loadGatewaySetup(): Promise<GatewaySetup | null> {
     return null
   }
 
+  let credentialError: string | undefined
+
+  // A throwing keychain must not strand the launch. Before this, the rejection
+  // escaped `reload()`'s un-awaited call and the app sat on the splash for ever
+  // — the one outcome worse than asking for a sign-in.
   const [rawHeaders, sessionToken, accessToken] = await Promise.all([
     secretStore.get(SECRET_KEYS.extraHeaders),
     secretStore.get(SECRET_KEYS.sessionToken),
     secretStore.get(SECRET_KEYS.accessToken)
-  ])
+  ]).catch((error: unknown) => {
+    credentialError = error instanceof Error ? error.message : String(error)
+
+    return [null, null, null] as const
+  })
 
   let extraHeaders: Record<string, string> = {}
 
@@ -93,7 +113,7 @@ export async function loadGatewaySetup(): Promise<GatewaySetup | null> {
 
   const hasCredentials = config.authMode === 'session_token' ? Boolean(sessionToken) : Boolean(accessToken)
 
-  return { config, extraHeaders, sessionToken, hasCredentials }
+  return { config, extraHeaders, sessionToken, hasCredentials, ...(credentialError ? { credentialError } : {}) }
 }
 
 /**

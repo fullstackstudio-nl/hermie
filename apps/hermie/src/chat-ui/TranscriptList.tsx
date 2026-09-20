@@ -60,6 +60,7 @@ import { applyDirectTouchPan } from '../platform/pointer-drag'
 import { GlassSurface } from '../ui/glass'
 import { Button, Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
+import { BUBBLE_GAP, DM_LINE_GAP } from '../ui/tokens'
 import { AssistantBubble } from './AssistantBubble'
 import { BotDmInBubble } from './BotDmInBubble'
 import { BotDmOutLine } from './BotDmOutLine'
@@ -255,7 +256,17 @@ function RequestRow({
         {approval ? (item as ApprovalItem).command : ((item as ClarifyItem).questions[0]?.question ?? '')}
       </Text>
       {onOpen ? (
-        <Button onPress={() => onOpen(item)} testID={`request-open-${item.id}`} title={chatStrings.transcript.answer} />
+        // Content width, not card width. The card is capped at the ledger's, and
+        // on a wide window that cap is 640pt — an `Answer` running all of it
+        // reads as the card's own footer rather than as one control in it.
+        // `Button` has no width of its own, so the caller states it, the way
+        // `AttachMenu` and `ClarifySheet` do.
+        <Button
+          onPress={() => onOpen(item)}
+          style={{ alignSelf: 'flex-start' }}
+          testID={`request-open-${item.id}`}
+          title={chatStrings.transcript.answer}
+        />
       ) : null}
     </GlassSurface>
   )
@@ -294,10 +305,32 @@ function CronRow({ item, context }: { item: CronDeliveryItem; context: Transcrip
 }
 
 /**
+ * Does this row put anything on the screen at all?
+ *
+ * The wrapper that carries the gap is rendered for EVERY row, including the ones
+ * that draw nothing, so the gap has to know. A run of five dispatches swallowed
+ * by a collapsed roll-up is one line by the time the reader sees it, and it used
+ * to cost one turn gap per swallowed row — fifty points of nothing between the
+ * roll-up and the next bubble.
+ *
+ * `cron_delivery` is the one kind whose card ignores `hidden-placeholder` and
+ * draws either way, so the first rule does not cover it.
+ */
+function rowDraws(entry: VisibleItem, dmRole: DmRowRole | undefined, runExpanded: boolean): boolean {
+  if (entry.presentation === 'hidden-placeholder' && entry.item.kind !== 'cron_delivery') {
+    return false
+  }
+
+  return dmRole?.role !== 'rollupMember' || runExpanded
+}
+
+/**
  * One outgoing DM row, which may be swallowed by a roll-up.
  *
  * A member of a collapsed run renders NOTHING — not a hidden view, nothing at all
- * — so the run really is one line tall until it is opened.
+ * — so the run really is one line tall until it is opened. `TranscriptRowFrame`
+ * asks the same question a second time, because the gap around a row that draws
+ * nothing must go with it.
  */
 function DmOutRow({ entry, context, role }: { entry: VisibleItem; context: TranscriptContext; role?: DmRowRole }) {
   const runId = role?.role === 'rollupMember' ? role.runId : role?.role === 'rollupHead' ? role.run.id : ''
@@ -320,7 +353,9 @@ function DmOutRow({ entry, context, role }: { entry: VisibleItem; context: Trans
 
   if (role?.role === 'rollupHead') {
     return (
-      <View>
+      // Expanded, the summary sits above the run's own first line, and §6.6's
+      // nine points separate them exactly as they separate the lines below.
+      <View style={runExpanded ? { gap: DM_LINE_GAP } : undefined}>
         <BotDmRollup run={role.run} />
         {runExpanded ? line : null}
       </View>
@@ -431,6 +466,47 @@ const TranscriptRow = memo(
     previous.context === next.context
 )
 
+/** The gap a row opens above itself. Speech rhythm, or §6.6's ledger one. */
+function gapAbove(layout: RowLayout): number {
+  return layout.grouped ? BUBBLE_GAP.grouped : layout.ledgerRun ? DM_LINE_GAP : BUBBLE_GAP.separate
+}
+
+/**
+ * One row, and the gap above it.
+ *
+ * A component rather than inline JSX inside `renderItem`, because whether there
+ * is a gap is a question about whether there is a ROW, and a collapsed roll-up's
+ * membership is disclosure state that only a hook can read.
+ *
+ * `marginTop` on an INVERTED list is not the mistake it looks like. A cell
+ * carries the list's inversion a second time, so what is inside one still reads
+ * top to bottom on screen; only the order of the cells is reversed. The gap
+ * above a row is therefore the row's own margin, which is what lets it say
+ * whether it continues the run above it.
+ */
+function TranscriptRowFrame({ entry, context, receipt, layout, dmRole }: RowProps) {
+  const runId = dmRole?.role === 'rollupMember' ? dmRole.runId : ''
+  const runExpanded = useRollupExpanded(runId)
+
+  if (!rowDraws(entry, dmRole, runExpanded)) {
+    return null
+  }
+
+  return (
+    <View style={{ marginTop: gapAbove(layout) }} testID={`transcript-row-${entry.item.id}`}>
+      {/* Inverted, so a stamp ABOVE a row renders after it. */}
+      <TranscriptRow
+        context={context}
+        {...(dmRole ? { dmRole } : {})}
+        entry={entry}
+        layout={layout}
+        {...(receipt ? { receipt } : {})}
+      />
+      {layout.dateStamp ? <DateSeparator label={layout.dateStamp} /> : null}
+    </View>
+  )
+}
+
 const AWAY_THRESHOLD = 32
 
 /**
@@ -443,6 +519,9 @@ const JUMP_SETTLE_MS = 600
 
 /** A stable empty array, so the context memo does not churn on every render. */
 const EMPTY_HANDLES: readonly string[] = []
+
+/** One shared object, so a row with no layout of its own still memoizes. */
+const FALLBACK_LAYOUT: RowLayout = { grouped: false, ledgerRun: false, tail: true }
 
 /**
  * Keep the previous object for every key whose value has not changed.
@@ -680,29 +759,16 @@ function TranscriptListBody({
   }, [])
 
   const renderItem = useCallback(
-    ({ item: entry }: { item: VisibleItem }) => {
-      const rowLayout = layout[entry.item.id] ?? { grouped: false, tail: true }
-
-      return (
-        <View
-          // Grouped bubbles sit tight; a change of speaker opens the gap. The
-          // margin is on the row rather than inside the bubble so a date stamp
-          // lands between two runs rather than inside one.
-          style={{ marginTop: rowLayout.grouped ? theme.space.xs - 1 : theme.space.sm + 2 }}
-        >
-          {/* Inverted, so a stamp ABOVE a row renders after it. */}
-          <TranscriptRow
-            context={context}
-            {...(dmRoles[entry.item.id] ? { dmRole: dmRoles[entry.item.id] } : {})}
-            entry={entry}
-            layout={rowLayout}
-            receipt={entry.item.id === lastOwnId ? receipt : undefined}
-          />
-          {rowLayout.dateStamp ? <DateSeparator label={rowLayout.dateStamp} /> : null}
-        </View>
-      )
-    },
-    [context, dmRoles, lastOwnId, layout, receipt, theme.space]
+    ({ item: entry }: { item: VisibleItem }) => (
+      <TranscriptRowFrame
+        context={context}
+        {...(dmRoles[entry.item.id] ? { dmRole: dmRoles[entry.item.id] } : {})}
+        entry={entry}
+        layout={layout[entry.item.id] ?? FALLBACK_LAYOUT}
+        {...(entry.item.id === lastOwnId && receipt ? { receipt } : {})}
+      />
+    ),
+    [context, dmRoles, lastOwnId, layout, receipt]
   )
 
   return (
@@ -717,10 +783,26 @@ function TranscriptListBody({
             {chatStrings.transcript.empty}
           </Text>
         }
-        // Inverted, so the "header" renders at the visual bottom: the typing
-        // bubble belongs there — but only while no streaming reply is on screen,
-        // because that reply's own bubble holds the dots.
-        ListHeaderComponent={typing && !streamingTail ? <TypingIndicator /> : null}
+        // Inverted, so the "header" renders at the visual bottom, which is where
+        // the typing bubble belongs — but only while no streaming reply is on
+        // screen, because that reply's own bubble holds the dots (§6.2).
+        //
+        // The header is rendered ALWAYS, empty when there is nothing to say, and
+        // that is the load-bearing part. `maintainVisibleContentPosition` anchors
+        // on the scroll view's first subview; a header that comes and goes makes
+        // that subview appear and disappear under it, so the anchor moves by the
+        // typing bubble's whole height and the list corrects for a shift that
+        // never happened — a jump, and then `autoscrollToTopThreshold` scrolling
+        // back down by itself. A zero-height header changes only its own height,
+        // never its origin, so there is nothing to correct.
+        ListHeaderComponent={
+          <View
+            style={typing && !streamingTail ? { paddingTop: BUBBLE_GAP.separate } : undefined}
+            testID={`${testID}-typing-slot`}
+          >
+            {typing && !streamingTail ? <TypingIndicator /> : null}
+          </View>
+        }
         contentContainerStyle={[{ paddingHorizontal: theme.space.md, paddingVertical: theme.space.md }, contentStyle]}
         data={data}
         inverted

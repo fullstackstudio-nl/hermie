@@ -68,6 +68,7 @@ import {
   interimAssistantItem,
   longReportItem,
   noticeItem,
+  pendingTurnTranscript,
   patchToolItem,
   pendingDmOutItem,
   processNoticeItem,
@@ -96,6 +97,17 @@ import {
   type ScheduleDraft
 } from '../cron'
 import { SignedOutPanel } from '../../gateway/SignedOutPanel'
+import {
+  DoneStep,
+  emptyDraft,
+  GatewayAddressStep,
+  OnboardingCard,
+  SignInStep,
+  StatusLine,
+  TestConnectionStep,
+  WelcomeStep,
+  type OnboardingDraft
+} from '../onboarding'
 import { Button, InsetButtonRow, InsetGroup, Screen, Text } from '../../ui/primitives'
 import { ApprovalSheet, ChatOptionsSheet, ClarifySheet } from '../../ui/sheets'
 import { useTheme } from '../../ui/theme'
@@ -116,6 +128,97 @@ export const GALLERY_ROW_TITLE = 'Component gallery'
 
 const STREAM_INTERVAL_MS = 120
 const STREAM_CHUNK = 24
+
+/**
+ * Onboarding drafts, one per state the wizard can be in.
+ *
+ * The wizard is the one screen nobody can reach twice: once a gateway is
+ * configured it never shows again, and the states that matter most — a probe
+ * that failed, a gateway too old for native sign-in — need a gateway that is
+ * broken in a particular way. So every step is addressable here with a draft
+ * that puts it in that state, and no network is touched: a draft carrying a
+ * `probe` needs no probe to have run.
+ */
+const GATED_PROBE = {
+  authFlows: ['cookie', 'native_pkce'],
+  authRequired: true,
+  providers: [{ displayName: 'Self-Hosted OIDC', name: 'self-hosted', supportsPassword: false }],
+  supportsNativePkce: true,
+  version: '2026.9.14'
+}
+
+const ONBOARDING_DRAFTS: Record<string, OnboardingDraft> = {
+  gated: {
+    ...emptyDraft(),
+    baseUrl: 'https://hermes.example.com',
+    probe: GATED_PROBE,
+    provider: GATED_PROBE.providers[0] ?? null,
+    rawAddress: 'hermes.example.com'
+  },
+  token: {
+    ...emptyDraft(),
+    baseUrl: 'http://gateway.example.com:9119',
+    probe: { ...GATED_PROBE, authRequired: false, providers: [], supportsNativePkce: false },
+    rawAddress: 'gateway.example.com:9119'
+  },
+  tooOld: {
+    ...emptyDraft(),
+    baseUrl: 'https://hermes.example.net',
+    probe: { ...GATED_PROBE, authFlows: ['cookie'], supportsNativePkce: false },
+    rawAddress: 'hermes.example.net'
+  }
+}
+
+function signedIn(draft: OnboardingDraft): OnboardingDraft {
+  return {
+    ...draft,
+    tokens: {
+      accessToken: 'access',
+      expiresAt: 4_102_444_800,
+      provider: 'self-hosted',
+      refreshToken: 'refresh',
+      userId: 'tester@example.invalid'
+    }
+  }
+}
+
+/** A step in its card, with the actions wired to nothing. */
+function OnboardingState({
+  children,
+  cover = false,
+  lead,
+  gated = false,
+  primaryLabel = 'Continue',
+  say,
+  stepIndex,
+  title
+}: {
+  children?: ReactNode
+  cover?: boolean
+  lead: string
+  /** The step has not produced what Continue needs yet, so Continue is shut. */
+  gated?: boolean
+  primaryLabel?: string
+  say: (message: string) => void
+  stepIndex: number
+  title: string
+}) {
+  return (
+    <OnboardingCard
+      cover={cover}
+      lead={lead}
+      onBack={cover ? undefined : () => say('Onboarding: back')}
+      onPrimary={() => say(`Onboarding: ${primaryLabel}`)}
+      primaryDisabled={gated}
+      primaryLabel={primaryLabel}
+      stepCount={4}
+      stepIndex={stepIndex}
+      title={title}
+    >
+      {children}
+    </OnboardingCard>
+  )
+}
 
 const REASONING_OPTIONS: PickerOption[] = [
   { label: 'High', value: 'high' },
@@ -711,7 +814,229 @@ const SECTIONS: readonly GallerySection[] = [
     pane: 'colour',
     render: () => null
   },
-  { id: 'sheet-cron-editor', title: 'Cron editor sheet', sheet: 'cronEditor', render: () => null }
+  { id: 'sheet-cron-editor', title: 'Cron editor sheet', sheet: 'cronEditor', render: () => null },
+
+  {
+    id: 'typing-after-own',
+    title: 'Pending turn after own message',
+    full: true,
+    render: ctx => (
+      // Typing is forced on rather than driven by the composer, so `simctl`
+      // needs no tap to reach the state the owner actually reported.
+      <Screen edgeToEdgeTop={false} padded={false} testID="gallery-typing-after-own">
+        <ChatHeader handle="researcher" name="Researcher" onOpenOptions={() => ctx.say('Options')} presence="working" />
+        <TranscriptList
+          items={pendingTurnTranscript}
+          onOpenBot={handle => ctx.say(`Open bot @${handle}`)}
+          onOpenRequest={() => ctx.say('Open request')}
+          onOpenTranscript={id => ctx.say(`Open transcript ${id}`)}
+          onRetry={id => ctx.say(`Retry ${id}`)}
+          receipt="delivered"
+          selfHandle="researcher"
+          testID="gallery-typing-after-own-list"
+          typing
+        />
+        <Composer
+          botName="Researcher"
+          keyboardAvoiding
+          onChangeText={ctx.setDraft}
+          onSend={text => ctx.say(`Sent: ${text}`)}
+          running
+          value={ctx.draft}
+        />
+      </Screen>
+    )
+  },
+
+  // The onboarding wizard, step by step. `full` throughout: the card draws its
+  // own wallpaper and centres itself, which a bordered gallery box would
+  // defeat — and the centring is most of what the redesign changed.
+  {
+    id: 'onboarding-welcome',
+    title: 'Onboarding — welcome',
+    full: true,
+    render: ctx => (
+      <OnboardingState
+        cover
+        lead="Hermie is a client for Hermes Agent. It talks to one gateway at a time — the machine running `hermes serve` — and chats with the bots that live there."
+        primaryLabel="Set up a gateway"
+        say={ctx.say}
+        stepIndex={-1}
+        title="Welcome to Hermie"
+      >
+        <WelcomeStep />
+      </OnboardingState>
+    )
+  },
+  {
+    id: 'onboarding-address',
+    title: 'Onboarding — gateway address (empty)',
+    full: true,
+    render: ctx => (
+      <OnboardingState
+        gated
+        lead="The address you would open in a browser to reach the gateway dashboard."
+        say={ctx.say}
+        stepIndex={0}
+        title="Gateway address"
+      >
+        {/* An empty address fires no probe, so this state needs no gateway. */}
+        <GatewayAddressStep draft={emptyDraft()} update={() => {}} />
+      </OnboardingState>
+    )
+  },
+  {
+    id: 'onboarding-address-states',
+    title: 'Onboarding — address status lines',
+    full: true,
+    render: ctx => (
+      <OnboardingState
+        gated
+        lead="Every answer the probe can give, so the error copy is readable without breaking a gateway first."
+        say={ctx.say}
+        stepIndex={0}
+        title="Gateway address"
+      >
+        <StatusLine tone="checking">Checking https://, then http://…</StatusLine>
+        <StatusLine tone="ok">
+          Hermes 2026.9.14 · sign-in required via Self-Hosted OIDC · Found over https://
+        </StatusLine>
+        <StatusLine tone="ok">Hermes 2026.9.14 · session token required · Found over http://</StatusLine>
+        <StatusLine tone="error">
+          Nothing answered at https://hermes.example.com. Check the address, and that the gateway is running.
+        </StatusLine>
+        <StatusLine tone="error">
+          Hermes 2026.9.14 · sign-in required, but this gateway lists no identity providers. Configure one on the
+          gateway.
+        </StatusLine>
+      </OnboardingState>
+    )
+  },
+  {
+    id: 'onboarding-signin',
+    title: 'Onboarding — sign in (provider)',
+    full: true,
+    render: ctx => (
+      <OnboardingState
+        gated
+        lead="The gateway hosts the sign-in page. Hermie opens it, reads the result and keeps the tokens on this device."
+        say={ctx.say}
+        stepIndex={1}
+        title="Sign in"
+      >
+        <SignInStep draft={ONBOARDING_DRAFTS.gated ?? emptyDraft()} update={() => {}} />
+      </OnboardingState>
+    )
+  },
+  {
+    id: 'onboarding-signin-done',
+    title: 'Onboarding — sign in (signed in)',
+    full: true,
+    render: ctx => (
+      <OnboardingState
+        lead="The gateway hosts the sign-in page. Hermie opens it, reads the result and keeps the tokens on this device."
+        say={ctx.say}
+        stepIndex={1}
+        title="Sign in"
+      >
+        <SignInStep draft={signedIn(ONBOARDING_DRAFTS.gated ?? emptyDraft())} update={() => {}} />
+      </OnboardingState>
+    )
+  },
+  {
+    id: 'onboarding-signin-token',
+    title: 'Onboarding — sign in (session token)',
+    full: true,
+    render: ctx => (
+      <OnboardingState
+        gated
+        lead="This gateway is not gated by an identity provider; it authenticates with the session token it prints at startup."
+        say={ctx.say}
+        stepIndex={1}
+        title="Sign in"
+      >
+        <SignInStep draft={ONBOARDING_DRAFTS.token ?? emptyDraft()} update={() => {}} />
+      </OnboardingState>
+    )
+  },
+  {
+    id: 'onboarding-signin-blocked',
+    title: 'Onboarding — sign in (gateway too old)',
+    full: true,
+    render: ctx => (
+      <OnboardingState
+        gated
+        lead="The gateway hosts the sign-in page. Hermie opens it, reads the result and keeps the tokens on this device."
+        say={ctx.say}
+        stepIndex={1}
+        title="Sign in"
+      >
+        <SignInStep draft={ONBOARDING_DRAFTS.tooOld ?? emptyDraft()} update={() => {}} />
+      </OnboardingState>
+    )
+  },
+  {
+    id: 'onboarding-test',
+    title: 'Onboarding — test connection',
+    full: true,
+    render: ctx => (
+      <OnboardingState
+        gated
+        lead="Hermie checks the REST surface and then opens the WebSocket, exactly as it will during use."
+        say={ctx.say}
+        stepIndex={2}
+        title="Test connection"
+      >
+        <TestConnectionStep draft={signedIn(ONBOARDING_DRAFTS.gated ?? emptyDraft())} update={() => {}} />
+      </OnboardingState>
+    )
+  },
+  {
+    id: 'onboarding-test-states',
+    title: 'Onboarding — test connection states',
+    full: true,
+    render: ctx => (
+      <OnboardingState
+        gated
+        lead="Mid-run, and the two ways it fails. Which half failed is the whole diagnosis."
+        say={ctx.say}
+        stepIndex={2}
+        title="Test connection"
+      >
+        <StatusLine tone="ok">REST</StatusLine>
+        <StatusLine tone="checking">WebSocket</StatusLine>
+        <StatusLine tone="pending">Profiles</StatusLine>
+        <StatusLine tone="error">
+          The gateway rejected the credentials. Sign in again, or check the session token.
+        </StatusLine>
+        <StatusLine tone="error">
+          The gateway closed the connection because its `dashboard.public_url` does not match this address.
+        </StatusLine>
+      </OnboardingState>
+    )
+  },
+  {
+    id: 'onboarding-done',
+    title: 'Onboarding — ready',
+    full: true,
+    render: ctx => (
+      <OnboardingState
+        lead="Hermie will store the gateway address on this device and the credentials in the system secret store."
+        primaryLabel="Start chatting"
+        say={ctx.say}
+        stepIndex={3}
+        title="Ready"
+      >
+        <DoneStep
+          draft={{
+            ...signedIn(ONBOARDING_DRAFTS.gated ?? emptyDraft()),
+            test: { botCount: 2, key: '', userDisplayName: 'Fake Tester' }
+          }}
+          error={null}
+        />
+      </OnboardingState>
+    )
+  }
 ]
 
 /** Every id `--hermieOpen gallery:<id>` accepts. Documented in CONTRIBUTING.md. */

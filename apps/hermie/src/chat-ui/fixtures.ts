@@ -552,6 +552,29 @@ export const dmRunItems: BotDmOutItem[] = [
   toolId: `call_dm_run_${index}`
 }))
 
+/**
+ * A turn that has started and produced nothing yet, right after the owner spoke.
+ *
+ * `galleryTranscript` ends on an assistant reply, so switching its typing flag
+ * on puts the typing bubble under a BOT's bubble — which is the one arrangement
+ * where the gap above it was never wrong. The owner's report was about the
+ * other one: the typing bubble directly under his own blue bubble, tail almost
+ * touching it. This is that arrangement, and it needs no tap to reach.
+ */
+export const pendingTurnTranscript: VisibleItem[] = [
+  { item: assistantItem, presentation: 'full' },
+  {
+    item: {
+      ...userItem,
+      id: 'u-pending',
+      seq: 40,
+      text: 'One more thing — check the changelog too.',
+      ts: (assistantItem.ts ?? 0) + 60
+    },
+    presentation: 'full'
+  }
+]
+
 /** The gallery's transcript: one of every kind, in a plausible order. */
 export const galleryTranscript: VisibleItem[] = [
   { item: userItem, presentation: 'full' },

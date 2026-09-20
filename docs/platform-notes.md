@@ -13,22 +13,26 @@ rewritten, and git history has them.
 
 ## Summary
 
-| Question                                         | Answer                                         | Date       |
-| ------------------------------------------------ | ---------------------------------------------- | ---------- |
-| Does the iOS app build for a Mac?                | Yes — Release, signed, wrapped, `npm run mac`  | 2026-09-19 |
-| Is the empty strip under the title bar gone?     | Chat column yes, sidebar no — now fixed        | 2026-09-19 |
-| Does a bare Return send on a Mac?                | **Yes** — used by hand                         | 2026-09-19 |
-| Is Shift+Return a newline on a Mac?              | **Yes** — used by hand                         | 2026-09-19 |
-| Does Escape close a sheet on a Mac?              | **Yes** — used by hand                         | 2026-09-19 |
-| Is `GCKeyboard` populated for an iOS app on Mac? | **Yes** — the three keys above prove it        | 2026-09-19 |
-| Is `expo-secure-store` keychain-backed on a Mac? | **Yes** — signed in across a quit and relaunch | 2026-09-19 |
-| Does the app launch on iOS 27?                   | **Yes, since scene adoption** — simulator      | 2026-09-20 |
-| Does `AppState` survive the scene life cycle?    | **Yes** — measured, background and foreground  | 2026-09-20 |
-| Can a Release build reach a gateway over http?   | **Yes, since the ATS key** — iOS 27 simulator  | 2026-09-20 |
-| What AppState does a Mac window report?          | **Unverified** — see "A Mac never pauses"      | 2026-09-19 |
-| Does a mouse drag still scroll a list on a Mac?  | Fixed in code; **unverified** — no Mac window  | 2026-09-20 |
-| Can a drag SELECT text in a bubble?              | **No** — RN copies the whole block; see below  | 2026-09-20 |
-| Is `TextDecoder` present at runtime?             | Not verified; the guard ships either way       | 2026-09-18 |
+| Question                                         | Answer                                          | Date       |
+| ------------------------------------------------ | ----------------------------------------------- | ---------- |
+| Does the iOS app build for a Mac?                | Yes — Release, signed, wrapped, `npm run mac`   | 2026-09-19 |
+| Is the empty strip under the title bar gone?     | Chat column yes, sidebar no — now fixed         | 2026-09-19 |
+| Does a bare Return send on a Mac?                | **Yes** — used by hand                          | 2026-09-19 |
+| Is Shift+Return a newline on a Mac?              | **Yes** — used by hand                          | 2026-09-19 |
+| Does Escape close a sheet on a Mac?              | **Yes** — used by hand                          | 2026-09-19 |
+| Is `GCKeyboard` populated for an iOS app on Mac? | **Yes** — the three keys above prove it         | 2026-09-19 |
+| Is `expo-secure-store` keychain-backed on a Mac? | **Yes** — signed in across a quit and relaunch  | 2026-09-19 |
+| Does the app launch on iOS 27?                   | **Yes, since scene adoption** — simulator       | 2026-09-20 |
+| Does `AppState` survive the scene life cycle?    | **Yes** — measured, background and foreground   | 2026-09-20 |
+| Can a Release build reach a gateway over http?   | **Yes, since the ATS key** — iOS 27 simulator   | 2026-09-20 |
+| What AppState does a Mac window report?          | **Unverified** — see "A Mac never pauses"       | 2026-09-19 |
+| Does a mouse drag still scroll a list on a Mac?  | Fixed in code; **unverified** — no Mac window   | 2026-09-20 |
+| Can a drag SELECT text in a bubble?              | **No** — RN copies the whole block; see below   | 2026-09-20 |
+| Why does replacing the .app sign the owner out?  | **Unresolved** — group made explicit; see below | 2026-09-20 |
+| Can the simulators here be tapped and typed in?  | **Yes**, through the dedicated simulator tool   | 2026-09-20 |
+| Is the sidebar tab strip present in portrait?    | **Yes** in the real shell; the gallery lied     | 2026-09-20 |
+| Does `contrast:check` cover avatar tints?        | **No** — measure those by hand                  | 2026-09-20 |
+| Is `TextDecoder` present at runtime?             | Not verified; the guard ships either way        | 2026-09-18 |
 
 "Unverified at runtime" is exact: the app builds, is signed and is wrapped, and the code path was read
 rather than watched. Several rows that said so were closed on 2026-09-19 by a hand session in a real
@@ -2158,3 +2162,314 @@ window in front of somebody while it is done.
 3. Press and hold on a reply (or right-click it): an edit menu appears and Copy
    puts that whole message on the clipboard. A drag selecting part of a message is
    NOT expected — see above.
+
+## Signed out by replacing the .app bundle (2026-09-20, later)
+
+Reported three times in one day, and reproducible: replacing `/Applications/Hermie.app` with a
+newer build — same bundle id, same team, development signing — and launching it puts the owner back
+in the wizard on **Step 2, Sign in**, with the gateway address still filled in. A plain Cmd+Q and
+relaunch never does it. One earlier occurrence was on a fresh install.
+
+### What that shape rules out on its own
+
+The address survives and the credentials do not, so the two stores parted company: the address is in
+AsyncStorage and the credentials are in the keychain. So the data container is intact — measured,
+not assumed: `~/Library/Containers` holds exactly one UUID-named container for this app and its
+parent directory's mtime predates all three replacements. Nothing about the container churned.
+
+The precise condition the app needs to land where it landed is in two lines. `GatewayProvider`
+takes the onboarding branch when `loadGatewaySetup()` returns a setup whose `hasCredentials` is
+false, and the wizard opens on `signin` rather than `welcome` when `resumeConfig` is non-null. So:
+`hermie.gateway.config` parsed with a non-empty `baseUrl`, **and**
+`SecureStore.getItemAsync('hermie.auth.access_token')` resolved to `null`.
+
+_Resolved_ to null, not rejected — and that is load-bearing. `loadGatewaySetup` had no `try`/`catch`
+around those reads and `reload()` was called as `void reload()`, so a keychain that THREW would have
+left the rejection unhandled and the app on the splash screen for ever. The owner saw the wizard, so
+the keychain answered cleanly. Both of those are now fixed anyway (below), because "hangs for ever"
+is a worse outcome than either.
+
+### A clean miss is exactly what a changed access group looks like
+
+`expo-secure-store` 15.0.8 (`ios/SecureStoreModule.swift`) builds its query at lines 172–192. It
+sets `kSecAttrAccessGroup` **only** when a caller passes `accessGroup`, and this app passes none —
+`src/platform/secret-store.ts` sets `keychainAccessible` and nothing else. It maps `errSecItemNotFound`
+to `nil` and throws on every other status (lines 159–169). So a wrong or moved access group does not
+surface as an entitlement error: the item is simply not in any group the process can see, and the
+read comes back _empty_, indistinguishable from never having been written.
+
+That means the clean read above **does not exonerate the access group**. It is precisely what a
+group change would produce.
+
+### What the build actually claims, measured
+
+`codesign -d --entitlements - /Applications/Hermie.app` (which resolves through `WrappedBundle` to
+the inner bundle):
+
+```
+Authority=Apple Development: <redacted>
+TeamIdentifier=S8832KD227
+[Key] application-identifier            [String] S8832KD227.nl.fullstackstudio.hermie
+[Key] com.apple.developer.team-identifier [String] S8832KD227
+[Key] get-task-allow                    [Bool] true
+```
+
+**No `keychain-access-groups`.** `apps/hermie/ios/Hermie/Hermie.entitlements` was an empty `<dict/>`,
+because `app.config.ts` set no `ios.entitlements`. So the effective group was entirely implicit,
+derived by the system from the signing identity. The embedded provisioning profile grants
+`S8832KD227.*` and is a **seven-day automatic profile**, minted again whenever it has lapsed;
+`apps/hermie/scripts/run-mac.mjs` contains **no `codesign` call at all** — the inner bundle keeps
+whatever `xcodebuild` produced and the outer wrapper is not signed at all.
+
+### The honest conclusion
+
+The access-group STRING should be stable across builds as long as the team id and bundle id are, and
+both are fixed. What demonstrably differs between "replace the bundle, then launch" (3 of 3) and
+"quit and relaunch" (0 of many) is the code-signature identity of the running process: a new cdhash,
+a re-registration with LaunchServices, and on at least one of today's builds a freshly minted
+profile. The defensible statement is that **this app's keychain scope was implicit and derived from
+signing metadata that the Mac build pipeline regenerates on every run**, and the failure correlates
+3 of 3 with regenerating it. Securityd logs for the launch window were empty, so the exact attribute
+that moved was not named, and this section does not pretend to name it.
+
+### What changed, and what it is worth
+
+Two things, neither of which is claimed as the fix:
+
+- **`app.config.ts` now names the group.** `ios.entitlements['keychain-access-groups']` is
+  `['$(AppIdentifierPrefix)nl.fullstackstudio.hermie']`. That is the same string the implicit
+  default already resolved to, and it is first in the list on purpose: `SecItemAdd` without an
+  explicit group writes to the FIRST entry and `SecItemCopyMatching` searches EVERY entry, so
+  naming it moves no write and leaves every existing item readable. There is no migration. What it
+  buys is that the group is declared by this repository, is auditable in `codesign`, and no longer
+  depends on what the signing pipeline inferred that day. **It is prophylactic. Do not report this
+  as fixed until a replace-then-launch cycle has been watched to keep the session.**
+
+  That the write target is unchanged is measured, not argued. `codesign -d --entitlements -` on the
+  bundle `npm run mac` produced after the change:
+
+  ```
+  [Key] application-identifier    [String] S8832KD227.nl.fullstackstudio.hermie
+  [Key] keychain-access-groups    [Array]  S8832KD227.nl.fullstackstudio.hermie
+  ```
+
+  `$(AppIdentifierPrefix)nl.fullstackstudio.hermie` resolved to the same string the
+  `application-identifier` already was — which is exactly what the implicit default resolves to. So
+  the first (and only) entry is byte-identical to where items were already being written.
+
+- **The next occurrence explains itself.** `loadGatewaySetup` now catches a refusing secret store
+  and reports it as `credentialError` instead of letting the rejection escape, and `GatewayProvider`
+  records `token.absent` for a clean miss and `token.read_failed` for a refusal. Before this the
+  ring held nothing at all about the read, so the two were indistinguishable after the fact — which
+  is why this section had to be written from first principles instead of read off the developer
+  screen.
+
+`kSecAttrAccessible` is not a suspect. `AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY` controls when the row's
+class key is available, not which process can see the row; it is applied only on write; and the
+keybag holding those class keys is unchanged.
+
+### The free diagnostic, before anything else
+
+The ring lives in AsyncStorage, which survives. After the next replacement, sign in and open
+Settings → the developer screen: the tail of the PREVIOUS session is still there. If it ends on
+`dial.ready` / `token.served` with no `signin.required`, `token.cleared`, `refresh.failed` or a 4401
+`ws.closed`, the session ended healthy and the credentials went missing between launches — which
+rules out every server-side and refresh-path cause in one look. With the change above, that launch
+will also have recorded `token.absent` or `token.read_failed`, which settles empty-versus-refused.
+
+### What this pass did NOT verify
+
+- **That the entitlement fixes anything.** It is a class-elimination, not a diagnosis. See above.
+- **The mechanism itself.** No securityd evidence was obtainable for the launch window.
+- **Whether `HERMIE_APPLE_TEAM_ID` was identical for all three of today's builds**, and whether the
+  provisioning profile was regenerated between them. A different team id would change
+  `application-identifier` and would be a complete, mundane explanation. The owner can answer this.
+- **Anything on a real iPhone or iPad.** All of the above is the Mac (iOS-app-on-Mac) build.
+
+## The onboarding wizard, on glass (2026-09-20, later)
+
+The owner's note was "this page could be prettier", about Step 2. What the screenshot actually
+showed was the shape every step had: a `Screen` filled edge to edge, an eyebrow and a title at the
+top, one paragraph, sometimes one field, then a tall empty middle, a hairline, and a pinned footer
+carrying Continue and Back. On a Mac window the middle was most of the screen and the two controls
+that move the wizard forward were as far from the content they act on as the layout could put them.
+
+### The "no taps" rule is out of date, and this pass ran on that
+
+"Driving a simulator without touching it" (earlier today) says the simulators on this machine can be
+launched and photographed and nothing else. That is still true of `xcrun simctl`, which has no tap,
+swipe or key verb, and `idb`/`fbsimctl`/`maestro`/`appium` are all still absent. But the dedicated
+simulator tool available to this session **can** tap and type, and it was used here: the whole
+before-state of the wizard was captured by driving the real app — tapping `Set up a gateway`,
+tapping the address field, typing `localhost:9119`, watching the probe answer the fake gateway over
+http, and tapping through to Step 2. Its accessibility-tree read (`inspect`) is not available, so
+targets still have to be found in a screenshot and converted to device points, and a screen that
+re-renders between the screenshot and the tap will swallow the tap — that happened once here and
+landed on a chat row instead of the tab strip.
+
+The launch-argument channel is still worth every line of it: it is deterministic, it needs no
+coordinate arithmetic, and it is the only thing that works when two changes are in flight against
+one Metro instance.
+
+### The pinned footer existed for a reason, and the reason is still true
+
+It was not laziness: the soft keyboard covered Continue on every step with a field, so the footer was
+pinned to keep it reachable. The card keeps that property by a different route — it lives inside the
+same `KeyboardAvoidingView` and inside a scroll view whose content container is
+`flexGrow: 1, justifyContent: 'center'`, so it is centred while it is shorter than the window and
+scrolls from the top once the keyboard makes it taller. Measured on an iPhone 17 Pro with the
+keyboard up on the address step: the field, its status line and the button under it are all on
+screen.
+
+### One accented block per card
+
+The first build put the step's own action ("Sign in with Self-Hosted OIDC") and the card's Continue
+next to each other as two full-width blue buttons, which reads as two ways forward rather than as
+one gate. Continue is now drawn as the quiet variant while it is disabled, so the only blue thing on
+the card is the action that is actually live. The rule holds on the sign-in step and on the test
+step, which are the two that own an action of their own.
+
+### Measurements
+
+- Card: `ONBOARDING_CARD_MAX_WIDTH` 520pt, `sheet` glass, `opaque`, `space.panel` (20) padding, the
+  sheet radius. Wider than `FORM_MAX_WIDTH` (480) because the card carries its own padding, its
+  status lines and its actions rather than only a field; at 480 the same content wrapped one line
+  more on every step.
+- On a phone the card is the window minus `WINDOW_GAP` (14) plus the safe-area inset on each side.
+- Progress rail: one 4pt segment per numbered step, `radii.pill`, accent for reached and `tintSunk`
+  for the rest. Static, and hidden from assistive technology because the eyebrow under it says the
+  same thing in words.
+- Status dot: 9pt, the inline presence-bead size. Filled for an answer, a 1.5pt hollow ring for a
+  question still open — the shape carries the meaning as well as the colour. Nothing pulses:
+  §5 of the tokens document reserves animation for "needs input".
+- The eyebrow is uppercased by `textTransform`, not by `toUpperCase()`. The string is what a screen
+  reader announces and what a test reads back, and `micro` is the uppercase-label token anyway.
+
+### Every step state is addressable
+
+Nine new gallery sections, `--hermieOpen gallery:onboarding-*`: `welcome`, `address`,
+`address-states`, `signin`, `signin-done`, `signin-token`, `signin-blocked`, `test`, `test-states`,
+`done`. They matter more here than anywhere else in the kit, because the wizard is the one screen
+nobody can reach twice — once a gateway is configured it never shows again — and the states worth
+looking at need a gateway that is broken in a particular way. A draft carrying a `probe` needs no
+probe to have run, so none of them touch the network.
+
+### What this pass did NOT verify
+
+- **The native sign-in web view's new glass bar on a device.** The bar was restyled and typechecks
+  and renders in the gallery's sibling states, but the modal itself was not photographed: reaching
+  it means completing a real PKCE round trip, and the run that would have done that collided with
+  another change in flight on the same Metro instance.
+- **The keyboard-up layout on Android.** `KEYBOARD_AVOID_BEHAVIOR` is unchanged, so the behaviour
+  should be what it was, but it was not looked at.
+- **Reduce Transparency.** The card is a `GlassSurface`, so it should fall back to its solid rung
+  like every other one; unmeasured.
+
+## The wide layout in real portrait (2026-09-20, later)
+
+The earlier iPad pass could only produce a landscape-PROPORTIONED window by editing the installed
+bundle's `Info.plist`. This one used real portrait on both sizes: iPad Pro 13" (2064 × 2752 @2x =
+**1032pt**) and iPad Pro 11" (1668 × 2420 @2x = **834pt**). No hack.
+
+### 834pt is the narrowest window that gets two panels, and 344 made it read worse than a phone
+
+`REGULAR_LAYOUT_MIN_WIDTH` is 700, so an 11" iPad in portrait gets the sidebar-plus-detail shell.
+With the old flat 344pt sidebar, measured:
+
+| At 834pt portrait | Sidebar | Chat column | Bubble cap |
+| ----------------- | ------- | ----------- | ---------- |
+| Before            | 344     | 448         | ~305       |
+| After             | 300     | 492         | ~335       |
+
+The finding is the before row, not the after one: **305pt is narrower than the 314pt the same bubble
+gets on an iPhone 17 Pro.** A tablet was reading worse than a phone, because 344 was chosen against a
+landscape window and then applied to every window.
+
+`sidebarWidth(windowWidth)` now answers 340 at or above 1100pt and 300 below. 335pt is about 38
+characters, still short of a comfortable measure — a collapsible sidebar is the remaining lever, and
+`design/liquid-glass.html` has no control for one, so it is a design decision rather than a fix.
+
+Two consequences worth knowing:
+
+- Narrowing to 300 clipped the fourth filter pill: the four want 311pt in a 260pt row. They scroll
+  now. They were already one Dynamic Type step from clipping at 344.
+- `BottomSheet.tsx` still derives the content column from the constant rather than the function, so
+  between 700 and 1100pt a sheet is parked about 40pt further right than the column's real left
+  edge. It errs INWARD — the sheet never reaches the chat list, which is what §6.9 actually forbids
+  — so it is left for a round where `__tests__/sheet-width.test.tsx` is in scope.
+
+### The tab strip was never missing from the real shell
+
+Reported as possibly absent in portrait. It is present in `RegularShell` at full height in both
+themes, verified on the running app rather than read out of the code. What was missing was the
+GALLERY's mimic of that shell, which mounted `BotsScreen` without `onOpenSection` — the only thing
+that renders the strip. So the mimic was lying about the layout it exists to stand in for, which is
+worse than a missing strip, and it now passes a no-op handler.
+
+### `contrast:check` does not measure avatar tints, and that is why they were washed out
+
+The avatar circle sat **1.02–1.20 : 1** from the panel behind it, while the initial drawn on it
+measured a comfortable 5.4–8.7. Only the second number had ever been taken, so a row that reads as a
+letter floating on glass passed every check the repo has. The palette now separates at 1.38–1.51
+light and 1.45–1.67 dark with the initial still above 5.73.
+
+`npm run contrast:check` reads composited surfaces out of `tokens.ts`. An avatar tint is neither a
+token surface nor an ink pair, so it is outside those 185 pairs **and has to be measured by hand
+when it changes.** Worth remembering before trusting a green check about anything drawn from a
+palette that does not live in `tokens.ts`.
+
+### One simulator trap
+
+A simulator that has never run the dev client shows the Expo developer-menu sheet over the app.
+Setting `EXDevMenuIsOnboardingFinished` in the app's preference plist only sticks while the device is
+**shut down**; written against a booted device it is overwritten on the next launch.
+
+### What this pass did NOT verify
+
+- **Whether 834pt is acceptable to the owner at 300.** It is measurably better and still tight; the
+  collapsible sidebar was deliberately not built, because the control does not exist in the design
+  board and inventing one is a decision rather than a fix.
+- **Anything between 700 and 834pt**, which is a Mac window dragged narrow and was not tried.
+- **Android, and Reduce Transparency**, unchanged from previous passes.
+
+## Two things about an inverted list that the rhythm depended on (2026-09-20, later)
+
+Both of these came out of chasing a gap that was too small in one direction and too big in the
+other, and both are the kind of thing that is obvious once stated and invisible until then.
+
+### A cell carries the inversion a second time, so `marginTop` really is the gap above
+
+An inverted `FlatList` flips the scroll view, and then flips each cell back. So what is INSIDE a cell
+still reads top to bottom on screen and a `marginTop` on a row is the gap above that row, exactly as
+it looks. Only the ORDER of the cells is reversed. The same holds for `ListHeaderComponent`, which
+is why a `paddingTop` inside the header is the gap above the header on screen even though the header
+is the newest thing in the list.
+
+### `ListHeaderComponent` is what `maintainVisibleContentPosition` anchors on
+
+On iOS the algorithm takes the scroll view's first subview at or after `minIndexForVisible`, records
+its frame before the commit, and corrects `contentOffset` by the origin delta afterwards; inside the
+same branch, `autoscrollToTopThreshold` then animates back to the top. A header that comes and goes
+between renders therefore moves that anchor by its own height, and the list corrects for a shift
+that never happened — which is a jump followed by a scroll back down, the owner's exact description.
+
+The transcript's header is now **always rendered**, holding the typing bubble when there is one and
+nothing when there is not. Subview zero is then a fixed anchor whose origin never moves and only its
+height changes, which is what the algorithm is built for.
+
+**This is derived from the React Native source, not from a recording.** It is a real mechanism and
+one half of it is now removed, but the owner's jump was never observed happening and never observed
+stopping — see below.
+
+### What this pass did NOT verify
+
+- **That the streaming jump is fixed.** Not reproduced end to end. Two of the four suspects were
+  ruled out from the code — item keys are already stable across typing → streaming → settled →
+  rowId-adopted (`packages/transcript/src/reconcile.ts` adopts the current id rather than renaming),
+  and nothing calls `scrollToOffset` automatically — and the anchor mechanism above is the third.
+  The fourth, a reasoning disclosure appearing and collapsing mid-turn, **could not be exercised at
+  all: the fake gateway never emits `reasoning.delta`.** Adding that to `packages/fake-gateway` is
+  the prerequisite for testing it, and is the obvious next step.
+- **A before-and-after pair for the typing bubble.** Only the after exists; the simulator was shared
+  with another change in flight and the before capture was abandoned rather than leave the file in a
+  reverted state.

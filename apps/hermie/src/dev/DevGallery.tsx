@@ -37,7 +37,7 @@ import { GalleryScreen, GALLERY_CHAT_SECTION } from '../features/settings/Galler
 import { useSafeAreaInsets } from '../platform/safe-area'
 import { useBotsStore, type Bot } from '../store/bots'
 import { GlassSurface, Wallpaper } from '../ui/glass'
-import { REGULAR_LAYOUT_MIN_WIDTH, SIDEBAR_WIDTH, WINDOW_GAP } from '../ui/tokens'
+import { REGULAR_LAYOUT_MIN_WIDTH, sidebarWidth, WINDOW_GAP } from '../ui/tokens'
 
 /**
  * The roster the wide chat frame's sidebar shows.
@@ -142,11 +142,20 @@ export function DevGallery({ section }: { section: string }) {
         >
           <GlassSurface
             contentStyle={{ flex: 1 }}
-            style={{ width: SIDEBAR_WIDTH }}
+            style={{ width: sidebarWidth(width) }}
             testID="shell-sidebar"
             variant="panel"
           >
-            <BotsScreen selectedBot="researcher" variant="sidebar" />
+            {/*
+              `onOpenSection` is what mounts the tab strip, and the strip is the
+              whole footer of the sidebar on every layout (§6.8). Without the
+              prop this mimic drew a sidebar that simply ended, and the missing
+              strip was read as a portrait bug in the real shell — which has one
+              at every height. The handler is a no-op on purpose: there is
+              nothing behind the gallery to open, and a strip that navigated
+              would be a second lie about the layout.
+            */}
+            <BotsScreen onOpenSection={() => undefined} selectedBot="researcher" variant="sidebar" />
           </GlassSurface>
 
           <View style={{ flex: 1, minWidth: 0 }} testID="shell-content">

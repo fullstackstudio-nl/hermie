@@ -1,9 +1,10 @@
 import { View } from 'react-native'
 
 import { strings } from '../../../i18n/strings'
-import { InsetGroup, InsetValueRow, Text } from '../../../ui/primitives'
+import { InsetGroup, InsetValueRow } from '../../../ui/primitives'
 import { useTheme } from '../../../ui/theme'
 import { authModeOf, type OnboardingDraft } from '../draft'
+import { StatusLine } from '../StatusLine'
 
 export interface DoneStepProps {
   draft: OnboardingDraft
@@ -15,12 +16,7 @@ export function DoneStep({ draft, error }: DoneStepProps) {
   const authMode = authModeOf(draft.probe)
 
   return (
-    <View style={{ gap: theme.space.xl }}>
-      <View style={{ gap: theme.space.sm }}>
-        <Text variant="title">{strings.onboarding.done.title}</Text>
-        <Text color="textMuted">{strings.onboarding.done.subtitle}</Text>
-      </View>
-
+    <View style={{ gap: theme.space.md }}>
       <InsetGroup header={strings.onboarding.done.gateway}>
         <InsetValueRow label={strings.settings.address} value={draft.baseUrl ?? ''} />
         <InsetValueRow
@@ -38,9 +34,9 @@ export function DoneStep({ draft, error }: DoneStepProps) {
       </InsetGroup>
 
       {error ? (
-        <Text color="dangerText" testID="done-error">
+        <StatusLine testID="done-error" tone="error">
           {error}
-        </Text>
+        </StatusLine>
       ) : null}
     </View>
   )

@@ -625,6 +625,16 @@ export const FOLD_FADE_LINES = 2.5
 /** How many consecutive bubbles from one sender sit this far apart. */
 export const BUBBLE_GAP = { grouped: 3, separate: 10 } as const
 
+/**
+ * Consecutive bot-to-bot lines, from §6.6.
+ *
+ * Deliberately its own number rather than a reuse of `BUBBLE_GAP.separate`. A
+ * dispatch is a ledger line, not speech (§6.4): it has no tail and no corner to
+ * tuck, so it neither groups like a bubble nor deserves the gap that separates
+ * two turns of conversation. Nine is what sits between two of them.
+ */
+export const DM_LINE_GAP = 9
+
 /** A sunk surface: a search field, a code well, the tab strip's track. */
 export const TINT_SUNK: Record<Scheme, string> = {
   light: 'rgba(14,32,64,0.055)',
@@ -805,8 +815,38 @@ export const TAP_SLOP = { bottom: 14, left: 12, right: 12, top: 14 } as const
 /** The width at and above which the regular (sidebar + detail) shell is used. */
 export const REGULAR_LAYOUT_MIN_WIDTH = 700
 
-/** Sidebar width in the regular shell, in points. */
-export const SIDEBAR_WIDTH = 344
+/**
+ * Sidebar width in the regular shell, on a window wide enough to spare it.
+ *
+ * §4's number was 344 flat, which is a landscape number wearing no label. In
+ * portrait it is a THIRD of an iPad Pro 13" (344 of 1032) and two fifths of an
+ * 11" (344 of 834), and what it takes comes out of the one column that has to
+ * hold prose.
+ */
+export const SIDEBAR_WIDTH = 340
+
+/**
+ * The same sidebar on a window that cannot spare it.
+ *
+ * A list row is an avatar, two lines of text and a stamp; at 300 the preview
+ * loses a couple of words and nothing else, which is the cheapest 40pt the
+ * layout has to give.
+ */
+export const SIDEBAR_WIDTH_NARROW = 300
+
+/** Above this window width the sidebar takes `SIDEBAR_WIDTH`, below it the narrow one. */
+export const SIDEBAR_WIDE_MIN_WIDTH = 1100
+
+/**
+ * Which of the two applies, as a function of the WINDOW.
+ *
+ * A function rather than a second constant at each call site: the shell, the
+ * gallery's mimic of the shell and anything that parks itself beside the sidebar
+ * have to agree, and three copies of one comparison is how they stop agreeing.
+ */
+export function sidebarWidth(windowWidth: number): number {
+  return windowWidth >= SIDEBAR_WIDE_MIN_WIDTH ? SIDEBAR_WIDTH : SIDEBAR_WIDTH_NARROW
+}
 
 /** How wide the overlay panel grows before it starts leaving the sidebar room. */
 export const OVERLAY_MAX_WIDTH = 520
@@ -826,6 +866,16 @@ export const SHEET_MAX_WIDTH = 560
  * a full-width field on an iPad or a Mac window.
  */
 export const FORM_MAX_WIDTH = 480
+
+/**
+ * How wide the onboarding card grows before it stops.
+ *
+ * Wider than `FORM_MAX_WIDTH` because the card carries its own padding, its
+ * status lines and its actions rather than only a field: at 480 the same content
+ * wrapped one line more on every step. It is the wizard's whole width on a
+ * phone, where the card spans the window minus the gap instead.
+ */
+export const ONBOARDING_CARD_MAX_WIDTH = 520
 
 /**
  * `#RRGGBB` plus an alpha, as `rgba()`.

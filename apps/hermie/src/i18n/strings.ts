@@ -57,7 +57,11 @@ export const strings = {
       subtitle: 'The address you would open in a browser to reach the gateway dashboard.',
       label: 'ADDRESS',
       placeholder: 'hermes.example.com',
-      hint: 'https:// is assumed when you leave the scheme out. http:// works too, for a gateway on a private network.',
+      // The resolver really does try both, https first (`resolveGatewayAddress`
+      // in packages/gateway-client). Until this said so, the behaviour existed
+      // and nobody knew about it, so an address that only answers on http read
+      // as a typo.
+      hint: 'Leave the scheme out and Hermie tries https:// first, then http://. Type a scheme yourself to pin it.',
       advanced: 'Advanced',
       advancedHint:
         'Extra request headers are sent with every call and with the sign-in page. An access proxy such as Cloudflare Access needs them here.',
@@ -68,6 +72,9 @@ export const strings = {
       hideValue: 'Hide value',
       removeHeader: (name: string) => `Remove the ${name || 'empty'} header`,
       probing: 'Checking…',
+      /** Which scheme is in flight, so the wait is not a silent one. */
+      probingScheme: (scheme: string) => `Checking ${scheme}…`,
+      probingBoth: 'Checking https://, then http://…',
       signInRequired: (version: string, providers: string[]) =>
         `Hermes ${version || 'gateway'} · sign-in required via ${list(providers)}`,
       signInRequiredNoProviders: (version: string) =>
@@ -103,6 +110,11 @@ export const strings = {
         cancelled: 'Sign-in was cancelled.',
         unavailable:
           'The in-app browser is not available on this platform. Open the sign-in page in your browser, then paste the address it fails to open back here.',
+        // Said when the reader ASKED for the browser. Telling them the in-app
+        // page is unavailable would be a plain untruth, and it is the sentence
+        // they would read while wondering what went wrong.
+        chosen:
+          'Open the sign-in page in your browser, then paste the address it fails to open back here. You can go back and use the in-app page instead.',
         headersWithheld:
           'This gateway needs extra headers, and Android\u2019s in-app browser would forward them to your identity provider. Sign in in your browser instead, then paste the address it fails to open back here.',
         fallbackLabel: 'FAILED ADDRESS',
@@ -131,7 +143,19 @@ export const strings = {
       invalidated: 'Something changed since the last test. Run it again.',
       connectedAs: (user: string, bots: number) => `Connected as ${user} · ${bots === 1 ? '1 bot' : `${bots} bots`}`,
       connected: (bots: number) => `Connected · ${bots === 1 ? '1 bot' : `${bots} bots`}`,
-      noBots: 'The connection works, but this gateway has no bot profiles yet.'
+      noBots: 'The connection works, but this gateway has no bot profiles yet.',
+
+      /**
+       * The three things the test actually exercises, in the order it does
+       * them. They are a checklist rather than one line because when a test
+       * fails, WHICH half failed is the whole diagnosis: REST refused is a
+       * credential, the socket refused is a reverse proxy.
+       */
+      checklist: {
+        rest: 'REST',
+        socket: 'WebSocket',
+        profiles: 'Profiles'
+      }
     },
 
     done: {
@@ -269,6 +293,8 @@ export const strings = {
    */
   transport: {
     foundOverHttp: 'Found over http://',
+    /** Said only when the reader left the scheme out, so the answer was in doubt. */
+    foundOverHttps: 'Found over https://',
     httpLoopback: 'Plain http://, and this connection never leaves this machine.',
     httpLocalNetwork: 'Plain http://, to an address on a local network. It is not reachable from outside that network.',
     httpTailnet:

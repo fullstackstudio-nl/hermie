@@ -6,6 +6,8 @@ import { WebView } from 'react-native-webview'
 import { describeSignInError } from '../../gateway/errors'
 import { strings } from '../../i18n/strings'
 import { randomBytes } from '../../platform/random'
+import { useSafeAreaInsets } from '../../platform/safe-area'
+import { GlassSurface } from '../../ui/glass'
 import { Button, InsetGroup, InsetRow, Screen, Text, TextField } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { FORM_MAX_WIDTH } from '../../ui/tokens'
@@ -35,6 +37,14 @@ export interface NativeSignInWebViewProps {
   /** Provider name from the probe; omitted lets the gateway pick its default. */
   provider?: string
   extraHeaders?: Record<string, string>
+  /**
+   * Open straight on the system-browser path instead of the in-app page.
+   *
+   * The sign-in step offers that path up front now, because an escape hatch
+   * reachable only from inside the thing it escapes is no escape hatch. It
+   * lands on the same fallback form Android already gets.
+   */
+  startInBrowser?: boolean
   onCancel: () => void
   onSuccess: (tokens: TokenSet) => void
 }
@@ -55,10 +65,12 @@ export function NativeSignInWebView({
   baseUrl,
   provider,
   extraHeaders = {},
+  startInBrowser = false,
   onCancel,
   onSuccess
 }: NativeSignInWebViewProps) {
   const theme = useTheme()
+  const insets = useSafeAreaInsets()
   const [attempt, setAttempt] = useState<{ pkce: Pkce; url: string } | null>(null)
   const [phase, setPhase] = useState<Phase>('signing-in')
   const [error, setError] = useState<string | null>(null)
@@ -85,7 +97,7 @@ export function NativeSignInWebView({
     // The headers this gateway needs cannot ride in the in-app page here, and a
     // sign-in page loaded WITHOUT them would simply be refused by the proxy in
     // front of the gateway. So the browser does it instead, from the start.
-    setPhase(headersWithheld ? 'fallback' : 'signing-in')
+    setPhase(headersWithheld || startInBrowser ? 'fallback' : 'signing-in')
 
     try {
       // A fresh verifier, challenge and state per attempt: reusing any of them
@@ -103,7 +115,7 @@ export function NativeSignInWebView({
       setPhase('failed')
       setError(describeSignInError(creationError, baseUrl))
     }
-  }, [baseUrl, headersWithheld, provider, visible])
+  }, [baseUrl, headersWithheld, provider, startInBrowser, visible])
 
   useEffect(() => {
     if (!visible || !attempt || phase !== 'signing-in') {
@@ -176,27 +188,32 @@ export function NativeSignInWebView({
 
   const header = useMemo(
     () => (
-      <View
-        style={{
-          flexDirection: 'row',
+      // The same `float` recipe the chat header and the composer use, squared
+      // off: the page under it goes to the window edge, so a rounded bar would
+      // leave two lit corners over a white provider page.
+      <GlassSurface
+        contentStyle={{
           alignItems: 'center',
+          flexDirection: 'row',
           justifyContent: 'space-between',
+          paddingBottom: theme.space.md,
           paddingHorizontal: theme.space.lg,
-          paddingVertical: theme.space.md,
-          borderBottomWidth: 1,
-          borderBottomColor: theme.hairline,
-          backgroundColor: theme.elevation.e3c
+          paddingTop: theme.space.md + insets.top
         }}
+        opaque
+        radius={0}
+        shadow="float"
+        variant="float"
       >
-        <Text variant="name">{strings.onboarding.signIn.webview.title}</Text>
-        <Pressable accessibilityRole="button" onPress={onCancel} hitSlop={12}>
-          <Text variant="body" color="accent">
+        <Text variant="chatName">{strings.onboarding.signIn.webview.title}</Text>
+        <Pressable accessibilityRole="button" hitSlop={12} onPress={onCancel}>
+          <Text color="accentText" variant="body">
             {strings.common.cancel}
           </Text>
         </Pressable>
-      </View>
+      </GlassSurface>
     ),
-    [onCancel, theme]
+    [insets.top, onCancel, theme]
   )
 
   const body = () => {
@@ -233,7 +250,9 @@ export function NativeSignInWebView({
           reason={
             headersWithheld
               ? strings.onboarding.signIn.webview.headersWithheld
-              : strings.onboarding.signIn.webview.unavailable
+              : startInBrowser
+                ? strings.onboarding.signIn.webview.chosen
+                : strings.onboarding.signIn.webview.unavailable
           }
           onOpen={openInBrowser}
           onSubmit={() => handleNavigation(pastedUrl.trim())}
@@ -277,13 +296,29 @@ export function NativeSignInWebView({
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onCancel} transparent={false}>
-      <Screen padded={false}>
+      {/*
+        `edgeToEdgeTop`, and the inset applied by hand on the bar instead.
+
+        A `Modal` is a separate UIKit presentation that the app's
+        `SafeAreaProvider` never measures, so `useSafeAreaInsets()` called from
+        INSIDE it answers zero and `Screen` added no top padding: the bar sat
+        under the status bar, with "Sign in" over the clock and "Cancel" over
+        the wifi icon. It had presumably always done that, and restyling the bar
+        to glass is only what made it obvious. Mounting a second
+        `SafeAreaProvider` in here does not fix it either — measured, it still
+        reports zero.
+
+        What does work is reading the insets OUTSIDE the modal, which this
+        component can do because only its children are presented separately, and
+        handing the top one to the bar as padding.
+      */}
+      <Screen edgeToEdgeTop padded={false}>
         {header}
         <View style={{ flex: 1 }}>{body()}</View>
         {phase === 'signing-in' && attempt ? (
           <View style={{ padding: theme.space.lg }}>
-            <Pressable accessibilityRole="button" onPress={openInBrowser} hitSlop={8}>
-              <Text variant="meta" color="accent" style={{ textAlign: 'center' }}>
+            <Pressable accessibilityRole="button" hitSlop={8} onPress={openInBrowser}>
+              <Text color="accentText" style={{ textAlign: 'center' }} variant="meta">
                 {strings.common.openInBrowser}
               </Text>
             </Pressable>

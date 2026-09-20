@@ -68,6 +68,31 @@ reply`. It is still one indicator and still static; it is strictly more informat
   the count of messages that arrived since"; `3 new` alone stopped saying what tapping it does, so
   the pill keeps its name and the count rides beside it.
 
+- **The onboarding wizard is a card, and the mockup does not draw one.** `liquid-glass.html` has no
+  setup flow at all, so the card is an extrapolation from the sheet recipe: `sheet` glass, `opaque`,
+  the sheet radius, `space.panel` padding, capped at 520pt. 520 rather than the 480 of
+  `FORM_MAX_WIDTH` because the card carries its own padding, its status lines and its actions rather
+  than only a field; at 480 the same content wrapped one line more on every step.
+
+- **The wizard's card is centred on a phone too, rather than sheet-anchored to the bottom.** A
+  sheet-like treatment was the other reading of "full-width sheet-like on phones". Centring is what
+  keeps one rule for both layouts, and the card's height already follows its content, so a
+  bottom-anchored variant would only differ on the tallest steps. The card does take the full window
+  width on a phone, minus the window gap and the safe-area inset.
+
+- **The step indicator counts the four numbered steps, not the five screens.** Welcome is the cover
+  and carries the app icon instead of a rail, which is also why the eyebrow still reads `Step 1 of
+4` — a five-segment rail beside a four-step counter would have had the card contradicting itself.
+
+- **The progress rail and the status dots are static, including while a probe or a connection test
+  is running.** §5's motion rule reserves animation for "needs input" and for streaming content, and
+  a spinner is neither. A waiting state is a hollow ring in the accent; an answer is a filled dot.
+  The shape, not only the colour, is what separates the two.
+
+- **The disclosure caret is a text glyph (`▸` / `▾`), like the tab strip's icons**, and it does not
+  rotate. Same two reasons: the app ships no vector icon set, and §5 does not spend motion on a
+  disclosure.
+
 `messenger.html` and `tokens.md` are the **superseded** Messenger direction. They are kept because the app still carries a few token names from them while the second half of the Liquid Glass pass lands, and because the reasoning in them about bubble contrast has not changed. Do not take layout, colour or motion from them.
 
 `icon.svg` is the app icon: a speech bubble carrying an H whose crossbar lifts to the right like a wing. It is hand-authored and it is the only source for the artwork — every PNG the app ships is rasterised from it by `scripts/generate-app-icons.mjs` (`npm run icons`), and `npm run icons:check` fails in CI if one of them has drifted. Edit the SVG, never a PNG.

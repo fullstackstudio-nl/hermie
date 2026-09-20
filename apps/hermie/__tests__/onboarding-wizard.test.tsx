@@ -89,6 +89,43 @@ describe('the wizard as a whole', () => {
     expect(screen.getByTestId('test-required')).toBeTruthy()
   })
 
+  it('holds every step in one card on the wallpaper, with the actions inside it', () => {
+    renderScreen(<OnboardingNavigator onComplete={jest.fn()} initialStep="address" initialDraft={signedInDraft()} />)
+
+    expect(screen.getByTestId('onboarding-wallpaper')).toBeTruthy()
+    expect(screen.getByTestId('onboarding-card')).toBeTruthy()
+    // The cover has the icon instead; a numbered step has the rail and the
+    // eyebrow. The rail is deliberately hidden from assistive technology —
+    // the eyebrow under it says the same thing in words — so the query has to
+    // ask for it explicitly, which is the assertion that it IS hidden.
+    expect(screen.getByTestId('step-rail', { includeHiddenElements: true })).toBeTruthy()
+    expect(screen.queryByTestId('step-rail')).toBeNull()
+    expect(screen.getByTestId('step-counter')).toHaveTextContent('Step 1 of 4')
+  })
+
+  it('shows no progress rail on the cover, which is not one of the four steps', () => {
+    renderScreen(<OnboardingNavigator onComplete={jest.fn()} initialDraft={signedInDraft()} />)
+
+    expect(screen.queryByTestId('step-rail', { includeHiddenElements: true })).toBeNull()
+    expect(screen.queryByTestId('step-counter')).toBeNull()
+    expect(screen.getByTestId('onboarding-card')).toBeTruthy()
+  })
+
+  it('keeps Continue quiet while the step still owns the live action', () => {
+    // The sign-in step draws its own accented "Sign in with …". Two full-width
+    // blue buttons stacked would read as two ways forward rather than one gate.
+    renderScreen(
+      <OnboardingNavigator
+        onComplete={jest.fn()}
+        initialStep="signin"
+        initialDraft={{ ...signedInDraft(), tokens: null }}
+      />
+    )
+
+    expect(isDisabled('Continue')).toBe(true)
+    expect(screen.getByRole('button', { name: 'Sign in with Self-Hosted OIDC' })).toBeTruthy()
+  })
+
   it('opens on the sign-in step when a sign-out left the address behind', () => {
     renderScreen(
       <OnboardingNavigator
@@ -105,6 +142,10 @@ describe('the wizard as a whole', () => {
 
     expect(screen.getByText('Sign in')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Sign in with Self-Hosted OIDC' })).toBeTruthy()
+    // Signed-out re-auth and Change gateway both land on this same component,
+    // so they get the card too rather than a second, older-looking wizard.
+    expect(screen.getByTestId('onboarding-card')).toBeTruthy()
+    expect(screen.getByTestId('step-counter')).toHaveTextContent('Step 2 of 4')
   })
 })
 

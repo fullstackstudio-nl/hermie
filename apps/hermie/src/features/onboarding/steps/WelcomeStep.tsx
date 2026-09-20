@@ -1,19 +1,17 @@
-import { View } from 'react-native'
-
 import { strings } from '../../../i18n/strings'
 import { Text } from '../../../ui/primitives'
-import { useTheme } from '../../../ui/theme'
 
+/**
+ * The cover's body.
+ *
+ * The icon, the title and the lead belong to `OnboardingCard`, so what is left
+ * here is the one promise worth making before anybody types an address:
+ * nothing is written down until the connection has been proved.
+ */
 export function WelcomeStep() {
-  const theme = useTheme()
-
   return (
-    <View style={{ gap: theme.space.lg, paddingTop: theme.space.xxl }}>
-      <Text variant="title">{strings.onboarding.welcome.title}</Text>
-      <Text color="textMuted">{strings.onboarding.welcome.body}</Text>
-      <Text variant="meta" color="textMuted">
-        {strings.onboarding.welcome.note}
-      </Text>
-    </View>
+    <Text color="textFaint" variant="meta">
+      {strings.onboarding.welcome.note}
+    </Text>
   )
 }

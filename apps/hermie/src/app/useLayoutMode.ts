@@ -1,6 +1,6 @@
 import { useWindowDimensions } from 'react-native'
 
-import { REGULAR_LAYOUT_MIN_WIDTH } from '../ui/tokens'
+import { REGULAR_LAYOUT_MIN_WIDTH, sidebarWidth } from '../ui/tokens'
 
 export type LayoutMode = 'compact' | 'regular'
 
@@ -17,4 +17,19 @@ export function useLayoutMode(): LayoutMode {
   const { width } = useWindowDimensions()
 
   return width >= REGULAR_LAYOUT_MIN_WIDTH ? 'regular' : 'compact'
+}
+
+/**
+ * How wide the sidebar is in this window.
+ *
+ * A SECOND breakpoint, above the one that picks the shell, and the reason it is
+ * not folded into `LayoutMode`: whether there are two panels and how wide the
+ * first one is are different questions with different answers. Every window from
+ * 700 to a Mac full screen is `regular`, and the 11" portrait end of that range
+ * is where 344 stopped being a sidebar and started being a third of the screen.
+ */
+export function useSidebarWidth(): number {
+  const { width } = useWindowDimensions()
+
+  return sidebarWidth(width)
 }
