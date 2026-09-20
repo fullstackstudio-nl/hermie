@@ -154,6 +154,10 @@ const config: ExpoConfig = {
       }
     ],
     ['./plugins/with-ios-deployment-target-floor', { deploymentTarget: IOS_DEPLOYMENT_TARGET }],
+    // The template signs release builds with the debug key, which Play refuses. This gives them the
+    // owner's upload key when the four HERMIE_UPLOAD_* values are configured, and leaves the debug
+    // signing in place when they are not, so a fork still builds. No secret enters the repository.
+    './plugins/with-android-release-signing',
     // iOS 27 refuses to launch an app built against its SDK that has not adopted the UIKit scene
     // life cycle, and SDK 54's template has not. The plugin writes the manifest; the scene delegate
     // it names lives in modules/hermie-scene.

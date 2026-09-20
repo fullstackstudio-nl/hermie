@@ -269,6 +269,10 @@ rewrite and why it exists.
 three of them, what a `v*` tag sets off, and the TestFlight and Play steps that are still done by
 hand. A Mac release is the iOS one — there is no separate artefact to sign.
 
+`npm run android:release` builds the signed app bundle and APK. The upload key it signs with is four
+`HERMIE_UPLOAD_*` properties in your own `~/.gradle/gradle.properties` — never in this repository,
+and never quoted, because a properties file keeps the quote characters.
+
 The icons are generated, not drawn per size. `design/icon.svg` is the source; `npm run icons`
 rewrites every PNG from it and `npm run icons:check` — which CI runs — fails if one of them has
 drifted. Never edit a PNG in `apps/hermie/assets` directly.

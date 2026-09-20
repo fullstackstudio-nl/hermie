@@ -1,7 +1,7 @@
 # Releasing Hermie
 
-Two halves. The half a machine can do on its own — build an Android APK and
-publish it against a tag with the right CHANGELOG section — is
+Two halves. The half a machine can do on its own — build the Android artefacts and
+publish them against a tag with the right CHANGELOG section — is
 `.github/workflows/release.yml`. The half that needs an account someone owns —
 TestFlight and Play internal testing — is written out below, because it is done by
 hand until somebody decides otherwise.
@@ -59,8 +59,8 @@ same number.
    git push origin main v0.2.0
    ```
 5. The tag triggers two workflows. `ci.yml` runs the checks and both native
-   builds; `release.yml` builds the Android APK and publishes a GitHub release
-   with it attached and the CHANGELOG section as its notes.
+   builds; `release.yml` builds the Android artefacts and publishes a GitHub
+   release with them attached and the CHANGELOG section as its notes.
 6. Then the store halves, below.
 
 A release can also be rehearsed without a tag: run **Release** from the Actions
@@ -68,13 +68,17 @@ tab. It builds and uploads the artefact and skips the publish step.
 
 ## What the automated release produces
 
-| Artefact                   | What it is                                                                  |
-| -------------------------- | --------------------------------------------------------------------------- |
-| `Hermie-android-debug.apk` | A debug-signed APK, installable on any device with unknown sources allowed. |
+| Artefact                     | What it is                                                                  |
+| ---------------------------- | --------------------------------------------------------------------------- |
+| `Hermie-android-debug.apk`   | A debug-signed APK, installable on any device with unknown sources allowed. |
+| `Hermie-android-release.apk` | Signed with the upload key — only when the signing secrets below are set.   |
+| `Hermie-android-release.aab` | The app bundle Play takes — only when the signing secrets below are set.    |
 
-It is a **debug** build on purpose: a release APK needs an upload key this
-workflow does not have, and an unsigned one cannot be installed at all. The Play
-artefact comes from EAS instead.
+The debug APK is built unconditionally, and it is a **debug** build on purpose:
+an unsigned APK cannot be installed at all, so a fork with no key still gets
+something a person can put on a phone. The two release artefacts appear only when
+the four secrets are there; without them the job builds the debug APK and nothing
+fails.
 
 There is no iOS or Mac artefact here, and there cannot be a useful one: an iOS app
 that anybody can install has to be signed by a real Apple Developer team, which is
@@ -84,16 +88,33 @@ what TestFlight and the App Store are for.
 
 All of these are repository secrets in GitHub → Settings → Secrets and variables
 → Actions. Every one of them is optional: with none set, the release workflow
-still produces working unsigned artefacts, which is what a fork gets.
+still produces a working debug-signed APK, which is what a fork gets.
 
-| Secret       | Used for                                                  |
-| ------------ | --------------------------------------------------------- |
-| `EXPO_TOKEN` | An EAS access token, if EAS builds are ever moved into CI |
+| Secret                          | Used for                                                  |
+| ------------------------------- | --------------------------------------------------------- |
+| `EXPO_TOKEN`                    | An EAS access token, if EAS builds are ever moved into CI |
+| `HERMIE_UPLOAD_KEYSTORE_BASE64` | The upload keystore itself, `base64 -i hermie-upload.jks` |
+| `HERMIE_UPLOAD_STORE_PASSWORD`  | Its store password                                        |
+| `HERMIE_UPLOAD_KEY_ALIAS`       | `hermie-upload`                                           |
+| `HERMIE_UPLOAD_KEY_PASSWORD`    | The key's own password                                    |
 
-That is the whole list now. The Developer ID certificate, its password, the notary
-service Apple ID and its app-specific password were all for the macOS `.app`, and
-that artefact no longer exists — a Mac user installs from TestFlight or the App
-Store, where EAS holds the credentials.
+The four Android ones are read as a group: `release.yml` checks whether the
+keystore secret is empty and skips the signed build when it is, the way the macOS
+Developer ID signing used to be guarded. The job decodes the keystore into
+`$RUNNER_TEMP` — never the workspace, where an `upload-artifact` glob could reach
+it — passes the other three as `ORG_GRADLE_PROJECT_HERMIE_UPLOAD_*` environment
+variables, which is how Gradle takes a project property from the environment, and
+deletes the file in an `if: always()` step.
+
+**Do not quote the secret values.** They arrive as Gradle properties, and a
+properties file does not strip quotes, so `"secret"` is a password with two quote
+characters in it. That failure surfaces as a `BadPaddingException` from deep inside
+AGP; the config plugin checks the keystore up front and says so instead.
+
+The Developer ID certificate, its password, the notary service Apple ID and its
+app-specific password were all for the macOS `.app`, and that artefact no longer
+exists — a Mac user installs from TestFlight or the App Store, where EAS holds the
+credentials.
 
 ## The two accounts this is waiting on
 
@@ -108,14 +129,14 @@ Written down here so the next reader does not spend an afternoon rediscovering i
   team's profiles last a **year**. `npm run mac` works either way — it takes whatever
   `HERMIE_APPLE_TEAM_ID` names — so a free team is fine for developing and is the
   reason a Mac build sometimes "breaks" after a week for no other reason.
-- **A Play upload keystore.** Play signs what it serves, but it will only accept an
-  upload signed by a key it has already seen registered, and that registration
-  happens once per app and cannot be undone. Until there is one, the release
-  workflow's APK stays debug-signed — installable by hand, not by Play — and
-  `eas build --profile production` has nothing to sign its app bundle with.
+- **A Play Console account.** The upload keystore it needs now **exists** — that was
+  the other half of this item and the Android section below is about it — so a signed
+  APK and app bundle can be built today. What cannot happen yet is registering that
+  key with Play, which happens once per app and cannot be undone.
 
-Neither belongs in this repository. The keystore is a secret and the Apple team is
-an account, so both live with the owner; nothing here should ever hold either.
+Neither the keystore nor the Apple team belongs in this repository. The keystore is
+a secret and the Apple team is an account, so both live with the owner; nothing here
+should ever hold either.
 
 ## iOS: TestFlight
 
@@ -144,9 +165,73 @@ Availability and leave "Make this app available on Mac" on; a TestFlight tester 
 an Apple Silicon Mac then installs the same build. Nothing else is needed, and
 nothing here is Mac-specific.
 
+## Android: the upload key
+
+There are two keys in an Android release and conflating them is the usual
+confusion. **Play App Signing** means Google holds the key that signs what users
+download; it is generated by Play and nobody here ever sees it. The **upload key**
+is ours, and it only proves to Play that an upload came from us. Play will not
+accept an upload signed by a key it has not seen registered, and that registration
+happens once per app and cannot be undone — so this key has to be kept, and losing
+it means asking Play support to reset it.
+
+The keystore lives **with the owner, outside every checkout**, and nothing in this
+repository ever holds it, names it or logs it. Its location and its passwords are
+four Gradle properties in `~/.gradle/gradle.properties`, which is outside the build
+tree and is not read by anything here except Gradle:
+
+```properties
+HERMIE_UPLOAD_STORE_FILE=/absolute/path/to/hermie-upload.jks
+HERMIE_UPLOAD_STORE_PASSWORD=…
+HERMIE_UPLOAD_KEY_ALIAS=hermie-upload
+HERMIE_UPLOAD_KEY_PASSWORD=…
+```
+
+**Do not put quotes round the values.** A Gradle properties file does not strip
+them, so `"secret"` is a password with two quote characters in it, and the failure
+arrives as `UnrecoverableKeyException: BadPaddingException` from inside AGP with
+nothing pointing at the cause. The path may contain spaces and needs no quoting or
+escaping either: it reaches `file()` as one string. `apps/hermie/plugins/with-android-release-signing.js`
+opens the keystore before the build starts and says both of these in its error.
+
+The same four can come from the environment instead, which is what CI uses — see
+Secrets above.
+
+### Building them
+
+```sh
+export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
+npm run android:release                 # prebuild if needed, then .aab and .apk
+npm run android:release -- --clean      # regenerate android/ first
+npm run android:release -- --aab        # the bundle only
+```
+
+It prints where the artefacts landed and how big they are. They are
+`apps/hermie/android/app/build/outputs/bundle/release/app-release.aab` and
+`.../apk/release/app-release.apk`.
+
+**Which key signed a build is in the log**, on the one line beginning `hermie:` —
+either the upload key with its alias, or a note that release kept the template's
+debug signing because the four values are not all there. That fallback is
+deliberate: a fork, and CI without secrets, still build a release. It also means a
+missing property produces a **debug-signed release APK**, which installs perfectly
+and is refused by Play, so check the line rather than assuming.
+
+To confirm an artefact before uploading, compare its certificate with the
+keystore's. The fingerprint is public; the key never leaves the keystore:
+
+```sh
+"$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs app-release.apk
+keytool -printcert -jarfile app-release.aab
+keytool -list -v -keystore /path/to/hermie-upload.jks -alias hermie-upload
+```
+
+All three print the same SHA-256 when the upload key signed it. A build that fell
+back to debug signing says `CN=Android Debug` instead, which is the tell.
+
 ## Android: Play internal testing
 
-Same shape:
+Same shape as iOS:
 
 ```sh
 cd apps/hermie
@@ -157,6 +242,14 @@ eas submit --platform android --latest --track internal
 `eas submit` needs a Google Play service-account key the first time. The
 `production` profile builds an app bundle because that is what Play takes;
 `preview` builds an APK, which is what a person can sideload.
+
+**EAS is the alternative to the keystore above, not a companion to it.** `eas build`
+manages credentials itself: it will generate an upload keystore and keep it on
+Expo's servers, or take yours with `eas credentials`. Either way the key is then in
+two places, and which one signed a given upload is worth knowing before Play
+rejects one. Pick one — the local properties for builds from this machine and from
+CI, EAS if releases move to EAS entirely — and if both are in use, make sure both
+hold the _same_ upload key.
 
 ## Before the first store submission
 

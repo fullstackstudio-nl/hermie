@@ -27,6 +27,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   button's centre, which is the thing the two full-width rows of text never said. It dismisses on
   Escape, on the `+` again, and on a tap anywhere else in the composer. A composer narrower than
   260pt keeps the stacked list: a squeezed popover is worse than the list it replaced.
+- **Android release builds are signed with the Play upload key.** The React Native template gives
+  `buildTypes.release` the debug signing config, which produces a release APK that installs by hand
+  and is refused by Play — the one failure that looks like success until the upload. A config plugin
+  (`apps/hermie/plugins/with-android-release-signing.js`) now replaces that line with a choice made
+  at configuration time: the upload key when all four `HERMIE_UPLOAD_*` values are there, the
+  template's debug key when they are not, so a fork and a CI run with no key still build a release.
+  The key itself stays with the owner — the four values are read by Gradle from
+  `~/.gradle/gradle.properties` or from the environment, nothing is written into the repository, and
+  the generated `build.gradle` carries the property names and no value. Every build says which key
+  it used on one line, because a missing property otherwise produces a debug-signed release APK
+  silently. `npm run android:release` builds the app bundle and the APK together and prints where
+  they landed; `release.yml` produces both, signed, when the four secrets are set, and the debug APK
+  alone when they are not. Verified against a real keystore: the APK's and the bundle's certificates
+  both match `keytool -list` on the keystore, the fallback build is signed `CN=Android Debug`, and
+  the signed APK installs and launches on an emulator.
 
 - **The wide layout's sidebar can be hidden.** A round button in the chat header, ⌘⇧S / ⌃⇧S on a
   hardware keyboard, and **Hide Sidebar** / **Show Sidebar** in the Mac's Chats menu all reach the

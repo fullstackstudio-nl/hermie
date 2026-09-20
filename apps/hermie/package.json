@@ -7,6 +7,7 @@
     "start": "expo start --dev-client",
     "ios": "expo run:ios",
     "android": "expo run:android",
+    "android:release": "node scripts/android-release.mjs",
     "mac": "node scripts/run-mac.mjs",
     "prebuild": "expo prebuild",
     "doctor": "expo-doctor",
