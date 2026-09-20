@@ -36,11 +36,9 @@
  * away with the oldest message.
  */
 import {
-  createContext,
   forwardRef,
   memo,
   useCallback,
-  useContext,
   useEffect,
   useImperativeHandle,
   useMemo,
@@ -526,31 +524,6 @@ function gapAbove(layout: RowLayout): number {
  * whether it continues the run above it.
  */
 /**
- * Which row the list is currently measuring, and where to send its height.
- *
- * ONE row at a time, and only while a place is held. That is the whole reason
- * this is a context rather than an `onLayout` on every row: a measurement
- * callback per row per layout pass is a real cost on a virtualised transcript,
- * and the list needs exactly one row's frame for about a third of a second.
- *
- * The value changes in the same commit as the toggle that started the hold —
- * `ExpandedProvider` calls `onToggle` before it sets its own state, so React
- * batches the two — which means opening a disclosure still costs one render
- * pass, not two.
- */
-const RowMeasureContext = createContext<{ id: string | null; report: (height: number) => void }>({
-  id: null,
-  report: () => {}
-})
-
-/** The row's `onLayout`, or nothing at all where nobody is listening. */
-function useRowMeasure(id: string): ((height: number) => void) | undefined {
-  const measuring = useContext(RowMeasureContext)
-
-  return measuring.id === id ? measuring.report : undefined
-}
-
-/**
  * The two `onLayout` hooks the scroll trace needs, and nothing when it is off.
  *
  * Both are spread props rather than always-present callbacks on purpose: an
@@ -592,32 +565,13 @@ function TranscriptRowFrame({ entry, context, receipt, layout, dmRole }: RowProp
   const runExpanded = useRollupExpanded(runId)
   const menu = useMessageMenu(entry.item, context)
   const trace = useRowTrace(`${entry.item.kind}-${entry.item.id}`)
-  const measure = useRowMeasure(entry.item.id)
-  const traceWrapper = trace.wrapper.onLayout
-
-  // One callback for both readers, so the row never carries two `onLayout`s and
-  // never carries one it does not need.
-  const onLayout = useMemo(
-    () =>
-      traceWrapper || measure
-        ? (event: LayoutChangeEvent) => {
-            traceWrapper?.(event)
-            measure?.(event.nativeEvent.layout.height)
-          }
-        : undefined,
-    [measure, traceWrapper]
-  )
 
   if (!rowDraws(entry, dmRole, runExpanded)) {
     return null
   }
 
   return (
-    <View
-      {...(onLayout ? { onLayout } : {})}
-      style={{ marginTop: gapAbove(layout) }}
-      testID={`transcript-row-${entry.item.id}`}
-    >
+    <View {...trace.wrapper} style={{ marginTop: gapAbove(layout) }} testID={`transcript-row-${entry.item.id}`}>
       {/*
         The stamp comes FIRST, above the row it heads.
 
@@ -815,13 +769,29 @@ export function dismissesKeyboard(dragStartedAt: number | undefined, offset: num
  * to read. Nothing about it was a jump the list failed to catch; it was the
  * list catching the offset and holding it in the wrong place.
  *
- * The target is therefore the offset at the tap PLUS the growth the row
- * reported, which keeps the message's top edge where it was and lets it grow
- * downward. `Fold` is the one place that number exists before the layout does.
+ * The target is therefore the offset at the tap PLUS the growth, which keeps the
+ * message's top edge where it was and lets it grow downward.
  *
- * Exported because this is the only part of it a test renderer can watch. The
- * rest is a scroll view moving.
+ * **Which growth** is the third report. `Fold` predicts one from its own
+ * unclipped body, and that is what the first frame has to go on — but a message
+ * with a TABLE in it grows twice, and the table's pass is in nobody's
+ * prediction. The CONTENT's own height cannot miss a stage, so `holdTarget`
+ * takes the offset and content height recorded at the tap and the content
+ * height as it is now, and answers where the reader belongs. Recorded on an
+ * iPhone 17 Pro: the fold predicted 1165.3, the content grew by 1377.7, and the
+ * 212.4pt between them is the text moving under the reader.
+ *
+ * Both are exported because they are the only part of this a test renderer can
+ * watch. The rest is a scroll view moving.
  */
+export function holdTarget(from: { offset: number; content: number }, content: number): number {
+  return Math.max(0, from.offset + (content - from.content))
+}
+
+/**
+ * Where the list has to be put, given the target and where it actually is.
+ */
+
 export function holdCorrection(held: number | undefined, offset: number): number | undefined {
   if (held === undefined || Math.abs(offset - held) <= HOLD_SLOP) {
     return undefined
@@ -1090,20 +1060,29 @@ function TranscriptListBody({
   const holding = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   /**
-   * The row whose frame is being watched, and the last height it reported.
+   * Where the reader was, and how tall the content was, at the moment of the tap.
    *
-   * A disclosure does NOT grow in one step. `Fold` can say how much taller its
-   * own text is about to be, because it measured the unclipped body — but a
-   * message containing a table grows again when the table lays its columns out,
-   * and the second stage was never in that number. The owner's report is the
-   * text moving ~212pt after `Show more`, which is a table's height arriving
-   * one pass late.
+   * The second number is what makes the hold correct rather than approximately
+   * correct. A disclosure does NOT grow in one step: `Fold` can say how much
+   * taller its own TEXT is about to be, because it measured the unclipped body,
+   * but a message containing a table grows again when the table lays its columns
+   * out, and that second stage is in nobody's prediction. Recorded on an iPhone
+   * 17 Pro, opening the long report the fake gateway streams:
    *
-   * So the prediction is only the FIRST estimate. Every further height this row
-   * reports is measured, and the difference goes straight onto the target.
+   *     [scroll] +101310 offset=859.0   content=2103.0   ← the tap
+   *     [row]    +108923 assistant-r:6 h=1676.7 (+1377.7)
+   *     [scroll] +108926 offset=2024.3  content=3480.7
+   *
+   * The fold predicted 1165.3 and the row grew by 1377.7 — 212.4pt of table,
+   * which is the number the owner reported the text moving by, twice.
+   *
+   * The CONTENT's own height is the one measurement that cannot miss a stage:
+   * whatever the row does, in however many passes, it is in there. So the
+   * prediction is only the first estimate, and every `onContentSizeChange` after
+   * it replaces the target with the measured one.
    */
-  const measured = useRef<{ id: string; height?: number } | null>(null)
-  const [measuring, setMeasuring] = useState<string | null>(null)
+  const contentNow = useRef(0)
+  const holdingFrom = useRef<{ offset: number; content: number } | undefined>(undefined)
 
   /**
    * How many rows the list had when the place was taken.
@@ -1149,8 +1128,7 @@ function TranscriptListBody({
     }
 
     holdingTo.current = undefined
-    measured.current = null
-    setMeasuring(null)
+    holdingFrom.current = undefined
   }, [])
 
   /**
@@ -1162,20 +1140,18 @@ function TranscriptListBody({
    * holding the bare offset pins its bottom instead, which on an inverted list
    * is how `Show more` used to land the reader at the end of the message.
    */
-  const holdPlace = useCallback((id: string, growth: number) => {
+  const holdPlace = useCallback((_id: string, growth: number) => {
     if (holding.current) {
       clearTimeout(holding.current)
     }
 
     holdingTo.current = Math.max(0, offsetNow.current + growth)
+    holdingFrom.current = { content: contentNow.current, offset: offsetNow.current }
     holdingRows.current = rowCount.current
-    measured.current = { id }
-    setMeasuring(id)
     holding.current = setTimeout(() => {
       holding.current = null
       holdingTo.current = undefined
-      measured.current = null
-      setMeasuring(null)
+      holdingFrom.current = undefined
     }, HOLD_SETTLE_MS)
   }, [])
 
@@ -1189,7 +1165,16 @@ function TranscriptListBody({
    * scroll event at all would otherwise never be answered — but by then the
    * reader has seen the frame this is meant to prevent.
    */
-  const settleHold = useCallback(() => {
+  const settleHold = useCallback((_width: number, height: number) => {
+    const from = holdingFrom.current
+
+    if (from && height > 0) {
+      contentNow.current = height
+      // Measured, not predicted. `holdTarget` is where the difference between
+      // the two is the whole of the second `Show more` report.
+      holdingTo.current = holdTarget(from, height)
+    }
+
     const correction = holdCorrection(holdingTo.current, offsetNow.current)
 
     if (correction === undefined) {
@@ -1199,46 +1184,6 @@ function TranscriptListBody({
     offsetNow.current = correction
     listRef.current?.scrollToOffset({ animated: false, offset: correction })
   }, [])
-
-  /**
-   * A measured frame for the row that was opened, one layout pass at a time.
-   *
-   * The FIRST report is the baseline: by the time a row can report anything it
-   * has already grown by whatever `Fold` predicted, and that prediction is
-   * already in the target. Every report after it is a stage the prediction knew
-   * nothing about — a table measuring its columns, an image arriving — and its
-   * difference is added to the target and applied at once, so the reader's line
-   * stays put through however many passes the row takes to settle.
-   */
-  const reportRowHeight = useCallback(
-    (height: number) => {
-      const row = measured.current
-
-      if (!row || holdingTo.current === undefined) {
-        return
-      }
-
-      if (row.height === undefined) {
-        row.height = height
-
-        return
-      }
-
-      const extra = height - row.height
-
-      row.height = height
-
-      if (Math.abs(extra) <= HOLD_SLOP) {
-        return
-      }
-
-      holdingTo.current = Math.max(0, holdingTo.current + extra)
-      settleHold()
-    },
-    [settleHold]
-  )
-
-  const rowMeasure = useMemo(() => ({ id: measuring, report: reportRowHeight }), [measuring, reportRowHeight])
 
   useEffect(() => releaseHold, [releaseHold])
 
@@ -1257,6 +1202,7 @@ function TranscriptListBody({
     traceScroll(contentOffset.y, contentSize.height, layoutMeasurement.height)
 
     offsetNow.current = contentOffset.y
+    contentNow.current = contentSize.height
 
     if (dismissesKeyboard(dragFrom.current, contentOffset.y)) {
       dragFrom.current = undefined
@@ -1396,119 +1342,114 @@ function TranscriptListBody({
       expansion and `holdPlace` only exists inside this body.
     */
     <ExpandedProvider onToggle={holdPlace}>
-      <RowMeasureContext.Provider value={rowMeasure}>
-        {/*
+      {/*
         The transcript IS the chat column, so it is the thing that knows how wide
         a bubble may be. See `BubbleColumn`.
       */}
-        <BubbleColumn style={{ flex: 1 }} testID={testID}>
-          {header}
+      <BubbleColumn style={{ flex: 1 }} testID={testID}>
+        {header}
 
-          <FlatList
-            ListEmptyComponent={
-              <Text color="textMuted" style={{ padding: theme.space.lg, textAlign: 'center' }}>
-                {chatStrings.transcript.empty}
-              </Text>
-            }
-            contentContainerStyle={[
-              { paddingHorizontal: theme.space.md, paddingVertical: theme.space.md },
-              contentStyle
-            ]}
-            data={rows}
-            inverted
-            keyExtractor={row => (isTypingRow(row) ? TYPING_ROW_KEY : isQueuedRow(row) ? row.queued.id : row.item.id)}
-            // Dragging the transcript down lowers the keyboard with the finger, which
-            // is what every messenger does and what the inverted list makes possible
-            // without a gesture handler. Android has no interactive dismissal — the
-            // value is ignored there and the keyboard simply stays up — so it drops
-            // the keyboard when the drag starts instead.
-            keyboardDismissMode={Platform.select({ ios: 'interactive', default: 'on-drag' })}
-            keyboardShouldPersistTaps="handled"
-            /*
-             * Held ONLY while the reader is away from the bottom, and that is the
-             * whole of the reported jump.
-             *
-             * `maintainVisibleContentPosition` anchors on a VIEW: iOS records the
-             * frame of the first subview whose bottom edge is past the current offset,
-             * and afterwards moves `contentOffset` by however far that view's origin
-             * moved (`RCTScrollViewComponentView`). At the bottom of an INVERTED list
-             * every new row — the message just sent, the reply's first bubble, a tool
-             * row, the bubble after it — is inserted BEFORE that view in content
-             * order, so the anchor moves down by exactly the new row's height and the
-             * list corrects for a shift the reader never saw. With
-             * `autoscrollToTopThreshold` set, the same branch then animates back to
-             * zero: the chat jumps up and scrolls itself back down, which is the bug
-             * as it was reported.
-             *
-             * Measured on an iPhone 17 Pro against the fake gateway with
-             * `--hermieTraceScroll`; a 70pt outgoing bubble moved the offset from 0 to
-             * 94 (the row plus its gap) and it took ~290ms to crawl back:
-             *
-             *     [row]    +38626 user-o:7000 h=70.0 (new)
-             *     [scroll] +38626 offset=94.0  content=968.0
-             *     [scroll] +38654 offset=90.3  content=951.0   ← animating back
-             *     [scroll] +38921 offset=0.0   content=951.0
-             *
-             * A constant-height `ListHeaderComponent` was tried as the anchor and
-             * CANNOT be one: `VirtualizedList` adds one to `minIndexForVisible`
-             * whenever a header exists ("Adjust index to account for
-             * ListHeaderComponent"), so the native loop starts at the first CELL and
-             * never looks at the header. There is no value of `minIndexForVisible`
-             * that reaches it — which is why the header is gone rather than tuned.
-             *
-             * The typing row is an insertion and a removal at index 0 like any
-             * other, and it is answered by the same two branches: away from the
-             * bottom the anchor corrects for it, at the bottom there is nothing to
-             * correct. That is what let the dots move into the list at all.
-             *
-             * Off at the bottom nothing has to be corrected: an inverted list already
-             * keeps offset 0 pinned to the newest row while the content grows above
-             * it. Away from the bottom the anchor is a genuinely visible row and the
-             * correction is what the reader wants — a message arriving under them must
-             * not shove the paragraph they are reading up the screen. So the prop is
-             * on exactly where it earns its keep, and `autoscrollToTopThreshold` is
-             * gone with it: it only ever fires within `AWAY_THRESHOLD` of the bottom,
-             * which is where this is now off.
-             */
-            maintainVisibleContentPosition={away ? AWAY_ANCHOR : undefined}
-            onContentSizeChange={settleHold}
-            onEndReached={onEndReached}
-            onEndReachedThreshold={0.4}
-            onMomentumScrollEnd={endJump}
-            onScroll={handleScroll}
-            onScrollBeginDrag={beginDrag}
-            onScrollToIndexFailed={recoverScroll}
-            ref={listRef}
-            renderItem={renderItem}
-            // A frame apart while tracing: a correction and the animated scroll back
-            // to the bottom are two events inside 300ms, and at 64ms the first of
-            // them is the one that gets dropped.
-            scrollEventThrottle={TRACING ? 16 : 64}
-            testID={`${testID}-scroll`}
-          />
+        <FlatList
+          ListEmptyComponent={
+            <Text color="textMuted" style={{ padding: theme.space.lg, textAlign: 'center' }}>
+              {chatStrings.transcript.empty}
+            </Text>
+          }
+          contentContainerStyle={[{ paddingHorizontal: theme.space.md, paddingVertical: theme.space.md }, contentStyle]}
+          data={rows}
+          inverted
+          keyExtractor={row => (isTypingRow(row) ? TYPING_ROW_KEY : isQueuedRow(row) ? row.queued.id : row.item.id)}
+          // Dragging the transcript down lowers the keyboard with the finger, which
+          // is what every messenger does and what the inverted list makes possible
+          // without a gesture handler. Android has no interactive dismissal — the
+          // value is ignored there and the keyboard simply stays up — so it drops
+          // the keyboard when the drag starts instead.
+          keyboardDismissMode={Platform.select({ ios: 'interactive', default: 'on-drag' })}
+          keyboardShouldPersistTaps="handled"
+          /*
+           * Held ONLY while the reader is away from the bottom, and that is the
+           * whole of the reported jump.
+           *
+           * `maintainVisibleContentPosition` anchors on a VIEW: iOS records the
+           * frame of the first subview whose bottom edge is past the current offset,
+           * and afterwards moves `contentOffset` by however far that view's origin
+           * moved (`RCTScrollViewComponentView`). At the bottom of an INVERTED list
+           * every new row — the message just sent, the reply's first bubble, a tool
+           * row, the bubble after it — is inserted BEFORE that view in content
+           * order, so the anchor moves down by exactly the new row's height and the
+           * list corrects for a shift the reader never saw. With
+           * `autoscrollToTopThreshold` set, the same branch then animates back to
+           * zero: the chat jumps up and scrolls itself back down, which is the bug
+           * as it was reported.
+           *
+           * Measured on an iPhone 17 Pro against the fake gateway with
+           * `--hermieTraceScroll`; a 70pt outgoing bubble moved the offset from 0 to
+           * 94 (the row plus its gap) and it took ~290ms to crawl back:
+           *
+           *     [row]    +38626 user-o:7000 h=70.0 (new)
+           *     [scroll] +38626 offset=94.0  content=968.0
+           *     [scroll] +38654 offset=90.3  content=951.0   ← animating back
+           *     [scroll] +38921 offset=0.0   content=951.0
+           *
+           * A constant-height `ListHeaderComponent` was tried as the anchor and
+           * CANNOT be one: `VirtualizedList` adds one to `minIndexForVisible`
+           * whenever a header exists ("Adjust index to account for
+           * ListHeaderComponent"), so the native loop starts at the first CELL and
+           * never looks at the header. There is no value of `minIndexForVisible`
+           * that reaches it — which is why the header is gone rather than tuned.
+           *
+           * The typing row is an insertion and a removal at index 0 like any
+           * other, and it is answered by the same two branches: away from the
+           * bottom the anchor corrects for it, at the bottom there is nothing to
+           * correct. That is what let the dots move into the list at all.
+           *
+           * Off at the bottom nothing has to be corrected: an inverted list already
+           * keeps offset 0 pinned to the newest row while the content grows above
+           * it. Away from the bottom the anchor is a genuinely visible row and the
+           * correction is what the reader wants — a message arriving under them must
+           * not shove the paragraph they are reading up the screen. So the prop is
+           * on exactly where it earns its keep, and `autoscrollToTopThreshold` is
+           * gone with it: it only ever fires within `AWAY_THRESHOLD` of the bottom,
+           * which is where this is now off.
+           */
+          maintainVisibleContentPosition={away ? AWAY_ANCHOR : undefined}
+          onContentSizeChange={settleHold}
+          onEndReached={onEndReached}
+          onEndReachedThreshold={0.4}
+          onMomentumScrollEnd={endJump}
+          onScroll={handleScroll}
+          onScrollBeginDrag={beginDrag}
+          onScrollToIndexFailed={recoverScroll}
+          ref={listRef}
+          renderItem={renderItem}
+          // A frame apart while tracing: a correction and the animated scroll back
+          // to the bottom are two events inside 300ms, and at 64ms the first of
+          // them is the one that gets dropped.
+          scrollEventThrottle={TRACING ? 16 : 64}
+          testID={`${testID}-scroll`}
+        />
 
-          {/*
+        {/*
           "Jump to latest" is the only thing left floating over the conversation.
           The typing bubble used to be pinned here beside it; it is a cell now —
           see `TYPING_ROW`.
         */}
-          {away ? (
-            <View style={{ alignItems: 'center', bottom: theme.space.md, left: 0, position: 'absolute', right: 0 }}>
-              <JumpToLatestPill count={newMessageCount} onPress={jump} />
-            </View>
-          ) : null}
+        {away ? (
+          <View style={{ alignItems: 'center', bottom: theme.space.md, left: 0, position: 'absolute', right: 0 }}>
+            <JumpToLatestPill count={newMessageCount} onPress={jump} />
+          </View>
+        ) : null}
 
-          {/*
+        {/*
           Mounted HERE, from the list rather than from the row that opened it: a
           `Modal` inside a virtualised cell is unmounted the moment the cell
           recycles, which on a transcript happens while the reader is still
           reading what it shows.
         */}
-          {selectingText === null ? null : (
-            <SelectTextOverlay markdown={selectingText} onClose={closeSelectText} testID={`${testID}-select-text`} />
-          )}
-        </BubbleColumn>
-      </RowMeasureContext.Provider>
+        {selectingText === null ? null : (
+          <SelectTextOverlay markdown={selectingText} onClose={closeSelectText} testID={`${testID}-select-text`} />
+        )}
+      </BubbleColumn>
     </ExpandedProvider>
   )
 }

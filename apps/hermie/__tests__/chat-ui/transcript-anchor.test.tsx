@@ -47,7 +47,7 @@ import { FlatList } from 'react-native'
 
 import { TranscriptList } from '../../src/chat-ui'
 import { assistantItem, subagentMap, userItem } from '../../src/chat-ui/fixtures'
-import { holdCorrection } from '../../src/chat-ui/TranscriptList'
+import { holdCorrection, holdTarget } from '../../src/chat-ui/TranscriptList'
 import type { AssistantItem, VisibleItem } from '../../src/chat-ui/types'
 import { markdownLeading } from '../../src/markdown'
 import { FOLD_LINES, type as typeScale } from '../../src/ui/tokens'
@@ -246,6 +246,24 @@ function within(root: { findAll: (predicate: (node: unknown) => boolean) => unkn
  * exactly the growth — which is why `holdCorrection` takes a target rather than
  * a memory, and why `Fold` reports how much taller it is about to be.
  */
+describe('holdTarget', () => {
+  it('is the tap’s offset plus however much the content actually grew', () => {
+    expect(holdTarget({ content: 2103, offset: 859 }, 3480.7)).toBeCloseTo(2236.7, 1)
+  })
+
+  it('answers the SAME place for a growth that arrives in two stages', () => {
+    // The reader's line does not care how many layout passes the row took.
+    const from = { content: 2103, offset: 859 }
+
+    expect(holdTarget(from, 2103 + 1165.3)).toBeCloseTo(859 + 1165.3, 1)
+    expect(holdTarget(from, 2103 + 1377.7)).toBeCloseTo(859 + 1377.7, 1)
+  })
+
+  it('never asks for a negative offset', () => {
+    expect(holdTarget({ content: 4000, offset: 100 }, 1000)).toBe(0)
+  })
+})
+
 describe('holdCorrection', () => {
   it('asks for nothing while no place is held', () => {
     expect(holdCorrection(undefined, 0)).toBeUndefined()
@@ -276,10 +294,10 @@ describe('opening a disclosure', () => {
   const limit = FOLD_LINES.regular * markdownLeading(typeScale.body.fontSize)
   const growth = HEIGHT - limit
 
-  /** One layout pass for a row, the way the list hears about it. */
-  function layoutRow(id: string, height: number): void {
+  /** One layout pass of the CONTENT, the way the scroll view reports it. */
+  function grewTo(content: number): void {
     act(() => {
-      fireEvent(screen.getByTestId(`transcript-row-${id}`), 'layout', { nativeEvent: { layout: { height } } })
+      fireEvent(screen.getByTestId('transcript-list-scroll'), 'contentSizeChange', 402, content)
     })
   }
 
@@ -346,44 +364,45 @@ describe('opening a disclosure', () => {
   })
 
   it('follows a row that grows in two stages, not just the one it predicted', () => {
-    // The owner's third report: `Show more` on a message containing a TABLE
-    // still moved the text up by about 212pt. `Fold` measures its own unclipped
-    // body and can say how much taller the text is about to be — but the table
-    // measures its columns a pass later, and that second stage was in nobody's
-    // number. So the prediction is the first estimate and every frame the row
-    // reports after it is measured.
+    // The owner's third report: `Show more` on a message containing a TABLE still
+    // moved the text up by about 212pt. `Fold` measures its own unclipped body
+    // and can say how much taller the TEXT is about to be — the table measures
+    // its columns a pass later, and that stage is in nobody's number. Recorded
+    // on an iPhone 17 Pro: predicted 1165.3, content grew 1377.7.
     const scrollToOffset = jest.spyOn(FlatList.prototype, 'scrollToOffset').mockImplementation(() => {})
     const TABLE = 212
 
     try {
       renderScreen(<TranscriptList items={visible([userItem, long])} subagents={subagentMap} />)
 
+      // The offset AND the content height at the tap; the second is what the
+      // measured growth is counted from.
       scrollTo(420)
       press()
       scrollToOffset.mockClear()
 
-      // Stage one: the row reports the height the fold already predicted. That
-      // is the baseline, and it must move nothing.
-      layoutRow(long.id, 1000)
-      expect(scrollToOffset).not.toHaveBeenCalled()
+      // Stage one: what the fold predicted, and nothing more to answer.
+      grewTo(2000 + growth)
+      expect(scrollToOffset).toHaveBeenCalledWith({ animated: false, offset: 420 + growth })
 
-      // Stage two: the table arrives.
-      layoutRow(long.id, 1000 + TABLE)
+      // Stage two: the table lays its columns out.
+      scrollToOffset.mockClear()
+      grewTo(2000 + growth + TABLE)
       expect(scrollToOffset).toHaveBeenCalledWith({ animated: false, offset: 420 + growth + TABLE })
 
-      // And a third pass that changes nothing asks for nothing.
+      // A third pass that changes nothing asks for nothing.
       scrollToOffset.mockClear()
-      layoutRow(long.id, 1000 + TABLE)
+      grewTo(2000 + growth + TABLE)
       expect(scrollToOffset).not.toHaveBeenCalled()
     } finally {
       scrollToOffset.mockRestore()
     }
   })
 
-  it('stops measuring once the hold has been let go', () => {
-    // The window is `HOLD_SETTLE_MS`. A row that goes on changing height after
-    // it — an image landing, a stream continuing — is not the expansion the
-    // reader asked for, and must not move them.
+  it('stops following once the hold has been let go', () => {
+    // The window is `HOLD_SETTLE_MS`. Content that goes on growing after it — an
+    // image landing, a reply streaming — is not the expansion the reader asked
+    // for, and must not move them.
     jest.useFakeTimers()
 
     const scrollToOffset = jest.spyOn(FlatList.prototype, 'scrollToOffset').mockImplementation(() => {})
@@ -393,14 +412,13 @@ describe('opening a disclosure', () => {
 
       scrollTo(420)
       press()
-      layoutRow(long.id, 1000)
 
       act(() => {
         jest.advanceTimersByTime(1000)
       })
 
       scrollToOffset.mockClear()
-      layoutRow(long.id, 1600)
+      grewTo(4000)
 
       expect(scrollToOffset).not.toHaveBeenCalled()
     } finally {
