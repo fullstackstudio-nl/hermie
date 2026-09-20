@@ -21,6 +21,14 @@ const mockEscapeListeners = new Set<() => void>()
 let mockShiftDown = false
 let mockHardwareKeyboard = false
 
+// A Mac is the iOS build on Apple Silicon, and this file needs to render as
+// both. `COMPOSER_ROUND_SIZE` is read at import time and is therefore fixed at
+// the value below for the whole file; only what is read per render follows the
+// flag.
+jest.mock('../../src/platform/runs-on-mac', () => ({ RUNS_ON_MAC: false }))
+
+const runsOnMac = jest.requireMock('../../src/platform/runs-on-mac') as { RUNS_ON_MAC: boolean }
+
 jest.mock('../../src/platform/keyboard-modifiers', () => ({
   isShiftDown: () => mockShiftDown,
   hasHardwareKeyboard: () => mockHardwareKeyboard,
@@ -544,12 +552,22 @@ describe('the Composer and Shift+Return', () => {
     expect(screen.queryByTestId('composer-key-hint')).toBeNull()
   })
 
-  it('shows the two chords under the field only where Return sends', () => {
+  it('announces the two chords on the Mac and nowhere else', () => {
+    // NOT wherever a bare Return sends. On an iPad with a keyboard case it does
+    // send, and the line still has nowhere to be: iPadOS keeps its own keyboard
+    // bar along the bottom of the window and the hint was drawn straight
+    // through it, with the system's keyboard button sitting on the words.
     renderComposer({ hardwareKeyboard: true })
-    expect(screen.getByTestId('composer-key-hint')).toBeTruthy()
-
-    renderComposer({ hardwareKeyboard: false })
     expect(screen.queryByTestId('composer-key-hint')).toBeNull()
+
+    runsOnMac.RUNS_ON_MAC = true
+
+    try {
+      renderComposer({ hardwareKeyboard: true })
+      expect(screen.getByTestId('composer-key-hint')).toBeTruthy()
+    } finally {
+      runsOnMac.RUNS_ON_MAC = false
+    }
   })
 })
 

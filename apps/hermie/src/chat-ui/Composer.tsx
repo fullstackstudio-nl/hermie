@@ -817,9 +817,20 @@ export function Composer({
           </Pressable>
         </GlassGroup>
 
-        {/* Only where a bare Return sends, which is the only place the two
-            chords mean anything. */}
-        {hardwareKeyboard ? (
+        {/*
+          The Mac only, and not merely "wherever a bare Return sends".
+
+          On an iPad with a keyboard case the two chords are true — `Enter` does
+          send there, which is what `hardwareKeyboard` is for — but the line has
+          nowhere to be: iPadOS keeps its own keyboard bar along the bottom of
+          the window, and the hint was drawn straight through it with the
+          system's keyboard button sitting on top of the words. A Mac window has
+          no such bar, so the line sits under the composer as it was meant to.
+
+          The chords still work on the iPad. They are just not announced there,
+          which is the ordinary state of a keyboard shortcut.
+        */}
+        {RUNS_ON_MAC ? (
           <Text
             color="textFaint"
             style={{ marginTop: theme.space.xs, textAlign: 'center' }}
