@@ -30,10 +30,30 @@ the diff before committing it.
 
 There used to be a fourth place and a `--build` flag for it: the hand-maintained
 macOS `Info.plist` carried both the marketing version and `CFBundleVersion`,
-because nothing generated them. Both are gone. The build number belongs to EAS —
-the `production` profile has `autoIncrement` set, so it rises per build — which is
-the right rhythm anyway: App Store Connect and Play both refuse a second upload
-with a number they have already seen.
+because nothing generated them. Both are gone.
+
+### The build number comes from git, and so does the commit in Settings
+
+`app.config.ts` reads two things from git when the config is evaluated:
+
+| `extra.commit`      | `git rev-parse --short HEAD` | `dev` when there is no git |
+| ------------------- | ---------------------------- | -------------------------- |
+| `extra.buildNumber` | `git rev-list --count HEAD`  | `1` when there is no git   |
+
+`ios.buildNumber` and `android.versionCode` are both derived from
+`extra.buildNumber`, so the three can never disagree, and the commit count is the
+only monotonic number a git history hands out for free — which is exactly what
+App Store Connect and Play want, since both refuse a second upload with a number
+they have already seen. Settings shows all three as one line,
+`Hermie 0.1.0 (68) · 79ad86d`, so a screenshot names the tree it came from.
+
+Two consequences worth knowing. **A shallow clone lies**: `rev-list --count` on
+`fetch-depth: 1` answers `1`, so any CI job that produces an uploadable build
+needs the full history (`fetch-depth: 0`). And **neither call may fail the
+build** — both are wrapped, and a checkout with no git simply gets the defaults.
+
+EAS still has `autoIncrement` on the `production` profile; where it applies it
+wins over the value above, and the two agree on direction either way.
 
 `eas.json` sets `cli.appVersionSource` to **`local`**: the version EAS builds is
 the one in `app.config.ts`, in the commit being built. The alternative,
@@ -45,7 +65,8 @@ same number.
 
 ## Cutting a release
 
-1. `main` is green: `npm run typecheck && npm run lint && npm run format && npm test && npm run test:app`.
+1. `main` is green: `npm run typecheck && npm run lint && npm run format && npm test && npm run test:app`,
+   and `npm run web:build` exports.
 2. Turn `## [Unreleased]` in `CHANGELOG.md` into `## [0.2.0] - YYYY-MM-DD`, and open a
    fresh empty `Unreleased` above it. Add the link definition at the foot of the
    file. Check what the release notes will say:
@@ -73,12 +94,22 @@ tab. It builds and uploads the artefact and skips the publish step.
 | `Hermie-android-debug.apk`   | A debug-signed APK, installable on any device with unknown sources allowed. |
 | `Hermie-android-release.apk` | Signed with the upload key — only when the signing secrets below are set.   |
 | `Hermie-android-release.aab` | The app bundle Play takes — only when the signing secrets below are set.    |
+| `hermie-web.zip`             | Hermie Web: the compiled server, the exported browser bundle and its bin.   |
+| `SHA256SUMS`                 | Digests of everything above, generated from what actually reached the job.  |
 
 The debug APK is built unconditionally, and it is a **debug** build on purpose:
 an unsigned APK cannot be installed at all, so a fork with no key still gets
 something a person can put on a phone. The two release artefacts appear only when
 the four secrets are there; without them the job builds the debug APK and nothing
 fails.
+
+`hermie-web.zip` is the whole web variant and needs no signing: it is a Node
+package with no runtime dependencies, which is why the zip carries no
+`node_modules` and the install instructions' `npm ci --omit=dev` is a no-op
+today. `SHA256SUMS` is not decoration — a running Hermie Web refuses to install a
+self-update the file does not list, and refuses bytes whose digest does not match
+(ADR-0015). It is generated from the artefact directory rather than written by
+hand, so an artefact that failed to build cannot quietly pass unverified.
 
 There is no iOS or Mac artefact here, and there cannot be a useful one: an iOS app
 that anybody can install has to be signed by a real Apple Developer team, which is

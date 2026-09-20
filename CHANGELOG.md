@@ -10,6 +10,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Hermie runs in a browser, served by a small process of its own.** `npx hermie-web --gateway
+  http://127.0.0.1:9119` puts the app on `http://127.0.0.1:9120` and proxies the gateway onto that
+  same origin, which is the whole design rather than a deployment detail: the gateway's session is
+  an `HttpOnly` cookie, and it refuses a WebSocket whose `Origin` is not its own — the defence that
+  stops a page on the internet from pointing a name at your loopback interface and driving an agent
+  that runs shell commands. Same-origin is what lets the browser build use that session instead of
+  asking the gateway to relax the guard. It therefore signs in the way the gateway's own dashboard
+  does — `/auth/login`, or a password form straight into `/auth/password-login` — and mints a
+  single-use ticket per dial, because `new WebSocket(url, protocols)` is the entire API a page has.
+  The wizard has one step fewer: there is no address to type when the server in front of you has
+  already fixed it, so it shows the gateway host and moves on. `deploy/web/README.md` has the
+  systemd unit, the Docker image and the Caddy, nginx and Tailscale Serve configurations;
+  [ADR-0015](docs/adr/0015-web-variant-on-its-own-port.md) has the reasoning, including what a
+  browser cannot be given: no keychain, no extra headers on an upgrade, and a file picker whose
+  cancel is a heuristic rather than an event.
+- **Hermie Web can update itself, where the install shape allows it.** Settings shows the running
+  version next to the newest release and, for a directory install, an Update button: it downloads
+  `hermie-web.zip`, checks it against the release's `SHA256SUMS`, unpacks it beside the running one,
+  flips a `current` symlink and exits so the supervisor starts the new code — then the page polls
+  `/healthz` until the NEW version answers and reloads. Docker and `npm -g` installs say
+  `canSelfUpdate: false` and name the command that does work, because the image (or npm) is the
+  version there. The POST is gated on the caller's own gateway session, checked by putting their
+  cookies to `/api/auth/me`: Hermie Web has no user database and is not going to grow one. The
+  digest is not a signature, and the ADR says so out loud.
+- **Settings ends with the build it is.** `Hermie 0.1.0 (68) · 79ad86d` — the version, the build
+  number and the commit, because "which version" is the first question on every bug report and a
+  version string alone cannot tell two builds of 0.1.0 apart. The build number is the git commit
+  count, which is also where `ios.buildNumber` and `android.versionCode` now come from, so the three
+  can never disagree; a checkout with no git history says `dev` rather than failing the build. A
+  long press copies the line where there is a pasteboard to copy it to.
+
 - **A fourth wallpaper, Slate, and it brings its own bubble colour.** Graphite was compared first and
   measured rather than eyeballed: its dark ramp is near-black (`#171B22 → #0D0F14`), where Slate's is
   about three times that luminance (`#3B4552 → #2E3640`), so on Graphite the panels are pale shapes
@@ -112,6 +143,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   absolute-path rule and the 100 MB cap had never been exercised by a run.
 
 ### Changed
+
+- **The connection test runs itself.** It was a button, and the button was a question with one
+  answer: the wizard cannot be finished without a passing test, so "Test connection" asked the
+  reader to confirm the only thing that step does — and charged them a wait for it, because the dial
+  could have been running while they read the page. Arriving at the step now starts it, the three
+  rows tick over as REST, the WebSocket and the profile list answer, and Continue opens the moment
+  it passes. A failure is where a button still earns its place, and it says **Try again**. The
+  invalidation rule is untouched and is what makes this safe: the test result carries the payload it
+  was produced for, so changing the address, a header, the provider or the credential produces a new
+  one and the next arrival dials again — while the same payload never dials twice, which is what
+  keeps a failure from retrying itself in a loop.
 
 - **A bubble's clock sits on the end of its last line, and every bubble carries one.** It was a line
   of its own under the body, which made a one-word message twice as tall as its text, and it appeared

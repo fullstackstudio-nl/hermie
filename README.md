@@ -245,6 +245,7 @@ say stays between you and the machine you run them on.
 | iPadOS                | The same build, with a sidebar layout on wide windows — and the sidebar hides           |
 | Android 7.0+ (API 24) | Builds and runs, driven end to end on an emulator; never on hardware, and no upload key |
 | macOS, Apple Silicon  | The same build again, as "Designed for iPad" — a window with the sidebar layout         |
+| A browser             | Served by Hermie Web, a small process next to the gateway — see **Web** below           |
 
 **On a wide window the chat list is a sidebar, and the sidebar can be put away.**
 The chat header's round button hides it, ⌘⇧S brings it back, and the Mac's Chats
@@ -267,6 +268,51 @@ should do differently from a tablet. That is a deliberate reversal:
 react-native-macos target cost and why it was dropped, and
 [docs/platform-notes.md](docs/platform-notes.md) records what has and has not
 been verified on a Mac.
+
+## Web
+
+There is a fourth way to reach your bots, and it installs nothing: run one small
+process next to `hermes serve` and open Hermie in a browser.
+
+```sh
+npx hermie-web --gateway http://127.0.0.1:9119
+# → http://127.0.0.1:9120
+```
+
+That process — **Hermie Web** — does two things. It serves the browser build of
+the app, and it proxies your gateway onto its own origin, so the page and the
+gateway share one address. That is not a convenience: the gateway's session is
+an `HttpOnly` cookie, a cookie belongs to an origin, and the gateway refuses a
+WebSocket whose `Origin` is not its own — a defence against a page on the
+internet pointing a name at your loopback interface and driving an agent that
+runs shell commands. Same-origin is what lets Hermie use that session honestly
+instead of asking the gateway to relax the guard.
+
+So the browser build signs in the way the gateway's own dashboard does: its
+sign-in page, its cookie, and a single-use ticket for each WebSocket dial. The
+wizard has no address step, because there is nothing to type — the gateway is
+whatever Hermie Web is in front of, and it tells you which one that is.
+
+It binds to `127.0.0.1` and authenticates nobody itself, so anything beyond the
+machine it runs on wants TLS in front of it. Caddy, nginx and Tailscale Serve
+configurations, a systemd unit, the Docker image and the gateway settings it
+needs are in [deploy/web/README.md](deploy/web/README.md);
+[ADR-0015](docs/adr/0015-web-variant-on-its-own-port.md) is why it is shaped
+this way.
+
+Two things a browser genuinely cannot do, and the app does not pretend
+otherwise: there is no keychain (the session stays in the browser's cookie jar,
+and clearing site data signs you out), and a page cannot put extra request
+headers on a WebSocket — so a gateway behind Cloudflare Access wants the access
+proxy in front of Hermie Web rather than configured inside the app. The full
+list is the web section of [docs/platform-notes.md](docs/platform-notes.md).
+
+Building it from a checkout:
+
+```sh
+npm run web:build   # compiles the server and exports the browser bundle
+npm run web         # both, in front of the fake gateway, at http://127.0.0.1:9120
+```
 
 ## Roadmap
 

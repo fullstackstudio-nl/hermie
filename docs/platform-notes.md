@@ -3612,3 +3612,125 @@ the change, produced **no scroll events at all**.
 - **The ~60pt blank gap was not reproduced.** `traceBlankRow` watches for exactly
   it — a wrapper with height over contents with none — and logged nothing across
   two full turns and a 22-row history.
+
+## Web (2026-09-20)
+
+The browser build is the app exported with `expo export --platform web` and served by
+`packages/hermie-web`, which also proxies the gateway onto the same origin
+([ADR-0015](adr/0015-web-variant-on-its-own-port.md)). Everything below was measured against that
+server in front of the fake gateway in cookie mode, in a real browser, on the date above — not
+inferred from what the packages claim.
+
+### Summary
+
+| Question                                         | Answer                                         |
+| ------------------------------------------------ | ---------------------------------------------- |
+| Does `expo export --platform web` succeed?       | **Yes**, once the seams below exist            |
+| Does the app render, connect and stream a reply? | **Yes** — wizard, chat list, transcript, send  |
+| Is there a keychain?                             | **No.** IndexedDB, and the app says so         |
+| Can a page put headers on a WebSocket upgrade?   | **No.** Never, in any browser                  |
+| Does `expo-blur` work?                           | **Yes** — `backdrop-filter`, so glass is real  |
+| Does `expo-glass-effect` work?                   | **No web build at all**; it cannot be imported |
+| Does `react-native-webview` work?                | **No web implementation**                      |
+| Does `Appearance.setColorScheme` exist?          | **No** — react-native-web has the getter only  |
+
+### What had to become a platform seam
+
+The rule is the one this file has had since the Mac work: a platform difference lives in a
+`*.web.ts` sibling, never in a branch inside a shared file. New seams:
+
+| Seam                                              | What the web answer is                                                   |
+| ------------------------------------------------- | ------------------------------------------------------------------------ |
+| `platform/chat-cache.web.ts`                      | IndexedDB, behind the same `FallbackChatCache` that downgrades to memory |
+| `platform/secret-store.web.ts`                    | IndexedDB, `localStorage`, then memory. **Not a keychain** — see below   |
+| `platform/net-info.web.ts`                        | `navigator.onLine` plus the `online`/`offline` events                    |
+| `platform/random.web.ts`                          | `crypto.getRandomValues`                                                 |
+| `platform/haptics.web.ts`                         | Nothing happens                                                          |
+| `platform/status-bar.web.tsx`                     | Renders nothing; a tab's chrome is the browser's                         |
+| `platform/socket.web.ts`                          | The DOM `WebSocket`, with the headers argument accepted and discarded    |
+| `platform/attachments-picker.web.ts`              | A hidden `<input type="file">`                                           |
+| `ui/glass/native-effect.web.tsx`                  | Both Liquid Glass probes answer false                                    |
+| `features/onboarding/NativeSignInWebView.web.tsx` | Renders nothing; the cookie flow replaces it                             |
+| `features/onboarding/cookie-sign-in.web.ts`       | `/auth/login` as a navigation, `/auth/password-login` as a fetch         |
+| `features/onboarding/steps/SignInStep.web.tsx`    | The cookie sign-in step                                                  |
+| `features/settings/WebUpdateRow.web.tsx`          | The Hermie Web self-update row                                           |
+| `gateway/web-config.web.ts`                       | `/hermie/config.json` and `window.location.origin`                       |
+
+Two mechanical notes, both of which cost time the first time:
+
+- **A `.web.ts` seam cannot import a value from the module it replaces.** `./secret-store` from
+  inside `secret-store.web.ts` resolves to that file itself. Anything two seams share therefore
+  lives in `platform/platform-contracts.ts`, which no platform owns. A type-only import would in
+  fact survive (Babel erases it) — the shared file is the version that is also readable.
+- **Two shared modules had to be SPLIT rather than seamed.** `chat-cache.ts` kept the SQLite half
+  and moved the contract, the memory cache and the downgrade wrapper into `chat-cache-core.ts`,
+  because the web store wants all three unchanged. The same shape would apply to any future seam
+  with a real implementation on both sides.
+
+### There is no keychain, and this is what that means
+
+`expo-secure-store` has no web implementation, and no browser API is an equivalent: whatever the
+page can write, the page can read. `secret-store.web.ts` is IndexedDB with a `localStorage` fallback
+and an in-memory last resort, and it is documented in its own header as storage rather than as a
+keychain. Concretely, against the phones:
+
+- No hardware-backed key, no Secure Enclave, no biometric gate, no "after first unlock".
+- Clearing site data signs the user out. No sync, no migration.
+- In practice a Hermie Web install keeps **no bearer token at all**: the session is the gateway's
+  `HttpOnly` cookie, which the page cannot read. What lands in this store is the non-secret
+  bookkeeping the shared code routes through it.
+
+### A page cannot set request headers on a WebSocket
+
+`new WebSocket(url, protocols)` is the whole API — there is no third argument and no header
+equivalent, in any browser. This is not a gap in the seam; it is the reason the gateway's ticket
+subprotocol exists ([ADR-0005](adr/0005-ticket-per-websocket-dial.md)) and the reason the browser
+build authenticates with cookies.
+
+The consequence worth naming: the **extra headers** an operator can configure for a gateway behind
+Cloudflare Access never reach the socket. `socket.web.ts` accepts `plan.headers` and drops it, so
+the shared dial code keeps one shape. Hermie Web is meant to run inside that perimeter, with the
+access proxy in front of **it** instead.
+
+### `expo-glass-effect` has no web build; `expo-blur` does, and it is a real blur
+
+`expo-blur`'s web implementation is `backdrop-filter: saturate(180%) blur(Npx)`, which genuinely
+blurs what is behind the surface — so `GLASS_MATERIAL` is `blur` on the web, not `solid`. Android
+stays `solid`. `expo-glass-effect` is Apple-only with nothing resolvable for the web, so the single
+import of it moved behind `ui/glass/native-effect.tsx`; the probes there answer false on the web and
+the two components fall back to a plain `View` rather than throwing, because a component that throws
+is a blank page.
+
+### `Appearance.setColorScheme` does not exist on react-native-web
+
+The first thing that broke after the bundle built was a white screen and one console line:
+`Appearance.default.setColorScheme is not a function`. react-native-web exposes the listener and the
+getter and stops there, because a page cannot override the user agent's colour scheme for anything
+but itself. The call is **guarded rather than seamed**: on the web every surface is drawn by our own
+token set and the one native material that reads a trait collection does not exist, so there is
+nothing a web implementation would do.
+
+### The file picker's cancel is a heuristic
+
+`expo-document-picker` has a web implementation and it is deliberately not used: it returns a
+`data:` URI, which base64s the whole file into a JavaScript string before anything has decided to
+upload it — exactly what the streaming upload exists to avoid. The seam creates an
+`<input type="file">` instead and hands back the `File`, which a browser's `FormData` streams.
+
+What is genuinely worse than on a phone: **there is no reliable cancel event.** The seam resolves on
+`change`, and calls it a cancel when the window regains focus without one. A user who takes longer
+than that to pick gets a cancel they did not ask for. `UploadableFile` grew an optional `body` so
+the upload appends whichever part the platform produced — a `File` here, React Native's
+`{uri, name, type}` blob everywhere else.
+
+### What is NOT verified
+
+- **A real `hermes serve` in cookie mode.** Everything here ran against
+  `packages/fake-gateway --auth cookie --public-host …`, which implements the routes and the
+  Host/Origin guard as upstream's sources describe them. The OAuth half of the cookie flow — a real
+  identity provider, a real `/auth/callback`, the `SameSite=None; Secure` PKCE cookie surviving the
+  cross-site redirect chain — has never been run.
+- **Safari and Firefox.** Only one Chromium browser was driven.
+- **A phone-sized browser window.** The layout was seen at 1024×768 and at the wizard's own width.
+- **TLS in front.** Every configuration in `deploy/web/README.md` is written from the gateway's
+  forwarded-header handling, not measured.
