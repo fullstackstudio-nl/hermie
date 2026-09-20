@@ -96,6 +96,13 @@ run(
     '-derivedDataPath',
     derivedData,
     '-allowProvisioningUpdates',
+    // A Mac that has never built this app is not in the team's device list, and
+    // automatic signing will not add it on its own — it renews profiles for
+    // devices it already knows and fails with "doesn't include the currently
+    // selected device" for one it does not. This is the flag that lets it
+    // register the machine, which is a one-off per Mac and the difference
+    // between `npm run mac` working on a fresh checkout and not.
+    '-allowProvisioningDeviceRegistration',
     `DEVELOPMENT_TEAM=${team}`,
     'CODE_SIGN_STYLE=Automatic',
     'build'

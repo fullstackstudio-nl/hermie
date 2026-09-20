@@ -170,6 +170,13 @@ Written down here so the next reader does not spend an afternoon rediscovering i
   team's profiles last a **year**. `npm run mac` works either way — it takes whatever
   `HERMIE_APPLE_TEAM_ID` names — so a free team is fine for developing and is the
   reason a Mac build sometimes "breaks" after a week for no other reason.
+  A Mac that has never built this app also has to be added to the team's device
+  list first, and `-allowProvisioningUpdates` alone will not do it: it renews
+  profiles for devices the team already knows, and for a new one automatic
+  signing fails with "doesn't include the currently selected device".
+  `npm run mac` therefore passes `-allowProvisioningDeviceRegistration` as well,
+  so a fresh machine registers itself on its first build instead of sending
+  somebody to the developer portal.
 - **A Play Console account.** The upload keystore it needs now **exists** — that was
   the other half of this item and the Android section below is about it — so a signed
   APK and app bundle can be built today. What cannot happen yet is registering that
