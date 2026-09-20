@@ -1,7 +1,8 @@
-import { GatewayError, type ConnectionStatus } from '@hermie/gateway-client'
+import { GatewayError, type AuthTimelineSnapshot, type ConnectionStatus } from '@hermie/gateway-client'
 import { act, fireEvent, screen, waitFor } from '@testing-library/react-native'
 
 import { GatewayProvider, SignedOutPanel } from '../src/gateway'
+import { useConnectionStore } from '../src/gateway/store'
 import { renderScreen } from './support/render'
 
 const mockStatusHandlers: ((status: ConnectionStatus, error: GatewayError | null) => void)[] = []
@@ -59,6 +60,7 @@ const pushStatus = (status: ConnectionStatus, error: GatewayError | null = null)
 beforeEach(() => {
   mockStatusHandlers.length = 0
   jest.clearAllMocks()
+  useConnectionStore.getState().setAuthTimeline({ events: [], lastSignOut: null })
 })
 
 /**
@@ -70,8 +72,14 @@ beforeEach(() => {
  * gateway, and the action is the in-place sign-in rather than the wizard.
  */
 describe('the signed-out card', () => {
-  /** The card is only ever mounted by a shell that has decided to show it. */
-  const renderWhenSignedOut = async () => {
+  /**
+   * The card is only ever mounted by a shell that has decided to show it.
+   *
+   * `recorded` is applied after the provider has settled rather than before: the
+   * provider's own startup restores the ring from disk and publishes it, so a
+   * store seeded ahead of the render is replaced before anything reads it.
+   */
+  const renderWhenSignedOut = async (recorded?: AuthTimelineSnapshot) => {
     renderScreen(
       <GatewayProvider>
         <SignedOutPanel />
@@ -79,6 +87,11 @@ describe('the signed-out card', () => {
     )
 
     await waitFor(() => expect(mockStatusHandlers.length).toBeGreaterThan(0))
+
+    if (recorded) {
+      act(() => useConnectionStore.getState().setAuthTimeline(recorded))
+    }
+
     pushStatus('needs_signin', new GatewayError('auth', 'expired'))
   }
 
@@ -111,5 +124,36 @@ describe('the signed-out card', () => {
     })
 
     expect(screen.getByTestId('sign-in-webview')).toBeTruthy()
+  })
+
+  /**
+   * A session that ends with no explanation reads as the app's fault. The auth
+   * ring knows which of the several paths to `needs_signin` was taken, and one
+   * sentence is the difference between "Hermie logged me out" and "the gateway
+   * would not renew the session".
+   */
+  it('names the cause when the auth ring recorded one', async () => {
+    await renderWhenSignedOut({
+      events: [{ at: 1, event: 'signin.required', reason: 'refresh_rejected' }],
+      lastSignOut: { at: 1, reason: 'refresh_rejected' }
+    })
+
+    expect(screen.getByTestId('signed-out-reason')).toHaveTextContent(/rejected the saved sign-in/)
+  })
+
+  it('tells a failed renewal apart from a rejected one', async () => {
+    await renderWhenSignedOut({ events: [], lastSignOut: { at: 1, reason: 'refresh_failed' } })
+
+    expect(screen.getByTestId('signed-out-reason')).toHaveTextContent(/did not complete/)
+  })
+
+  /**
+   * Silence beats a guess. A sign-out from before this build, or down a path that
+   * recorded nothing, gets no sentence rather than a plausible invention.
+   */
+  it('says nothing at all when there is no recorded cause', async () => {
+    await renderWhenSignedOut()
+
+    expect(screen.queryByTestId('signed-out-reason')).toBeNull()
   })
 })

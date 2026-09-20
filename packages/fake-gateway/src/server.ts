@@ -128,6 +128,28 @@ export interface FakeGatewayState {
   rejectedUpgrades: number
   /** Force the next N upgrades to fail auth even with a valid credential. */
   rejectNextUpgrades: number
+  /**
+   * Answer the next N ticket mints with 503.
+   *
+   * A dial can fail for a reason that has nothing to do with the credential, and
+   * the mint is where that is cheapest to stage: upstream's ws-ticket route is an
+   * ordinary authenticated POST, so a proxy hiccup in front of it looks exactly
+   * like this and must NOT count as a rejection of the credential.
+   */
+  failNextTicketMints: number
+  /** Ticket mints answered with 503 because of `failNextTicketMints`. */
+  ticketMintsFailed: number
+  /**
+   * Refresh tokens this gateway has already rotated away.
+   *
+   * Upstream keeps no refresh-token store of its own — rotation and invalidation
+   * happen at the identity provider — but a rotating IdP with reuse detection is
+   * the case that costs a session, so the fake models it: presenting a spent
+   * token is refused rather than quietly accepted.
+   */
+  spentRefreshTokens: Set<string>
+  /** Refresh calls that presented an already-rotated token. */
+  refreshReuseAttempts: number
   /** `session.events.since` calls, newest last. */
   eventsSinceCalls: { session_id: string; last_seen: number }[]
   /** Every JSON-RPC method the server handled, in order. */
@@ -870,6 +892,10 @@ function initialState(options: FakeGatewayOptions): FakeGatewayState {
     connections: 0,
     rejectedUpgrades: 0,
     rejectNextUpgrades: 0,
+    failNextTicketMints: 0,
+    ticketMintsFailed: 0,
+    spentRefreshTokens: new Set<string>(),
+    refreshReuseAttempts: 0,
     eventsSinceCalls: [],
     methodLog: [],
     truncateNextReplay: false,
@@ -1248,15 +1274,31 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       const body = await readBody(req)
       state.refreshCalls += 1
       const token = String(body.refresh_token ?? '')
+
+      if (!token) {
+        // `dashboard_auth/routes.py:501-502` — the one 400 this route answers.
+        json(res, 400, { detail: 'refresh_token required' })
+
+        return
+      }
+
+      if (state.spentRefreshTokens.has(token)) {
+        state.refreshReuseAttempts += 1
+      }
+
       const known = refreshTokens.get(token)
 
       if (!known) {
+        // Upstream collapses expired, unknown and provider-rejected into this one
+        // answer, with `error` alongside `detail` — an envelope no other route in
+        // `dashboard_auth` uses (`routes.py:517-519`).
         json(res, 401, { error: 'session_expired', detail: 'Refresh token expired or invalid; start a new sign-in.' })
 
         return
       }
 
       refreshTokens.delete(token)
+      state.spentRefreshTokens.add(token)
       json(res, 200, issueTokens(known.provider, known.userId))
 
       return
@@ -1308,6 +1350,14 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     }
 
     if (path === '/api/auth/ws-ticket' && method === 'POST') {
+      if (state.failNextTicketMints > 0) {
+        state.failNextTicketMints -= 1
+        state.ticketMintsFailed += 1
+        json(res, 503, { detail: 'ticket store unavailable' })
+
+        return
+      }
+
       const ticket = `tk-${randomUUID()}`
       tickets.set(ticket, {
         expiresAt: Date.now() + TICKET_TTL_SECONDS * 1000,

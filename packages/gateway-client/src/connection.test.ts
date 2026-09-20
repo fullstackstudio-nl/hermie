@@ -81,6 +81,15 @@ interface Harness {
   connection: GatewayConnection
   statuses: ConnectionStatus[]
   waitFor: (status: ConnectionStatus, timeoutMs?: number) => Promise<void>
+  /**
+   * Wait for something the gateway counted rather than for a status.
+   *
+   * `waitFor('ready')` returns instantly when the connection is already ready,
+   * which makes it useless for "drop the socket and let it come back": the
+   * assertion runs before the redial has even started. A counter only moves when
+   * the work actually happened.
+   */
+  waitUntil: (label: string, reached: () => boolean, timeoutMs?: number) => Promise<void>
 }
 
 async function harness(options: {
@@ -154,7 +163,24 @@ async function harness(options: {
     )
   }
 
-  return { gateway, connection, statuses, waitFor }
+  const waitUntil = async (label: string, reached: () => boolean, timeoutMs = 5000) => {
+    const deadline = Date.now() + timeoutMs
+
+    while (Date.now() < deadline) {
+      if (reached()) {
+        return
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 5))
+    }
+
+    throw new Error(
+      `Timed out waiting for ${label}; the connection is "${connection.status}" ` +
+        `(seen: ${statuses.join(' → ')}; last error: ${connection.lastError?.message ?? 'none'})`
+    )
+  }
+
+  return { gateway, connection, statuses, waitFor, waitUntil }
 }
 
 const settle = (ms = 60) => new Promise(resolve => setTimeout(resolve, ms))
@@ -199,7 +225,20 @@ describe('GatewayConnection against the fake gateway', () => {
     expect(gateway.state.connections).toBe(2)
   })
 
-  it('recovers from a 4401 by refreshing once and redialling', async () => {
+  /**
+   * A 4401 is the gateway refusing the TICKET, and upstream verifies no access
+   * token at all on the upgrade path: `web_server_chat.py::_ws_auth_reason` looks
+   * only at `?internal=`, the ticket subprotocol, `?ticket=` and the legacy
+   * `?token=`, because the HTTP auth middleware does not run for WebSocket
+   * routes. So a 4401 means the ticket was expired (30 s TTL), already consumed,
+   * or unknown because the process-local ticket store was reset — never that the
+   * bearer token is bad. On `/api/ws` it does not even carry a close reason.
+   *
+   * Hermie used to answer it by forcing a refresh-token rotation, which
+   * diagnosed the one thing a 4401 cannot mean, and spent a rotation to do it.
+   * A fresh ticket fixes all three real causes for one HTTP round trip.
+   */
+  it('answers a 4401 with a fresh ticket, not a token rotation', async () => {
     const { connection, gateway, statuses, waitFor } = await harness({ auth: 'native' })
 
     gateway.state.rejectNextUpgrades = 1
@@ -208,26 +247,97 @@ describe('GatewayConnection against the fake gateway', () => {
     await waitFor('ready')
 
     expect(gateway.state.rejectedUpgrades).toBe(1)
-    expect(gateway.state.refreshCalls).toBe(1)
-    expect(statuses).not.toContain('needs_signin')
     expect(gateway.state.ticketsMinted).toBe(2)
+    expect(gateway.state.refreshCalls).toBe(0)
+    expect(statuses).not.toContain('needs_signin')
   })
 
-  it('stops at needs_signin after a second 4401 in a row', async () => {
+  /**
+   * A second refusal of a ticket minted seconds earlier is no longer a ticket
+   * story, so the credential the mint authenticated with becomes the suspect and
+   * the rotation happens then — one dial later than before, and only once the
+   * cheap explanation has been ruled out.
+   */
+  it('escalates to a rotation only when a freshly minted ticket is refused too', async () => {
     const { connection, gateway, waitFor } = await harness({ auth: 'native' })
 
     gateway.state.rejectNextUpgrades = 2
 
     connection.start()
+    await waitFor('ready')
+
+    expect(gateway.state.rejectedUpgrades).toBe(2)
+    expect(gateway.state.refreshCalls).toBe(1)
+    expect(connection.status).toBe('ready')
+  })
+
+  it('stops at needs_signin once a rotated credential is refused as well', async () => {
+    const { connection, gateway, waitFor } = await harness({ auth: 'native' })
+
+    gateway.state.rejectNextUpgrades = 3
+
+    connection.start()
     await waitFor('needs_signin')
 
     expect(connection.lastError?.kind).toBe('auth')
-    expect(gateway.state.rejectedUpgrades).toBe(2)
+    expect(gateway.state.rejectedUpgrades).toBe(3)
+    expect(gateway.state.refreshCalls).toBe(1)
 
     // Terminal: no further dials.
     await settle(150)
-    expect(gateway.state.rejectedUpgrades).toBe(2)
+    expect(gateway.state.rejectedUpgrades).toBe(3)
     expect(connection.status).toBe('needs_signin')
+  })
+
+  /**
+   * The tally is called "consecutive" and has to mean it.
+   *
+   * It was only ever reset by a dial that reached `ready`, so two auth failures
+   * with an ordinary outage between them counted as "twice in a row" however long
+   * the gap was — and the second one signed the user out with the message that
+   * the gateway had rejected the credentials twice, which it had not. A laptop
+   * that roams between networks collects exactly this shape.
+   */
+  it('does not count auth failures either side of an outage as consecutive', async () => {
+    const { connection, gateway, statuses, waitFor, waitUntil } = await harness({ auth: 'native' })
+
+    // Two ticket refusals far enough apart to have an ordinary outage between
+    // them: the first is absorbed by a fresh ticket, then a dial fails at the
+    // mint for a reason that is nobody's credential, and only then does the
+    // second refusal arrive.
+    gateway.state.rejectNextUpgrades = 2
+    connection.start()
+    await waitFor('ready')
+    expect(gateway.state.refreshCalls).toBe(1)
+
+    gateway.state.failNextTicketMints = 1
+    gateway.state.rejectNextUpgrades = 2
+    gateway.dropSockets()
+
+    await waitUntil('the mint to fail', () => gateway.state.ticketMintsFailed === 1)
+    await waitUntil('the connection to come back', () => connection.status === 'ready')
+
+    expect(statuses).not.toContain('needs_signin')
+  })
+
+  /**
+   * Rotation is destructive at the identity provider, so a spent refresh token
+   * must never go out twice: a provider with reuse detection answers a replay by
+   * revoking the whole session, which is a sign-out the client causes itself.
+   */
+  it('never presents a refresh token it has already rotated away', async () => {
+    const { connection, gateway, waitFor, waitUntil } = await harness({ auth: 'native' })
+
+    gateway.state.rejectNextUpgrades = 2
+    connection.start()
+    await waitFor('ready')
+
+    gateway.state.rejectNextUpgrades = 2
+    gateway.dropSockets()
+    await waitUntil('a second rotation', () => gateway.state.refreshCalls === 2)
+    await waitUntil('the connection to come back', () => connection.status === 'ready')
+
+    expect(gateway.state.refreshReuseAttempts).toBe(0)
   })
 
   it('treats a 4403 as a configuration problem and does not loop', async () => {
@@ -336,7 +446,9 @@ describe('GatewayConnection against the fake gateway', () => {
   it('keeps a terminal status when the app goes to the background', async () => {
     const { connection, gateway, waitFor } = await harness({ auth: 'native' })
 
-    gateway.state.rejectNextUpgrades = 2
+    // Three: a fresh ticket for the first refusal, a rotation for the second, and
+    // the third is what concludes the credential is genuinely not accepted.
+    gateway.state.rejectNextUpgrades = 3
 
     connection.start()
     await waitFor('needs_signin')

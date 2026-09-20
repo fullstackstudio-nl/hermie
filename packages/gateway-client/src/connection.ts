@@ -4,6 +4,7 @@ import type { ServerRequestHandler } from '@hermes/shared/json-rpc-channel'
 import { JsonRpcGatewayClient } from '@hermes/shared/json-rpc-gateway'
 import { reconnectBackoffDelayMs } from '@hermes/shared/reconnect-backoff'
 
+import { type AuthTimelineSink, NULL_AUTH_TIMELINE } from './auth-timeline'
 import type { CredentialProvider } from './credentials'
 import type { FetchLike } from './fetch-json'
 import { GatewayHttp } from './http'
@@ -84,6 +85,8 @@ export interface GatewayConnectionOptions {
   offlineGraceMs?: number
   /** Injectable clock, so the backoff-preserving rules are testable. */
   now?: () => number
+  /** Where the dial and sign-out record goes; the app persists it. */
+  timeline?: AuthTimelineSink
 }
 
 /**
@@ -107,6 +110,7 @@ export class GatewayConnection {
   private readonly readyTimeoutMs: number
   private readonly offlineGraceMs: number
   private readonly now: () => number
+  private readonly timeline: AuthTimelineSink
 
   private currentStatus: ConnectionStatus = 'disconnected'
   private currentError: GatewayError | null = null
@@ -117,6 +121,15 @@ export class GatewayConnection {
   private online = true
   private attempt = 0
   private consecutiveAuthFailures = 0
+  /**
+   * WebSocket 4401 closes since the last healthy dial.
+   *
+   * Counted apart from `consecutiveAuthFailures` because upstream means something
+   * different by it: no access token is verified on the upgrade path, so a 4401
+   * is always a ticket that was expired, spent or unknown — and the first one
+   * deserves a fresh ticket rather than a refresh-token rotation.
+   */
+  private consecutiveTicketRejections = 0
   private dialToken = 0
   private retryTimer: ReturnType<typeof setTimeout> | undefined
   private offlineTimer: ReturnType<typeof setTimeout> | undefined
@@ -141,12 +154,14 @@ export class GatewayConnection {
     this.readyTimeoutMs = options.readyTimeoutMs ?? READY_TIMEOUT_MS
     this.offlineGraceMs = options.offlineGraceMs ?? OFFLINE_GRACE_MS
     this.now = options.now ?? (() => Date.now())
+    this.timeline = options.timeline ?? NULL_AUTH_TIMELINE
     this.backoff = options.backoffDelayMs ?? (attempt => reconnectBackoffDelayMs(attempt, { capMs: RECONNECT_CAP_MS }))
 
     this.http = new GatewayHttp({
       baseUrl,
       credentials: options.credentials,
       extraHeaders: options.config.extraHeaders ?? {},
+      timeline: this.timeline,
       ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {})
     })
 
@@ -198,6 +213,7 @@ export class GatewayConnection {
     this.paused = false
     this.attempt = 0
     this.consecutiveAuthFailures = 0
+    this.consecutiveTicketRejections = 0
 
     if (!this.online) {
       this.setStatus('offline')
@@ -248,6 +264,7 @@ export class GatewayConnection {
     // Keeping the old tally would send the next single rejection straight to
     // `needs_signin` with the new credential barely tried.
     this.consecutiveAuthFailures = 0
+    this.consecutiveTicketRejections = 0
     this.clearOfflineTimer()
 
     if (!this.online) {
@@ -369,6 +386,7 @@ export class GatewayConnection {
 
     this.clearRetryTimer()
     this.lastCloseCode = null
+    this.timeline.record({ event: 'dial.start' })
 
     try {
       this.setStatus('authenticating')
@@ -401,9 +419,11 @@ export class GatewayConnection {
 
       this.attempt = 0
       this.consecutiveAuthFailures = 0
+      this.consecutiveTicketRejections = 0
       this.firstSessionCallDone = false
       this.lastDialFailureAt = null
       this.currentLastReadyAt = Date.now()
+      this.timeline.record({ event: 'dial.ready' })
       this.setStatus('ready', null)
     } catch (error) {
       this.factory.disarm()
@@ -529,13 +549,56 @@ export class GatewayConnection {
       return
     }
 
-    if (closeCode === 4401 || error.kind === 'auth') {
+    // Two different verdicts that used to share one branch. A 4401 is the gateway
+    // refusing the TICKET — `_ws_auth_reason` inspects no access token, because
+    // the HTTP auth middleware does not run for WebSocket routes — while an
+    // `auth` error means the ticket MINT was refused, which is the one place an
+    // expired bearer token actually shows up.
+    if (closeCode === 4401) {
+      await this.handleTicketRejection(error)
+
+      return
+    }
+
+    if (error.kind === 'auth') {
       await this.handleAuthFailure(error)
 
       return
     }
 
     this.scheduleReconnect(error)
+  }
+
+  /**
+   * A 4401 close: the ticket was expired (30 s TTL), already consumed, or unknown
+   * because the gateway's process-local ticket store was reset. On `/api/ws` the
+   * close carries no reason, so the three are indistinguishable — and a fresh
+   * ticket is the answer to all three.
+   *
+   * Forcing a refresh-token rotation here, as this used to, diagnosed the only
+   * thing a 4401 cannot mean. It also spent a rotation per refusal, and on a
+   * provider with reuse detection a rotation is not free to spend.
+   */
+  private async handleTicketRejection(error: GatewayError): Promise<void> {
+    this.consecutiveTicketRejections += 1
+    this.timeline.record({ event: 'ws.closed', closeCode: 4401 })
+
+    if (this.consecutiveTicketRejections === 1) {
+      this.teardownSocket()
+
+      if (!this.running || this.paused || !this.online) {
+        return
+      }
+
+      this.currentError = error
+      void this.runDial()
+
+      return
+    }
+
+    // A ticket minted seconds ago and refused as well is no longer a ticket
+    // story: now the credential the mint authenticated with is the suspect.
+    await this.handleAuthFailure(error)
   }
 
   private async handleAuthFailure(error: GatewayError): Promise<void> {
@@ -545,6 +608,7 @@ export class GatewayConnection {
     if (this.consecutiveAuthFailures > 1) {
       this.running = false
       this.teardown()
+      this.timeline.signOut('rejected_after_refresh')
       this.setStatus(
         'needs_signin',
         new GatewayError('auth', 'The gateway rejected the credentials twice in a row. Sign in again.', {
@@ -573,6 +637,10 @@ export class GatewayConnection {
     if (verdict === 'reauth') {
       this.running = false
       this.teardown()
+      // The verdict only says the credential provider has nothing left to offer.
+      // Why it has nothing left was recorded by the coordinator a moment ago, so
+      // the timeline attributes the sign-out by reading back to it.
+      this.timeline.signOut('refresh_rejected')
       this.setStatus(
         'needs_signin',
         new GatewayError('auth', 'Your session has expired. Sign in again.', {
@@ -589,6 +657,15 @@ export class GatewayConnection {
 
   private scheduleReconnect(error: GatewayError): void {
     this.teardownSocket()
+
+    // "Consecutive" has to mean it. Both tallies used to be reset only by a dial
+    // that reached `ready`, so two auth failures with an ordinary outage between
+    // them — a laptop roaming between networks, a gateway restarting behind a
+    // proxy — counted as "twice in a row" however long the gap was, and signed
+    // the user out with a claim that was not true. An outcome that is not an auth
+    // failure breaks the streak.
+    this.consecutiveAuthFailures = 0
+    this.consecutiveTicketRejections = 0
 
     if (!this.running || this.paused || !this.online) {
       return

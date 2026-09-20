@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
+import { AuthTimeline, type AuthEvent } from './auth-timeline'
 import {
   AuthChangedError,
   exchangeCode,
@@ -120,6 +121,41 @@ describe('refreshTokens', () => {
     await expect(
       refreshTokens('https://example.test', { refreshToken: 'rt', provider: 'p' }, { fetchImpl: respondWith(503, {}) })
     ).rejects.toMatchObject({ kind: 'server', status: 503 })
+  })
+
+  /**
+   * A rate limiter is not a verdict on the grant. Classifying 429 as `auth` sent
+   * it to `TokenCoordinator.clear()`, so a gateway behind a proxy that throttled
+   * a burst of refreshes signed the user out — and the refresh token it threw
+   * away was still perfectly good.
+   */
+  it('maps 429 onto server, so a throttled refresh is retried rather than signed out', async () => {
+    await expect(
+      refreshTokens('https://example.test', { refreshToken: 'rt', provider: 'p' }, { fetchImpl: respondWith(429, {}) })
+    ).rejects.toMatchObject({ kind: 'server', status: 429 })
+  })
+
+  it('maps 408 onto server, because a request timeout says nothing about the grant', async () => {
+    await expect(
+      refreshTokens('https://example.test', { refreshToken: 'rt', provider: 'p' }, { fetchImpl: respondWith(408, {}) })
+    ).rejects.toMatchObject({ kind: 'server', status: 408 })
+  })
+
+  /**
+   * What upstream actually refuses a grant with. `dashboard_auth/routes.py`
+   * answers 400 only for an empty `refresh_token`, and 401
+   * `{"error":"session_expired"}` for a token that is expired, unknown, or
+   * rejected by every provider. 403 is not reachable there at all, and is kept
+   * final because no HTTP 403 has ever meant "try again in a moment".
+   */
+  it.each([400, 401, 403])('keeps %i as a definitive auth rejection', async status => {
+    await expect(
+      refreshTokens(
+        'https://example.test',
+        { refreshToken: 'rt', provider: 'p' },
+        { fetchImpl: respondWith(status, {}) }
+      )
+    ).rejects.toMatchObject({ kind: 'auth', status })
   })
 
   it('refuses to call the gateway without a refresh token', async () => {
@@ -316,5 +352,133 @@ describe('TokenCoordinator', () => {
 
     expect(await coordinator.accessToken()).toBeNull()
     expect(store.value).toBeNull()
+  })
+
+  /**
+   * A keychain read can fail transiently — an item that is `WhenUnlocked` and a
+   * process that asked a moment too early is the ordinary case on Apple
+   * platforms. The failed read used to be memoised as the load flight and never
+   * cleared, so every later call returned the SAME rejected promise: one unlucky
+   * read left the coordinator unable to produce a token for the rest of the
+   * process's life, and the dial loop reconnected forever against a store that
+   * had been readable all along.
+   */
+  it('retries a store read that failed instead of memoising the failure', async () => {
+    let attempts = 0
+    const store: TokenStore = {
+      async load() {
+        attempts += 1
+
+        if (attempts === 1) {
+          throw new Error('keychain unavailable')
+        }
+
+        return tokenSet({ expiresAt: 10_000 })
+      },
+      async save() {
+        return undefined
+      },
+      async clear() {
+        return undefined
+      }
+    }
+    const coordinator = new TokenCoordinator({ store, refresh: async () => tokenSet(), nowSeconds: () => 0 })
+
+    await expect(coordinator.current()).rejects.toThrow('keychain unavailable')
+    expect(await coordinator.current()).toMatchObject({ accessToken: 'at-1' })
+    expect(attempts).toBe(2)
+  })
+
+  /**
+   * Rotation is destructive at the server: the refresh token that was just spent
+   * is dead the moment the gateway answers. If the write of the replacement
+   * fails, rejecting the flight throws away a token set that is perfectly usable
+   * and breaks the session immediately — on top of the next launch being signed
+   * out anyway. So the rotated token is served, and the failed write is what the
+   * timeline is for.
+   */
+  it('serves a rotated token whose write failed, and records the failed write', async () => {
+    const events: AuthEvent[] = []
+    const timeline = new AuthTimeline({ sink: snapshot => events.splice(0, events.length, ...snapshot.events) })
+    const store: TokenStore = {
+      async load() {
+        return tokenSet({ expiresAt: 10 })
+      },
+      async save() {
+        throw new Error('keychain write refused')
+      },
+      async clear() {
+        return undefined
+      }
+    }
+    const coordinator = new TokenCoordinator({
+      store,
+      refresh: async () => tokenSet({ accessToken: 'at-2', refreshToken: 'rt-2', expiresAt: 5000 }),
+      nowSeconds: () => 0,
+      timeline
+    })
+
+    expect(await coordinator.accessToken()).toBe('at-2')
+    expect(events.map(entry => entry.event)).toEqual(['refresh.start', 'refresh.ok', 'token.write_failed'])
+    // Still usable for the rest of this process, without another rotation.
+    expect(await coordinator.accessToken()).toBe('at-2')
+  })
+
+  it('records a rotation that reached the store', async () => {
+    const timeline = new AuthTimeline()
+    const coordinator = new TokenCoordinator({
+      store: memoryStore(tokenSet({ expiresAt: 10 })),
+      refresh: async () => tokenSet({ accessToken: 'at-2', expiresAt: 5000 }),
+      nowSeconds: () => 0,
+      timeline
+    })
+
+    await coordinator.accessToken()
+
+    expect(timeline.snapshot().events.map(entry => entry.event)).toEqual([
+      'refresh.start',
+      'refresh.ok',
+      'token.write_ok'
+    ])
+  })
+
+  it('records a definitive rejection as the reason the tokens were cleared', async () => {
+    const timeline = new AuthTimeline()
+    const coordinator = new TokenCoordinator({
+      store: memoryStore(tokenSet({ expiresAt: 10 })),
+      refresh: async () => {
+        const { GatewayError } = await import('./types')
+
+        throw new GatewayError('auth', 'expired', { status: 401 })
+      },
+      nowSeconds: () => 0,
+      timeline
+    })
+
+    expect(await coordinator.accessToken()).toBeNull()
+
+    const events = timeline.snapshot().events
+    expect(events.map(entry => entry.event)).toEqual(['refresh.start', 'refresh.failed', 'token.cleared'])
+    expect(events[1]).toMatchObject({ kind: 'auth', status: 401 })
+  })
+
+  /**
+   * The clock reading, not the token, is what this records. A device whose clock
+   * is minutes off makes every stored token look expired (or immortal), and the
+   * only way to see that from a support log is to write down what the app
+   * believed the remaining lifetime was.
+   */
+  it('records the remaining lifetime it read when it served a stored token', async () => {
+    const timeline = new AuthTimeline()
+    const coordinator = new TokenCoordinator({
+      store: memoryStore(tokenSet({ expiresAt: 1000 })),
+      refresh: async () => tokenSet(),
+      nowSeconds: () => 400,
+      timeline
+    })
+
+    await coordinator.accessToken()
+
+    expect(timeline.snapshot().events).toMatchObject([{ event: 'token.served', expiresIn: 600 }])
   })
 })

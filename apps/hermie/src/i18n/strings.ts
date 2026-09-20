@@ -239,7 +239,24 @@ export const strings = {
     bodyNoHost: 'Your session has expired, so Hermie cannot reach your bots until you sign in.',
     signIn: 'Sign in',
     changeGateway: 'Change gateway',
-    listNote: 'Showing the last saved list.'
+    listNote: 'Showing the last saved list.',
+    /**
+     * One calm sentence naming what actually ended the session, shown under the
+     * body when the auth ring knows.
+     *
+     * A session that ends without explanation reads as the app's fault, and the
+     * only honest way to say otherwise is to say which thing happened. These are
+     * kept apart on purpose: "the gateway rejected the saved sign-in" is
+     * something only a new sign-in fixes, while "renewing did not complete" is a
+     * network story that may well have fixed itself by the time it is read.
+     */
+    reason: {
+      refreshRejected: 'The gateway rejected the saved sign-in, so the session could not be renewed.',
+      refreshFailed: 'Renewing the session did not complete, so Hermie could not stay signed in.',
+      noRefreshToken: 'There was nothing saved to renew the session with.',
+      rejectedAfterRefresh: 'The gateway rejected the sign-in Hermie had just renewed.',
+      tokenUnreadable: 'Hermie could not read the saved sign-in from the keychain.'
+    }
   },
 
   /**

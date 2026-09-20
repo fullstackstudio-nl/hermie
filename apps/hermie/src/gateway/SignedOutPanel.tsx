@@ -13,7 +13,7 @@
  * coordinator and the dial loop picks up where it stopped. Nobody is sent back
  * through the wizard for an expired refresh token.
  */
-import type { TokenSet } from '@hermie/gateway-client'
+import type { SignOutReason, TokenSet } from '@hermie/gateway-client'
 import { useState } from 'react'
 import { View } from 'react-native'
 
@@ -24,6 +24,32 @@ import { Button, Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
 import { hostOf } from './errors'
 import { useGateway } from './GatewayProvider'
+import { useConnectionStore } from './store'
+
+/**
+ * The reason, as a sentence — or nothing at all.
+ *
+ * Nothing is the right answer when the ring has no account of it: a sign-out that
+ * happened before this build, or on a path that recorded none, must not be
+ * narrated with a guess. An unexplained sign-out is bad; a confidently wrong
+ * explanation is worse.
+ */
+export function describeSignOutReason(reason: SignOutReason | null | undefined): string | null {
+  switch (reason) {
+    case 'refresh_rejected':
+      return strings.signedOut.reason.refreshRejected
+    case 'refresh_failed':
+      return strings.signedOut.reason.refreshFailed
+    case 'no_refresh_token':
+      return strings.signedOut.reason.noRefreshToken
+    case 'rejected_after_refresh':
+      return strings.signedOut.reason.rejectedAfterRefresh
+    case 'token_unreadable':
+      return strings.signedOut.reason.tokenUnreadable
+    default:
+      return null
+  }
+}
 
 /**
  * Everything the signed-out state needs, in one hook, so the content panel and
@@ -71,6 +97,7 @@ export function useReauth() {
 export function SignedOutPanel() {
   const theme = useTheme()
   const { busy, changeGateway, host, signIn, webView } = useReauth()
+  const reason = describeSignOutReason(useConnectionStore(state => state.authTimeline.lastSignOut?.reason))
 
   return (
     <View
@@ -89,6 +116,12 @@ export function SignedOutPanel() {
           <Text color="textMuted" variant="preview">
             {host ? strings.signedOut.body(host) : strings.signedOut.bodyNoHost}
           </Text>
+
+          {reason ? (
+            <Text color="textMuted" testID="signed-out-reason" variant="meta">
+              {reason}
+            </Text>
+          ) : null}
 
           <View style={{ gap: theme.space.sm, paddingTop: theme.space.xs }}>
             <Button

@@ -1,4 +1,16 @@
 export {
+  AUTH_TIMELINE_SIZE,
+  type AuthEvent,
+  type AuthEventInput,
+  type AuthEventName,
+  AuthTimeline,
+  type AuthTimelineOptions,
+  type AuthTimelineSink,
+  type AuthTimelineSnapshot,
+  NULL_AUTH_TIMELINE,
+  type SignOutReason
+} from './auth-timeline'
+export {
   assertDesktopContract,
   DEFAULT_RPC_TIMEOUT_MS,
   FIRST_SESSION_TIMEOUT_MS,

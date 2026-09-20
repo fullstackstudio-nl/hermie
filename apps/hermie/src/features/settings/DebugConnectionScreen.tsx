@@ -1,9 +1,18 @@
-import { type GatewayConnection, probeGateway, type ConnectionStatus, type ProbeResult } from '@hermie/gateway-client'
+import {
+  type AuthEvent,
+  type GatewayConnection,
+  probeGateway,
+  type ConnectionStatus,
+  type ProbeResult
+} from '@hermie/gateway-client'
 import { formatTranscriptDiagnostics } from '@hermie/transcript'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Platform, Pressable, ScrollView, View } from 'react-native'
 
 import { createGatewayConnection } from '../../gateway'
+// Straight from the store rather than the barrel: the barrel pulls in the whole
+// provider, and a screen test that stubs it should not have to stub the store too.
+import { useConnectionStore } from '../../gateway/store'
 import { strings } from '../../i18n/strings'
 import { hasHardwareKeyboard } from '../../platform/keyboard-modifiers'
 import { directTouchPanRef } from '../../platform/pointer-drag'
@@ -22,6 +31,89 @@ import { useTheme } from '../../ui/theme'
 
 // The Android emulator reaches the host machine through 10.0.2.2, never localhost.
 const DEFAULT_BASE_URL = Platform.OS === 'android' ? 'http://10.0.2.2:9119' : 'http://localhost:9119'
+
+/** `hh:mm:ss` in the reader's own zone — a ring is read as intervals, not dates. */
+function clockOf(at: number): string {
+  const when = new Date(at)
+  const pad = (value: number) => String(value).padStart(2, '0')
+
+  return `${pad(when.getHours())}:${pad(when.getMinutes())}:${pad(when.getSeconds())}`
+}
+
+/**
+ * One event as a line that can be pasted into an issue as it stands.
+ *
+ * Everything here is either a name from a closed set or a number the gateway
+ * itself said; there is no token value, no host and no message text anywhere in
+ * the ring, which is what makes pasting it safe rather than a judgement call.
+ */
+export function formatAuthEvent(event: AuthEvent): string {
+  const parts = [clockOf(event.at), event.event]
+
+  if (event.status !== undefined) {
+    parts.push(`http ${event.status}`)
+  }
+
+  if (event.closeCode !== undefined) {
+    parts.push(`close ${event.closeCode}`)
+  }
+
+  if (event.kind !== undefined) {
+    parts.push(event.kind)
+  }
+
+  if (event.expiresIn !== undefined) {
+    // Signed on purpose: a negative reading is an already-expired token, and a
+    // reading nowhere near the lifetime the gateway issues is clock drift.
+    parts.push(`expires in ${event.expiresIn}s`)
+  }
+
+  if (event.reason !== undefined) {
+    parts.push(event.reason)
+  }
+
+  return parts.join(' · ')
+}
+
+/**
+ * The account of why the session ended, on the one screen where an owner is
+ * already looking for it.
+ *
+ * This is the whole point of the ring: a Mac session ended in the signed-out card
+ * with no gateway restart and no second instance, and there was nothing to read
+ * afterwards — the diagnosis had to begin from "we do not know". The last
+ * sign-out is called out above the events because it is the line that usually
+ * settles it, and the events are what say whether it is the whole story.
+ */
+function AuthTimelineBlock() {
+  const theme = useTheme()
+  const timeline = useConnectionStore(state => state.authTimeline)
+  const reason = timeline.lastSignOut
+
+  return (
+    <View style={{ gap: theme.space.xxs }}>
+      <Text variant="name">Auth timeline</Text>
+
+      <Text color="textMuted" testID="debug-auth-signout" variant="meta">
+        {reason
+          ? `last sign-out: ${reason.reason} at ${clockOf(reason.at)}`
+          : 'last sign-out: none recorded on this device'}
+      </Text>
+
+      {timeline.events.length > 0 ? (
+        timeline.events.map(event => (
+          <Text color="textMuted" key={`${event.at}-${event.event}`} testID="debug-auth-event" variant="meta">
+            {formatAuthEvent(event)}
+          </Text>
+        ))
+      ) : (
+        <Text color="textMuted" variant="meta">
+          No auth events yet.
+        </Text>
+      )}
+    </View>
+  )
+}
 
 export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
   const theme = useTheme()
@@ -194,6 +286,8 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
             <Text testID="debug-profiles">{profiles.join(', ')}</Text>
           </View>
         ) : null}
+
+        <AuthTimelineBlock />
 
         {/*
           What to read when a chat shows something twice. A screenshot of two

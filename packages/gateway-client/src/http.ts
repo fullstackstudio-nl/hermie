@@ -1,3 +1,4 @@
+import { type AuthTimelineSink, NULL_AUTH_TIMELINE } from './auth-timeline'
 import { bearerFrom, type CredentialProvider } from './credentials'
 import { type FetchLike, parseJsonBody, requestText } from './fetch-json'
 import { apiUrl, normalizeHeaders } from './url'
@@ -12,6 +13,8 @@ export interface GatewayHttpOptions {
   extraHeaders?: Record<string, string>
   fetchImpl?: FetchLike
   defaultTimeoutMs?: number
+  /** Where a 401 on a REST call is recorded. */
+  timeline?: AuthTimelineSink
 }
 
 export interface RequestOptions {
@@ -110,6 +113,8 @@ export class GatewayHttp {
     if (attempt.status !== 401) {
       return this.unwrap<T>(attempt, method, path)
     }
+
+    ;(this.options.timeline ?? NULL_AUTH_TIMELINE).record({ event: 'rest.unauthorized', kind: 'auth', status: 401 })
 
     const verdict = await this.options.credentials.onRejected(attempt.usedToken)
 

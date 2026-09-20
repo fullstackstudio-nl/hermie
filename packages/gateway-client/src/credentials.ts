@@ -1,3 +1,4 @@
+import { type AuthTimelineSink, NULL_AUTH_TIMELINE } from './auth-timeline'
 import { type FetchLike, parseJsonObject, requestText } from './fetch-json'
 import { type TokenCoordinator } from './native-auth'
 import { apiUrl, normalizeHeaders } from './url'
@@ -46,6 +47,8 @@ export interface NativePkceCredentialsOptions {
   coordinator: TokenCoordinator
   extraHeaders?: Record<string, string>
   fetchImpl?: FetchLike
+  /** Where the mint record goes, so a 4401 can be read next to the ticket it refused. */
+  timeline?: AuthTimelineSink
 }
 
 /**
@@ -91,29 +94,56 @@ export class NativePkceCredentials implements CredentialProvider {
     await this.options.coordinator.clear()
   }
 
+  /**
+   * One ticket for one dial.
+   *
+   * This is the ONLY place in a dial where an expired access token shows itself:
+   * the mint is an ordinary authenticated POST, so upstream's gate answers 401
+   * here, whereas the WebSocket upgrade verifies no token at all and can only
+   * ever refuse the ticket. The two must stay distinguishable, which is why the
+   * mint's status is recorded.
+   */
   private async mintTicket(extraHeaders: Record<string, string>): Promise<string> {
+    const timeline = this.options.timeline ?? NULL_AUTH_TIMELINE
     const url = apiUrl(this.options.baseUrl, '/api/auth/ws-ticket')
     const auth = await this.httpAuthHeaders()
-    const response = await requestText(url, {
-      method: 'POST',
-      headers: { ...normalizeHeaders(this.options.extraHeaders), ...extraHeaders, ...auth },
-      body: {},
-      fetchImpl: this.options.fetchImpl
-    })
+    let response
+
+    try {
+      response = await requestText(url, {
+        method: 'POST',
+        headers: { ...normalizeHeaders(this.options.extraHeaders), ...extraHeaders, ...auth },
+        body: {},
+        fetchImpl: this.options.fetchImpl
+      })
+    } catch (error) {
+      timeline.record({
+        event: 'ticket.failed',
+        ...(error instanceof GatewayError ? { kind: error.kind } : {})
+      })
+
+      throw error
+    }
 
     if (response.status === 401 || response.status === 403) {
+      timeline.record({ event: 'ticket.failed', kind: 'auth', status: response.status })
+
       throw new GatewayError('auth', 'The gateway refused to mint a WebSocket ticket. Sign in again.', {
         status: response.status
       })
     }
 
     if (response.status >= 500) {
+      timeline.record({ event: 'ticket.failed', kind: 'server', status: response.status })
+
       throw new GatewayError('server', `The gateway answered HTTP ${response.status} while minting a ticket.`, {
         status: response.status
       })
     }
 
     if (!response.ok) {
+      timeline.record({ event: 'ticket.failed', kind: 'protocol', status: response.status })
+
       throw new GatewayError('protocol', `Minting a WebSocket ticket failed with HTTP ${response.status}.`, {
         status: response.status
       })
@@ -122,8 +152,12 @@ export class NativePkceCredentials implements CredentialProvider {
     const body = parseJsonObject(response.text, url, 'protocol')
 
     if (typeof body.ticket !== 'string' || !body.ticket) {
+      timeline.record({ event: 'ticket.failed', kind: 'protocol', status: response.status })
+
       throw new GatewayError('protocol', `${url} answered without a ticket.`)
     }
+
+    timeline.record({ event: 'ticket.minted' })
 
     return body.ticket
   }

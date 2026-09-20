@@ -1,4 +1,5 @@
 import type {
+  AuthTimeline,
   ConnectionStatus,
   GatewayConnection,
   GatewayError,
@@ -9,6 +10,7 @@ import type {
 } from '@hermie/gateway-client'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
+import { createPersistentAuthTimeline } from './auth-timeline'
 import { attachLifecycle, createGatewayConnection, createTokenCoordinator } from './client'
 import { clearCredentials, clearGateway, type GatewaySetup, loadGatewaySetup, type StoredGatewayConfig } from './config'
 import { useConnectionStore } from './store'
@@ -69,6 +71,8 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
   const coordinatorRef = useRef<TokenCoordinator | null>(null)
   const detachRef = useRef<(() => void) | null>(null)
   const unsubscribeRef = useRef<(() => void) | null>(null)
+  // Outlives every connection here on purpose: `teardown` must not clear it.
+  const timelineRef = useRef<AuthTimeline | null>(null)
 
   const status = useConnectionStore(state => state.status)
   const lastError = useConnectionStore(state => state.lastError)
@@ -88,16 +92,17 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
   }, [resetStore])
 
   const connect = useCallback(
-    (loaded: GatewaySetup) => {
+    (loaded: GatewaySetup, timeline: AuthTimeline) => {
       teardown()
 
       const coordinator =
         loaded.config.authMode === 'session_token'
           ? null
-          : createTokenCoordinator({ baseUrl: loaded.config.baseUrl, extraHeaders: loaded.extraHeaders })
+          : createTokenCoordinator({ baseUrl: loaded.config.baseUrl, extraHeaders: loaded.extraHeaders, timeline })
 
       const connection = createGatewayConnection({
         config: toGatewayConfig(loaded),
+        timeline,
         ...(loaded.sessionToken ? { sessionToken: loaded.sessionToken } : {}),
         ...(coordinator ? { coordinator } : {})
       })
@@ -116,6 +121,10 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
   )
 
   const reload = useCallback(async () => {
+    // One ring for the app's whole life, not one per connect: it has to span the
+    // sign-out and the reconnect that follow, which is the sequence worth reading.
+    timelineRef.current ??= await createPersistentAuthTimeline()
+
     const loaded = await loadGatewaySetup()
 
     if (!loaded || !loaded.hasCredentials) {
@@ -127,7 +136,7 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
       return
     }
 
-    connect(loaded)
+    connect(loaded, timelineRef.current)
   }, [connect, teardown])
 
   useEffect(() => {

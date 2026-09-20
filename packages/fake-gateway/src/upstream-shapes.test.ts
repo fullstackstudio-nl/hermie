@@ -15,10 +15,15 @@
  * Upstream is NousResearch/hermes-agent, `hermes_cli/web_routers/`, at the pin
  * in `packages/hermes-shared/upstream.json`.
  */
+import { createHash, randomBytes } from 'node:crypto'
+
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
 
 import { startFakeGateway, type FakeGateway } from './server'
+
+const base64url = (value: Buffer): string =>
+  value.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 
 let gateway: FakeGateway
 
@@ -389,5 +394,152 @@ describe('session.active_list over the socket — methods_session.py::session.ac
 
     expect(rows.every(row => typeof row.status === 'string' && row.status !== 'idle')).toBe(true)
     expect(rows.map(row => row.session_key)).toContain(stored)
+  })
+})
+
+/**
+ * The native token endpoints, pinned against `hermes_cli/dashboard_auth/routes.py`.
+ *
+ * These matter more than most routes here: the client turns a status code from
+ * the refresh endpoint straight into "keep this session" or "delete the refresh
+ * token", and it cannot undo the second one. Which codes mean which is therefore
+ * a contract, not an implementation detail.
+ */
+describe('POST /auth/native/refresh — routes.py::auth_native_refresh', () => {
+  const refresh = async (body: unknown): Promise<{ status: number; body: Record<string, unknown> }> => {
+    const response = await fetch(`${gateway.url}/auth/native/refresh`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+
+    return { status: response.status, body: (await response.json()) as Record<string, unknown> }
+  }
+
+  /**
+   * routes.py:501-502, `if not body.refresh_token: raise _http(400, ...)`. The
+   * only 400 this route answers, and the reason the client may treat 400 as
+   * final: it can never describe a transient condition.
+   */
+  it('answers 400 `refresh_token required` for an empty token', async () => {
+    const empty = await refresh({ refresh_token: '', provider: 'self-hosted' })
+
+    expect(empty.status).toBe(400)
+    expect(empty.body.detail).toBe('refresh_token required')
+  })
+
+  /**
+   * routes.py:516-519. Expired, unknown, and rejected-by-every-provider all
+   * collapse into this one answer, with an `error` key no other route in
+   * `dashboard_auth` sends and — unlike the gate's 401 in `middleware.py:73-76` —
+   * no `login_url`.
+   */
+  it('answers 401 `session_expired` for a token it does not know', async () => {
+    const unknown = await refresh({ refresh_token: 'rt-never-issued', provider: 'self-hosted' })
+
+    expect(unknown.status).toBe(401)
+    expect(unknown.body.error).toBe('session_expired')
+    expect(typeof unknown.body.detail).toBe('string')
+    expect(unknown.body.login_url).toBeUndefined()
+  })
+
+  /**
+   * The codes this route cannot answer with, which is what lets the client treat
+   * them as retryable. Upstream has no rate limiter on any native route — the
+   * only 429 in `dashboard_auth` is `/auth/password-login` (routes.py:382-384) —
+   * and no 403 literal exists in the package at all. If upstream ever did start
+   * refusing a grant with one of these, this is where it would be noticed, and
+   * `DEFINITIVE_REFRESH_STATUSES` in `native-auth.ts` is what would have to move.
+   */
+  it('never refuses a grant with 403, 408 or 429', async () => {
+    const refused = await refresh({ refresh_token: 'rt-never-issued', provider: 'self-hosted' })
+
+    expect([403, 408, 429]).not.toContain(refused.status)
+  })
+
+  /**
+   * `_bearer_payload`, routes.py:110-115 — the shape BOTH `/auth/native/token`
+   * and `/auth/native/refresh` answer with.
+   *
+   * `expires_at` is unix SECONDS: pinned at the dataclass (`base.py:18`, "unix
+   * seconds; the access_token's exp claim"), computed as the raw JWT `exp`
+   * (`_shared.py:177`) or `int(time.time()) + ttl` (`basic/__init__.py:172-173`),
+   * and there is no `* 1000` anywhere in the package. There is no `expires_in`
+   * key to fall back on either. A client reading it as milliseconds would put the
+   * expiry some fifty thousand years out and never refresh proactively at all,
+   * which is a bug that hides until the access token lapses.
+   */
+  it('rotates into the six-key bearer payload, with expires_at in unix seconds', async () => {
+    const gated = await startFakeGateway({ port: 0, auth: 'native' })
+
+    try {
+      const verifier = base64url(randomBytes(32))
+      const authorize = new URL(`${gated.url}/auth/native/authorize`)
+      authorize.searchParams.set('provider', 'self-hosted')
+      authorize.searchParams.set('code_challenge', base64url(createHash('sha256').update(verifier).digest()))
+      authorize.searchParams.set('code_challenge_method', 'S256')
+      authorize.searchParams.set('redirect_uri', 'http://127.0.0.1:8765/callback')
+      authorize.searchParams.set('state', 'state-1')
+      authorize.searchParams.set('auto', '1')
+
+      const redirected = await fetch(authorize, { redirect: 'manual' })
+      const code = new URL(String(redirected.headers.get('location'))).searchParams.get('code')
+
+      const exchanged = await fetch(`${gated.url}/auth/native/token`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code, code_verifier: verifier })
+      })
+      const issued = (await exchanged.json()) as Record<string, unknown>
+
+      expect(exchanged.status).toBe(200)
+      expect(keysOf(issued)).toEqual([
+        'access_token',
+        'expires_at',
+        'provider',
+        'refresh_token',
+        'token_type',
+        'user_id'
+      ])
+      expect(issued.token_type).toBe('Bearer')
+      expect(issued.expires_in).toBeUndefined()
+
+      // Seconds, not milliseconds: the same instant in ms would be ~1.7e12.
+      const expiresAt = issued.expires_at as number
+      expect(expiresAt).toBeGreaterThan(Date.now() / 1000)
+      expect(expiresAt).toBeLessThan(Date.now())
+
+      const rotated = await fetch(`${gated.url}/auth/native/refresh`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ refresh_token: issued.refresh_token, provider: 'self-hosted' })
+      })
+      const next = (await rotated.json()) as Record<string, unknown>
+
+      expect(rotated.status).toBe(200)
+      expect(keysOf(next)).toEqual(keysOf(issued))
+      // Rotation: a new refresh token, and the old one is spent.
+      expect(next.refresh_token).not.toBe(issued.refresh_token)
+
+      const replayed = await fetch(`${gated.url}/auth/native/refresh`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ refresh_token: issued.refresh_token, provider: 'self-hosted' })
+      })
+
+      /**
+       * Upstream keeps no refresh-token store of its own; rotation happens at the
+       * identity provider, and `refresh_singleflight.py` caches a successful
+       * rotation for 30 s (`_SUCCESS_TTL`), so a replay inside that window gets
+       * **200 with the same body** and only afterwards reaches the provider and
+       * becomes a 401. The fake refuses immediately instead, which is the case
+       * the client has to survive — and on a provider with reuse detection the
+       * replay does not merely fail, it revokes the session.
+       */
+      expect(replayed.status).toBe(401)
+      expect(gated.state.refreshReuseAttempts).toBe(1)
+    } finally {
+      await gated.close()
+    }
   })
 })
