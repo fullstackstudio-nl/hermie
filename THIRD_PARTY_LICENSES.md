@@ -22,7 +22,7 @@ the licence in [LICENSE](LICENSE). Their own dependencies _are_ in the list, bec
 Code copied or ported into this repository is a different obligation and is listed in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-**623 packages**, carrying **261 distinct licence texts**.
+**643 packages**, carrying **271 distinct licence texts**.
 Identical texts are printed once under [Licence texts](#licence-texts) and referenced by the first
 twelve hex digits of the SHA-256 of the text, which is why a file listing hundreds of MIT packages
 is not hundreds of copies of the MIT licence.
@@ -139,6 +139,7 @@ is not hundreds of copies of the MIT licence.
 | `@expo/json-file`                                      | `11.0.1`       | MIT                                 | [`371567d5d899`](#licence-text-371567d5d899) | <https://github.com/expo/expo>                                                                        |
 | `@expo/metro`                                          | `54.2.0`       | MIT                                 | [`7077ac1bb379`](#licence-text-7077ac1bb379) | <https://github.com/expo/expo-metro>                                                                  |
 | `@expo/metro-config`                                   | `54.0.17`      | MIT                                 | [`371567d5d899`](#licence-text-371567d5d899) | <https://github.com/expo/expo>                                                                        |
+| `@expo/metro-runtime`                                  | `6.1.2`        | MIT                                 | _none shipped_                               | <https://github.com/expo/expo>                                                                        |
 | `@expo/osascript`                                      | `2.7.1`        | MIT                                 | [`371567d5d899`](#licence-text-371567d5d899) | <https://github.com/expo/expo>                                                                        |
 | `@expo/package-manager`                                | `1.13.1`       | MIT                                 | [`371567d5d899`](#licence-text-371567d5d899) | <https://github.com/expo/expo>                                                                        |
 | `@expo/plist`                                          | `0.4.9`        | MIT                                 | _none shipped_                               | <https://github.com/expo/expo>                                                                        |
@@ -179,6 +180,7 @@ is not hundreds of copies of the MIT licence.
 | `@react-native/dev-middleware`                         | `0.81.5`       | MIT                                 | _none shipped_                               | <https://github.com/facebook/react-native>                                                            |
 | `@react-native/gradle-plugin`                          | `0.81.5`       | MIT                                 | _none shipped_                               | <https://github.com/facebook/react-native>                                                            |
 | `@react-native/js-polyfills`                           | `0.81.5`       | MIT                                 | _none shipped_                               | <https://github.com/facebook/react-native>                                                            |
+| `@react-native/normalize-colors`                       | `0.74.89`      | MIT                                 | _none shipped_                               | <https://github.com/facebook/react-native>                                                            |
 | `@react-native/normalize-colors`                       | `0.81.5`       | MIT                                 | _none shipped_                               | <https://github.com/facebook/react-native>                                                            |
 | `@react-native/virtualized-lists`                      | `0.81.5`       | MIT                                 | _none shipped_                               | <https://github.com/facebook/react-native>                                                            |
 | `@react-navigation/core`                               | `7.22.1`       | MIT                                 | [`0043ee969733`](#licence-text-0043ee969733) | <https://github.com/react-navigation/react-navigation>                                                |
@@ -290,7 +292,9 @@ is not hundreds of copies of the MIT licence.
 | `connect`                                              | `3.7.0`        | MIT                                 | [`8c0dcd258c8a`](#licence-text-8c0dcd258c8a) | <https://github.com/senchalabs/connect>                                                               |
 | `convert-source-map`                                   | `2.0.0`        | MIT                                 | [`e66591b0b153`](#licence-text-e66591b0b153) | <https://github.com/thlorenz/convert-source-map>                                                      |
 | `core-js-compat`                                       | `3.50.0`       | MIT                                 | [`826192089a5a`](#licence-text-826192089a5a) | <https://github.com/zloirock/core-js>                                                                 |
+| `cross-fetch`                                          | `3.2.0`        | MIT                                 | [`c47050aac992`](#licence-text-c47050aac992) | <https://github.com/lquixada/cross-fetch>                                                             |
 | `cross-spawn`                                          | `7.0.6`        | MIT                                 | [`5e7b89989b94`](#licence-text-5e7b89989b94) | <https://github.com/moxystudio/node-cross-spawn>                                                      |
+| `css-in-js-utils`                                      | `3.1.0`        | MIT                                 | [`6db8ccdbd3d7`](#licence-text-6db8ccdbd3d7) | <https://github.com/robinweser/css-in-js-utils>                                                       |
 | `css-select`                                           | `5.2.2`        | BSD-2-Clause                        | [`0e57eeaccc07`](#licence-text-0e57eeaccc07) | <https://github.com/fb55/css-select>                                                                  |
 | `css-tree`                                             | `1.1.3`        | MIT                                 | [`a870a8a0f803`](#licence-text-a870a8a0f803) | <https://github.com/csstree/csstree>                                                                  |
 | `css-what`                                             | `6.2.2`        | BSD-2-Clause                        | [`0e57eeaccc07`](#licence-text-0e57eeaccc07) | <https://github.com/fb55/css-what>                                                                    |
@@ -365,6 +369,8 @@ is not hundreds of copies of the MIT licence.
 | `fast-text-encoding`                                   | `1.0.6`        | Apache-2.0                          | [`6dc0e068dcf3`](#licence-text-6dc0e068dcf3) | <https://github.com/samthor/fast-text-encoding>                                                       |
 | `fast-uri`                                             | `3.1.8`        | BSD-3-Clause                        | [`b010b0dfdfdb`](#licence-text-b010b0dfdfdb) | <https://github.com/fastify/fast-uri>                                                                 |
 | `fb-watchman`                                          | `2.0.2`        | Apache-2.0                          | _none shipped_                               | <https://github.com/facebook/watchman>                                                                |
+| `fbjs`                                                 | `3.0.5`        | MIT                                 | [`2a4be0700546`](#licence-text-2a4be0700546) | <https://github.com/facebook/fbjs>                                                                    |
+| `fbjs-css-vars`                                        | `1.0.2`        | MIT                                 | [`2a4be0700546`](#licence-text-2a4be0700546) | <https://github.com/facebook/fbjs>                                                                    |
 | `fdir`                                                 | `6.5.0`        | MIT                                 | [`15e7786c7e68`](#licence-text-15e7786c7e68) | <https://github.com/thecodrr/fdir>                                                                    |
 | `fill-range`                                           | `7.1.1`        | MIT                                 | [`d99bf3271ffd`](#licence-text-d99bf3271ffd) | <https://github.com/jonschlinkert/fill-range>                                                         |
 | `finalhandler`                                         | `1.1.2`        | MIT                                 | [`8f529b2a0a7e`](#licence-text-8f529b2a0a7e) | <https://github.com/pillarjs/finalhandler>                                                            |
@@ -393,6 +399,7 @@ is not hundreds of copies of the MIT licence.
 | `hosted-git-info`                                      | `7.0.2`        | ISC                                 | [`d28e1b882ecc`](#licence-text-d28e1b882ecc) | <https://github.com/npm/hosted-git-info>                                                              |
 | `http-errors`                                          | `2.0.1`        | MIT                                 | [`b279be1458cd`](#licence-text-b279be1458cd) | <https://github.com/jshttp/http-errors>                                                               |
 | `https-proxy-agent`                                    | `7.0.6`        | MIT                                 | [`8d8c55319c77`](#licence-text-8d8c55319c77) | <https://github.com/TooTallNate/proxy-agents>                                                         |
+| `hyphenate-style-name`                                 | `1.1.0`        | BSD-3-Clause                        | [`c779b920dd98`](#licence-text-c779b920dd98) | <https://github.com/rexxars/hyphenate-style-name>                                                     |
 | `ieee754`                                              | `1.2.1`        | BSD-3-Clause                        | [`9d78a7400453`](#licence-text-9d78a7400453) | <https://github.com/feross/ieee754>                                                                   |
 | `ignore`                                               | `5.3.2`        | MIT                                 | [`9c94db23dc4b`](#licence-text-9c94db23dc4b) | <https://github.com/kaelzhang/node-ignore>                                                            |
 | `image-size`                                           | `1.2.1`        | MIT                                 | [`69fc4e74bce4`](#licence-text-69fc4e74bce4) | <https://github.com/image-size/image-size>                                                            |
@@ -400,6 +407,7 @@ is not hundreds of copies of the MIT licence.
 | `inflight`                                             | `1.0.6`        | ISC                                 | [`2f7487c19150`](#licence-text-2f7487c19150) | <https://github.com/npm/inflight>                                                                     |
 | `inherits`                                             | `2.0.4`        | ISC                                 | [`3a395674c5c9`](#licence-text-3a395674c5c9) | <https://github.com/isaacs/inherits>                                                                  |
 | `ini`                                                  | `1.3.8`        | ISC                                 | [`0ae52fe329cc`](#licence-text-0ae52fe329cc) | <https://github.com/isaacs/ini>                                                                       |
+| `inline-style-prefixer`                                | `7.0.1`        | MIT                                 | [`da1e7d4d2fd0`](#licence-text-da1e7d4d2fd0) | <https://github.com/robinweser/inline-style-prefixer>                                                 |
 | `invariant`                                            | `2.2.4`        | MIT                                 | [`2a4be0700546`](#licence-text-2a4be0700546) | <https://github.com/zertosh/invariant>                                                                |
 | `is-arrayish`                                          | `0.3.4`        | MIT                                 | [`849dffdc5103`](#licence-text-849dffdc5103) | <https://github.com/qix-/node-is-arrayish>                                                            |
 | `is-core-module`                                       | `2.17.0`       | MIT                                 | [`5c496ce5ae47`](#licence-text-5c496ce5ae47) | <https://github.com/inspect-js/is-core-module>                                                        |
@@ -447,6 +455,7 @@ is not hundreds of copies of the MIT licence.
 | `marky`                                                | `1.3.0`        | Apache-2.0                          | [`25d3237b6e26`](#licence-text-25d3237b6e26) | <https://github.com/nolanlawson/marky>                                                                |
 | `mdn-data`                                             | `2.0.14`       | CC0-1.0                             | [`5537d4d10b76`](#licence-text-5537d4d10b76) | <https://github.com/mdn/data>                                                                         |
 | `memoize-one`                                          | `5.2.1`        | MIT                                 | [`b1c501095de7`](#licence-text-b1c501095de7) | <https://github.com/alexreardon/memoize-one>                                                          |
+| `memoize-one`                                          | `6.0.0`        | MIT                                 | [`b1c501095de7`](#licence-text-b1c501095de7) | <https://github.com/alexreardon/memoize-one>                                                          |
 | `merge-options`                                        | `3.0.4`        | MIT                                 | [`2365c6429611`](#licence-text-2365c6429611) | <https://github.com/schnittstabil/merge-options>                                                      |
 | `merge-stream`                                         | `2.0.0`        | MIT                                 | [`e9c49f7790ad`](#licence-text-e9c49f7790ad) | <https://github.com/grncdr/merge-stream>                                                              |
 | `metro`                                                | `0.83.3`       | MIT                                 | _none shipped_                               | <https://github.com/facebook/metro>                                                                   |
@@ -482,6 +491,7 @@ is not hundreds of copies of the MIT licence.
 | `negotiator`                                           | `0.6.3`        | MIT                                 | [`8a160f8ccc7b`](#licence-text-8a160f8ccc7b) | <https://github.com/jshttp/negotiator>                                                                |
 | `negotiator`                                           | `0.6.4`        | MIT                                 | [`8a160f8ccc7b`](#licence-text-8a160f8ccc7b) | <https://github.com/jshttp/negotiator>                                                                |
 | `nested-error-stacks`                                  | `2.0.1`        | MIT                                 | [`6ac17776d31a`](#licence-text-6ac17776d31a) | <https://github.com/mdlavin/nested-error-stacks>                                                      |
+| `node-fetch`                                           | `2.7.0`        | MIT                                 | [`24052e630f1d`](#licence-text-24052e630f1d) | <https://github.com/bitinn/node-fetch>                                                                |
 | `node-forge`                                           | `1.4.0`        | (BSD-3-Clause OR GPL-2.0)           | [`ef57d67a087b`](#licence-text-ef57d67a087b) | <https://github.com/digitalbazaar/forge>                                                              |
 | `node-int64`                                           | `0.4.0`        | MIT                                 | [`6d5147568ce6`](#licence-text-6d5147568ce6) | <https://github.com/broofa/node-int64>                                                                |
 | `node-releases`                                        | `2.0.56`       | MIT                                 | [`b02a61dfa2f1`](#licence-text-b02a61dfa2f1) | <https://github.com/chicoxyzzy/node-releases>                                                         |
@@ -517,10 +527,12 @@ is not hundreds of copies of the MIT licence.
 | `plist`                                                | `3.1.1`        | MIT                                 | [`ce3cd057e952`](#licence-text-ce3cd057e952) | <https://github.com/TooTallNate/node-plist>                                                           |
 | `pngjs`                                                | `3.4.0`        | MIT                                 | [`87ddba564a59`](#licence-text-87ddba564a59) | <https://github.com/lukeapage/pngjs2>                                                                 |
 | `postcss`                                              | `8.4.49`       | MIT                                 | [`b02d6103a91d`](#licence-text-b02d6103a91d) | <https://github.com/postcss/postcss>                                                                  |
+| `postcss-value-parser`                                 | `4.2.0`        | MIT                                 | [`702bc24f203f`](#licence-text-702bc24f203f) | <https://github.com/TrySound/postcss-value-parser>                                                    |
 | `pretty-bytes`                                         | `5.6.0`        | MIT                                 | [`1529f88b3675`](#licence-text-1529f88b3675) | <https://github.com/sindresorhus/pretty-bytes>                                                        |
 | `pretty-format`                                        | `29.7.0`       | MIT                                 | [`cf9b17822d1f`](#licence-text-cf9b17822d1f) | <https://github.com/jestjs/jest>                                                                      |
 | `proc-log`                                             | `4.2.0`        | ISC                                 | [`5773e68412c4`](#licence-text-5773e68412c4) | <https://github.com/npm/proc-log>                                                                     |
 | `progress`                                             | `2.0.3`        | MIT                                 | [`b3d63451b0d3`](#licence-text-b3d63451b0d3) | <https://github.com/visionmedia/node-progress>                                                        |
+| `promise`                                              | `7.3.1`        | MIT                                 | [`44191656d296`](#licence-text-44191656d296) | <https://github.com/then/promise>                                                                     |
 | `promise`                                              | `8.3.0`        | MIT                                 | [`44191656d296`](#licence-text-44191656d296) | <https://github.com/then/promise>                                                                     |
 | `prompts`                                              | `2.4.2`        | MIT                                 | [`434b9e711d9c`](#licence-text-434b9e711d9c) | <https://github.com/terkelg/prompts>                                                                  |
 | `punycode`                                             | `2.3.1`        | MIT                                 | [`e7f14c40a4fc`](#licence-text-e7f14c40a4fc) | <https://github.com/mathiasbynens/punycode.js>                                                        |
@@ -530,6 +542,7 @@ is not hundreds of copies of the MIT licence.
 | `rc`                                                   | `1.2.8`        | (BSD-2-Clause OR MIT OR Apache-2.0) | [`1a03c8624084`](#licence-text-1a03c8624084) | <https://github.com/dominictarr/rc>                                                                   |
 | `react`                                                | `19.1.0`       | MIT                                 | [`cf9b17822d1f`](#licence-text-cf9b17822d1f) | <https://github.com/facebook/react>                                                                   |
 | `react-devtools-core`                                  | `6.1.5`        | MIT                                 | _none shipped_                               | <https://github.com/facebook/react>                                                                   |
+| `react-dom`                                            | `19.1.0`       | MIT                                 | [`cf9b17822d1f`](#licence-text-cf9b17822d1f) | <https://github.com/facebook/react>                                                                   |
 | `react-freeze`                                         | `1.0.4`        | MIT                                 | [`e548256ef078`](#licence-text-e548256ef078) | <https://github.com/software-mansion/react-freeze>                                                    |
 | `react-is`                                             | `18.3.1`       | MIT                                 | [`a80c79b8f80e`](#licence-text-a80c79b8f80e) | <https://github.com/facebook/react>                                                                   |
 | `react-is`                                             | `19.3.0`       | MIT                                 | [`cf9b17822d1f`](#licence-text-cf9b17822d1f) | <https://github.com/react/react>                                                                      |
@@ -538,6 +551,7 @@ is not hundreds of copies of the MIT licence.
 | `react-native-safe-area-context`                       | `5.6.2`        | MIT                                 | [`cc30a121cf37`](#licence-text-cc30a121cf37) | <https://github.com/AppAndFlow/react-native-safe-area-context>                                        |
 | `react-native-screens`                                 | `4.16.0`       | MIT                                 | [`8ffc5e162f4e`](#licence-text-8ffc5e162f4e) | <https://github.com/software-mansion/react-native-screens>                                            |
 | `react-native-svg`                                     | `15.12.1`      | MIT                                 | [`c37f7b559ade`](#licence-text-c37f7b559ade) | <https://github.com/react-native-community/react-native-svg>                                          |
+| `react-native-web`                                     | `0.21.2`       | MIT                                 | [`8fb9ab1de487`](#licence-text-8fb9ab1de487) | <https://github.com/necolas/react-native-web>                                                         |
 | `react-native-webview`                                 | `13.15.0`      | MIT                                 | [`212dbf14b113`](#licence-text-212dbf14b113) | <https://github.com/react-native-webview/react-native-webview>                                        |
 | `react-refresh`                                        | `0.14.2`       | MIT                                 | [`a80c79b8f80e`](#licence-text-a80c79b8f80e) | <https://github.com/facebook/react>                                                                   |
 | `regenerate`                                           | `1.4.2`        | MIT                                 | [`e7f14c40a4fc`](#licence-text-e7f14c40a4fc) | <https://github.com/mathiasbynens/regenerate>                                                         |
@@ -564,6 +578,7 @@ is not hundreds of copies of the MIT licence.
 | `send`                                                 | `0.19.2`       | MIT                                 | [`f4b733956caa`](#licence-text-f4b733956caa) | <https://github.com/pillarjs/send>                                                                    |
 | `serialize-error`                                      | `2.1.0`        | MIT                                 | [`2bc4beb49d48`](#licence-text-2bc4beb49d48) | <https://github.com/sindresorhus/serialize-error>                                                     |
 | `serve-static`                                         | `1.16.3`       | MIT                                 | [`d80ea12109c5`](#licence-text-d80ea12109c5) | <https://github.com/expressjs/serve-static>                                                           |
+| `setimmediate`                                         | `1.0.5`        | MIT                                 | [`e989f62f4fdc`](#licence-text-e989f62f4fdc) | <https://github.com/YuzuJS/setImmediate>                                                              |
 | `setprototypeof`                                       | `1.2.0`        | ISC                                 | [`db05b3b0f72f`](#licence-text-db05b3b0f72f) | <https://github.com/wesleytodd/setprototypeof>                                                        |
 | `sf-symbols-typescript`                                | `2.2.0`        | MIT                                 | [`80de3c4eed58`](#licence-text-80de3c4eed58) | <https://github.com/nandorojo/typescript-sf-symbols>                                                  |
 | `shebang-command`                                      | `2.0.0`        | MIT                                 | [`1407925f6128`](#licence-text-1407925f6128) | <https://github.com/kevva/shebang-command>                                                            |
@@ -592,6 +607,7 @@ is not hundreds of copies of the MIT licence.
 | `strip-ansi`                                           | `6.0.1`        | MIT                                 | [`c9808a775260`](#licence-text-c9808a775260) | <https://github.com/chalk/strip-ansi>                                                                 |
 | `strip-json-comments`                                  | `2.0.1`        | MIT                                 | [`2bc4beb49d48`](#licence-text-2bc4beb49d48) | <https://github.com/sindresorhus/strip-json-comments>                                                 |
 | `structured-headers`                                   | `0.4.1`        | MIT                                 | _none shipped_                               | <https://github.com/evert/structured-header>                                                          |
+| `styleq`                                               | `0.1.3`        | MIT                                 | [`d134a78b672d`](#licence-text-d134a78b672d) | <https://github.com/necolas/styleq>                                                                   |
 | `sucrase`                                              | `3.35.1`       | MIT                                 | [`1b31e7ac2b89`](#licence-text-1b31e7ac2b89) | <https://github.com/alangpierce/sucrase>                                                              |
 | `supports-color`                                       | `5.5.0`        | MIT                                 | [`c9808a775260`](#licence-text-c9808a775260) | <https://github.com/chalk/supports-color>                                                             |
 | `supports-color`                                       | `7.2.0`        | MIT                                 | [`c9808a775260`](#licence-text-c9808a775260) | <https://github.com/chalk/supports-color>                                                             |
@@ -609,10 +625,12 @@ is not hundreds of copies of the MIT licence.
 | `tmpl`                                                 | `1.0.5`        | BSD-3-Clause                        | [`4163303e4cc6`](#licence-text-4163303e4cc6) | <https://github.com/daaku/nodejs-tmpl>                                                                |
 | `to-regex-range`                                       | `5.0.1`        | MIT                                 | [`f6355b305c68`](#licence-text-f6355b305c68) | <https://github.com/micromatch/to-regex-range>                                                        |
 | `toidentifier`                                         | `1.0.1`        | MIT                                 | [`8d512baec1ac`](#licence-text-8d512baec1ac) | <https://github.com/component/toidentifier>                                                           |
+| `tr46`                                                 | `0.0.3`        | MIT                                 | _none shipped_                               | <https://github.com/Sebmaster/tr46.js>                                                                |
 | `ts-interface-checker`                                 | `0.1.13`       | Apache-2.0                          | [`6dc0e068dcf3`](#licence-text-6dc0e068dcf3) | <https://github.com/gristlabs/ts-interface-checker>                                                   |
 | `type-detect`                                          | `4.0.8`        | MIT                                 | [`dd785a967508`](#licence-text-dd785a967508) | <https://github.com/chaijs/type-detect>                                                               |
 | `type-fest`                                            | `0.7.1`        | (MIT OR CC0-1.0)                    | [`c9808a775260`](#licence-text-c9808a775260) | <https://github.com/sindresorhus/type-fest>                                                           |
 | `type-fest`                                            | `0.21.3`       | (MIT OR CC0-1.0)                    | [`c14bc7f11d1c`](#licence-text-c14bc7f11d1c) | <https://github.com/sindresorhus/type-fest>                                                           |
+| `ua-parser-js`                                         | `1.0.41`       | MIT                                 | [`eae199608960`](#licence-text-eae199608960) | <https://github.com/faisalman/ua-parser-js>                                                           |
 | `undici`                                               | `6.28.1`       | MIT                                 | [`fe64958bfaef`](#licence-text-fe64958bfaef) | <https://github.com/nodejs/undici>                                                                    |
 | `undici-types`                                         | `6.21.0`       | MIT                                 | [`fe64958bfaef`](#licence-text-fe64958bfaef) | <https://github.com/nodejs/undici>                                                                    |
 | `unicode-canonical-property-names-ecmascript`          | `2.0.1`        | MIT                                 | [`e7f14c40a4fc`](#licence-text-e7f14c40a4fc) | <https://github.com/mathiasbynens/unicode-canonical-property-names-ecmascript>                        |
@@ -631,8 +649,10 @@ is not hundreds of copies of the MIT licence.
 | `walker`                                               | `1.0.8`        | Apache-2.0                          | [`92a6441c77ca`](#licence-text-92a6441c77ca) | <https://github.com/daaku/nodejs-walker>                                                              |
 | `warn-once`                                            | `0.1.1`        | MIT                                 | [`6adc43862476`](#licence-text-6adc43862476) | <https://github.com/satya164/warn-once>                                                               |
 | `wcwidth`                                              | `1.0.1`        | MIT                                 | [`c512ea39f8b7`](#licence-text-c512ea39f8b7) | <https://github.com/timoxley/wcwidth>                                                                 |
+| `webidl-conversions`                                   | `3.0.1`        | BSD-2-Clause                        | [`cc645a131c94`](#licence-text-cc645a131c94) | <https://github.com/jsdom/webidl-conversions>                                                         |
 | `webidl-conversions`                                   | `5.0.0`        | BSD-2-Clause                        | [`cc645a131c94`](#licence-text-cc645a131c94) | <https://github.com/jsdom/webidl-conversions>                                                         |
 | `whatwg-fetch`                                         | `3.6.20`       | MIT                                 | [`1ed818e4d07f`](#licence-text-1ed818e4d07f) | <https://github.com/github/fetch>                                                                     |
+| `whatwg-url`                                           | `5.0.0`        | MIT                                 | [`915aef69a272`](#licence-text-915aef69a272) | <https://github.com/jsdom/whatwg-url>                                                                 |
 | `whatwg-url-without-unicode`                           | `8.0.0-3`      | MIT                                 | [`915aef69a272`](#licence-text-915aef69a272) | <https://github.com/charpeni/whatwg-url>                                                              |
 | `which`                                                | `2.0.2`        | ISC                                 | [`0ae52fe329cc`](#licence-text-0ae52fe329cc) | <https://github.com/isaacs/node-which>                                                                |
 | `wonka`                                                | `6.3.6`        | MIT                                 | [`079ed870790c`](#licence-text-079ed870790c) | <https://github.com/0no-co/wonka>                                                                     |
@@ -664,6 +684,7 @@ make; the canonical text of that licence is the one published at
 
 - [@expo/cli](https://github.com/expo/expo) `54.0.27` — declares MIT, ships no licence file.
 - [@expo/devcert](https://github.com/expo/devcert) `1.2.1` — declares MIT, ships no licence file.
+- [@expo/metro-runtime](https://github.com/expo/expo) `6.1.2` — declares MIT, ships no licence file.
 - [@expo/plist](https://github.com/expo/expo) `0.4.9` — declares MIT, ships no licence file.
 - @expo/sdk-runtime-versions `1.0.0` — declares MIT, ships no licence file.
 - @expo/ws-tunnel `1.0.6` — declares MIT, ships no licence file.
@@ -677,6 +698,7 @@ make; the canonical text of that licence is the one published at
 - [@react-native/dev-middleware](https://github.com/facebook/react-native) `0.81.5` — declares MIT, ships no licence file.
 - [@react-native/gradle-plugin](https://github.com/facebook/react-native) `0.81.5` — declares MIT, ships no licence file.
 - [@react-native/js-polyfills](https://github.com/facebook/react-native) `0.81.5` — declares MIT, ships no licence file.
+- [@react-native/normalize-colors](https://github.com/facebook/react-native) `0.74.89` — declares MIT, ships no licence file.
 - [@react-native/normalize-colors](https://github.com/facebook/react-native) `0.81.5` — declares MIT, ships no licence file.
 - [@react-native/virtualized-lists](https://github.com/facebook/react-native) `0.81.5` — declares MIT, ships no licence file.
 - [babel-plugin-react-compiler](https://github.com/facebook/react) `1.0.0` — declares MIT, ships no licence file.
@@ -738,6 +760,7 @@ make; the canonical text of that licence is the one published at
 - [standard-navigation](https://github.com/react-navigation/standard-navigation) `0.0.8` — declares MIT, ships no licence file.
 - [stream-buffers](https://github.com/samcday/node-stream-buffer) `2.2.0` — declares Unlicense, ships no licence file.
 - [structured-headers](https://github.com/evert/structured-header) `0.4.1` — declares MIT, ships no licence file.
+- [tr46](https://github.com/Sebmaster/tr46.js) `0.0.3` — declares MIT, ships no licence file.
 
 ## Licence texts
 
@@ -2194,6 +2217,34 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+### Licence text 24052e630f1d
+
+Declared as `MIT` by one package: `node-fetch@2.7.0`.
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2016 David Frank
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ### Licence text 25d3237b6e26
 
 Declared as `Apache-2.0` by one package: `marky@1.3.0`.
@@ -2731,7 +2782,7 @@ THE SOFTWARE.
 
 ### Licence text 2a4be0700546
 
-Declared as `MIT` by one package: `invariant@2.2.4`.
+Declared as `MIT` by 3 packages: `fbjs-css-vars@1.0.2`, `fbjs@3.0.5`, `invariant@2.2.4`.
 
 ```text
 MIT License
@@ -3298,7 +3349,7 @@ SOFTWARE.
 
 ### Licence text 44191656d296
 
-Declared as `MIT` by one package: `promise@8.3.0`.
+Declared as `MIT` by 2 packages: `promise@7.3.1`, `promise@8.3.0`.
 
 ```text
 Copyright (c) 2014 Forbes Lindesay
@@ -4912,6 +4963,34 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
+### Licence text 6db8ccdbd3d7
+
+Declared as `MIT` by one package: `css-in-js-utils@3.1.0`.
+
+```text
+MIT License
+
+Copyright (c) 2017 Robin Frischmann
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ### Licence text 6dc0e068dcf3
 
 Declared as `Apache-2.0` by 3 packages: `detect-libc@2.1.2`, `fast-text-encoding@1.0.6`, `ts-interface-checker@0.1.13`.
@@ -5152,6 +5231,35 @@ SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
 CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+### Licence text 702bc24f203f
+
+Declared as `MIT` by one package: `postcss-value-parser@4.2.0`.
+
+```text
+Copyright (c) Bogdan Chadkin <trysound@yandex.ru>
+
+Permission is hereby granted, free of charge, to any person
+obtaining a copy of this software and associated documentation
+files (the "Software"), to deal in the Software without
+restriction, including without limitation the rights to use,
+copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
 ```
 
 ### Licence text 7077ac1bb379
@@ -6270,6 +6378,35 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
+### Licence text 8fb9ab1de487
+
+Declared as `MIT` by one package: `react-native-web@0.21.2`.
+
+```text
+MIT License
+
+Copyright (c) Nicolas Gallagher.
+Copyright (c) Meta Platforms, Inc. and affiliates.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ### Licence text 8ffc5e162f4e
 
 Declared as `MIT` by one package: `react-native-screens@4.16.0`.
@@ -6361,7 +6498,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ### Licence text 915aef69a272
 
-Declared as `MIT` by one package: `whatwg-url-without-unicode@8.0.0-3`.
+Declared as `MIT` by 2 packages: `whatwg-url-without-unicode@8.0.0-3`, `whatwg-url@5.0.0`.
 
 ```text
 The MIT License (MIT)
@@ -7383,7 +7520,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ### Licence text b1c501095de7
 
-Declared as `MIT` by one package: `memoize-one@5.2.1`.
+Declared as `MIT` by 2 packages: `memoize-one@5.2.1`, `memoize-one@6.0.0`.
 
 ```text
 MIT License
@@ -7881,6 +8018,34 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+### Licence text c47050aac992
+
+Declared as `MIT` by one package: `cross-fetch@3.2.0`.
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2017 Leonardo Quixadá
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ### Licence text c512ea39f8b7
 
 Declared as `MIT` by one package: `wcwidth@1.0.1`.
@@ -7943,6 +8108,42 @@ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
 CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
 TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### Licence text c779b920dd98
+
+Declared as `BSD-3-Clause` by one package: `hyphenate-style-name@1.1.0`.
+
+```text
+BSD 3-Clause License
+
+Copyright (c) 2015, Espen Hovlandsdal
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice, this
+  list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of the copyright holder nor the names of its
+  contributors may be used to endorse or promote products derived from
+  this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
 ### Licence text c89cc82ae888
@@ -8104,7 +8305,7 @@ SOFTWARE.
 
 ### Licence text cc645a131c94
 
-Declared as `BSD-2-Clause` by one package: `webidl-conversions@5.0.0`.
+Declared as `BSD-2-Clause` by 2 packages: `webidl-conversions@3.0.1`, `webidl-conversions@5.0.0`.
 
 ```text
 # The BSD 2-Clause License
@@ -8286,7 +8487,7 @@ THIS SOFTWARE.
 
 ### Licence text cf9b17822d1f
 
-Declared as `MIT` by 29 packages: `@jest/create-cache-key-function@29.7.0`, `@jest/environment@29.7.0`, `@jest/fake-timers@29.7.0`, `@jest/schemas@29.6.3`, `@jest/transform@29.7.0`, `@jest/types@29.6.3`, `babel-jest@29.7.0`, `babel-plugin-jest-hoist@29.6.3`, `babel-plugin-syntax-hermes-parser@0.29.1`, `babel-preset-jest@29.6.3`, `hermes-estree@0.29.1`, `hermes-estree@0.32.0`, `hermes-parser@0.29.1`, `hermes-parser@0.32.0`, `jest-environment-node@29.7.0`, `jest-get-type@29.6.3`, `jest-haste-map@29.7.0`, `jest-message-util@29.7.0`, `jest-mock@29.7.0`, `jest-regex-util@29.6.3`, `jest-util@29.7.0`, `jest-validate@29.7.0`, `jest-worker@29.7.0`, `pretty-format@29.7.0`, `react-is@19.3.0`, `react-native@0.81.5`, `react@19.1.0`, `scheduler@0.26.0`, `use-sync-external-store@1.7.0`.
+Declared as `MIT` by 30 packages: `@jest/create-cache-key-function@29.7.0`, `@jest/environment@29.7.0`, `@jest/fake-timers@29.7.0`, `@jest/schemas@29.6.3`, `@jest/transform@29.7.0`, `@jest/types@29.6.3`, `babel-jest@29.7.0`, `babel-plugin-jest-hoist@29.6.3`, `babel-plugin-syntax-hermes-parser@0.29.1`, `babel-preset-jest@29.6.3`, `hermes-estree@0.29.1`, `hermes-estree@0.32.0`, `hermes-parser@0.29.1`, `hermes-parser@0.32.0`, `jest-environment-node@29.7.0`, `jest-get-type@29.6.3`, `jest-haste-map@29.7.0`, `jest-message-util@29.7.0`, `jest-mock@29.7.0`, `jest-regex-util@29.6.3`, `jest-util@29.7.0`, `jest-validate@29.7.0`, `jest-worker@29.7.0`, `pretty-format@29.7.0`, `react-dom@19.1.0`, `react-is@19.3.0`, `react-native@0.81.5`, `react@19.1.0`, `scheduler@0.26.0`, `use-sync-external-store@1.7.0`.
 
 ```text
 MIT License
@@ -8366,6 +8567,34 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+```
+
+### Licence text d134a78b672d
+
+Declared as `MIT` by one package: `styleq@0.1.3`.
+
+```text
+MIT License
+
+Copyright (c) Nicolas Gallagher
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ### Licence text d28e1b882ecc
@@ -8599,6 +8828,34 @@ LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE A
 IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
 WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### Licence text da1e7d4d2fd0
+
+Declared as `MIT` by one package: `inline-style-prefixer@7.0.1`.
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2015 Robin Frischmann
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ### Licence text db05b3b0f72f
@@ -9468,6 +9725,33 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+### Licence text e989f62f4fdc
+
+Declared as `MIT` by one package: `setimmediate@1.0.5`.
+
+```text
+Copyright (c) 2012 Barnesandnoble.com, llc, Donavon West, and Domenic Denicola
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
 ### Licence text e9c49f7790ad
 
 Declared as `MIT` by one package: `merge-stream@2.0.0`.
@@ -9530,6 +9814,34 @@ SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
 CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+### Licence text eae199608960
+
+Declared as `MIT` by one package: `ua-parser-js@1.0.41`.
+
+```text
+MIT License
+
+Copyright (c) 2012-2025 Faisal Salman <<f@faisalman.com>>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ### Licence text ee4428814971
