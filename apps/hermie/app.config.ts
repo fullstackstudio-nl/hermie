@@ -69,7 +69,13 @@ const config: ExpoConfig = {
   },
   extra: {
     commit: COMMIT,
-    buildNumber: BUILD_NUMBER
+    buildNumber: BUILD_NUMBER,
+    /*
+     * The Expo project this app is registered under. Nothing is built or served through it; it is
+     * what a device needs to obtain a push token, and where the push credentials live. The id is
+     * public by design, the same as a bundle identifier.
+     */
+    eas: { projectId: 'c28a9aee-1a9c-4c0e-8730-70e17fe31329' }
   },
   ios: {
     bundleIdentifier: BUNDLE_ID,
