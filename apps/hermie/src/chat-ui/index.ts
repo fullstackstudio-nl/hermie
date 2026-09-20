@@ -39,6 +39,7 @@ export { Avatar, type AvatarProps } from './primitives/Avatar'
 export {
   Bubble,
   bubbleCorners,
+  bubblePaddingX,
   resolveBubbleWidth,
   TAIL_REACH,
   useBubbleWidth,

@@ -279,6 +279,75 @@ function currentAssistantId(next: ChatState, now: number): string {
 }
 
 /**
+ * Where this turn's thinking goes. One turn, one thought.
+ *
+ * The three events that carry reasoning do not all arrive while the same bubble
+ * is live. `reasoning.delta` streams before the first token, so it lands on the
+ * bubble the turn is building. `reasoning.available` is sent by
+ * `tool_progress._progress_reasoning` — which is to say AFTER a tool call has
+ * already sealed that bubble as an interim note — so resolving it through
+ * `turn.assistantId` alone opened a SECOND bubble carrying the same block. That
+ * is the owner's "every thought appears twice": one `Thought for 1s` above the
+ * sealed note, an identical one above the reply.
+ *
+ * So the turn remembers which item holds its thought, and every later frame of
+ * the same thinking goes back to it — including onto an item that has since been
+ * sealed, which is exactly right: the thought belongs to the moment it happened,
+ * not to whichever bubble happens to be open when the gateway gets round to
+ * summarising it.
+ */
+function reasoningTargetId(next: ChatState, now: number): string {
+  const live = next.turn.assistantId ? next.items[next.turn.assistantId] : undefined
+
+  if (live?.kind === 'assistant' && !live.interim) {
+    next.turn.reasoningId = live.id
+
+    return live.id
+  }
+
+  const held = next.turn.reasoningId ? next.items[next.turn.reasoningId] : undefined
+
+  if (held?.kind === 'assistant') {
+    return held.id
+  }
+
+  const id = currentAssistantId(next, now)
+
+  next.turn.reasoningId = id
+
+  return id
+}
+
+/**
+ * The sealed interim the next preview should overwrite, if there is one.
+ *
+ * `message.interim` is the reply SO FAR, not a message of its own: the gateway
+ * sends one per mid-turn assistant message and each carries the whole text it
+ * has, so appending them stacked three muted bubbles of the same growing
+ * sentence above the answer. The next interim replaces the last one.
+ *
+ * "The last one" is deliberately narrow — the last assistant item, and only
+ * while nothing but a `status` line has been appended after it. A tool card
+ * between two interims means the second one is genuinely a second piece of
+ * commentary, with the call it follows standing between them, and merging those
+ * would drop text the reader watched arrive.
+ */
+function openInterimId(next: ChatState): string | undefined {
+  for (let index = next.order.length - 1; index >= 0; index -= 1) {
+    const id = next.order[index]
+    const item = id ? next.items[id] : undefined
+
+    if (!item || item.kind === 'status') {
+      continue
+    }
+
+    return item.kind === 'assistant' && item.interim && !item.error ? item.id : undefined
+  }
+
+  return undefined
+}
+
+/**
  * The bubble a mid-turn seal left behind, when this completion is plainly that
  * same reply finishing rather than a new one.
  *
@@ -364,6 +433,7 @@ function clearTurn(next: ChatState): void {
   // placeholder the moment the turn ahead of it finished.
   next.turn.local = next.queued?.local === true
   next.turn.assistantId = undefined
+  next.turn.reasoningId = undefined
   next.turn.startedAt = undefined
   next.turn.draftingTool = undefined
   next.turn.interrupted = false
@@ -527,7 +597,7 @@ export function applyEvent(state: ChatState, event: TranscriptEvent, now: number
         return next
       }
 
-      const id = currentAssistantId(next, now)
+      const id = reasoningTargetId(next, now)
       const replace = event.type === 'reasoning.available'
 
       patchItem<AssistantItem>(next, id, draft => {
@@ -559,16 +629,30 @@ export function applyEvent(state: ChatState, event: TranscriptEvent, now: number
         return next
       }
 
-      if (text) {
-        addItem<AssistantItem>(next, {
-          id: `a:${next.turn.nextSeq}`,
-          kind: 'assistant',
-          text,
-          streaming: false,
-          interim: true,
-          ts: now / 1000
-        })
+      if (!text) {
+        return next
       }
+
+      // No live bubble: this preview either REPLACES the one standing at the end
+      // of the transcript, or starts the first note of a new stretch.
+      const open = openInterimId(next)
+
+      if (open) {
+        patchItem<AssistantItem>(next, open, draft => {
+          draft.text = text
+        })
+
+        return next
+      }
+
+      addItem<AssistantItem>(next, {
+        id: `a:${next.turn.nextSeq}`,
+        kind: 'assistant',
+        text,
+        streaming: false,
+        interim: true,
+        ts: now / 1000
+      })
 
       return next
     }

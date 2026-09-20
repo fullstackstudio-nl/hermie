@@ -131,10 +131,16 @@ export function AssistantBubble({
         </Text>
       ) : null}
 
+      {/*
+        The thought, aligned with the bubble's TEXT on the same rule as the
+        eyebrow above it — see `ReasoningDisclosure`, which is deliberately
+        secondary text rather than a bubble or a ledger row.
+      */}
       {item.reasoning ? (
         <ReasoningDisclosure
           durationS={item.durationS}
           id={item.id}
+          inset={TAIL_REACH + bodyInset}
           streaming={item.streaming && !hasBody}
           testID={`reasoning-${item.id}`}
           text={item.reasoning}

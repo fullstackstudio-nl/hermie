@@ -49,6 +49,42 @@ export const streamedTurn: TranscriptEvent[] = [
   })
 ]
 
+/**
+ * A thinking turn as the gateway really streams one: the thought, two previews
+ * of the same growing sentence, then the sentence.
+ *
+ * `message.interim` carries the reply SO FAR — the second frame is not a second
+ * message, it is the first one with more of it — which is why appending them
+ * put the same sentence on screen three times.
+ */
+export const thinkingTurn: TranscriptEvent[] = [
+  event('message.start', 1, {}),
+  event('reasoning.delta', 2, { text: 'The changelog ' }),
+  event('reasoning.delta', 3, { text: 'is the place to look.' }),
+  event('message.interim', 4, { text: 'Version 1.2.0', already_streamed: true }),
+  event('message.interim', 5, { text: 'Version 1.2.0 ships', already_streamed: true }),
+  event('message.complete', 6, { text: 'Version 1.2.0 ships three fixes.', status: 'complete' })
+]
+
+/**
+ * The same thought, summarised after the tool that interrupted it.
+ *
+ * `reasoning.available` comes out of `tool_progress`, so it arrives once the
+ * call has already sealed the bubble the deltas were landing on. This is the
+ * stream behind "every thought appears twice".
+ */
+export const thinkingSummarisedAfterToolTurn: TranscriptEvent[] = [
+  event('message.start', 1, {}),
+  event('reasoning.delta', 2, { text: 'The changelog ' }),
+  event('reasoning.delta', 3, { text: 'is the place to look.' }),
+  event('message.delta', 4, { text: 'Let me check.' }),
+  event('tool.start', 5, { tool_id: 'call_9', name: 'read_file', args: { path: 'CHANGELOG.md' } }),
+  event('reasoning.available', 6, { text: 'Read the changelog.' }),
+  event('tool.complete', 7, { tool_id: 'call_9', name: 'read_file', result: { content: '# 1.2.0' } }),
+  event('message.delta', 8, { text: 'Version 1.2.0 ships three fixes.' }),
+  event('message.complete', 9, { text: 'Version 1.2.0 ships three fixes.', status: 'complete' })
+]
+
 export const erroredTurn: TranscriptEvent[] = [
   event('message.start', 1, {}),
   event('message.delta', 2, { text: 'Starting…' }),

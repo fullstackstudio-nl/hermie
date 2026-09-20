@@ -361,6 +361,20 @@ export interface TurnState {
   startedAt?: number
   /** The assistant item currently receiving deltas. */
   assistantId?: string
+  /**
+   * The item holding THIS turn's thought.
+   *
+   * One turn is one thought, and the events that carry it do not all arrive
+   * while the same bubble is live: `reasoning.delta` streams before the first
+   * token, and `reasoning.available` comes out of `tool_progress`, which means
+   * it lands AFTER a tool call has already sealed that bubble. Resolving the
+   * target through `turn.assistantId` alone therefore started a second bubble
+   * for the same thinking, and the reader saw `Thought for 1s` twice with the
+   * same block under each — see `reasoningTargetId`.
+   *
+   * Cleared with the rest of the turn, so the next one thinks afresh.
+   */
+  reasoningId?: string
   /** True when WE submitted this turn; false means a foreign turn. */
   local: boolean
   /** Next `seq` to hand out. */

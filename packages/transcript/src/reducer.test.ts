@@ -13,14 +13,16 @@ import {
   type SubagentSnapshotRow,
   type TranscriptEvent
 } from './reducer'
-import { latestStatus } from './selectors'
+import { latestStatus, visibleItems } from './selectors'
 import {
   approvalRequest,
   clarifyRequest,
   delegationEvents,
   dmDispatchTurn,
   erroredTurn,
-  streamedTurn
+  streamedTurn,
+  thinkingSummarisedAfterToolTurn,
+  thinkingTurn
 } from './__fixtures__/events'
 import { rowsToItems } from './rows-to-items'
 import { cronBotChatBody, cronBotChatText, dmReplyProcessText } from './__fixtures__/rows'
@@ -969,5 +971,97 @@ describe('applySubagentSnapshot', () => {
     const state = run(delegationEvents)
 
     expect(applySubagentSnapshot(state, [], NOW)).toBe(state)
+  })
+})
+
+/**
+ * One turn is one thought, and one preview is not three messages.
+ *
+ * Both halves of the owner's "every thought appears twice with Show thinking
+ * on": a summary that lands after the tool that interrupted the thinking used to
+ * open a second bubble carrying the same block, and every `message.interim` used
+ * to stack another muted copy of the same growing sentence above the answer.
+ *
+ * Measured through `visibleItems` rather than off the state, because "appears
+ * twice" is a statement about what the reader sees.
+ */
+describe('a thinking turn', () => {
+  const shown = (state: ChatState) => visibleItems(state, { level: 'normal', showBotToBot: true, showThinking: true })
+  const thoughts = (state: ChatState) =>
+    shown(state)
+      .map(entry => entry.item)
+      .filter((item): item is AssistantItem => item.kind === 'assistant' && Boolean(item.reasoning?.trim()))
+  const replies = (state: ChatState) =>
+    shown(state)
+      .map(entry => entry.item)
+      .filter((item): item is AssistantItem => item.kind === 'assistant' && Boolean(item.text.trim()))
+
+  describe('reasoning → interim → interim → complete', () => {
+    const state = run(thinkingTurn)
+
+    it('shows the thought exactly once', () => {
+      expect(thoughts(state).map(item => item.reasoning)).toEqual(['The changelog is the place to look.'])
+    })
+
+    it('shows one reply, not a preview stacked under every preview', () => {
+      expect(replies(state).map(item => item.text)).toEqual(['Version 1.2.0 ships three fixes.'])
+    })
+
+    it('replaces the preview rather than appending to it', () => {
+      // The whole turn is one bubble here: the second interim overwrote the
+      // first, and the completion settled onto it because it continued it.
+      expect(state.order.filter(id => state.items[id]?.kind === 'assistant')).toHaveLength(1)
+      expect((list(state).at(-1) as AssistantItem).interim).toBe(false)
+    })
+  })
+
+  describe('a summary that arrives after the tool that interrupted it', () => {
+    const state = run(thinkingSummarisedAfterToolTurn)
+
+    it('keeps the thought on the bubble that was thinking it', () => {
+      expect(thoughts(state).map(item => item.reasoning)).toEqual(['Read the changelog.'])
+    })
+
+    it('does not open a second bubble for the same thinking', () => {
+      const assistants = list(state).filter(item => item.kind === 'assistant') as AssistantItem[]
+
+      expect(assistants.map(item => item.text)).toEqual(['Let me check.', 'Version 1.2.0 ships three fixes.'])
+      expect(assistants.filter(item => item.reasoning)).toHaveLength(1)
+    })
+
+    it('forgets the thought when the turn ends, so the next one thinks afresh', () => {
+      expect(state.turn.reasoningId).toBeUndefined()
+    })
+  })
+
+  describe('the same turn, hydrated from history', () => {
+    // What the gateway persists for the turn above: the previews are live-only,
+    // so one assistant row carries the thought and the reply. Both sidecar keys
+    // are set because providers send both, and the projection must not read the
+    // thought out of each of them.
+    const items = rowsToItems(
+      [
+        { role: 'user', text: 'What is in 1.2.0?', row_id: 1 },
+        {
+          role: 'assistant',
+          text: 'Version 1.2.0 ships three fixes.',
+          reasoning: 'The changelog is the place to look.',
+          reasoning_content: 'The changelog is the place to look.',
+          row_id: 2
+        }
+      ],
+      'rpc'
+    )
+    const assistants = items.filter((item): item is AssistantItem => item.kind === 'assistant')
+
+    it('shows one thought and one reply', () => {
+      expect(assistants).toHaveLength(1)
+      expect(assistants[0]?.reasoning).toBe('The changelog is the place to look.')
+      expect(assistants[0]?.text).toBe('Version 1.2.0 ships three fixes.')
+    })
+
+    it('carries no interim, so nothing is drawn muted under the answer', () => {
+      expect(assistants.every(item => !item.interim)).toBe(true)
+    })
   })
 })
