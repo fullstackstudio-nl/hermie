@@ -24,10 +24,10 @@
  *    silhouette.
  *  - **The tail is drawn BEHIND the bubble, not inside it.** Only the part that
  *    escapes the bubble's rounded corner is visible, so the join can never show
- *    as a seam or a band — even though the tail is a flat colour and the bubble
- *    is a gradient. Drawing it on top would paint a 5pt strip of the bottom stop
- *    over a lighter part of the gradient, which reads as a stripe on a tall
- *    bubble.
+ *    as a seam or a band. Both are one flat colour now — the outgoing gradient is
+ *    gone (the owner's verdict: gradients look generated) — but behind is still
+ *    where the tail belongs: drawn on top it would paint its own anti-aliased
+ *    edge across the bubble's.
  *  - **Every offset is a whole point.** The Mac renders the iPad build scaled,
  *    so a sub-point offset that is invisible at 3x is a visible sliver there. The
  *    tail's own width is the wrapper's padding, which keeps it inside the column
@@ -38,9 +38,15 @@
  *    is composited by hand, and a long reply swaps it for the near-opaque reading
  *    wash so its contrast stops being a function of the wallpaper.
  */
-import { LinearGradient } from 'expo-linear-gradient'
 import { useCallback, useState, type ReactNode } from 'react'
-import { useWindowDimensions, View, type LayoutChangeEvent, type StyleProp, type ViewStyle } from 'react-native'
+import {
+  StyleSheet,
+  useWindowDimensions,
+  View,
+  type LayoutChangeEvent,
+  type StyleProp,
+  type ViewStyle
+} from 'react-native'
 import Svg, { Path } from 'react-native-svg'
 
 import { useTheme } from '../../ui/theme'
@@ -60,17 +66,17 @@ export interface BubbleProps {
   /**
    * Which recipe paints the interior.
    *
-   * `own` ignores it — an outgoing bubble is the chat's accent gradient — so the
-   * variant only ever describes an incoming one.
+   * `own` ignores it — an outgoing bubble is the chat's accent — so the variant
+   * only ever describes an incoming one.
    */
   variant?: BubbleVariant
   /**
-   * The outgoing gradient, top → bottom, from `useChatAccent`.
+   * The outgoing bubble's flat fill, from `useChatAccent`.
    *
    * Passed in rather than read here: the bubble does not know which chat it is
    * in, and the accent is one lookup per screen rather than one per row.
    */
-  accent?: { top: string; bottom: string }
+  accent?: string
   /** Draws the tail. Only the LAST bubble of a group gets one. */
   tail?: boolean
   /** Continues a run: the top corner on the sender's side tucks in too. */
@@ -168,11 +174,9 @@ export function useLedgerWidth(): number | undefined {
 }
 
 /**
- * The tail, filled flat.
+ * The tail.
  *
- * Flat is correct rather than convenient: it sits at the bubble's lower edge,
- * where a vertical gradient has already arrived at its bottom stop, so one colour
- * matches exactly. The viewBox is a point taller than the shape's nominal height
+ * The viewBox is a point taller than the shape's nominal height
  * because the path's lowest control point reaches 17.7 and a 17-high box would
  * clip the curve's last half point — which at Mac scaling is a flat edge where a
  * curve should be.
@@ -336,13 +340,13 @@ export function Bubble({
   const max = useBubbleWidth()
   const own = side === 'own'
   const recipe = theme.bubbles[variant]
-  const gradient = own ? accent : undefined
+  const fill = own ? accent : undefined
   const reading = variant === 'inRead' || variant === 'dmRead'
   const corners = bubbleCorners(theme.radii, side, grouped)
   const paddingX = bubblePaddingX(theme.space, reading)
   const clock = useInlineMeta(max - paddingX * 2)
 
-  const tailColor = own ? (gradient?.bottom ?? theme.accent().bubble.bottom) : recipe.tail
+  const tailColor = own ? (fill ?? theme.accent().bubble) : recipe.tail
 
   return (
     <View
@@ -373,21 +377,22 @@ export function Bubble({
       {tail ? <Tail color={tailColor} side={side} /> : null}
 
       <View style={[corners, { maxWidth: max, overflow: 'hidden' }, style]} testID={testID}>
-        <LinearGradient
-          colors={gradient ? [gradient.top, gradient.bottom] : recipe.gradient}
-          end={{ x: 0, y: 1 }}
+        {/*
+          One flat field, and under a translucent incoming recipe the rung it
+          composites onto. `own` needs no rung: its accent has no alpha.
+
+          This was a two-stop vertical gradient. The owner's verdict on gradients
+          is that they look generated, and a messenger's outgoing bubble is one
+          saturated colour with one ink on it — which is also why the tail below
+          is now trivially the same colour as the bubble instead of having to
+          match its lower stop.
+        */}
+        {own ? null : (
+          <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: recipe.solid }]} />
+        )}
+        <View
           pointerEvents="none"
-          start={{ x: 0, y: 0 }}
-          style={{
-            bottom: 0,
-            left: 0,
-            position: 'absolute',
-            right: 0,
-            top: 0,
-            // The rung under a translucent recipe. `own` never needs one: its
-            // gradient has no alpha.
-            ...(own ? {} : { backgroundColor: recipe.solid })
-          }}
+          style={[StyleSheet.absoluteFill, { backgroundColor: own ? (fill ?? theme.accent().bubble) : recipe.fill }]}
         />
 
         <View

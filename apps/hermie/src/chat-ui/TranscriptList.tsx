@@ -142,8 +142,8 @@ export interface TranscriptContext {
    */
   canOpenCron?: (jobName: string) => boolean
   onRunCron?: (jobName: string) => void
-  /** The chat's outgoing bubble gradient, from `useChatAccent`. */
-  accent?: { top: string; bottom: string }
+  /** The chat's outgoing bubble fill, from `useChatAccent`. */
+  accent?: string
   /**
    * Where a gateway-relative Markdown image resolves, and what its request
    * carries. Must be a stable object; it is part of the row memo's key.

@@ -1,5 +1,5 @@
 /**
- * The human's own turn: right-aligned, the chat's accent gradient, white text,
+ * The human's own turn: right-aligned, the chat's flat accent, white text,
  * a tail on the last of a run, the clock on the body's last line and — on the last
  * sent message only — ticks beside it.
  *
@@ -7,7 +7,7 @@
  * a path in backticks was writing markup, and the reply beside it renders the
  * same markup: showing the asterisks on one side and bold on the other is the
  * app disagreeing with itself. Links are underlined in white rather than in the
- * accent, which on its own gradient would be invisible.
+ * accent, which on its own fill would be invisible.
  */
 import { View } from 'react-native'
 
@@ -29,8 +29,8 @@ export interface UserBubbleProps {
   tail?: boolean
   /** Continues the run above it. */
   grouped?: boolean
-  /** The chat's outgoing gradient, from `useChatAccent`. */
-  accent?: { top: string; bottom: string }
+  /** The chat's outgoing fill, from `useChatAccent`. */
+  accent?: string
   onLinkPress?: (href: string) => void
 }
 
@@ -90,7 +90,7 @@ export function UserBubble({
     >
       {item.text ? (
         <Markdown
-          // White on the gradient. The accent link colour is the bubble's own
+          // White on the accent. The accent link colour is the bubble's own
           // fill, so it would vanish into it.
           color="onAccent"
           linkColor={theme.colors.onAccent}
@@ -98,7 +98,7 @@ export function UserBubble({
           onLinkPress={onLinkPress}
           // A code chip inside a white-on-accent bubble needs a light wash. The
           // default steps DOWN from the surface it sits on, which on a saturated
-          // gradient reads as a redaction bar.
+          // fill reads as a redaction bar.
           inlineCodeBackground="rgba(255,255,255,0.22)"
           inlineCodeBorderColor="rgba(255,255,255,0.32)"
           surface="rgba(255,255,255,0.16)"

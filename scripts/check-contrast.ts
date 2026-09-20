@@ -109,21 +109,17 @@ function contrast(ink: string, background: Rgb): number {
 }
 
 /**
- * The worst point of each wallpaper: the darkest bloom in light, the BRIGHTEST
- * in dark.
+ * Each wallpaper, as the one colour it now is.
  *
- * Not the base colour. A wallpaper is a base plus coloured blooms, and a bubble
- * can land on any of them — so the number that has to clear AA is the one over
- * the bloom that hurts most, not the average.
+ * This used to hunt for the worst POINT of a wallpaper — the brightest bloom in
+ * dark, the darkest in light — because a wallpaper was a ramp plus coloured
+ * corner washes and a bubble could land on any of them. There is nothing to hunt
+ * any more: a wallpaper is one flat fill, so the number that has to clear AA is
+ * simply that fill. Every ratio in the table can only have improved, because the
+ * colour kept is the end of the old ramp furthest from the ink.
  */
 function wallpaperExtremes(scheme: Scheme): { name: string; rgb: Rgb }[] {
-  return Object.entries(WALLPAPERS).map(([name, bySchema]) => {
-    const spec = bySchema[scheme]
-    const candidates = [...spec.base, ...spec.blooms.map(bloom => bloom.color)].map(color => parse(color).rgb)
-    const pick = candidates.sort((a, b) => luminance(b) - luminance(a))
-
-    return { name, rgb: (scheme === 'dark' ? pick[0] : pick.at(-1)) as Rgb }
-  })
+  return Object.entries(WALLPAPERS).map(([name, bySchema]) => ({ name, rgb: parse(bySchema[scheme].fill).rgb }))
 }
 
 interface Surface {
@@ -137,18 +133,15 @@ function surfaces(scheme: Scheme): Surface[] {
   const bubbles = scheme === 'dark' ? darkBubbles : lightBubbles
   const out: Surface[] = []
 
-  /** The least opaque stop is the one the wallpaper shows through most. */
-  const thinnest = (stops: readonly string[]) => [...stops].sort((a, b) => parse(a).alpha - parse(b).alpha)[0] as string
-
   for (const variant of ['panel', 'sheet', 'card', 'control'] as GlassVariant[]) {
     const recipe = glass[variant]
 
     out.push({
       name: variant,
-      // Blurred: the gradient over the wallpaper itself. That is the real case
+      // Blurred: the wash over the wallpaper itself. That is the real case
       // on iOS and the harsher of the two; the opaque fallback is strictly
       // easier to read on, so it cannot be what fails.
-      background: wallpaper => over(thinnest(recipe.gradient), wallpaper)
+      background: wallpaper => over(recipe.fill, wallpaper)
     })
   }
 
@@ -159,13 +152,13 @@ function surfaces(scheme: Scheme): Surface[] {
       // A bubble is NOT glass (§7.4): it paints its own opaque rung and
       // composites the recipe onto that, so the wallpaper never reaches the ink.
       name: `bubble ${variant}`,
-      background: () => over(thinnest(recipe.gradient), parse(recipe.solid).rgb)
+      background: () => over(recipe.fill, parse(recipe.solid).rgb)
     })
   }
 
   out.push({
     name: 'sunk tint',
-    background: wallpaper => over(TINT_SUNK[scheme], over(thinnest(glass.panel.gradient), wallpaper))
+    background: wallpaper => over(TINT_SUNK[scheme], over(glass.panel.fill, wallpaper))
   })
 
   /**
@@ -179,12 +172,12 @@ function surfaces(scheme: Scheme): Surface[] {
    */
   out.push({
     name: 'danger tint',
-    background: wallpaper => over(DANGER_SOFT[scheme], over(thinnest(glass.sheet.gradient), wallpaper))
+    background: wallpaper => over(DANGER_SOFT[scheme], over(glass.sheet.fill, wallpaper))
   })
 
   out.push({
     name: 'ok tint',
-    background: wallpaper => over(OK_SOFT[scheme], over(thinnest(glass.sheet.gradient), wallpaper))
+    background: wallpaper => over(OK_SOFT[scheme], over(glass.sheet.fill, wallpaper))
   })
 
   return out
@@ -229,19 +222,21 @@ function measure(): Row[] {
 }
 
 /**
- * White on the outgoing bubble, at the gradient's LIGHTER stop.
+ * White on the outgoing bubble.
  *
  * The one place a fill's own readability is the question: the outgoing bubble is
- * the chat's accent, the body on it is `onAccent`, and the top stop is the
- * hardest of the two to read on. Every accent has to clear AA or a chat's colour
- * becomes a choice between a look and a legible message.
+ * the chat's accent and the body on it is `onAccent`. It used to be a gradient,
+ * and the stop measured here was its lighter — the harder — one; that stop is now
+ * the whole bubble, so this row is the same number about a simpler thing. Every
+ * accent has to clear AA or a chat's colour becomes a choice between a look and a
+ * legible message.
  */
 function accentRows(): Row[] {
   return ACCENT_ORDER.map(name => ({
     scheme: 'light' as Scheme,
     surface: `accent ${name}`,
     role: 'onAccent' as ColorRole,
-    ratio: contrast(lightColors.onAccent, parse(ACCENTS[name].bubble.top).rgb),
+    ratio: contrast(lightColors.onAccent, parse(ACCENTS[name].bubble).rgb),
     wallpaper: '—',
     floor: AA_TEXT
   }))
@@ -267,7 +262,7 @@ function main(): void {
   }
 
   if (!check) {
-    process.stdout.write('\n## white on the outgoing bubble, at its lighter stop\n')
+    process.stdout.write('\n## white on the outgoing bubble\n')
 
     for (const row of rows.filter(entry => entry.surface.startsWith('accent '))) {
       const mark = row.ratio < row.floor ? `   <-- below ${row.floor}` : ''

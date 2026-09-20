@@ -7,6 +7,53 @@ composited surfaces, not on the raw hex values.
 
 ---
 
+## 0. Two rules that outrank everything below
+
+These were set by the owner on 2026-09-20 against a reference he picked himself —
+iPadOS 26 Messages in dark mode — and they beat any value in this file that
+disagrees with them.
+
+### 0.1 No gradients. Anywhere.
+
+Flat colours only, per theme: the wallpaper, every glass wash, every button, and
+the outgoing bubble. His verdict on the gradients that were there was that they
+look **generated**, and the reference bears it out — the Messages window is a
+near-black field with nothing painted on it, and every impression of depth comes
+from the glass in FRONT of the floor rather than from a ramp on the floor itself.
+
+What this cost, and what it did not:
+
+- `WallpaperSpec` is one `fill` per scheme. The value kept is the end of the old
+  ramp furthest from the ink, so every contrast ratio could only improve.
+- `GlassRecipe.fill` and `BubbleRecipe.fill` are one colour, at the alpha of the
+  THINNEST stop the gradient used to carry — the stop `contrast:check` already
+  measured the ink against, so no floor moved.
+- `AccentSwatch.bubble` is one colour, the old gradient's lighter stop, which is
+  the one white was already being checked on.
+- The **only** surviving `LinearGradient` in the app is the reading fold's mask
+  (`chat-ui/primitives/Fold.tsx`). That is not decoration: it is an alpha ramp
+  whose whole job is to make a clipped body fade instead of ending in a cut line.
+  A flat mask there is a rectangle drawn over the last two lines.
+
+### 0.2 Glass must be REAL glass where the OS has it
+
+The benchmark is the Messages search field and the button beside it: the blue
+selected row scrolling underneath shows through them, blurred and bent at the rim,
+with no opaque tint over it. That is `UIGlassEffect` lensing, and nothing built out
+of a blur plus a tint reaches it.
+
+So on iOS 26+ and on the Mac (the iPad build on macOS 26) every glass element is a
+real `expo-glass-effect` `GlassView` — `glassEffectStyle` `regular`, minimal tint,
+`isInteractive` on the ones that are buttons, `GlassContainer` where adjacent
+elements should merge. `GLASS_MATERIAL` (`ui/glass/material.ts`) decides once, from
+`isLiquidGlassAvailable()` and `isGlassEffectAPIAvailable()`, and the developer
+screen prints which of the three paths is live so the question is answerable on a
+device instead of by reading this paragraph. The blur fallback is for older OS
+versions, Android and the web, and there it is a low-opacity flat tint — never a
+thicker one standing in for the real material.
+
+---
+
 ## 1. Colour
 
 ### 1.1 Text and content

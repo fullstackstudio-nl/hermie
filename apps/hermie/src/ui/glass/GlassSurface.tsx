@@ -1,8 +1,8 @@
 /**
  * One glass surface, in whichever material this platform can draw.
  *
- * A glass surface is a stack: a blur, one or two translucent gradients, a
- * specular edge and a drop shadow. Which parts are real depends on the platform
+ * A glass surface is a stack: a blur, one translucent wash, a specular edge and
+ * a drop shadow. Which parts are real depends on the platform
  * (`material.ts`) and on the reader's Reduce Transparency setting; the token set
  * is identical in all three cases, which is the point — the dark elevation
  * ladder is defined so that the solid fallback keeps the same hierarchy.
@@ -17,11 +17,13 @@
  *    inside a `GlassSurface` inside a `GlassSurface` therefore drops to a tint
  *    on its own, by reading the depth off a context.
  *  - **Text-heavy surfaces get a tint layer.** `opaque` lays the surface's solid
- *    rung under the gradient at full strength, so body-text contrast is a fixed
+ *    rung under the wash at full strength, so body-text contrast is a fixed
  *    number rather than a function of whatever is behind it.
+ *  - **No gradients.** Not here and not anywhere: the owner's verdict is that
+ *    they look generated. The wash is one flat colour at the alpha the thinnest
+ *    stop used to carry — see `GlassRecipe.fill`.
  */
 import { BlurView } from 'expo-blur'
-import { LinearGradient } from 'expo-linear-gradient'
 import { createContext, useContext, type ReactNode } from 'react'
 import { StyleSheet, View, type StyleProp, type ViewProps, type ViewStyle } from 'react-native'
 
@@ -53,7 +55,7 @@ export type GlassSurfaceProps = Omit<ViewProps, 'style'> & {
   /** Defaults to the radius that belongs to the variant. */
   radius?: number
   shadow?: ShadowName | 'none'
-  /** A chat's accent, laid under the gradient. Used by the selected row. */
+  /** A chat's accent, laid under the wash. Used by the selected row. */
   tint?: string
   /** Lay the solid rung under the glass, for a surface that carries body text. */
   opaque?: boolean
@@ -148,26 +150,20 @@ export function GlassSurface({
         {blurred ? <Material intensity={recipe.blurIntensity} tint={recipe.nativeTint} radius={cornerRadius} /> : null}
 
         {/*
-          The gradient is what turns a FLAT blur into glass: a bright top-left
-          falling to a dimmer middle. The real material already does that, and
-          better — it refracts rather than only blurring — so laying the
-          gradient over it as well applies the lightening twice and washes the
-          wallpaper out of the panel entirely. Measured on an iPhone 17 Pro
-          (iOS 26.5): with both, the Blue wallpaper reads as a flat near-white
-          field behind the list. So the gradient belongs to the two fallbacks
-          and nowhere else.
+          The wash: a low-alpha flat fill that turns a plain blur into something
+          that reads as a material. It belongs to the two FALLBACKS and nowhere
+          else — the real Liquid Glass material already lightens and refracts,
+          and laying our own wash over it applies the lightening twice. Measured
+          on an iPhone 17 Pro (iOS 26.5): with both, the Blue wallpaper read as a
+          flat near-white field behind the list.
 
-          The panel uses the mockup's 155° diagonal; every other surface is
-          vertical.
+          It used to be a diagonal gradient. The owner's verdict on gradients is
+          that they look generated, and the benchmark he set — iPadOS 26 Messages
+          — has none: the transparency comes from the material, not from a ramp
+          painted on top of it.
         */}
         {native ? null : (
-          <LinearGradient
-            colors={gradientStops(recipe.gradient)}
-            end={variant === 'panel' ? { x: 0.9, y: 1 } : { x: 0, y: 1 }}
-            pointerEvents="none"
-            start={variant === 'panel' ? { x: 0.1, y: 0 } : { x: 0, y: 0 }}
-            style={StyleSheet.absoluteFill}
-          />
+          <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: recipe.fill }]} />
         )}
 
         {tint ? <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: tint }]} /> : null}
@@ -220,15 +216,6 @@ function Material({ intensity, tint, radius }: { intensity: number; tint?: strin
       tint={theme.scheme === 'dark' ? 'systemMaterialDark' : 'systemMaterialLight'}
     />
   )
-}
-
-/** `LinearGradient` wants at least two stops and types them as a tuple. */
-function gradientStops(stops: readonly string[]): readonly [string, string, ...string[]] {
-  return (stops.length >= 2 ? stops : [stops[0] ?? 'transparent', stops[0] ?? 'transparent']) as readonly [
-    string,
-    string,
-    ...string[]
-  ]
 }
 
 /**

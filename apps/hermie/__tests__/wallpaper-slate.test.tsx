@@ -4,7 +4,7 @@
  * The owner liked the way macOS renders an INACTIVE window — everything a step
  * desaturated — and asked whether Graphite was already that. It is not, and the
  * first assertion here is the measurement that settles it rather than an opinion
- * about it: Graphite's dark base is near-black and Slate's is roughly three times
+ * about it: Graphite's dark fill is near-black and Slate's is roughly three times
  * its luminance, which is a different composition and not a tuning of the same one.
  *
  * The second half is the mechanism. A wallpaper is the only setting a reader picks
@@ -33,43 +33,39 @@ const luminance = (hex: string): number => {
   return 0.2126 * channel(red) + 0.7152 * channel(green) + 0.0722 * channel(blue)
 }
 
-/** The brightest point of a wallpaper: the base stops and every bloom. */
-const brightest = (name: keyof typeof WALLPAPERS, scheme: Scheme): number => {
-  const spec = WALLPAPERS[name][scheme]
-
-  return Math.max(...[...spec.base, ...spec.blooms.map(bloom => bloom.color)].map(luminance))
-}
+const fillOf = (name: keyof typeof WALLPAPERS, scheme: Scheme): string => WALLPAPERS[name][scheme].fill
 
 describe('Slate against Graphite', () => {
   it('is a different composition, not a tuned Graphite', () => {
-    const slate = luminance(WALLPAPERS.slate.dark.base[0] as string)
-    const graphite = luminance(WALLPAPERS.graphite.dark.base[0] as string)
+    const slate = luminance(fillOf('slate', 'dark'))
+    const graphite = luminance(fillOf('graphite', 'dark'))
 
     // Near-black against mid-dark. The ratio is the whole answer to "is Graphite
-    // already close": it is not, and the difference is the base rather than the
-    // blooms, which is why tuning could not have produced it.
+    // already close": it is not, and the difference is the FLOOR, which is why no
+    // amount of tuning the one produces the other.
     expect(slate / graphite).toBeGreaterThan(2.5)
   })
 
-  it('keeps its blooms at the base’s luminance, because the contrast check binds', () => {
-    // The dark ink set is calibrated against a deep wallpaper, and the contrast
-    // check measures every ink against the BRIGHTEST point of every dark one. So a
-    // Slate bloom is a hue shift at the same luminance, never a highlight — and
-    // `npm run contrast:check` is what actually enforces that. This states the
-    // intent so that a bloom raised "to add depth" fails here with the reason
-    // rather than in a table of 186 numbers.
-    const base = luminance(WALLPAPERS.slate.dark.base[0] as string)
+  /**
+   * The ceiling, restated for the round that made every wallpaper one colour.
+   *
+   * There are no blooms to hold down any more — a wallpaper is a flat fill, the
+   * owner's verdict on the gradients having been that they look generated. What
+   * survives of that rule is the thing it was protecting: the dark ink set is
+   * calibrated against a deep wallpaper, and Slate is the brightest of the four,
+   * so Slate is the value `contrast:check` binds. This says so here, with the
+   * reason, rather than leaving it to fail in a table of 186 numbers.
+   */
+  it('is the brightest dark wallpaper, which is what makes it the one the check binds', () => {
+    const others = (['blue', 'warm', 'graphite'] as const).map(name => luminance(fillOf(name, 'dark')))
 
-    expect(brightest('slate', 'dark')).toBeLessThanOrEqual(base + 0.001)
+    expect(Math.min(...others.map(other => luminance(fillOf('slate', 'dark')) / other))).toBeGreaterThan(1)
   })
 
   it('has a light counterpart, derived rather than inverted', () => {
-    const light = WALLPAPERS.slate.light
-
-    expect(light.base).toHaveLength(3)
-    // Desaturated in the light scheme means NEUTRAL, not dark: the light ramp is
-    // a near-grey, where Blue's is plainly blue.
-    const [red, green, blue] = rgb(light.base[2] as string)
+    // Desaturated in the light scheme means NEUTRAL, not dark: Slate's light fill
+    // is a near-grey, where Blue's is plainly blue.
+    const [red, green, blue] = rgb(fillOf('slate', 'light'))
 
     expect(Math.abs(red - green)).toBeLessThan(12)
     expect(blue - red).toBeLessThan(20)
@@ -96,8 +92,8 @@ describe('the picker', () => {
     // Every name in the order has a spec in both schemes, which is what the
     // segmented control and `--hermieWallpaper` both read.
     for (const name of WALLPAPER_ORDER) {
-      expect(WALLPAPERS[name].light.base.length).toBeGreaterThan(0)
-      expect(WALLPAPERS[name].dark.base.length).toBeGreaterThan(0)
+      expect(WALLPAPERS[name].light.fill).toMatch(/^#[0-9A-F]{6}$/i)
+      expect(WALLPAPERS[name].dark.fill).toMatch(/^#[0-9A-F]{6}$/i)
     }
   })
 })
