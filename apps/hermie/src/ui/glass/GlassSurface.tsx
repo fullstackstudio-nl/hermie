@@ -68,6 +68,16 @@ export type GlassSurfaceProps = Omit<ViewProps, 'style'> & {
   variant?: GlassVariant
   /** Defaults to the radius that belongs to the variant. */
   radius?: number
+  /**
+   * The BOTTOM corners, when they differ from the rest.
+   *
+   * A bottom sheet is the only caller: it sits on the window's own edge, so its
+   * lower corners are square. It used to say that by overriding four style keys
+   * on two of the surface's views — which left the third, the native material,
+   * still rounded, and a material is not clipped by a parent's corner mask the
+   * way a plain layer is. One number reaches every layer instead.
+   */
+  radiusBottom?: number
   shadow?: ShadowName | 'none'
   /** A chat's accent, laid under the wash. Used by the selected row. */
   tint?: string
@@ -116,6 +126,7 @@ const SHADOW_FOR: Record<GlassVariant, ShadowName | 'none'> = {
 export function GlassSurface({
   variant = 'panel',
   radius,
+  radiusBottom,
   shadow,
   tint,
   opaque = false,
@@ -131,6 +142,16 @@ export function GlassSurface({
   const recipe = theme.glass[variant]
 
   const cornerRadius = radius ?? theme.radii[RADIUS_FOR[variant]]
+  const bottomRadius = radiusBottom ?? cornerRadius
+  // Spelled per corner so that one number can differ; a single `borderRadius`
+  // beside a per-corner override is two rules for one shape, and which wins
+  // depends on the order a style array happens to be flattened in.
+  const corners = {
+    borderBottomLeftRadius: bottomRadius,
+    borderBottomRightRadius: bottomRadius,
+    borderTopLeftRadius: cornerRadius,
+    borderTopRightRadius: cornerRadius
+  }
   const shadowToken = shadow ?? SHADOW_FOR[variant]
   const shadowStyle = shadowToken === 'none' ? null : theme.shadows[shadowToken]
 
@@ -162,11 +183,11 @@ export function GlassSurface({
   const border = blurred ? (variant === 'panel' ? theme.edge : theme.edgeSoft) : recipe.hairline
 
   return (
-    <View {...rest} style={[shadowStyle, { borderRadius: cornerRadius }, style]}>
+    <View {...rest} style={[shadowStyle, corners, style]}>
       <View
         style={[
           {
-            borderRadius: cornerRadius,
+            ...corners,
             overflow: 'hidden',
             borderWidth: border === 'transparent' ? 0 : 1,
             borderColor: border,
@@ -178,9 +199,9 @@ export function GlassSurface({
       >
         {blurred ? (
           <Material
+            corners={corners}
             interactive={interactive}
             intensity={recipe.blurIntensity}
-            radius={cornerRadius}
             tint={recipe.nativeTint}
           />
         ) : null}
@@ -239,12 +260,13 @@ export function GlassSurface({
 function Material({
   intensity,
   tint,
-  radius,
+  corners,
   interactive
 }: {
   intensity: number
   tint?: string | undefined
-  radius: number
+  /** Per corner, so a sheet's square bottom reaches the material too. */
+  corners: ViewStyle
   interactive: boolean
 }) {
   const theme = useTheme()
@@ -256,7 +278,7 @@ function Material({
         glassEffectStyle="regular"
         isInteractive={interactive}
         pointerEvents="none"
-        style={[StyleSheet.absoluteFill, { borderRadius: radius }]}
+        style={[StyleSheet.absoluteFill, corners]}
         {...(tint ? { tintColor: tint } : {})}
       />
     )

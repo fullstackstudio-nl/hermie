@@ -248,7 +248,10 @@ export function BottomSheet({
           behavior={KEYBOARD_AVOID_BEHAVIOR}
           // The column inset lives here rather than on the root so it travels with
           // the sheet when the keyboard pushes it up.
-          style={{ alignItems: 'center', paddingLeft: left }}
+          // `paddingBottom: 0` is explicit rather than assumed: this is a
+          // `KeyboardAvoidingView`, whose whole job is to add one, and the card
+          // below it has to reach the window's edge when it is not doing that.
+          style={{ alignItems: 'center', paddingBottom: 0, paddingLeft: left }}
           testID={testID ? `${testID}-column` : 'sheet-column'}
         >
           <Animated.View
@@ -269,21 +272,23 @@ export function BottomSheet({
             {/*
               `opaque`: a sheet carries body text and often a command, so its
               contrast has to be a fixed number rather than a function of the
-              wallpaper it happens to be over. Only the top corners are rounded —
-              the bottom edge is the window's.
+              wallpaper it happens to be over.
+
+              `radiusBottom={0}`: the sheet sits ON the window's bottom edge, so
+              its lower corners are square and there is nothing under it. That
+              used to be said by overriding four style keys on two of the
+              surface's views, which left the third — the native material — still
+              rounded; a material is not clipped by a parent's corner mask the way
+              a plain layer is, and the owner's report is a rounded lower edge with
+              a strip of window showing beneath it. One number now reaches every
+              layer. The safe-area inset is padding INSIDE the card (see `body`),
+              never a margin under it.
             */}
             <GlassSurface
-              contentStyle={[
-                {
-                  borderBottomLeftRadius: 0,
-                  borderBottomRightRadius: 0,
-                  maxHeight
-                },
-                contentStyle
-              ]}
+              contentStyle={[{ maxHeight }, contentStyle]}
               opaque
               radius={theme.radii.sheet}
-              style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}
+              radiusBottom={0}
               variant="sheet"
             >
               {scrollable ? (

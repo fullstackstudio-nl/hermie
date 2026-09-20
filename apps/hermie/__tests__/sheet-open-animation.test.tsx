@@ -13,9 +13,10 @@
  * only that it ends at 0 would have passed against the bug.
  */
 import { act, screen } from '@testing-library/react-native'
-import { Animated, Text } from 'react-native'
+import { Animated, StyleSheet, Text } from 'react-native'
 
 import { BottomSheet, SHEET_ANIMATION_MS } from '../src/ui/BottomSheet'
+import { radii } from '../src/ui/tokens'
 import { renderScreen, withProviders } from './support/render'
 
 /** The panel's `translateY`, read off the style the sheet actually rendered. */
@@ -36,6 +37,9 @@ const sheet = (visible: boolean) => (
 )
 
 const open = (visible = true) => renderScreen(sheet(visible))
+
+/** What the sheet's own layers are drawn with, as opposed to a grabber. */
+const SHEET_RADIUS = radii.sheet
 
 describe('opening a bottom sheet', () => {
   beforeEach(() => {
@@ -107,6 +111,69 @@ describe('opening a bottom sheet', () => {
 
     expect(onClosed).toHaveBeenCalled()
     expect(screen.queryByTestId('sheet-panel')).toBeNull()
+  })
+})
+
+describe('where the sheet sits', () => {
+  beforeEach(() => {
+    jest.useFakeTimers()
+  })
+
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
+  /** Every style the surface flattened, for the layer under a testID. */
+  const flat = (testID: string) =>
+    StyleSheet.flatten(screen.getByTestId(testID).props.style as never) as Record<string, number | undefined>
+
+  it('is square at the bottom and rounded at the top, on every layer', () => {
+    // It used to say this by overriding four style keys on two of the surface's
+    // views, which left the native material still rounded — and a material is not
+    // clipped by a parent's corner mask the way a plain layer is. That is the
+    // rounded lower edge the owner photographed.
+    open()
+
+    act(() => {
+      jest.advanceTimersByTime(SHEET_ANIMATION_MS * 2)
+    })
+
+    // Every layer, found by its radius rather than by a testID: the surface
+    // renders three of them and the one that was wrong had no name.
+    const rounded = screen
+      .getByTestId('sheet-panel')
+      .findAll(node => {
+        const style = StyleSheet.flatten(node.props?.style as never) as Record<string, number | undefined> | undefined
+
+        // The sheet's OWN layers, by the radius they are drawn with. A grabber
+        // is rounded too and is not one of them.
+        return style?.borderTopLeftRadius === SHEET_RADIUS || style?.borderRadius === SHEET_RADIUS
+      })
+      .map(node => StyleSheet.flatten(node.props.style as never) as Record<string, number | undefined>)
+
+    expect(rounded.length).toBeGreaterThan(0)
+
+    for (const style of rounded) {
+      expect(style.borderBottomLeftRadius).toBe(0)
+      expect(style.borderBottomRightRadius).toBe(0)
+      expect(style.borderTopLeftRadius).toBeGreaterThan(0)
+      expect(style.borderTopRightRadius).toBeGreaterThan(0)
+      // A blanket radius beside a per-corner one is two rules for one shape, and
+      // which wins depends on the order a style array is flattened in.
+      expect(style.borderRadius).toBeUndefined()
+    }
+  })
+
+  it('leaves no space under the card', () => {
+    // The safe-area inset belongs INSIDE the card as padding. A margin under it
+    // is a strip of window below a sheet that is supposed to sit on the edge.
+    open()
+
+    const column = flat('sheet-column')
+
+    expect(column.paddingBottom ?? 0).toBe(0)
+    expect(column.marginBottom ?? 0).toBe(0)
+    expect(flat('sheet-panel').marginBottom ?? 0).toBe(0)
   })
 })
 
