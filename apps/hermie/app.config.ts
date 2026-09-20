@@ -1,4 +1,6 @@
 import { execFileSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 
 import type { ExpoConfig } from 'expo/config'
 
@@ -139,6 +141,14 @@ const config: ExpoConfig = {
   android: {
     package: BUNDLE_ID,
     versionCode: BUILD_NUMBER,
+    /*
+     * Firebase Cloud Messaging is how a push reaches an Android device. The file is the
+     * project's public client configuration (ids and a key that only works from this package),
+     * but it is kept out of the repository so a fork gets its own Firebase project rather than
+     * ours; the release workflow writes it from a secret, and a checkout without it still builds,
+     * without push.
+     */
+    ...(existsSync(join(__dirname, 'google-services.json')) ? { googleServicesFile: './google-services.json' } : {}),
     adaptiveIcon: {
       foregroundImage: './assets/adaptive-icon.png',
       backgroundColor: ICON_BACKGROUND

@@ -121,13 +121,14 @@ All of these are repository secrets in GitHub → Settings → Secrets and varia
 → Actions. Every one of them is optional: with none set, the release workflow
 still produces a working debug-signed APK, which is what a fork gets.
 
-| Secret                          | Used for                                                  |
-| ------------------------------- | --------------------------------------------------------- |
-| `EXPO_TOKEN`                    | An EAS access token, if EAS builds are ever moved into CI |
-| `HERMIE_UPLOAD_KEYSTORE_BASE64` | The upload keystore itself, `base64 -i hermie-upload.jks` |
-| `HERMIE_UPLOAD_STORE_PASSWORD`  | Its store password                                        |
-| `HERMIE_UPLOAD_KEY_ALIAS`       | `hermie-upload`                                           |
-| `HERMIE_UPLOAD_KEY_PASSWORD`    | The key's own password                                    |
+| Secret                          | Used for                                                                                                     |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `EXPO_TOKEN`                    | An EAS access token, if EAS builds are ever moved into CI                                                    |
+| `HERMIE_UPLOAD_KEYSTORE_BASE64` | The upload keystore itself, `base64 -i hermie-upload.jks`                                                    |
+| `HERMIE_UPLOAD_STORE_PASSWORD`  | Its store password                                                                                           |
+| `HERMIE_UPLOAD_KEY_ALIAS`       | `hermie-upload`                                                                                              |
+| `HERMIE_UPLOAD_KEY_PASSWORD`    | The key's own password                                                                                       |
+| `HERMIE_GOOGLE_SERVICES_JSON`   | The Firebase `google-services.json` for `dev.hermie.app`, verbatim; without it the Android build has no push |
 
 The four Android ones are read as a group: `release.yml` checks whether the
 keystore secret is empty and skips the signed build when it is, the way the macOS

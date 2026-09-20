@@ -89,6 +89,18 @@ jobs:
       - name: Install
         run: npm ci
 
+      # The Firebase client configuration is not in the repository (see .gitignore); a fork
+      # brings its own. Written before prebuild so the config picks it up, and only when set.
+      - name: Write the Firebase configuration
+        env:
+          HERMIE_GOOGLE_SERVICES_JSON: ${{ secrets.HERMIE_GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$HERMIE_GOOGLE_SERVICES_JSON" ]; then
+            printf '%s' "$HERMIE_GOOGLE_SERVICES_JSON" > apps/hermie/google-services.json
+          else
+            echo 'No Firebase configuration secret set; building without push.'
+          fi
+
       - name: Generate the native project
         run: npx expo prebuild --platform android --no-install
         working-directory: apps/hermie

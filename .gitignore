@@ -32,3 +32,6 @@ yarn-error.log*
 .DS_Store
 .idea/
 *.swp
+
+# Firebase client configuration: per installation, written by the release workflow from a secret
+apps/hermie/google-services.json
