@@ -37,6 +37,7 @@ import { useEscapeKey } from '../ui/useEscapeKey'
 import { AttachMenu } from './AttachMenu'
 import { FileChip } from './FileChip'
 import { QueuedChip } from './QueuedChip'
+import { shouldSend } from './send-key'
 import { chatStrings } from './strings'
 import type { AttachChoice, ComposerAttachment, SlashSuggestion } from './types'
 
@@ -357,9 +358,23 @@ export function Composer({
    * only branch is Shift, so a Return arriving with any other modifier falls
    * through to the send. Whether macOS delivers Cmd+Return to a text view as a
    * Return at all is unverified; if it does, it sends.
+   *
+   * The decision itself is `shouldSend`, shared with `onKeyPress` below. Only
+   * the ACTION differs: here `submitBehavior: 'submit'` already suppressed the
+   * insertion, so a newline has to be put in by hand.
    */
   const onSubmitEditing = () => {
-    if (hardwareKeyboard && isShiftDown()) {
+    const decision = shouldSend('Enter', {
+      // Reaching this handler at all IS the platform having decided to submit
+      // (`submitBehavior`), so the hardware-keyboard half of the table is
+      // already answered here and only the modifier is open. Passing the prop
+      // through instead would turn a software keyboard's Return — which has
+      // ALREADY inserted its newline — into a second one.
+      hardwareKeyboard: true,
+      shift: hardwareKeyboard && isShiftDown()
+    })
+
+    if (decision === 'newline') {
       insertNewline()
 
       return
@@ -412,24 +427,17 @@ export function Composer({
       ctrlKey?: boolean
     }
 
-    if (native.key !== 'Enter') {
-      return
-    }
-
-    // Cmd/Ctrl+Enter sends everywhere: only a physical keyboard can produce a
-    // modifier, so this is safe on a phone too.
-    if (native.metaKey || native.ctrlKey) {
-      event.preventDefault?.()
-      submit()
-
-      return
-    }
-
-    // Shift+Enter is always the newline. A bare Enter only sends where a
-    // hardware keyboard is certain — and there `submitBehavior` has already
-    // dealt with it, so this branch is the fallback for a platform that
-    // reports the key without suppressing the insertion.
-    if (!hardwareKeyboard || native.shiftKey) {
+    // The same table `onSubmitEditing` uses. Where it says `newline` this site
+    // does NOTHING: the insertion has already been accepted, so letting it land
+    // IS the newline — which is the one difference between the two callers.
+    if (
+      shouldSend(native.key, {
+        ctrl: native.ctrlKey === true,
+        hardwareKeyboard,
+        meta: native.metaKey === true,
+        shift: native.shiftKey === true
+      }) !== 'send'
+    ) {
       return
     }
 

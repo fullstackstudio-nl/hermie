@@ -42,6 +42,30 @@ import UIKit
  */
 public class HermieMacModule: Module {
   private var connectObserver: NSObjectProtocol?
+  private var activationObservers: [NSObjectProtocol] = []
+
+  /**
+   Whether a Shift key has been pressed and not yet released, as THIS process saw it.
+
+   The polled HID state is not enough on its own, and the owner's report is what it looks like when
+   it is trusted: Return starts inserting a newline instead of sending, and pressing Shift once
+   fixes it. GameController delivers key changes to the app that is in front, so a Shift held while
+   the window loses focus — ⇧-clicking something else, a Cmd+Tab with Shift down — has its key-UP
+   delivered somewhere else, and `isPressed` stays true until the next Shift press corrects it.
+   Nothing in the app can distinguish that from a Shift genuinely being held.
+
+   So the answer is the AND of two sources that fail in different directions: the polled state,
+   which can stick ON, and this latch, which is cleared whenever the window becomes active again.
+   Both must agree before a Return is treated as Shift+Return. A stuck latch is impossible because
+   activation clears it; a stuck poll no longer reaches JavaScript because the latch is false until
+   a Shift is pressed with this window in front.
+
+   `UIKey.modifierFlags` in `pressesBegan` would be authoritative per event and was NOT used: the
+   first responder while typing is React Native's own `RCTUITextView`, so reading the flag off the
+   Return would mean subclassing or swizzling a renderer-owned class, and the failure this is about
+   is the latch going stale rather than the poll being wrong in principle.
+   */
+  private var shiftLatch = false
 
   public func definition() -> ModuleDefinition {
     Name("HermieMac")
@@ -61,6 +85,7 @@ public class HermieMacModule: Module {
 
     OnCreate {
       self.watchForKeyboards()
+      self.watchForActivation()
 
       // The menu bar's items and the keyboard's shortcuts are the same actions, so they land on the
       // same event. `install()` is a no-op anywhere but a Mac, where the menu bar exists.
@@ -75,6 +100,10 @@ public class HermieMacModule: Module {
         NotificationCenter.default.removeObserver(observer)
         self.connectObserver = nil
       }
+      for observer in self.activationObservers {
+        NotificationCenter.default.removeObserver(observer)
+      }
+      self.activationObservers = []
       GCKeyboard.coalesced?.keyboardInput?.keyChangedHandler = nil
       HermieMenuBar.onCommand = nil
     }
@@ -139,7 +168,9 @@ public class HermieMacModule: Module {
      phone and the reason this needs no platform check of its own.
      */
     Function("isShiftDown") { () -> Bool in
-      guard let input = GCKeyboard.coalesced?.keyboardInput else {
+      // Both sources have to agree; see `shiftLatch` for why one of them alone is a bug the owner
+      // can feel — Return stops sending until Shift is tapped once.
+      guard self.shiftLatch, let input = GCKeyboard.coalesced?.keyboardInput else {
         return false
       }
 
@@ -225,10 +256,34 @@ public class HermieMacModule: Module {
       object: nil,
       queue: .main
     ) { [weak self] _ in
+      // A keyboard that has just arrived cannot be holding a key this process watched go down, and
+      // the state it reports for one is not this app's to trust.
+      self?.shiftLatch = false
       self?.installEscapeHandler()
     }
 
     installEscapeHandler()
+  }
+
+  /**
+   Forget every held modifier whenever this window becomes the active one.
+
+   The key-UP for anything held while the window was in the background went to whatever was in
+   front instead, so on the way back in the only honest state is "nothing is held". Both
+   notifications are observed because they are not the same event: `UIScene.didActivateNotification`
+   is per window — which on a Mac is the one that fires when the owner clicks back into Hermie — and
+   `UIApplication.didBecomeActiveNotification` covers the process-level return that a scene-less
+   path would take.
+   */
+  private func watchForActivation() {
+    for name in [UIScene.didActivateNotification, UIApplication.didBecomeActiveNotification] {
+      let observer = NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) {
+        [weak self] _ in
+        self?.shiftLatch = false
+      }
+
+      activationObservers.append(observer)
+    }
   }
 
   private func installEscapeHandler() {
@@ -241,6 +296,13 @@ public class HermieMacModule: Module {
     keyboard.handlerQueue = .main
 
     input.keyChangedHandler = { [weak self] keyboardInput, _, keyCode, pressed in
+      // Tracked for BOTH directions and before the guards below, because a release is exactly the
+      // half the polled state can miss. Only while this app is in front: a Shift pressed for
+      // another window is not a Shift this composer should honour.
+      if keyCode == .leftShift || keyCode == .rightShift {
+        self?.shiftLatch = pressed && UIApplication.shared.applicationState == .active
+      }
+
       guard pressed else {
         return
       }
