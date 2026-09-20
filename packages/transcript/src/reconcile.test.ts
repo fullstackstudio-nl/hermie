@@ -310,6 +310,27 @@ describe('a turn we sent ourselves coming back persisted', () => {
     expect(twice.order).toHaveLength(once.order.length)
   })
 
+  /**
+   * The list renders one cell per id, so an id is a KEY: change it and React
+   * unmounts the row and mounts a new one, which throws away every height the
+   * list had measured and re-measures it a frame later. That is indistinguishable
+   * on screen from the transcript jumping, and it was the fourth suspect for it.
+   *
+   * Adoption is where it would happen if it happened anywhere: the persisted row
+   * arrives with a durable `row_id` and the live bubble has an id of its own, and
+   * only one of the two may survive. It has to be the live one.
+   */
+  it('leaves every rendered key exactly where it was, twice over', () => {
+    const live = liveTurn()
+    const keys = live.order
+    const once = reconcileTail(live, rowsToItems(persistedRows, 'rest'))
+
+    expect(once.order).toEqual(keys)
+    expect(reconcileTail(once, rowsToItems(persistedRows, 'rest')).order).toEqual(keys)
+    // And through the other door, which takes the whole list rather than its tail.
+    expect(reconcile(once, rowsToItems(persistedRows, 'rest')).order).toEqual(keys)
+  })
+
   it('still appends a row that is genuinely new', () => {
     const state = reconcileTail(liveTurn(), rowsToItems(persistedRows, 'rest'))
     const next = reconcileTail(

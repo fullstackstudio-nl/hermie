@@ -15,22 +15,29 @@
  * if (ABS(deltaY) > 0.5) { contentOffset.y += deltaY; if (y <= threshold) scrollToOffset(0, animated) }
  * ```
  *
+ * The anchor is a VIEW, and at the bottom of an inverted list every new row is
+ * inserted before it, so `deltaY` is the new row's own height. A previous round
+ * tried to give that loop a constant view to hold — a one-point
+ * `ListHeaderComponent` — and it cannot work: `VirtualizedList` adds one to
+ * `minIndexForVisible` whenever a header exists, so the loop starts at the first
+ * CELL and the header is unreachable at any value of the prop. Measured on an
+ * iPhone 17 Pro with `--hermieTraceScroll`: a 70pt outgoing bubble moved the
+ * offset from 0 to 94 and it took ~290ms to animate back.
+ *
  * So the invariant is expressed here as the two structural facts it reduces to,
  * both of which ARE observable from JavaScript:
  *
- *  1. the scroll view's first subview has a CONSTANT, non-zero height, so it wins
- *     the `hasNewView` test at every offset a reader can be at the bottom with and
- *     its origin — always 0 — is what every delta is measured against;
+ *  1. the scroll view holds NO `maintainVisibleContentPosition` while the reader
+ *     is at the bottom, so there is nothing to correct and nothing to animate —
+ *     and it does hold one once they scroll away, where the correction is the
+ *     behaviour a reader wants;
  *  2. nothing whose height changes during a turn is rendered inside the scroll
  *     view before the cells.
  *
- * Together those make `deltaY` identically zero at the bottom, which makes the
- * correction and its animated scroll-back unreachable. A change that puts a
- * variable-height view back into the header, or drops the spacer to zero, breaks
- * one of these two and this file says which.
+ * A change that puts the typing bubble back into the list, or turns the anchor
+ * back on at the bottom, breaks one of these two and this file says which.
  */
-import { screen } from '@testing-library/react-native'
-import { StyleSheet } from 'react-native'
+import { fireEvent, screen } from '@testing-library/react-native'
 
 import { TranscriptList } from '../../src/chat-ui'
 import { assistantItem, subagentMap, userItem } from '../../src/chat-ui/fixtures'
@@ -45,21 +52,30 @@ const thinking: AssistantItem = { ...assistantItem, id: 'a-live', streaming: tru
 const firstToken: AssistantItem = { ...thinking, text: 'L', version: (thinking.version ?? 0) + 1 }
 const moreText: AssistantItem = { ...thinking, text: 'Looking that up', version: (thinking.version ?? 0) + 2 }
 
-function anchorHeight(): number {
-  const style = StyleSheet.flatten(screen.getByTestId('transcript-list-anchor').props.style) as { height?: number }
+/** What the list is holding the scroll view to right now, if anything. */
+function anchorProp(): unknown {
+  return screen.getByTestId('transcript-list-scroll').props.maintainVisibleContentPosition
+}
 
-  return style.height ?? 0
+/** Put the reader `y` points from the bottom of the inverted list. */
+function scrollTo(y: number): void {
+  fireEvent.scroll(screen.getByTestId('transcript-list-scroll'), {
+    nativeEvent: {
+      contentOffset: { x: 0, y },
+      contentSize: { height: 2000, width: 402 },
+      layoutMeasurement: { height: 800, width: 402 }
+    }
+  })
 }
 
 describe('the list’s anchor', () => {
-  it('is a constant, non-zero height through a whole streaming turn', () => {
-    // Zero is the failing value, and it fails silently: `0 > 0` is false, so the
-    // anchor falls through to the first CELL and every change at the bottom moves
-    // that cell's origin.
+  it('is held by nothing at the bottom, through a whole streaming turn', () => {
+    // Every frame of a turn inserts or grows a row at index 0. With an anchor
+    // held, each of those is a correction of exactly that row's height followed
+    // by an animated scroll back to zero.
     const view = renderScreen(<TranscriptList items={visible([userItem])} subagents={subagentMap} />)
-    const before = anchorHeight()
 
-    expect(before).toBeGreaterThan(0)
+    expect(anchorProp()).toBeUndefined()
 
     for (const item of [thinking, firstToken, moreText]) {
       view.rerender(
@@ -72,7 +88,7 @@ describe('the list’s anchor', () => {
         )
       )
 
-      expect(anchorHeight()).toBe(before)
+      expect(anchorProp()).toBeUndefined()
     }
 
     // And when the turn ends and the typing flag drops with it.
@@ -85,44 +101,40 @@ describe('the list’s anchor', () => {
       )
     )
 
-    expect(anchorHeight()).toBe(before)
+    expect(anchorProp()).toBeUndefined()
   })
 
-  it('keeps its height while the typing bubble comes and goes', () => {
-    // The transition that produced the reported jump: a turn starts, the typing
-    // bubble appears, and the first reasoning delta replaces it with a streaming
-    // reply — three height changes in a row at the bottom of the list.
-    const view = renderScreen(<TranscriptList items={visible([userItem])} subagents={subagentMap} />)
-    const before = anchorHeight()
+  it('is held once the reader scrolls away, and let go again at the bottom', () => {
+    // The case the prop exists for: a message arriving under a reader who is up
+    // in the history must not shove the paragraph they are reading up the screen.
+    renderScreen(<TranscriptList items={visible([userItem, assistantItem])} subagents={subagentMap} />)
 
-    view.rerender(withProviders(<TranscriptList items={visible([userItem])} subagents={subagentMap} typing />))
-    expect(screen.getByTestId('typing-indicator')).toBeTruthy()
-    expect(anchorHeight()).toBe(before)
+    scrollTo(400)
+    expect(anchorProp()).toEqual({ minIndexForVisible: 0 })
 
-    view.rerender(
-      withProviders(
-        <TranscriptList
-          items={[...visible([userItem]), { item: thinking, presentation: 'full' }]}
-          subagents={subagentMap}
-          typing
-        />
-      )
-    )
+    scrollTo(0)
+    expect(anchorProp()).toBeUndefined()
+  })
 
-    expect(screen.queryByTestId('typing-indicator')).toBeNull()
-    expect(anchorHeight()).toBe(before)
+  it('never carries an autoscroll threshold, which is what animated the jump back', () => {
+    // `autoscrollToTopThreshold` only ever fires within its own distance of the
+    // bottom — which is exactly where the anchor is now let go — so a value here
+    // could only ever re-arm the scroll back down.
+    renderScreen(<TranscriptList items={visible([userItem, assistantItem])} subagents={subagentMap} />)
+
+    scrollTo(400)
+    expect(anchorProp()).not.toHaveProperty('autoscrollToTopThreshold')
   })
 
   it('is the only thing between the scroll view and its cells', () => {
     // The typing bubble is what used to sit here, and its height is exactly what
-    // moved the anchor. It is a pinned sibling now, so it must NOT be a descendant
-    // of the scroll view at all.
+    // moved the first cell. It is a pinned sibling now, so it must NOT be a
+    // descendant of the scroll view at all.
     renderScreen(<TranscriptList items={visible([userItem])} subagents={subagentMap} typing />)
 
     const scroll = screen.getByTestId('transcript-list-scroll')
     const slot = screen.getByTestId('transcript-list-typing-slot')
 
-    expect(screen.getByTestId('transcript-list-anchor')).toBeTruthy()
     expect(within(scroll, slot)).toBe(false)
   })
 })

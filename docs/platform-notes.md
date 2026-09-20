@@ -2486,6 +2486,11 @@ height changes, which is what the algorithm is built for.
 one half of it is now removed, but the owner's jump was never observed happening and never observed
 stopping — see below.
 
+> **Superseded.** A recording (see "The transcript jump, recorded at last", below) showed the header
+> is never the anchor: `VirtualizedList` adds one to `minIndexForVisible` whenever a header exists, so
+> the native loop starts at the first cell. The header is gone and the prop is now held only while the
+> reader is scrolled away.
+
 ### What this pass did NOT verify
 
 - **That the streaming jump is fixed.** Not reproduced end to end. Two of the four suspects were
@@ -3536,3 +3541,74 @@ model configured.` The fake gateway ships that job with `last_status: 'error'`
 `adb shell input` drives all of this comfortably, which is the standing difference
 from the simulators: the wizard was completed with taps and `input text` in about
 a minute, and that is the thing iOS still cannot do.
+
+## The transcript jump, recorded at last (2026-09-20, later)
+
+Two rounds reasoned about this one from the React Native source and both fixed
+something real without stopping it. What closed it was a recording:
+`--hermieTraceScroll` (`src/dev/trace-scroll.ts`) logs every scroll event and
+every row height that moved, and the fake gateway grew a reply long enough to
+watch (`--stream-delay`, and a scenario matched on `long` that puts its tool call
+mid-reply).
+
+### `ListHeaderComponent` can never be the anchor, at any value of the prop
+
+The previous round's one-point list header — the "single most load-bearing view in
+this file" — was unreachable. `VirtualizedList` adds one to `minIndexForVisible`
+whenever a header exists:
+
+```js
+// Adjust index to account for ListHeaderComponent.
+minIndexForVisible: props.maintainVisibleContentPosition.minIndexForVisible + (props.ListHeaderComponent ? 1 : 0)
+```
+
+so `{ minIndexForVisible: 0 }` reaches native as `1`, and the loop that picks the
+anchor starts at the first CELL. The header is skipped. There is no value that
+reaches it either: the same number is fed to `_getItemKey(props, minIndexForVisible)`
+in `getDerivedStateFromProps`, so `-1` calls the list's own `keyExtractor` with
+`undefined`. The header is gone rather than tuned, and the section above it in
+this file is wrong about what anchors the list.
+
+### What the anchor actually does at the bottom of an inverted list
+
+It anchors on a VIEW, and every new row is inserted _before_ that view in content
+order — so the delta is the new row's own height, on every message sent, every
+bubble of a reply, and every tool row. Measured on an iPhone 17 Pro (iOS 26.5),
+one 70pt outgoing bubble:
+
+```
+[row]    +38626 user-o:7000 h=70.0 (new)
+[scroll] +38626 offset=94.0 content=968.0 view=291.0   ← corrected by the row + its gap
+[scroll] +38654 offset=90.3 content=951.0 view=291.0   ← autoscrollToTopThreshold, animating back
+[scroll] +38921 offset=0.0  content=951.0 view=291.0   ← ~290ms later
+```
+
+Four of those per turn. That is the whole of "the chat jumps up and scrolls itself
+back down", and it is what the prop is specified to do — the list is correcting
+for a shift the reader never saw, because at the bottom of an inverted list the
+shift IS the new message arriving.
+
+So the prop is now held only while the reader is scrolled away from the bottom,
+where it earns its keep (a message must not shove the paragraph someone is reading
+up the screen) and where `autoscrollToTopThreshold` cannot fire anyway. At the
+bottom the list is pinned by inversion alone. The same turn, recorded again after
+the change, produced **no scroll events at all**.
+
+### Two height changes the recording found and this pass did NOT fix
+
+- **Every bubble is 17pt too tall for one frame when it mounts.** The inline-clock
+  measurement in `Bubble.tsx` renders the clock on a line of its own until the
+  body and the clock have been measured, then lifts it onto the last line:
+  `[row] user-r:1 h=112.0 (+17.0)` followed by `h=95.0 (-17.0)` within 6ms, once
+  per mount and therefore once per virtualisation round trip. It was adding its
+  17pt to every jump above; on its own it is a one-frame flicker.
+- **A bubble sealed mid-turn folds immediately**, which collapses it by 208pt
+  under the reader: `[row] +40779 tool-t:… h=100.0 (new)` and, in the same frame,
+  `[row] +40779 assistant-a:8000 h=336.0 (-208.0)`. `Fold` engages on
+  `!item.streaming`, and an interim note stops streaming the moment the tool row
+  seals it. The final bubble does the same at `message.complete` (-280pt). Both
+  are §6.3 working as specified; whether a reply should fold while its own turn is
+  still running is a design question, not a defect, and it is the obvious next one.
+- **The ~60pt blank gap was not reproduced.** `traceBlankRow` watches for exactly
+  it — a wrapper with height over contents with none — and logged nothing across
+  two full turns and a 22-row history.

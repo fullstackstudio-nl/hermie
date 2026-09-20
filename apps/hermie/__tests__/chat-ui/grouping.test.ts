@@ -167,3 +167,48 @@ describe('dateStampFor', () => {
     expect(dateStampFor(AT - 400 * 86_400, AT)).toMatch(/\d{4}$/)
   })
 })
+
+/**
+ * What a row above may be told while a turn is still arriving.
+ *
+ * A layout that changes on a settled row is a settled row that re-renders, and if
+ * the change reaches its geometry it is a settled row that changes HEIGHT — under
+ * the reader, mid-turn. That was the third suspect for the transcript's jump, and
+ * it is ruled out here rather than in prose: the turn as it really arrives is
+ * replayed one frame at a time and every earlier row is compared with itself.
+ */
+describe('a row that is already on screen, while the turn under it grows', () => {
+  const turn: VisibleItem[] = [
+    user('u1', AT),
+    assistant('a1', AT + 1),
+    tool('t1', AT + 2),
+    assistant('a2', AT + 3),
+    user('u2', AT + 4)
+  ]
+
+  it('is laid out exactly as it was before the row under it arrived', () => {
+    for (let length = 1; length < turn.length; length += 1) {
+      const before = layoutRows(turn.slice(0, length), AT + 10)
+      const after = layoutRows(turn.slice(0, length + 1), AT + 10)
+
+      for (const entry of turn.slice(0, length)) {
+        expect(after[entry.item.id]).toEqual(before[entry.item.id])
+      }
+    }
+  })
+
+  it('gives up only its tail when the next row is the same speaker, and nothing else', () => {
+    // The one thing that DOES flip, and the reason it is allowed to: `tail` says
+    // whether the tail shape is painted into the bubble's own left gutter. It is
+    // an absolutely positioned path, so losing it changes what the row draws and
+    // not how tall it is — unlike `grouped`, which is a margin, or `dateStamp`,
+    // which is a whole extra band.
+    const run = [assistant('a1', AT), assistant('a2', AT + 1)]
+    const before = layoutRows(run.slice(0, 1), AT + 10).a1
+    const after = layoutRows(run, AT + 10).a1
+
+    expect(before?.tail).toBe(true)
+    expect(after?.tail).toBe(false)
+    expect({ ...after, tail: true }).toEqual(before)
+  })
+})

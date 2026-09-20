@@ -27,9 +27,9 @@
  *
  * Nothing here scrolls in response to a disclosure opening. That is not an
  * omission, it is the requirement: expanding a tool row, a cron card or a DM
- * exchange must leave the viewport exactly where it was. `minIndexForVisible: 0`
- * anchors the list on the NEWEST item, so an older row growing changes nothing
- * about where the bottom is.
+ * exchange must leave the viewport exactly where it was. At the bottom of an
+ * inverted list that is free — offset 0 is the newest row and an older row
+ * growing happens further down the content, where the reader is not.
  *
  * The agents bar is a pinned sibling rather than a list header. The design board
  * pins it under the chat header, and a header inside an inverted list would scroll
@@ -544,6 +544,17 @@ function TranscriptRowFrame({ entry, context, receipt, layout, dmRole }: RowProp
   return (
     <View {...trace.wrapper} style={{ marginTop: gapAbove(layout) }} testID={`transcript-row-${entry.item.id}`}>
       {/*
+        The stamp comes FIRST, above the row it heads.
+
+        A cell carries the list's inversion a second time, so what is inside one
+        reads top to bottom on screen and only the ORDER OF CELLS is reversed —
+        see docs/platform-notes.md. This used to sit after the row, on the belief
+        that the inversion applied here too, which put every date stamp under the
+        first message of its day instead of over it.
+      */}
+      {layout.dateStamp ? <DateSeparator label={layout.dateStamp} /> : null}
+
+      {/*
         The whole row is the menu's target, not the bubble inside it. A secondary
         click on the metadata line under a reply, or on the gap beside a short one,
         means the same message — and UIKit lifts the target into the menu's preview,
@@ -555,7 +566,6 @@ function TranscriptRowFrame({ entry, context, receipt, layout, dmRole }: RowProp
         onSelect={menu.select}
         testID={`transcript-menu-${entry.item.id}`}
       >
-        {/* Inverted, so a stamp ABOVE a row renders after it. */}
         <View {...trace.content}>
           <TranscriptRow
             context={context}
@@ -566,7 +576,6 @@ function TranscriptRowFrame({ entry, context, receipt, layout, dmRole }: RowProp
           />
         </View>
       </ContextMenuHost>
-      {layout.dateStamp ? <DateSeparator label={layout.dateStamp} /> : null}
     </View>
   )
 }
@@ -647,6 +656,12 @@ const AWAY_THRESHOLD = 32
  * the pill for good.
  */
 const JUMP_SETTLE_MS = 600
+
+/**
+ * The anchor held while the reader is scrolled away. One object, so toggling it
+ * on does not hand the scroll view a new identity on every render.
+ */
+const AWAY_ANCHOR = { minIndexForVisible: 0 } as const
 
 /** A stable empty array, so the context memo does not churn on every render. */
 const EMPTY_HANDLES: readonly string[] = []
@@ -930,39 +945,6 @@ function TranscriptListBody({
             {chatStrings.transcript.empty}
           </Text>
         }
-        /*
-         * A one-point spacer, and it is the single most load-bearing view in this
-         * file. It is the ANCHOR `maintainVisibleContentPosition` holds the list
-         * against, and it is one point tall rather than zero because of the exact
-         * condition RCTScrollViewComponentView uses to pick one:
-         *
-         *   hasNewView = subview.frame.origin.y + subview.frame.size.height
-         *                > _scrollView.contentOffset.y
-         *
-         * At the bottom of an inverted list `contentOffset.y` is 0, so a
-         * ZERO-height header at origin 0 fails that test — `0 > 0` is false — and
-         * the anchor falls through to the first CELL instead. The cell's origin then
-         * moves whenever anything above it in content order changes height, which at
-         * the bottom of an inverted list means: every message sent, and every
-         * appearance of the typing bubble. `_adjustForMaintainVisibleContentPosition`
-         * corrects the offset by that delta and then, because the offset was within
-         * `autoscrollToTopThreshold`, animates back to zero. That IS the reported
-         * bug: the chat jumps up and scrolls itself back.
-         *
-         * One point passes the test at every offset a reader can be at the bottom
-         * with, including a rubber-band bounce, so the anchor is ALWAYS this view;
-         * its origin is always 0; the delta is always 0; nothing is ever corrected
-         * and nothing ever animates. Scrolled away from the bottom the loop walks
-         * past it to a genuinely visible row, which is the behaviour older history
-         * landing at the far end needs — so the fix costs that case nothing.
-         *
-         * It is invisible: the content container's own `paddingVertical` is larger
-         * than it is, and it draws nothing.
-         *
-         * The typing bubble used to live here, which is what made the header's
-         * height change. It is now a pinned sibling below the list — see below.
-         */
-        ListHeaderComponent={<View style={{ height: 1 }} testID={`${testID}-anchor`} />}
         contentContainerStyle={[{ paddingHorizontal: theme.space.md, paddingVertical: theme.space.md }, contentStyle]}
         data={data}
         inverted
@@ -974,10 +956,48 @@ function TranscriptListBody({
         // the keyboard when the drag starts instead.
         keyboardDismissMode={Platform.select({ ios: 'interactive', default: 'on-drag' })}
         keyboardShouldPersistTaps="handled"
-        // `minIndexForVisible: 0` anchors on the NEWEST item, which is what makes
-        // "expanding a card never moves the viewport" true: an older row growing
-        // does not change where the bottom is.
-        maintainVisibleContentPosition={{ autoscrollToTopThreshold: AWAY_THRESHOLD, minIndexForVisible: 0 }}
+        /*
+         * Held ONLY while the reader is away from the bottom, and that is the
+         * whole of the reported jump.
+         *
+         * `maintainVisibleContentPosition` anchors on a VIEW: iOS records the
+         * frame of the first subview whose bottom edge is past the current offset,
+         * and afterwards moves `contentOffset` by however far that view's origin
+         * moved (`RCTScrollViewComponentView`). At the bottom of an INVERTED list
+         * every new row — the message just sent, the reply's first bubble, a tool
+         * row, the bubble after it — is inserted BEFORE that view in content
+         * order, so the anchor moves down by exactly the new row's height and the
+         * list corrects for a shift the reader never saw. With
+         * `autoscrollToTopThreshold` set, the same branch then animates back to
+         * zero: the chat jumps up and scrolls itself back down, which is the bug
+         * as it was reported.
+         *
+         * Measured on an iPhone 17 Pro against the fake gateway with
+         * `--hermieTraceScroll`; a 70pt outgoing bubble moved the offset from 0 to
+         * 94 (the row plus its gap) and it took ~290ms to crawl back:
+         *
+         *     [row]    +38626 user-o:7000 h=70.0 (new)
+         *     [scroll] +38626 offset=94.0  content=968.0
+         *     [scroll] +38654 offset=90.3  content=951.0   ← animating back
+         *     [scroll] +38921 offset=0.0   content=951.0
+         *
+         * A constant-height `ListHeaderComponent` was tried as the anchor and
+         * CANNOT be one: `VirtualizedList` adds one to `minIndexForVisible`
+         * whenever a header exists ("Adjust index to account for
+         * ListHeaderComponent"), so the native loop starts at the first CELL and
+         * never looks at the header. There is no value of `minIndexForVisible`
+         * that reaches it — which is why the header is gone rather than tuned.
+         *
+         * Off at the bottom nothing has to be corrected: an inverted list already
+         * keeps offset 0 pinned to the newest row while the content grows above
+         * it. Away from the bottom the anchor is a genuinely visible row and the
+         * correction is what the reader wants — a message arriving under them must
+         * not shove the paragraph they are reading up the screen. So the prop is
+         * on exactly where it earns its keep, and `autoscrollToTopThreshold` is
+         * gone with it: it only ever fires within `AWAY_THRESHOLD` of the bottom,
+         * which is where this is now off.
+         */
+        maintainVisibleContentPosition={away ? AWAY_ANCHOR : undefined}
         onEndReached={onEndReached}
         onEndReachedThreshold={0.4}
         onMomentumScrollEnd={endJump}
@@ -997,11 +1017,11 @@ function TranscriptListBody({
         The typing bubble, PINNED below the list rather than carried inside it.
 
         Its height is the whole problem: anything whose height comes and goes at the
-        bottom of an inverted list moves the first cell's origin, and the anchor
-        above exists because of that. Taking it out of the scroll view removes the
-        second half of the same question — the list's content does not change at all
-        when a turn starts, only the list's own frame does, and a frame change moves
-        no subview origin.
+        bottom of an inverted list moves the first cell's origin, which is the view
+        `maintainVisibleContentPosition` anchors on while the reader is scrolled
+        away. Out here the list's content does not change at all when a turn starts
+        — only the list's own frame does, and a frame change moves no subview
+        origin.
 
         It is the same shape as the agents bar, which is pinned above the list for
         the same kind of reason. Left-aligned and inset to match the content
