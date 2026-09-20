@@ -275,6 +275,11 @@ export const BotRow = memo(function BotRow({
   // without the native menu this is the same tree with one wrapper fewer.
   return (
     <ContextMenuHost
+      // The same radius the row's own selected surface is drawn with, so the
+      // platform's pointer highlight is a rounded pill rather than the square
+      // block UIKit defaults to. Our own hover background below already used it;
+      // the one that did not was the system's, drawn over the top.
+      cornerRadius={theme.radii.card}
       items={menu}
       menuTitle={bot.displayName}
       onSelect={id => onMenuSelect(bot.name, id)}

@@ -62,6 +62,7 @@ import type { MarkdownImageSource } from '../markdown'
 import { copyToClipboard } from '../platform/clipboard'
 import { ContextMenuHost } from '../platform/context-menu'
 import { applyDirectTouchPan } from '../platform/pointer-drag'
+import { RUNS_ON_MAC } from '../platform/runs-on-mac'
 import { GlassSurface } from '../ui/glass'
 import { Button, Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
@@ -575,6 +576,13 @@ function TranscriptRowFrame({ entry, context, receipt, layout, dmRole }: RowProp
         so a target that was only the text would lift only the text.
       */}
       <ContextMenuHost
+        // A transcript row is as wide as the window and as tall as a reply, so
+        // the pointer highlight a list row wants is, here, a blurred platter the
+        // size of a message following the mouse across the conversation — which
+        // is what the owner reported from the Mac build. Nothing about a
+        // paragraph of text is a button; the menu still opens on a secondary
+        // click, it just stops advertising itself on the way past.
+        hoverEffect={false}
         items={menu.items}
         menuTitle={chatStrings.menu.message}
         onSelect={menu.select}

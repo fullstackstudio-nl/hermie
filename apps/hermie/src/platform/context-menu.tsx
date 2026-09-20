@@ -58,6 +58,26 @@ export interface ContextMenuHostProps {
   menuTitle?: string
   /** False leaves the gesture alone, so a row being dragged opens nothing. */
   enabled?: boolean
+  /**
+   * Whether the pointer may highlight this host while it merely passes over.
+   *
+   * True for a LIST ROW — that highlight is how the rest of the system says a
+   * row is a thing you can act on. False for anything as large as a message: the
+   * owner's report from the Mac is a blurred platter the size of a reply
+   * appearing under the mouse on its way across the conversation, which is this
+   * effect at a size it was never meant for. Only `TranscriptList` turns it off.
+   */
+  hoverEffect?: boolean
+  /**
+   * The radius the CHILD is drawn with, so the platform's highlight is cut to
+   * the same shape.
+   *
+   * UIKit's own is a rectangle around the whole host, which under a chat row
+   * reads as a square grey block behind a row whose selected state is a rounded
+   * pill — the owner's report. The host cannot measure its child's corners, so
+   * the row hands over the radius it already uses.
+   */
+  cornerRadius?: number
   style?: StyleProp<ViewStyle>
   children: ReactNode
   testID?: string
@@ -67,6 +87,8 @@ type NativeProps = {
   items: readonly MenuItem[]
   menuTitle?: string
   enabled?: boolean
+  hoverEffect?: boolean
+  cornerRadius?: number
   style?: StyleProp<ViewStyle>
   onSelect?: (event: { nativeEvent: { id: string } }) => void
   children?: ReactNode
@@ -96,7 +118,9 @@ function nativeHost(): React.ComponentType<NativeProps> | null {
 
 export function ContextMenuHost({
   children,
+  cornerRadius,
   enabled = true,
+  hoverEffect = true,
   items,
   menuTitle,
   onSelect,
@@ -116,7 +140,9 @@ export function ContextMenuHost({
 
   return (
     <Host
+      {...(cornerRadius === undefined ? {} : { cornerRadius })}
       enabled={enabled}
+      hoverEffect={hoverEffect}
       items={items}
       {...(menuTitle ? { menuTitle } : {})}
       onSelect={event => onSelect(event.nativeEvent.id)}
