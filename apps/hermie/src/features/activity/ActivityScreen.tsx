@@ -24,6 +24,7 @@ import { formatClock } from '../../chat-ui'
 import { useGateway } from '../../gateway'
 import { humaniseStatus } from '../../i18n/humanise'
 import { strings } from '../../i18n/strings'
+import { directTouchPanRef } from '../../platform/pointer-drag'
 import { useBotsStore } from '../../store/bots'
 import { GlassSurface } from '../../ui/glass'
 import { Screen, Text } from '../../ui/primitives'
@@ -103,6 +104,7 @@ export function ActivityScreen({ onOpenBot }: ActivityScreenProps) {
   return (
     <Screen padded={false}>
       <SectionList
+        ref={directTouchPanRef}
         ListEmptyComponent={
           <EmptyState
             error={error}

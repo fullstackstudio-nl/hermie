@@ -4,6 +4,7 @@ import { KeyboardAvoidingView, ScrollView, View } from 'react-native'
 import { saveGatewaySetup, type StoredGatewayConfig } from '../../gateway/config'
 import { describeConnectionError } from '../../gateway/errors'
 import { strings } from '../../i18n/strings'
+import { directTouchPanRef } from '../../platform/pointer-drag'
 import { KEYBOARD_AVOID_BEHAVIOR } from '../../ui/keyboard'
 import { Button, Screen, Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
@@ -155,6 +156,7 @@ export function OnboardingNavigator({
           first, which nothing on screen said. */}
       <KeyboardAvoidingView behavior={KEYBOARD_AVOID_BEHAVIOR} style={{ flex: 1 }}>
         <ScrollView
+          ref={directTouchPanRef}
           contentContainerStyle={{
             padding: theme.space.lg,
             gap: theme.space.lg,

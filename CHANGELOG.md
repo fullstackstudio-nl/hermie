@@ -111,6 +111,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the moment the turn is sent instead of up to one poll later. The fake gateway used to filter on
   `profile` and so agreed with the bug; it now reproduces upstream, with the behaviour pinned in its
   upstream-shapes suite.
+- **On a Mac, dragging with the mouse scrolled a list instead of leaving the text alone.** A
+  "Designed for iPad" app gets full pointer support and UIKit delivers an indirect-pointer drag to a
+  `UIScrollView` as a touch, which its pan recognizer accepts by default. Every list and reading
+  surface now restricts that one recognizer to direct touches on a Mac, through a new function in the
+  local module: a finger still pans, and a wheel or trackpad scroll is not a touch at all — it is
+  gated by `allowedScrollTypesMask`, which is untouched — so scrolling keeps working and only the drag
+  stops. No-op on iPhone and iPad, and it cannot throw. Selecting text with that drag is a separate
+  request and is NOT delivered: React Native's `Text selectable` is a long-press edit menu whose Copy
+  takes the whole block, with no selection range in the component at all, so bubbles are already at
+  that ceiling. `docs/platform-notes.md` has what is verified, what is only reasoned — the pointer
+  behaviour cannot be exercised on the simulators here — and the three-step manual test for a Mac
+  window.
 - **The app did not launch on iOS 27.** UIKit refuses to start an app built against the iOS 27 SDK
   that has not adopted the scene life cycle, and it refuses before any of our code runs: an
   `EXC_BREAKPOINT` on the main thread in

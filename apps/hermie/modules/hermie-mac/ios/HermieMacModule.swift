@@ -84,6 +84,67 @@ public class HermieMacModule: Module {
     Function("hasHardwareKeyboard") { () -> Bool in
       GCKeyboard.coalesced?.keyboardInput != nil
     }
+
+    /**
+     Stop a MOUSE drag from scrolling the scroll view behind `viewTag`, without touching the wheel.
+
+     On a Mac the owner drags across the transcript expecting to select text, and the list pans
+     instead. That is UIKit doing what it is told: a "Designed for iPad" app gets full pointer
+     support, an indirect-pointer drag is delivered to `UIScrollView` as a touch, and
+     `panGestureRecognizer` accepts every touch type by default — so press-and-drag scrolls.
+
+     Restricting `allowedTouchTypes` to `.direct` is the whole fix. It is the narrowest lever
+     available: it tells that ONE recognizer to ignore a pointer while still accepting a finger, and
+     a mouse wheel or a trackpad two-finger scroll never reaches it at all. Those arrive as scroll
+     events, gated by `allowedScrollTypesMask`, which this does not touch — which is why the fix can
+     stop the drag without also breaking the way everybody actually scrolls.
+
+     Runs on the main queue because it reads the view registry and mutates a view. Returns whether a
+     scroll view was actually found, so the caller can be tested and the developer screen can say.
+     Never throws: a tag that resolves to nothing is a `false`, not an error, because this is called
+     from a `ref` callback during layout and a broken reading surface is worse than an unfixed drag.
+     */
+    AsyncFunction("useDirectTouchPanOnly") { (viewTag: Int) -> Bool in
+      guard let view = self.appContext?.findView(withTag: viewTag, ofType: UIView.self),
+            let scrollView = Self.scrollView(for: view) else {
+        return false
+      }
+
+      scrollView.panGestureRecognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+
+      return true
+    }
+    .runOnQueue(.main)
+  }
+
+  /**
+   The `UIScrollView` a React Native scroll component's view tag stands for.
+
+   The tag belongs to the wrapper, not to the scroller: under Fabric it resolves to
+   `RCTScrollViewComponentView`, whose single subview is the `RCTEnhancedScrollView` that actually
+   scrolls, and under the old renderer to `RCTScrollView` with the same shape one level down. Both are
+   covered by taking the SHALLOWEST `UIScrollView` at or below the tagged view.
+
+   Shallowest, and depth-capped, on purpose. A transcript row can hold scroll views of its own — a
+   wide code block, a markdown table — and an unbounded search would hand back one of those instead of
+   the list, which would leave the list panning and quietly break the code block as well.
+   */
+  private static func scrollView(for view: UIView) -> UIScrollView? {
+    if let scrollView = view as? UIScrollView {
+      return scrollView
+    }
+
+    var level = view.subviews
+
+    for _ in 0..<2 {
+      if let scrollView = level.first(where: { $0 is UIScrollView }) as? UIScrollView {
+        return scrollView
+      }
+
+      level = level.flatMap { $0.subviews }
+    }
+
+    return nil
   }
 
   /**

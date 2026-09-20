@@ -24,6 +24,7 @@ import {
   type ViewStyle
 } from 'react-native'
 
+import { directTouchPanRef } from '../platform/pointer-drag'
 import { useSafeAreaInsets } from '../platform/safe-area'
 import { GlassSurface } from './glass'
 import { KEYBOARD_AVOID_BEHAVIOR } from './keyboard'
@@ -259,7 +260,11 @@ export function BottomSheet({
               variant="sheet"
             >
               {scrollable ? (
-                <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                <ScrollView
+                  keyboardShouldPersistTaps="handled"
+                  ref={directTouchPanRef}
+                  showsVerticalScrollIndicator={false}
+                >
                   {body}
                 </ScrollView>
               ) : (

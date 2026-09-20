@@ -10,6 +10,7 @@ import { useState } from 'react'
 import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native'
 
 import { MONOSPACE } from '../markdown/context'
+import { directTouchPanRef } from '../platform/pointer-drag'
 import { BottomSheet, SheetPage } from '../ui/BottomSheet'
 import { Button, Text, TextField } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
@@ -273,6 +274,7 @@ function TranscriptPage({ transcript, onBack }: { transcript: SubagentTranscript
         ) : null}
 
         <ScrollView
+          ref={directTouchPanRef}
           style={{
             backgroundColor: theme.tintSunk,
             borderColor: theme.hairlineSoft,

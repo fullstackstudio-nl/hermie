@@ -56,6 +56,7 @@ import {
 } from 'react-native'
 
 import type { MarkdownImageSource } from '../markdown'
+import { applyDirectTouchPan } from '../platform/pointer-drag'
 import { GlassSurface } from '../ui/glass'
 import { Button, Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
@@ -508,6 +509,16 @@ function TranscriptListBody({
   const theme = useTheme()
   const listRef = useRef<FlatList<VisibleItem>>(null)
   const [away, setAway] = useState(false)
+
+  /**
+   * On a Mac, a mouse drag across the transcript must select text rather than
+   * scroll it. This is the surface the owner was dragging on when he asked, and
+   * the list already holds the ref the fix needs — see `platform/pointer-drag`.
+   * A no-op on every other platform.
+   */
+  useEffect(() => {
+    applyDirectTouchPan(listRef.current)
+  }, [])
 
   const context = useMemo<TranscriptContext>(
     () => ({

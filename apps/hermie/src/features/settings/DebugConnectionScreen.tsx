@@ -6,6 +6,7 @@ import { Platform, Pressable, ScrollView, View } from 'react-native'
 import { createGatewayConnection } from '../../gateway'
 import { strings } from '../../i18n/strings'
 import { hasHardwareKeyboard } from '../../platform/keyboard-modifiers'
+import { directTouchPanRef } from '../../platform/pointer-drag'
 import { RUNS_ON_MAC } from '../../platform/runs-on-mac'
 import { useChatsStore } from '../../store/chats'
 import { Button, Screen, Text, TextField } from '../../ui/primitives'
@@ -90,7 +91,10 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
 
   return (
     <Screen>
-      <ScrollView contentContainerStyle={{ gap: theme.space.md, paddingVertical: theme.space.lg }}>
+      <ScrollView
+        contentContainerStyle={{ gap: theme.space.md, paddingVertical: theme.space.lg }}
+        ref={directTouchPanRef}
+      >
         <Text variant="title">Connection test</Text>
         <Text color="textMuted">
           Points a raw gateway connection at an address and reports what happens. Session-token gateways only; signing

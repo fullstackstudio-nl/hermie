@@ -18,6 +18,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ActivityIndicator, FlatList, Pressable, View } from 'react-native'
 
 import { strings } from '../../i18n/strings'
+import { directTouchPanRef } from '../../platform/pointer-drag'
 import { Button, Screen, Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { CONTROL_MIN_HEIGHT } from '../../ui/tokens'
@@ -104,6 +105,7 @@ export function LicencesScreen({ onClose }: LicencesScreenProps) {
   return (
     <Screen edgeToEdgeTop={false} padded={false}>
       <FlatList
+        ref={directTouchPanRef}
         ListFooterComponent={<Footer data={state.data} />}
         ListHeaderComponent={header}
         contentContainerStyle={{ padding: theme.space.lg }}

@@ -26,6 +26,8 @@ rewritten, and git history has them.
 | Does `AppState` survive the scene life cycle?    | **Yes** — measured, background and foreground  | 2026-09-20 |
 | Can a Release build reach a gateway over http?   | **Yes, since the ATS key** — iOS 27 simulator  | 2026-09-20 |
 | What AppState does a Mac window report?          | **Unverified** — see "A Mac never pauses"      | 2026-09-19 |
+| Does a mouse drag still scroll a list on a Mac?  | Fixed in code; **unverified** — no Mac window  | 2026-09-20 |
+| Can a drag SELECT text in a bubble?              | **No** — RN copies the whole block; see below  | 2026-09-20 |
 | Is `TextDecoder` present at runtime?             | Not verified; the guard ships either way       | 2026-09-18 |
 
 "Unverified at runtime" is exact: the app builds, is signed and is wrapped, and the code path was read
@@ -2025,3 +2027,134 @@ correct wherever a real message does arrive and costs nothing where one does not
   but nothing here exercised it.
 - **The Mac window.** The Mac is the same binary and the same Info.plist, so the ATS behaviour is the
   iOS one; nothing was run in a Mac window.
+
+## A mouse drag scrolled the transcript instead of selecting it (2026-09-20, later)
+
+Reported from the Mac build: _"On macOS I do not want to scroll by dragging with
+the mouse held down. I want to select text with that."_ Two requests in one
+sentence, and they turned out to have very different ceilings. The first is fixed.
+The second is at the limit of what React Native can draw, and that limit is worth
+writing down, because it is invisible from the JavaScript side and it is the kind
+of thing a future round would otherwise spend a rebuild rediscovering.
+
+### Why a pointer drag scrolls: it is delivered as a touch
+
+A "Designed for iPad" app gets full iPad pointer support, and UIKit hands an
+indirect-pointer drag to a `UIScrollView` as a **touch**.
+`UIScrollView.panGestureRecognizer` accepts every touch type by default, so
+press-and-drag anywhere on a list pans it. Nothing in the app asked for that; it
+is the platform default, and on a phone it is the only sensible one.
+
+`panGestureRecognizer.allowedTouchTypes = [.direct]` is the whole fix, and it is
+the narrowest lever available:
+
+- it changes ONE recognizer on ONE scroll view, not a gesture policy for the app;
+- a finger still pans, so a touch display or an iPad in Sidecar is unaffected;
+- **a wheel or a trackpad two-finger scroll is not a touch at all.** Those arrive
+  as scroll events, gated by `allowedScrollTypesMask`, which this does not touch.
+  That separation is the reason the drag can be stopped without also breaking the
+  way everybody actually scrolls.
+
+`HermieMacModule.useDirectTouchPanOnly(viewTag)` applies it, on the main queue,
+and `src/platform/pointer-drag.ts` is the seam. Four things about that seam:
+
+- **`RUNS_ON_MAC` gates it, and it has to be the operating system rather than the
+  hardware.** Every other Mac seam in this app could have asked a better question
+  instead — `useEscapeKey` asks whether a keyboard is attached, not whether this is
+  a Mac. This one cannot: on an iPad with a Magic Trackpad a pointer drag is a
+  legitimate way to scroll a list, and taking it away there would be a regression
+  for a reader who never asked for anything.
+- **The tag handed over is the scroll view's, not the list's.**
+  `getScrollableNode()` is the step down from a `FlatList` to the `ScrollView` it
+  renders; without it the native side would be guessing how far down to look.
+- **The native side takes the shallowest `UIScrollView` at or below the tag, capped
+  at two levels.** Under Fabric the tag resolves to `RCTScrollViewComponentView`,
+  whose single subview is the `RCTEnhancedScrollView` that actually scrolls. An
+  unbounded search would be wrong rather than merely slow: a transcript row holds
+  scroll views of its own — a wide code block, a markdown table — and finding one
+  of those would leave the list panning and break the code block as well.
+- **Nothing throws.** It runs from a `ref` callback during layout, so a missing
+  module, an older binary or a tag the view registry cannot resolve all read as
+  "not applied". A blank chat would be far worse than an unfixed drag.
+
+Applied to every list and reading surface: the transcript, the chat list,
+Activity, Crons, Settings, the licences list, the developer screen, onboarding,
+`BottomSheet`'s scroll content (which is every sheet in the app — no caller
+overrides `scrollable`), the sub-agent transcript, and the three horizontal
+scrollers inside a bubble (code block, markdown table, diff). Not the dev
+gallery, and not the slash popover or the attachment tray, which are rows of tap
+targets rather than text anybody selects.
+
+### `Text selectable` does not select. It copies the whole block
+
+This is the half that cannot be delivered in this SDK, read out of React Native
+0.81's own source rather than out of its documentation.
+
+`RCTParagraphComponentView` implements `isSelectable` as a
+`UILongPressGestureRecognizer` that presents a `UIEditMenuInteraction`, plus
+`canPerformAction:` returning true for exactly one selector, `copy:`. And `copy:`
+copies `dataFromRange:NSMakeRange(0, attributedText.length)` — **the entire
+paragraph**. There is no selection range anywhere in the component: no selection
+rects, no anchor, nothing a drag could move. So on any platform, `selectable`
+means long-press, then Copy, then you have the whole text block. It is not a
+partial selection that happens to need a long press.
+
+Every bubble in the app is already `selectable`: the markdown renderer threads it
+through its context and defaults it to `true`. So that half was shipped before
+this round and is already at the ceiling.
+
+**Drag-select would need a `UITextView`**, which in React Native means a
+`TextInput` with `multiline`, `editable={false}` and `scrollEnabled={false}` as
+the reading surface. That was considered and NOT done, because the cost is
+concrete and the benefit is unverifiable from here:
+
+- our markdown renderer emits nested `Text` for bold, inline code, links and
+  tables, and a `TextInput` is not a general container for them;
+- link taps go through `onPress` on an inline `Text`, which a text view does not
+  have;
+- the transcript is an inverted `FlatList` whose row heights drive
+  `maintainVisibleContentPosition`, and swapping the measured element on the app's
+  most performance-sensitive surface is not a change to make blind;
+- and none of it could be checked, because the pointer behaviour it exists for
+  cannot be exercised on this machine at all.
+
+If drag-select is wanted later, that is the shape of the work, and it wants a Mac
+window in front of somebody while it is done.
+
+### What is verified, and what is only reasoned
+
+**Verified on this machine:**
+
+- `npm run mac -- --no-open` ends in `** BUILD SUCCEEDED **`, signed and wrapped,
+  with the new native function compiled into the binary.
+- The JavaScript seam, by unit test (`__tests__/mac-pointer-drag.test.ts`): an
+  iPhone and an iPad make no native call at all; the tag handed over is the
+  scroll view's; a detaching ref asks for nothing; and a rejection, a synchronous
+  throw and a component that throws while being read are all swallowed.
+- `Text selectable`'s behaviour, by reading `RCTParagraphComponentView.mm` in the
+  pinned React Native — which is evidence about the renderer, not about a Mac.
+
+**Reasoned, not watched:**
+
+- **That the drag actually stops.** The simulators here deliver a mouse as a
+  direct touch, so an indirect-pointer drag does not exist on them and no
+  simulator can tell the fix from its absence. `allowedTouchTypes` is documented
+  UIKit and this is its documented use, but nobody has seen it in a Mac window.
+- **That wheel and trackpad scrolling still work.** Same reason, and the same
+  documentation: `allowedScrollTypesMask` is a separate gate. If this is wrong,
+  it is wrong loudly — the lists would stop scrolling entirely with a mouse — so
+  it is the first thing the manual test below checks.
+- **Whether the edit menu appears on a right-click** rather than only on a
+  press-and-hold. `UIEditMenuInteraction` is what UIKit maps a secondary click
+  to on a Mac, but that mapping was not observed.
+
+### The manual test, for a Mac window
+
+1. Open a chat with a long reply. Drag with the mouse button held down across the
+   text: the transcript must NOT move. Then scroll with the wheel and with a
+   trackpad: both must still scroll it.
+2. Repeat on the chat list, on Activity, on Crons and inside a sheet — a drag
+   moves nothing, a wheel still scrolls.
+3. Press and hold on a reply (or right-click it): an edit menu appears and Copy
+   puts that whole message on the clipboard. A drag selecting part of a message is
+   NOT expected — see above.

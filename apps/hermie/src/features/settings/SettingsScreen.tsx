@@ -7,6 +7,7 @@ import { chatStrings } from '../../chat-ui'
 import { useGateway } from '../../gateway'
 import { TransportNotice } from '../../gateway/TransportNotice'
 import { strings } from '../../i18n/strings'
+import { directTouchPanRef } from '../../platform/pointer-drag'
 import { type Appearance, useSettingsStore } from '../../store/settings'
 import { InsetButtonRow, InsetGroup, InsetValueRow, Screen } from '../../ui/primitives'
 import { SegmentedRow, SwitchRow } from '../../ui/sheets'
@@ -90,6 +91,7 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
   return (
     <Screen padded={false}>
       <ScrollView
+        ref={directTouchPanRef}
         contentContainerStyle={{
           padding: theme.space.lg,
           gap: theme.space.xl,

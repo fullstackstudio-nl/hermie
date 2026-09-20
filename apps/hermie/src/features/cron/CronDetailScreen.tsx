@@ -14,6 +14,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, View } from 'react-native'
 
 import { humaniseStatus } from '../../i18n/humanise'
+import { directTouchPanRef } from '../../platform/pointer-drag'
 import { BottomSheet, SheetEyebrow } from '../../ui/BottomSheet'
 import { Button, InsetGroup, InsetRow, InsetValueRow, Screen, Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
@@ -97,6 +98,7 @@ export function CronDetailScreen({ controller, job, onClose, onOpenRun, onEdit, 
       />
 
       <ScrollView
+        ref={directTouchPanRef}
         contentContainerStyle={{ gap: theme.space.xl, padding: theme.space.lg }}
         refreshControl={<RefreshControl onRefresh={refresh} refreshing={refreshing} />}
       >

@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Pressable, RefreshControl, SectionList, View } from 'react-native'
 
+import { directTouchPanRef } from '../../platform/pointer-drag'
 import { useBotsStore } from '../../store/bots'
 import { useCronStore } from '../../store/cron'
 import { Screen, Text } from '../../ui/primitives'
@@ -180,6 +181,7 @@ export function CronScreen({ initialJobId }: CronScreenProps = {}) {
   return (
     <Screen padded={false}>
       <SectionList
+        ref={directTouchPanRef}
         ListEmptyComponent={<EmptyState error={error} loading={loading} />}
         ListHeaderComponent={
           <ListHeader gatewayRunning={gatewayRunning} onCreate={() => setEditing({ open: true, job: null })} />

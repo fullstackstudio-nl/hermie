@@ -8,6 +8,7 @@
 import { memo, useMemo } from 'react'
 import { ScrollView, Text, View } from 'react-native'
 
+import { directTouchPanRef } from '../platform/pointer-drag'
 import { MONOSPACE, type MarkdownContext } from './context'
 import { codeScopeColor } from './code-theme'
 import { highlightToLines } from './highlight'
@@ -53,6 +54,8 @@ function CodeBlockView({ code, language, context }: CodeBlockProps) {
         // A code block inside a transcript must not steal the list's drag.
         directionalLockEnabled
         horizontal
+        // A Mac reader drags across a listing to select it, not to pan it.
+        ref={directTouchPanRef}
         showsHorizontalScrollIndicator={false}
         // A horizontal `ScrollView` defaults to `flexGrow: 1`, so inside a
         // scrollable column it balloons to the viewport height instead of

@@ -33,6 +33,7 @@ import { unreadCountSince } from '@hermie/transcript'
 import { useGateway } from '../../gateway'
 import { SignedOutPanel } from '../../gateway/SignedOutPanel'
 import { strings } from '../../i18n/strings'
+import { directTouchPanRef } from '../../platform/pointer-drag'
 import { useSafeAreaInsets } from '../../platform/safe-area'
 import { isUnread, useBotsStore, type Bot } from '../../store/bots'
 import { archivedOf, dividersOf, sectionsOf, useChatLayoutStore } from '../../store/chat-layout'
@@ -326,6 +327,7 @@ export function BotsScreen({
       ) : null}
 
       <FlatList
+        ref={directTouchPanRef}
         ListEmptyComponent={
           <EmptyState
             error={rosterError}

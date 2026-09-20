@@ -8,6 +8,7 @@
  */
 import { memo, useMemo } from 'react'
 import { ScrollView, Text, View } from 'react-native'
+import { directTouchPanRef } from '../platform/pointer-drag'
 import { marked, type Token, type Tokens } from './marked-compat'
 
 import { CodeBlock } from './CodeBlock'
@@ -108,6 +109,7 @@ function TableBlock({ token, context }: { token: Tokens.Table; context: Markdown
     <ScrollView
       directionalLockEnabled
       horizontal
+      ref={directTouchPanRef}
       showsHorizontalScrollIndicator={false}
       // `flexGrow: 0`: a horizontal `ScrollView` otherwise grows to the height
       // of whatever column it sits in.
