@@ -37,10 +37,12 @@
  * A change that puts the typing bubble back into the list, or turns the anchor
  * back on at the bottom, breaks one of these two and this file says which.
  */
-import { fireEvent, screen } from '@testing-library/react-native'
+import { act, fireEvent, screen } from '@testing-library/react-native'
+import { FlatList } from 'react-native'
 
 import { TranscriptList } from '../../src/chat-ui'
 import { assistantItem, subagentMap, userItem } from '../../src/chat-ui/fixtures'
+import { holdCorrection } from '../../src/chat-ui/TranscriptList'
 import type { AssistantItem, VisibleItem } from '../../src/chat-ui/types'
 import { renderScreen, withProviders } from '../support/render'
 
@@ -143,3 +145,91 @@ describe('the list’s anchor', () => {
 function within(root: { findAll: (predicate: (node: unknown) => boolean) => unknown[] }, node: unknown): boolean {
   return root.findAll(candidate => candidate === node).length > 0
 }
+
+/**
+ * The second half of the same invariant, for the reader rather than for a turn.
+ *
+ * **Opening a disclosure must not move the offset.** On paper an inverted list
+ * gives that for free: the growing cell's origin does not move, so it grows
+ * upward and its `Show more` stays pinned to the cell's screen bottom, under the
+ * finger. On the owner's phone it did not, and a guarantee that rests on a layout
+ * pass nobody controls is not a guarantee — so the place is recorded when the
+ * finger goes down and restored if anything moves it.
+ */
+describe('holdCorrection', () => {
+  it('asks for nothing while no place is held', () => {
+    expect(holdCorrection(undefined, 0)).toBeUndefined()
+    expect(holdCorrection(undefined, 940)).toBeUndefined()
+  })
+
+  it('asks for nothing when the offset did not move — the delta a fold must have', () => {
+    expect(holdCorrection(420, 420)).toBeUndefined()
+  })
+
+  it('treats sub-point drift as rounding, the way UIKit does', () => {
+    expect(holdCorrection(420, 420.4)).toBeUndefined()
+    expect(holdCorrection(420, 419.6)).toBeUndefined()
+  })
+
+  it('puts the list back when the expansion moved it', () => {
+    // The reported shape: the growth lands the reader at the newest message.
+    expect(holdCorrection(420, 0)).toBe(420)
+    expect(holdCorrection(420, 628)).toBe(420)
+  })
+})
+
+describe('opening a disclosure', () => {
+  const long = { ...assistantItem, id: 'a-long', streaming: false, text: 'x'.repeat(4000) }
+
+  function press(): void {
+    act(() => {
+      fireEvent(screen.getByTestId(`assistant-fold-${long.id}-body`), 'layout', {
+        nativeEvent: { layout: { height: 4000 } }
+      })
+    })
+
+    fireEvent.press(screen.getByTestId(`assistant-fold-${long.id}-toggle`))
+  }
+
+  it('holds the offset the finger went down at, and lets it go on a drag', () => {
+    const scrollToOffset = jest.spyOn(FlatList.prototype, 'scrollToOffset').mockImplementation(() => {})
+
+    try {
+      renderScreen(<TranscriptList items={visible([userItem, long])} subagents={subagentMap} />)
+
+      // The reader is 420pt up in the history when they reach for `Show more`.
+      scrollTo(420)
+      press()
+      scrollToOffset.mockClear()
+
+      // The expansion lands them at the bottom; the list puts them back.
+      scrollTo(0)
+      expect(scrollToOffset).toHaveBeenCalledWith({ animated: false, offset: 420 })
+
+      // A drag is the reader deciding where to be, and outranks the hold.
+      scrollToOffset.mockClear()
+      fireEvent(screen.getByTestId('transcript-list-scroll'), 'scrollBeginDrag')
+      scrollTo(0)
+      expect(scrollToOffset).not.toHaveBeenCalled()
+    } finally {
+      scrollToOffset.mockRestore()
+    }
+  })
+
+  it('corrects nothing when the offset did not move, which is the normal case', () => {
+    const scrollToOffset = jest.spyOn(FlatList.prototype, 'scrollToOffset').mockImplementation(() => {})
+
+    try {
+      renderScreen(<TranscriptList items={visible([userItem, long])} subagents={subagentMap} />)
+
+      scrollTo(420)
+      press()
+      scrollToOffset.mockClear()
+      scrollTo(420)
+
+      expect(scrollToOffset).not.toHaveBeenCalled()
+    } finally {
+      scrollToOffset.mockRestore()
+    }
+  })
+})

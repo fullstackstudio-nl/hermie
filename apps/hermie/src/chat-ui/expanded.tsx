@@ -12,7 +12,7 @@
  * expanding something must not move the viewport, which a row has no way to
  * arrange from the inside.
  */
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react'
 
 export interface ExpandedApi {
   isExpanded: (id: string) => boolean
@@ -34,10 +34,30 @@ const NOOP: ExpandedApi = {
 
 const ExpandedContext = createContext<ExpandedApi>(NOOP)
 
-export function ExpandedProvider({ children }: { children: ReactNode }) {
+export interface ExpandedProviderProps {
+  children: ReactNode
+  /**
+   * Called just BEFORE a reader-driven toggle changes the set.
+   *
+   * This is the hook the header above promises: the list decides that opening
+   * something must not move the viewport, and it cannot decide that from inside a
+   * row. `TranscriptList` passes the function that records where the list is
+   * sitting right now, so the frames after the growth can be put back there. It
+   * fires on `toggle` only — a card that opens ITSELF through `setExpanded` is not
+   * a finger on a `Show more` and has no place to hold.
+   */
+  onToggle?: (id: string) => void
+}
+
+export function ExpandedProvider({ children, onToggle }: ExpandedProviderProps) {
   const [ids, setIds] = useState<ReadonlySet<string>>(() => new Set())
+  const before = useRef(onToggle)
+
+  before.current = onToggle
 
   const toggle = useCallback((id: string) => {
+    before.current?.(id)
+
     setIds(current => {
       const next = new Set(current)
 

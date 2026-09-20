@@ -9,10 +9,11 @@ import { act, fireEvent, screen } from '@testing-library/react-native'
 import { useState } from 'react'
 import { Text as RNText, View } from 'react-native'
 
-import { ExpandedProvider, Fold, needsReadingTreatment, useExpanded } from '../../src/chat-ui'
+import { AssistantBubble, ExpandedProvider, Fold, needsReadingTreatment, useExpanded } from '../../src/chat-ui'
+import { assistantItem } from '../../src/chat-ui/fixtures'
 import { foldCut, type FoldBlock } from '../../src/chat-ui/primitives/Fold'
 import { FOLD_HEIGHT, FOLD_LINES } from '../../src/ui/tokens'
-import { renderScreen } from '../support/render'
+import { renderScreen, withProviders } from '../support/render'
 
 /** A row that can be unmounted and re-mounted, the way `FlatList` does it. */
 function Row({ id }: { id: string }) {
@@ -83,18 +84,22 @@ describe('Fold', () => {
    * overflowing branch at all — which is also the honest limit of this test: it
    * proves the decision, not the pixels.
    */
-  function renderFold(height: number, streaming = false) {
+  function grow(testID: string, height: number) {
+    act(() => {
+      fireEvent(screen.getByTestId(`${testID}-body`), 'layout', { nativeEvent: { layout: { height } } })
+    })
+  }
+
+  function renderFold(height: number) {
     renderScreen(
       <ExpandedProvider>
-        <Fold expanded={false} fadeTo="#ffffff" onToggle={jest.fn()} streaming={streaming} testID="fold">
+        <Fold expanded={false} fadeTo="#ffffff" onToggle={jest.fn()} testID="fold">
           <RNText>body</RNText>
         </Fold>
       </ExpandedProvider>
     )
 
-    act(() => {
-      fireEvent(screen.getByTestId('fold').props.children, 'layout', { nativeEvent: { layout: { height } } })
-    })
+    grow('fold', height)
   }
 
   it('offers no control for a body that fits', () => {
@@ -109,13 +114,59 @@ describe('Fold', () => {
     expect(screen.queryByTestId('fold-toggle')).toBeNull()
   })
 
-  // Never fold the message that is currently streaming: a fold appearing mid-stream
-  // clips the words being written, and a "Show more" that then grows past the fold
-  // on its own is worse than no fold.
-  it('never folds a streaming body', () => {
-    renderFold(4000, true)
+  it('offers the control once the body passes the cap', () => {
+    renderFold(4000)
 
-    expect(screen.queryByTestId('fold-toggle')).toBeNull()
+    expect(screen.getByTestId('fold-toggle')).toBeTruthy()
+  })
+
+  /**
+   * The owner's rule, and the reverse of what this file used to assert.
+   *
+   * A long reply folds WHILE it streams: the text grows inside the folded height
+   * with `Show more` already under it. The exemption it replaces dumped the whole
+   * reply out and collapsed it afterwards, and cost a visible lurch every time a
+   * tool row sealed an interim bubble.
+   */
+  it('folds at the cap while the reply is still streaming', () => {
+    const id = 'streaming-1'
+
+    renderScreen(<AssistantBubble item={{ ...assistantItem, id, streaming: true, text: 'x'.repeat(4000) }} />)
+
+    grow(`assistant-fold-${id}`, 4000)
+
+    expect(screen.getByTestId(`assistant-fold-${id}-toggle`)).toBeTruthy()
+  })
+
+  /**
+   * And it keeps growing once opened. The expanded flag belongs to the list, and
+   * nothing in a turn clears it, so a reader who opened a streaming reply is not
+   * re-collapsed by the next token.
+   */
+  it('keeps a streaming body open once the reader opened it', () => {
+    const id = 'streaming-2'
+    const item = { ...assistantItem, id, streaming: true, text: 'x'.repeat(4000) }
+    const view = renderScreen(
+      <ExpandedProvider>
+        <AssistantBubble item={item} />
+      </ExpandedProvider>
+    )
+
+    grow(`assistant-fold-${id}`, 4000)
+    fireEvent.press(screen.getByTestId(`assistant-fold-${id}-toggle`))
+
+    expect(screen.getByTestId(`assistant-fold-${id}-toggle`).props.accessibilityState.expanded).toBe(true)
+
+    view.rerender(
+      withProviders(
+        <ExpandedProvider>
+          <AssistantBubble item={{ ...item, text: 'x'.repeat(6000), version: 2 }} />
+        </ExpandedProvider>
+      )
+    )
+    grow(`assistant-fold-${id}`, 6000)
+
+    expect(screen.getByTestId(`assistant-fold-${id}-toggle`).props.accessibilityState.expanded).toBe(true)
   })
 })
 

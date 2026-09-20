@@ -2,16 +2,23 @@
  * The reading fold: a long body clipped with a gradient mask and a
  * `Show more` / `Show less` control.
  *
- * Two rules the mockup states and one the streaming path forces:
+ * Three rules the mockup states:
  *
  *  - Past roughly fourteen lines the body folds (§6.3).
  *  - The state belongs to the LIST, not to this component — see `expanded.tsx`.
  *    A fold that lived here would re-collapse every time the row was virtualised
  *    out and back.
- *  - **Never fold the message that is currently streaming.** A fold appearing
- *    mid-stream clips the words being written, and a `Show more` that the reader
- *    taps and that then grows past the fold on its own is worse than no fold. The
- *    turn finishes first.
+ *  - **The fold engages WHILE the reply streams**, at the cap, and never
+ *    afterwards. This used to read the other way round — a streaming body was
+ *    exempt, on the argument that a fold appearing mid-stream clips the words
+ *    being written — and the owner's rule is the opposite one: a long reply grows
+ *    inside its folded height with `Show more` already under it, and is never
+ *    dumped out at full length and then collapsed once the turn seals. The
+ *    exemption also cost a visible lurch: a tool row sealing an interim bubble
+ *    flipped `streaming` to false, the fold engaged on a body that was already
+ *    laid out, and the transcript lost the difference in one frame (−208pt on the
+ *    owner's phone). A body the reader has already opened keeps growing open,
+ *    because the expanded flag is the LIST's and nothing in a turn clears it.
  *
  * ### Where the cut lands
  *
@@ -58,8 +65,6 @@ export interface FoldBlock {
 export interface FoldProps {
   expanded: boolean
   onToggle: () => void
-  /** A streaming body is never folded, whatever its height. */
-  streaming?: boolean
   /** What the mask fades into: the bubble's own lower colour. */
   fadeTo: string
   /**
@@ -162,17 +167,7 @@ export function foldCut(
   return limit
 }
 
-export function Fold({
-  expanded,
-  onToggle,
-  streaming = false,
-  fadeTo,
-  lineHeight,
-  blocks,
-  bleed = 0,
-  children,
-  testID
-}: FoldProps) {
+export function Fold({ expanded, onToggle, fadeTo, lineHeight, blocks, bleed = 0, children, testID }: FoldProps) {
   const theme = useTheme()
   const fallback = useFoldHeight()
   const lines = useFoldLines()
@@ -181,8 +176,10 @@ export function Fold({
   const limit = foldCut(lines, lineHeight, fallback, blocks)
 
   // `natural` is measured on the INNER view, which is never height-constrained,
-  // so it keeps reporting the real height even while the outer box clips it.
-  const overflows = !streaming && natural > limit + theme.space.lg
+  // so it keeps reporting the real height even while the outer box clips it —
+  // including all through a streaming turn, which is what lets the fold engage at
+  // the cap rather than once the turn seals.
+  const overflows = natural > limit + theme.space.lg
   const clipped = overflows && !expanded
 
   // Two and a half lines of fade. A fixed 64pt was a third of the phone's
@@ -200,7 +197,17 @@ export function Fold({
           paddingHorizontal: bleed
         }}
       >
-        <View onLayout={event => setNatural(event.nativeEvent.layout.height)}>{children}</View>
+        {/*
+          The measuring view. It carries a testID of its own because the test
+          renderer lays nothing out, so firing `layout` by hand on exactly this
+          view is the only way a test can reach the overflowing branch at all.
+        */}
+        <View
+          onLayout={event => setNatural(event.nativeEvent.layout.height)}
+          testID={testID ? `${testID}-body` : undefined}
+        >
+          {children}
+        </View>
 
         {clipped ? (
           /*

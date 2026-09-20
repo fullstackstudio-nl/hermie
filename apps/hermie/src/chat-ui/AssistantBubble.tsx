@@ -8,8 +8,9 @@
  *    wider padding. §7.1 is explicit that this is not a stylistic variant — it is
  *    how body-text contrast stops depending on the wallpaper behind the bubble.
  *  - Past roughly fourteen lines the body folds, with the state held above the
- *    list so virtualisation cannot reset it. The message currently STREAMING is
- *    never folded.
+ *    list so virtualisation cannot reset it — WHILE the reply streams, not once
+ *    it seals. See `Fold`: a reply that is dumped out at full length and then
+ *    collapses is the lurch this rule exists to prevent.
  *  - One bubble from start to finish (§6.2): while the turn has no text this
  *    bubble holds the typing dots itself. It must not render as an empty box —
  *    that box, under a separate bubble of dots, is the grey rectangle the owner
@@ -168,7 +169,6 @@ export function AssistantBubble({
               fadeTo={recipe.tail}
               lineHeight={markdownLeading(theme.type.body.fontSize)}
               onToggle={toggle}
-              streaming={item.streaming}
               testID={`assistant-fold-${item.id}`}
             >
               <Markdown
