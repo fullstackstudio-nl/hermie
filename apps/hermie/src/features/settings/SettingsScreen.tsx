@@ -15,9 +15,11 @@ import { useTheme } from '../../ui/theme'
 import { useEscapeKey } from '../../ui/useEscapeKey'
 import { useHardwareBack } from '../../ui/useHardwareBack'
 import { FORM_MAX_WIDTH, WALLPAPER_ORDER, type WallpaperName } from '../../ui/tokens'
+import { AboutFooter } from './AboutFooter'
 import { DebugConnectionScreen } from './DebugConnectionScreen'
 import { GALLERY_ROW_TITLE, GalleryScreen } from './GalleryScreen'
 import { LicencesScreen } from './LicencesScreen'
+import { WebUpdateRow } from './WebUpdateRow'
 
 const VERBOSITY_OPTIONS: { value: Verbosity; label: string }[] = [
   { value: 'quiet', label: chatStrings.options.verbosityOptions.quiet },
@@ -213,6 +215,10 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
           />
         </InsetGroup>
 
+        {/* Only the browser build has a server of its own to update; everywhere
+            else this renders nothing. */}
+        <WebUpdateRow />
+
         <InsetGroup header={strings.settings.about}>
           <InsetButtonRow
             detail={strings.settings.licencesHint}
@@ -231,6 +237,8 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
             <InsetButtonRow title={GALLERY_ROW_TITLE} onPress={() => setShowGallery(true)} />
           </InsetGroup>
         ) : null}
+
+        <AboutFooter />
 
         <View style={{ height: theme.space.xxl }} />
       </ScrollView>
