@@ -10,8 +10,12 @@
  *
  * Three pieces of state are deliberately NOT roster fields and cannot be:
  *
- *  - "working" comes from `session.active_list`, polled only while this list is
- *    mounted, because an unwatched roster has nothing to animate.
+ *  - "working" has two sources, and needs both. `session.active_list` is polled
+ *    while this list is mounted, because an unwatched roster has nothing to
+ *    animate; it answers for the whole gateway process and carries no profile,
+ *    so the roster controller attributes each busy row to a bot by session id.
+ *    The chat's own streaming `turn.active` is the second source: it is true the
+ *    moment a turn is sent, for that bot alone, without waiting for a poll.
  *  - "needs input" comes from the open approvals and clarifies the chat store
  *    already holds, so it survives a roster refresh and is true even for a
  *    question that arrived while this screen was not on top.
@@ -179,7 +183,7 @@ export function BotsScreen({
           gatewayReady: status === 'ready',
           needsInput,
           sessionAttached: Boolean(bot.canonical?.id),
-          working: Boolean(running[bot.name]),
+          working: Boolean(running[bot.name]) || (chat?.turn.active ?? false),
           ...(bot.canonical?.lastActive ? { lastActive: bot.canonical.lastActive } : {})
         })
       )

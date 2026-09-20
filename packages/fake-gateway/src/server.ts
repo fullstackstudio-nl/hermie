@@ -2036,9 +2036,11 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       }
 
       case 'session.active_list': {
-        const profile = typeof params.profile === 'string' ? params.profile : null
+        // Deliberately IGNORES `profile`, because upstream does: the method is a
+        // plain one over the process's live sessions and never reads the profile
+        // it accepts (`tui_gateway/methods_session.py`). Honouring it here hid
+        // the bug where one busy session marked every bot as working.
         const sessions = [...state.sessions.values()]
-          .filter(session => (profile ? session.profile === profile : true))
           .filter(session => state.runningSessions.has(session.storedId))
           .map(session => ({
             current: false,

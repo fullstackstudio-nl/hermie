@@ -60,7 +60,10 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     }
 
     const gateway = chatGatewayFor(connection)
-    const bots = new BotsController({ gateway, store: useBotsStore, cache: chatCache })
+    // The chat store is handed over read-only: `session.active_list` answers for
+    // the whole gateway process and carries no profile, so the roster attributes
+    // a busy session to a bot through the ids its chat is known under.
+    const bots = new BotsController({ gateway, store: useBotsStore, cache: chatCache, chats: useChatsStore })
     const controller = new ChatController({
       gateway,
       chats: useChatsStore,

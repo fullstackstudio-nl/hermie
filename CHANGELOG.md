@@ -97,6 +97,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Every bot showed "Working" when one bot was working.** Asking a single bot something painted the
+  blue working bead on every row in the chat list. `session.active_list` is not profile-scoped,
+  however much its parameters suggest otherwise: upstream it is a plain method over every live
+  session in the gateway PROCESS and it never reads the `profile` it accepts. The roster called it
+  once per bot with that profile and marked the bot running if any row came back busy — which could
+  only ever answer the same thing for every bot at once, at a cost of one identical round trip per
+  bot per poll. It is now ONE call per poll, and each busy row is attributed to a bot by session id:
+  the roster's stored id and lineage tip, the open chat's copies of both, and the runtime id the chat
+  is bound to. A busy session this app cannot place — another client's session, a cron run — lights up
+  nobody, and `title` is never matched on, because `Bot Chat` is the same title on every profile. A
+  bot the user is talking to also shows as working off its own streaming `turn.active`, which is true
+  the moment the turn is sent instead of up to one poll later. The fake gateway used to filter on
+  `profile` and so agreed with the bug; it now reproduces upstream, with the behaviour pinned in its
+  upstream-shapes suite.
 - **The app did not launch on iOS 27.** UIKit refuses to start an app built against the iOS 27 SDK
   that has not adopted the scene life cycle, and it refuses before any of our code runs: an
   `EXC_BREAKPOINT` on the main thread in

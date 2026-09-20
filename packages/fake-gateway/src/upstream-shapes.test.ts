@@ -16,6 +16,7 @@
  * in `packages/hermes-shared/upstream.json`.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { WebSocket } from 'ws'
 
 import { startFakeGateway, type FakeGateway } from './server'
 
@@ -243,5 +244,150 @@ describe('GET /api/sessions/{id}/messages — sessions.py::_get_session_messages
       expect(row.text).toBeUndefined()
       expect(row.row_id).toBeUndefined()
     }
+  })
+})
+
+/**
+ * The one RPC in this file, and it earns its socket.
+ *
+ * `session.active_list` is where the fake lied in the most expensive way
+ * available: it FILTERED ON `profile`, upstream does not, and so every test that
+ * drove it agreed with an app that was calling it once per bot and marking the
+ * bot busy if any row came back. One bot working painted the working bead on
+ * every row in the chat list, and nothing here could see it.
+ *
+ * Upstream is `tui_gateway/methods_session.py`, `session.active_list`: a plain
+ * `@method` over the process's live sessions. It takes `ProfileParams` and reads
+ * only `current_session_id` from them. The rows come from
+ * `server.py::_session_live_item`, whose contract is
+ * `contracts/sessions.py::SessionActiveItem`.
+ */
+describe('session.active_list over the socket — methods_session.py::session.active_list', () => {
+  let live: FakeGateway
+  let socket: WebSocket
+  let nextId = 0
+
+  const pending = new Map<number, (value: Record<string, unknown>) => void>()
+
+  const call = (method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> => {
+    const id = ++nextId
+
+    return new Promise(resolve => {
+      pending.set(id, resolve)
+      socket.send(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`)
+    })
+  }
+
+  const activeRows = async (params: Record<string, unknown> = {}): Promise<Record<string, unknown>[]> =>
+    ((await call('session.active_list', params)).sessions ?? []) as Record<string, unknown>[]
+
+  beforeAll(async () => {
+    // Slow the stream right down: every assertion below needs the session to
+    // still be running when it reads the list.
+    live = await startFakeGateway({ port: 0, streamDelayMs: 400 })
+    socket = new WebSocket(live.wsUrl, ['hermes-gateway-v1'])
+
+    socket.on('message', data => {
+      for (const line of String(data).split('\n')) {
+        if (!line.trim()) {
+          continue
+        }
+
+        const frame = JSON.parse(line) as Record<string, unknown>
+        const id = typeof frame.id === 'number' ? frame.id : null
+        const waiter = id === null ? undefined : pending.get(id)
+
+        if (waiter) {
+          pending.delete(id as number)
+          waiter((frame.result ?? {}) as Record<string, unknown>)
+        }
+      }
+    })
+
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', () => resolve())
+      socket.once('error', reject)
+    })
+  })
+
+  afterAll(async () => {
+    socket.close()
+    await live.close()
+  })
+
+  /** The researcher's stored session id, and a turn running on it. */
+  const busyResearcher = async (): Promise<string> => {
+    const profiles = (await call('profiles.list', { include_sessions: true })).profiles as Record<string, unknown>[]
+    const researcher = profiles.find(row => row.name === 'researcher')
+    const stored = String((researcher?.canonical_session as Record<string, unknown> | undefined)?.id ?? '')
+
+    expect(stored).not.toBe('')
+
+    await call('session.resume', { session_id: stored })
+    await call('prompt.submit', { session_id: stored, text: 'Take your time.' })
+
+    return stored
+  }
+
+  it('answers with the ten fields `SessionActiveItem` declares, and no others', async () => {
+    await busyResearcher()
+
+    const rows = await activeRows()
+
+    expect(rows.length).toBeGreaterThan(0)
+    expect(keysOf(rows[0])).toEqual([
+      'current',
+      'id',
+      'last_active',
+      'message_count',
+      'model',
+      'preview',
+      'session_key',
+      'started_at',
+      'status',
+      'title'
+    ])
+  })
+
+  /**
+   * The field the app has to attribute a row with. `_session_live_item` sets
+   * `id` to the runtime session id and `session_key` to
+   * `_session_lookup_key` — the agent's own session id, else the stored key.
+   * They are different strings, and neither of them encodes the profile.
+   */
+  it('reports the runtime id and the stored key as two different ids, with no profile on either', async () => {
+    const stored = await busyResearcher()
+    const row = (await activeRows()).find(entry => entry.session_key === stored)
+
+    expect(row, 'the busy session is missing from the list').toBeDefined()
+    expect(row?.id).not.toBe(row?.session_key)
+    expect(row).not.toHaveProperty('profile')
+    expect(row).not.toHaveProperty('profile_home')
+  })
+
+  /**
+   * The bug, held still. Asking for `writer` returns the `researcher` row,
+   * because upstream never looks at the parameter — so a client cannot read
+   * "these are that profile's sessions" out of the answer, however it asked.
+   */
+  it('IGNORES the `profile` parameter, exactly as upstream does', async () => {
+    const stored = await busyResearcher()
+
+    const asWriter = await activeRows({ profile: 'writer' })
+    const unscoped = await activeRows()
+    const nonsense = await activeRows({ profile: 'no-such-profile' })
+
+    expect(asWriter.map(row => row.session_key)).toContain(stored)
+    expect(asWriter.map(row => row.session_key).sort()).toEqual(unscoped.map(row => row.session_key).sort())
+    expect(nonsense.map(row => row.session_key)).toContain(stored)
+  })
+
+  /** Every row the list reports is one the gateway calls busy. */
+  it('lists only live sessions, so an idle profile contributes no row', async () => {
+    const stored = await busyResearcher()
+    const rows = await activeRows()
+
+    expect(rows.every(row => typeof row.status === 'string' && row.status !== 'idle')).toBe(true)
+    expect(rows.map(row => row.session_key)).toContain(stored)
   })
 })

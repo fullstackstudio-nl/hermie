@@ -40,11 +40,96 @@ type StoreApi<T> = {
   setState: (partial: Partial<T>) => void
 }
 
+/** The three session ids a chat is known under; `ChatState` satisfies it. */
+export interface ChatSessionIds {
+  storedSessionId?: string | undefined
+  resolvedSessionId?: string | undefined
+  runtimeSessionId?: string | undefined
+}
+
+/** Read-only view of the chat store, for `refreshRunning`'s attribution. */
+export type ChatSessionIdSource = {
+  getState: () => { chats: Readonly<Record<string, ChatSessionIds>> }
+}
+
 export interface BotsControllerOptions {
   gateway: ChatGateway
   store: StoreApi<BotsState>
   cache?: ChatCache | null
   now?: () => number
+  /**
+   * The chat store. Only its session ids are read, and only to attribute a busy
+   * session to a bot — see `refreshRunning`. Optional so the roster still works
+   * before any chat is open; a bot with no ids simply cannot be attributed.
+   */
+  chats?: ChatSessionIdSource | null
+}
+
+/**
+ * Index every session id the app can attribute to a bot, id → bot name.
+ *
+ * `SessionActiveItem` has no `profile` field, so this index is the ONLY way to
+ * tell whose session a busy row is. Four ids per bot, because a session is
+ * addressed by a different one depending on how it was reached:
+ *
+ *  - the roster's `canonical.id` (the durable stored id) and `canonical.resolvedId`
+ *    (the compression-lineage tip), known without opening the chat at all;
+ *  - the open chat's own copies of those two, which are refreshed on resume;
+ *  - the chat's `runtimeSessionId`, which is what a row's `id` carries.
+ *
+ * A bot never appears twice, so the first claim on an id wins: that keeps a
+ * stale runtime id from stealing a row from the bot that actually holds it.
+ */
+export function sessionOwnerIndex(
+  bots: readonly Bot[],
+  chats: Readonly<Record<string, ChatSessionIds>> = {}
+): Map<string, string> {
+  const owners = new Map<string, string>()
+
+  const claim = (id: string | undefined, name: string): void => {
+    if (id && !owners.has(id)) {
+      owners.set(id, name)
+    }
+  }
+
+  for (const bot of bots) {
+    const chat = chats[bot.name]
+
+    claim(bot.canonical?.id, bot.name)
+    claim(bot.canonical?.resolvedId, bot.name)
+    claim(chat?.storedSessionId, bot.name)
+    claim(chat?.resolvedSessionId, bot.name)
+    claim(chat?.runtimeSessionId, bot.name)
+  }
+
+  return owners
+}
+
+/**
+ * The bots that own a busy row in one `session.active_list` answer.
+ *
+ * A busy session that maps to no known bot lights up NOBODY. The gateway hosts
+ * sessions this app never opened — another client's TUI, a cron, a sub-agent —
+ * and attributing one of those to a bot is exactly the bug this replaced.
+ */
+export function runningBotsIn(rows: readonly SessionActiveItem[], owners: ReadonlyMap<string, string>): string[] {
+  const running = new Set<string>()
+
+  for (const row of rows) {
+    if (!BUSY_SESSION_STATUS.has(String(row?.status ?? ''))) {
+      continue
+    }
+
+    // `id` is the runtime session id, `session_key` the stored/lineage one. A
+    // row carries both and either may be the one this app knows.
+    const owner = owners.get(String(row?.id ?? '')) ?? owners.get(String(row?.session_key ?? ''))
+
+    if (owner) {
+      running.add(owner)
+    }
+  }
+
+  return [...running]
 }
 
 export class BotsController {
@@ -52,6 +137,7 @@ export class BotsController {
   private readonly store: StoreApi<BotsState>
   private readonly cache: ChatCache | null
   private readonly now: () => number
+  private readonly chats: ChatSessionIdSource | null
 
   /** One canonical resolution per bot at a time; a double tap must not mint two chats. */
   private readonly resolutions = new Map<string, Promise<BotCanonicalSession>>()
@@ -64,6 +150,7 @@ export class BotsController {
     this.store = options.store
     this.cache = options.cache ?? null
     this.now = options.now ?? (() => Date.now())
+    this.chats = options.chats ?? null
   }
 
   /** Paint the roster from disk. Safe to call before the socket is up. */
@@ -187,33 +274,52 @@ export class BotsController {
   }
 
   /**
-   * Refresh running state for every bot.
+   * Refresh running state for every bot, in ONE round trip.
    *
-   * `session.active_list` answers for one profile's backend at a time, so this
-   * is one call per bot. A bot whose call fails is reported as not running
-   * rather than as an error: a spinner that will not go away is worse than a
-   * missing one.
+   * `session.active_list` is NOT profile-scoped, however much its parameters
+   * suggest otherwise. Upstream it is a plain method that returns every live
+   * session in the gateway PROCESS and never reads the `profile` it accepts
+   * (`tui_gateway/methods_session.py`, `session.active_list`). This used to call
+   * it once per bot with that profile and mark the bot running if any returned
+   * row was busy — so one busy session painted the working bead on every row in
+   * the list, which is precisely what it looked like, and it spent N identical
+   * round trips per poll to do it.
+   *
+   * Attribution therefore cannot come from the answer; it comes from the ids
+   * this app already holds. See `sessionOwnerIndex` for the four per bot and
+   * `runningBotsIn` for the matching. A busy session this app cannot place
+   * lights up nobody.
+   *
+   * No `profile` is sent, because sending one would document a scoping that does
+   * not exist. If upstream ever does scope the method, this under-reports rather
+   * than over-reports — and a bot the user is talking to still shows as working
+   * off its own streaming `turn.active`, which is the other half of the signal.
+   *
+   * A failed call is reported as nothing running rather than as an error: a
+   * spinner that will not go away is worse than a missing one.
    */
   async refreshRunning(): Promise<void> {
     const bots = this.store.getState().bots
-    const running: string[] = []
 
-    await Promise.all(
-      bots.map(async bot => {
-        try {
-          const result = await this.gateway.request('session.active_list', { profile: bot.name })
-          const sessions: SessionActiveItem[] = result?.sessions ?? []
+    if (!bots.length) {
+      this.store.getState().setRunning([])
 
-          if (sessions.some(session => BUSY_SESSION_STATUS.has(session.status))) {
-            running.push(bot.name)
-          }
-        } catch {
-          // Not running, as far as this poll is concerned.
-        }
-      })
-    )
+      return
+    }
 
-    this.store.getState().setRunning(running)
+    let rows: SessionActiveItem[] = []
+
+    try {
+      const result = await this.gateway.request('session.active_list', {})
+
+      rows = Array.isArray(result?.sessions) ? result.sessions : []
+    } catch {
+      this.store.getState().setRunning([])
+
+      return
+    }
+
+    this.store.getState().setRunning(runningBotsIn(rows, sessionOwnerIndex(bots, this.chats?.getState().chats)))
   }
 
   /**

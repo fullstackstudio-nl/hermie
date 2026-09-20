@@ -2,7 +2,9 @@
  * The bot roster.
  *
  * A bot is a Hermes profile. Everything the list shows is derived rather than
- * stored twice: `running` comes from `session.active_list`, unread from the
+ * stored twice: `running` comes from `session.active_list` — whose rows the
+ * controller has to attribute to a bot by session id, because that call answers
+ * for the whole gateway process and its rows carry no profile — unread from the
  * canonical chat's `last_active` against a per-bot watermark, and "needs input"
  * from the open requests the chat store is already holding. The roster itself
  * is cached so the list paints on launch instead of after a round trip.
@@ -82,7 +84,7 @@ export interface BotsState {
   avatars: Record<string, string>
   /** `name + ':' + revision` for every avatar fetch already attempted, hit or miss. */
   avatarsFetched: Record<string, true>
-  /** Bots with a live session on the gateway right now. */
+  /** Bots the last `session.active_list` poll could place a busy session on. */
   running: Record<string, true>
   /** name → the `last_active` the user has already looked at. */
   lastSeen: Record<string, number>
