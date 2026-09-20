@@ -647,7 +647,15 @@ export function Composer({
                 height: round,
                 justifyContent: 'center',
                 width: round,
-                ...theme.shadows.card
+                // No shadow while the button is dimmed. Android draws an
+                // elevation shadow BEHIND the view and clips nothing, so at
+                // opacity 0.35 the fill stops hiding it and the shadow's own
+                // outline — an octagon, which is how the platform approximates
+                // a circle at this size — reads straight through the circle.
+                // iOS clips a shadow to outside the view's path and never
+                // showed it. A disabled control has nothing to float above
+                // either way, so the shadow goes with the dimming.
+                ...(!running && !canSend ? {} : theme.shadows.card)
               }}
               testID="composer-send-circle"
             >

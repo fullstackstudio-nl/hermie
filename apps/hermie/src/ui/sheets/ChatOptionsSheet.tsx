@@ -269,7 +269,12 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
     <BottomSheet
       accessibilityLabel={chatStrings.options.title}
       onClosed={props.onClosed}
-      onRequestClose={close}
+      // One level, the same rule Escape follows above. `onRequestClose` is the
+      // platform's dismiss request, and on Android that is the hardware back
+      // button — the only surface here that HAS one, and the one Escape cannot
+      // reach because `useEscapeKey` is wired to a Mac keyboard. Without this a
+      // back press from a page closed the whole sheet and skipped the level.
+      onRequestClose={() => (pane === 'root' ? close() : setPane('root'))}
       testID="chat-options-sheet"
       visible={props.visible}
     >
