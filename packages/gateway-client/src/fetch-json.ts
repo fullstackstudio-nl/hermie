@@ -98,17 +98,33 @@ export async function requestText(url: string, request: JsonRequest = {}): Promi
 
 /** Parse a response body that must be a JSON object. */
 export function parseJsonObject(text: string, url: string, kind: 'not_hermes' | 'protocol'): Record<string, unknown> {
-  let parsed: unknown
-
-  try {
-    parsed = JSON.parse(text)
-  } catch (error) {
-    throw new GatewayError(kind, `${url} answered with something that is not JSON.`, { cause: error })
-  }
+  const parsed = parseJsonBody(text, url, kind)
 
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new GatewayError(kind, `${url} answered with JSON that is not an object.`)
   }
 
   return parsed as Record<string, unknown>
+}
+
+/**
+ * Parse a response body that must be JSON, object or ARRAY.
+ *
+ * Not every REST route answers with an envelope. `GET /api/cron/jobs` answers
+ * with a bare array — the cron controller says so in `listRows` and reads both
+ * shapes — so a transport that rejected an array made that route unreachable
+ * whatever the caller was prepared to accept. Which SHAPE is acceptable is the
+ * caller's question; the transport's question is only whether it is JSON.
+ *
+ * `parseJsonObject` stays for the handshakes that genuinely require an object:
+ * the status probe, the credential exchange, the token endpoints. An array
+ * arriving there is a gateway that is not the gateway, and saying so early is
+ * the point of that check.
+ */
+export function parseJsonBody(text: string, url: string, kind: 'not_hermes' | 'protocol'): unknown {
+  try {
+    return JSON.parse(text)
+  } catch (error) {
+    throw new GatewayError(kind, `${url} answered with something that is not JSON.`, { cause: error })
+  }
 }

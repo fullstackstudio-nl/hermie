@@ -11,12 +11,12 @@
  */
 import { View } from 'react-native'
 
-import { Markdown } from '../markdown'
+import { Markdown, markdownLeading } from '../markdown'
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
 import { Bubble } from './primitives/Bubble'
 import { Chip } from './primitives/Chip'
-import { Fold } from './primitives/Fold'
+import { Fold, useFoldBlocks } from './primitives/Fold'
 import { MetaLine } from './primitives/MetaLine'
 import { useExpanded } from './expanded'
 import { formatClock, needsReadingTreatment } from './format'
@@ -54,6 +54,7 @@ export function BotDmInBubble({
   grouped = false
 }: BotDmInBubbleProps) {
   const theme = useTheme()
+  const foldBlocks = useFoldBlocks()
   const [expanded, toggle] = useExpanded(item.id)
 
   if (presentation === 'hidden-placeholder') {
@@ -99,15 +100,18 @@ export function BotDmInBubble({
       )}
 
       <Fold
+        blocks={foldBlocks.blocks}
         bleed={reading ? theme.space.lg : theme.space.md + 2}
         expanded={expanded}
         fadeTo={recipe.tail}
+        lineHeight={markdownLeading(theme.type.body.fontSize)}
         onToggle={toggle}
         testID={`bot-dm-in-fold-${item.id}`}
       >
         <Markdown
           fontSize={theme.type.body.fontSize}
           linkColor={theme.accent().text}
+          onBlockLayout={foldBlocks.onBlockLayout}
           onLinkPress={onLinkPress}
           text={item.text}
         />

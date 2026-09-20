@@ -17,7 +17,7 @@ import { chatStrings } from '../../chat-ui/strings'
 import type { PickerOption, Verbosity } from '../../chat-ui/types'
 import { strings } from '../../i18n/strings'
 import { AccentSwatches } from '../AccentSwatches'
-import { BottomSheet, SheetEyebrow } from '../BottomSheet'
+import { BottomSheet, SheetEyebrow, SheetPage } from '../BottomSheet'
 import { Button, InsetGroup, Text, TextField } from '../primitives'
 import { useTheme } from '../theme'
 import { TAP_SLOP, type AccentName } from '../tokens'
@@ -96,36 +96,17 @@ export interface ChatOptionsSheetProps {
 type Pane = 'root' | 'reasoning' | 'model' | 'colour'
 
 /**
- * A page inside the sheet, with a back control.
+ * A page inside the sheet.
  *
- * The header is shared so that every page has the same back affordance in the
- * same place — the thing Escape and the Android back button also do, one level
- * at a time.
+ * `SheetPage` rather than a local copy: the back affordance has to be in the
+ * same place with the same glyph in every sheet that goes a level deeper, which
+ * is the visible half of "Escape goes back one level".
  */
 function Page({ children, onBack, title }: { children: ReactNode; onBack: () => void; title: string }) {
-  const theme = useTheme()
-
   return (
-    <View style={{ gap: theme.space.md }}>
-      <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.sm }}>
-        <Pressable
-          accessibilityLabel={strings.common.back}
-          accessibilityRole="button"
-          hitSlop={TAP_SLOP}
-          onPress={onBack}
-          testID="picker-back"
-        >
-          <Text color="accent" style={{ fontSize: 22 }}>
-            {'‹'}
-          </Text>
-        </Pressable>
-        <Text style={{ flex: 1 }} variant="sheetTitle">
-          {title}
-        </Text>
-      </View>
-
+    <SheetPage backLabel={strings.common.back} onBack={onBack} testID="picker-back" title={title}>
       {children}
-    </View>
+    </SheetPage>
   )
 }
 
@@ -347,7 +328,13 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
             </Text>
           </View>
 
-          <InsetGroup>
+          {/*
+            Four groups, each with a heading. Without them the sheet is eight
+            controls in a column and the reader has to infer which two belong
+            together — and the two verbosity/visibility groups in particular are
+            about different things (what the model does, what this screen shows).
+          */}
+          <InsetGroup header={chatStrings.options.howHeader}>
             <SwitchRow
               hint={chatStrings.options.yoloHint}
               label={chatStrings.options.yolo}
@@ -364,7 +351,7 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
             />
           </InsetGroup>
 
-          <InsetGroup>
+          <InsetGroup header={chatStrings.options.thisChatHeader}>
             <DisclosureRow
               label={chatStrings.options.reasoning}
               onPress={() => setPane('reasoning')}
@@ -385,7 +372,16 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
             />
           </InsetGroup>
 
-          <InsetGroup>
+          {/*
+            Verbosity and the two visibility switches are ONE group: all three
+            are the client-side view filter (ADR-0008), they share the override
+            footer, and split across two cards the footer looked like it only
+            applied to the switches.
+          */}
+          <InsetGroup
+            footer={props.viewOverridden ? chatStrings.options.usingOverride : chatStrings.options.usingDefault}
+            header={chatStrings.options.viewHeader}
+          >
             <SegmentedRow
               label={chatStrings.options.verbosity}
               onChange={props.onChangeVerbosity}
@@ -397,11 +393,6 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
               testID="option-verbosity"
               value={props.verbosity}
             />
-          </InsetGroup>
-
-          <InsetGroup
-            footer={props.viewOverridden ? chatStrings.options.usingOverride : chatStrings.options.usingDefault}
-          >
             <SwitchRow
               label={chatStrings.options.showBotToBot}
               onChange={props.onChangeShowBotToBot}

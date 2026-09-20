@@ -5,6 +5,7 @@ import { AccessibilityInfo, useColorScheme } from 'react-native'
 import { useSettingsStore } from '../store/settings'
 import {
   ACCENTS,
+  DANGER_SOFT,
   darkBubbles,
   darkColors,
   darkElevation,
@@ -15,6 +16,7 @@ import {
   EDGE_SOFT,
   HAIRLINE,
   HAIRLINE_SOFT,
+  OK_SOFT,
   lightBubbles,
   lightColors,
   lightElevation,
@@ -71,6 +73,10 @@ export type Theme = {
   edge: string
   edgeSoft: string
   tintSunk: string
+  /** The soft destructive fill; `colors.dangerText` is the ink that goes on it. */
+  dangerSoft: string
+  /** Its counterpart, for a confirmed or locked state. `colors.okText` reads on it. */
+  okSoft: string
   /**
    * VoiceOver's "Reduce Transparency". Every glass surface swaps for its solid
    * tint and keeps the identical token set.
@@ -130,6 +136,8 @@ function buildTheme(
     edge: EDGE[scheme],
     edgeSoft: EDGE_SOFT[scheme],
     tintSunk: TINT_SUNK[scheme],
+    dangerSoft: DANGER_SOFT[scheme],
+    okSoft: OK_SOFT[scheme],
     reduceTransparency,
     reduceMotion,
     accent: name => resolveAccent(name ?? 'default', scheme)

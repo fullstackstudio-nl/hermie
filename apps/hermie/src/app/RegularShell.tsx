@@ -38,6 +38,7 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
   const [section, setSection] = useState<BotsSection | null>(initial?.section ?? null)
   const [selectedBot, setSelectedBot] = useState<string | undefined>(initial?.bot)
   const [focusItemId, setFocusItemId] = useState<string | undefined>(undefined)
+  const [cronJobId, setCronJobId] = useState<string | undefined>(undefined)
 
   const openBot = useCallback((name: string, options?: OpenChatOptions) => {
     setSelectedBot(name)
@@ -46,6 +47,19 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
     // twice should work twice.
     setFocusItemId(options?.focusItemId)
     setSection(null)
+  }, [])
+
+  // A cron card in the transcript opens the crons panel ON that cron. Opening
+  // the panel any other way clears the target, so the next visit lands on the
+  // list rather than on whichever cron somebody followed a card to last week.
+  const openCron = useCallback((jobId: string) => {
+    setCronJobId(jobId)
+    setSection('cron')
+  }, [])
+
+  const openSection = useCallback((next: BotsSection) => {
+    setCronJobId(undefined)
+    setSection(next)
   }, [])
 
   return (
@@ -71,7 +85,7 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
           <BotsScreen
             currentTab={section ?? 'chats'}
             onOpenBot={bot => openBot(bot.name)}
-            onOpenSection={setSection}
+            onOpenSection={openSection}
             selectedBot={section === null ? selectedBot : undefined}
             variant="sidebar"
           />
@@ -85,12 +99,12 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
               `ChatScreen` does that itself now, on both layouts, so there is no
               second copy of the rule here to disagree with it.
             */}
-            <ChatScreen bot={selectedBot} focusItemId={focusItemId} onOpenBot={openBot} />
+            <ChatScreen bot={selectedBot} focusItemId={focusItemId} onOpenBot={openBot} onOpenCron={openCron} />
           </GlassSurface>
 
           <OverlayPanel onClose={() => setSection(null)} title={titleFor(section)} visible={section !== null}>
             {section === 'activity' ? <ActivityScreen onOpenBot={openBot} /> : null}
-            {section === 'cron' ? <CronScreen /> : null}
+            {section === 'cron' ? <CronScreen {...(cronJobId ? { initialJobId: cronJobId } : {})} /> : null}
             {section === 'settings' ? (
               <SettingsScreen {...(initial?.page ? { initialPage: initial.page } : {})} />
             ) : null}

@@ -13,7 +13,7 @@
  * is not about a single job: `gateway_running === false` means the scheduler
  * process is down, and every cron below is then a plan rather than a promise.
  */
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Pressable, RefreshControl, SectionList, View } from 'react-native'
 
 import { useBotsStore } from '../../store/bots'
@@ -21,20 +21,12 @@ import { useCronStore } from '../../store/cron'
 import { Screen, Text } from '../../ui/primitives'
 import { useEscapeKey } from '../../ui/useEscapeKey'
 import { useTheme } from '../../ui/theme'
-import { CONTROL_MIN_HEIGHT } from '../../ui/tokens'
+import { CONTROL_MIN_HEIGHT, withAlpha } from '../../ui/tokens'
 import type { CronJobInput } from './cron-controller'
 import { CronDetailScreen } from './CronDetailScreen'
 import { CronEditorSheet } from './CronEditorSheet'
 import { CronRunScreen } from './CronRunScreen'
-import {
-  type CronJob,
-  type CronRun,
-  cronStatusLabel,
-  cronStatusOf,
-  lastErrorSummary,
-  relativeTime,
-  scheduleText
-} from './model'
+import { type CronJob, type CronRun, cronStatusOf, lastErrorSummary, relativeTime, scheduleText } from './model'
 import { StatusDot } from './StatusDot'
 import { cronStrings } from './strings'
 import { useCronController } from './useCron'
@@ -42,8 +34,19 @@ import { useCronController } from './useCron'
 type CronView =
   { screen: 'list' } | { screen: 'detail'; jobId: string } | { screen: 'run'; jobId: string; run: CronRun }
 
-export function CronScreen() {
-  const theme = useTheme()
+export interface CronScreenProps {
+  /**
+   * Open this job's detail instead of the list.
+   *
+   * How a cron card in a transcript lands on its own cron (§6.5). It is a job
+   * ID rather than a name because the name is what was ambiguous in the first
+   * place: two profiles may hold a cron called the same thing, and the resolving
+   * is done by whoever had both the name and the profile — see `ChatScreen`.
+   */
+  initialJobId?: string
+}
+
+export function CronScreen({ initialJobId }: CronScreenProps = {}) {
   const controller = useCronController()
   const jobs = useCronStore(state => state.jobs)
   const loading = useCronStore(state => state.loading)
@@ -56,11 +59,23 @@ export function CronScreen() {
   // that serves one of them gets no picker rather than a picker with one option.
   const profiles = useMemo(() => (bots.length > 1 ? bots.map(bot => bot.name) : []), [bots])
 
-  const [view, setView] = useState<CronView>({ screen: 'list' })
+  const [view, setView] = useState<CronView>(
+    initialJobId ? { screen: 'detail', jobId: initialJobId } : { screen: 'list' }
+  )
   const [refreshing, setRefreshing] = useState(false)
   const [editing, setEditing] = useState<{ open: boolean; job: CronJob | null }>({ open: false, job: null })
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+
+  // The initial state covers the wide layout, where this screen is mounted with
+  // the overlay and dropped with it. On the phone the route is already in the
+  // stack, so a second `navigate` only changes the parameter — this is what
+  // makes that land on the detail rather than on whatever page was last open.
+  useEffect(() => {
+    if (initialJobId) {
+      setView({ screen: 'detail', jobId: initialJobId })
+    }
+  }, [initialJobId])
 
   const refresh = useCallback(async () => {
     setRefreshing(true)
@@ -178,22 +193,7 @@ export function CronScreen() {
             showProfile={showProfiles}
           />
         )}
-        renderSectionHeader={({ section }) => (
-          <Text
-            color="textMuted"
-            style={{
-              backgroundColor: theme.elevation.e0,
-              fontWeight: '700',
-              letterSpacing: 1.1,
-              paddingHorizontal: theme.space.lg,
-              paddingTop: theme.space.lg,
-              paddingBottom: theme.space.xs
-            }}
-            variant="meta"
-          >
-            {section.title}
-          </Text>
-        )}
+        renderSectionHeader={({ section }) => <SectionDivider title={section.title} />}
         sections={sections}
         stickySectionHeadersEnabled={false}
         testID="cron-list"
@@ -213,18 +213,50 @@ export function CronScreen() {
   )
 }
 
+/**
+ * §6.11's `.divider`: the label, then a hairline that runs to the edge.
+ *
+ * A bare capitalised word was doing the job of a section break on its own, which
+ * on a list of six rows read as another row. The rule is what makes `Paused` a
+ * boundary rather than a caption.
+ */
+function SectionDivider({ title }: { title: string }) {
+  const theme = useTheme()
+
+  return (
+    <View
+      style={{
+        alignItems: 'center',
+        flexDirection: 'row',
+        gap: theme.space.md,
+        paddingBottom: theme.space.xs,
+        paddingHorizontal: theme.space.lg,
+        paddingTop: theme.space.lg
+      }}
+    >
+      <Text color="textFaint" variant="micro">
+        {title}
+      </Text>
+      <View style={{ backgroundColor: theme.hairlineSoft, flex: 1, height: 1 }} />
+    </View>
+  )
+}
+
 function ListHeader({ gatewayRunning, onCreate }: { gatewayRunning: boolean | null; onCreate: () => void }) {
   const theme = useTheme()
 
   return (
     <View style={{ gap: theme.space.sm, paddingHorizontal: theme.space.lg, paddingTop: theme.space.sm }}>
+      {/*
+        No title here. Both shells already put one above this screen — the
+        overlay panel's header on the wide layout, the stack's own title bar on
+        the phone — so printing "Crons" again made the panel say its own name
+        twice in two sizes, the same stutter the cron editor's eyebrow had.
+      */}
       <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.md }}>
-        <View style={{ flex: 1, gap: theme.space.xxs }}>
-          <Text variant="title">{cronStrings.title}</Text>
-          <Text color="textMuted" variant="preview">
-            {cronStrings.subtitle}
-          </Text>
-        </View>
+        <Text color="textMuted" style={{ flex: 1 }} variant="preview">
+          {cronStrings.subtitle}
+        </Text>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={cronStrings.list.add}
@@ -244,18 +276,30 @@ function ListHeader({ gatewayRunning, onCreate }: { gatewayRunning: boolean | nu
         </Pressable>
       </View>
 
+      {/*
+        The one thing on the screen that is not about a single job, so it is the
+        one thing painted in the danger tint: every row below it is a plan rather
+        than a promise while the scheduler is down.
+      */}
       {gatewayRunning === false ? (
         <View
           style={{
-            backgroundColor: theme.elevation.e3c,
-            borderColor: theme.colors.danger,
-            borderRadius: theme.radii.lg,
+            alignItems: 'center',
+            backgroundColor: theme.dangerSoft,
+            borderColor: withAlpha(theme.colors.danger, 0.34),
+            borderRadius: theme.radii.card,
             borderWidth: 1,
-            padding: theme.space.md
+            flexDirection: 'row',
+            gap: theme.space.sm,
+            paddingHorizontal: theme.space.lg,
+            paddingVertical: theme.space.md
           }}
           testID="cron-gateway-banner"
         >
-          <Text color="dangerText" variant="preview">
+          <Text color="dangerText" style={{ fontSize: 15 }}>
+            {'!'}
+          </Text>
+          <Text color="dangerText" style={{ flex: 1 }} variant="preview">
             {cronStrings.gatewayBanner}
           </Text>
         </View>
@@ -276,10 +320,25 @@ function EmptyState({ loading, error }: { loading: boolean; error: string | null
   )
 }
 
+/**
+ * One cron, as §6.11's `.cronrow`.
+ *
+ * Three columns rather than four stacked lines: a static status dot, the
+ * identity (name over "Every day at 04:22 · Researcher"), and a right-aligned
+ * pair that says WHEN — a micro label over a relative time. The four-line
+ * version printed the schedule, the delivery target, the profile and the next
+ * run each on its own row, which made a list of five crons forty lines long and
+ * gave a reader no way to scan one column.
+ *
+ * `next_run_at` is shown as a relative phrase on purpose: the scheduler's
+ * timezone is not the phone's (see `relativeTime`).
+ */
 function RoutineRow({ job, onPress, showProfile }: { job: CronJob; onPress: () => void; showProfile: boolean }) {
   const theme = useTheme()
   const status = cronStatusOf(job)
+  const paused = status === 'paused'
   const nextRun = relativeTime(job.nextRunAt)
+  const lastRun = relativeTime(job.lastRunAt)
   const summary = lastErrorSummary(job.lastError)
 
   // Two profiles may hold a cron of the same name, so the name alone does not
@@ -287,52 +346,79 @@ function RoutineRow({ job, onPress, showProfile }: { job: CronJob; onPress: () =
   const owner = showProfile && job.profile ? job.profile : null
   const label = owner ? `${job.name}, ${cronStrings.list.profile(owner)}` : job.name
 
+  // "next in 2h" while it is scheduled, otherwise what it last did. A row that
+  // said only "Not scheduled" left the reader with nothing to go on.
+  // The fallback keeps the `next` label rather than repeating the status: a row
+  // sitting under a `PAUSED` divider that also says PAUSED is the same stutter
+  // the cron editor's eyebrow had.
+  const when = nextRun
+    ? { label: cronStrings.list.nextLabel, value: nextRun }
+    : lastRun
+      ? { label: cronStrings.list.lastLabel, value: lastRun }
+      : { label: cronStrings.list.nextLabel, value: cronStrings.list.noNextRun }
+
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} testID={`cron-row-${job.id}`}>
       {({ pressed }) => (
         <View
           style={{
+            alignItems: 'center',
             backgroundColor: pressed ? theme.elevation.e2 : 'transparent',
-            borderBottomColor: theme.hairline,
-            borderBottomWidth: 1,
-            gap: theme.space.xs,
+            flexDirection: 'row',
+            gap: theme.space.md,
+            // A paused cron is dimmed, not greyed out: it is still a cron, and
+            // the colour it would have to lose to read as disabled is the one
+            // its status dot needs.
+            opacity: paused ? 0.68 : 1,
             paddingHorizontal: theme.space.lg,
             paddingVertical: theme.space.md
           }}
         >
-          <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.sm }}>
-            <Text style={{ flex: 1 }} numberOfLines={1} variant="name">
+          <StatusDot status={status} />
+
+          <View style={{ flex: 1, gap: 2, minWidth: 0 }}>
+            <Text numberOfLines={1} style={{ fontSize: 16, fontWeight: '600', lineHeight: 21 }}>
               {job.name}
             </Text>
-            <StatusDot status={status} />
-            <Text color="textMuted" variant="meta">
-              {cronStatusLabel(status)}
-            </Text>
-          </View>
 
-          <Text color="textMuted" numberOfLines={1}>
-            {scheduleText(job.schedule)}
-          </Text>
+            <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.sm }}>
+              <Text color="textMuted" numberOfLines={1} style={{ flexShrink: 1 }} variant="meta">
+                {[scheduleText(job.schedule), job.deliver ? `@${job.deliver}` : ''].filter(Boolean).join(' · ')}
+              </Text>
 
-          <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.sm }}>
-            <Text color="textMuted" style={{ flex: 1 }} variant="meta">
-              {job.deliver ? `@${job.deliver}` : ''}
-            </Text>
-            {owner ? (
-              <Text color="textMuted" variant="meta" testID={`cron-profile-${job.id}`}>
-                {cronStrings.list.profile(owner)}
+              {/* Only where it tells two rows apart — see `showProfiles`. */}
+              {owner ? (
+                <Text
+                  color="textFaint"
+                  style={{
+                    backgroundColor: theme.elevation.e2,
+                    borderRadius: theme.radii.sm + 2,
+                    overflow: 'hidden',
+                    paddingHorizontal: 6
+                  }}
+                  testID={`cron-profile-${job.id}`}
+                  variant="micro"
+                >
+                  {owner}
+                </Text>
+              ) : null}
+            </View>
+
+            {summary ? (
+              <Text color="dangerText" numberOfLines={2} testID={`cron-error-${job.id}`} variant="meta">
+                {summary}
               </Text>
             ) : null}
-            <Text color="textMuted" variant="meta">
-              {nextRun ? cronStrings.list.nextRun(nextRun) : cronStrings.list.noNextRun}
-            </Text>
           </View>
 
-          {summary ? (
-            <Text color="dangerText" numberOfLines={2} variant="meta" testID={`cron-error-${job.id}`}>
-              {summary}
+          <View style={{ alignItems: 'flex-end', flexShrink: 0, gap: 1 }}>
+            <Text color="textFaint" variant="micro">
+              {when.label.toUpperCase()}
             </Text>
-          ) : null}
+            <Text color="textMuted" variant="meta">
+              {when.value}
+            </Text>
+          </View>
         </View>
       )}
     </Pressable>

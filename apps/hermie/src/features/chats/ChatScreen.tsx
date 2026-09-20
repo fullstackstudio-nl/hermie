@@ -47,6 +47,7 @@ import { presenceOf } from '../bots/presence'
 import { useBotsStore } from '../../store/bots'
 import { useChatAccent, useChatLayoutStore } from '../../store/chat-layout'
 import { useChatsStore } from '../../store/chats'
+import { useCronStore } from '../../store/cron'
 import { hasChatViewOverride, useChatView, useSettingsStore } from '../../store/settings'
 import { KEYBOARD_AVOID_BEHAVIOR } from '../../ui/keyboard'
 import { Screen, Text } from '../../ui/primitives'
@@ -82,6 +83,11 @@ export type ChatScreenProps = {
   onBack?: () => void
   /** Open another bot's chat — a tapped DM card or sender chip. */
   onOpenBot?: (botName: string, options?: OpenChatOptions) => void
+  /**
+   * Open one cron's detail, by job id. Absent means the shell cannot get there,
+   * and a cron card in the transcript then offers no `Open cron` at all.
+   */
+  onOpenCron?: (jobId: string) => void
 }
 
 const REASONING_OPTIONS: PickerOption[] = [
@@ -95,7 +101,7 @@ const REASONING_OPTIONS: PickerOption[] = [
   { value: 'ultra', label: 'Ultra' }
 ]
 
-export function ChatScreen({ route, bot, focusItemId, onBack, onOpenBot }: ChatScreenProps) {
+export function ChatScreen({ route, bot, focusItemId, onBack, onOpenBot, onOpenCron }: ChatScreenProps) {
   const { status } = useGateway()
   const botName = bot ?? route?.params?.bot ?? ''
   const focus = focusItemId ?? route?.params?.focusItemId
@@ -120,7 +126,16 @@ export function ChatScreen({ route, bot, focusItemId, onBack, onOpenBot }: ChatS
   // Keyed on the bot so that switching conversations in the regular shell
   // starts from a clean composer and closed sheets rather than inheriting the
   // previous chat's.
-  return <Conversation botName={botName} focusItemId={focus} key={botName} onBack={onBack} onOpenBot={onOpenBot} />
+  return (
+    <Conversation
+      botName={botName}
+      focusItemId={focus}
+      key={botName}
+      onBack={onBack}
+      onOpenBot={onOpenBot}
+      onOpenCron={onOpenCron}
+    />
+  )
 }
 
 function NoBotSelected() {
@@ -168,14 +183,17 @@ function Conversation({
   botName,
   focusItemId,
   onBack,
-  onOpenBot
+  onOpenBot,
+  onOpenCron
 }: {
   botName: string
   focusItemId?: string
   onBack?: () => void
   onOpenBot?: (botName: string, options?: OpenChatOptions) => void
+  onOpenCron?: (jobId: string) => void
 }) {
   const chat = useChat(botName)
+  const cronJobs = useCronStore(state => state.jobs)
   const { config, http, status } = useGateway()
   const view = useChatView(botName)
   const avatar = useBotsStore(state => state.avatars[botName])
@@ -434,6 +452,50 @@ function Conversation({
       onOpenBot?.(target, counterpart ? { focusItemId: counterpart } : undefined)
     },
     [botName, onOpenBot]
+  )
+
+  /**
+   * A cron card's `Open cron`, resolved rather than guessed.
+   *
+   * A card carries the job's NAME, and a name does not identify a job: two
+   * profiles may hold a cron called the same thing, which is exactly why the
+   * list shows a profile chip. So the name is narrowed by this chat's bot — a
+   * bot IS a Hermes profile — and the action exists only when that leaves
+   * EXACTLY ONE job. Anything else and `undefined` is handed down, which makes
+   * the card render no action at all instead of a link that opens the wrong
+   * cron or nothing.
+   *
+   * It is also undefined until the crons list has been read at least once in
+   * this session: the cron controller's lifetime is the Crons screen's, so
+   * until then this app genuinely does not know which job the card names.
+   */
+  const resolveCron = useCallback(
+    (jobName: string): string | undefined => {
+      const named = cronJobs.filter(job => job.name === jobName)
+      const matches = named.length > 1 ? named.filter(job => job.profile === botName) : named
+
+      return matches.length === 1 ? matches[0]?.id : undefined
+    },
+    [botName, cronJobs]
+  )
+
+  // Per CARD, not per screen: the card asks whether ITS name resolves, so a
+  // transcript with one resolvable delivery and one ambiguous one draws the link
+  // on the first only.
+  const canOpenCron = useCallback(
+    (jobName: string) => Boolean(onOpenCron) && resolveCron(jobName) !== undefined,
+    [onOpenCron, resolveCron]
+  )
+
+  const openCron = useCallback(
+    (jobName: string) => {
+      const id = resolveCron(jobName)
+
+      if (id) {
+        onOpenCron?.(id)
+      }
+    },
+    [onOpenCron, resolveCron]
   )
 
   const subagents = useChatsStore(useCallback(state => state.chats[botName]?.subagents ?? EMPTY_SUBAGENTS, [botName]))
@@ -867,7 +929,14 @@ function Conversation({
           {...(needsPhotoAccess ? { onOpenSettings: openAppSettings } : {})}
         />
 
+        {/*
+          `onRunCron` is deliberately absent. Run now is a side effect on the
+          gateway and it lives on the cron's own detail behind its confirm; a
+          transcript card is a receipt for a run that already happened, and one
+          tap away from starting another one is not where that belongs.
+        */}
         <TranscriptList
+          canOpenCron={canOpenCron}
           header={
             chat.subagents.length ? (
               <AgentsBar count={chat.subagents.length} onPress={openAgents} startedAtMs={oldestStart(chat.subagents)} />
@@ -878,6 +947,7 @@ function Conversation({
           newMessageCount={newCount}
           onEndReached={noop}
           onOpenBot={openBot}
+          onOpenCron={openCron}
           onOpenRequest={reopenRequest}
           onOpenTranscript={openTranscript}
           onScrolledAwayFromBottom={onScrolledAway}

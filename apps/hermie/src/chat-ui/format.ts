@@ -45,6 +45,31 @@ export function formatDuration(seconds: number | undefined): string {
   return `${hours}h ${String(totalMinutes % 60).padStart(2, '0')}m`
 }
 
+/**
+ * `0:42`, `1:12`, `1:02:33` — a running clock, for the agents bar.
+ *
+ * Not `formatDuration`. The bar's number ticks every second in a fixed slot, and
+ * `1m 12s` changes WIDTH as it counts (`9s` → `10s` → `1m 00s`), which shoves
+ * the "Show" beside it left and right once a second — the one thing a bar the
+ * design board calls static must not do. A colon clock only ever grows, and only
+ * at a minute or an hour.
+ */
+export function formatElapsedClock(seconds: number | undefined): string {
+  if (seconds === undefined || Number.isNaN(seconds) || seconds < 0) {
+    return '0:00'
+  }
+
+  const whole = Math.floor(seconds)
+  const minutes = Math.floor(whole / 60)
+  const rest = String(whole % 60).padStart(2, '0')
+
+  if (minutes < 60) {
+    return `${minutes}:${rest}`
+  }
+
+  return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}:${rest}`
+}
+
 /** `1.2k`, `912` — token counts in a bubble footer. */
 export function formatCount(value: number | undefined): string {
   if (value === undefined || Number.isNaN(value)) {

@@ -12,7 +12,7 @@
  * `__tests__/chat-ui/markdown-blocks.test.tsx` asserts.
  */
 import { useCallback, useMemo, useRef } from 'react'
-import { Linking, View, type ViewStyle } from 'react-native'
+import { Linking, View, type LayoutChangeEvent, type ViewStyle } from 'react-native'
 
 import { useTheme } from '../ui/theme'
 import type { ColorRole } from '../ui/tokens'
@@ -54,9 +54,50 @@ export interface MarkdownProps {
    */
   images?: MarkdownImageSource
   style?: ViewStyle
+  /**
+   * Where each top-level block sits, and whether it may be cut through.
+   *
+   * Only the fold asks for this, and only it can use it: a fold whose clip lands
+   * inside a table or a fenced code block slices a row of cells or a line of code
+   * in half, and no amount of gradient makes that read as a fade rather than as
+   * damage. The renderer is the only thing that knows where the blocks are, so it
+   * reports them and the fold decides.
+   *
+   * Absent means no wrapper views and no callbacks, which is what every other
+   * caller gets.
+   */
+  onBlockLayout?: (block: { index: number; top: number; height: number; atomic: boolean }) => void
 }
 
 const OPENABLE = /^(https?|mailto|tel):/i
+
+/**
+ * The body leading, from the body size. 1.45 × the font size, rounded.
+ *
+ * Exported because the FOLD needs the same number: it clips at a whole multiple
+ * of the leading, and a second copy of this factor is a fold that cuts half a
+ * line the day either one is tuned.
+ */
+export function markdownLeading(fontSize: number): number {
+  return Math.round(fontSize * 1.45)
+}
+
+/**
+ * A block a fold must not cut through: a fenced code block, or a table.
+ *
+ * Cheap and deliberately shallow — it runs per block, not per delta, and the
+ * cost of a false positive is one block faded whole instead of clipped.
+ */
+function isAtomicBlock(raw: string): boolean {
+  const text = raw.trim()
+
+  if (text.startsWith('```') || text.startsWith('~~~')) {
+    return true
+  }
+
+  // A table's delimiter row is the one line whose shape is unambiguous.
+  return /^\s*\|?[\s:-]*-{2,}[\s:|-]*\|/m.test(text)
+}
 
 export function Markdown({
   text,
@@ -72,7 +113,8 @@ export function Markdown({
   selectable = true,
   onLinkPress,
   images,
-  style
+  style,
+  onBlockLayout
 }: MarkdownProps) {
   const theme = useTheme()
 
@@ -106,7 +148,7 @@ export function Markdown({
       borderColor: borderColor ?? theme.hairline,
       color,
       fontSize: body,
-      lineHeight: Math.round(body * 1.45),
+      lineHeight: markdownLeading(body),
       linkColor: linkColor ?? theme.colors.accent,
       mutedColor,
       mutedTextColor: theme.colors[mutedColor],
@@ -143,11 +185,46 @@ export function Markdown({
     return -1
   }, [blocks])
 
+  // The callback may be a fresh closure per render; the wrapper must not be
+  // rebuilt for that, and a block must never be invalidated by it.
+  const blockLayout = useRef(onBlockLayout)
+
+  blockLayout.current = onBlockLayout
+
+  const reportLayout = useCallback((index: number, raw: string) => {
+    const report = blockLayout.current
+
+    if (!report) {
+      return
+    }
+
+    return (event: LayoutChangeEvent) =>
+      report({
+        atomic: isAtomicBlock(raw),
+        height: event.nativeEvent.layout.height,
+        index,
+        top: event.nativeEvent.layout.y
+      })
+  }, [])
+
   return (
     <View style={style}>
-      {blocks.map((raw, index) => (
-        <MarkdownBlock context={context} key={index} raw={raw} streaming={streaming && index === lastIndex} />
-      ))}
+      {blocks.map((raw, index) => {
+        const block = (
+          <MarkdownBlock context={context} key={index} raw={raw} streaming={streaming && index === lastIndex} />
+        )
+
+        // No wrapper at all where nobody asked for the geometry: a view per block
+        // on every reply in the transcript, for a measurement only one caller
+        // wants, is a cost with no reader.
+        return onBlockLayout ? (
+          <View key={index} onLayout={reportLayout(index, raw)}>
+            {block}
+          </View>
+        ) : (
+          block
+        )
+      })}
     </View>
   )
 }

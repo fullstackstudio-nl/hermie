@@ -5,7 +5,7 @@
  */
 export { MarkdownBlock, type MarkdownBlockProps } from './Block'
 export { CodeBlock, type CodeBlockProps } from './CodeBlock'
-export { Markdown, type MarkdownProps } from './Markdown'
+export { Markdown, markdownLeading, type MarkdownProps } from './Markdown'
 export { resetBlockCache, splitBlocks } from './blocks'
 export { codeScopeColor, type CodeScheme } from './code-theme'
 export { MONOSPACE, type MarkdownContext, type MarkdownImageSource, resolveImageUri } from './context'

@@ -110,44 +110,50 @@ export function ApprovalSheet({
       testID="approval-sheet"
       visible={visible}
     >
+      {/*
+        §6.9's order, which is not the order this sheet had: lead line, then the
+        command, then the consequence. The description used to sit ABOVE the
+        well, so the reader met the sentence about the command before the
+        command, and the well — the one thing they have to read — was in the
+        middle of three paragraphs instead of being the object the sheet is about.
+      */}
       <SheetEyebrow>{chatStrings.approval.eyebrow(botHandle)}</SheetEyebrow>
       <Text variant="sheetTitle">{chatStrings.approval.title}</Text>
 
-      {item.description ? (
-        <Text color="textMuted" style={{ fontSize: 16, lineHeight: 22 }}>
-          {item.description}
-        </Text>
-      ) : null}
+      <Text color="textMuted" testID="approval-lead" variant="preview">
+        {chatStrings.approval.lead(botHandle, workingDirectory)}
+      </Text>
 
       <View
         style={{
           backgroundColor: theme.tintSunk,
-          borderRadius: theme.radii.lg,
-          padding: theme.space.md
+          borderColor: theme.hairlineSoft,
+          borderRadius: theme.radii.inset,
+          borderWidth: 1,
+          paddingHorizontal: theme.space.lg,
+          paddingVertical: theme.space.md
         }}
       >
         <Text
           selectable
-          style={{ color: theme.colors.text, fontFamily: MONOSPACE, fontSize: 13, lineHeight: 19 }}
+          style={{ color: theme.colors.text, fontFamily: MONOSPACE, fontSize: 15, lineHeight: 22 }}
           testID="approval-command"
         >
           {item.command}
         </Text>
       </View>
 
-      <View style={{ gap: 2 }}>
-        <Text style={{ fontSize: 13, fontWeight: '600' }}>{chatStrings.approval.runsOn}</Text>
-        {item.toolName ? (
-          <Text color="textMuted" variant="meta" testID="approval-tool-name">
-            {item.toolName}
-          </Text>
-        ) : null}
-        {workingDirectory ? (
-          <Text color="textMuted" variant="meta">
-            {workingDirectory}
-          </Text>
-        ) : null}
-      </View>
+      {item.description ? (
+        <Text color="textMuted" variant="preview">
+          {item.description}
+        </Text>
+      ) : null}
+
+      {item.toolName ? (
+        <Text color="textFaint" testID="approval-tool-name" variant="meta">
+          {`${chatStrings.approval.runsOn} · ${item.toolName}`}
+        </Text>
+      ) : null}
 
       {open ? (
         <View style={{ gap: theme.space.sm }}>
@@ -163,7 +169,7 @@ export function ApprovalSheet({
           ))}
 
           {item.choices.includes('always') ? (
-            <Text color="textMuted" variant="meta">
+            <Text color="textFaint" variant="meta">
               {chatStrings.approval.fine}
             </Text>
           ) : null}

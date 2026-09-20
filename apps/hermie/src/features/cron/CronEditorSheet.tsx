@@ -10,7 +10,7 @@
  * is what the detail screen shows. Any countdown computed here would be in the
  * phone's timezone, and the scheduler runs in the gateway's.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { View } from 'react-native'
 
 import { BottomSheet, SheetEyebrow } from '../../ui/BottomSheet'
@@ -119,58 +119,60 @@ export function CronEditorSheet({
       accessibilityLabel={job ? cronStrings.editor.editTitle : cronStrings.editor.createTitle}
       testID="cron-editor"
     >
-      <View style={{ gap: theme.space.lg }}>
-        <View style={{ gap: theme.space.xxs }}>
-          <SheetEyebrow>{job ? cronStrings.editor.editEyebrow : cronStrings.editor.createEyebrow}</SheetEyebrow>
-          <Text variant="sheetTitle">{job ? cronStrings.editor.editTitle : cronStrings.editor.createTitle}</Text>
-        </View>
+      <View style={{ gap: theme.space.xl }}>
+        {/*
+          Title only. The eyebrow above it read "NEW CRON" over "New cron" — the
+          same two words twice, in two sizes, which is a stutter rather than a
+          hierarchy. The eyebrow earns its line where it says something the title
+          does not (the approval sheet names the bot); here it did not.
+        */}
+        <Text variant="sheetTitle">{job ? cronStrings.editor.editTitle : cronStrings.editor.createTitle}</Text>
 
-        <TextField
-          label={cronStrings.editor.name}
-          placeholder={cronStrings.editor.namePlaceholder}
-          value={draft.name}
-          onChangeText={name => setDraft(current => ({ ...current, name }))}
-          error={touched ? nameError : null}
-          testID="cron-editor-name"
-        />
+        <Section title={cronStrings.editor.what}>
+          <TextField
+            label={cronStrings.editor.name}
+            placeholder={cronStrings.editor.namePlaceholder}
+            value={draft.name}
+            onChangeText={name => setDraft(current => ({ ...current, name }))}
+            error={touched ? nameError : null}
+            testID="cron-editor-name"
+          />
 
-        <TextField
-          label={cronStrings.editor.prompt}
-          placeholder={cronStrings.editor.promptPlaceholder}
-          multiline
-          numberOfLines={4}
-          style={{ minHeight: 96, textAlignVertical: 'top' }}
-          value={draft.prompt}
-          onChangeText={prompt => setDraft(current => ({ ...current, prompt }))}
-          error={touched ? promptError : null}
-          testID="cron-editor-prompt"
-        />
+          <TextField
+            label={cronStrings.editor.prompt}
+            placeholder={cronStrings.editor.promptPlaceholder}
+            multiline
+            numberOfLines={4}
+            style={{ minHeight: 96, textAlignVertical: 'top' }}
+            value={draft.prompt}
+            onChangeText={prompt => setDraft(current => ({ ...current, prompt }))}
+            error={touched ? promptError : null}
+            testID="cron-editor-prompt"
+          />
+        </Section>
 
-        <DeliveryPicker
-          targets={targets}
-          value={draft.deliver}
-          onChange={deliver => setDraft(current => ({ ...current, deliver }))}
-        />
-
-        <ProfilePicker
-          locked={job !== null}
-          onChange={profile => setDraft(current => ({ ...current, profile }))}
-          profiles={profiles}
-          value={draft.profile}
-        />
-
-        <View style={{ gap: theme.space.sm }}>
-          <Text variant="name">{cronStrings.editor.schedule}</Text>
+        <Section hint={cronStrings.editor.nextRunHint} title={cronStrings.editor.schedule}>
           <ScheduleBuilder
             draft={draft.schedule}
             onChange={next => setDraft(current => ({ ...current, schedule: next }))}
             showErrors={touched}
           />
-        </View>
+        </Section>
 
-        <Text color="textMuted" variant="meta">
-          {cronStrings.editor.nextRunHint}
-        </Text>
+        <Section title={cronStrings.editor.where}>
+          <DeliveryPicker
+            targets={targets}
+            value={draft.deliver}
+            onChange={deliver => setDraft(current => ({ ...current, deliver }))}
+          />
+
+          <ProfilePicker
+            locked={job !== null}
+            onChange={profile => setDraft(current => ({ ...current, profile }))}
+            profiles={profiles}
+            value={draft.profile}
+          />
+        </Section>
 
         {error ? (
           <Text color="dangerText" variant="meta" testID="cron-editor-error">
@@ -189,6 +191,30 @@ export function CronEditorSheet({
         </View>
       </View>
     </BottomSheet>
+  )
+}
+
+/**
+ * One titled group of fields.
+ *
+ * The editor is five controls long and, as one flat column, every one of them
+ * looked equally important — the schedule builder in particular, which is three
+ * controls of its own, ran straight into the delivery pills above it. Three
+ * headings are what make it readable without a second screen.
+ */
+function Section({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
+  const theme = useTheme()
+
+  return (
+    <View style={{ gap: theme.space.md }}>
+      <SheetEyebrow>{title}</SheetEyebrow>
+      {children}
+      {hint ? (
+        <Text color="textFaint" variant="meta">
+          {hint}
+        </Text>
+      ) : null}
+    </View>
   )
 }
 
@@ -295,6 +321,12 @@ function OptionPills({
       <Text color="textMuted" variant="meta">
         {label}
       </Text>
+      {/*
+        §3's `.chip`: a 32pt pill on the level-3 tint with a hairline, and the
+        pressed one filled with the accent. The hairline is what tells an
+        unselected pill apart from the sheet behind it — without it the group
+        read as a row of words on a dark sheet.
+      */}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.space.sm }}>
         {options.map(option => {
           const selected = option.id === value
@@ -305,14 +337,18 @@ function OptionPills({
               accessibilityState={{ selected }}
               key={option.id}
               onPress={() => onChange(option.id)}
-              variant="preview"
-              color={selected ? 'onAccent' : 'text'}
+              color={selected ? 'onAccent' : 'textMuted'}
               style={{
                 backgroundColor: selected ? theme.colors.accent : theme.elevation.e2,
+                borderColor: selected ? 'transparent' : theme.hairlineSoft,
                 borderRadius: theme.radii.pill,
+                borderWidth: 1,
+                fontSize: 14,
+                fontWeight: '600',
+                lineHeight: 18,
                 overflow: 'hidden',
                 paddingHorizontal: theme.space.md,
-                paddingVertical: theme.space.sm
+                paddingVertical: 7
               }}
               testID={`${testID}-${option.id}`}
             >

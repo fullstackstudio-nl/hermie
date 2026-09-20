@@ -122,6 +122,16 @@ export interface TranscriptContext {
   onLinkPress?: (href: string) => void
   /** The cron card's two actions, where the host can provide them. */
   onOpenCron?: (jobName: string) => void
+  /**
+   * Whether THIS card's job name resolves to exactly one cron.
+   *
+   * A card carries a name, and a name is not an identity — two profiles may hold
+   * a cron called the same thing. The host is the only one that can resolve it,
+   * so it answers per card and an unresolvable one draws no action rather than a
+   * link that opens the wrong cron. Absent means "always", for a host that has
+   * nothing to disambiguate.
+   */
+  canOpenCron?: (jobName: string) => boolean
   onRunCron?: (jobName: string) => void
   /** The chat's outgoing bubble gradient, from `useChatAccent`. */
   accent?: { top: string; bottom: string }
@@ -269,7 +279,9 @@ function CronRow({ item, context }: { item: CronDeliveryItem; context: Transcrip
       // actual name, so the card says nothing about the name instead.
       name={item.nameRedacted ? chatStrings.cron.unnamed : item.jobName}
       onLinkPress={context.onLinkPress}
-      {...(context.onOpenCron ? { onOpenCron: () => context.onOpenCron?.(item.jobName) } : {})}
+      {...(context.onOpenCron && (context.canOpenCron?.(item.jobName) ?? true)
+        ? { onOpenCron: () => context.onOpenCron?.(item.jobName) }
+        : {})}
       {...(context.onRunCron ? { onRunNow: () => context.onRunCron?.(item.jobName) } : {})}
       onToggle={toggle}
       testID={`cron-delivery-${item.id}`}
@@ -500,6 +512,7 @@ function TranscriptListBody({
       accent: handlers.accent,
       images: handlers.images,
       onLinkPress: handlers.onLinkPress,
+      canOpenCron: handlers.canOpenCron,
       onOpenBot: handlers.onOpenBot,
       onOpenCron: handlers.onOpenCron,
       onOpenRequest: handlers.onOpenRequest,
@@ -514,6 +527,7 @@ function TranscriptListBody({
       handlers.accent,
       handlers.images,
       handlers.onLinkPress,
+      handlers.canOpenCron,
       handlers.onOpenBot,
       handlers.onOpenCron,
       handlers.onOpenRequest,

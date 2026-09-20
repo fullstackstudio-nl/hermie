@@ -23,6 +23,9 @@ export const cronStrings = {
     loading: 'Loading crons…',
     failed: (reason: string) => `Could not load the crons: ${reason}`,
     nextRun: (when: string) => `Next: ${when}`,
+    /** The micro label over a row's relative time. §6.11 writes it lower case. */
+    nextLabel: 'next',
+    lastLabel: 'last',
     neverRun: 'Never run',
     noNextRun: 'Not scheduled',
     lastRun: (when: string) => `Last run ${when}`,
@@ -87,8 +90,9 @@ export const cronStrings = {
     readOnly: 'Read-only: a cron run cannot be continued from here.'
   },
   editor: {
-    createEyebrow: 'NEW CRON',
-    editEyebrow: 'EDIT CRON',
+    /** The editor's three group headings. */
+    what: 'What it does',
+    where: 'Where it goes',
     createTitle: 'New cron',
     editTitle: 'Edit cron',
     name: 'Name',

@@ -19,14 +19,14 @@
  */
 import { View } from 'react-native'
 
-import { Markdown, type MarkdownImageSource } from '../markdown'
+import { Markdown, markdownLeading, type MarkdownImageSource } from '../markdown'
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
 import { ErrorCard } from './ErrorCard'
 import { ReasoningDisclosure } from './ReasoningDisclosure'
 import { TypingDots } from './TypingIndicator'
 import { Bubble } from './primitives/Bubble'
-import { Fold } from './primitives/Fold'
+import { Fold, useFoldBlocks } from './primitives/Fold'
 import { MetaLine } from './primitives/MetaLine'
 import { useExpanded } from './expanded'
 import { formatClock, formatCount, formatDuration, needsReadingTreatment } from './format'
@@ -90,6 +90,7 @@ export function AssistantBubble({
   grouped = false
 }: AssistantBubbleProps) {
   const theme = useTheme()
+  const foldBlocks = useFoldBlocks()
   const [expanded, toggle] = useExpanded(item.id)
 
   if (presentation === 'hidden-placeholder') {
@@ -136,9 +137,13 @@ export function AssistantBubble({
         >
           {hasBody ? (
             <Fold
+              // The leading and the block geometry are what let the cut land on a
+              // line boundary and step over a table or a code block.
+              blocks={foldBlocks.blocks}
               bleed={reading ? theme.space.lg : theme.space.md + 2}
               expanded={expanded}
               fadeTo={recipe.tail}
+              lineHeight={markdownLeading(theme.type.body.fontSize)}
               onToggle={toggle}
               streaming={item.streaming}
               testID={`assistant-fold-${item.id}`}
@@ -147,6 +152,7 @@ export function AssistantBubble({
                 fontSize={theme.type.body.fontSize}
                 {...(images ? { images } : {})}
                 linkColor={theme.accent().text}
+                onBlockLayout={foldBlocks.onBlockLayout}
                 onLinkPress={onLinkPress}
                 streaming={item.streaming}
                 text={body}

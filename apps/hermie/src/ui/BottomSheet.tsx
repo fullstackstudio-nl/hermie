@@ -29,7 +29,7 @@ import { GlassSurface } from './glass'
 import { KEYBOARD_AVOID_BEHAVIOR } from './keyboard'
 import { Text } from './primitives'
 import { useTheme } from './theme'
-import { REGULAR_LAYOUT_MIN_WIDTH, SCRIM_COLOR, SHEET_MAX_WIDTH, SIDEBAR_WIDTH, WINDOW_GAP } from './tokens'
+import { REGULAR_LAYOUT_MIN_WIDTH, SCRIM_COLOR, SHEET_MAX_WIDTH, SIDEBAR_WIDTH, TAP_SLOP, WINDOW_GAP } from './tokens'
 import { useEscapeKey } from './useEscapeKey'
 
 export interface BottomSheetProps {
@@ -285,5 +285,56 @@ export function SheetEyebrow({ children }: { children: string }) {
     <Text color="textFaint" variant="micro">
       {children.toUpperCase()}
     </Text>
+  )
+}
+
+/**
+ * A PAGE inside a sheet: a back control, a title, and a body.
+ *
+ * Shared rather than written per sheet, because the affordance has to be in the
+ * same place with the same glyph wherever a sheet goes one level deeper — that
+ * is the visible half of "Escape goes back one level", and a page whose back
+ * control moved would make the key feel like a different key. The caller owns
+ * the Escape registration itself: the handler has to be installed by whoever
+ * sits ABOVE the `BottomSheet` in the tree, so that it registers last and wins
+ * the key (see `useEscapeKey`).
+ */
+export function SheetPage({
+  children,
+  onBack,
+  title,
+  backLabel = 'Back',
+  testID = 'sheet-page-back'
+}: {
+  children: ReactNode
+  onBack: () => void
+  title: string
+  backLabel?: string
+  testID?: string
+}) {
+  const theme = useTheme()
+
+  return (
+    <View style={{ gap: theme.space.md }}>
+      <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.sm }}>
+        <Pressable
+          accessibilityLabel={backLabel}
+          accessibilityRole="button"
+          hitSlop={TAP_SLOP}
+          onPress={onBack}
+          style={{ alignItems: 'center', justifyContent: 'center', minHeight: 32, minWidth: 24 }}
+          testID={testID}
+        >
+          <Text color="accentText" style={{ fontSize: 22, lineHeight: 26 }}>
+            {'‹'}
+          </Text>
+        </Pressable>
+        <Text style={{ flex: 1 }} variant="sheetTitle">
+          {title}
+        </Text>
+      </View>
+
+      {children}
+    </View>
   )
 }

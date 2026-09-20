@@ -1,5 +1,5 @@
 import { bearerFrom, type CredentialProvider } from './credentials'
-import { type FetchLike, parseJsonObject, requestText } from './fetch-json'
+import { type FetchLike, parseJsonBody, requestText } from './fetch-json'
 import { apiUrl, normalizeHeaders } from './url'
 import { GatewayError } from './types'
 
@@ -178,6 +178,8 @@ export class GatewayHttp {
       return undefined as T
     }
 
-    return parseJsonObject(response.text, response.url, 'protocol') as T
+    // Object or array: a REST route may legitimately answer with either, and the
+    // caller's own reader decides which it wanted (see `parseJsonBody`).
+    return parseJsonBody(response.text, response.url, 'protocol') as T
   }
 }

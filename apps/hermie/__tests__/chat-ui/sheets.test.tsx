@@ -228,12 +228,13 @@ describe('ClarifySheet', () => {
   it('steps through a batch and submits every answer at once', () => {
     const { onSubmit } = renderSheet()
 
-    expect(screen.getByTestId('clarify-step').props.children).toBe('Question 1 of 2')
+    // The step count rides beside the eyebrow, in the same uppercase micro style.
+    expect(screen.getByTestId('clarify-step').props.children).toBe('QUESTION 1 OF 2')
 
     fireEvent.press(screen.getByTestId('clarify-choice-Warm and direct'))
     fireEvent.press(screen.getByTestId('clarify-next'))
 
-    expect(screen.getByTestId('clarify-step').props.children).toBe('Question 2 of 2')
+    expect(screen.getByTestId('clarify-step').props.children).toBe('QUESTION 2 OF 2')
 
     // The second question is multi-select: both choices stay selected.
     fireEvent.press(screen.getByTestId('clarify-choice-Recovery'))
@@ -454,7 +455,10 @@ describe('AgentsSheet', () => {
     })
 
     expect(screen.getByTestId('agent-transcript-text')).toHaveTextContent(/read_file\(README\.md\)/u)
-    expect(screen.getByText('The child’s own transcript, read-only.')).toBeTruthy()
+    // The transcript is a PAGE of the sheet now, with the same back control every
+    // other sheet page has, and the source line is its eyebrow.
+    expect(screen.getByText('THE CHILD’S OWN TRANSCRIPT, READ-ONLY.')).toBeTruthy()
+    expect(screen.getByTestId('agent-transcript-back')).toBeTruthy()
     expect(screen.queryByTestId('agent-row-sa-1')).toBeNull()
   })
 

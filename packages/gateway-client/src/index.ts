@@ -27,6 +27,7 @@ export {
   DEFAULT_HTTP_TIMEOUT_MS,
   type FetchLike,
   looksLikeTlsFailure,
+  parseJsonBody,
   parseJsonObject,
   requestText
 } from './fetch-json'

@@ -14,6 +14,15 @@ import { Text } from '../primitives'
 import { useTheme } from '../theme'
 import { CONTROL_MIN_HEIGHT } from '../tokens'
 
+/**
+ * §3's `.sw`: a 51 × 31 track and a 27pt knob sitting 2pt inside it.
+ *
+ * `inset` is 1 rather than 2 because the hairline is a real 1pt BORDER here and
+ * the mockup's is an inset box-shadow, which costs no layout. Border plus
+ * padding is the 2pt the mockup insets by, which is what keeps the travel at 20.
+ */
+const SWITCH = { width: 51, track: 31, knob: 27, inset: 1, travel: 20 } as const
+
 export interface SwitchRowProps {
   label: string
   hint?: string
@@ -60,23 +69,34 @@ export function SwitchRow({ label, hint, value, onChange, disabled = false, test
           ) : null}
         </View>
 
+        {/*
+          Off is the SUNK tint with a hairline, not a grey fill (§3's `.sw`). A
+          mid-grey track reads as a third state somewhere between on and
+          disabled, and on a dark sheet it was the brightest thing in the row.
+        */}
         <View
           style={{
-            backgroundColor: value ? theme.colors.ok : theme.colors.textMuted,
-            borderRadius: 16,
-            height: 31,
+            backgroundColor: value ? theme.colors.ok : theme.tintSunk,
+            borderColor: value ? 'transparent' : theme.hairlineSoft,
+            borderRadius: SWITCH.track / 2,
+            borderWidth: 1,
+            height: SWITCH.track,
             justifyContent: 'center',
-            padding: 3,
-            width: 51
+            paddingHorizontal: SWITCH.inset,
+            width: SWITCH.width
           }}
         >
           <Animated.View
             style={{
               backgroundColor: '#FFFFFF',
-              borderRadius: 13,
-              height: 25,
-              transform: [{ translateX: knob.interpolate({ inputRange: [0, 1], outputRange: [0, 20] }) }],
-              width: 25
+              borderRadius: SWITCH.knob / 2,
+              height: SWITCH.knob,
+              shadowColor: '#0A1E46',
+              shadowOffset: { height: 2, width: 0 },
+              shadowOpacity: 0.3,
+              shadowRadius: 5,
+              transform: [{ translateX: knob.interpolate({ inputRange: [0, 1], outputRange: [0, SWITCH.travel] }) }],
+              width: SWITCH.knob
             }}
           />
         </View>
@@ -104,13 +124,23 @@ export function SegmentedRow<T extends string>({ label, options, value, onChange
         </Text>
       ) : null}
 
+      {/*
+        §3's `.seg`: a sunk track with a hairline, and the SELECTED segment
+        raised onto `e4` — the control rung — with its own hairline and a small
+        shadow. The selected label is `text`, not the accent: an accent-coloured
+        segment on a raised slab says "link" twice and left the unselected ones
+        looking disabled by comparison.
+      */}
       <View
         accessibilityRole="radiogroup"
         style={{
           backgroundColor: theme.tintSunk,
-          borderRadius: 10,
+          borderColor: theme.hairlineSoft,
+          borderRadius: theme.radii.pill,
+          borderWidth: 1,
           flexDirection: 'row',
-          padding: 3
+          gap: 2,
+          padding: 2
         }}
         testID={testID}
       >
@@ -129,12 +159,20 @@ export function SegmentedRow<T extends string>({ label, options, value, onChange
               <View
                 style={{
                   alignItems: 'center',
-                  backgroundColor: selected ? theme.elevation.e3c : 'transparent',
-                  borderRadius: 8,
-                  paddingVertical: theme.space.sm
+                  backgroundColor: selected ? theme.elevation.e4 : 'transparent',
+                  borderColor: selected ? theme.hairlineSoft : 'transparent',
+                  borderRadius: theme.radii.pill,
+                  borderWidth: 1,
+                  justifyContent: 'center',
+                  minHeight: 30,
+                  ...(selected ? theme.shadows.card : {})
                 }}
               >
-                <Text color={selected ? 'accent' : 'text'} style={{ fontWeight: selected ? '700' : '400' }}>
+                <Text
+                  color={selected ? 'text' : 'textMuted'}
+                  numberOfLines={1}
+                  style={{ fontSize: 13, fontWeight: '600', lineHeight: 17 }}
+                >
                   {option.label}
                 </Text>
               </View>

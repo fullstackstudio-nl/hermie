@@ -10,10 +10,11 @@ import { useState } from 'react'
 import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native'
 
 import { MONOSPACE } from '../markdown/context'
-import { BottomSheet } from '../ui/BottomSheet'
+import { BottomSheet, SheetPage } from '../ui/BottomSheet'
 import { Button, Text, TextField } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
 import { CONTROL_MIN_HEIGHT, TAP_SLOP } from '../ui/tokens'
+import { useEscapeKey } from '../ui/useEscapeKey'
 import { formatDuration } from './format'
 import { statusGlyph, statusTone } from './SubagentGroupCard'
 import { chatStrings } from './strings'
@@ -89,11 +90,25 @@ function AgentRow({
   }
 
   return (
-    <View style={{ gap: theme.space.xs, marginLeft: depth * theme.space.md }}>
+    <View
+      style={{
+        // A child is indented AND hangs off a rail. Indentation alone stopped
+        // reading as a tree past the first level — three cards inset by 12pt
+        // look like three cards with odd margins, not like a parent and its
+        // children — and the rail is one hairline rather than a second card.
+        borderLeftColor: depth > 0 ? theme.hairline : 'transparent',
+        borderLeftWidth: depth > 0 ? 1 : 0,
+        gap: theme.space.xs,
+        marginLeft: depth > 0 ? theme.space.md : 0,
+        paddingLeft: depth > 0 ? theme.space.md : 0
+      }}
+    >
       <View
         style={{
           backgroundColor: theme.elevation.e3c,
-          borderRadius: theme.radii.lg,
+          borderColor: theme.hairlineSoft,
+          borderRadius: theme.radii.card,
+          borderWidth: 1,
           gap: theme.space.xs,
           padding: theme.space.md
         }}
@@ -109,9 +124,21 @@ function AgentRow({
           </Text>
         </View>
 
-        <Text color="textMuted" style={{ fontSize: 11 }}>
-          {`${chatStrings.subagents.status[node.status]}${node.currentTool ? ` · ${node.currentTool}` : ''}`}
-        </Text>
+        {/*
+          The status word carries the tone; nothing here pulses or spins. §3:
+          a child being busy is information, and the only state allowed to
+          animate anywhere in the app is "needs input".
+        */}
+        <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.sm }}>
+          <Text color={statusTone(node.status)} variant="micro">
+            {chatStrings.subagents.status[node.status].toUpperCase()}
+          </Text>
+          {node.currentTool ? (
+            <Text color="textFaint" numberOfLines={1} style={{ flex: 1, fontFamily: MONOSPACE }} variant="meta">
+              {node.currentTool}
+            </Text>
+          ) : null}
+        </View>
 
         {node.stream.length ? (
           <View style={{ gap: 2 }}>
@@ -213,58 +240,63 @@ function AgentRow({
   )
 }
 
-function TranscriptPanel({ transcript, onBack }: { transcript: SubagentTranscript; onBack?: () => void }) {
+/**
+ * One child's transcript, as a PAGE of the sheet rather than as a panel inside it.
+ *
+ * Same header as every other sheet page — `SheetPage` — so the back control is
+ * where the reader has already learnt it is, and so the level Escape pops is the
+ * level the chevron pops. The tree is not unmounted while it is open; the page
+ * simply takes the body.
+ */
+function TranscriptPage({ transcript, onBack }: { transcript: SubagentTranscript; onBack?: () => void }) {
   const theme = useTheme()
 
   return (
-    <View style={{ gap: theme.space.sm }} testID="agent-transcript">
-      <Pressable
-        accessibilityRole="button"
-        hitSlop={TAP_SLOP}
-        onPress={onBack}
-        style={ACTION_STYLE}
-        testID="agent-transcript-back"
-      >
-        <Text color="accent" variant="preview">
-          {`‹ ${chatStrings.subagents.transcriptBack}`}
+    <SheetPage
+      backLabel={chatStrings.subagents.transcriptBack}
+      onBack={() => onBack?.()}
+      testID="agent-transcript-back"
+      title={transcript.goal}
+    >
+      <View style={{ gap: theme.space.sm }} testID="agent-transcript">
+        <Text color="textFaint" variant="micro">
+          {(transcript.source === 'tail'
+            ? chatStrings.subagents.transcriptLive
+            : chatStrings.subagents.transcriptStored
+          ).toUpperCase()}
         </Text>
-      </Pressable>
 
-      <Text style={{ fontWeight: '600' }} variant="body">
-        {chatStrings.subagents.transcriptTitle(transcript.goal)}
-      </Text>
-      <Text color="textMuted" variant="meta">
-        {transcript.source === 'tail' ? chatStrings.subagents.transcriptLive : chatStrings.subagents.transcriptStored}
-      </Text>
-
-      {transcript.error ? (
-        <Text color="dangerText" variant="preview">
-          {transcript.error}
-        </Text>
-      ) : null}
-
-      <ScrollView
-        style={{
-          backgroundColor: theme.elevation.e3c,
-          borderRadius: theme.radii.lg,
-          maxHeight: 320,
-          padding: theme.space.md
-        }}
-      >
-        {transcript.loading && !transcript.text ? (
-          <ActivityIndicator />
-        ) : (
-          <Text
-            color={transcript.text ? 'text' : 'textMuted'}
-            selectable
-            style={{ fontFamily: MONOSPACE, fontSize: 12, lineHeight: 18 }}
-            testID="agent-transcript-text"
-          >
-            {transcript.text || chatStrings.subagents.transcriptEmpty}
+        {transcript.error ? (
+          <Text color="dangerText" variant="preview">
+            {transcript.error}
           </Text>
-        )}
-      </ScrollView>
-    </View>
+        ) : null}
+
+        <ScrollView
+          style={{
+            backgroundColor: theme.tintSunk,
+            borderColor: theme.hairlineSoft,
+            borderRadius: theme.radii.inset,
+            borderWidth: 1,
+            maxHeight: 340,
+            padding: theme.space.md
+          }}
+        >
+          {transcript.loading && !transcript.text ? (
+            <ActivityIndicator />
+          ) : (
+            <Text
+              color={transcript.text ? 'text' : 'textMuted'}
+              selectable
+              style={{ fontFamily: MONOSPACE, fontSize: 12.5, lineHeight: 19 }}
+              testID="agent-transcript-text"
+            >
+              {transcript.text || chatStrings.subagents.transcriptEmpty}
+            </Text>
+          )}
+        </ScrollView>
+      </View>
+    </SheetPage>
   )
 }
 
@@ -282,6 +314,18 @@ export function AgentsSheet({
 }: AgentsSheetProps) {
   const theme = useTheme()
 
+  /**
+   * Escape closes the transcript page first, and only then the sheet.
+   *
+   * `useEscapeKey` delivers to whoever registered LAST and effects flush
+   * child-first, so the `BottomSheet` below registers its own "close the sheet"
+   * handler before this line runs. The page therefore wins the key while it is
+   * open, pops itself, unregisters, and hands the key back — the same mount-order
+   * arrangement `ChatOptionsSheet` relies on, which is why it is not coordinated
+   * anywhere.
+   */
+  useEscapeKey(() => onCloseTranscript?.(), visible && Boolean(transcript) && Boolean(onCloseTranscript))
+
   return (
     <BottomSheet
       accessibilityLabel={chatStrings.subagents.title}
@@ -290,44 +334,48 @@ export function AgentsSheet({
       testID="agents-sheet"
       visible={visible}
     >
-      <View style={{ alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' }}>
-        <Text variant="sheetTitle">{chatStrings.subagents.title}</Text>
-        <Pressable
-          accessibilityRole="button"
-          hitSlop={TAP_SLOP}
-          onPress={onClose}
-          style={ACTION_STYLE}
-          testID="agents-sheet-close"
-        >
-          <Text color="accent" variant="body">
-            {chatStrings.options.done}
-          </Text>
-        </Pressable>
-      </View>
-
-      {notice ? (
-        <Text color="textMuted" testID="agents-sheet-notice" variant="preview">
-          {notice}
-        </Text>
-      ) : null}
-
       {transcript ? (
-        <TranscriptPanel onBack={onCloseTranscript} transcript={transcript} />
-      ) : tree.length ? (
-        <View style={{ gap: theme.space.sm }}>
-          {tree.map(node => (
-            <AgentRow
-              depth={0}
-              key={node.id}
-              node={node}
-              onInterrupt={onInterrupt}
-              onOpenTranscript={onOpenTranscript}
-              onSteer={onSteer}
-            />
-          ))}
-        </View>
+        <TranscriptPage onBack={onCloseTranscript} transcript={transcript} />
       ) : (
-        <Text color="textMuted">{chatStrings.subagents.idle}</Text>
+        <>
+          <View style={{ alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' }}>
+            <Text variant="sheetTitle">{chatStrings.subagents.title}</Text>
+            <Pressable
+              accessibilityRole="button"
+              hitSlop={TAP_SLOP}
+              onPress={onClose}
+              style={ACTION_STYLE}
+              testID="agents-sheet-close"
+            >
+              <Text color="accentText" variant="body">
+                {chatStrings.options.done}
+              </Text>
+            </Pressable>
+          </View>
+
+          {notice ? (
+            <Text color="textMuted" testID="agents-sheet-notice" variant="preview">
+              {notice}
+            </Text>
+          ) : null}
+
+          {tree.length ? (
+            <View style={{ gap: theme.space.sm }}>
+              {tree.map(node => (
+                <AgentRow
+                  depth={0}
+                  key={node.id}
+                  node={node}
+                  onInterrupt={onInterrupt}
+                  onOpenTranscript={onOpenTranscript}
+                  onSteer={onSteer}
+                />
+              ))}
+            </View>
+          ) : (
+            <Text color="textMuted">{chatStrings.subagents.idle}</Text>
+          )}
+        </>
       )}
     </BottomSheet>
   )

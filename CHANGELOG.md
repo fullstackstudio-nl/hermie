@@ -10,6 +10,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The four sheet interiors, against the mockup.** The approval sheet reads in §6.9's order — who
+  is asking and where, then the command well in monospace on the sunk tint, then the consequence —
+  rather than the description-above-the-command it had; the buttons are still exactly the server's
+  `choices` in the server's order (ADR-0010 is untouched) and `Deny` is the mockup's soft
+  destructive tint rather than a saturated red block competing with the primary. The clarify sheet
+  puts its step count beside the eyebrow, shows a locked answer as a tinted chip instead of only
+  dimming the controls, and leads its actions with the one that answers the question. The agents
+  sheet draws its tree on a hairline rail and gives a child's transcript a real PAGE with the shared
+  back control — and Escape there now pops the page before the sheet. The cron editor is three named
+  groups. The chat options root is four named groups, with verbosity and the two visibility switches
+  in one card under the override footer that applies to all three.
+- **The agents bar is §5's slim glass pill** — three static pips, the count, a monospace clock and
+  `Show` — inset from the panel edge instead of a full-width strip with a bottom rule that read as a
+  second header. The clock is `0:42` rather than `1m 12s` because the number ticks once a second in
+  a fixed slot and a label that changes width moves the control beside it.
+- **The crons list is §6.11's row**: a static status dot, the name over `Every 2 hours · @local`, a
+  profile chip where the list spans more than one profile, and a right-hand `NEXT / in 2h` pair. The
+  `Paused` divider is a label plus a rule. Four stacked lines per job became one row.
+- **Activity is a ledger.** Rows carry the transcript's glyph well, the sentence in `meta`, the clock
+  at the right edge and the body indented past the glyph, and the three counters are small static
+  glass chips instead of 22pt numerals that led a timeline with a dashboard.
+- **A cron card in a chat can open its cron.** `ChatScreen` resolves the card's job NAME against the
+  loaded crons, narrowed by this chat's bot — a bot is a Hermes profile — and passes the action only
+  where that leaves exactly one job; anything else renders no action rather than a link to the wrong
+  cron. Both shells route it: the wide layout opens the crons panel on that cron, the phone pushes
+  the route with its id. `Run now` deliberately stays on the cron's own detail behind its confirm.
+- **`gallery:chat` renders in the real wide shell** on a wide window — the same gaps, sidebar width
+  and two panels `RegularShell` draws — over a seeded fixture roster, so a screenshot of the chat
+  screen is a screenshot of a shape the app actually shows.
+
+### Fixed
+
+- **The fold cuts on a line boundary, and the fade is a fade.** It clipped at a fixed height, so it
+  landed wherever that height fell — half a line of x-height under a gradient, which reads as a
+  sliced row. The clip is now `lines × leading`, the leading comes from the renderer
+  (`markdownLeading`) so the two cannot drift, and a table or fenced code block is never cut through
+  at all: the Markdown renderer reports where its blocks are and the fold moves the cut up to such a
+  block's top and fades the whole block instead. The mask is two and a half lines tall with an even
+  ramp, where the old one reached 85 % opacity at 65 % of a fixed 64pt and read as an edge.
+- **A REST route may answer with a JSON array.** `GatewayHttp` parsed every body with
+  `parseJsonObject`, which rejects an array — so `GET /api/cron/jobs`, which `hermes serve` answers
+  with a bare array and which the cron controller is explicitly written to read in either shape,
+  failed with _"answered with JSON that is not an object"_ and the crons list was empty against a
+  real gateway. The transport now only asks whether the body is JSON; which shape is acceptable is
+  the caller's question. The handshakes that genuinely require an object — the status probe, the
+  credential exchange, the token endpoints — still use `parseJsonObject`.
+- **Crons and Activity no longer say their own name twice.** Both shells already title the screen —
+  the overlay panel's header on the wide layout, the stack's title bar on the phone — and each screen
+  printed the same word again underneath it. The cron editor's `NEW CRON` eyebrow over `New cron` is
+  gone for the same reason; an eyebrow earns its line where it says something the title does not.
+- **The switch and the segmented control are §3's.** The switch's off track was a mid-grey fill that
+  read as a third state and was the brightest thing in a dark row; it is the sunk tint with a
+  hairline. The selected segment is raised onto the control rung with its own hairline and shadow,
+  and its label is `text` rather than the accent.
+
 - **Ink contrast is a check, not a paragraph.** `npm run contrast:check` composites every ink role
   onto every surface the way the surface is actually painted — the thinnest gradient stop over its
   rung or over the worst point of each wallpaper — and fails under 4.5 : 1 for anything read as text

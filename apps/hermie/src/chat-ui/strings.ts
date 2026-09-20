@@ -92,6 +92,9 @@ export const chatStrings = {
   subagents: {
     title: 'Agents',
     working: (count: number, elapsed: string) => `${count} ${count === 1 ? 'agent' : 'agents'} working · ${elapsed}`,
+    /** The bar's own halves: §5 sets the count in bold and the clock in mono. */
+    barCount: (count: number) => `${count} ${count === 1 ? 'agent' : 'agents'} working`,
+    barOpen: 'Show',
     idle: 'No agents running',
     goals: (count: number) => `${count} ${count === 1 ? 'goal' : 'goals'}`,
     steer: 'Steer',
@@ -173,6 +176,16 @@ export const chatStrings = {
   approval: {
     eyebrow: (handle: string) => `PERMISSION REQUEST · @${handle.toUpperCase()}`,
     title: 'Allow this command?',
+    /**
+     * The lead line above the command well: who is asking, and where it would
+     * run. The working directory belongs in this sentence rather than in a
+     * labelled block under the command — §6.9 writes it as prose, and a bare
+     * path on its own line told a reader nothing about what it was the path of.
+     */
+    lead: (handle: string, directory?: string) =>
+      directory
+        ? `@${handle} wants to run one command on your gateway host, in ${directory}.`
+        : `@${handle} wants to run one command on your gateway host.`,
     runsOn: 'Runs on your gateway',
     fine: 'Always allow applies to this exact command on this gateway. Change it later in Settings.',
     answeredElsewhere: 'Answered elsewhere',
@@ -234,6 +247,9 @@ export const chatStrings = {
     verbosityOptions: { quiet: 'Quiet', normal: 'Normal', verbose: 'Verbose' },
     showBotToBot: 'Show bot-to-bot',
     showThinking: 'Show thinking',
+    /** The root page's three group headings. */
+    howHeader: 'How it answers',
+    thisChatHeader: 'This conversation',
     viewHeader: 'What this conversation shows',
     useDefault: 'Use the default view',
     usingDefault: 'Following the default set in Settings.',

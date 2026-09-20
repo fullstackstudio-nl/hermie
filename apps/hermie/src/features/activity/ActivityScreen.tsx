@@ -25,6 +25,7 @@ import { useGateway } from '../../gateway'
 import { humaniseStatus } from '../../i18n/humanise'
 import { strings } from '../../i18n/strings'
 import { useBotsStore } from '../../store/bots'
+import { GlassSurface } from '../../ui/glass'
 import { Screen, Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { useActivity } from './useActivity'
@@ -118,10 +119,24 @@ export function ActivityScreen({ onOpenBot }: ActivityScreenProps) {
           <Row entry={item} label={label} onPress={() => onOpenBot?.(item.botName, { focusItemId: item.itemId })} />
         )}
         renderSectionHeader={({ section }) => (
-          <View style={{ backgroundColor: theme.elevation.e0, paddingHorizontal: theme.space.lg }}>
-            <Text color="textMuted" style={{ fontWeight: '700', letterSpacing: 1.1 }} variant="meta">
+          // The day label plus a rule, the same divider the crons list uses. It
+          // is sticky, so it carries a panel-coloured background of its own: over
+          // glass a transparent sticky header lets the rows scroll through it.
+          <View
+            style={{
+              alignItems: 'center',
+              backgroundColor: theme.elevation.e1,
+              flexDirection: 'row',
+              gap: theme.space.md,
+              paddingBottom: theme.space.xs,
+              paddingHorizontal: theme.space.lg,
+              paddingTop: theme.space.md
+            }}
+          >
+            <Text color="textFaint" variant="micro">
               {section.title.toUpperCase()}
             </Text>
+            <View style={{ backgroundColor: theme.hairlineSoft, flex: 1, height: 1 }} />
           </View>
         )}
         sections={sections}
@@ -136,22 +151,20 @@ function Header({ counters }: { counters: ReturnType<typeof useActivity>['counte
   const theme = useTheme()
 
   return (
-    <View style={{ paddingHorizontal: theme.space.lg, paddingTop: theme.space.sm }}>
-      <Text variant="title">{strings.activity.title}</Text>
-      <Text color="textMuted" style={{ marginTop: theme.space.xs }} variant="preview">
+    <View style={{ gap: theme.space.md, paddingHorizontal: theme.space.lg, paddingTop: theme.space.sm }}>
+      {/* The panel header and the stack's title bar already name this screen. */}
+      <Text color="textMuted" variant="preview">
         {strings.activity.subtitle}
       </Text>
 
-      <View
-        style={{
-          borderBottomColor: theme.hairline,
-          borderBottomWidth: 1,
-          flexDirection: 'row',
-          gap: theme.space.lg,
-          marginTop: theme.space.md,
-          paddingBottom: theme.space.md
-        }}
-      >
+      {/*
+        Three glass chips, not three big numerals with captions under them. The
+        numerals were 22pt — larger than the screen's own rows — so a page whose
+        whole point is the timeline led with a dashboard. A chip is the level-3
+        tint §3 already uses for a count, it is static, and it reads as status
+        rather than as a headline.
+      */}
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.space.sm }}>
         <Counter
           label={strings.activity.counters.working}
           testID="activity-count-working"
@@ -173,24 +186,47 @@ function Header({ counters }: { counters: ReturnType<typeof useActivity>['counte
 }
 
 function Counter({ label, value, testID }: { label: string; value: number; testID: string }) {
+  const theme = useTheme()
+
   return (
-    <View style={{ gap: 2 }}>
-      <Text color={value > 0 ? 'accent' : 'textMuted'} style={{ fontSize: 22, fontWeight: '700' }} testID={testID}>
+    <GlassSurface
+      contentStyle={{
+        alignItems: 'center',
+        flexDirection: 'row',
+        gap: 5,
+        paddingHorizontal: theme.space.md,
+        paddingVertical: 6
+      }}
+      radius={theme.radii.pill}
+      variant="chip"
+    >
+      <Text
+        color={value > 0 ? 'accentText' : 'textMuted'}
+        style={{ fontSize: 13, fontWeight: '700', lineHeight: 17 }}
+        testID={testID}
+      >
         {String(value)}
       </Text>
-      <Text color="textMuted" style={{ fontSize: 11 }}>
+      <Text color="textMuted" style={{ fontSize: 13, lineHeight: 17 }}>
         {label}
       </Text>
-    </View>
+    </GlassSurface>
   )
 }
 
 /**
- * One line of traffic.
+ * One line of traffic, in the transcript's ledger language (§6.4).
+ *
+ * Deliberately the same silhouette as a `LedgerRow`: a 20pt glyph well on the
+ * left, the sentence in `meta` at 600, a clock at the right edge, and the body
+ * indented under it so the column of glyphs is unbroken. It is not that
+ * component, because that one is a DISCLOSURE — its chevron and its
+ * `expanded` state both promise the row opens in place, and these rows navigate.
+ * Saying so here is cheaper than a second mode on a shared component.
  *
  * The heading is the sentence (`researcher → writer`), the body is what was
- * actually said, and the right edge carries the clock. A delegation has no
- * recipient, so it reads `researcher spawned 3 agents` instead.
+ * actually said. A delegation has no recipient, so it reads `researcher spawned
+ * 3 agents` instead.
  */
 function Row({
   entry,
@@ -223,36 +259,54 @@ function Row({
       onPress={onPress}
       style={({ pressed }) => ({
         backgroundColor: pressed ? theme.elevation.e2 : 'transparent',
-        gap: 2,
+        gap: 3,
         paddingHorizontal: theme.space.lg,
-        paddingVertical: theme.space.md
+        paddingVertical: theme.space.sm + 2
       })}
       testID={`activity-row-${entry.id}`}
     >
-      <View style={{ alignItems: 'baseline', flexDirection: 'row', gap: theme.space.sm }}>
-        <Text numberOfLines={1} style={{ color: theme.colors.text, flex: 1, fontSize: 15, fontWeight: '600' }}>
+      <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.sm }}>
+        <View
+          style={{
+            alignItems: 'center',
+            backgroundColor: theme.tintSunk,
+            borderRadius: theme.radii.sm + 2,
+            height: 20,
+            justifyContent: 'center',
+            width: 20
+          }}
+        >
+          <Text color={entry.failed ? 'dangerText' : 'textFaint'} style={{ fontSize: 11, lineHeight: 14 }}>
+            {entry.kind === 'delegation' ? '⑃' : '→'}
+          </Text>
+        </View>
+
+        <Text color="text" numberOfLines={1} style={{ flex: 1, fontWeight: '600' }} variant="meta">
           {heading}
         </Text>
+
         {entry.at ? (
-          <Text color="textMuted" variant="meta">
+          <Text color="textFaint" variant="meta">
             {formatClock(entry.at)}
           </Text>
         ) : null}
       </View>
 
+      {/* Indented past the glyph well, so the column of glyphs stays a column. */}
       {entry.text ? (
-        <Text color="textMuted" numberOfLines={2} style={{ fontSize: 14, lineHeight: 19 }}>
+        <Text color="textMuted" numberOfLines={2} style={{ marginLeft: 20 + theme.space.sm }} variant="preview">
           {entry.text}
         </Text>
       ) : null}
 
       {status ? (
         <Text
-          color={entry.failed ? 'dangerText' : entry.pending ? 'accent' : 'textMuted'}
-          style={{ fontSize: 11 }}
+          color={entry.failed ? 'dangerText' : entry.pending ? 'accentText' : 'textFaint'}
+          style={{ marginLeft: 20 + theme.space.sm }}
           testID={`activity-status-${entry.id}`}
+          variant="micro"
         >
-          {status}
+          {status.toUpperCase()}
         </Text>
       ) : null}
     </Pressable>

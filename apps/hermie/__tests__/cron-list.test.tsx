@@ -141,8 +141,12 @@ it('lists a cron that lives in a bot profile, and says whose it is', async () =>
   renderScreen(<CronScreen />)
 
   expect(await screen.findByText('Source scan')).toBeTruthy()
-  expect(screen.getByTestId('cron-profile-job-inbox-scan')).toHaveTextContent('Profile: researcher')
-  expect(screen.getByTestId('cron-profile-job-heartbeat')).toHaveTextContent('Profile: default')
+  // The row wears the profile as a CHIP — §6.11 — so it is the bare name on the
+  // screen. "Profile: researcher" stays in the row's accessibility label, which
+  // is what somebody reading it out gets.
+  expect(screen.getByTestId('cron-profile-job-inbox-scan')).toHaveTextContent('researcher')
+  expect(screen.getByTestId('cron-profile-job-heartbeat')).toHaveTextContent('default')
+  expect(screen.getByLabelText('Source scan, Profile: researcher')).toBeTruthy()
 })
 
 it('leaves the profile off every row when they all share one', async () => {
@@ -197,8 +201,10 @@ it('reads the schedule out of the stored job, where it is an object', async () =
 
   // `schedule` on a stored row is the parsed spec; the readable form is beside
   // it, and taking the wrong one leaves the row blank.
-  expect(await screen.findByText('Every 2 hours')).toBeTruthy()
-  expect(screen.getByText('Next: in 2h')).toBeTruthy()
+  // The schedule shares its line with the delivery target, and the next run is a
+  // labelled pair in the row's right-hand column.
+  expect(await screen.findByText('Every 2 hours · @local')).toBeTruthy()
+  expect(screen.getByText('in 2h')).toBeTruthy()
   // Nothing scheduled must not read as "now".
   expect(screen.getAllByText('Not scheduled').length).toBeGreaterThan(0)
 })

@@ -103,8 +103,8 @@ export function CronDetailScreen({ controller, job, onClose, onOpenRun, onEdit, 
         <View
           style={{
             backgroundColor: theme.elevation.e3c,
-            borderColor: theme.hairline,
-            borderRadius: theme.radii.xl,
+            borderColor: theme.hairlineSoft,
+            borderRadius: theme.radii.card,
             borderWidth: 1,
             gap: theme.space.xs,
             padding: theme.space.lg
@@ -126,14 +126,32 @@ export function CronDetailScreen({ controller, job, onClose, onOpenRun, onEdit, 
           ) : null}
         </View>
 
+        {/*
+          The prompt goes in a sunk well. It is the text a bot is handed verbatim,
+          so it reads as an input rather than as prose the screen wrote — the
+          same treatment the approval sheet gives a command.
+        */}
         <View style={{ gap: theme.space.sm }}>
-          <Text variant="name">{cronStrings.detail.instructions}</Text>
-          <Text color="textMuted" testID="cron-detail-prompt">
-            {detail.prompt || detail.promptPreview || cronStrings.detail.noPrompt}
+          <Text color="textFaint" variant="micro">
+            {cronStrings.detail.instructions.toUpperCase()}
           </Text>
+          <View
+            style={{
+              backgroundColor: theme.tintSunk,
+              borderColor: theme.hairlineSoft,
+              borderRadius: theme.radii.inset,
+              borderWidth: 1,
+              paddingHorizontal: theme.space.lg,
+              paddingVertical: theme.space.md
+            }}
+          >
+            <Text color="text" selectable testID="cron-detail-prompt" variant="preview">
+              {detail.prompt || detail.promptPreview || cronStrings.detail.noPrompt}
+            </Text>
+          </View>
         </View>
 
-        <InsetGroup header={cronStrings.detail.details}>
+        <InsetGroup header={cronStrings.detail.details.toUpperCase()}>
           <InsetValueRow
             label={cronStrings.detail.scheduleLabel}
             value={detail.schedule || cronStrings.detail.unknown}
@@ -159,6 +177,11 @@ export function CronDetailScreen({ controller, job, onClose, onOpenRun, onEdit, 
           ) : null}
         </InsetGroup>
 
+        {/*
+          One primary, then the two that change the job side by side, then the
+          destructive one alone. Four full-width buttons in a column gave Delete
+          the same weight as Run now and put it under the reader's thumb.
+        */}
         <View style={{ gap: theme.space.sm }}>
           <Button
             busy={busy}
@@ -166,20 +189,24 @@ export function CronDetailScreen({ controller, job, onClose, onOpenRun, onEdit, 
             testID="cron-run-now"
             title={busy ? cronStrings.detail.running : cronStrings.detail.runNow}
           />
-          <Button
-            disabled={busy}
-            onPress={() => void (paused ? controller?.resume(job) : controller?.pause(job))?.catch(() => undefined)}
-            testID="cron-toggle-pause"
-            title={paused ? cronStrings.detail.resume : cronStrings.detail.pause}
-            variant="secondary"
-          />
-          <Button
-            disabled={busy}
-            onPress={() => onEdit(detail)}
-            testID="cron-edit"
-            title={cronStrings.detail.edit}
-            variant="secondary"
-          />
+          <View style={{ flexDirection: 'row', gap: theme.space.sm }}>
+            <Button
+              disabled={busy}
+              onPress={() => void (paused ? controller?.resume(job) : controller?.pause(job))?.catch(() => undefined)}
+              style={{ flex: 1 }}
+              testID="cron-toggle-pause"
+              title={paused ? cronStrings.detail.resume : cronStrings.detail.pause}
+              variant="secondary"
+            />
+            <Button
+              disabled={busy}
+              onPress={() => onEdit(detail)}
+              style={{ flex: 1 }}
+              testID="cron-edit"
+              title={cronStrings.detail.edit}
+              variant="secondary"
+            />
+          </View>
           <Button
             disabled={busy}
             onPress={() => setConfirmingDelete(true)}
@@ -190,7 +217,7 @@ export function CronDetailScreen({ controller, job, onClose, onOpenRun, onEdit, 
         </View>
 
         <View style={{ gap: theme.space.sm }}>
-          <Text color="textMuted" style={{ fontWeight: '700', letterSpacing: 1.1 }} variant="meta">
+          <Text color="textFaint" variant="micro">
             {cronStrings.detail.runHistory}
           </Text>
 
@@ -261,7 +288,9 @@ function RunRow({ run, onPress }: { run: CronRun; onPress: () => void }) {
       {({ pressed }) => (
         <InsetRow style={{ backgroundColor: pressed ? theme.elevation.e2 : 'transparent' }}>
           <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.sm }}>
-            <Text style={{ flex: 1 }} numberOfLines={1}>
+            {/* The same static dot the list rows carry, so a run reads as a run. */}
+            <StatusDot size={8} status={ok ? 'ok' : 'failed'} />
+            <Text numberOfLines={1} style={{ flex: 1 }} variant="preview">
               {started ?? run.id}
             </Text>
             <Text color={ok ? 'okText' : 'dangerText'} variant="meta">

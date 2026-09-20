@@ -1499,3 +1499,47 @@ a device.
   before this one left them.
 - **The contrast numbers against a real screen.** They are computed from the
   token values and the compositing rules, not sampled off a device.
+
+## The crons list against a real gateway (2026-09-20, later)
+
+### `GatewayHttp` refused every array body
+
+Found by opening `overlay:crons` on the iPad against the fake gateway, which is
+the first time anybody had. The panel showed one line:
+
+```
+Could not load the crons: http://127.0.0.1:9119/api/cron/jobs?profile=all
+answered with JSON that is not an object.
+```
+
+That message is `parseJsonObject` in `packages/gateway-client/src/fetch-json.ts`,
+and `GatewayHttp.request` ran EVERY response body through it. `GET
+/api/cron/jobs` answers with a bare array — `hermes serve` does, the fake gateway
+does, and `listRows` in `features/cron/cron-controller.ts` carries a comment
+saying so and reads both shapes. So the reader was prepared for an array that the
+transport under it had already thrown away, and the crons list could never load
+from any gateway at all. It is not a fake-gateway artefact and it is not new to
+this round; it had simply never been looked at, because the list is three taps in
+and the simulators here cannot tap.
+
+The transport now asks only whether the body is JSON (`parseJsonBody`) and leaves
+the shape to the caller. `parseJsonObject` stays where an object really is the
+protocol — the status probe, the credential exchange, the token endpoints — since
+an array arriving there means the address is not a Hermes gateway, and saying so
+early is the whole point of that check.
+
+**The lesson for the next round is the cheap one**: a feature reachable only
+behind taps on a machine that cannot tap is a feature nobody has run. The launch
+arguments exist for exactly this; `overlay:crons` and `overlay:activity` should be
+part of every pass's screenshot set, not just the gallery sections.
+
+### Counters, and what Activity still could not be made to show
+
+`overlay:activity` renders its header and its three counter chips against the
+fake gateway, and the empty state underneath. Injecting turns with
+`POST /__fake/inject` — including a `Message from 🤖 …` user turn, which is what
+the projection reads as an incoming bot DM — did NOT populate the timeline in the
+few attempts made here: Activity derives from transcripts the app has hydrated,
+and nothing had opened those chats. So the ledger ROWS are proven by the jest
+suite and not by a screenshot. Somebody with more budget should open the two
+chats first and then the panel.

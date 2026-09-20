@@ -22,12 +22,14 @@
 import {
   ACCENT_ORDER,
   ACCENTS,
+  DANGER_SOFT,
   darkBubbles,
   darkColors,
   darkGlass,
   lightBubbles,
   lightColors,
   lightGlass,
+  OK_SOFT,
   TINT_SUNK,
   WALLPAPERS,
   type BubbleVariant,
@@ -164,6 +166,25 @@ function surfaces(scheme: Scheme): Surface[] {
   out.push({
     name: 'sunk tint',
     background: wallpaper => over(TINT_SUNK[scheme], over(thinnest(glass.panel.gradient), wallpaper))
+  })
+
+  /**
+   * The two soft fills, on the surface they are actually used on.
+   *
+   * A `Deny` button, a scheduler-down banner, a locked-answer chip: each is a
+   * low-alpha wash over a SHEET, with `dangerText` / `okText` on it. That is a
+   * composite nothing else in this table covers — the ink is measured against
+   * the sheet, and the wash shifts the sheet toward the ink's own hue, which is
+   * the direction that costs contrast.
+   */
+  out.push({
+    name: 'danger tint',
+    background: wallpaper => over(DANGER_SOFT[scheme], over(thinnest(glass.sheet.gradient), wallpaper))
+  })
+
+  out.push({
+    name: 'ok tint',
+    background: wallpaper => over(OK_SOFT[scheme], over(thinnest(glass.sheet.gradient), wallpaper))
   })
 
   return out

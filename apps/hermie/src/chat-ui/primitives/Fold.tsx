@@ -4,9 +4,7 @@
  *
  * Two rules the mockup states and one the streaming path forces:
  *
- *  - Past roughly fourteen lines the body folds (§6.3). Fourteen lines is
- *    expressed as a height because that is what `maxHeight` takes, and the phone
- *    folds sooner because its bubble is narrower.
+ *  - Past roughly fourteen lines the body folds (§6.3).
  *  - The state belongs to the LIST, not to this component — see `expanded.tsx`.
  *    A fold that lived here would re-collapse every time the row was virtualised
  *    out and back.
@@ -15,18 +13,47 @@
  *    taps and that then grows past the fold on its own is worse than no fold. The
  *    turn finishes first.
  *
- * The mask is a gradient from transparent to the surface colour, so the last
- * visible line fades instead of being guillotined mid-x-height. It needs the
+ * ### Where the cut lands
+ *
+ * The fold used to clip at a fixed height, and a fixed height lands wherever it
+ * lands: half a line of x-height under a gradient, which reads as a row that has
+ * been cut rather than as a body that fades. So the clip is now `lines × leading`
+ * — the last visible line is always a whole line — and the leading comes from the
+ * caller, because only the caller knows what it is rendering at.
+ *
+ * A table or a fenced code block gets a stronger rule: it is never cut through at
+ * all. Half a row of cells or half a line of code under a gradient is not a fade,
+ * it is damage, and no gradient fixes it. Where the cut would fall inside one,
+ * the clip moves UP to that block's top and the whole block fades out instead —
+ * which is only possible because the Markdown renderer reports where its blocks
+ * are (`onBlockLayout`).
+ *
+ * The mask is a gradient from transparent to the surface colour. It needs the
  * colour it is fading INTO, which only the caller knows.
  */
 import { LinearGradient } from 'expo-linear-gradient'
-import { useState, type ReactNode } from 'react'
+import { useCallback, useState, type ReactNode } from 'react'
 import { Pressable, useWindowDimensions, View } from 'react-native'
 
 import { Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
-import { FOLD_HEIGHT, REGULAR_LAYOUT_MIN_WIDTH, TAP_SLOP, withAlpha } from '../../ui/tokens'
+import {
+  FOLD_FADE_LINES,
+  FOLD_HEIGHT,
+  FOLD_LINES,
+  REGULAR_LAYOUT_MIN_WIDTH,
+  TAP_SLOP,
+  withAlpha
+} from '../../ui/tokens'
 import { chatStrings } from '../strings'
+
+/** One block of the body, as the Markdown renderer reported it. */
+export interface FoldBlock {
+  index: number
+  top: number
+  height: number
+  atomic: boolean
+}
 
 export interface FoldProps {
   expanded: boolean
@@ -35,6 +62,19 @@ export interface FoldProps {
   streaming?: boolean
   /** What the mask fades into: the bubble's own lower colour. */
   fadeTo: string
+  /**
+   * The body's leading, in points.
+   *
+   * The clip is a whole number of these. Absent falls back to the old fixed
+   * height, which is the right answer for a body whose leading nobody knows.
+   */
+  lineHeight?: number
+  /**
+   * Blocks that must not be cut through, from `<Markdown onBlockLayout>`.
+   *
+   * Only the atomic ones are used, so a caller may hand over all of them.
+   */
+  blocks?: readonly FoldBlock[]
   /**
    * How far the mask reaches PAST the text, in points.
    *
@@ -55,15 +95,100 @@ export function useFoldHeight(): number {
   return width >= REGULAR_LAYOUT_MIN_WIDTH ? FOLD_HEIGHT.regular : FOLD_HEIGHT.compact
 }
 
-export function Fold({ expanded, onToggle, streaming = false, fadeTo, bleed = 0, children, testID }: FoldProps) {
+/** How many lines this layout folds at. */
+function useFoldLines(): number {
+  const { width } = useWindowDimensions()
+
+  return width >= REGULAR_LAYOUT_MIN_WIDTH ? FOLD_LINES.regular : FOLD_LINES.compact
+}
+
+/**
+ * Collect block geometry for a fold.
+ *
+ * A hook rather than state in `Fold`, because the reporter has to be handed to
+ * the CHILD — the fold receives its body already built and cannot reach inside
+ * it. The two bubbles that fold pass `onBlockLayout` to their `Markdown` and
+ * `blocks` back to their `Fold`.
+ */
+export function useFoldBlocks(): { blocks: FoldBlock[]; onBlockLayout: (block: FoldBlock) => void } {
+  const [blocks, setBlocks] = useState<FoldBlock[]>([])
+
+  const onBlockLayout = useCallback((block: FoldBlock) => {
+    setBlocks(current => {
+      const previous = current[block.index]
+
+      // Layout fires on every pass; only a real move is worth a render.
+      if (previous && previous.top === block.top && previous.height === block.height) {
+        return current
+      }
+
+      const next = [...current]
+
+      next[block.index] = block
+
+      return next
+    })
+  }, [])
+
+  return { blocks, onBlockLayout }
+}
+
+/**
+ * The clip height: a whole number of lines, moved up off an atomic block.
+ *
+ * Exported for the test, which is the only way to assert "cuts on a line
+ * boundary" without measuring a rendered bubble.
+ */
+export function foldCut(
+  lines: number,
+  lineHeight: number | undefined,
+  fallback: number,
+  blocks: readonly FoldBlock[] = []
+): number {
+  if (!lineHeight || lineHeight <= 0) {
+    return fallback
+  }
+
+  const limit = lines * lineHeight
+  const straddling = blocks.find(block => block?.atomic && block.top < limit && block.top + block.height > limit)
+
+  // A guard, not a preference: an atomic block that starts in the first few lines
+  // would move the cut to almost nothing, and an empty fold with a `Show more`
+  // under it is worse than a sliced table. Three lines is the floor.
+  if (straddling && straddling.top >= lineHeight * 3) {
+    return straddling.top
+  }
+
+  return limit
+}
+
+export function Fold({
+  expanded,
+  onToggle,
+  streaming = false,
+  fadeTo,
+  lineHeight,
+  blocks,
+  bleed = 0,
+  children,
+  testID
+}: FoldProps) {
   const theme = useTheme()
-  const limit = useFoldHeight()
+  const fallback = useFoldHeight()
+  const lines = useFoldLines()
   const [natural, setNatural] = useState(0)
+
+  const limit = foldCut(lines, lineHeight, fallback, blocks)
 
   // `natural` is measured on the INNER view, which is never height-constrained,
   // so it keeps reporting the real height even while the outer box clips it.
   const overflows = !streaming && natural > limit + theme.space.lg
   const clipped = overflows && !expanded
+
+  // Two and a half lines of fade. A fixed 64pt was a third of the phone's
+  // fourteen lines at one leading and a fifth at another, which is why it read
+  // as a band on one and as nothing much on the other.
+  const fade = Math.round(FOLD_FADE_LINES * (lineHeight && lineHeight > 0 ? lineHeight : 24))
 
   return (
     <View testID={testID}>
@@ -88,12 +213,17 @@ export function Fold({ expanded, onToggle, streaming = false, fadeTo, bleed = 0,
             plainly visible over the bubble, with the clipped line ghosting
             through it. Fading a colour to itself is the only way to make the mask
             disappear into the surface.
+
+            The alphas are an even-ish ramp on purpose. The previous pair reached
+            0.85 at 65 % of the mask, so five sixths of the opacity happened in
+            the first two thirds and the result read as an edge with a soft top
+            rather than as a fade.
           */
           <LinearGradient
-            colors={[withAlpha(fadeTo, 0), withAlpha(fadeTo, 0.85), fadeTo]}
-            locations={[0, 0.65, 1]}
+            colors={[withAlpha(fadeTo, 0), withAlpha(fadeTo, 0.45), withAlpha(fadeTo, 0.92), fadeTo]}
+            locations={[0, 0.45, 0.82, 1]}
             pointerEvents="none"
-            style={{ bottom: 0, height: 64, left: 0, position: 'absolute', right: 0 }}
+            style={{ bottom: 0, height: fade, left: 0, position: 'absolute', right: 0 }}
           />
         ) : null}
       </View>

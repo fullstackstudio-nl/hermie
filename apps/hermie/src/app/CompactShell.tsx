@@ -16,7 +16,7 @@ export type CompactStackParamList = {
   Bots: undefined
   Chat: { bot: string; focusItemId?: string }
   Activity: undefined
-  Cron: undefined
+  Cron: { jobId?: string } | undefined
   Settings: undefined
 }
 
@@ -59,6 +59,10 @@ function ChatRoute({
       onOpenBot={(bot, options) =>
         navigation.push('Chat', { bot, ...(options?.focusItemId ? { focusItemId: options.focusItemId } : {}) })
       }
+      // A cron card in the transcript pushes the Crons route straight onto that
+      // cron's detail. Pushed rather than navigated: Back belongs to the chat the
+      // card was in.
+      onOpenCron={jobId => navigation.push('Cron', { jobId })}
       route={route}
     />
   )
@@ -135,7 +139,11 @@ export function CompactShell({ initial }: { initial?: DevInitialView } = {}) {
             options={{ headerShown: false }}
           />
           <Stack.Screen component={ActivityRoute} name="Activity" options={{ title: strings.tabs.activity }} />
-          <Stack.Screen component={CronScreen} name="Cron" options={{ title: strings.tabs.routines }} />
+          <Stack.Screen name="Cron" options={{ title: strings.tabs.routines }}>
+            {({ route }: { route: { params?: { jobId?: string } } }) => (
+              <CronScreen {...(route.params?.jobId ? { initialJobId: route.params.jobId } : {})} />
+            )}
+          </Stack.Screen>
           <Stack.Screen name="Settings" options={{ title: strings.tabs.settings }}>
             {() => <SettingsScreen {...(initial?.page ? { initialPage: initial.page } : {})} />}
           </Stack.Screen>

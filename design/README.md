@@ -27,25 +27,40 @@ reply`. It is still one indicator and still static; it is strictly more informat
   exists. It carries the counterpart query the old card used, so the far chat opens on the row this
   one is about rather than at its bottom. What §6.6 removed — navigation as the DEFAULT gesture — is
   removed.
-- **A cron card in a chat offers neither _Open cron_ nor _Run now_ yet.** §6.5 lists both and the
-  component takes both; the chat screen does not pass them, so the card shows no actions rather than
-  dead ones. Wiring a chat row to the Crons feature is outstanding. The card's own two states are
-  addressable in the gallery (`gallery:cron-card`, `gallery:cron-card-actionless`), so the decision
-  can now be judged on a screen rather than in a diff.
+- **A cron card in a chat offers _Open cron_ but never _Run now_.** §6.5 lists both and the component
+  takes both. `Open cron` is wired: `ChatScreen` resolves the card's job NAME against the loaded
+  crons, narrowed by this chat's bot, and passes the action only where that leaves exactly one job —
+  a name is not an identity, which is the same fact the list's profile chip exists for. Where it
+  does not resolve the card draws no action, which is also what it does before the crons list has
+  been read once in a session: the cron controller's lifetime is the Crons screen's, so until then
+  the app genuinely does not know which job the card names.
+
+  `Run now` is deliberately left off. It is a side effect on the gateway, it lives on the cron's own
+  detail behind its confirm, and a transcript card is a receipt for a run that already happened —
+  one tap from starting another one is not where that belongs.
+
 - **The tab strip's icons are text glyphs, not the mockup's line art.** §6.8 draws four stroked
   SVG icons; the strip uses `◉ ⇄ ◷ ⚙︎`. They read as a monochrome set at strip size and cost
   no assets, but the chat glyph in particular is a filled circle where the mockup has a speech
   bubble. Replacing them is a `react-native-svg` job now that the dependency is in.
-- **The crons list, its detail, the run transcript and Activity are still on the Part-1 surfaces.**
-  §6.11's cron rows (schedule in words, next run, static status dot, profile chip, a `Paused`
-  section) and the ledger language Activity is supposed to share with the transcript's DM lines are
-  not built yet. All four are now addressable (`gallery:cron-detail`, `gallery:cron-detail-paused`,
-  `gallery:cron-run`, `overlay:crons`, `overlay:activity`), which is what the restyle was waiting
-  for.
-- **The agents bar and the interiors of the four sheets are still Part-1 too.** An earlier round
-  brought their TITLES onto §3's `sheetTitle` and the eyebrow onto `micro`; the bodies are
-  unchanged. Every text field in them now carries the shared sunk-well treatment, which is what the
-  cron editor was missing entirely.
+- **A screen inside the overlay panel does not repeat its own title.** §6.11 draws the crons list
+  with `Crons` at the top of it. Both shells already title the destination — the overlay panel's
+  header on the wide layout, the stack's title bar on the phone — so the screen printing it again
+  underneath made the panel say its own name twice in two sizes. Only the subtitle stays. The same
+  reasoning removed the cron editor's `NEW CRON` eyebrow over `New cron`: an eyebrow earns its line
+  where it says something the title does not, which is why the approval sheet keeps its one (it
+  names the bot).
+- **A fold clips at a multiple of the BODY leading, not at a count of rendered lines.** §6.3 says
+  fourteen lines. The clip is `14 × the body leading`, which is a line boundary for a run of body
+  text and therefore fixes the sliced row — but a heading or a table inside the fold is taller than
+  one body line, so the fold then holds fewer than fourteen visible lines. Counting real lines would
+  mean measuring every block and there is no reader-visible difference between fourteen lines and
+  twelve; a cut through the middle of one is what a reader sees.
+- **The fold's fade colour is the bubble's TAIL colour, not its exact composite.** Both are the
+  bubble's lower edge resolved against the panel, and on the dark reading bubble they differ by a
+  few levels per channel, so a very close look at the bottom of a fade can find the join. Measuring
+  the true composite would mean the fold knowing the wallpaper behind the bubble, which is the thing
+  §7.4 keeps bubbles from depending on.
 - **A table's columns are as wide as their longest value**, between 110 and 280pt, rather than the
   150pt the mockup's table uses. A flat width broke `docs.example.org` mid-word and left one letter
   under the row. The table scrolls horizontally either way, which is what pays for it.

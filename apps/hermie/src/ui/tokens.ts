@@ -602,6 +602,26 @@ export type ResolvedBubbleWidth = (typeof BUBBLE_MAX)[keyof typeof BUBBLE_MAX]
  */
 export const FOLD_HEIGHT = { regular: 378, compact: 300 } as const
 
+/**
+ * The same fold, as a LINE COUNT — which is the number that actually matters.
+ *
+ * A fold clipped to a height lands wherever that height falls, and half a line
+ * of x-height under a gradient reads as a sliced row rather than as a fade. So
+ * the clip is `lines × leading` and the leading is the one the caller is really
+ * rendering at, which only the caller knows. `FOLD_HEIGHT` stays the fallback
+ * for a body whose leading nobody has told us.
+ */
+export const FOLD_LINES = { regular: 14, compact: 11 } as const
+
+/**
+ * How many lines the fade covers.
+ *
+ * One line is not a fade, it is an edge; four is a wash that hides a paragraph
+ * the reader could have read. Two and a half lines is long enough to be plainly
+ * a gradient at both leadings.
+ */
+export const FOLD_FADE_LINES = 2.5
+
 /** How many consecutive bubbles from one sender sit this far apart. */
 export const BUBBLE_GAP = { grouped: 3, separate: 10 } as const
 
@@ -609,6 +629,33 @@ export const BUBBLE_GAP = { grouped: 3, separate: 10 } as const
 export const TINT_SUNK: Record<Scheme, string> = {
   light: 'rgba(14,32,64,0.055)',
   dark: 'rgba(6,12,24,0.44)'
+}
+
+/**
+ * The soft destructive fill, and the soft ok one beside it.
+ *
+ * §3's `.btn--danger` is a TINT carrying `dangerText`, not the saturated
+ * `danger` fill. That is a hierarchy decision, not a shade: a sheet whose four
+ * answers include one solid red block reads as a warning about itself rather
+ * than as a choice between four buttons, and the solid fill is then competing
+ * with the primary. `danger` stays what a status MARK is painted with.
+ */
+export const DANGER_SOFT: Record<Scheme, string> = {
+  light: 'rgba(192,41,58,0.12)',
+  dark: 'rgba(255,120,135,0.16)'
+}
+
+/**
+ * The dark alpha is 0.12, not the 0.16 the danger tint uses.
+ *
+ * `ok` is the lightest of the status fills, so the same wash lifts a dark sheet
+ * further — at 0.16 every light ink on it, `okText` included, measured 4.39–4.47
+ * against the blue wallpaper's brightest bloom and `npm run contrast:check`
+ * failed. Both tints are in that check now, which is how this was found at all.
+ */
+export const OK_SOFT: Record<Scheme, string> = {
+  light: 'rgba(28,133,71,0.12)',
+  dark: 'rgba(92,203,134,0.12)'
 }
 
 /** The full-strength hairline, for an edge that has to be visible. */

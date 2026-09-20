@@ -178,7 +178,12 @@ describe('agents', () => {
 
     renderScreen(<AgentsBar count={3} elapsedSeconds={72} onPress={onPress} />)
 
-    expect(screen.getByText('3 agents working · 1m 12s')).toBeTruthy()
+    // §5 splits the bar's halves: the count in bold, the clock in mono. It is a
+    // clock rather than `1m 12s` because the number ticks in a fixed slot and a
+    // label that changes width once a second moves the "Show" beside it.
+    expect(screen.getByText('3 agents working')).toBeTruthy()
+    expect(screen.getByText('1:12')).toBeTruthy()
+    expect(screen.getByText('Show')).toBeTruthy()
 
     fireEvent.press(screen.getByTestId('agents-bar'))
     expect(onPress).toHaveBeenCalled()
@@ -193,14 +198,15 @@ describe('agents', () => {
   it('ticks from a start in MILLISECONDS, the unit the reducer stores', () => {
     // `Subagent.startedAt` is epoch milliseconds. The bar used to take unix
     // seconds, so the screen handed it a number a thousand times too large,
-    // `now - startedAt` came out hugely negative, and the clock sat on `0s`
+    // `now - startedAt` came out hugely negative, and the clock sat on `0:00`
     // for the entire run.
     const now = jest.spyOn(Date, 'now').mockReturnValue(1_700_000_072_000)
 
     try {
       renderScreen(<AgentsBar count={2} onPress={jest.fn()} startedAtMs={1_700_000_000_000} />)
 
-      expect(screen.getByText('2 agents working · 1m 12s')).toBeTruthy()
+      expect(screen.getByText('2 agents working')).toBeTruthy()
+      expect(screen.getByText('1:12')).toBeTruthy()
     } finally {
       now.mockRestore()
     }
