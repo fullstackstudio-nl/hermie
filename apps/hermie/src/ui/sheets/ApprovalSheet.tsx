@@ -11,7 +11,15 @@
  *     does nothing, and there is no gesture anywhere near it.
  *  3. A 400 ms guard after mount. A sheet that appears under a finger already
  *     travelling toward the screen would otherwise answer a question the user
- *     never read.
+ *     never read. It guards the MOUNT only; a tap that gets through answers at
+ *     once and the sheet leaves on it — see `respond`, which is the guard
+ *     against the second tap.
+ *
+ * The sheet closes on the tap and the RPC travels on its own. It used to wait
+ * for the gateway to confirm and then sit for two seconds saying "Answered:
+ * Allow once", which is a sheet explaining to the reader what the reader just
+ * did. If the answer fails to land, the question is still open in the
+ * transcript with an `Answer` button on it and the error is on the banner.
  */
 import { useEffect, useRef, useState } from 'react'
 import { View } from 'react-native'
@@ -69,6 +77,25 @@ export function ApprovalSheet({
   const [armed, setArmed] = useState(tapGuardMs <= 0)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  /**
+   * One answer per question.
+   *
+   * The sheet SLIDES OUT rather than vanishing, so its buttons are still under
+   * the finger for the length of the animation — and now that the answer no
+   * longer waits for the gateway, a second tap is a second `approval.respond`
+   * for a request that has already been answered.
+   */
+  const answered = useRef(false)
+
+  const respond = (choice: string) => {
+    if (answered.current) {
+      return
+    }
+
+    answered.current = true
+    onRespond(choice)
+  }
+
   // `item.id` is in here on purpose. The sheet host keeps ONE approval sheet
   // mounted and swaps the request into it, so a second question can arrive
   // without `visible` ever going false — and a guard that only re-armed on
@@ -76,10 +103,15 @@ export function ApprovalSheet({
   // finger that just answered the previous one.
   useEffect(() => {
     if (!visible) {
+      // Deliberately NOT resetting `answered` here: a sheet going invisible is
+      // a sheet sliding out, usually because it was just answered, and its
+      // buttons are still under the finger for the length of that animation.
       setArmed(tapGuardMs <= 0)
 
       return
     }
+
+    answered.current = false
 
     if (tapGuardMs <= 0) {
       setArmed(true)
@@ -161,7 +193,7 @@ export function ApprovalSheet({
             <Button
               disabled={!armed}
               key={choice}
-              onPress={() => onRespond(choice)}
+              onPress={() => respond(choice)}
               testID={`approval-choice-${choice}`}
               title={choiceLabel(choice)}
               variant={choiceVariant(choice)}

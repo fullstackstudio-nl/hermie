@@ -16,7 +16,7 @@ import { haptic } from '../src/platform/haptics'
 import { type Bot, useBotsStore } from '../src/store/bots'
 import { useChatsStore } from '../src/store/chats'
 import { useSettingsStore } from '../src/store/settings'
-import { renderScreen } from './support/render'
+import { deferred, renderScreen } from './support/render'
 
 // `mock`-prefixed so the factory below may close over it (Jest's hoisting rule).
 let mockController: Record<string, jest.Mock>
@@ -285,6 +285,49 @@ describe('ChatScreen', () => {
       expect(mockController.respondApproval).toHaveBeenCalledWith('researcher', 'srq-7', 'once', undefined)
     })
     expect(haptic).toHaveBeenCalledWith('choice')
+  })
+
+  it('closes the approval sheet on the tap, with the answer still in flight', async () => {
+    // The sheet used to wait for `approval.respond` to come back and then sit
+    // for two seconds saying "Answered: Allow once". It leaves on the tap now:
+    // the RPC is a background errand, and the only thing that waits for it is
+    // the question's own row in the transcript.
+    const answering = deferred<undefined>()
+    let settled = false
+
+    void answering.promise.then(() => {
+      settled = true
+    })
+
+    mockController.respondApproval.mockImplementationOnce(() => answering.promise)
+
+    renderChat()
+
+    act(() => {
+      useChatsStore.getState().dispatchServerRequest('researcher', {
+        id: 'srq-8',
+        method: 'approval',
+        params: { command: 'rm -rf build', choices: ['once', 'deny'], request_id: 'appr-8' }
+      })
+    })
+
+    await waitFor(() => expect(screen.getByTestId('approval-sheet')).toBeTruthy())
+
+    await waitFor(() => {
+      fireEvent.press(screen.getByTestId('approval-choice-once'))
+
+      expect(mockController.respondApproval).toHaveBeenCalledWith('researcher', 'srq-8', 'once', undefined)
+    })
+
+    // Gone one slide-out later — and the answer has not been anywhere: nothing
+    // resolves that promise until the assertion below has run.
+    await waitFor(() => expect(screen.queryByTestId('approval-sheet')).toBeNull(), { timeout: 4000 })
+    expect(settled).toBe(false)
+
+    // Still open, still in the transcript, with the way back to it.
+    expect(screen.getByText('Answer')).toBeTruthy()
+
+    answering.resolve(undefined)
   })
 
   it('shows one question at a time, oldest first', async () => {

@@ -12,10 +12,15 @@
  * the ordering is testable on its own.
  *
  * It also owns the one thing the chat screen could not: a question that has
- * just been ANSWERED. `chat.requests` is `openRequests`, so the moment a
- * question resolves it vanishes from under the sheet. The host holds the item
- * it is showing by id instead, which is what makes the sheet's own "Answered
- * elsewhere" / "Timed out" branch reachable at all.
+ * stopped being open while its sheet is up. `chat.requests` is `openRequests`,
+ * so the moment a question resolves it vanishes from under the sheet. The host
+ * holds the item it is showing by id instead, which is what makes the sheet's
+ * own "Answered elsewhere" / "Timed out" branch reachable at all.
+ *
+ * That branch is for a question resolved SOMEWHERE ELSE. One answered here
+ * leaves on the tap: the reader has just said what should happen, and a sheet
+ * that stays up for a round trip and then for two seconds of "Answered: Allow
+ * once" is two seconds of telling them what they just did.
  */
 import type { ApprovalItem, ClarifyItem } from '@hermie/transcript'
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
@@ -48,20 +53,24 @@ export interface ChatSheetHostProps {
   onRespondApproval: (item: ApprovalItem, choice: string) => void
   onSubmitClarify: (item: ClarifyItem, answers: Record<string, string>) => void
   onLockClarify: (item: ClarifyItem, qid: string, answer: string) => void
-  /** Take the question off the screen. An OPEN one stays open in the transcript. */
+  /**
+   * Take the question off the screen. An OPEN one stays open in the transcript,
+   * as an item with an `Answer` button that brings the sheet back.
+   *
+   * Called for an ANSWERED question too, and that is the whole of the change
+   * behind "the sheet closes on the tap": the answer travels as an RPC that may
+   * take a round trip, and the question is only off the SCREEN until the
+   * gateway says what became of it. If the RPC fails it is still open, still in
+   * the transcript, and the error is on the banner.
+   */
   onCloseRequest: (item: RequestItem) => void
 
   agents: Omit<AgentsSheetProps, 'visible' | 'onClose' | 'onClosed'>
   options: Omit<ChatOptionsSheetProps, 'visible' | 'onClose' | 'onClosed'>
 
-  /** How long a question answered here stays up before closing itself. */
-  answeredDismissMs?: number
   /** Forwarded to the approval sheet; tests pass 0. */
   tapGuardMs?: number
 }
-
-/** Long enough to read "Answered: Allow once", short enough not to be in the way. */
-const ANSWERED_DISMISS_MS = 2_000
 
 /**
  * A slide-out that never reports finishing would strand the next sheet.
@@ -85,16 +94,10 @@ export function ChatSheetHost({
   onCloseRequest,
   agents,
   options,
-  answeredDismissMs = ANSWERED_DISMISS_MS,
   tapGuardMs
 }: ChatSheetHostProps) {
   const [held, setHeld] = useState<string | null>(() => request?.id ?? null)
   const [state, dispatch] = useReducer(sheetHostReducer, initialSheetHostState)
-
-  // Questions answered from THIS sheet. Those are the ones that may close
-  // themselves; one answered somewhere else, or withdrawn, waits for the
-  // reader, because they never saw what happened to it.
-  const answeredHere = useRef<string | null>(null)
 
   // Which question is on screen, derived rather than stored: a held question
   // stays while it is open, and keeps its place afterwards so its outcome can
@@ -150,25 +153,6 @@ export function ChatSheetHost({
 
   const visible = isSheetVisible(state)
 
-  // ── an answered question closes itself ──────────────────────────────────
-  const resolvedHere = Boolean(shown && shown.state === 'answered' && answeredHere.current === shown.id)
-
-  useEffect(() => {
-    if (!resolvedHere) {
-      return
-    }
-
-    if (answeredDismissMs <= 0) {
-      setHeld(null)
-
-      return
-    }
-
-    const timer = setTimeout(() => setHeld(null), answeredDismissMs)
-
-    return () => clearTimeout(timer)
-  }, [answeredDismissMs, resolvedHere])
-
   const closeRequest = useMemo(
     () => (item: RequestItem) => {
       setHeld(null)
@@ -196,7 +180,11 @@ export function ChatSheetHost({
         onClose={() => closeRequest(item)}
         onClosed={settled}
         onRespond={choice => {
-          answeredHere.current = item.id
+          // The sheet goes on the TAP, not on the answer landing. `closeRequest`
+          // first, so the slide-out has started before the RPC is even handed to
+          // the socket; the question keeps its place in the transcript until the
+          // gateway says what became of it.
+          closeRequest(item)
           onRespondApproval(item, choice)
         }}
         visible={visible}
@@ -211,7 +199,7 @@ export function ChatSheetHost({
         onLock={(qid, answer) => onLockClarify(item, qid, answer)}
         onSkip={() => closeRequest(item)}
         onSubmit={answers => {
-          answeredHere.current = item.id
+          closeRequest(item)
           onSubmitClarify(item, answers)
         }}
         visible={visible}

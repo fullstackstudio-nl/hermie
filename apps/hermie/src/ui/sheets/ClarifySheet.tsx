@@ -9,7 +9,7 @@
  * Choices and free text coexist on purpose: the model offers options, and the
  * answer the user actually has is often neither of them.
  */
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Pressable, View } from 'react-native'
 
 import { chatStrings } from '../../chat-ui/strings'
@@ -60,6 +60,25 @@ export function ClarifySheet({ visible, item, onLock, onSubmit, onSkip, onClose,
   const theme = useTheme()
   const [index, setIndex] = useState(0)
   const [answers, setAnswers] = useState<Record<string, string>>(() => ({ ...item.answers }))
+
+  /**
+   * One way out per question.
+   *
+   * Submit and Later both close the sheet on the tap now, and a closing sheet
+   * slides rather than vanishing — so both buttons are still under the finger
+   * while it goes. This is the only thing between that and two `clarify.respond`
+   * calls for one question.
+   */
+  const left = useRef(false)
+
+  const leave = (go: () => void) => {
+    if (left.current) {
+      return
+    }
+
+    left.current = true
+    go()
+  }
 
   const question = item.questions[Math.min(index, item.questions.length - 1)]
   const batch = item.questions.length > 1
@@ -228,7 +247,11 @@ export function ClarifySheet({ visible, item, onLock, onSubmit, onSkip, onClose,
             title={chatStrings.clarify.next}
           />
         ) : (
-          <Button onPress={() => onSubmit(answers)} testID="clarify-submit" title={chatStrings.clarify.submit} />
+          <Button
+            onPress={() => leave(() => onSubmit(answers))}
+            testID="clarify-submit"
+            title={chatStrings.clarify.submit}
+          />
         )}
 
         {onLock && !isLocked ? (
@@ -252,7 +275,7 @@ export function ClarifySheet({ visible, item, onLock, onSubmit, onSkip, onClose,
             />
           ) : null}
           <Button
-            onPress={onSkip}
+            onPress={() => leave(onSkip)}
             style={{ flex: 1 }}
             testID="clarify-skip"
             title={chatStrings.clarify.later}

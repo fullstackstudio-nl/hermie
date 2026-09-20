@@ -955,6 +955,12 @@ function Conversation({
     setDismissed(current => (current.includes(item.id) ? current : [...current, item.id]))
   }, [])
 
+  /*
+    Both of these are fired AFTER the sheet has started sliding out — see
+    `ChatSheetHost`. So a failure has nowhere to be shown but here: the banner
+    carries the error, and the question is still open in the transcript with an
+    `Answer` button that brings the sheet back.
+  */
   const respondApproval = useCallback(
     (item: ApprovalItem, choice: string) => {
       haptic('choice')
