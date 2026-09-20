@@ -9,7 +9,7 @@
  * The cases worth writing down are the precedence ones, because that is where a
  * plausible-looking implementation goes wrong.
  */
-import { CHAT_FILTERS, matchesFilter, presenceOf, type PresenceInput } from '../src/features/bots/presence'
+import { presenceOf, type PresenceInput } from '../src/features/bots/presence'
 
 const READY: PresenceInput = {
   gatewayReady: true,
@@ -63,25 +63,5 @@ describe('presenceOf', () => {
     // Zero is the roster's "never", not a timestamp at the epoch.
     expect(presenceOf({ ...READY, gatewayReady: false, lastActive: 0 })).toEqual({ state: 'offline' })
     expect(presenceOf({ ...READY, lastActive: 1_700_000_000 })).toEqual({ state: 'online' })
-  })
-})
-
-describe('the filter chips', () => {
-  it('covers every chip', () => {
-    expect(CHAT_FILTERS).toEqual(['all', 'unread', 'working', 'needsInput'])
-  })
-
-  it('filters on exactly the presence states plus unread', () => {
-    const working = presenceOf({ ...READY, working: true })
-    const waiting = presenceOf({ ...READY, needsInput: true })
-    const idle = presenceOf(READY)
-
-    expect(matchesFilter('all', idle, false)).toBe(true)
-    expect(matchesFilter('working', working, false)).toBe(true)
-    expect(matchesFilter('working', waiting, false)).toBe(false)
-    expect(matchesFilter('needsInput', waiting, false)).toBe(true)
-    expect(matchesFilter('needsInput', working, false)).toBe(false)
-    expect(matchesFilter('unread', idle, true)).toBe(true)
-    expect(matchesFilter('unread', idle, false)).toBe(false)
   })
 })

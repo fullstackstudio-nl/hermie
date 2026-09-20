@@ -64,25 +64,3 @@ export function presenceOf(input: PresenceInput): Presence {
 
   return { state: 'online' }
 }
-
-/**
- * The filter chips filter on exactly these states plus unread, so the mapping
- * from a chip to a predicate lives next to the states rather than in the view.
- */
-export type ChatFilter = 'all' | 'unread' | 'working' | 'needsInput'
-
-export const CHAT_FILTERS: readonly ChatFilter[] = ['all', 'unread', 'working', 'needsInput']
-
-export function matchesFilter(filter: ChatFilter, presence: Presence, unread: boolean): boolean {
-  switch (filter) {
-    case 'unread':
-      return unread
-    case 'working':
-      return presence.state === 'working'
-    case 'needsInput':
-      return presence.state === 'needsInput'
-    case 'all':
-    default:
-      return true
-  }
-}

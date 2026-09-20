@@ -8,15 +8,7 @@ export {
   SESSION_COLUMNS
 } from './bots-controller'
 export { BotsScreen, BotsScreenOrSignedOut, type BotsScreenProps } from './BotsScreen'
-export {
-  CHAT_FILTERS,
-  matchesFilter,
-  presenceOf,
-  type ChatFilter,
-  type Presence,
-  type PresenceInput,
-  type PresenceState
-} from './presence'
+export { presenceOf, type Presence, type PresenceInput, type PresenceState } from './presence'
 export { ConnectionLine } from './ConnectionLine'
 export { SidebarFooter, TABS, type BotsSection, type TabKey } from './SidebarFooter'
 export { SidebarRail, type SidebarRailProps } from './SidebarRail'

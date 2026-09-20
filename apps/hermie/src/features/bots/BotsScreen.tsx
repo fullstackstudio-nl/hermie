@@ -31,7 +31,6 @@ import {
   FlatList,
   Pressable,
   RefreshControl,
-  ScrollView,
   TextInput,
   View,
   type NativeScrollEvent,
@@ -61,7 +60,7 @@ import { useChatRuntime } from '../chats/ChatRuntime'
 import { BotRow } from './BotRow'
 import { ConnectionLine } from './ConnectionLine'
 import { dragAnchors, entryIndexByKey } from './drag-order'
-import { CHAT_FILTERS, matchesFilter, presenceOf, type ChatFilter, type Presence } from './presence'
+import { presenceOf, type Presence } from './presence'
 import { parseRowMenuAction } from './row-menu-items'
 import { RowMenu } from './RowMenu'
 import { SidebarFooter, type BotsSection, type TabKey } from './SidebarFooter'
@@ -147,7 +146,6 @@ export function BotsScreen({
 
   const [refreshing, setRefreshing] = useState(false)
   const [query, setQuery] = useState('')
-  const [filter, setFilter] = useState<ChatFilter>('all')
   const [editing, setEditing] = useState(false)
   // Which divider was added by the button, so that one — and only that one —
   // opens with the keyboard in it. Cleared when edit mode ends, so leaving and
@@ -254,23 +252,18 @@ export function BotsScreen({
    * them, which reads as one run-on line rather than as two sections. A heading
    * plus an explicit empty row cannot do either.
    *
-   * A search or a filter is the exception: those narrow the list on purpose,
-   * and answering "no matches" once per section would bury the matches.
+   * A search is the exception: it narrows the list on purpose, and answering
+   * "no matches" once per section would bury the matches.
    */
   const items = useMemo<ListItem[]>(() => {
     const out: ListItem[] = []
-    const narrowed = Boolean(query.trim()) || filter !== 'all'
+    const narrowed = Boolean(query.trim())
 
     for (const section of sections) {
       const visible = section.bots
         .map(name => byName[name])
         .filter((bot): bot is Bot => Boolean(bot))
         .filter(bot => matches(bot, query))
-        .filter(bot => {
-          const state = presence.get(bot.name)
-
-          return state ? matchesFilter(filter, state, unreadFor(bot.name).unread) : false
-        })
 
       // The unsectioned top group has no heading, so an empty one is nothing.
       if (!section.divider) {
@@ -316,7 +309,7 @@ export function BotsScreen({
     }
 
     return out
-  }, [archiveOpen, archivedNames, byName, editing, filter, presence, query, sections, unreadFor])
+  }, [archiveOpen, archivedNames, byName, editing, query, sections])
 
   const hasRows = items.some(item => item.kind === 'bot')
 
@@ -574,8 +567,6 @@ export function BotsScreen({
         value={query}
       />
 
-      <Filters current={filter} onChange={setFilter} />
-
       {signedOut ? (
         <Text
           color="warnText"
@@ -589,13 +580,7 @@ export function BotsScreen({
       <FlatList
         ref={attachList}
         ListEmptyComponent={
-          <EmptyState
-            error={rosterError}
-            filtered={filter !== 'all'}
-            loading={loading}
-            query={query}
-            searching={Boolean(query.trim())}
-          />
+          <EmptyState error={rosterError} loading={loading} query={query} searching={Boolean(query.trim())} />
         }
         data={items}
         extraData={hasRows}
@@ -915,94 +900,6 @@ function SearchField({
 }
 
 /**
- * The four filter pills.
- *
- * A ROW THAT SCROLLS, not a row that fits. Four pills whose widths are four
- * translated words never fit a fixed box by arithmetic: at the narrow sidebar
- * width "Needs input" lost its last letters, and it was already one Dynamic Type
- * step from doing the same at the wide one. A horizontal scroller is the only
- * version of this row that survives a narrower sidebar, a longer translation and
- * a larger text size at the same time — and with nothing to scroll it is
- * indistinguishable from the fixed row.
- *
- * `flexGrow: 1` on the content is what keeps it left-aligned rather than
- * stretched when the pills DO fit, which is the common case.
- *
- * The padding is `sm`, not `md`, for the same reason. Measured in English at the
- * narrow sidebar the four pills wanted 311pt in a 260pt row; at `sm`, and with
- * the row's own gutter one step in, they want 271 in 268 — near enough that the
- * scroller only has to cover translations and Dynamic Type rather than the
- * default case.
- */
-function Filters({ current, onChange }: { current: ChatFilter; onChange: (filter: ChatFilter) => void }) {
-  const theme = useTheme()
-
-  return (
-    <ScrollView
-      contentContainerStyle={{
-        flexDirection: 'row',
-        flexGrow: 1,
-        gap: 6,
-        paddingHorizontal: theme.space.md
-      }}
-      horizontal
-      // The pills are a filter, not a scroll surface: a bar under four chips
-      // reads as a second, broken scrollbar for the list below them.
-      showsHorizontalScrollIndicator={false}
-      style={{ flexGrow: 0, marginBottom: theme.space.md }}
-    >
-      {CHAT_FILTERS.map(filter => (
-        <FilterChip current={current} filter={filter} key={filter} onChange={onChange} />
-      ))}
-    </ScrollView>
-  )
-}
-
-function FilterChip({
-  current,
-  filter,
-  onChange
-}: {
-  current: ChatFilter
-  filter: ChatFilter
-  onChange: (filter: ChatFilter) => void
-}) {
-  const theme = useTheme()
-  const hover = useHover()
-  const selected = filter === current
-
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
-      onPress={() => onChange(filter)}
-      style={{
-        backgroundColor: selected ? theme.colors.accent : hover.hovered ? theme.glass.row.solid : theme.tintSunk,
-        borderColor: selected ? 'transparent' : theme.hairlineSoft,
-        borderRadius: theme.radii.pill,
-        borderWidth: 1,
-        cursor: 'pointer',
-        paddingHorizontal: theme.space.sm,
-        paddingVertical: 6
-      }}
-      testID={`filter-${filter}`}
-      {...hover.props}
-    >
-      <Text
-        color={selected ? 'onAccent' : 'textMuted'}
-        // The pill is sized by its label, so the label must not wrap — a two-line
-        // chip changes the row's height instead of its width.
-        numberOfLines={1}
-        style={{ fontWeight: '600' }}
-        variant="meta"
-      >
-        {strings.bots.filters[filter]}
-      </Text>
-    </Pressable>
-  )
-}
-
-/**
  * A named section break.
  *
  * In edit mode the name becomes editable in place rather than opening a rename
@@ -1248,13 +1145,11 @@ function EditBar({ onAddDivider }: { onAddDivider: (id: string) => void }) {
 
 function EmptyState({
   error,
-  filtered,
   loading,
   query,
   searching
 }: {
   error: string | null
-  filtered: boolean
   loading: boolean
   query: string
   searching: boolean
@@ -1265,11 +1160,9 @@ function EmptyState({
     ? strings.bots.failed(error)
     : searching
       ? strings.bots.noMatches(query.trim())
-      : filtered
-        ? strings.bots.noneMatchFilter
-        : loading
-          ? strings.bots.loading
-          : strings.bots.empty
+      : loading
+        ? strings.bots.loading
+        : strings.bots.empty
 
   return (
     <View style={{ gap: theme.space.sm, padding: theme.space.lg }}>

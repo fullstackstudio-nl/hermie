@@ -209,14 +209,7 @@ export const strings = {
     offline: 'Offline — showing the last saved list.',
     footnote: 'Your conversations stay with your gateway.',
     sidebarHeader: 'CHATS',
-    newCron: 'New cron',
-    filters: {
-      all: 'All',
-      unread: 'Unread',
-      working: 'Working',
-      needsInput: 'Needs input'
-    },
-    noneMatchFilter: 'No conversation is in that state right now.'
+    newCron: 'New cron'
   },
 
   /**

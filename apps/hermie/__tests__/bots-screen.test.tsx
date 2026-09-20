@@ -207,50 +207,6 @@ describe('BotsScreen', () => {
   })
 })
 
-describe('the filter chips', () => {
-  beforeEach(seedRoster)
-
-  it('filters on exactly the presence states, not on anything else', () => {
-    useBotsStore.getState().setRunning(['researcher'])
-    renderScreen(<BotsScreen />)
-
-    fireEvent.press(screen.getByTestId('filter-working'))
-    expect(screen.getByTestId('bot-row-researcher')).toBeTruthy()
-    expect(screen.queryByTestId('bot-row-writer')).toBeNull()
-
-    fireEvent.press(screen.getByTestId('filter-all'))
-    expect(screen.getByTestId('bot-row-writer')).toBeTruthy()
-  })
-
-  it('filters on needs-input', () => {
-    seedOpenApproval()
-    renderScreen(<BotsScreen />)
-
-    fireEvent.press(screen.getByTestId('filter-needsInput'))
-
-    expect(screen.getByTestId('bot-row-writer')).toBeTruthy()
-    expect(screen.queryByTestId('bot-row-researcher')).toBeNull()
-  })
-
-  it('filters on unread', () => {
-    useBotsStore.getState().markSeen('writer', NOW)
-    renderScreen(<BotsScreen />)
-
-    fireEvent.press(screen.getByTestId('filter-unread'))
-
-    expect(screen.getByTestId('bot-row-researcher')).toBeTruthy()
-    expect(screen.queryByTestId('bot-row-writer')).toBeNull()
-  })
-
-  it('says so when a state is simply empty, rather than reading as an empty roster', () => {
-    renderScreen(<BotsScreen />)
-
-    fireEvent.press(screen.getByTestId('filter-working'))
-
-    expect(screen.getByTestId('bots-empty')).toHaveTextContent('No conversation is in that state right now.')
-  })
-})
-
 describe('edit mode', () => {
   beforeEach(seedRoster)
 
@@ -403,12 +359,11 @@ describe('the row context menu', () => {
     expect(screen.getByTestId('archived-row')).toHaveTextContent(/Archived \(1\)/)
   })
 
-  it('keeps an archived bot out of the filters and the unread count', () => {
+  it('keeps an archived bot out of the list and the unread count', () => {
     renderScreen(<BotsScreen />)
 
     fireEvent(screen.getByTestId('bot-row-writer'), 'longPress')
     fireEvent.press(screen.getByTestId('row-menu-archive'))
-    fireEvent.press(screen.getByTestId('filter-unread'))
 
     expect(screen.queryByTestId('bot-row-writer')).toBeNull()
 
