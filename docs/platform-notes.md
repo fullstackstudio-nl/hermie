@@ -11,6 +11,59 @@ build** running as "Designed for iPad" (ADR-0011). Sections dated before 2026-09
 native macOS target described a platform that no longer exists — they were removed rather than
 rewritten, and git history has them.
 
+## The chat chrome floats, and the glass is the real material (2026-09-20)
+
+The header was one glass surface spanning the column. It is now three separate
+floating elements — the leading button, a contact pill, the trailing button — laid
+OVER the transcript, with the list padding its own content clear of whatever the
+chrome measured. On an inverted list that padding is `paddingBottom`: the content
+container's top is at the screen's bottom, which is the kind of thing that is
+obvious once and wrong twice.
+
+The header row is `pointerEvents="box-none"`, so the gaps between the three
+elements pass drags and taps down to the transcript. A transparent view that
+swallows touches is worse than an opaque one, because nothing on screen explains
+what stopped the finger.
+
+`GlassSurface` now takes `interactive`, which reaches `UIGlassEffect.isInteractive`
+— the flex and brighten a Liquid Glass control does under the finger. It is on for
+the round buttons and off for anything holding content; a panel carrying a
+scrolling list must not squirm when the reader drags it. The developer screen
+prints both probes (`liquid glass:` / `effect API:`) beside the material, because
+"older than iOS 26" and "an iOS 26 beta with a broken initialiser" both come out
+as `blur` and the first question about a surface that is not transparent enough is
+which of the two it was.
+
+**Unverified:** every line above was read and tested, not watched. Whether the
+material actually reaches the transparency of the Messages search field on this
+Mac is a question for that Mac.
+
+## An inactive Mac window (2026-09-20) — read, not settled
+
+The requirement is that the app does not change its look when its window is not
+key. What was checked, and what it leaves open:
+
+- **Nothing in this app dims itself.** The two places that watch `AppState` —
+  `ChatRuntime` and the gateway client — act on `background` only, and both guard
+  the Mac out of the branch that stops polling (`RUNS_ON_MAC`). No code path
+  reacts to `inactive` at all, so a resigned window changes nothing we draw.
+- **Our own layers are constant by construction.** The border, the tint, the solid
+  rung and the shadow in `GlassSurface` are theme values with no window state in
+  them. On the `blur` and `solid` materials there is therefore nothing left that
+  could dim.
+- **What is open is the native material.** On the `native` path the surface is a
+  `UIVisualEffectView` carrying a `UIGlassEffect`, and whether UIKit dims that for
+  a non-key window in a "Designed for iPad" app is exactly what cannot be answered
+  here — there is no Mac window in this environment, and the two candidate
+  behaviours (dims like AppKit vibrancy, or does not) are indistinguishable from
+  the code. If it does dim, the lever is not `GlassSurface`: UIKit exposes no
+  inactive-appearance override, so the fix would be to hold the window key-looking
+  from `modules/hermie-mac` or to drop that surface to the `blur` material on a
+  Mac, and choosing between those without seeing the dim would be guessing.
+
+So: no change was made for this, on purpose. The finding is that there is nothing
+of ours to fix, and the one thing that might need fixing cannot be seen from here.
+
 ## The wide layout is edge to edge (2026-09-20)
 
 The sidebar and the chat column used to be two rounded glass panels floating in a

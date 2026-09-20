@@ -53,5 +53,26 @@ function detect(): GlassMaterial {
 
 export const GLASS_MATERIAL: GlassMaterial = detect()
 
+/**
+ * The two probes, as they answered, for the developer screen.
+ *
+ * `GLASS_MATERIAL` alone says which path is live but not WHY, and the two
+ * failures look identical from the outside: an OS older than 26 and an iOS 26
+ * beta whose `UIGlassEffect` initialiser does not work both come out as `blur`.
+ * So do both on a binary built before the dependency was linked, where the calls
+ * throw. `unavailable` is that third answer.
+ *
+ * Read on a device rather than reasoned about: the owner's requirement is that
+ * the glass reaches the transparency of the Messages search field, and the first
+ * question when it does not is which of these three is false.
+ */
+export const GLASS_PROBES: { liquidGlass: boolean | 'unavailable'; effectApi: boolean | 'unavailable' } = (() => {
+  try {
+    return { liquidGlass: isLiquidGlassAvailable(), effectApi: isGlassEffectAPIAvailable() }
+  } catch {
+    return { liquidGlass: 'unavailable', effectApi: 'unavailable' }
+  }
+})()
+
 /** True where a blur of any kind is possible, before accessibility has its say. */
 export const CAN_BLUR = GLASS_MATERIAL !== 'solid'

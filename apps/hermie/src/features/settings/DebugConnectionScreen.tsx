@@ -19,7 +19,7 @@ import { directTouchPanRef } from '../../platform/pointer-drag'
 import { RUNS_ON_MAC } from '../../platform/runs-on-mac'
 import { useChatsStore } from '../../store/chats'
 import { Button, Screen, Text, TextField } from '../../ui/primitives'
-import { GLASS_MATERIAL } from '../../ui/glass'
+import { GLASS_MATERIAL, GLASS_PROBES } from '../../ui/glass'
 import { useTheme } from '../../ui/theme'
 
 /**
@@ -266,6 +266,15 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
           */}
           <Text color="textMuted" testID="debug-glass-material">
             glass material: {GLASS_MATERIAL}
+          </Text>
+          {/*
+            And WHY. The two failures look identical from the outside — an OS
+            older than 26 and an iOS 26 beta with a broken `UIGlassEffect`
+            initialiser both come out as `blur` — so the answer to "the glass is
+            not transparent enough" starts with which of these two is false.
+          */}
+          <Text color="textMuted" testID="debug-glass-probes">
+            liquid glass: {String(GLASS_PROBES.liquidGlass)} · effect API: {String(GLASS_PROBES.effectApi)}
           </Text>
           <Text color="textMuted" testID="debug-reduce-transparency">
             reduce transparency: {String(theme.reduceTransparency)} · reduce motion: {String(theme.reduceMotion)}

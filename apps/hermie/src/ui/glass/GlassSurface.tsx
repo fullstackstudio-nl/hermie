@@ -73,6 +73,16 @@ export type GlassSurfaceProps = Omit<ViewProps, 'style'> & {
   tint?: string
   /** Lay the solid rung under the glass, for a surface that carries body text. */
   opaque?: boolean
+  /**
+   * This surface is a BUTTON, so the material may react to the finger.
+   *
+   * `UIGlassEffect.isInteractive` is what makes a Liquid Glass control feel like
+   * one: it flexes and brightens under the touch, which is the behaviour the
+   * reference toolbars have and which a `Pressable` opacity change only imitates.
+   * Off by default and wrong for anything that holds content — a panel carrying a
+   * scrolling list must not squirm when the reader drags it.
+   */
+  interactive?: boolean
   style?: StyleProp<ViewStyle>
   /** The outer box carries the shadow; this styles the clipped inner surface. */
   contentStyle?: StyleProp<ViewStyle>
@@ -109,6 +119,7 @@ export function GlassSurface({
   shadow,
   tint,
   opaque = false,
+  interactive = false,
   style,
   contentStyle,
   contentTestID,
@@ -165,7 +176,14 @@ export function GlassSurface({
         ]}
         testID={contentTestID}
       >
-        {blurred ? <Material intensity={recipe.blurIntensity} tint={recipe.nativeTint} radius={cornerRadius} /> : null}
+        {blurred ? (
+          <Material
+            interactive={interactive}
+            intensity={recipe.blurIntensity}
+            radius={cornerRadius}
+            tint={recipe.nativeTint}
+          />
+        ) : null}
 
         {/*
           The wash: a low-alpha flat fill that turns a plain blur into something
@@ -207,11 +225,28 @@ export function GlassSurface({
  * the only thing standing between a material and the system appearance if a
  * window ever escapes that override, and it costs one prop.
  *
- * `isInteractive` is left off. It makes the material react to touches, which is
- * right for a button and wrong for a panel that holds a scrolling list — and the
- * only round controls in Part 1 are small enough that the effect reads as noise.
+ * `isInteractive` is passed through rather than hard-coded off. It used to be off
+ * everywhere, on the argument that the round controls were small enough for the
+ * effect to read as noise; the owner's reference — the buttons beside the Messages
+ * search field — says otherwise, and it is what makes a Liquid Glass control feel
+ * like a control rather than like a picture of one. It stays off for anything that
+ * holds content.
+ *
+ * A native material that is interactive must also be able to RECEIVE the touch, so
+ * `pointerEvents` follows it. Elsewhere the material is decoration behind a
+ * `Pressable` and stays out of the way.
  */
-function Material({ intensity, tint, radius }: { intensity: number; tint?: string | undefined; radius: number }) {
+function Material({
+  intensity,
+  tint,
+  radius,
+  interactive
+}: {
+  intensity: number
+  tint?: string | undefined
+  radius: number
+  interactive: boolean
+}) {
   const theme = useTheme()
 
   if (GLASS_MATERIAL === 'native') {
@@ -219,6 +254,7 @@ function Material({ intensity, tint, radius }: { intensity: number; tint?: strin
       <GlassView
         colorScheme={theme.scheme}
         glassEffectStyle="regular"
+        isInteractive={interactive}
         pointerEvents="none"
         style={[StyleSheet.absoluteFill, { borderRadius: radius }]}
         {...(tint ? { tintColor: tint } : {})}

@@ -1,6 +1,6 @@
 /**
- * The chat's title bar: an avatar with the chat's accent ring and a presence bead,
- * the name, a subtitle that says the state in words, and round glass buttons.
+ * The chat's chrome: round glass buttons, and a pill carrying the avatar, the name
+ * and what the bot is doing.
  *
  * One rule decides the subtitle and it is the owner's: **it must never say
  * "Connecting…" while the chat is live.** The header therefore takes a resolved
@@ -8,7 +8,25 @@
  * a pair of booleans it would have to guess a precedence order for. A row that says
  * "Working…" above a header that says "Online" is two bugs that look like one.
  *
- * The header itself is a floating glass surface, not a bar with a bottom hairline.
+ * ## It is not a bar
+ *
+ * It was one glass surface spanning the column, and the owner replaced that with a
+ * reference: iPadOS 26 Messages, where the buttons and the contact pill are
+ * SEPARATE rounded glass elements floating over the conversation, with the messages
+ * scrolling underneath and blurring through them. So this component draws no
+ * background of its own. It is a transparent row of three floating things — the
+ * leading button, the pill, the trailing button — and the chat screen lays it over
+ * the transcript rather than above it.
+ *
+ * Two consequences:
+ *
+ *  - The row is `pointerEvents="box-none"`, so the gaps between the three elements
+ *    pass drags and taps through to the transcript underneath. A transparent view
+ *    that swallows touches is worse than an opaque one, because the reader cannot
+ *    see what stopped them.
+ *  - Nothing here reserves space. `CHAT_CHROME_HEIGHT` is what the transcript pads
+ *    its own content by, so the padding and the thing it clears cannot drift apart.
+ *
  * The agents bar pins under it (§6.8), which is why the two are siblings in the
  * chat screen rather than one component.
  */
@@ -98,7 +116,7 @@ function RoundButton({
   const theme = useTheme()
 
   return (
-    <GlassSurface radius={size / 2} shadow="card" style={{ height: size, width: size }} variant="control">
+    <GlassSurface interactive radius={size / 2} shadow="card" style={{ height: size, width: size }} variant="control">
       <Pressable
         accessibilityLabel={label}
         accessibilityRole="button"
@@ -159,19 +177,16 @@ export function ChatHeader({
   const line = subtitle ?? (handle ? `@${handle} · ${state}` : state)
 
   return (
-    <GlassSurface
-      contentStyle={{
+    <View
+      pointerEvents="box-none"
+      style={{
         alignItems: 'center',
         flexDirection: 'row',
-        gap: theme.space.sm + 2,
-        minHeight: 60,
+        gap: theme.space.sm,
         paddingHorizontal: theme.space.md,
         paddingVertical: theme.space.sm
       }}
-      radius={theme.radii.sheet}
-      shadow="float"
       testID={testID}
-      variant="float"
     >
       {/*
         The leading group. Back belongs to a stack and the sidebar control belongs
@@ -198,27 +213,56 @@ export function ChatHeader({
         />
       ) : null}
 
-      {/* The ring is the chat's colour; the bead is the bot's state. Two facts,
-          two marks, so neither has to carry the other. */}
-      <View>
-        <Avatar
-          name={name}
-          size={AVATAR_SIZE.header}
-          style={{ borderColor: ring, borderWidth: 2 }}
-          {...(avatarUri ? { uri: avatarUri } : {})}
-        />
-        <View style={{ bottom: -1, position: 'absolute', right: -1 }}>
-          <PresenceBead ringColor={theme.glass.float.solid} size={BEAD_SIZE.inline} state={presence} />
-        </View>
-      </View>
+      {/*
+        The pill. It floats CENTRED between the two buttons rather than filling the
+        row, which is what makes the gaps on either side of it real gaps that the
+        transcript shows through — the whole point of the reference.
 
-      <View style={{ flex: 1 }}>
-        <Text numberOfLines={1} variant="chatName">
-          {name}
-        </Text>
-        <Text color="textFaint" numberOfLines={1} variant="meta">
-          {line}
-        </Text>
+        The air around its contents is deliberate and is the other half of what the
+        owner asked for: the avatar, the name and the buttons were crowded together
+        in the old bar. `space.sm` between the buttons and the pill, `space.sm`
+        inside it, and the pill's own horizontal padding is a full `space.md` on the
+        trailing side so the name is not against the rim.
+      */}
+      <View pointerEvents="box-none" style={{ alignItems: 'center', flex: 1 }}>
+        <GlassSurface
+          contentStyle={{
+            alignItems: 'center',
+            flexDirection: 'row',
+            gap: theme.space.sm,
+            paddingLeft: theme.space.xs,
+            paddingRight: theme.space.md,
+            paddingVertical: theme.space.xs
+          }}
+          radius={theme.radii.pill}
+          shadow="float"
+          style={{ maxWidth: '100%' }}
+          testID={`${testID}-pill`}
+          variant="control"
+        >
+          {/* The ring is the chat's colour; the bead is the bot's state. Two facts,
+              two marks, so neither has to carry the other. */}
+          <View>
+            <Avatar
+              name={name}
+              size={AVATAR_SIZE.header}
+              style={{ borderColor: ring, borderWidth: 2 }}
+              {...(avatarUri ? { uri: avatarUri } : {})}
+            />
+            <View style={{ bottom: -1, position: 'absolute', right: -1 }}>
+              <PresenceBead ringColor={theme.glass.control.solid} size={BEAD_SIZE.inline} state={presence} />
+            </View>
+          </View>
+
+          <View style={{ flexShrink: 1 }}>
+            <Text numberOfLines={1} variant="chatName">
+              {name}
+            </Text>
+            <Text color="textFaint" numberOfLines={1} variant="meta">
+              {line}
+            </Text>
+          </View>
+        </GlassSurface>
       </View>
 
       <GlassGroup spacing={theme.space.sm} style={{ flexDirection: 'row', gap: theme.space.sm }}>
@@ -230,6 +274,6 @@ export function ChatHeader({
           testID="chat-header-options"
         />
       </GlassGroup>
-    </GlassSurface>
+    </View>
   )
 }

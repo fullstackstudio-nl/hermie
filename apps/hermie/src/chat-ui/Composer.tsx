@@ -661,7 +661,13 @@ export function Composer({
           spacing={theme.space.sm}
           style={{ alignItems: 'flex-end', flexDirection: 'row', gap: theme.space.sm }}
         >
-          <GlassSurface radius={round / 2} shadow="card" style={{ height: round, width: round }} variant="control">
+          <GlassSurface
+            interactive
+            radius={round / 2}
+            shadow="card"
+            style={{ height: round, width: round }}
+            variant="control"
+          >
             <Pressable
               accessibilityLabel={chatStrings.composer.attach}
               accessibilityRole="button"

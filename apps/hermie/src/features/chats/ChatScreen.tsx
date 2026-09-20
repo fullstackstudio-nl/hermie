@@ -248,6 +248,15 @@ function Conversation({
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([])
   const [attachBusy, setAttachBusy] = useState<'photo' | 'file' | null>(null)
   /**
+   * How tall the floating chrome came out, so the transcript can pad its content
+   * clear of it.
+   *
+   * Measured rather than declared as a constant: the header is a pill whose height
+   * follows the type scale and the presence line, and a number written down beside
+   * it is a number that goes stale the first time either moves.
+   */
+  const [chromeHeight, setChromeHeight] = useState(0)
+  /**
    * Files already uploaded and waiting to be named in the next prompt.
    *
    * Uploaded on pick rather than on send, because the upload is the slow part
@@ -924,22 +933,6 @@ function Conversation({
 
   return (
     <Screen edgeToEdgeTop={false} padded={false}>
-      <ChatHeader
-        accentFill={theme.accent(accent).fill}
-        avatarUri={avatar}
-        handle={botName}
-        name={display}
-        onBack={onBack}
-        onOpenOptions={openOptions}
-        onToggleSidebar={onToggleSidebar}
-        // The resolved state, from the same function the chat list uses. It is
-        // what keeps the header from saying "Connecting…" over a live chat: the
-        // socket's own status is not a bot's state.
-        presence={presence.state}
-        {...(presence.lastSeenAt !== undefined ? { lastSeenAt: presence.lastSeenAt } : {})}
-        {...(subtitle ? { subtitle } : {})}
-      />
-
       <KeyboardAvoidingView
         behavior={KEYBOARD_AVOID_BEHAVIOR}
         // The chat header is inside this screen (the stack's own header is
@@ -970,6 +963,17 @@ function Conversation({
         */}
         <TranscriptList
           canOpenCron={canOpenCron}
+          /*
+            The transcript runs UNDER the floating chrome and pads its own content
+            out of the way. An inverted list's content container has its top where
+            the screen's bottom is, so the padding that clears a header at the
+            visual top is `paddingBottom`.
+
+            Measured rather than named: `chromeHeight` is what the header actually
+            laid out at, so the clearance and the thing it clears cannot drift
+            apart when a subtitle wraps or a control size changes.
+          */
+          contentStyle={{ paddingBottom: chromeHeight }}
           header={
             chat.subagents.length ? (
               <AgentsBar count={chat.subagents.length} onPress={openAgents} startedAtMs={oldestStart(chat.subagents)} />
@@ -993,6 +997,39 @@ function Conversation({
           typing={chat.turnActive && !hasStreamingText(chat.items)}
           typingHandles={typing}
         />
+
+        {/*
+          The chrome, laid OVER the transcript rather than above it.
+
+          The owner's reference is iPadOS 26 Messages: the buttons and the contact
+          pill float on the conversation and the messages blur through them, which
+          only works if the list occupies the space they sit in. `box-none` so the
+          gaps between the three elements pass drags and taps down to the list.
+
+          It is a sibling of the list inside the keyboard-avoiding view, not a
+          child of it, so the chrome does not move when the keyboard opens.
+        */}
+        <View
+          onLayout={event => setChromeHeight(event.nativeEvent.layout.height)}
+          pointerEvents="box-none"
+          style={{ left: 0, position: 'absolute', right: 0, top: 0 }}
+        >
+          <ChatHeader
+            accentFill={theme.accent(accent).fill}
+            avatarUri={avatar}
+            handle={botName}
+            name={display}
+            onBack={onBack}
+            onOpenOptions={openOptions}
+            onToggleSidebar={onToggleSidebar}
+            // The resolved state, from the same function the chat list uses. It is
+            // what keeps the header from saying "Connecting…" over a live chat: the
+            // socket's own status is not a bot's state.
+            presence={presence.state}
+            {...(presence.lastSeenAt !== undefined ? { lastSeenAt: presence.lastSeenAt } : {})}
+            {...(subtitle ? { subtitle } : {})}
+          />
+        </View>
 
         <Composer
           attachBusy={attachBusy}
