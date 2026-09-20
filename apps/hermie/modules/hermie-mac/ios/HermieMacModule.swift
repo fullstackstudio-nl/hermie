@@ -420,6 +420,23 @@ public class HermieMacModule: Module {
       return "nextChat"
     }
 
+    // Bare ↑, ↓ and Tab, for the composer's slash list — the only unmodified keys on this table.
+    // They can be here without weakening what it is for: none of the three inserts a character, so
+    // nothing typed into a field still crosses into JavaScript. All three are ignored there unless a
+    // suggestion list is actually open.
+    if !command, !control {
+      switch keyCode {
+      case .upArrow:
+        return "suggestionUp"
+      case .downArrow:
+        return "suggestionDown"
+      case .tab:
+        return "suggestionAccept"
+      default:
+        break
+      }
+    }
+
     guard command else {
       return nil
     }

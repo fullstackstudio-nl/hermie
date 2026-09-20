@@ -1073,6 +1073,55 @@ describe('slash commands', () => {
     expect(gateway.calls.filter(call => call.method === 'complete.slash')).toHaveLength(2)
   })
 
+  it('answers from the catalogue which names are commands and which are prose', async () => {
+    const { gateway, controller } = setup()
+
+    gateway
+      .reply('commands.catalog', {
+        pairs: [['/model', 'Switch the model']],
+        canon: { compact: 'compact' },
+        skills: { work: { usage: 2 } }
+      })
+      .reply('complete.slash', { items: [] })
+
+    await controller.openChat(RESEARCHER)
+
+    // Nothing has been fetched yet, so nothing is a command yet — which is the
+    // safe answer: the line goes out as an ordinary prompt.
+    expect(controller.knowsSlashCommand('researcher', 'model')).toBe(false)
+
+    await controller.querySlash('researcher', '/mo')
+
+    // A name, an alias and a skill are all things the gateway will run.
+    expect(controller.knowsSlashCommand('researcher', 'model')).toBe(true)
+    expect(controller.knowsSlashCommand('researcher', 'Model')).toBe(true)
+    expect(controller.knowsSlashCommand('researcher', 'compact')).toBe(true)
+    expect(controller.knowsSlashCommand('researcher', 'work')).toBe(true)
+
+    // And a path is not.
+    expect(controller.knowsSlashCommand('researcher', 'usr')).toBe(false)
+    expect(controller.knowsSlashCommand('researcher', '')).toBe(false)
+  })
+
+  it('reports the column an accepted completion replaces from', async () => {
+    // One call completes both halves: the command name while there is no
+    // argument, and the argument once there is one. `replace_from` is how the
+    // gateway says which.
+    const { gateway, controller } = setup()
+
+    gateway
+      .reply('commands.catalog', {})
+      .reply('complete.slash', { items: [{ text: 'example-large' }], replace_from: 7 })
+
+    await controller.openChat(RESEARCHER)
+
+    expect(await controller.querySlash('researcher', '/model exa')).toEqual({
+      items: [{ text: 'example-large' }],
+      replaceFrom: 7
+    })
+    expect(gateway.lastCall('complete.slash')).toMatchObject({ text: '/model exa' })
+  })
+
   it('lands a slash result in the transcript as a notice', async () => {
     const { gateway, controller } = setup()
 

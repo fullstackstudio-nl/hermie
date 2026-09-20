@@ -18,6 +18,7 @@ import {
 import { renderScreen } from '../support/render'
 
 const mockEscapeListeners = new Set<() => void>()
+const mockShortcutListeners = new Set<(action: string) => void>()
 let mockShiftDown = false
 let mockHardwareKeyboard = false
 
@@ -28,6 +29,18 @@ let mockHardwareKeyboard = false
 jest.mock('../../src/platform/runs-on-mac', () => ({ RUNS_ON_MAC: false }))
 
 const runsOnMac = jest.requireMock('../../src/platform/runs-on-mac') as { RUNS_ON_MAC: boolean }
+
+// ↑, ↓ and Tab reach the composer from the keyboard seam, not from the field: a
+// `TextInput` only reports keys that insert text.
+jest.mock('../../src/platform/desktop-shortcuts', () => ({
+  subscribeToShortcuts: (handler: (action: string) => void) => {
+    mockShortcutListeners.add(handler)
+
+    return () => mockShortcutListeners.delete(handler)
+  },
+  setMenuBar: jest.fn(),
+  isMenuBarInstalled: jest.fn(() => false)
+}))
 
 jest.mock('../../src/platform/keyboard-modifiers', () => ({
   isShiftDown: () => mockShiftDown,
@@ -41,8 +54,18 @@ jest.mock('../../src/platform/keyboard-modifiers', () => ({
 
 beforeEach(() => {
   mockEscapeListeners.clear()
+  mockShortcutListeners.clear()
   mockShiftDown = false
 })
+
+/** One press of ↑, ↓ or Tab, as the seam delivers it. */
+function pressKey(action: 'suggestionUp' | 'suggestionDown' | 'suggestionAccept') {
+  act(() => {
+    for (const listener of [...mockShortcutListeners]) {
+      listener(action)
+    }
+  })
+}
 
 /** The resolved style of a rendered node, function styles included. */
 function styleOf(testID: string): Record<string, number> {
@@ -127,12 +150,38 @@ describe('Composer', () => {
     expect(handlers.onStop).toHaveBeenCalled()
   })
 
-  it('asks for slash candidates and shows the popover', () => {
+  it('asks for slash candidates on the whole typed line and shows the popover', () => {
+    // The LINE, not the name: `complete.slash` completes the argument as well,
+    // and it can only do that if it is given what was typed.
     const handlers = renderComposer({ suggestions: SUGGESTIONS, value: '/co' })
 
-    expect(handlers.onQuerySlash).toHaveBeenCalledWith('co')
+    expect(handlers.onQuerySlash).toHaveBeenCalledWith('/co')
     expect(screen.getByTestId('composer-slash-popover')).toBeTruthy()
     expect(screen.getByTestId('slash-option-compact')).toBeTruthy()
+  })
+
+  it('keeps asking once there is an argument, which is what completes it', () => {
+    const handlers = renderComposer({ suggestions: SUGGESTIONS, value: '/model exa' })
+
+    expect(handlers.onQuerySlash).toHaveBeenCalledWith('/model exa')
+    expect(screen.getByTestId('composer-slash-popover')).toBeTruthy()
+  })
+
+  it('closes the list at a newline, because a multi-line draft is a message', () => {
+    const handlers = renderComposer({ suggestions: SUGGESTIONS, value: '/note\nsecond line' })
+
+    expect(handlers.onQuerySlash).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('composer-slash-popover')).toBeNull()
+  })
+
+  it('writes what the caller says the row inserts, argument and all', () => {
+    const handlers = renderComposer({
+      suggestions: [{ description: 'A model', insert: '/model example-large', name: 'example-large' }],
+      value: '/model exa'
+    })
+
+    fireEvent.press(screen.getByTestId('slash-option-example-large'))
+    expect(handlers.onChangeText).toHaveBeenCalledWith('/model example-large')
   })
 
   it('writes the picked command back into the draft', () => {
@@ -376,6 +425,99 @@ describe('the composer row', () => {
  * queue; stopping is what the button does with an EMPTY field, and what Escape
  * does always.
  */
+/**
+ * The slash list under the keyboard.
+ *
+ * Arrow keys and Tab do not reach a `TextInput` at all — React Native builds its
+ * `onKeyPress` payload from the text a field is about to insert — so all three
+ * come down the same road as Escape and the desktop shortcuts, and only while
+ * the list is open.
+ */
+describe('the slash list and the keyboard', () => {
+  const OPTIONS = [
+    { description: 'Compact the conversation', name: 'compact' },
+    { description: 'Show the current model', name: 'model' }
+  ]
+
+  /** Which row the keyboard is on, as the list itself reports it. */
+  const selected = (name: string) =>
+    screen.getByTestId(`slash-option-${name}`).props.accessibilityState?.selected === true
+
+  it('starts on the first row and walks down and back up', () => {
+    renderComposer({ suggestions: OPTIONS, value: '/' })
+
+    expect(selected('compact')).toBe(true)
+
+    pressKey('suggestionDown')
+    expect(selected('model')).toBe(true)
+    expect(selected('compact')).toBe(false)
+
+    // …and stops at the end rather than wrapping: a list that wraps under a held
+    // arrow key never lets go of the reader.
+    pressKey('suggestionDown')
+    expect(selected('model')).toBe(true)
+
+    pressKey('suggestionUp')
+    expect(selected('compact')).toBe(true)
+    pressKey('suggestionUp')
+    expect(selected('compact')).toBe(true)
+  })
+
+  it('takes the highlighted row on Tab', () => {
+    const handlers = renderComposer({ suggestions: OPTIONS, value: '/' })
+
+    pressKey('suggestionDown')
+    pressKey('suggestionAccept')
+
+    expect(handlers.onChangeText).toHaveBeenCalledWith('/model ')
+    expect(handlers.onSend).not.toHaveBeenCalled()
+  })
+
+  it('takes the highlighted row on Enter rather than sending the line', () => {
+    mockHardwareKeyboard = true
+
+    try {
+      const handlers = renderComposer({ suggestions: OPTIONS, value: '/' })
+
+      fireEvent(screen.getByTestId('composer-input'), 'submitEditing')
+
+      expect(handlers.onChangeText).toHaveBeenCalledWith('/compact ')
+      expect(handlers.onSend).not.toHaveBeenCalled()
+    } finally {
+      mockHardwareKeyboard = false
+    }
+  })
+
+  it('sends on Enter with no list open, which is every other line', () => {
+    mockHardwareKeyboard = true
+
+    try {
+      const handlers = renderComposer({ suggestions: [], value: 'just a message' })
+
+      fireEvent(screen.getByTestId('composer-input'), 'submitEditing')
+
+      expect(handlers.onSend).toHaveBeenCalledWith('just a message')
+    } finally {
+      mockHardwareKeyboard = false
+    }
+  })
+
+  it('gives the keys back the moment the list is closed', () => {
+    const handlers = renderComposer({ suggestions: OPTIONS, value: '/' })
+
+    act(() => {
+      for (const listener of [...mockEscapeListeners]) {
+        listener()
+      }
+    })
+
+    expect(screen.queryByTestId('composer-slash-popover')).toBeNull()
+
+    pressKey('suggestionAccept')
+    expect(handlers.onChangeText).not.toHaveBeenCalled()
+  })
+})
+
 describe('the Composer keyboard', () => {
   const submitEditing = () => fireEvent(screen.getByTestId('composer-input'), 'submitEditing')
 

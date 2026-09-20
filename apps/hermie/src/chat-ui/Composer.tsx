@@ -34,6 +34,7 @@ import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
 import { CONTROL_SIZE, TAP_SLOP } from '../ui/tokens'
 import { useEscapeKey } from '../ui/useEscapeKey'
+import { useShortcut } from '../ui/useShortcut'
 import { AttachMenu } from './AttachMenu'
 import { FileChip } from './FileChip'
 import { QueuedChip } from './QueuedChip'
@@ -207,12 +208,21 @@ export const COMPOSER_FIELD_RADIUS = (COMPOSER_LINE_HEIGHT + 2 * COMPOSER_FIELD_
  */
 export const ATTACH_POPOVER_MIN_WIDTH = 260
 
-function slashPrefix(text: string): string | null {
-  // Only a leading slash opens the popover — `/` in the middle of a sentence is
-  // a slash, not a command.
-  const match = text.match(/^\/([\w:-]*)$/)
+/**
+ * The line the completion list is for, or `null` while there is no list.
+ *
+ * A LEADING slash and nothing else: `/` in the middle of a sentence is a slash,
+ * and `run /clean` is prose. It is the whole typed line rather than the command
+ * name, because `complete.slash` completes the ARGUMENT as well once there is
+ * one — `/model exa` has to reach the gateway intact for it to answer with the
+ * models. A newline ends it: a multi-line draft is a message.
+ */
+export function slashQuery(text: string): string | null {
+  if (!text.startsWith('/') || text.includes('\n')) {
+    return null
+  }
 
-  return match ? (match[1] ?? '') : null
+  return text
 }
 
 export function Composer({
@@ -261,8 +271,17 @@ export function Composer({
    */
   const [caret, setCaret] = useState<{ start: number; end: number } | undefined>(undefined)
 
-  const prefix = useMemo(() => slashPrefix(value), [value])
+  const prefix = useMemo(() => slashQuery(value), [value])
   const [popoverDismissed, setPopoverDismissed] = useState(false)
+
+  /**
+   * Which row the keyboard is on.
+   *
+   * Back to the first whenever the candidates change, which is on every
+   * keystroke that narrows them: keeping an index across two different lists
+   * would move the highlight to whatever happened to land in that position.
+   */
+  const [active, setActive] = useState(0)
 
   /**
    * The `+` menu, as local state and nothing else.
@@ -315,6 +334,10 @@ export function Composer({
 
   const showSuggestions = prefix !== null && suggestions.length > 0 && !popoverDismissed
 
+  useEffect(() => setActive(0), [suggestions])
+
+  const activeIndex = Math.min(active, Math.max(0, suggestions.length - 1))
+
   // The caller decides where the candidates come from (`commands.catalog`,
   // `complete.slash`, a cache); the composer only says which prefix it is on.
   useEffect(() => {
@@ -326,16 +349,40 @@ export function Composer({
   const canSend = Boolean(value.trim()) || attachments.length > 0
 
   /**
-   * What Enter does: send, or nothing.
+   * Put the highlighted candidate in the field.
+   *
+   * `insert` is the whole line the caller worked out from the gateway's
+   * `replace_from`; the fallback is a bare command, which is all that can be
+   * assumed without one.
+   */
+  const accept = (suggestion: SlashSuggestion) => {
+    onChangeText(suggestion.insert ?? `/${suggestion.name} `)
+    inputRef.current?.focus()
+  }
+
+  /**
+   * What Enter does: take the highlighted suggestion, or send, or nothing.
+   *
+   * The list first, and only while it is open — which is the rule every editor
+   * has and the one thing that makes a list navigable by keyboard worth having.
    *
    * It deliberately does NOT stop a running turn. On a Mac a bare Return is the
    * send key, and while a reply streamed that same key cancelled the turn — so
    * typing the next message and pressing Return killed the answer being written
-   * instead of queueing the message. A prompt sent mid-turn is parked by the
-   * gateway, which is what the queued chip reports; only the red button, and
-   * Escape, stop anything.
+   * instead of queueing the message. Sending mid-turn parks the message in the
+   * queue; only the red button, and Escape, stop anything.
    */
   const submit = () => {
+    if (showSuggestions) {
+      const suggestion = suggestions[activeIndex]
+
+      if (suggestion) {
+        accept(suggestion)
+
+        return
+      }
+    }
+
     if (!canSend) {
       return
     }
@@ -476,6 +523,29 @@ export function Composer({
    */
   useEscapeKey(() => onStop?.(), running)
   useEscapeKey(() => setPopoverDismissed(true), showSuggestions)
+
+  /*
+    ↑, ↓ and Tab, from the keyboard seam rather than from the field.
+
+    A `TextInput` only reports keys that insert text — React Native builds its
+    `onKeyPress` payload from the text a `UITextView` is about to insert — so an
+    arrow key never reaches it at all. These three come down the same road as
+    Escape and the desktop shortcuts, and they are registered only while the
+    list is open, so nothing else in the app loses an arrow key to them.
+  */
+  useShortcut('suggestionDown', () => setActive(index => Math.min(index + 1, suggestions.length - 1)), showSuggestions)
+  useShortcut('suggestionUp', () => setActive(index => Math.max(index - 1, 0)), showSuggestions)
+  useShortcut(
+    'suggestionAccept',
+    () => {
+      const suggestion = suggestions[activeIndex]
+
+      if (suggestion) {
+        accept(suggestion)
+      }
+    },
+    showSuggestions
+  )
   // Registered last, so while the attach menu is open Escape closes IT and
   // neither the popover nor the running turn sees the key. Esc goes back exactly
   // one level.
@@ -501,11 +571,6 @@ export function Composer({
    * keyboard which one it was — see `insertNewline` above.
    */
   const submitBehavior = hardwareKeyboard ? 'submit' : 'newline'
-
-  const pick = (name: string) => {
-    onChangeText(`/${name} `)
-    inputRef.current?.focus()
-  }
 
   /**
    * The two entries, in the order this platform wants them.
@@ -573,13 +638,17 @@ export function Composer({
           variant="float"
         >
           <ScrollView keyboardShouldPersistTaps="handled">
-            {suggestions.map(suggestion => (
+            {suggestions.map((suggestion, index) => (
               <Pressable
                 accessibilityRole="button"
+                // The keyboard's own place in the list, announced rather than
+                // only drawn: the row is selected in the same sense a picker's
+                // row is.
+                accessibilityState={{ selected: index === activeIndex }}
                 key={suggestion.name}
-                onPress={() => pick(suggestion.name)}
+                onPress={() => accept(suggestion)}
                 style={({ pressed }) => ({
-                  backgroundColor: pressed ? theme.tintSunk : 'transparent',
+                  backgroundColor: pressed || index === activeIndex ? theme.tintSunk : 'transparent',
                   gap: 1,
                   paddingHorizontal: theme.space.lg,
                   paddingVertical: theme.space.sm + 2

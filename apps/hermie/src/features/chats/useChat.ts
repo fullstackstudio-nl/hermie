@@ -31,7 +31,7 @@ import {
   visibleItems
 } from '@hermie/transcript'
 import type { ConnectionStatus, GatewayError } from '@hermie/gateway-client'
-import type { CompletionItem, SessionLiveInfo } from '@hermes/shared/gateway-contract'
+import type { SessionLiveInfo } from '@hermes/shared/gateway-contract'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { describeConnectionError, useGateway } from '../../gateway'
@@ -39,7 +39,7 @@ import { strings } from '../../i18n/strings'
 import { type Bot, useBotsStore } from '../../store/bots'
 import { useChatsStore, type QueuedMessage } from '../../store/chats'
 import { useChatView } from '../../store/settings'
-import type { AttachmentInput, ChatOptionKey, ModelChoice, SetOptionResult } from './chat-controller'
+import type { AttachmentInput, ChatOptionKey, ModelChoice, SetOptionResult, SlashCompletions } from './chat-controller'
 import { FileUploadError, type UploadableFile, type UploadedFile } from './file-upload'
 import { type ChatRuntimeValue, useChatRuntime } from './ChatRuntime'
 
@@ -133,7 +133,10 @@ export interface UseChatResult {
   tailSubagent: (subagentId: string) => Promise<string>
   /** The child's own stored transcript, for the full read-only view. */
   childTranscript: (childSessionId: string) => Promise<TranscriptItem[]>
-  querySlash: (prefix: string) => Promise<CompletionItem[]>
+  /** Completions for the line being typed, with the column they replace from. */
+  querySlash: (typed: string) => Promise<SlashCompletions>
+  /** Is this a command the gateway will run, rather than prose starting with `/`? */
+  knowsSlashCommand: (name: string) => boolean
   runSlash: (command: string) => Promise<void>
   setOption: (
     key: ChatOptionKey,
@@ -347,7 +350,11 @@ export function useChat(botName: string): UseChatResult {
       [botName, controller, notReady]
     ),
     querySlash: useCallback(
-      (prefix: string) => (controller ? controller.querySlash(botName, prefix) : Promise.resolve([])),
+      (typed: string) => (controller ? controller.querySlash(botName, typed) : Promise.resolve({ items: [] })),
+      [botName, controller]
+    ),
+    knowsSlashCommand: useCallback(
+      (name: string) => controller?.knowsSlashCommand(botName, name) ?? false,
       [botName, controller]
     ),
     runSlash: useCallback(

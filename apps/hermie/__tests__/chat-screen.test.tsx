@@ -83,7 +83,8 @@ function makeController() {
     steerSubagent: jest.fn(async () => 'ok'),
     interruptSubagent: jest.fn(async () => true),
     tailSubagent: jest.fn(async () => ''),
-    querySlash: jest.fn(async () => []),
+    querySlash: jest.fn(async () => ({ items: [] })),
+    knowsSlashCommand: jest.fn(() => false),
     runSlash: jest.fn(async () => undefined),
     setOption: jest.fn(async () => ({})),
     refreshOptions: jest.fn(async () => null),
@@ -722,6 +723,34 @@ describe('following a DM across chats', () => {
 
     // No focus target rather than a wrong one: the chat opens at its bottom.
     expect(onOpenBot).toHaveBeenCalledWith('writer', undefined)
+  })
+})
+
+describe('a line that starts with a slash', () => {
+  it('runs as a command when the gateway has one by that name', async () => {
+    mockController.knowsSlashCommand.mockReturnValue(true)
+    renderChat()
+
+    fireEvent.changeText(screen.getByTestId('composer-input'), '/model')
+    fireEvent.press(screen.getByTestId('composer-send'))
+
+    await waitFor(() => expect(mockController.runSlash).toHaveBeenCalledWith('researcher', '/model'))
+    // No turn: `slash.exec` answers with text, and the text lands in the
+    // transcript as a notice.
+    expect(mockController.send).not.toHaveBeenCalled()
+  })
+
+  it('is an ordinary prompt when it is not a command this profile has', async () => {
+    mockController.knowsSlashCommand.mockReturnValue(false)
+    renderChat()
+
+    fireEvent.changeText(screen.getByTestId('composer-input'), '/usr/local/bin is where it lives')
+    fireEvent.press(screen.getByTestId('composer-send'))
+
+    await waitFor(() =>
+      expect(mockController.send).toHaveBeenCalledWith('researcher', '/usr/local/bin is where it lives', [])
+    )
+    expect(mockController.runSlash).not.toHaveBeenCalled()
   })
 })
 

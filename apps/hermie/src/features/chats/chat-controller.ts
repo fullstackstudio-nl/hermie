@@ -1500,7 +1500,7 @@ export class ChatController {
    * per-keystroke work is `complete.slash`, which is what the gateway is built
    * to answer quickly.
    */
-  async querySlash(botName: string, prefix: string): Promise<CompletionItem[]> {
+  async querySlash(botName: string, typed: string): Promise<SlashCompletions> {
     const sessionId = this.requireRuntime(botName)
 
     if (!this.slashCatalogs.has(sessionId)) {
@@ -1514,12 +1514,47 @@ export class ChatController {
     }
 
     try {
-      const result = await this.gateway.request('complete.slash', { text: prefix, session_id: sessionId })
+      const result = await this.gateway.request('complete.slash', { text: typed, session_id: sessionId })
 
-      return result?.items ?? []
+      return {
+        items: result?.items ?? [],
+        // The COLUMN an accepted item replaces from, which is how the same call
+        // completes a command name and then its arguments: the gateway says how
+        // much of the line its answer stands for.
+        ...(typeof result?.replace_from === 'number' ? { replaceFrom: result.replace_from } : {})
+      }
     } catch {
-      return []
+      return { items: [] }
     }
+  }
+
+  /**
+   * Does this session have a command by that name?
+   *
+   * The catalogue answers it, and the answer decides what Return does with a
+   * line that starts with a slash: a name the gateway knows is a COMMAND and
+   * goes to `slash.exec`, and anything else is prose that happens to begin with
+   * `/` and goes out as an ordinary prompt. Names, aliases and skills all count
+   * — they are all things the gateway will run.
+   */
+  knowsSlashCommand(botName: string, name: string): boolean {
+    const catalog = this.slashCatalog(botName)
+
+    if (!catalog || !name) {
+      return false
+    }
+
+    const wanted = name.toLowerCase()
+
+    const named = (raw: string) => raw.replace(/^\//u, '').toLowerCase() === wanted
+
+    return (
+      Object.keys(catalog.commands ?? {}).some(named) ||
+      Object.keys(catalog.canon ?? {}).some(named) ||
+      Object.keys(catalog.skills ?? {}).some(named) ||
+      (catalog.pairs ?? []).some(pair => named(pair[0] ?? '')) ||
+      (catalog.categories ?? []).some(category => (category.pairs ?? []).some(pair => named(pair[0] ?? '')))
+    )
   }
 
   /** The catalogue behind `querySlash`, for a picker that wants the whole list. */
@@ -1841,6 +1876,12 @@ export class ChatController {
  * An image, which goes over the socket as bytes. `kind` is optional so every
  * existing call site keeps compiling and keeps meaning what it meant.
  */
+/** What `complete.slash` answered, and how much of the line it stands for. */
+export interface SlashCompletions {
+  items: CompletionItem[]
+  replaceFrom?: number
+}
+
 export interface ImageAttachmentInput {
   kind?: 'image'
   filename: string

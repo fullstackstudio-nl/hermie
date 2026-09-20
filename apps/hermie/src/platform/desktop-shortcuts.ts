@@ -9,12 +9,13 @@
  *
  * ## An allow-list, not a key event
  *
- * The native side emits only for a fixed table of modified keys: ⌘K, ⌘,, ⌘W,
- * ⌘⇧S, ⌘1…9, ⌘↑, ⌘↓ and ⌃Tab. It never emits for an unmodified key, which matters
- * more than it looks: the handler it reads from is GameController's, below the
- * responder chain, so it sees every keystroke in the app including the ones typed
- * into the composer and into a password field. Nothing that is not on the list
- * crosses into JavaScript at all.
+ * The native side emits only for a fixed table: ⌘K, ⌘,, ⌘W, ⌘⇧S, ⌘1…9, ⌘↑, ⌘↓,
+ * ⌃Tab — and bare ↑, ↓ and Tab for the composer's slash list. It never emits for
+ * a key that INSERTS TEXT, which matters more than it looks: the handler it reads
+ * from is GameController's, below the responder chain, so it sees every keystroke
+ * in the app including the ones typed into the composer and into a password
+ * field. A letter has no path to JavaScript through here; an arrow key carries
+ * nothing to leak.
  *
  * ⌘⇧S is the one entry that WANTS Shift, and the native table had to be opened for
  * it: everything else is disqualified by Shift on purpose, so that ⌘⇧K cannot be
@@ -52,6 +53,10 @@ export type ShortcutAction =
   | 'chat7'
   | 'chat8'
   | 'chat9'
+  /** The composer's slash list: bare ↑, ↓ and Tab, ignored while it is closed. */
+  | 'suggestionUp'
+  | 'suggestionDown'
+  | 'suggestionAccept'
 
 const ACTIONS: readonly ShortcutAction[] = [
   'search',
@@ -68,7 +73,10 @@ const ACTIONS: readonly ShortcutAction[] = [
   'chat6',
   'chat7',
   'chat8',
-  'chat9'
+  'chat9',
+  'suggestionUp',
+  'suggestionDown',
+  'suggestionAccept'
 ]
 
 /** The wording the Mac's menu bar shows. Sent from JavaScript so `strings.ts` stays the only copy. */

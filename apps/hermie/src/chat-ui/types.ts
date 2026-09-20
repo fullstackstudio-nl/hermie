@@ -42,6 +42,15 @@ export type Receipt = 'sending' | 'sent' | 'delivered' | 'read'
 export interface SlashSuggestion {
   name: string
   description: string
+  /**
+   * The whole line accepting this row produces.
+   *
+   * The caller builds it, because only the caller knows what the gateway said
+   * its answer replaces (`complete.slash`'s `replace_from`) — which is how the
+   * same list completes a command name and then an argument to it. Absent means
+   * "a bare command", and the composer writes `/name `.
+   */
+  insert?: string
 }
 
 /**

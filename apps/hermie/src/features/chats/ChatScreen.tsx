@@ -41,6 +41,8 @@ import {
   TranscriptList,
   type TranscriptListHandle
 } from '../../chat-ui'
+import { looksLikeSlashCommand, parseSlashCommand } from '@hermes/shared/slash'
+
 import { useGateway } from '../../gateway'
 import { SignedOutPanel } from '../../gateway/SignedOutPanel'
 import { strings } from '../../i18n/strings'
@@ -709,6 +711,30 @@ function Conversation({
       haptic('send')
 
       /*
+        A line that begins with a slash is a COMMAND only if the gateway has one
+        by that name. The catalogue (`commands.catalog`, fetched once per
+        session behind the autocomplete) is what answers that, and the two
+        roads are genuinely different: a command goes to `slash.exec` and comes
+        back as text in the transcript, while anything else — `/usr/local/bin`,
+        a sentence that starts with a slash, a command this profile does not
+        have — is an ordinary prompt and starts a turn.
+
+        A catalogue that has not arrived yet answers "no", which sends the line
+        as a prompt. The gateway understands a leading slash there too, so the
+        worst case is the reply arriving as a turn rather than as a notice.
+      */
+      if (looksLikeSlashCommand(body) && chat.knowsSlashCommand(parseSlashCommand(body).name)) {
+        try {
+          await chat.runSlash(body)
+        } catch (error) {
+          chat.setDraft(body)
+          setNotice(messageOf(error))
+        }
+
+        return
+      }
+
+      /*
         Your own message goes to the END of the conversation, wherever you were
         reading when you sent it.
 
@@ -861,16 +887,27 @@ function Conversation({
     [stageFile]
   )
 
+  /**
+   * Candidates for the line being typed, and what accepting one puts in the field.
+   *
+   * `replace_from` is the column the gateway's answer stands for, and it is what
+   * makes ONE call complete both halves: with nothing typed after the slash it
+   * is 0 and the item replaces the whole line, and once there is an argument it
+   * points at the start of that argument and the command in front of it is kept.
+   * Without it the only safe assumption is a bare command name.
+   */
   const querySlash = useCallback(
-    (prefix: string) => {
+    (typed: string) => {
       void chat
-        .querySlash(prefix)
-        .then(items =>
+        .querySlash(typed)
+        .then(({ items, replaceFrom }) =>
           setSuggestions(
-            items.slice(0, 6).map(item => ({
-              name: (item.display ?? item.text).replace(/^\//, ''),
-              description: item.meta ?? ''
-            }))
+            items.slice(0, 6).map(item => {
+              const name = (item.display ?? item.text).replace(/^\//u, '')
+              const insert = replaceFrom === undefined ? `/${name} ` : `${typed.slice(0, replaceFrom)}${item.text}`
+
+              return { name, description: item.meta ?? '', insert }
+            })
           )
         )
         .catch(() => setSuggestions([]))
