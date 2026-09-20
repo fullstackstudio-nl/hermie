@@ -33,7 +33,16 @@ export interface UserBubbleProps {
   onLinkPress?: (href: string) => void
 }
 
-/** `@file:/srv/x/report.pdf` → `report.pdf`. Backticked paths lose the quotes. */
+/**
+ * `@file:/srv/x/report.pdf` → `report.pdf`. Backticked paths lose the quotes.
+ *
+ * `UserItem.attachments` stores the reference and nothing else, so the name a
+ * chip shows is derived here, at render time. `attachmentRefName` in
+ * `@hermie/transcript` derives the same name to PAIR a sent turn with its row, and
+ * the two have to agree; the kit imports no runtime code from the engine, so what
+ * keeps them in step is an assertion in `__tests__/chat-ui/components.test.tsx`
+ * rather than a shared call.
+ */
 export function attachmentName(reference: string): string {
   const raw = reference.replace(/^@(?:file|image):/u, '').replace(/^[`"']|[`"']$/gu, '')
 

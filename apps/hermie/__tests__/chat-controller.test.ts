@@ -319,7 +319,11 @@ describe('sending', () => {
       .order.map(id => chatOf().items[id])
       .find(item => item?.kind === 'user' && item.origin === 'optimistic')
 
-    expect(user).toMatchObject({ text: 'have a look', pending: false, attachments: ['shot.png'] })
+    // A reference, not a display name: `attachments` is the same contract on
+    // both sides of the wire, and the gateway appends `@image:<its own path>` to
+    // the row it persists. The name is all the client can put in the path
+    // position, and the name is what the two sides are compared on.
+    expect(user).toMatchObject({ text: 'have a look', pending: false, attachments: ['@image:shot.png'] })
   })
 
   it('keeps a queued prompt pending behind the running turn', async () => {

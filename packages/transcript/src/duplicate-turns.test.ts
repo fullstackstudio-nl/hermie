@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { reconcile, reconcileTail } from './reconcile'
 import { applyEvent, applyResumeSnapshot, beginLocalTurn, confirmSubmit, markInterrupted } from './reducer'
 import { rowsToItems, type TranscriptRow } from './rows-to-items'
-import { type ChatState, createChatState, type UserItem } from './types'
+import { type ChatState, createChatState, type TranscriptItem, type UserItem } from './types'
 
 const NOW = 1_700_000_000_000
 /** A minute later, which is how far apart the two bubbles in the report were. */
@@ -28,6 +28,9 @@ const list = (state: ChatState) => state.order.map(id => state.items[id]!)
 const users = (state: ChatState) => list(state).filter((item): item is UserItem => item.kind === 'user')
 const assistants = (state: ChatState) => list(state).filter(item => item.kind === 'assistant')
 const texts = (state: ChatState) => list(state).map(item => `${item.kind}:${'text' in item ? item.text : ''}`)
+/** What a bubble carries, appended to its text so one assertion covers both. */
+const chips = (item: TranscriptItem) =>
+  item.kind === 'user' && item.attachments?.length ? ` +${item.attachments.join(' ')}` : ''
 
 /** The message from the report: paragraphs, a blank line, an address, a URL. */
 const LONG = [
@@ -37,6 +40,14 @@ const LONG = [
   '',
   'Tell me what you find.'
 ].join('\n')
+
+/**
+ * The file half of the report that opened this file's 2026-09-20 section: an
+ * upload lands under the session's cwd with a collision token in front of its
+ * name, and the prompt is nothing BUT the reference to it.
+ */
+const FILE_DIRECTIVE = '@file:"/srv/work/uploads/hermie/2026-09-19/ab-notes.txt"'
+const FILE_ONLY_BODY = FILE_DIRECTIVE
 
 /** Painted, submitted, and the gateway took it straight away. */
 function sentTurn(text = LONG, attachments?: string[]): ChatState {
@@ -87,7 +98,7 @@ describe('the tail sweep after a send', () => {
     // says less than the body that was submitted.
     const body = 'have a look at this\n\n@file:"/srv/work/uploads/hermie/2026-09-19/ab-notes.txt"'
     const state = reconcileTail(
-      sentTurn(body, ['notes.txt']),
+      sentTurn(body, [FILE_DIRECTIVE]),
       rowsToItems([{ role: 'user', row_id: 8, text: body }], 'rest')
     )
 
@@ -97,7 +108,7 @@ describe('the tail sweep after a send', () => {
 
   it('pairs a send that carried an image, whose directive the gateway appends', () => {
     const state = reconcileTail(
-      sentTurn('what is this', ['shot.png']),
+      sentTurn('what is this', ['@image:shot.png']),
       rowsToItems([{ role: 'user', row_id: 9, text: 'what is this\n@image:/srv/work/.hermes/images/shot.png' }], 'rest')
     )
 
@@ -126,6 +137,111 @@ describe('the tail sweep after a send', () => {
     ]
 
     expect(users(reconcileTail(state, rowsToItems(rows, 'rest')))).toHaveLength(2)
+  })
+})
+
+/**
+ * Reported from an Android run on 2026-09-20: attaching a file and sending it
+ * with NO words painted two bubbles, the optimistic one naming `ui.xml` and the
+ * row naming `8setj4h3-ui.xml`.
+ *
+ * It is the same "nothing links the two sides" problem as above with the one
+ * thing that solved it taken away. A turn whose whole body is a `@file:`
+ * reference projects to EMPTY text — the directive is plumbing and the
+ * projection lifts it out — so text cannot pair anything, and what the two sides
+ * do have in common is the attachment. That only works if both sides describe an
+ * attachment the same way, which is what `UserItem.attachments` being one
+ * contract (the directive strings) is for.
+ */
+describe('a send that carries an attachment and no words', () => {
+  it('pairs a file-only send with its row instead of standing a second bubble beside it', () => {
+    const state = reconcileTail(
+      sentTurn(FILE_ONLY_BODY, [FILE_DIRECTIVE]),
+      rowsToItems([{ role: 'user', row_id: 12, text: FILE_ONLY_BODY, timestamp: 1 }], 'rest')
+    )
+
+    expect(users(state)).toHaveLength(1)
+    expect(users(state)[0]).toMatchObject({ rowId: 12, text: '', attachments: [FILE_DIRECTIVE] })
+  })
+
+  it('pairs a file-only send through a full re-hydration too', () => {
+    const state = reconcile(
+      sentTurn(FILE_ONLY_BODY, [FILE_DIRECTIVE]),
+      rowsToItems([{ role: 'user', row_id: 12, text: FILE_ONLY_BODY, timestamp: 1 }], 'rest')
+    )
+
+    expect(users(state)).toHaveLength(1)
+    expect(users(state)[0]?.rowId).toBe(12)
+  })
+
+  it('pairs an image-only send, whose path only the gateway knows', () => {
+    // An image goes over `image.attach_bytes`, so it is never in the body and
+    // the client never learns where it landed; the gateway appends the directive
+    // it chose at persist time. The base name is what both sides can say.
+    const state = reconcileTail(
+      sentTurn('', ['@image:shot.png']),
+      rowsToItems([{ role: 'user', row_id: 13, text: '@image:/srv/work/.hermes/images/shot.png' }], 'rest')
+    )
+
+    expect(users(state)).toHaveLength(1)
+    expect(users(state)[0]).toMatchObject({ rowId: 13, attachments: ['@image:/srv/work/.hermes/images/shot.png'] })
+  })
+
+  it('keeps two bubbles when the two sends carried different files', () => {
+    const other = '@file:"/srv/work/uploads/hermie/2026-09-19/cd-budget.csv"'
+    let state = sentTurn(FILE_ONLY_BODY, [FILE_DIRECTIVE])
+
+    state = applyEvent(state, { type: 'message.start', seq: 1 }, NOW)
+    state = applyEvent(state, { type: 'message.complete', seq: 2, payload: { text: 'read it', status: 'ok' } }, NOW)
+    state = confirmSubmit(beginLocalTurn(state, other, [other], LATER), { status: 'streaming' }, LATER)
+
+    const tail = reconcileTail(
+      state,
+      rowsToItems(
+        [
+          { role: 'user', row_id: 12, text: FILE_ONLY_BODY, timestamp: 1 },
+          { role: 'assistant', row_id: 13, text: 'read it', timestamp: 2 },
+          { role: 'user', row_id: 14, text: other, timestamp: 3 }
+        ],
+        'rest'
+      )
+    )
+
+    expect(users(tail)).toHaveLength(2)
+    expect(users(tail).map(item => item.attachments)).toEqual([[FILE_DIRECTIVE], [other]])
+  })
+
+  it('does not pair an image with a file of the same name', () => {
+    // Same base name, different directive: a picture of a diagram and the
+    // diagram's source are two attachments, so they are two turns.
+    const state = reconcileTail(
+      sentTurn('', ['@image:diagram.png']),
+      rowsToItems([{ role: 'user', row_id: 15, text: '@file:/srv/work/diagram.png' }], 'rest')
+    )
+
+    expect(users(state)).toHaveLength(2)
+  })
+
+  it('does not fold a file-only send into a resume that describes a different one', () => {
+    const other = '@file:"/srv/work/uploads/hermie/2026-09-19/cd-budget.csv"'
+    const resumed = applyResumeSnapshot(
+      sentTurn(FILE_ONLY_BODY, [FILE_DIRECTIVE]),
+      { inflight: { user: other, assistant: '', streaming: true }, running: true },
+      LATER
+    )
+
+    expect(users(resumed)).toHaveLength(2)
+  })
+
+  it('folds a resume that describes the file-only turn already on screen', () => {
+    const resumed = applyResumeSnapshot(
+      sentTurn(FILE_ONLY_BODY, [FILE_DIRECTIVE]),
+      { inflight: { user: FILE_ONLY_BODY, assistant: 'Reading it.', streaming: true }, running: true },
+      LATER
+    )
+
+    expect(users(resumed)).toHaveLength(1)
+    expect(assistants(resumed)).toHaveLength(1)
   })
 })
 
@@ -347,17 +463,25 @@ describe('the order rows are shown in', () => {
   })
 })
 
-describe('every route to the same conversation', () => {
-  /** One turn with a tool in the middle, as the gateway persisted it. */
-  const rows: TranscriptRow[] = [
+/** One conversation, described the two ways a client can learn about it. */
+interface Conversation {
+  rows: TranscriptRow[]
+  /** The prompt as `session.resume` reports it: the submitted body, verbatim. */
+  prompt: string
+  /** The same turn as it arrives on the socket, sent from here. */
+  streamed: () => ChatState
+}
+
+/** A turn with a tool in the middle, whose prompt is words. */
+const withWords: Conversation = {
+  rows: [
     { role: 'user', row_id: 1, text: 'read the changelog', timestamp: 1 },
     { role: 'assistant', row_id: 2, text: 'Let me look.', timestamp: 2 },
     { role: 'tool', row_id: 3, tool_id: 'call_1', name: 'read_file', context: 'read_file(CHANGELOG.md)', timestamp: 3 },
     { role: 'assistant', row_id: 4, text: 'It ships three fixes.', timestamp: 4 }
-  ]
-
-  /** The same turn as it arrives on the socket, sent from here. */
-  const streamed = (): ChatState => {
+  ],
+  prompt: 'read the changelog',
+  streamed: () => {
     let state = sentTurn('read the changelog')
 
     state = applyEvent(state, { type: 'message.start', seq: 1 }, NOW)
@@ -380,26 +504,50 @@ describe('every route to the same conversation', () => {
       NOW
     )
   }
+}
 
-  const clean = () => texts(reconcile(fresh(), rowsToItems(rows, 'rest')))
+/**
+ * The same turn with no words in it at all — the whole prompt is the file.
+ *
+ * Every route below has to converge on the single bubble, and the one that
+ * reported the bug (the tail sweep after a send) is only one of them.
+ */
+const fileOnly: Conversation = {
+  rows: [
+    { role: 'user', row_id: 1, text: FILE_ONLY_BODY, timestamp: 1 },
+    { role: 'assistant', row_id: 2, text: 'Six hundred lines of XML.', timestamp: 2 }
+  ],
+  prompt: FILE_ONLY_BODY,
+  streamed: () => {
+    let state = sentTurn(FILE_ONLY_BODY, [FILE_DIRECTIVE])
 
-  /**
-   * Every way the same conversation can reach a client. Whichever order they
-   * arrive in, the transcript has to end up as the clean load of it — one item
-   * per row, in the gateway's order.
-   */
-  const routes: Record<string, (state: ChatState) => ChatState> = {
+    state = applyEvent(state, { type: 'message.start', seq: 1 }, NOW)
+    state = applyEvent(state, { type: 'message.delta', seq: 2, payload: { text: 'Six hundred lines of XML.' } }, NOW)
+
+    return applyEvent(
+      state,
+      { type: 'message.complete', seq: 3, payload: { text: 'Six hundred lines of XML.', status: 'ok' } },
+      NOW
+    )
+  }
+}
+
+/**
+ * Every way one conversation can reach a client. Whichever order they arrive in,
+ * the transcript has to end up as the clean load of it — one item per row, in the
+ * gateway's order.
+ */
+function routesFor({ rows, prompt }: Conversation): Record<string, (state: ChatState) => ChatState> {
+  const reply = rows.filter(row => row.role === 'assistant').pop()?.text ?? ''
+
+  return {
     tail: state => reconcileTail(state, rowsToItems(rows, 'rest')),
     'tail, front half first': state =>
       reconcileTail(reconcileTail(state, rowsToItems(rows.slice(0, 2), 'rest')), rowsToItems(rows, 'rest')),
     rehydrate: state => reconcile(state, rowsToItems(rows, 'rest')),
     'resume, then tail': state =>
       reconcileTail(
-        applyResumeSnapshot(
-          state,
-          { inflight: { user: 'read the changelog', assistant: 'It ships three fixes.' } },
-          NOW
-        ),
+        applyResumeSnapshot(state, { inflight: { user: prompt, assistant: reply } }, NOW),
         rowsToItems(rows, 'rest')
       ),
     'tail, then rehydrate': state =>
@@ -407,16 +555,28 @@ describe('every route to the same conversation', () => {
     'rehydrate, then tail': state =>
       reconcileTail(reconcile(state, rowsToItems(rows, 'rest')), rowsToItems(rows, 'rest'))
   }
+}
+
+describe.each([
+  ['a conversation of words', withWords],
+  ['a conversation whose prompt is only a file', fileOnly]
+])('every route to %s', (_name, conversation) => {
+  const routes = routesFor(conversation)
+  // Attachments are part of the shape here: a bubble that converges on the right
+  // COUNT while losing the chip off the file it was sent with is still wrong.
+  const shape = (state: ChatState) =>
+    list(state).map(item => `${item.kind}:${'text' in item ? item.text : ''}${chips(item)}`)
+  const clean = () => shape(reconcile(fresh(), rowsToItems(conversation.rows, 'rest')))
 
   for (const [name, route] of Object.entries(routes)) {
     it(`converges on the clean load: ${name}`, () => {
-      expect(texts(route(streamed()))).toEqual(clean())
+      expect(shape(route(conversation.streamed()))).toEqual(clean())
     })
   }
 
   it('converges from a cold start too, whichever route runs', () => {
     for (const route of Object.values(routes)) {
-      expect(texts(route(fresh()))).toEqual(clean())
+      expect(shape(route(fresh()))).toEqual(clean())
     }
   })
 
@@ -425,7 +585,7 @@ describe('every route to the same conversation', () => {
 
     for (const first of names) {
       for (const second of names) {
-        expect(texts(routes[second]!(routes[first]!(streamed())))).toEqual(clean())
+        expect(shape(routes[second]!(routes[first]!(conversation.streamed())))).toEqual(clean())
       }
     }
   })

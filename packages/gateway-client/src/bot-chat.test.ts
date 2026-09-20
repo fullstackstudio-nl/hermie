@@ -23,6 +23,7 @@ import {
   type TranscriptEvent,
   type TranscriptItem,
   type TranscriptRow,
+  type UserItem,
   visibleItems
 } from '@hermie/transcript'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -59,6 +60,14 @@ interface ChatHarness {
   respondApproval: (requestId: string, choice: string) => void
   restRows: (limit: number) => Promise<TranscriptRow[]>
   waitFor: (predicate: (state: ChatState) => boolean, label: string) => Promise<void>
+  /** The session's working directory — the only place an upload can legally land. */
+  cwd?: string
+  /** Paint, submit and settle a turn, in the order the controller's `send` does. */
+  submit: (text: string, attachments?: string[]) => Promise<void>
+  /** The `sessions.changed` sweep: fold the REST tail into the live transcript. */
+  sweepTail: (limit?: number) => Promise<void>
+  /** Reopening the chat: throw the transcript away and project it from the rows. */
+  rehydrate: (limit?: number) => Promise<void>
 }
 
 async function openBotChat(profile: string, options: FakeGatewayOptions = {}): Promise<ChatHarness> {
@@ -223,7 +232,25 @@ async function openBotChat(profile: string, options: FakeGatewayOptions = {}): P
       replies.delete(requestId)
     },
     restRows,
-    waitFor
+    waitFor,
+    ...(typeof resume.info?.cwd === 'string' ? { cwd: resume.info.cwd } : {}),
+    async submit(text, attachments) {
+      apply(beginLocalTurn(state, text, attachments))
+
+      const result = await connection.request('prompt.submit', {
+        session_id: runtimeSessionId,
+        profile,
+        text
+      })
+
+      apply(confirmSubmit(state, { status: result?.status ?? null }))
+    },
+    async sweepTail(limit = 30) {
+      apply(reconcileTail(state, rowsToItems(await restRows(limit), 'rest')))
+    },
+    async rehydrate(limit = 30) {
+      apply(reconcile(state, rowsToItems(await restRows(limit), 'rest')))
+    }
   }
 }
 
@@ -245,6 +272,10 @@ const itemsOf = (state: ChatState): TranscriptItem[] =>
   state.order.map(id => state.items[id]).filter((item): item is TranscriptItem => Boolean(item))
 
 const kindsOf = (state: ChatState): string[] => itemsOf(state).map(item => item.kind)
+
+/** The human's own bubbles — what a duplicated send shows up as two of. */
+const outgoing = (state: ChatState): UserItem[] =>
+  itemsOf(state).filter((item): item is UserItem => item.kind === 'user')
 
 describe('a Bot Chat end to end', () => {
   it('hydrates the canonical chat with its tool row and its bot-to-bot exchange', async () => {
@@ -625,5 +656,56 @@ describe('a Bot Chat end to end', () => {
 
     expect(attached.attached).toBe(true)
     expect(chat.gateway.state.attachedImages).toHaveLength(1)
+  }, 20_000)
+
+  it('paints one bubble for a file sent with no words, at every stage', async () => {
+    const chat = await openBotChat('researcher')
+
+    // The upload has to land under the session's own cwd or the `@file:`
+    // reference is refused as outside the allowed workspace.
+    expect(chat.cwd, 'the session reported no working directory').toBeTruthy()
+
+    const path = `${chat.cwd}/uploads/hermie/2026-09-20/8setj4h3-ui.xml`
+    const form = new FormData()
+
+    form.append('path', path)
+    form.append('overwrite', 'true')
+    form.append('file', new Blob(['<ui/>']), 'ui.xml')
+
+    const upload = await fetch(`${chat.gateway.url}/api/files/upload-stream`, {
+      method: 'POST',
+      headers: { 'X-Hermes-Session-Token': 'demo' },
+      body: form
+    })
+
+    expect(upload.status).toBe(200)
+
+    // No words at all: the reference IS the prompt. That is the send that came
+    // back as two bubbles, because the projection of it holds no text to pair on.
+    const reference = `@file:${path}`
+
+    // Only the bubbles carrying this file: the canonical chat opens with fixture
+    // history, and counting every outgoing bubble would count those too.
+    const carryingTheFile = (state: ChatState): UserItem[] =>
+      outgoing(state).filter(item => item.attachments?.some(ref => ref.endsWith('8setj4h3-ui.xml')))
+
+    await chat.submit(reference, [reference])
+
+    expect(carryingTheFile(chat.state())).toHaveLength(1)
+
+    await chat.waitFor(state => !state.turn.active, 'the reply to finish')
+    await chat.sweepTail()
+
+    expect(carryingTheFile(chat.state())).toHaveLength(1)
+    expect(carryingTheFile(chat.state())[0]?.rowId).toBeGreaterThan(0)
+    // The chip survives the pairing: the row's directive is the durable one.
+    expect(carryingTheFile(chat.state())[0]?.attachments).toEqual([reference])
+
+    await chat.rehydrate()
+
+    expect(carryingTheFile(chat.state())).toHaveLength(1)
+    // And the file really did reach the agent, which is the other half of the
+    // claim: one bubble showing an upload nothing read would be no better.
+    expect(itemsOf(chat.state()).some(item => item.kind === 'assistant' && item.text.includes('ui.xml'))).toBe(true)
   }, 20_000)
 })

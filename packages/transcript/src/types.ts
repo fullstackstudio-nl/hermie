@@ -49,7 +49,23 @@ export interface ItemBase {
 export interface UserItem extends ItemBase {
   kind: 'user'
   text: string
-  /** `@image:` / `@file:` reference strings pulled out of the persisted text. */
+  /**
+   * The `@file:` / `@image:` REFERENCE strings this turn carries — never display
+   * names. One contract, whichever transport built the item:
+   *
+   * - a persisted row: the directives `stripUserText` lifted out of its text;
+   * - a local submit: the same directives, as `beginLocalTurn` projects them out
+   *   of the body it was handed — plus, for an image, a reference whose path
+   *   position holds only the file name, because `image.attach_bytes` takes the
+   *   bytes out of band and the gateway alone decides where they land.
+   *
+   * Everything else derives from this, and nothing stores a second copy: the chip
+   * name (`attachmentName` in the chat kit) and the reconciliation key
+   * (`attachmentsMatchKey`) both read the name off the reference. A display name
+   * stored here instead is a name the other side of the wire has never seen —
+   * which is fine while there is text to pair a turn on, and is how a file sent
+   * with no text came back as a second bubble.
+   */
   attachments?: string[]
   /** Submitted locally, not yet acknowledged by the gateway. */
   pending?: boolean

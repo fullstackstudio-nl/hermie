@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
-import { normalizedItemText, rowsToItems, stripUserText, type TranscriptRow } from './rows-to-items'
+import {
+  attachmentRefName,
+  attachmentsMatchKey,
+  normalizedItemText,
+  rowsToItems,
+  stripUserText,
+  type TranscriptRow
+} from './rows-to-items'
 import {
   attachedContextRow,
   codexSidecarRow,
@@ -213,6 +220,47 @@ describe('stripUserText', () => {
 
   it('leaves an ordinary message untouched', () => {
     expect(stripUserText('just a question')).toEqual({ text: 'just a question' })
+  })
+
+  it('reads a file-only prompt as no text and one reference', () => {
+    // The whole bug: this is what a send with an attachment and no words
+    // projects to on BOTH sides, so the reference is all there is to pair on.
+    expect(stripUserText('@file:/srv/work/uploads/hermie/2026-09-20/ab-ui.xml')).toEqual({
+      text: '',
+      attachments: ['@file:/srv/work/uploads/hermie/2026-09-20/ab-ui.xml']
+    })
+  })
+})
+
+describe('attachment references as a comparison key', () => {
+  it('reads the name out of a reference, quoted or not', () => {
+    expect(attachmentRefName('@file:/srv/work/uploads/hermie/2026-09-20/8setj4h3-ui.xml')).toBe('8setj4h3-ui.xml')
+    expect(attachmentRefName('@file:"/srv/work/my notes.txt"')).toBe('my notes.txt')
+    expect(attachmentRefName('@file:`/srv/work/my notes.txt`')).toBe('my notes.txt')
+    expect(attachmentRefName('@image:shot.png')).toBe('shot.png')
+  })
+
+  it('matches the same attachment described with and without its path', () => {
+    // An attached image is the asymmetric case: the client named it, the gateway
+    // chose where to put it, and only the name survives both.
+    expect(attachmentsMatchKey(['@image:shot.png'])).toBe(
+      attachmentsMatchKey(['@image:/srv/work/.hermes/images/shot.png'])
+    )
+  })
+
+  it('ignores the order two references were listed in', () => {
+    expect(attachmentsMatchKey(['@file:/a/one.txt', '@image:two.png'])).toBe(
+      attachmentsMatchKey(['@image:/srv/two.png', '@file:/a/one.txt'])
+    )
+  })
+
+  it('separates a picture from a document of the same name', () => {
+    expect(attachmentsMatchKey(['@image:diagram.png'])).not.toBe(attachmentsMatchKey(['@file:diagram.png']))
+  })
+
+  it('is empty for a turn that carries nothing, so text alone decides', () => {
+    expect(attachmentsMatchKey(undefined)).toBe('')
+    expect(attachmentsMatchKey([])).toBe('')
   })
 })
 

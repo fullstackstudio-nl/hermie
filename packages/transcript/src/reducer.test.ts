@@ -345,6 +345,60 @@ describe('local submits', () => {
 
     expect((list(state)[0] as UserItem).displayKind).toBe('steer')
   })
+
+  /**
+   * `UserItem.attachments` is one contract on both sides of the wire: the
+   * `@file:` / `@image:` reference strings, as the persisted row carries them.
+   * The bubble derives its chip from that (`attachmentName` in the chat kit) and
+   * reconciliation derives its match key from it — a display name stored here
+   * instead is a name nothing on the other side can be compared against, which
+   * is how a file-only send came back as a second bubble.
+   */
+  describe('what an optimistic turn records as its attachments', () => {
+    const REF = '@file:"/srv/work/uploads/hermie/2026-09-20/8setj4h3-ui.xml"'
+
+    it('takes the references out of the body, where the row will repeat them', () => {
+      const state = beginLocalTurn(fresh(), `have a look\n\n${REF}`, undefined, NOW)
+
+      expect(list(state)[0]).toMatchObject({ kind: 'user', text: 'have a look', attachments: [REF] })
+    })
+
+    it('records a file-only send as no text and one reference', () => {
+      const state = beginLocalTurn(fresh(), REF, [REF], NOW)
+
+      expect(list(state)[0]).toMatchObject({ kind: 'user', text: '', attachments: [REF] })
+    })
+
+    it('keeps an image reference the body cannot carry', () => {
+      // `image.attach_bytes` takes the bytes out of band, so the prompt says
+      // nothing about it and the caller's reference is the only record until the
+      // gateway persists its own.
+      const state = beginLocalTurn(fresh(), 'what is this', ['@image:shot.png'], NOW)
+
+      expect(list(state)[0]).toMatchObject({ text: 'what is this', attachments: ['@image:shot.png'] })
+    })
+
+    it('does not record the same attachment twice when the body already named it', () => {
+      const state = beginLocalTurn(fresh(), `read this\n\n${REF}`, [REF], NOW)
+
+      expect((list(state)[0] as UserItem).attachments).toEqual([REF])
+    })
+
+    it('keeps both when a send carries a file and an image', () => {
+      const state = beginLocalTurn(fresh(), `both\n\n${REF}`, [REF, '@image:shot.png'], NOW)
+
+      expect((list(state)[0] as UserItem).attachments).toEqual([REF, '@image:shot.png'])
+    })
+
+    it('never drops a reference the body carries in favour of the caller', () => {
+      // A send with a file AND an image: the file is in the prompt, the image is
+      // not, and the row will carry both. Keeping only what the caller passed
+      // would lose the file's chip and leave an attachment set nothing matches.
+      const state = beginLocalTurn(fresh(), `both\n\n${REF}`, ['@image:shot.png'], NOW)
+
+      expect((list(state)[0] as UserItem).attachments).toEqual([REF, '@image:shot.png'])
+    })
+  })
 })
 
 describe('bot-to-bot dispatch', () => {

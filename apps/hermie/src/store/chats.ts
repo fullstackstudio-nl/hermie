@@ -64,6 +64,7 @@ export interface ChatsState {
   applyHistory: (botName: string, items: readonly TranscriptItem[]) => void
   applyTail: (botName: string, items: readonly TranscriptItem[]) => void
 
+  /** `attachments` are `@file:` / `@image:` references — see `UserItem.attachments`. */
   beginTurn: (botName: string, text: string, attachments?: string[]) => void
   settleTurn: (botName: string, result: SubmitResult) => void
   interrupt: (botName: string) => void

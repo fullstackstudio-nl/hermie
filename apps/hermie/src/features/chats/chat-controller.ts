@@ -49,7 +49,15 @@ import type { Bot, BotCanonicalSession, BotsState } from '../../store/bots'
 import type { ChatsState } from '../../store/chats'
 import { liveChatNames } from '../../store/chats'
 import type { BotsController } from '../bots/bots-controller'
-import { FileUploadError, uploadFile, type UploadableFile, type UploadedFile, withFileReferences } from './file-upload'
+import {
+  fileReferenceFor,
+  FileUploadError,
+  imageReferenceFor,
+  uploadFile,
+  type UploadableFile,
+  type UploadedFile,
+  withFileReferences
+} from './file-upload'
 
 /** Above this many rows, `session.history` is a download; the REST tail is not. */
 export const REST_HISTORY_THRESHOLD = 400
@@ -975,6 +983,11 @@ export class ChatController {
    * submitted: the two have to be byte-identical, or the gateway echoes the turn
    * back as a message the reconciler does not recognise and the bubble appears
    * twice.
+   *
+   * Byte-identical text is not enough when there is no text. An attachment sent
+   * with nothing typed leaves the two sides with only the attachment in common,
+   * so what is painted has to be the REFERENCE the row will carry rather than a
+   * display name — see `attachmentReferences`.
    */
   async send(botName: string, text: string, attachments: AttachmentInput[] = []): Promise<void> {
     const chat = this.chats.getState().chats[botName]
@@ -991,9 +1004,7 @@ export class ChatController {
       files.map(file => file.path)
     )
 
-    this.chats
-      .getState()
-      .beginTurn(botName, body, attachments.length ? attachments.map(file => file.filename) : undefined)
+    this.chats.getState().beginTurn(botName, body, attachmentReferences(attachments))
 
     try {
       for (const file of images) {
@@ -1689,6 +1700,32 @@ export interface FileAttachmentInput {
 export type AttachmentInput = ImageAttachmentInput | FileAttachmentInput
 
 const isFileAttachment = (attachment: AttachmentInput): attachment is FileAttachmentInput => attachment.kind === 'file'
+
+/**
+ * What the painted bubble records as its attachments: references, not names.
+ *
+ * `UserItem.attachments` is the same contract on both sides of the wire — the
+ * `@file:` / `@image:` directive strings the persisted row carries — and
+ * reconciliation pairs a sent turn with its row on them whenever the prompt had
+ * no words to pair on. A display name here instead is a string the gateway has
+ * never seen, and a file sent with no text then came back as a second bubble.
+ *
+ * A file's reference is the exact token the prompt names it by, so the two are
+ * built the same way. An image's is not knowable: `image.attach_bytes` sends the
+ * bytes out of band and the gateway decides where they land, writing its own
+ * `@image:<path>` into the row. The name goes in the path position, which is
+ * what both sides can still agree on, and the row's own reference replaces it
+ * once it lands.
+ */
+function attachmentReferences(attachments: readonly AttachmentInput[]): string[] | undefined {
+  if (!attachments.length) {
+    return undefined
+  }
+
+  return attachments.map(attachment =>
+    isFileAttachment(attachment) ? fileReferenceFor(attachment.path) : imageReferenceFor(attachment.filename)
+  )
+}
 
 /** One entry of the gateway's model inventory, as the options picker shows it. */
 export interface ModelChoice {

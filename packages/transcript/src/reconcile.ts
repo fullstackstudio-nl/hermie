@@ -4,11 +4,12 @@
  *
  * Stable ids are the point. A UI keyed on `item.id` must not remount every row
  * when a re-hydration lands, so a fresh item adopts the id of the current item
- * it matches: durable `rowId` first, then `tool_id`, then normalised text.
+ * it matches: durable `rowId` first, then `tool_id`, then what the item says and
+ * carries (`itemMatchKey`).
  *
  * Ported from `apps/desktop/src/lib/chat-messages/reconciliation.ts`.
  */
-import { normalizedItemText } from './rows-to-items'
+import { isMatchable, itemMatchKey } from './rows-to-items'
 import {
   type AssistantItem,
   type BotDmOutItem,
@@ -29,7 +30,14 @@ const toolKeyOf = (item: TranscriptItem): string | undefined =>
       ? item.toolId
       : undefined
 
-const textKeyOf = (item: TranscriptItem): string => `${item.kind}\n${normalizedItemText(item)}`
+/**
+ * The last-resort pairing key: the kind, the text, and the attachments.
+ *
+ * The attachments are in it because a send can have no text to pair on at all —
+ * a turn whose whole body was a `@file:` reference projects to the empty string,
+ * and the file is then the only thing identifying it.
+ */
+const matchKeyOf = (item: TranscriptItem): string => `${item.kind}\n${itemMatchKey(item)}`
 
 /** Items the backend never persists, so a re-hydration can never re-supply them. */
 const isEphemeral = (item: TranscriptItem): boolean => item.kind === 'approval' || item.kind === 'clarify'
@@ -216,7 +224,7 @@ function rebuild(state: ChatState, list: readonly TranscriptItem[]): ChatState {
 export function reconcile(state: ChatState, freshItems: readonly TranscriptItem[]): ChatState {
   const byRowId = new Map<number, string>()
   const byToolKey = new Map<string, string>()
-  const byText = new Map<string, string[]>()
+  const byMatchKey = new Map<string, string[]>()
 
   for (const id of state.order) {
     const item = state.items[id]
@@ -235,10 +243,10 @@ export function reconcile(state: ChatState, freshItems: readonly TranscriptItem[
       byToolKey.set(toolKey, id)
     }
 
-    const textKey = textKeyOf(item)
+    if (isMatchable(item)) {
+      const key = matchKeyOf(item)
 
-    if (normalizedItemText(item)) {
-      byText.set(textKey, [...(byText.get(textKey) ?? []), id])
+      byMatchKey.set(key, [...(byMatchKey.get(key) ?? []), id])
     }
   }
 
@@ -255,7 +263,7 @@ export function reconcile(state: ChatState, freshItems: readonly TranscriptItem[
     }
 
     if (!matchId || used.has(matchId)) {
-      matchId = byText.get(textKeyOf(fresh))?.find(id => !used.has(id))
+      matchId = isMatchable(fresh) ? byMatchKey.get(matchKeyOf(fresh))?.find(id => !used.has(id)) : undefined
     }
 
     const current = matchId && !used.has(matchId) ? state.items[matchId] : undefined
@@ -307,26 +315,30 @@ export function reconcileTail(state: ChatState, tailItems: readonly TranscriptIt
   let placeholderCursor = 0
 
   /**
-   * The live tail, indexed by text.
+   * The live tail, indexed by what each item says and carries.
    *
    * A turn we sent ourselves exists twice for a moment: as the optimistic
    * bubble and the streamed reply the reducer built (no `rowId`, because
    * nothing persisted them yet), and as the rows the gateway wrote. There is no
-   * id in common — `prompt.submit` does not answer with one — so text is the
+   * id in common — `prompt.submit` does not answer with one — so this key is the
    * only thing that can pair them, exactly as `reconcile` already does for a
    * full re-hydration. Without it the next `sessions.changed` sweep appends the
    * persisted copies and every sent message shows up twice.
+   *
+   * Indexing on TEXT alone was that bug's second half: a send carrying only a
+   * file has no text, so the bubble was never a candidate and the row landed
+   * beside it.
    */
-  const liveByText = new Map<string, string[]>()
+  const liveByMatchKey = new Map<string, string[]>()
 
   for (const item of list) {
-    if (item.rowId !== undefined || !normalizedItemText(item)) {
+    if (item.rowId !== undefined || !isMatchable(item)) {
       continue
     }
 
-    const key = textKeyOf(item)
+    const key = matchKeyOf(item)
 
-    liveByText.set(key, [...(liveByText.get(key) ?? []), item.id])
+    liveByMatchKey.set(key, [...(liveByMatchKey.get(key) ?? []), item.id])
   }
 
   const pairedLive = new Set<string>()
@@ -360,7 +372,9 @@ export function reconcileTail(state: ChatState, tailItems: readonly TranscriptIt
       continue
     }
 
-    const liveId = liveByText.get(textKeyOf(fresh))?.find(id => !pairedLive.has(id))
+    const liveId = isMatchable(fresh)
+      ? liveByMatchKey.get(matchKeyOf(fresh))?.find(id => !pairedLive.has(id))
+      : undefined
     const liveMatch = liveId ? byId.get(liveId) : undefined
 
     if (liveMatch) {

@@ -12,7 +12,7 @@ import {
   replyFromDeliveryOutput
 } from './bot-dm'
 import { parseCronDelivery } from './cron-delivery'
-import { normalizedItemText, normalizeMatchText, stripUserText } from './rows-to-items'
+import { attachmentsMatchKey, normalizedItemText, normalizeMatchText, stripUserText } from './rows-to-items'
 import { subagentIdOf, TERMINAL_SUBAGENT_STATUS, toSubagent } from './subagent-progress'
 import type { ErrorSurface, SessionLiveInfo, Usage } from '@hermes/shared/gateway-events'
 import {
@@ -1209,7 +1209,7 @@ function isForeignPlaceholder(item: TranscriptItem | undefined): boolean {
  * card beside the first. A placeholder must neither count as the shown prompt
  * nor hide the item that really is it; skipping it is both halves of that.
  */
-function shownTurn(state: ChatState): { authored?: string; settledReply?: string } {
+function shownTurn(state: ChatState): { authored?: string; carried?: string; settledReply?: string } {
   let settledReply: string | undefined
 
   for (let index = state.order.length - 1; index >= 0; index -= 1) {
@@ -1229,7 +1229,11 @@ function shownTurn(state: ChatState): { authored?: string; settledReply?: string
       continue
     }
 
-    return { authored: normalizedItemText(item), ...(settledReply !== undefined ? { settledReply } : {}) }
+    return {
+      authored: normalizedItemText(item),
+      carried: item.kind === 'user' ? attachmentsMatchKey(item.attachments) : '',
+      ...(settledReply !== undefined ? { settledReply } : {})
+    }
   }
 
   return settledReply !== undefined ? { settledReply } : {}
@@ -1267,6 +1271,15 @@ type InflightPrompt = {
   raw: string
   /** `normalizedItemText` of the item this prompt would become. */
   key: string
+  /**
+   * `attachmentsMatchKey` of the references the prompt itself names, and empty
+   * when it names none — which is not the same as carrying none. An image is
+   * attached out of band, so a turn can carry one the prompt says nothing about;
+   * see `resumeOverlap` for why that makes this a one-sided check.
+   */
+  carried: string
+  /** Those references themselves, for the item this prompt projects to. */
+  refs?: string[]
   kind: 'user' | 'cron_delivery' | 'bot_dm_in'
   cron?: ReturnType<typeof parseCronDelivery>
   incoming?: ReturnType<typeof parseIncomingBotMessage>
@@ -1276,19 +1289,33 @@ function readInflightPrompt(userText: string): InflightPrompt {
   const cron = parseCronDelivery(userText)
 
   if (cron) {
-    return { raw: userText, key: normalizeMatchText(`${cron.jobName}\n${cron.body}`), kind: 'cron_delivery', cron }
+    return {
+      raw: userText,
+      key: normalizeMatchText(`${cron.jobName}\n${cron.body}`),
+      carried: '',
+      kind: 'cron_delivery',
+      cron
+    }
   }
 
   const incoming = parseIncomingBotMessage(userText)
 
   if (incoming) {
-    return { raw: userText, key: normalizeMatchText(incoming.body), kind: 'bot_dm_in', incoming }
+    return { raw: userText, key: normalizeMatchText(incoming.body), carried: '', kind: 'bot_dm_in', incoming }
   }
 
   // `stripUserText` is what the persisted row goes through, directives and
   // attached-context block included, so the optimistic and inflight projections
   // of one prompt agree.
-  return { raw: userText, key: normalizeMatchText(stripUserText(userText).text), kind: 'user' }
+  const stripped = stripUserText(userText)
+
+  return {
+    raw: userText,
+    key: normalizeMatchText(stripped.text),
+    carried: attachmentsMatchKey(stripped.attachments),
+    ...(stripped.attachments ? { refs: stripped.attachments } : {}),
+    kind: 'user'
+  }
 }
 
 /**
@@ -1308,6 +1335,13 @@ function readInflightPrompt(userText: string): InflightPrompt {
  * turn and gets its own bubble — unless the reply is the `inflight`'s own
  * assistant text, which is the gateway holding a finished turn replayable (a
  * retained failure) and describing what the transcript already shows.
+ *
+ * The attachments are compared only when BOTH sides name one, which is the one
+ * place in reconciliation where that tolerance is needed. `inflight.user` is the
+ * submitted BODY rather than the persisted row: a file is in it, so a file-only
+ * prompt — which has no words to be told apart by — is compared properly, while
+ * an image never is, and insisting on a set the body cannot carry would paint
+ * every image send twice on resume.
  */
 function resumeOverlap(
   state: ChatState,
@@ -1315,8 +1349,9 @@ function resumeOverlap(
   assistantText: string
 ): { promptShown: boolean; replyPersisted: boolean } {
   const shown = shownTurn(state)
-  const { raw, key: promptKey } = prompt
-  const promptShown = Boolean(raw) && shown.authored !== undefined && shown.authored === promptKey
+  const { raw, key: promptKey, carried } = prompt
+  const sameAttachments = !carried || !shown.carried || carried === shown.carried
+  const promptShown = Boolean(raw) && shown.authored !== undefined && shown.authored === promptKey && sameAttachments
 
   if (!promptShown) {
     return { promptShown: false, replyPersisted: false }
@@ -1397,7 +1432,17 @@ export function applyResumeSnapshot(state: ChatState, snapshot: ResumeSnapshot, 
               text: prompt.incoming.body,
               ts: now / 1000
             }
-          : { id: `i:${next.turn.nextSeq}`, kind: 'user', text: stripUserText(userText).text, ts: now / 1000 }
+          : {
+              id: `i:${next.turn.nextSeq}`,
+              kind: 'user',
+              text: stripUserText(userText).text,
+              // The references too, for the same reason the projection lifts them
+              // out of the text: without them a prompt that was nothing but a
+              // file resumes as an empty bubble, and the row that lands for it has
+              // nothing to pair with and becomes a second one.
+              ...(prompt.refs ? { attachments: prompt.refs } : {}),
+              ts: now / 1000
+            }
 
     // Filling the placeholder rather than appending is the whole point:
     // appended, the prompt would sit BELOW the reply it started, because the
@@ -1531,9 +1576,16 @@ export function applyResumeSnapshot(state: ChatState, snapshot: ResumeSnapshot, 
  * like: the gateway stores the prompt verbatim — `@file:` and `@image:`
  * directives included — and `stripUserText` lifts those directives out of the
  * text into `attachments` on the way back. Painting the raw body left the bubble
- * holding a different string from its own row, and since text is the only thing
- * that pairs the two, every send carrying a file came back as a second bubble.
- * So the optimistic item goes through the SAME projection a persisted row does.
+ * holding a different string from its own row, and since the two are paired on
+ * what they say, every send carrying a file came back as a second bubble. So the
+ * optimistic item goes through the SAME projection a persisted row does.
+ *
+ * `attachments` are REFERENCE strings, the same contract `UserItem.attachments`
+ * holds everywhere (`@file:…` / `@image:…`), not display names — and a turn that
+ * carries one is paired on it as well as on its text, which is the only thing
+ * left when the send had no words at all. A caller that passed a friendlier name
+ * here instead left the bubble and its row with nothing in common, which is how a
+ * file sent with no text came back as a second bubble.
  */
 export function beginLocalTurn(
   state: ChatState,
@@ -1543,9 +1595,7 @@ export function beginLocalTurn(
 ): ChatState {
   const next = editable(state)
   const projected = stripUserText(text)
-  // The caller's names are the friendlier chip ("notes.txt", not a gateway
-  // path); the projected refs are the fallback for a ref the user typed.
-  const refs = attachments?.length ? attachments : projected.attachments
+  const refs = mergeAttachmentRefs(projected.attachments, attachments)
 
   addItem<UserItem>(
     next,
@@ -1567,6 +1617,31 @@ export function beginLocalTurn(
   next.draft = ''
 
   return next
+}
+
+/**
+ * Every attachment a locally submitted turn carries, once.
+ *
+ * Two sources, because a prompt can only name one of the two kinds. A file
+ * reaches the agent BY being named in the text (`@file:<path>`), so the
+ * projection has it, byte for byte what the persisted row will repeat. An image
+ * goes over `image.attach_bytes` and is never in the prompt at all, so only the
+ * caller can say it is there. Projected first: those are the ones the row agrees
+ * with exactly, and neither source may swallow the other — a send with a file and
+ * an image carries both.
+ */
+function mergeAttachmentRefs(projected?: string[], supplied?: string[]): string[] | undefined {
+  const byKey = new Map<string, string>()
+
+  for (const ref of [...(projected ?? []), ...(supplied ?? [])]) {
+    const key = attachmentsMatchKey([ref])
+
+    if (!byKey.has(key)) {
+      byKey.set(key, ref)
+    }
+  }
+
+  return byKey.size ? [...byKey.values()] : undefined
 }
 
 function lastOptimisticUserId(state: ChatState): string | undefined {

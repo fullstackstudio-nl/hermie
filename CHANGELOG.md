@@ -58,6 +58,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An attachment sent with nothing typed no longer paints two outgoing bubbles.** Reconciliation
+  pairs a locally sent turn with the row the gateway persists for it on what the turn SAYS, because
+  `prompt.submit` answers with a status and never a row id. A send carrying only a file says nothing:
+  the `@file:` directive is plumbing, and both sides lift it out of the text — so there was nothing
+  to pair on, and the row landed beside the bubble a moment later, one naming `ui.xml` and the other
+  `8setj4h3-ui.xml`. Pairing now uses the text AND the attachments, and `UserItem.attachments` is one
+  contract on both sides of the wire: the reference strings, as the row carries them. A bubble's chip
+  is derived from the reference at render time, and so is the key the two sides are compared on — the
+  reference's own file name, which is all a client is ever told about an image, since
+  `image.attach_bytes` sends the bytes out of band and the gateway alone decides where they land. Two
+  sends carrying different files stay two bubbles. An image-only send gets the same treatment, and so
+  does a prompt that was only a file when the chat is reopened in the middle of it — that used to
+  resume as an empty bubble.
 - **Android's back button reaches the surfaces that are not modals.** A `Modal` consumes the press
   itself, so every sheet was already right — including the blocking approval sheet, which correctly
   swallows it. Nothing else heard it: back on Activity, Crons or Settings in the wide layout left

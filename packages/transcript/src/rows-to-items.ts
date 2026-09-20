@@ -67,6 +67,7 @@ const ATTACHED_CONTEXT_MARKER_RE = /(?:^|\n)--- Attached Context ---\s*\n/u
 const CONTEXT_WARNINGS_MARKER_RE = /(?:^|\n)--- Context Warnings ---[\s\S]*$/u
 const CONTEXT_REF_RE = /@(?:file|folder|url|image|tool|terminal):(?:"[^"\n]+"|'[^'\n]+'|`[^`\n]+`|\S+)/gu
 const ATTACHMENT_REF_RE = /@(?:file|image):(?:"[^"\n]+"|'[^'\n]+'|`[^`\n]+`|\S+)/gu
+const ATTACHMENT_SCHEME_RE = /^@(file|image):/u
 
 // Gateway routing note for Discord turns (`gateway/run_inbound.py`); current
 // gateways persist the authored text, this heals rows written before that fix.
@@ -593,6 +594,49 @@ export function normalizeMatchText(text: string): string {
   return text.replace(/\s+/gu, ' ').trim().normalize('NFC')
 }
 
+/**
+ * The name at the end of an attachment reference.
+ *
+ * `@file:"/srv/work/uploads/hermie/2026-09-20/8setj4h3-ui.xml"` → `8setj4h3-ui.xml`.
+ *
+ * The path is the half of a reference two descriptions of one send can disagree
+ * about, and it is not always anybody's fault: an image goes over
+ * `image.attach_bytes`, so the GATEWAY decides where it lands and writes
+ * `@image:<its path>` into the row, while the client only ever knew the name it
+ * handed over. The name is what both always have, so the name is what pairing
+ * compares — and, in the chat kit, what the chip shows.
+ */
+export function attachmentRefName(reference: string): string {
+  const raw = reference.replace(ATTACHMENT_SCHEME_RE, '').replace(/^[`"']|[`"']$/gu, '')
+
+  return raw.split(/[/\\]/u).pop() || raw
+}
+
+/** `file` or `image`: a picture of a diagram is not the diagram's source. */
+function attachmentRefKind(reference: string): string {
+  return ATTACHMENT_SCHEME_RE.exec(reference)?.[1] ?? 'file'
+}
+
+/**
+ * The comparison form of what a turn carries.
+ *
+ * Sorted, because the set is what identifies the send and the order the two
+ * sides happen to list it in is not: a file's reference is in the prompt where
+ * the composer put it, and an image's is appended by the gateway afterwards.
+ * Empty for a turn that carries nothing, which is the signal that text alone
+ * decides.
+ */
+export function attachmentsMatchKey(references: readonly string[] | undefined): string {
+  if (!references?.length) {
+    return ''
+  }
+
+  const keys = [...new Set(references.map(ref => `${attachmentRefKind(ref)}:${attachmentRefName(ref)}`))]
+
+  // A unit separator rather than a comma: a file name may contain one.
+  return keys.sort().join('\u001f')
+}
+
 /** A row matcher used by reconciliation: the text two transports agree on. */
 export function normalizedItemText(item: TranscriptItem): string {
   const text =
@@ -610,4 +654,26 @@ export function normalizedItemText(item: TranscriptItem): string {
             : ''
 
   return normalizeMatchText(text)
+}
+
+/**
+ * Everything about an item that two descriptions of it have to agree on: what it
+ * says, and what it carries.
+ *
+ * Text alone was enough until a turn arrived with no text. A send whose whole
+ * body is a `@file:` reference projects to the empty string — the directive is
+ * plumbing, so the projection lifts it out — and then the attachments are the
+ * only thing left that identifies it. They also have to be ABLE to disagree:
+ * two file-only sends carrying different files are two turns, and a key made of
+ * text alone would have called them one.
+ */
+export function itemMatchKey(item: TranscriptItem): string {
+  const attachments = item.kind === 'user' ? attachmentsMatchKey(item.attachments) : ''
+
+  return `${normalizedItemText(item)}\n${attachments}`
+}
+
+/** Whether an item says or carries enough to be paired on at all. */
+export function isMatchable(item: TranscriptItem): boolean {
+  return Boolean(normalizedItemText(item)) || (item.kind === 'user' && Boolean(attachmentsMatchKey(item.attachments)))
 }

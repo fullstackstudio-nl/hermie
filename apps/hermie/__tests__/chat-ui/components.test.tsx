@@ -3,11 +3,13 @@
  * gallery that mounts all of them at once.
  */
 import { fireEvent, screen } from '@testing-library/react-native'
+import { attachmentRefName } from '@hermie/transcript'
 
 import {
   AgentsBar,
   AgentsSheet,
   AssistantBubble,
+  attachmentName,
   BotDmInBubble,
   BotDmOutLine,
   ChatHeader,
@@ -55,6 +57,49 @@ describe('bubbles', () => {
 
     expect(screen.getByText(/quarterly-report\.xlsx$/)).toBeTruthy()
     expect(screen.queryByText(/@file:/)).toBeNull()
+  })
+
+  /**
+   * `attachments` holds references, and the reference is the only thing stored:
+   * the chip's name is derived from it here, at render time. So the bubble has to
+   * read every shape one can arrive in — an absolute path the gateway chose, a
+   * quoted path with a space in it, and the bare name that is all a client can
+   * say about an image it has only just handed over.
+   */
+  it.each([
+    ['a path the gateway chose', '@file:/srv/work/uploads/hermie/2026-09-20/8setj4h3-ui.xml', '8setj4h3-ui.xml'],
+    ['a quoted path with a space', '@file:"/srv/work/my notes.txt"', 'my notes.txt'],
+    ['a backticked path', '@file:`/srv/work/my notes.txt`', 'my notes.txt'],
+    ['an image the gateway has not placed yet', '@image:shot.png', 'shot.png'],
+    ['an image the gateway did place', '@image:/srv/work/.hermes/images/shot.png', 'shot.png']
+  ])('names the chip from %s', (_label, reference, name) => {
+    renderScreen(<UserBubble item={{ ...userItem, attachments: [reference], text: '' }} />)
+
+    expect(screen.getByText(name)).toBeTruthy()
+    expect(screen.queryByText(new RegExp('@(?:file|image):'))).toBeNull()
+  })
+
+  it('paints a bubble that carries only a file and says nothing', () => {
+    // The send that reported the duplicate. There is no text at all, so the chip
+    // is the whole bubble — and it still needs its metadata line.
+    renderScreen(<UserBubble item={{ ...userItem, attachments: ['@file:/srv/work/ui.xml'], text: '' }} />)
+
+    expect(screen.getByText('ui.xml')).toBeTruthy()
+    expect(screen.getByTestId(`user-meta-${userItem.id}`)).toBeTruthy()
+  })
+
+  it('derives the same name the engine compares on', () => {
+    // Two functions, one truth: the kit paints the name and the transcript
+    // engine pairs on it, and the kit must not grow a runtime dependency on the
+    // engine to keep them in step. This is what keeps them honest instead.
+    for (const reference of [
+      '@file:/srv/work/uploads/hermie/2026-09-20/8setj4h3-ui.xml',
+      '@file:"/srv/work/my notes.txt"',
+      '@image:shot.png',
+      '@image:/srv/work/.hermes/images/shot.png'
+    ]) {
+      expect(attachmentName(reference)).toBe(attachmentRefName(reference))
+    }
   })
 
   it('renders the reply footer only when asked', () => {

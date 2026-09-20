@@ -12,6 +12,7 @@
  * road.
  */
 import type { GatewayHttp } from '@hermie/gateway-client'
+import type { UserItem } from '@hermie/transcript'
 
 import { BotsController } from '../src/features/bots/bots-controller'
 import { ChatController } from '../src/features/chats/chat-controller'
@@ -169,8 +170,42 @@ it('submits the prompt with the reference appended, and paints what the row will
   const user = items.filter(entry => entry.kind === 'user')
 
   expect(user).toHaveLength(1)
-  expect(user[0]).toMatchObject({ text: 'Summarise this', attachments: ['report.csv'] })
+  // `attachments` holds the DIRECTIVE, which is what the row holds too. The chip
+  // shows `report.csv` because `attachmentName` reads the name off it at render
+  // time — storing the friendly name here instead left the two sides of one send
+  // with nothing in common when the prompt had no words to pair on.
+  expect(user[0]).toMatchObject({ text: 'Summarise this', attachments: [`@file:${uploaded.path}`] })
 })
+
+it('paints one bubble for a file sent with no text, and still one after the sweep', async () => {
+  const { gateway, controller } = setup()
+  await controller.openChat(RESEARCHER)
+
+  const uploaded = await controller.uploadFile('researcher', FILE)
+
+  // The reported send: an attachment and nothing typed.
+  await controller.send('researcher', '', [{ kind: 'file', filename: 'report.csv', path: uploaded.path }])
+
+  const reference = `@file:${uploaded.path}`
+
+  expect(gateway.lastCall('prompt.submit')).toMatchObject({ text: reference })
+  expect(userBubbles()).toHaveLength(1)
+
+  // The row the gateway wrote for it, folded in the way a `sessions.changed`
+  // sweep does. Nothing links it to the bubble above but what the two carry.
+  gateway.restMessages = [{ role: 'user', row_id: 11, text: reference, timestamp: 1_700_000_200 }]
+  await controller.reconcileTailFor('researcher')
+
+  expect(userBubbles()).toHaveLength(1)
+  expect(userBubbles()[0]).toMatchObject({ rowId: 11, text: '', attachments: [reference] })
+})
+
+/** The human's own bubbles in the researcher's chat. */
+function userBubbles() {
+  const chat = useChatsStore.getState().chats.researcher
+
+  return (chat?.order ?? []).map(id => chat?.items[id]).filter((item): item is UserItem => item?.kind === 'user')
+}
 
 it('sends nothing at all when the upload failed', async () => {
   const { gateway, controller } = setup()

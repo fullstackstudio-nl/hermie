@@ -33,7 +33,7 @@ export {
   type TranscriptListProps
 } from './TranscriptList'
 export { TypingDots, TypingIndicator, type TypingIndicatorProps } from './TypingIndicator'
-export { UserBubble, type UserBubbleProps } from './UserBubble'
+export { attachmentName, UserBubble, type UserBubbleProps } from './UserBubble'
 
 export { Avatar, type AvatarProps } from './primitives/Avatar'
 export { Bubble, resolveBubbleWidth, useBubbleWidth, useLedgerWidth, type BubbleProps } from './primitives/Bubble'

@@ -320,3 +320,71 @@ describe('a turn we sent ourselves coming back persisted', () => {
     expect(next.order).toHaveLength(state.order.length + 1)
   })
 })
+
+/**
+ * Pairing on the attachments when there is no text to pair on.
+ *
+ * `reconcile` and `reconcileTail` both key the live side by what an item says, so
+ * an item that says nothing was never a candidate at all. A turn carrying only a
+ * file is exactly that — the directive is lifted out of the text — so the
+ * attachments have to count towards the key, and count in a way both sides can
+ * produce: the reference's base name, because the gateway alone decides the path
+ * an attached image lands on.
+ */
+describe('pairing a turn that says nothing but carries something', () => {
+  const REF = '@file:"/srv/work/uploads/hermie/2026-09-20/8setj4h3-ui.xml"'
+  const row = (text: string, rowId: number): TranscriptRow[] => [{ role: 'user', text, row_id: rowId, timestamp: 1 }]
+  const sent = (text: string, attachments: string[]) =>
+    confirmSubmit(beginLocalTurn(fresh(), text, attachments, NOW), { status: 'streaming' }, NOW)
+  const userItems = (state: ChatState) => list(state).filter((item): item is UserItem => item.kind === 'user')
+
+  it('adopts the row onto the bubble in a tail sweep', () => {
+    const next = reconcileTail(sent(REF, [REF]), rowsToItems(row(REF, 4), 'rest'))
+
+    expect(userItems(next)).toHaveLength(1)
+    expect(userItems(next)[0]?.rowId).toBe(4)
+  })
+
+  it('adopts it in a full re-hydration, keeping the bubble its id', () => {
+    const state = sent(REF, [REF])
+    const id = userItems(state)[0]?.id
+    const next = reconcile(state, rowsToItems(row(REF, 4), 'rest'))
+
+    expect(userItems(next)).toHaveLength(1)
+    expect(userItems(next)[0]?.id).toBe(id)
+  })
+
+  it('refuses to pair a different file, however similar the turn looks', () => {
+    const other = '@file:"/srv/work/uploads/hermie/2026-09-20/99xyzabc-ui.xml"'
+    const next = reconcileTail(sent(REF, [REF]), rowsToItems(row(other, 4), 'rest'))
+
+    expect(userItems(next)).toHaveLength(2)
+  })
+
+  it('pairs an attached image on its name, which is all the client was told', () => {
+    const next = reconcileTail(
+      sent('', ['@image:shot.png']),
+      rowsToItems(row('@image:/srv/work/.hermes/images/shot.png', 4), 'rest')
+    )
+
+    expect(userItems(next)).toHaveLength(1)
+    // The row's own directive wins: it is the durable one, and the path in it is
+    // where the file really is.
+    expect(userItems(next)[0]?.attachments).toEqual(['@image:/srv/work/.hermes/images/shot.png'])
+  })
+
+  it('pairs regardless of the order the two sides list two attachments in', () => {
+    const image = '@image:shot.png'
+    const next = reconcileTail(sent(REF, [REF, image]), rowsToItems(row(`${image}\n${REF}`, 4), 'rest'))
+
+    expect(userItems(next)).toHaveLength(1)
+  })
+
+  it('still pairs a turn that has words, whatever it carries', () => {
+    // The attachment must not become a second thing that has to match: an
+    // ordinary message's row carries no attachments at all.
+    const next = reconcileTail(sent('just words', []), rowsToItems(row('just words', 4), 'rest'))
+
+    expect(userItems(next)).toHaveLength(1)
+  })
+})

@@ -2926,7 +2926,11 @@ no working directory — so every attach stopped at "No workspace to upload into
 made, and the server's own upload route, its absolute-path rule, its 100 MB cap and its "I received N
 bytes" reply were all unreachable. The server now reports one.
 
-### Found on the way, and NOT fixed: a file-only send comes back twice
+### Found on the way: a file-only send comes back twice
+
+> **Fixed since**, in the transcript package — see "The file-only duplicate, fixed" at the end of
+> this file. The report below is left as it was written, because it is what the diagnosis was based
+> on and one line of it turned out to be incomplete.
 
 With the upload path reachable for the first time, sending an attachment **with no text** paints two
 outgoing bubbles: the optimistic one showing `ui.xml` and the persisted row showing
@@ -2948,9 +2952,9 @@ is to match on — and those do not match either, because `beginLocalTurn` repla
 `UserItem.attachments` is documented as holding the directive strings, so the optimistic side is the
 one departing from the contract.
 
-Not fixed here: it is shared code, it is not an Android defect, and the honest repair is to give the
-optimistic item the projected refs to match on without losing the friendly chip — a change to the
-transcript package's contract and its tests, not a line. Filed as what it is.
+Not fixed in that pass: it is shared code, it is not an Android defect, and the honest repair is to
+give the optimistic item the projected refs to match on without losing the friendly chip — a change
+to the transcript package's contract and its tests, not a line. Filed as what it is.
 
 ### What this pass did NOT verify
 
@@ -2973,3 +2977,68 @@ transcript package's contract and its tests, not a line. Filed as what it is.
 - **One thing seen once and not diagnosed.** After dismissing the keyboard with the back button
   during a streaming turn, the transcript was left slightly above the bottom with the jump pill
   showing over the newest bubble; tapping the pill recovered it. Not reproduced deliberately.
+
+## The file-only duplicate, fixed (2026-09-20, later)
+
+The repair for the report above. Nothing platform-specific: it is all in `packages/transcript` plus
+the chat controller that feeds it, and it is here rather than in the package's own README because
+what is worth keeping is the reasoning about the wire, not the API.
+
+### One contract for `UserItem.attachments`, and a key that reads it
+
+**The contract.** `attachments` holds the `@file:` / `@image:` reference strings and nothing else,
+whichever side built the item. `beginLocalTurn` takes a file's reference out of the body it was handed
+— the prompt is how a file reaches the agent at all, so the projection already has the directive the
+row will repeat byte for byte — and unions it with what the caller passed, dropping neither. The
+caller passes references too: `attachmentReferences` in the chat controller builds a file's with the
+same `fileReferenceFor` the prompt uses, and an image's with `imageReferenceFor`, which puts the file
+NAME in the path position because nothing else is knowable. The friendly chip is not stored at all any
+more; `attachmentName` derives it from the reference at render time, which is what it already did.
+
+**The key.** `itemMatchKey` is the text and the attachments, and `attachmentsMatchKey` reduces a
+reference to `<kind>:<base name>`, sorted. The base name is where the asymmetry is absorbed: an
+attached image's path is chosen by the gateway at persist time and the client only ever knew the name
+it handed over, so comparing paths could never have worked, while comparing names pairs
+`@image:shot.png` with `@image:/srv/work/.hermes/images/shot.png` and still keeps a picture apart from
+a document of the same name. Both reconcilers stopped indexing on text alone: the candidacy guard is
+now `isMatchable`, which is true for an item that says something **or** carries something.
+
+Two file-only sends carrying different files are still two bubbles — the sets differ — and an ordinary
+message is unaffected, because its row carries no attachments and an empty set on either side leaves
+the text to decide.
+
+### The report was right about the cause and wrong about one line
+
+It named `beginLocalTurn` as "the one departing from the contract", which is true and is not the whole
+of it: even with the optimistic item holding the projected refs, `reconcile.ts` would still have
+skipped it, because the candidacy guard tested the TEXT. Both halves had to move, and the guard is the
+half that also breaks a full re-hydration rather than only the tail sweep.
+
+### And one thing the report did not mention
+
+`applyResumeSnapshot` projected `inflight.user` through `stripUserText` but kept only the `.text`, so
+reopening a chat in the middle of a file-only turn painted an **empty bubble** — and the row that
+landed for it then had nothing to pair with either, so it became a second one by a second route. The
+resume projection carries the references now. It surfaced from running a file-only conversation
+through the whole convergence table in `duplicate-turns.test.ts` rather than only through the tail
+sweep the report described, which is the argument for that table existing.
+
+`resumeOverlap` is the one place the attachment comparison is deliberately one-sided. `inflight.user`
+is the submitted BODY rather than the persisted row, so it names a file but never an image, and
+insisting on a set the body cannot carry would have painted every image send twice on resume. It
+compares only when both sides name something.
+
+### What this is verified against
+
+`packages/gateway-client/src/bot-chat.test.ts` drives the whole sequence against a real
+`startFakeGateway` over HTTP and a WebSocket: upload the bytes to `/api/files/upload-stream` under the
+session's own `cwd`, submit a prompt that is nothing but the reference, then the tail sweep and a full
+re-hydration, with one bubble asserted at each stage and the agent's reply naming the file.
+
+**Not verified against a real `hermes serve`.** Specifically, that a real gateway persists a
+file-only prompt verbatim (the fake one does, and `prompt_turn.py` says it should), and that its
+`@image:` rewrite at persist time carries the name the client sent — the base-name match assumes it
+does, and the only evidence is the fixture in `duplicate-turns.test.ts` written from the 2026-09-19
+pass. The fake gateway does not rewrite image directives at all, so an image-only send against it
+persists a row that projects to nothing and is dropped; the image-only path is pinned by unit tests
+with a hand-written row, not by a run.

@@ -43,6 +43,29 @@ Every item carries `origin` (`history` / `live` / `optimistic` / `inflight` /
 `foreign`) and a `version` counter. `origin` decides what reconciliation may
 drop; `version` makes memoization cheap.
 
+### `UserItem.attachments` holds references, never names
+
+One contract, whichever transport built the item: the `@file:` / `@image:`
+reference strings, as the persisted row carries them. A persisted row gets them
+from `stripUserText`, which lifts the directives out of the text; a local submit
+gets the same directives out of the body it was handed, plus — for an image — a
+reference whose path position holds only the file name, because
+`image.attach_bytes` sends the bytes out of band and the gateway decides where
+they land.
+
+Nothing stores a second copy. The chip a bubble draws is derived at render time
+(`attachmentName` in the app's chat kit), and so is the pairing key
+(`attachmentsMatchKey`): both read the file NAME off the reference, which is the
+one part of it two descriptions of a send always agree on.
+
+That matters because a send can carry an attachment and no words at all, and then
+the attachment is the whole of what identifies the turn. `prompt.submit` answers
+with a status and never a row id, so `reconcile.ts` pairs a sent turn with its row
+on `itemMatchKey` — the text AND the attachments — and a key made of text alone
+left a file-only send with no candidate at all, which is how it came back as a
+second bubble. `duplicate-turns.test.ts` runs both a conversation of words and one
+whose prompt is only a file through every route a transcript can arrive on.
+
 Two rules the reducer never breaks:
 
 1. **It never filters.** Verbosity and the bot-to-bot toggle are read-time
