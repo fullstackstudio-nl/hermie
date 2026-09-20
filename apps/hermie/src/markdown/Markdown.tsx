@@ -14,6 +14,7 @@
 import { useCallback, useMemo, useRef } from 'react'
 import { Linking, View, type LayoutChangeEvent, type ViewStyle } from 'react-native'
 
+import { HAS_NATIVE_CONTEXT_MENU } from '../platform/context-menu'
 import { useTheme } from '../ui/theme'
 import type { ColorRole } from '../ui/tokens'
 import { MarkdownBlock } from './Block'
@@ -110,7 +111,16 @@ export function Markdown({
   inlineCodeBorderColor,
   borderColor,
   fontSize,
-  selectable = true,
+  // Off where the platform's own context menu exists, on everywhere else.
+  //
+  // `Text selectable` is not a selection: it is a long-press `UIEditMenuInteraction`
+  // whose only action copies the WHOLE paragraph (see the 2026-09-20 section of
+  // docs/platform-notes.md). That was the best copy available before there was a
+  // context menu. Now there is one, and it copies the same message with the choice
+  // of words or markdown — so keeping both means a secondary click on a bubble
+  // races two interactions for one gesture, which is the thing the owner reported
+  // as "it also starts selecting".
+  selectable = !HAS_NATIVE_CONTEXT_MENU,
   onLinkPress,
   images,
   style,

@@ -232,6 +232,14 @@ export const strings = {
     moveDown: 'Move down',
     topGroup: 'No section',
     moveToSection: (section: string) => `Move to ${section}`,
+    // The submenu's own heading, so its lines can be bare section names. The
+    // sentence form above is still what the fallback sheet's flat rows say.
+    moveToSectionMenu: 'Move to section',
+    openChat: 'Open',
+    markRead: 'Mark as read',
+    addDividerAbove: 'Add divider above',
+    dragHint: 'Hold and drag to reorder.',
+    dragging: (name: string) => `Moving ${name}`,
     archive: 'Archive',
     unarchive: 'Unarchive',
     archived: (count: number) => `Archived (${count})`,
@@ -250,6 +258,20 @@ export const strings = {
       graphite: 'Graphite'
     },
     rowActions: (name: string) => `Actions for ${name}`,
+    close: 'Close'
+  },
+
+  /**
+   * The Mac's menu bar.
+   *
+   * Here rather than in Swift for the same reason every other string is: one
+   * place to read the app's voice. `HermieMenuBar` is handed these and holds no
+   * wording of its own, so a translation reaches the menu bar for free.
+   */
+  menuBar: {
+    chats: 'Chats',
+    search: 'Search…',
+    settings: 'Settings…',
     close: 'Close'
   },
 

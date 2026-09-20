@@ -74,6 +74,21 @@ export const cronStrings = {
     loading: 'Loading…',
     unknown: '—'
   },
+  /**
+   * Run now, from the list's context menu.
+   *
+   * Confirmed, and the detail screen's own Run now is not — which is deliberate
+   * rather than inconsistent. On the detail screen the reader has the cron's
+   * instructions and its delivery target in front of them; from a menu on a row
+   * they have a name, and "run this" is a real turn against a real gateway.
+   */
+  confirmRun: {
+    eyebrow: 'RUN CRON',
+    title: (name: string) => `Run “${name}” now?`,
+    body: 'The cron runs once, immediately, and delivers wherever it normally delivers. Its schedule is unchanged.',
+    confirm: 'Run now',
+    cancel: 'Cancel'
+  },
   confirmDelete: {
     eyebrow: 'DELETE CRON',
     title: (name: string) => `Delete “${name}”?`,

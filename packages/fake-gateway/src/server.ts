@@ -23,6 +23,33 @@ export interface ScenarioReply {
   match?: string
   deltas?: string[]
   text?: string
+  /**
+   * Chunks of the model's reasoning, streamed BEFORE the first `message.delta`.
+   *
+   * The real gateway sends these from `agent_callbacks._agent_cbs` while the model
+   * is still thinking, which means the client's assistant item comes into existence
+   * — and therefore the transcript's typing header comes and goes — before a single
+   * word of the reply exists. Nothing here emitted them, so the one transcript bug
+   * that depends on that ordering could not be reproduced against this server at
+   * all. See the 2026-09-20 section of docs/platform-notes.md.
+   */
+  reasoning?: string[]
+  /**
+   * One `reasoning.available` frame, which REPLACES the accumulated reasoning
+   * rather than appending to it. `tool_progress._progress_reasoning` sends it, and
+   * the client's reducer treats the two differently, so a fake that only ever sent
+   * deltas left half of that branch unexercised.
+   */
+  reasoningAvailable?: string
+  /**
+   * Announce the tool by name before its call id exists (`tool.generating`).
+   *
+   * The real gateway does this whenever a tool is being drafted; the reason it is a
+   * flag rather than automatic is that the in-process tests pass their own scenarios
+   * and several of them count frames. The default scenario turns it on, so
+   * `npm run fake-gateway` exercises it.
+   */
+  toolGenerating?: boolean
   tool?: { name: string; args?: Record<string, unknown>; summary?: string; result?: unknown }
 }
 
@@ -347,6 +374,11 @@ const FRAMES_PER_CHILD = 6
 const DEFAULT_SCENARIO: Scenario = {
   replies: [
     {
+      // Thinking first, then words: the order a real turn arrives in, and the order
+      // the transcript's typing header has to survive.
+      reasoning: ['Checking the ', 'README first.'],
+      reasoningAvailable: 'Checked the README.',
+      toolGenerating: true,
       deltas: ['Looking that up', ' for you.'],
       text: 'Looking that up for you.',
       tool: { name: 'read_file', args: { path: 'README.md' }, summary: 'read README.md', result: '# Hermie' }
@@ -2567,6 +2599,19 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
 
     later(() => publish('message.start', sid, {}), at)
 
+    // Reasoning before words. The client's reducer creates its assistant item on the
+    // first frame of EITHER kind, so this ordering is what decides whether the
+    // transcript's typing bubble is replaced before or after any text exists.
+    for (const chunk of reply.reasoning ?? []) {
+      at += streamDelayMs
+      later(() => publish('reasoning.delta', sid, { text: chunk }), at)
+    }
+
+    if (reply.reasoningAvailable) {
+      at += streamDelayMs
+      later(() => publish('reasoning.available', sid, { text: reply.reasoningAvailable }), at)
+    }
+
     for (const delta of deltas) {
       at += streamDelayMs
       later(() => publish('message.delta', sid, { text: delta }), at)
@@ -2574,6 +2619,12 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
 
     if (reply.tool) {
       const toolId = `tool-${randomUUID().slice(0, 8)}`
+
+      if (reply.toolGenerating) {
+        at += streamDelayMs
+        later(() => publish('tool.generating', sid, { name: reply.tool?.name }), at)
+      }
+
       at += streamDelayMs
       later(
         () =>

@@ -11,6 +11,7 @@ import { SettingsScreen } from '../features/settings'
 import { strings } from '../i18n/strings'
 import { GlassSurface, Wallpaper } from '../ui/glass'
 import { useTheme } from '../ui/theme'
+import { useShortcut } from '../ui/useShortcut'
 
 export type CompactStackParamList = {
   Bots: undefined
@@ -30,6 +31,12 @@ const SECTION_ROUTES: Record<BotsSection, keyof CompactStackParamList> = {
 
 function BotsRoute() {
   const navigation = useNavigation<NativeStackNavigationProp<CompactStackParamList>>()
+
+  // ⌘, from a hardware keyboard, which an iPad in a case has as readily as a Mac.
+  // Registered on the chat list rather than on the navigator because this is the
+  // route that is always in the stack, so the shortcut cannot be shadowed by a
+  // screen that happens to be on top of it.
+  useShortcut('settings', () => navigation.navigate('Settings'))
 
   // Full-bleed rather than floating: at 393pt there is no room to spend 14pt on
   // each side proving the panel floats, and the mockup's phone frame draws the

@@ -10,6 +10,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A secondary click opens the platform's own context menu.** A right click on a chat row, on a
+  message, on a section heading or on a cron — and a press and hold on a touch screen — now opens a
+  real `UIMenu` through `UIContextMenuInteraction`, not a sheet the app drew. The system's glass and
+  placement, the row lifting into a preview, arrow-key navigation, Return to choose and Escape to
+  dismiss all come with it and are not our code. React Native has no secondary-click event at all,
+  so this is a host view in the local `hermie-mac` module (`HermieContextMenuView`) that the call
+  site wraps its existing tree in. The chat list's bottom sheet stays exactly as it was and is the
+  Android path.
+- **Hold a chat row and drag it where you want it.** Long press for 300ms, then move: the row lifts
+  with a shadow, a line shows where it will land, the list scrolls itself when you reach an edge, and
+  dividers are drop targets so dragging across one changes a chat's section. Long press and hold
+  STILL, without moving, and you get the context menu instead — the two separate by themselves, the
+  way they do in the Files app. In edit mode the grab handle drags immediately, and Move up / Move
+  down stay for anyone who would rather not drag. No gesture library: `PanResponder` and `Animated`,
+  both already in React Native.
+- **Desktop keyboard shortcuts, and Hermie's own menu in the Mac's menu bar.** ⌘K focuses the search
+  field, ⌘, opens Settings, ⌘1…9 opens the nth visible chat, ⌘↑/⌘↓ and ⌃Tab step between chats, and
+  ⌘W closes one level exactly as Escape does. The Mac menu bar gains a **Chats** menu carrying the
+  same commands and the first nine chats by name, built with `UIMenuBuilder`; the keyboard and the
+  menu bar emit the same event, so they cannot drift. Nothing is emitted for an unmodified key, so
+  ordinary typing never leaves the native side.
+- **`Copy text` and `Copy as Markdown` on a message**, plus a link submenu listing each link the
+  message contains, `Open @handle's chat` on a bot-to-bot line and `Show details` where a card has a
+  disclosure. A reply IS markdown, and the two destinations want different things.
+- **`Mark as read` and `Add divider above`** on a chat row, and `Rename` / `Remove` on a section
+  heading without going into edit mode first.
+- **The fake gateway streams reasoning.** A scripted reply can now carry `reasoning` deltas, one
+  `reasoningAvailable` frame and `tool.generating`, and the default scenario uses all three — so a
+  turn arriving as thinking-then-words is reproducible locally. It was not before, which is why the
+  transcript bug below survived two rounds.
 - **The setup wizard is one glass card on the wallpaper.** Every step used to be a flat full-screen
   form: an eyebrow, a title, a paragraph, a tall empty middle, a hairline, and a pinned footer
   holding Continue and Back. It is now a single centred card, at most 520pt wide, whose height
@@ -98,6 +128,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The transcript no longer jumps up and scrolls itself back while a bot is thinking.** The cause
+  was one comparison in React Native's own scroll view: `maintainVisibleContentPosition` picks its
+  anchor with `origin.y + height > contentOffset.y`, and at the bottom of an inverted list
+  `contentOffset.y` is 0 — so a ZERO-height list header fails that test and the anchor falls through
+  to the first cell instead. Every change at the bottom then moved that cell's origin, the scroll
+  view corrected the offset by the difference, and `autoscrollToTopThreshold` animated back: the jump,
+  and the scroll back. It happened on every message sent as well as on every appearance of the typing
+  bubble. The header is now a one-point spacer whose height never changes, so it always wins that
+  test and the delta is always zero, and the typing bubble is a pinned sibling below the list rather
+  than content inside it. `__tests__/chat-ui/transcript-anchor.test.tsx` holds the invariant.
+- **A secondary click on a bubble no longer starts a selection as well.** Where the native context
+  menu exists the markdown renderer stops passing `selectable`, because `Text selectable` is not a
+  selection — it is a long-press edit menu whose only action copies the whole paragraph. Two
+  interactions were racing for one gesture, and the menu does the same copy better.
 - **A collapsed run of bot-to-bot messages is one line again.** Every transcript row carried the gap
   above it, including the rows a roll-up swallows — so five dispatches collapsed into
   `5 messages to @writer` still left five turn gaps behind them, about 55pt of nothing between that

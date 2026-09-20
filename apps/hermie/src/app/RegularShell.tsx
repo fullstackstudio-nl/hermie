@@ -10,6 +10,7 @@ import { SettingsScreen } from '../features/settings'
 import { strings } from '../i18n/strings'
 import { useSafeAreaInsets } from '../platform/safe-area'
 import { GlassSurface, Wallpaper } from '../ui/glass'
+import { useShortcut } from '../ui/useShortcut'
 import { WINDOW_GAP } from '../ui/tokens'
 import { OverlayPanel } from './OverlayPanel'
 import { useSidebarWidth } from './useLayoutMode'
@@ -63,6 +64,10 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
     setCronJobId(undefined)
     setSection(next)
   }, [])
+
+  // ⌘, opens Settings, on a Mac from the keyboard and from the menu bar. ⌘W and
+  // Escape close it again, through the Escape stack `OverlayPanel` registers on.
+  useShortcut('settings', () => openSection('settings'))
 
   return (
     <Wallpaper style={{ flex: 1 }} testID="wallpaper">

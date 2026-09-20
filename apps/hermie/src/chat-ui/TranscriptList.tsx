@@ -56,6 +56,8 @@ import {
 } from 'react-native'
 
 import type { MarkdownImageSource } from '../markdown'
+import { copyToClipboard } from '../platform/clipboard'
+import { ContextMenuHost } from '../platform/context-menu'
 import { applyDirectTouchPan } from '../platform/pointer-drag'
 import { GlassSurface } from '../ui/glass'
 import { Button, Text } from '../ui/primitives'
@@ -80,6 +82,7 @@ import { Chip } from './primitives/Chip'
 import { ExpandedProvider, useExpanded } from './expanded'
 import { rollupDmRuns, type DmRowRole } from './dm-rollup'
 import { clipInline } from './format'
+import { messageMenuItems, parseMessageMenuAction } from './message-menu'
 import { layoutRows, type RowLayout } from './grouping'
 import { chatStrings } from './strings'
 import type {
@@ -487,6 +490,7 @@ function gapAbove(layout: RowLayout): number {
 function TranscriptRowFrame({ entry, context, receipt, layout, dmRole }: RowProps) {
   const runId = dmRole?.role === 'rollupMember' ? dmRole.runId : ''
   const runExpanded = useRollupExpanded(runId)
+  const menu = useMessageMenu(entry.item, context)
 
   if (!rowDraws(entry, dmRole, runExpanded)) {
     return null
@@ -494,17 +498,97 @@ function TranscriptRowFrame({ entry, context, receipt, layout, dmRole }: RowProp
 
   return (
     <View style={{ marginTop: gapAbove(layout) }} testID={`transcript-row-${entry.item.id}`}>
-      {/* Inverted, so a stamp ABOVE a row renders after it. */}
-      <TranscriptRow
-        context={context}
-        {...(dmRole ? { dmRole } : {})}
-        entry={entry}
-        layout={layout}
-        {...(receipt ? { receipt } : {})}
-      />
+      {/*
+        The whole row is the menu's target, not the bubble inside it. A secondary
+        click on the metadata line under a reply, or on the gap beside a short one,
+        means the same message — and UIKit lifts the target into the menu's preview,
+        so a target that was only the text would lift only the text.
+      */}
+      <ContextMenuHost
+        items={menu.items}
+        menuTitle={chatStrings.menu.message}
+        onSelect={menu.select}
+        testID={`transcript-menu-${entry.item.id}`}
+      >
+        {/* Inverted, so a stamp ABOVE a row renders after it. */}
+        <TranscriptRow
+          context={context}
+          {...(dmRole ? { dmRole } : {})}
+          entry={entry}
+          layout={layout}
+          {...(receipt ? { receipt } : {})}
+        />
+      </ContextMenuHost>
       {layout.dateStamp ? <DateSeparator label={layout.dateStamp} /> : null}
     </View>
   )
+}
+
+/**
+ * The message's own menu, and what a selection from it does.
+ *
+ * `hasDetails` is narrower than it looks, and deliberately so: the only disclosure
+ * the shared `expanded` store OWNS for a plain item id is the cron card's. A tool
+ * card keeps its own `useState` — with a third state, "the reader has not decided",
+ * that a boolean set cannot express — and a roll-up is keyed by run rather than by
+ * item. So Show details is offered where it is actually connected, and the other two
+ * keep their chevrons. Wiring those into the shared store is its own change.
+ */
+function useMessageMenu(
+  item: TranscriptItem,
+  context: TranscriptContext
+): { items: ReturnType<typeof messageMenuItems>; select: (id: string) => void } {
+  const [expanded, toggleExpanded] = useExpanded(item.id)
+  const hasDetails = item.kind === 'cron_delivery'
+
+  const items = useMemo(
+    () =>
+      messageMenuItems({
+        canOpenBot: Boolean(context.onOpenBot),
+        detailsOpen: expanded,
+        hasDetails,
+        item
+      }),
+    // `item.version` is the engine's change key, so a streamed reply rebuilds the
+    // menu's Copy lines and its links without deep-comparing the text.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [context.onOpenBot, expanded, hasDetails, item, item.version]
+  )
+
+  const select = useCallback(
+    (id: string) => {
+      const action = parseMessageMenuAction(id, item)
+
+      switch (action?.kind) {
+        case 'copyText':
+        case 'copyMarkdown':
+          copyToClipboard(action.text)
+
+          return
+
+        case 'copyLink':
+          copyToClipboard(action.href)
+
+          return
+
+        case 'openBot':
+          context.onOpenBot?.(action.handle)
+
+          return
+
+        case 'toggleDetails':
+          toggleExpanded()
+
+          return
+
+        default:
+          return
+      }
+    },
+    [context, item, toggleExpanded]
+  )
+
+  return { items, select }
 }
 
 const AWAY_THRESHOLD = 32
@@ -783,26 +867,39 @@ function TranscriptListBody({
             {chatStrings.transcript.empty}
           </Text>
         }
-        // Inverted, so the "header" renders at the visual bottom, which is where
-        // the typing bubble belongs — but only while no streaming reply is on
-        // screen, because that reply's own bubble holds the dots (§6.2).
-        //
-        // The header is rendered ALWAYS, empty when there is nothing to say, and
-        // that is the load-bearing part. `maintainVisibleContentPosition` anchors
-        // on the scroll view's first subview; a header that comes and goes makes
-        // that subview appear and disappear under it, so the anchor moves by the
-        // typing bubble's whole height and the list corrects for a shift that
-        // never happened — a jump, and then `autoscrollToTopThreshold` scrolling
-        // back down by itself. A zero-height header changes only its own height,
-        // never its origin, so there is nothing to correct.
-        ListHeaderComponent={
-          <View
-            style={typing && !streamingTail ? { paddingTop: BUBBLE_GAP.separate } : undefined}
-            testID={`${testID}-typing-slot`}
-          >
-            {typing && !streamingTail ? <TypingIndicator /> : null}
-          </View>
-        }
+        /*
+         * A one-point spacer, and it is the single most load-bearing view in this
+         * file. It is the ANCHOR `maintainVisibleContentPosition` holds the list
+         * against, and it is one point tall rather than zero because of the exact
+         * condition RCTScrollViewComponentView uses to pick one:
+         *
+         *   hasNewView = subview.frame.origin.y + subview.frame.size.height
+         *                > _scrollView.contentOffset.y
+         *
+         * At the bottom of an inverted list `contentOffset.y` is 0, so a
+         * ZERO-height header at origin 0 fails that test — `0 > 0` is false — and
+         * the anchor falls through to the first CELL instead. The cell's origin then
+         * moves whenever anything above it in content order changes height, which at
+         * the bottom of an inverted list means: every message sent, and every
+         * appearance of the typing bubble. `_adjustForMaintainVisibleContentPosition`
+         * corrects the offset by that delta and then, because the offset was within
+         * `autoscrollToTopThreshold`, animates back to zero. That IS the reported
+         * bug: the chat jumps up and scrolls itself back.
+         *
+         * One point passes the test at every offset a reader can be at the bottom
+         * with, including a rubber-band bounce, so the anchor is ALWAYS this view;
+         * its origin is always 0; the delta is always 0; nothing is ever corrected
+         * and nothing ever animates. Scrolled away from the bottom the loop walks
+         * past it to a genuinely visible row, which is the behaviour older history
+         * landing at the far end needs — so the fix costs that case nothing.
+         *
+         * It is invisible: the content container's own `paddingVertical` is larger
+         * than it is, and it draws nothing.
+         *
+         * The typing bubble used to live here, which is what made the header's
+         * height change. It is now a pinned sibling below the list — see below.
+         */
+        ListHeaderComponent={<View style={{ height: 1 }} testID={`${testID}-anchor`} />}
         contentContainerStyle={[{ paddingHorizontal: theme.space.md, paddingVertical: theme.space.md }, contentStyle]}
         data={data}
         inverted
@@ -829,6 +926,33 @@ function TranscriptListBody({
         scrollEventThrottle={64}
         testID={`${testID}-scroll`}
       />
+
+      {/*
+        The typing bubble, PINNED below the list rather than carried inside it.
+
+        Its height is the whole problem: anything whose height comes and goes at the
+        bottom of an inverted list moves the first cell's origin, and the anchor
+        above exists because of that. Taking it out of the scroll view removes the
+        second half of the same question — the list's content does not change at all
+        when a turn starts, only the list's own frame does, and a frame change moves
+        no subview origin.
+
+        It is the same shape as the agents bar, which is pinned above the list for
+        the same kind of reason. Left-aligned and inset to match the content
+        container's own padding, so it lands exactly where an incoming bubble would
+        (§6.2). It stands down the moment a streaming reply exists, because that
+        reply's own bubble holds the dots.
+      */}
+      <View
+        style={
+          typing && !streamingTail
+            ? { paddingBottom: theme.space.md, paddingHorizontal: theme.space.md, paddingTop: BUBBLE_GAP.separate }
+            : undefined
+        }
+        testID={`${testID}-typing-slot`}
+      >
+        {typing && !streamingTail ? <TypingIndicator /> : null}
+      </View>
 
       {away ? (
         <View style={{ alignItems: 'center', bottom: theme.space.md, left: 0, position: 'absolute', right: 0 }}>

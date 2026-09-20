@@ -16,10 +16,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Pressable, RefreshControl, SectionList, View } from 'react-native'
 
+import { ContextMenuHost } from '../../platform/context-menu'
 import { directTouchPanRef } from '../../platform/pointer-drag'
 import { useBotsStore } from '../../store/bots'
 import { useCronStore } from '../../store/cron'
-import { Screen, Text } from '../../ui/primitives'
+import { BottomSheet, SheetEyebrow } from '../../ui/BottomSheet'
+import { Button, Screen, Text } from '../../ui/primitives'
 import { useEscapeKey } from '../../ui/useEscapeKey'
 import { useTheme } from '../../ui/theme'
 import { CONTROL_MIN_HEIGHT, withAlpha } from '../../ui/tokens'
@@ -67,6 +69,10 @@ export function CronScreen({ initialJobId }: CronScreenProps = {}) {
   const [editing, setEditing] = useState<{ open: boolean; job: CronJob | null }>({ open: false, job: null })
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  // The one thing a row's menu cannot do by itself: two of its four lines have
+  // consequences on the gateway, so they ask first. One piece of state for both,
+  // because two sheets at once is not a state this screen can be in.
+  const [confirming, setConfirming] = useState<{ kind: 'run' | 'delete'; job: CronJob } | null>(null)
 
   // The initial state covers the wide layout, where this screen is mounted with
   // the overlay and dropped with it. On the phone the route is already in the
@@ -110,6 +116,45 @@ export function CronScreen({ initialJobId }: CronScreenProps = {}) {
       }
     },
     [controller, editing.job]
+  )
+
+  /**
+   * A cron row's menu, in one place.
+   *
+   * Pause and Resume go straight through: they are reversible by the same menu
+   * line, and the row's own status dot reports the outcome. Run now and Delete ask
+   * first — see `ConfirmSheet`.
+   */
+  const onRowMenu = useCallback(
+    (job: CronJob, id: string) => {
+      switch (id) {
+        case 'pause':
+          void controller?.pause(job).catch(() => undefined)
+
+          return
+
+        case 'resume':
+          void controller?.resume(job).catch(() => undefined)
+
+          return
+
+        case 'edit':
+          setSaveError(null)
+          setEditing({ open: true, job })
+
+          return
+
+        case 'run':
+        case 'delete':
+          setConfirming({ job, kind: id })
+
+          return
+
+        default:
+          return
+      }
+    },
+    [controller]
   )
 
   const sections = useMemo(() => {
@@ -191,6 +236,7 @@ export function CronScreen({ initialJobId }: CronScreenProps = {}) {
         renderItem={({ item }) => (
           <RoutineRow
             job={item}
+            onMenuSelect={onRowMenu}
             onPress={() => setView({ screen: 'detail', jobId: item.id })}
             showProfile={showProfiles}
           />
@@ -211,7 +257,76 @@ export function CronScreen({ initialJobId }: CronScreenProps = {}) {
         targets={targets}
         visible={editing.open}
       />
+
+      <ConfirmSheet
+        confirming={confirming}
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => {
+          const pending = confirming
+
+          setConfirming(null)
+
+          if (!pending) {
+            return
+          }
+
+          void (pending.kind === 'run' ? controller?.runNow(pending.job) : controller?.remove(pending.job))?.catch(
+            () => {
+              // The controller already put the reason in the store, and the list
+              // shows it; a second report on top of the sheet that just closed
+              // would land on nothing.
+            }
+          )
+        }}
+      />
     </Screen>
+  )
+}
+
+/**
+ * Run now and Delete, asked before they happen.
+ *
+ * One component for both because the two sheets differ only in their words: the
+ * shape is an eyebrow, a question, the consequence in one sentence, and two
+ * buttons with the dangerous one first — which is the shape the detail screen's
+ * delete confirmation already had, and it is `blocking` for the same reason
+ * (ADR-0010: a question is answered by an explicit tap, so Escape must not answer
+ * it either).
+ */
+function ConfirmSheet({
+  confirming,
+  onCancel,
+  onConfirm
+}: {
+  confirming: { kind: 'run' | 'delete'; job: CronJob } | null
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  const theme = useTheme()
+  const words = confirming?.kind === 'run' ? cronStrings.confirmRun : cronStrings.confirmDelete
+  const name = confirming?.job.name ?? ''
+
+  return (
+    <BottomSheet
+      accessibilityLabel={words.title(name)}
+      blocking
+      onRequestClose={onCancel}
+      testID="cron-row-confirm-sheet"
+      visible={confirming !== null}
+    >
+      <View style={{ gap: theme.space.md }}>
+        <SheetEyebrow>{words.eyebrow}</SheetEyebrow>
+        <Text variant="sheetTitle">{words.title(name)}</Text>
+        <Text color="textMuted">{words.body}</Text>
+        <Button
+          onPress={onConfirm}
+          testID="cron-row-confirm"
+          title={words.confirm}
+          variant={confirming?.kind === 'delete' ? 'danger' : 'primary'}
+        />
+        <Button onPress={onCancel} title={words.cancel} variant="secondary" />
+      </View>
+    </BottomSheet>
   )
 }
 
@@ -335,7 +450,17 @@ function EmptyState({ loading, error }: { loading: boolean; error: string | null
  * `next_run_at` is shown as a relative phrase on purpose: the scheduler's
  * timezone is not the phone's (see `relativeTime`).
  */
-function RoutineRow({ job, onPress, showProfile }: { job: CronJob; onPress: () => void; showProfile: boolean }) {
+function RoutineRow({
+  job,
+  onMenuSelect,
+  onPress,
+  showProfile
+}: {
+  job: CronJob
+  onMenuSelect: (job: CronJob, id: string) => void
+  onPress: () => void
+  showProfile: boolean
+}) {
   const theme = useTheme()
   const status = cronStatusOf(job)
   const paused = status === 'paused'
@@ -359,8 +484,24 @@ function RoutineRow({ job, onPress, showProfile }: { job: CronJob; onPress: () =
       ? { label: cronStrings.list.lastLabel, value: lastRun }
       : { label: cronStrings.list.nextLabel, value: cronStrings.list.noNextRun }
 
-  return (
-    <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} testID={`cron-row-${job.id}`}>
+  const menu = [
+    paused
+      ? { id: 'resume', title: cronStrings.detail.resume, systemImage: 'play' }
+      : { id: 'pause', title: cronStrings.detail.pause, systemImage: 'pause' },
+    // The ellipsis is the platform's own promise that a line asks before it acts.
+    { id: 'run', title: `${cronStrings.detail.runNow}…`, systemImage: 'bolt' },
+    { id: 'edit', title: cronStrings.detail.edit, systemImage: 'pencil' },
+    { id: 'delete', title: `${cronStrings.detail.delete}…`, systemImage: 'trash', destructive: true }
+  ]
+
+  const row = (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={{ cursor: 'pointer' }}
+      testID={`cron-row-${job.id}`}
+    >
       {({ pressed }) => (
         <View
           style={{
@@ -424,5 +565,16 @@ function RoutineRow({ job, onPress, showProfile }: { job: CronJob; onPress: () =
         </View>
       )}
     </Pressable>
+  )
+
+  return (
+    <ContextMenuHost
+      items={menu}
+      menuTitle={job.name}
+      onSelect={id => onMenuSelect(job, id)}
+      testID={`cron-row-menu-${job.id}`}
+    >
+      {row}
+    </ContextMenuHost>
   )
 }

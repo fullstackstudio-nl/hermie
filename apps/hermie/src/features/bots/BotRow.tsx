@@ -8,13 +8,14 @@
  * one of four beads, and it is a pure function so the row and (in Part 2) the
  * chat header cannot disagree about what a bot is doing.
  */
-import { memo, useState } from 'react'
-import { Pressable, View } from 'react-native'
+import { memo, useMemo, useState } from 'react'
+import { Pressable, View, type PanResponderInstance } from 'react-native'
 
 import { unreadBadgeLabel } from '@hermie/transcript'
 
 import { Avatar, formatListTime, formatPreview } from '../../chat-ui'
 import { strings } from '../../i18n/strings'
+import { ContextMenuHost, HAS_NATIVE_CONTEXT_MENU } from '../../platform/context-menu'
 import type { Bot } from '../../store/bots'
 import { GlassSurface } from '../../ui/glass'
 import { PresenceBead } from '../../ui/PresenceBead'
@@ -22,10 +23,12 @@ import { Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { AVATAR_SIZE, ROW_HEIGHT, TAP_SLOP, type AccentName } from '../../ui/tokens'
 import type { Presence } from './presence'
+import { rowMenuItems } from './row-menu-items'
 
 export type BotRowProps = {
   bot: Bot
   accent: AccentName
+  archived: boolean
   avatarUri?: string | undefined
   compact: boolean
   editing: boolean
@@ -34,14 +37,28 @@ export type BotRowProps = {
   unread: boolean
   unreadCount: number
   /**
+   * Every section the row can move to, `null` first for the unsectioned top
+   * group. Must be a stable array — it is part of the memo's key, and a fresh one
+   * per render re-renders forty rows because one of them changed.
+   */
+  menuSections: readonly { id: string | null; name: string }[]
+  /**
    * Every callback takes what it acts on rather than closing over it. That is
    * what lets the list hand down ONE identity per handler, which is the only
    * way the memo above survives a roster refresh.
    */
   onPress: (bot: Bot) => void
+  /** A selection from either menu, by the id `rowMenuItems` gave it. */
+  onMenuSelect: (botName: string, id: string) => void
+  /** The fallback sheet's opener. Used where there is no native menu. */
   onOpenMenu: (botName: string) => void
   /** Edit mode only: one position up or down, across dividers included. */
   onMove?: (botName: string, offset: number) => void
+  /** Long press armed the drag; the wrapper's pan responder claims it on the first move. */
+  onArm?: (botName: string) => void
+  onDisarm?: () => void
+  /** Edit mode's grab handle, which drags with no long press first. */
+  handleHandlers?: PanResponderInstance['panHandlers']
 }
 
 function stampOf(presence: Presence, bot: Bot): string {
@@ -52,10 +69,16 @@ function stampOf(presence: Presence, bot: Bot): string {
 
 export const BotRow = memo(function BotRow({
   accent,
+  archived,
   avatarUri,
   bot,
   compact,
   editing,
+  handleHandlers,
+  menuSections,
+  onArm,
+  onDisarm,
+  onMenuSelect,
   onMove,
   onOpenMenu,
   onPress,
@@ -67,6 +90,25 @@ export const BotRow = memo(function BotRow({
   const theme = useTheme()
   const [hovered, setHovered] = useState(false)
   const swatch = theme.accent(accent)
+
+  /**
+   * Built here rather than by the list, so the list can keep handing every row the
+   * same handler identities. The dependencies are the row's own state, which is
+   * exactly what the menu's ticks and its Archive/Unarchive wording read.
+   */
+  const menu = useMemo(
+    () =>
+      rowMenuItems({
+        accent,
+        archived,
+        botName: bot.name,
+        displayName: bot.displayName,
+        movable: !archived,
+        sections: menuSections,
+        unread
+      }),
+    [accent, archived, bot.displayName, bot.name, menuSections, unread]
+  )
 
   // Offline replaces the preview with when the bot was last heard from: a stale
   // last message under a dead connection reads as if it just arrived.
@@ -99,7 +141,16 @@ export const BotRow = memo(function BotRow({
       }}
     >
       {editing ? (
-        <View style={{ alignItems: 'center', gap: 2, width: 26 }}>
+        <View
+          // The grab handle drags immediately: in edit mode a press on this column
+          // cannot mean anything else, so there is nothing for a long press to
+          // disambiguate. It is `View` and not `Pressable` on purpose — a pressable
+          // would claim the touch before the pan responder saw it.
+          accessibilityLabel={strings.layout.dragHint}
+          style={{ alignItems: 'center', gap: 2, width: 26 }}
+          testID={`bot-drag-handle-${bot.name}`}
+          {...(handleHandlers ?? {})}
+        >
           <MoveButton
             direction="up"
             label={`${strings.layout.moveUp}: ${bot.displayName}`}
@@ -173,16 +224,32 @@ export const BotRow = memo(function BotRow({
     </View>
   )
 
-  return (
+  const pressable = (
     <Pressable
       accessibilityLabel={label}
       accessibilityRole="button"
       accessibilityState={{ selected }}
-      onLongPress={() => onOpenMenu(bot.name)}
+      // 300ms, not the default 500: a lift the reader has to wait half a second for
+      // reads as a list that did not notice them.
+      delayLongPress={300}
+      /*
+       * One gesture, two meanings, split by platform — and the split is not a
+       * preference, it is what each platform has.
+       *
+       * Where the native menu exists, a long press already opens it (UIKit's own
+       * interaction, see `platform/context-menu`), so this one arms the drag and the
+       * two separate by themselves: holding still gets the menu, holding and then
+       * moving gets the drag. Where it does not, a long press is the ONLY way to
+       * reach a row's options at all, so it opens the fallback sheet and the drag is
+       * reached through edit mode's handle instead.
+       */
+      onLongPress={() => (HAS_NATIVE_CONTEXT_MENU ? onArm?.(bot.name) : onOpenMenu(bot.name))}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
       onPress={() => onPress(bot)}
-      style={{ marginHorizontal: theme.space.sm }}
+      onPressOut={onDisarm}
+      // A row is a thing you click, and on a Mac the pointer has to say so.
+      style={{ cursor: 'pointer', marginHorizontal: theme.space.sm }}
       testID={`bot-row-${bot.name}`}
     >
       {selected ? (
@@ -202,6 +269,19 @@ export const BotRow = memo(function BotRow({
         </View>
       )}
     </Pressable>
+  )
+
+  // The host draws nothing and lays its child out as a `View` would, so on a build
+  // without the native menu this is the same tree with one wrapper fewer.
+  return (
+    <ContextMenuHost
+      items={menu}
+      menuTitle={bot.displayName}
+      onSelect={id => onMenuSelect(bot.name, id)}
+      testID={`bot-row-menu-${bot.name}`}
+    >
+      {pressable}
+    </ContextMenuHost>
   )
 })
 

@@ -2473,3 +2473,251 @@ stopping — see below.
 - **A before-and-after pair for the typing bubble.** Only the after exists; the simulator was shared
   with another change in flight and the before capture was abandoned rather than leave the file in a
   reverted state.
+
+## Normal Mac behaviour, end to end (2026-09-20, later)
+
+The owner asked for four things by name — a right-click menu on a chat row, hold
+and drag to reorder, a right-click menu on a message, and "everything else that
+makes it feel like a Mac app" — and for the transcript bug that two rounds had
+failed to pin down. Three of the five have a mechanism worth writing down,
+because in each case the obvious approach is the wrong one and the reason is not
+visible from JavaScript.
+
+### React Native has no secondary click, so the menu has to be a native view
+
+There is no `onContextMenu`, no `onSecondaryClick` and no modifier on a press.
+`Pressable` offers `onLongPress`, which is why the chat list's row menu was a
+bottom sheet: a press and hold was the only secondary gesture available on every
+platform Hermie ships. A right click on a Mac or an iPad trackpad did not reach
+the app at all.
+
+`UIContextMenuInteraction` is the whole answer and it is attached to a HOST view
+— `HermieContextMenuView` in `modules/hermie-mac` — that draws nothing and lays
+its children out as a `View` would. So a call site wraps the tree it already had,
+and a build without the native side renders the same tree with the wrapper gone.
+
+Four things come with the interaction that a drawn menu would have to reimplement:
+the system's glass, size and placement including flipping near a window edge; the
+target lifting into a preview, which is what says "this menu belongs to THAT row";
+arrow keys, Return and Escape; and the secondary click itself, which UIKit maps to
+the interaction without being asked.
+
+Two decisions inside it:
+
+- **The `UIMenu` is built in the action provider, not when `items` changes.** A
+  row's menu carries the row's state — which colour is ticked, Archive or
+  Unarchive, which sections exist — and that changes while the menu is closed far
+  more often than it is opened. Building late means it cannot be stale.
+- **`items` is a plain `[Any]`, walked by `HermieMenuNode`, not an ExpoModulesCore
+  `Record`.** A menu is a tree, and a record whose field is an array of itself is a
+  recursive reflection problem. The walk is the same amount of code with no such
+  question in it.
+
+The JavaScript side probes availability by asking the MODULE for
+`setClipboardString`, a function added in the same change. `requireNativeView`
+throws for a view that is not registered, and it throws at module scope where
+nothing can catch it usefully; a binary that answers yes to the function has the
+view, and a binary that answers no is never asked for it.
+
+### `Text selectable` and a context menu cannot both have the gesture
+
+`selectable` is not a selection — it is a `UILongPressGestureRecognizer` that
+presents a `UIEditMenuInteraction` whose only action copies the whole paragraph
+(measured last round from `RCTParagraphComponentView.mm`). With a context menu on
+the same view, two interactions race for one press. So the markdown renderer's
+`selectable` now defaults to `!HAS_NATIVE_CONTEXT_MENU`: the menu does the same
+copy, with the choice of words or markdown, and there is one gesture.
+
+### The drag is claimed, never assumed
+
+A plain drag has to keep doing what it did: scroll on a phone, and nothing at all
+on a Mac, where `useDirectTouchPanOnly` already stops a pointer drag panning a
+list. So the reorder is long-press-THEN-move. The row's own `onLongPress` arms it
+and the first move past a 6pt slop claims the responder from the `Pressable`,
+which cancels the press so the chat does not also open.
+
+That is also, for free, how it coexists with the context menu.
+`UIContextMenuInteraction` cancels itself when the touch moves and its delay is
+longer than the 300ms arm, so holding still gets the menu and holding then moving
+gets the drag. Nothing arbitrates that; the two gestures are simply distinct — the
+same split the Files app has.
+
+On Android a long press still opens the fallback sheet, because that sheet is the
+only menu there and Move up / Move down live in it. `armEnabled` is off, and the
+drag is reached through edit mode's handle, which claims the touch outright.
+
+`PanResponder` and `Animated`, not a gesture library: ADR-0010 keeps those out of
+the chat surface and the list is not the chat surface, but two native
+dependencies, a Babel plugin and a worklet runtime for one gesture on one screen
+is not a trade this needed.
+
+### The menu bar is installed onto the app delegate's class at runtime
+
+`buildMenu(with:)` is a `UIResponder` method and UIKit calls it on the APP
+DELEGATE. Hermie's app delegate is generated (`apps/hermie/ios` is not committed),
+`ExpoAppDelegateSubscriber` has no menu hook, and the scene delegate is not an
+alternative — a scene is in the responder chain, its delegate is not. So
+`HermieMenuBar.install()` adds `buildMenuWithBuilder:` and a command selector to
+the delegate's class with `class_addMethod`, from the module's `OnCreate`.
+
+It ADDS, it does not swizzle: `UIResponder`'s own implementation does nothing and
+nothing installed here implements it, so there is no previous behaviour to chain
+to, and `class_addMethod` fails outright if the class already defines the method —
+which reads as "no menu" rather than as a silently replaced one.
+
+⌘W is the one standard item that is replaced. The owner asked for it to close the
+overlay or sheet one level, the way Escape does; with `UIMenu.Identifier.close` in
+place the keystroke never reaches the app. It is removed and a Close of Hermie's
+own takes the same key equivalent, so the shortcut stays discoverable. The
+consequence is stated plainly: **⌘W on a bare chat list now does nothing**, and
+⌘Q is how the window closes.
+
+### The shortcut seam is an allow-list for a privacy reason, not a tidiness one
+
+The keyboard half reads GameController's `keyChangedHandler`, the same handler
+Escape uses, and that handler sees every key in the app — including keys typed
+into the composer and into a password field, because it is below the responder
+chain. So nothing is emitted unless Command (or Control, for Tab) is held AND the
+key is in a fixed table. There is no path from a letter to JavaScript through this
+seam. Shift disqualifies everything, so ⌘⇧K is not ⌘K.
+
+`UIKeyCommand` was not used for the keyboard half for the reason Escape is not
+one: a presented `Modal` leaves the responder chain, and a shortcut that stops
+working while a sheet is open is a shortcut nobody trusts. The menu bar's items
+ARE key commands — a menu bar has no alternative — and they route to the same
+event, so the two cannot drift.
+
+### The transcript jump: one comparison in RCTScrollViewComponentView
+
+This is the round it was actually found, and the previous round's fix was aimed
+one step to the side of it.
+
+`_prepareForMaintainVisibleScrollPosition` picks the anchor like this:
+
+```objc
+hasNewView = subview.frame.origin.y + subview.frame.size.height
+             > _scrollView.contentOffset.y;
+```
+
+At the bottom of an inverted list `contentOffset.y` is **0**. A ZERO-height header
+at origin 0 therefore fails that test — `0 > 0` is false — and the loop walks past
+it to the first CELL. Last round's fix made the header always rendered and
+zero-height when idle, which removed the mount/unmount but left the header out of
+the anchor role exactly when it mattered.
+
+With the first cell as the anchor, anything that changes height above it in
+content order moves its origin, and at the bottom of an inverted list that is:
+every message sent, and every appearance and disappearance of the typing bubble.
+`_adjustForMaintainVisibleContentPosition` then corrects `contentOffset` by the
+delta and, because the offset was within `autoscrollToTopThreshold`, calls
+`scrollToOffset(0, animated: YES)`. That is the owner's description exactly: it
+jumps up, then scrolls back.
+
+The fix is two facts rather than one behaviour:
+
+1. **The header is a one-point spacer whose height never changes.** One point wins
+   `hasNewView` at every offset a reader can be at the bottom with, including a
+   rubber-band bounce, so the anchor is always that view, its origin is always 0,
+   and the delta is always 0. Scrolled away, the loop walks past it to a genuinely
+   visible row, so pagination at the far end is unaffected.
+2. **The typing bubble is a pinned sibling BELOW the list, not content inside it.**
+   Its height still comes and goes, but a change to the scroll view's own frame
+   moves no subview origin. It is the same shape as the agents bar, which is pinned
+   above the list for the same kind of reason.
+
+`__tests__/chat-ui/transcript-anchor.test.tsx` holds both as the invariant "while
+at the bottom, a streaming turn never changes the visible offset except by
+growth", expressed as the two structural facts, because the correction itself
+happens in UIKit where a test renderer cannot watch it.
+
+### The fake gateway could not produce the turn that triggers it
+
+Last round's note ended with "the fake gateway never emits `reasoning.delta`" as
+the obvious next step, and it was. A scripted reply now takes `reasoning` deltas,
+one `reasoningAvailable` frame and `toolGenerating`, and the DEFAULT scenario uses
+all three — so `npm run fake-gateway` produces a turn that thinks before it
+speaks, which is the ordering that makes the client create its assistant item
+before any text exists and therefore replaces the typing bubble mid-turn.
+
+`toolGenerating` is a flag rather than automatic because several in-process tests
+pass their own scenarios and count frames; the default scenario is where it is
+exercised.
+
+### Verified, and where
+
+**Verified on this machine:**
+
+- `npm run typecheck`, `npx eslint apps packages scripts`, `npx prettier --check`,
+  `npm test`, `npm run test:app` — all green, including the new suites
+  `context-menus`, `drag-reorder`, `desktop-shortcuts` and `chat-ui/transcript-anchor`.
+- The three new Swift files COMPILE and their symbols are in the built product.
+  Demangled from `libHermieMac.a`: `HermieContextMenuView.contextMenuInteraction(_:configurationForMenuAtLocation:)`,
+  `HermieMenuNode.element(onSelect:)`, `HermieMenuBar.install()`,
+  `HermieMenuBar.setMenuBar(titles:chats:)`.
+- The app builds, installs and RUNS on the iOS 27 iPad Pro 13" and iPhone 18 Pro
+  simulators with the new module linked, in both themes, with no layout
+  regression from moving the typing bubble out of the list.
+
+**Reasoned, not watched — and the list is longer than usual this round:**
+
+- **Every one of the context menus actually opening.** A menu needs a secondary
+  click or a long press, and this machine has neither: `xcrun simctl` has no touch
+  verb and the tooling that can drive a simulator by other means was not available
+  in this session. The JavaScript contract is unit tested end to end (items in,
+  action out) and the interaction is documented UIKit, but nobody has seen one of
+  these menus on screen.
+- **The drag.** Same reason. The arithmetic between the visible list and the flat
+  arrangement is tested as a pure function; the gesture itself is not.
+- **Every keyboard shortcut, and the whole menu bar.** The menu bar exists only on
+  a Mac, which cannot be launched here (ADR-0011).
+- **Whether `class_addMethod` lands on the Expo app delegate.** It is guarded and
+  reports `isMenuBarInstalled()`, so the failure mode is "no Hermie menu" rather
+  than a broken one, but the success case is not observed.
+- **That the transcript jump is gone.** The cause is now identified from React
+  Native's own source rather than suspected, and the two structural facts that
+  make the correction unreachable are asserted by test — but the jump itself was
+  never observed happening and has not been observed stopping.
+
+### What this pass did NOT do
+
+- **Tool cards and bot-to-bot roll-ups have no Show details line.** A tool card
+  keeps its own `useState` with a third state — "the reader has not decided", which
+  is what lets a verbosity change still open it — and a roll-up is keyed by run
+  rather than by item id. Neither fits the shared disclosure store a boolean set
+  can express. The cron card does, and has the line. Wiring the other two is its
+  own change.
+- **Cmd+F.** There is no transcript search to focus, so the shortcut was left out
+  rather than added as a key that does nothing.
+- **Jump to reply** on a message menu. There is no stable id on the reply side of
+  a bot-to-bot exchange to jump TO; `Open @handle's chat` is what shipped instead.
+- **A hover screenshot.** Pointer emulation needs a pointer, and see above.
+
+### The manual test, for a Mac window
+
+Six things, in this order. The first three are what was asked for by name; the
+last three are the ones nothing here could watch.
+
+1. **Right-click a chat row.** A system menu opens under the pointer with the row
+   lifted behind it: Open, Mark as read, Colour ▸, Move to section ▸, Move up /
+   down, Add divider above, Archive. Arrow keys move the highlight, Return chooses,
+   Escape dismisses. Colour ▸ shows a tick on the colour that chat is on.
+2. **Right-click a message.** Copy text, Copy as Markdown, Copy link ▸ (one line
+   per link), and on a bot-to-bot line `Open @writer's chat`. Copy text pastes the
+   words; Copy as Markdown pastes the syntax. Dragging across the bubble must NOT
+   start a selection on top of the menu.
+3. **Hold a chat row and drag it with the mouse.** Press and hold for a beat, then
+   move: the row lifts with a shadow and a line shows where it lands. Drag across a
+   section heading and drop — the chat changes section. Hold WITHOUT moving and you
+   should get the menu from (1) instead, not a drag.
+4. **⌘K, ⌘,, ⌘1…9, ⌘↑/⌘↓, ⌃Tab, ⌘W.** Search focuses, Settings opens, the numbers
+   open the nth chat in the list as you see it, the arrows step between chats, ⌘W
+   closes one level — and ⌘W on a bare chat list now does nothing at all, because
+   the window's standard Close was replaced. ⌘Q still quits.
+5. **The menu bar.** A **Chats** menu between View and Window, holding Search…,
+   Settings…, Close and the first nine chats by name with ⌘1…9 beside them. Edit ▸
+   Copy / Paste / Select All must work in the composer.
+6. **Send a message to a bot and watch it think.** The transcript must not jump up
+   and scroll itself back — not when the message is sent, not when the typing dots
+   appear, and not when they are replaced by the reply. Run the fake gateway with
+   no arguments; its default reply now thinks before it speaks, which is the turn
+   that used to trigger it.

@@ -29,7 +29,11 @@ export function Button({ title, variant = 'primary', busy = false, disabled, sty
       accessibilityRole="button"
       accessibilityState={{ disabled: inactive, busy }}
       disabled={inactive}
-      style={style}
+      // Every button in the app is a button under a pointer, and a Mac says so with
+      // the cursor. React Native 0.81 offers exactly two values, `auto` and
+      // `pointer`, so a disabled button falls back to `auto` rather than to an
+      // explicit arrow — a pointing hand over something that does nothing is a lie.
+      style={[{ cursor: inactive ? 'auto' : 'pointer' }, style as never]}
       {...rest}
     >
       {({ pressed }) => (

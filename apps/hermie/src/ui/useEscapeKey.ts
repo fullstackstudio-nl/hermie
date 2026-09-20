@@ -33,6 +33,25 @@ function deliver(): void {
 }
 
 /**
+ * Close one level, the way Escape does, from something that is not Escape.
+ *
+ * ⌘W is the only caller. The owner asked for it to close the overlay or the sheet
+ * — "one level, like Esc" — and the honest way to make that true is for it to be
+ * the same delivery rather than a second rule that agrees with this one until it
+ * does not. Returns whether anything was registered to take it, so ⌘W on a bare
+ * chat list can be a no-op rather than a mystery.
+ */
+export function closeTopmost(): boolean {
+  if (!stack.length) {
+    return false
+  }
+
+  deliver()
+
+  return true
+}
+
+/**
  * Take Escape while `enabled`.
  *
  * `enabled` is the visibility of whatever is registering — a sheet that is

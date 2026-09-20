@@ -12,6 +12,22 @@ Two rules from that document are easy to lose and expensive to rediscover:
 The mockup is the source of truth and the app follows it, with these knowing exceptions. Each one is
 a decision, not a shortfall; if the mockup should change instead, change it and this list with it.
 
+- **A row's options, a message's options and a cron's options are the PLATFORM's menu, not a
+  drawn one.** The mockup shows the chat row's options as a bottom sheet, and the sheet is still
+  what Android gets. Where `UIContextMenuInteraction` exists — a Mac, an iPad, an iPhone — a
+  secondary click or a long press opens a real `UIMenu` instead: the system's glass, its placement,
+  its keyboard navigation, and the row lifting into a preview. The mockup's sheet cannot be drawn
+  with any of those, and a Mac that answers a right click with a sheet from the bottom of the window
+  is the specific thing the owner asked to stop. The two are built from ONE list of items
+  (`src/ui/menu.ts`), so nothing about what a row can do lives in two places.
+
+- **The transcript's typing bubble is pinned below the list rather than being its last row.** §6.2
+  puts it at the bottom of the transcript, which is where it still draws — but it is a sibling of
+  the scroll view, not content inside it. Anything whose height comes and goes at the bottom of an
+  inverted list moves the first cell's origin, and that is the whole cause of the jump-and-scroll-back
+  the owner reported; see the 2026-09-20 section of docs/platform-notes.md. Visually identical,
+  including the gap above it.
+
 - **The bubble tail is drawn BEHIND the bubble, not inside it.** §6.1 says the tail is an inline SVG
   child of the bubble, absolutely positioned at its bottom corner. It is a sibling rendered first
   instead, so the bubble's own fill covers the overlapping part. Drawn on top, the tail's flat colour

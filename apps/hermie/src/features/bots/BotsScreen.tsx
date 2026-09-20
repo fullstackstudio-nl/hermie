@@ -25,14 +25,26 @@
  * The only difference is density and the title size — the tab strip and the
  * gateway card are in both, because both mockup frames show them.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { FlatList, Pressable, RefreshControl, ScrollView, TextInput, View } from 'react-native'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Animated,
+  FlatList,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  TextInput,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent
+} from 'react-native'
 
 import { unreadCountSince } from '@hermie/transcript'
 
 import { useGateway } from '../../gateway'
 import { SignedOutPanel } from '../../gateway/SignedOutPanel'
 import { strings } from '../../i18n/strings'
+import { ContextMenuHost, HAS_NATIVE_CONTEXT_MENU } from '../../platform/context-menu'
+import { setMenuBar } from '../../platform/desktop-shortcuts'
 import { directTouchPanRef } from '../../platform/pointer-drag'
 import { useSafeAreaInsets } from '../../platform/safe-area'
 import { isUnread, useBotsStore, type Bot } from '../../store/bots'
@@ -41,13 +53,18 @@ import { useChatsStore } from '../../store/chats'
 import { GlassSurface } from '../../ui/glass'
 import { Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
+import { useHover } from '../../ui/useHover'
+import { useNumberedShortcuts, useShortcut } from '../../ui/useShortcut'
 import { CONTROL_MIN_HEIGHT, TAP_SLOP, type AccentName } from '../../ui/tokens'
 import { useChatRuntime } from '../chats/ChatRuntime'
 import { BotRow } from './BotRow'
 import { ConnectionLine } from './ConnectionLine'
+import { dragAnchors, entryIndexByKey } from './drag-order'
 import { CHAT_FILTERS, matchesFilter, presenceOf, type ChatFilter, type Presence } from './presence'
+import { parseRowMenuAction } from './row-menu-items'
 import { RowMenu } from './RowMenu'
 import { SidebarFooter, type BotsSection, type TabKey } from './SidebarFooter'
+import { useRowDrag } from './use-row-drag'
 
 export type { BotsSection }
 
@@ -288,6 +305,186 @@ export function BotsScreen({
 
   const hasRows = items.some(item => item.kind === 'bot')
 
+  /**
+   * The visible chats, in the order the reader sees them.
+   *
+   * ⌘1…9 and ⌘↑/↓ count in THIS order rather than in the roster's or the
+   * arrangement's, because it is the only one the reader can see — a search or a
+   * filter narrows the list, and a shortcut that skipped a hidden row would land
+   * somewhere nobody pointed at. It is also what the Mac's menu bar names.
+   */
+  const visibleBots = useMemo(
+    () => items.filter(item => item.kind === 'bot' && !item.archived).map(item => (item as { bot: Bot }).bot),
+    [items]
+  )
+
+  /** One stable array for every row's menu; see `BotRow.menuSections`. */
+  const menuSections = useMemo(
+    () => [{ id: null, name: strings.layout.topGroup }, ...dividers.map(d => ({ id: d.id, name: d.name }))],
+    [dividers]
+  )
+
+  const listRef = useRef<FlatList<ListItem>>(null)
+  const searchRef = useRef<TextInput>(null)
+  const scrollOffset = useRef(0)
+
+  const entryIndexes = useMemo(() => entryIndexByKey(entries), [entries])
+  const anchors = useMemo(() => dragAnchors(items, entryIndexes), [entryIndexes, items])
+
+  const drag = useRowDrag({
+    anchors,
+    // Long press means the native menu where there is one, and the fallback sheet
+    // where there is not. Either way it is not free for the drag to take, so on
+    // Android the handle in edit mode is the only way in.
+    armEnabled: HAS_NATIVE_CONTEXT_MENU,
+    entryCount: entries.length,
+    onAutoScroll: useCallback((delta: number) => {
+      const next = Math.max(0, scrollOffset.current + delta)
+
+      listRef.current?.scrollToOffset({ animated: false, offset: next })
+    }, []),
+    onCommit: useCallback((name: string, index: number) => {
+      useChatLayoutStore.getState().moveToIndex(name, index)
+    }, [])
+  })
+
+  const openIndex = useCallback(
+    (index: number) => {
+      const bot = visibleBots[index]
+
+      if (bot) {
+        openBot(bot)
+      }
+    },
+    [openBot, visibleBots]
+  )
+
+  useShortcut('search', () => searchRef.current?.focus())
+  useNumberedShortcuts(openIndex)
+
+  /**
+   * ⌘↑ / ⌘↓ and ⌃Tab, relative to the row that is open.
+   *
+   * With nothing open the first press lands on the first chat rather than on the
+   * last: a reader who has just started the app and reaches for "next" means the
+   * top of the list.
+   */
+  const step = useCallback(
+    (offset: number) => {
+      const at = visibleBots.findIndex(bot => bot.name === selectedBot)
+
+      openIndex(at === -1 ? 0 : Math.max(0, Math.min(visibleBots.length - 1, at + offset)))
+    },
+    [openIndex, selectedBot, visibleBots]
+  )
+
+  useShortcut('nextChat', () => step(1))
+  useShortcut('previousChat', () => step(-1))
+
+  /**
+   * One ref, two readers. The list is held so a drag can auto-scroll it, and
+   * `applyDirectTouchPan` still has to see the same view — a Mac must not pan this
+   * list under a pointer either (`platform/pointer-drag`). `useCallback`, because a
+   * fresh callback ref per render is a detach and a re-attach per render.
+   */
+  const attachList = useCallback((view: FlatList<ListItem> | null) => {
+    listRef.current = view
+    directTouchPanRef(view)
+  }, [])
+
+  /** Rename from a divider's own menu: edit mode on, and the caret in that field. */
+  const renameDivider = useCallback((id: string) => {
+    setEditing(true)
+    setAddedDividerId(id)
+  }, [])
+
+  const onListScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      scrollOffset.current = event.nativeEvent.contentOffset.y
+      drag.onListScroll(scrollOffset.current)
+    },
+    [drag]
+  )
+
+  /**
+   * Hand the Mac's menu bar the same nine chats ⌘1…9 reaches, with the app's own
+   * wording. A no-op on every other platform — see `platform/desktop-shortcuts`.
+   */
+  useEffect(() => {
+    setMenuBar(
+      strings.menuBar,
+      visibleBots.slice(0, 9).map(bot => bot.displayName)
+    )
+  }, [visibleBots])
+
+  /**
+   * One selection from either menu.
+   *
+   * The native menu and the fallback sheet report the same ids (`row-menu-items`),
+   * so this is the only handler for both and there is no second table of what a row
+   * can do sitting beside the first one.
+   */
+  const onMenuSelect = useCallback(
+    (name: string, id: string) => {
+      const action = parseRowMenuAction(id)
+      const layout = useChatLayoutStore.getState()
+
+      switch (action?.kind) {
+        case 'open': {
+          const bot = byName[name]
+
+          if (bot) {
+            openBot(bot)
+          }
+
+          return
+        }
+
+        case 'markRead':
+          useBotsStore.getState().markSeen(name, byName[name]?.canonical?.lastActive)
+
+          return
+
+        case 'accent':
+          layout.setAccent(name, action.accent)
+
+          return
+
+        case 'section':
+          layout.moveToSection(name, action.dividerId)
+
+          return
+
+        case 'move':
+          layout.moveBy(name, action.offset)
+
+          return
+
+        case 'archiveToggle':
+          layout.setArchived(name, !layout.archived[name])
+
+          return
+
+        case 'dividerAbove': {
+          const id = layout.addDividerAbove(name, '')
+
+          // Straight into the field, and into edit mode to show it: a section that
+          // stays untitled is what put two headings next to each other.
+          if (id) {
+            setEditing(true)
+            setAddedDividerId(id)
+          }
+
+          return
+        }
+
+        default:
+          return
+      }
+    },
+    [byName, openBot]
+  )
+
   // A chat-level failure must not compete with the signed-out card: a dead
   // session is not a roster problem and showing both makes neither readable.
   const rosterError = signedOut ? null : error
@@ -312,7 +509,15 @@ export function BotsScreen({
       */}
       <ConnectionLine />
 
-      <SearchField onChangeText={setQuery} value={query} />
+      <SearchField
+        inputRef={searchRef}
+        onChangeText={setQuery}
+        // Return in the search field opens the first match, which is what Return in
+        // a search field does everywhere. It is the visible order, so it is the same
+        // row ⌘1 would open.
+        onSubmit={() => openIndex(0)}
+        value={query}
+      />
 
       <Filters current={filter} onChange={setFilter} />
 
@@ -327,7 +532,7 @@ export function BotsScreen({
       ) : null}
 
       <FlatList
-        ref={directTouchPanRef}
+        ref={attachList}
         ListEmptyComponent={
           <EmptyState
             error={rosterError}
@@ -342,8 +547,12 @@ export function BotsScreen({
         keyExtractor={item => item.key}
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
+        onLayout={event => drag.onListLayout(event.nativeEvent.layout.height)}
+        onScroll={onListScroll}
         refreshControl={<RefreshControl onRefresh={refresh} refreshing={refreshing} />}
         renderItem={({ item }) => {
+          const line = drag.dropKey === item.key ? <DropLine /> : null
+
           if (item.kind === 'archiveHeader') {
             return (
               <ArchiveHeader count={item.count} onToggle={() => setArchiveOpen(open => !open)} open={archiveOpen} />
@@ -351,36 +560,99 @@ export function BotsScreen({
           }
 
           if (item.kind === 'divider') {
-            return <Divider autoFocus={item.id === addedDividerId} editing={editing} id={item.id} name={item.name} />
+            return (
+              <View onLayout={drag.measure(item.key)}>
+                {line}
+                <Divider
+                  autoFocus={item.id === addedDividerId}
+                  editing={editing}
+                  id={item.id}
+                  name={item.name}
+                  onRename={renameDivider}
+                />
+              </View>
+            )
           }
 
           if (item.kind === 'sectionEmpty') {
-            return <SectionEmpty id={item.id} />
+            return (
+              <View onLayout={drag.measure(item.key)}>
+                {line}
+                <SectionEmpty id={item.id} />
+              </View>
+            )
           }
 
           const state = presence.get(item.bot.name) ?? ARCHIVED_PRESENCE
           const { count, unread } = unreadFor(item.bot.name)
+          const lifted = drag.draggingName === item.bot.name
 
           return (
-            <BotRow
-              accent={accents[item.bot.name] ?? 'default'}
-              bot={item.bot}
-              compact={!sidebar}
-              editing={editing && !item.archived}
-              onMove={moveBot}
-              onOpenMenu={setMenuFor}
-              onPress={openBot}
-              presence={item.archived ? ARCHIVED_PRESENCE : state}
-              selected={item.bot.name === selectedBot}
-              unread={item.archived ? false : unread}
-              unreadCount={item.archived ? 0 : count}
-              {...(avatars[item.bot.name] ? { avatarUri: avatars[item.bot.name] } : {})}
-            />
+            /*
+             * The wrapper carries three things a row cannot carry itself: the
+             * measurement the drop arithmetic needs, the pan responder that claims
+             * the gesture once a long press has armed it, and the lift.
+             *
+             * The lift is a TRANSFORM on the row in place rather than a separate drag
+             * layer. A portal would let the row leave the list, which nothing here
+             * needs — the drop targets are all inside it — and it would cost a second
+             * copy of the row to keep in sync with the first.
+             */
+            <Animated.View
+              onLayout={drag.measure(item.key)}
+              {...(item.archived ? {} : drag.rowHandlers(item.bot.name))}
+              style={
+                lifted
+                  ? {
+                      elevation: 8,
+                      shadowColor: '#000',
+                      shadowOffset: { height: 6, width: 0 },
+                      shadowOpacity: 0.28,
+                      shadowRadius: 12,
+                      transform: [{ translateY: drag.translateY }, { scale: 1.02 }],
+                      zIndex: 2
+                    }
+                  : undefined
+              }
+              testID={lifted ? `bot-row-lifted-${item.bot.name}` : undefined}
+            >
+              {line}
+              <BotRow
+                accent={accents[item.bot.name] ?? 'default'}
+                archived={item.archived}
+                bot={item.bot}
+                compact={!sidebar}
+                editing={editing && !item.archived}
+                {...(editing && !item.archived ? { handleHandlers: drag.handleHandlers(item.bot.name) } : {})}
+                menuSections={menuSections}
+                onArm={drag.arm}
+                onDisarm={drag.disarm}
+                onMenuSelect={onMenuSelect}
+                onMove={moveBot}
+                onOpenMenu={setMenuFor}
+                onPress={openBot}
+                presence={item.archived ? ARCHIVED_PRESENCE : state}
+                selected={item.bot.name === selectedBot}
+                unread={item.archived ? false : unread}
+                unreadCount={item.archived ? 0 : count}
+                {...(avatars[item.bot.name] ? { avatarUri: avatars[item.bot.name] } : {})}
+              />
+            </Animated.View>
           )
         }}
+        // While a row is lifted the list must not also pan: the auto-scroll at the
+        // edges is what moves it, and two scrollers would fight over one finger.
+        scrollEnabled={drag.draggingName === null}
+        scrollEventThrottle={16}
         style={{ flex: 1 }}
         testID="bots-list"
       />
+
+      {drag.draggingName ? (
+        <Text accessibilityLiveRegion="polite" style={{ height: 0, opacity: 0 }}>
+          {strings.layout.dragging(byName[drag.draggingName]?.displayName ?? drag.draggingName)}
+        </Text>
+      ) : null}
 
       {editing ? <EditBar onAddDivider={setAddedDividerId} /> : null}
 
@@ -448,6 +720,7 @@ function Head({
           accessibilityRole="button"
           hitSlop={TAP_SLOP}
           onPress={onNewCron}
+          style={{ cursor: 'pointer' }}
           testID="bots-new-cron"
         >
           <GlassSurface
@@ -461,7 +734,13 @@ function Head({
         </Pressable>
       ) : null}
 
-      <Pressable accessibilityRole="button" hitSlop={TAP_SLOP} onPress={onToggleEdit} testID="bots-edit">
+      <Pressable
+        accessibilityRole="button"
+        hitSlop={TAP_SLOP}
+        onPress={onToggleEdit}
+        style={{ cursor: 'pointer' }}
+        testID="bots-edit"
+      >
         <Text color="accentText" style={{ fontWeight: '600' }} variant="preview">
           {editing ? strings.layout.done : strings.layout.edit}
         </Text>
@@ -470,7 +749,42 @@ function Head({
   )
 }
 
-function SearchField({ onChangeText, value }: { onChangeText: (value: string) => void; value: string }) {
+/**
+ * Where a dragged row would land.
+ *
+ * Two points of the accent, full width of the row's own inset. A line rather than a
+ * gap that opens up: a gap moves every row below it on every slot change, which on a
+ * list of forty is forty layout passes per centimetre of finger travel.
+ */
+function DropLine() {
+  const theme = useTheme()
+
+  return (
+    <View
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={{
+        backgroundColor: theme.colors.accent,
+        borderRadius: 1,
+        height: 2,
+        marginHorizontal: theme.space.md
+      }}
+      testID="drop-line"
+    />
+  )
+}
+
+function SearchField({
+  inputRef,
+  onChangeText,
+  onSubmit,
+  value
+}: {
+  inputRef: React.RefObject<TextInput | null>
+  onChangeText: (value: string) => void
+  onSubmit: () => void
+  value: string
+}) {
   const theme = useTheme()
 
   return (
@@ -495,8 +809,11 @@ function SearchField({ onChangeText, value }: { onChangeText: (value: string) =>
         autoCorrect={false}
         clearButtonMode="while-editing"
         onChangeText={onChangeText}
+        onSubmitEditing={onSubmit}
         placeholder={strings.bots.search}
         placeholderTextColor={theme.colors.textFaint}
+        ref={inputRef}
+        returnKeyType="go"
         style={{
           color: theme.colors.text,
           flex: 1,
@@ -547,39 +864,54 @@ function Filters({ current, onChange }: { current: ChatFilter; onChange: (filter
       showsHorizontalScrollIndicator={false}
       style={{ flexGrow: 0, marginBottom: theme.space.md }}
     >
-      {CHAT_FILTERS.map(filter => {
-        const selected = filter === current
-
-        return (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ selected }}
-            key={filter}
-            onPress={() => onChange(filter)}
-            style={{
-              backgroundColor: selected ? theme.colors.accent : theme.tintSunk,
-              borderColor: selected ? 'transparent' : theme.hairlineSoft,
-              borderRadius: theme.radii.pill,
-              borderWidth: 1,
-              paddingHorizontal: theme.space.sm,
-              paddingVertical: 6
-            }}
-            testID={`filter-${filter}`}
-          >
-            <Text
-              color={selected ? 'onAccent' : 'textMuted'}
-              // The pill is sized by its label, so the label must not wrap — a
-              // two-line chip changes the row's height instead of its width.
-              numberOfLines={1}
-              style={{ fontWeight: '600' }}
-              variant="meta"
-            >
-              {strings.bots.filters[filter]}
-            </Text>
-          </Pressable>
-        )
-      })}
+      {CHAT_FILTERS.map(filter => (
+        <FilterChip current={current} filter={filter} key={filter} onChange={onChange} />
+      ))}
     </ScrollView>
+  )
+}
+
+function FilterChip({
+  current,
+  filter,
+  onChange
+}: {
+  current: ChatFilter
+  filter: ChatFilter
+  onChange: (filter: ChatFilter) => void
+}) {
+  const theme = useTheme()
+  const hover = useHover()
+  const selected = filter === current
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      onPress={() => onChange(filter)}
+      style={{
+        backgroundColor: selected ? theme.colors.accent : hover.hovered ? theme.glass.row.solid : theme.tintSunk,
+        borderColor: selected ? 'transparent' : theme.hairlineSoft,
+        borderRadius: theme.radii.pill,
+        borderWidth: 1,
+        cursor: 'pointer',
+        paddingHorizontal: theme.space.sm,
+        paddingVertical: 6
+      }}
+      testID={`filter-${filter}`}
+      {...hover.props}
+    >
+      <Text
+        color={selected ? 'onAccent' : 'textMuted'}
+        // The pill is sized by its label, so the label must not wrap — a two-line
+        // chip changes the row's height instead of its width.
+        numberOfLines={1}
+        style={{ fontWeight: '600' }}
+        variant="meta"
+      >
+        {strings.bots.filters[filter]}
+      </Text>
+    </Pressable>
   )
 }
 
@@ -594,20 +926,34 @@ function Divider({
   editing,
   id,
   name,
-  autoFocus
+  autoFocus,
+  onRename
 }: {
   editing: boolean
   id: string | null
   name: string
   autoFocus?: boolean
+  /** Turns edit mode on with this heading's field focused; the menu's Rename. */
+  onRename?: (id: string) => void
 }) {
   const theme = useTheme()
+
+  const menu = useMemo(
+    () =>
+      id
+        ? [
+            { id: 'rename', title: strings.layout.rename, systemImage: 'pencil' },
+            { id: 'remove', title: strings.layout.remove, systemImage: 'trash', destructive: true }
+          ]
+        : [],
+    [id]
+  )
 
   if (!id) {
     return null
   }
 
-  return (
+  const heading = (
     <View
       style={{
         alignItems: 'center',
@@ -669,6 +1015,7 @@ function Divider({
           hitSlop={TAP_SLOP}
           onPress={() => useChatLayoutStore.getState().removeDivider(id)}
           style={({ pressed }) => ({
+            cursor: 'pointer',
             // A bordered chip rather than a bare word: Remove sat as plain text
             // beside a field that also looked like plain text, so neither of the
             // two things edit mode is FOR looked like a control.
@@ -687,6 +1034,25 @@ function Divider({
         </Pressable>
       ) : null}
     </View>
+  )
+
+  return (
+    <ContextMenuHost
+      items={menu}
+      menuTitle={name || strings.layout.unnamedSection}
+      onSelect={selected => {
+        if (selected === 'rename') {
+          onRename?.(id)
+
+          return
+        }
+
+        useChatLayoutStore.getState().removeDivider(id)
+      }}
+      testID={`divider-menu-${id}`}
+    >
+      {heading}
+    </ContextMenuHost>
   )
 }
 
@@ -719,6 +1085,7 @@ function SectionEmpty({ id }: { id: string }) {
 
 function ArchiveHeader({ count, onToggle, open }: { count: number; onToggle: () => void; open: boolean }) {
   const theme = useTheme()
+  const hover = useHover()
 
   return (
     <Pressable
@@ -727,6 +1094,9 @@ function ArchiveHeader({ count, onToggle, open }: { count: number; onToggle: () 
       onPress={onToggle}
       style={{
         alignItems: 'center',
+        backgroundColor: hover.hovered ? theme.glass.row.solid : 'transparent',
+        borderRadius: theme.radii.card,
+        cursor: 'pointer',
         flexDirection: 'row',
         gap: theme.space.sm,
         marginHorizontal: theme.space.sm,
@@ -735,6 +1105,7 @@ function ArchiveHeader({ count, onToggle, open }: { count: number; onToggle: () 
         paddingVertical: theme.space.md
       }}
       testID="archived-row"
+      {...hover.props}
     >
       {/* Decorative: the row's own expanded state is what a screen reader reads. */}
       <Text
@@ -783,6 +1154,7 @@ function EditBar({ onAddDivider }: { onAddDivider: (id: string) => void }) {
         // straight into, and a seeded name means the first thing typed is
         // APPENDED to a word nobody asked for.
         onPress={() => onAddDivider(useChatLayoutStore.getState().addDivider(''))}
+        style={{ cursor: 'pointer' }}
         testID="add-divider"
       >
         <Text color="accentText" style={{ fontWeight: '600' }} variant="meta">

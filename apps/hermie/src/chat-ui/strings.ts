@@ -149,6 +149,23 @@ export const chatStrings = {
     answer: 'Answer',
     answered: 'answered'
   },
+
+  /**
+   * A message's own context menu — what a secondary click on a bubble offers.
+   *
+   * `copyText` and `copyMarkdown` are both here because a reply IS markdown and the
+   * two destinations want different things; see `message-menu.ts`.
+   */
+  menu: {
+    copyText: 'Copy text',
+    copyMarkdown: 'Copy as Markdown',
+    copyLink: 'Copy link',
+    showDetails: 'Show details',
+    hideDetails: 'Hide details',
+    openBotChat: (handle: string) => `Open @${handle}’s chat`,
+    /** What a screen reader announces the menu itself as. */
+    message: 'Message actions'
+  },
   composer: {
     placeholder: 'Message',
     /** The field's accessibility label once the chat knows whose it is. */

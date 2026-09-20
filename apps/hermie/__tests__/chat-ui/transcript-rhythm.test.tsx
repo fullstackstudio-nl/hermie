@@ -94,11 +94,11 @@ describe('the typing bubble', () => {
     expect(slot.paddingTop).toBe(BUBBLE_GAP.separate)
   })
 
-  it('leaves its slot in place for the whole turn, so the list keeps one anchor', () => {
-    // The slot is the scroll view's first subview, which is what
-    // `maintainVisibleContentPosition` anchors on. A slot that came and went
-    // would move that anchor by the bubble's height mid-turn — the jump, and
-    // then the scroll back down.
+  it('leaves its slot in place for the whole turn, and never inside the list', () => {
+    // The slot lives BELOW the scroll view now. Its height still comes and goes,
+    // but it is no longer content, so nothing it does can move a cell's origin —
+    // which is what `maintainVisibleContentPosition` measures. The list's own
+    // anchor is the constant spacer asserted in `transcript-anchor.test.tsx`.
     const view = renderScreen(<TranscriptList items={visible([userItem])} subagents={subagentMap} />)
 
     expect(screen.getByTestId('transcript-list-typing-slot')).toBeTruthy()

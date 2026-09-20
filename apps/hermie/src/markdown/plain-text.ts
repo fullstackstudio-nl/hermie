@@ -98,8 +98,27 @@ function inlineToText(line: string): string {
  * a partially streamed reply, which is the state a preview is usually read in.
  */
 export function plainTextPreview(markdown: string): string {
+  return plainTextLines(markdown).join(' ').replace(/\s+/gu, ' ').trim()
+}
+
+/**
+ * The same words, with the LINES kept.
+ *
+ * A preview wants one line; Copy wants the message. The two differ only in how
+ * the stripped lines are joined, so they share the pass rather than having a
+ * second stripper that agrees with the first until it does not.
+ */
+export function plainTextBlock(markdown: string): string {
+  return plainTextLines(markdown)
+    .join('\n')
+    .replace(/[ \t]+$/gmu, '')
+    .replace(/\n{3,}/gu, '\n\n')
+    .trim()
+}
+
+function plainTextLines(markdown: string): string[] {
   if (!markdown) {
-    return ''
+    return []
   }
 
   const out: string[] = []
@@ -138,5 +157,5 @@ export function plainTextPreview(markdown: string): string {
     out.push(line)
   }
 
-  return out.join(' ').replace(/\s+/gu, ' ').trim()
+  return out
 }

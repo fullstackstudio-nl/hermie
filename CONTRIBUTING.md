@@ -163,8 +163,12 @@ no entitlement. Launch arguments are visible only to the process itself.
   files — `npx expo prebuild --clean` will throw your edits away. There is no third native project:
   the Mac is the iOS one.
 - `apps/hermie/modules` holds local Expo modules, and is **committed**. There are two. `hermie-mac`
-  exposes `ProcessInfo.processInfo.isiOSAppOnMac` and two keyboard answers, because React Native
-  exposes nothing equivalent. `hermie-scene` has no JavaScript side at all: it ships the
+  exposes what React Native has no equivalent for: `ProcessInfo.processInfo.isiOSAppOnMac`, two
+  keyboard answers, an allow-list of desktop shortcuts, a `UIContextMenuInteraction` host view
+  (`HermieContextMenuView` — there is no secondary-click event in React Native at all) and Hermie's
+  own menu in the Mac's menu bar. Adding a Swift file to that module needs no project change — the
+  podspec globs `**/*.swift` — but it DOES need `pod install` before the next build, or the new file
+  is simply not compiled and the symbol is missing with no error anywhere. `hermie-scene` has no JavaScript side at all: it ships the
   `UIWindowSceneDelegate` that `plugins/with-ios-scene-lifecycle.js` names in `Info.plist`, without
   which **iOS 27 refuses to launch the app** — see the 2026-09-20 section of
   [docs/platform-notes.md](docs/platform-notes.md). Expo autolinks anything under `modules/` with no

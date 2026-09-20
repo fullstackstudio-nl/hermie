@@ -57,7 +57,11 @@ export interface ChatLayoutState {
   moveBy: (botName: string, offset: number) => void
   moveToSection: (botName: string, dividerId: string | null) => void
   addDivider: (name: string) => string
+  /** A new section break immediately above one chat, so that chat starts it. */
+  addDividerAbove: (botName: string, name: string) => string | null
   renameDivider: (id: string, name: string) => void
+  /** Put a chat immediately before position `index` of the CURRENT entry list. */
+  moveToIndex: (botName: string, index: number) => void
   removeDivider: (id: string) => void
   setArchived: (botName: string, archived: boolean) => void
   setAccent: (botName: string, accent: AccentName) => void
@@ -264,10 +268,74 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
       write(entries)
     },
 
+    /**
+     * Put one chat immediately before position `index` of the current entry list.
+     *
+     * The hold-and-drag reorder commits through here rather than through a run of
+     * `moveBy` calls: a drag knows where the row ended up, and expressing that as
+     * N single steps means N writes to disk and N chances for the list to
+     * re-render mid-gesture.
+     *
+     * `index` is read against the list AS IT IS, including the dragged row. That
+     * is the number the caller can actually compute — a drop line sits between two
+     * rows it can see — so the shift that removing the row causes is corrected
+     * here rather than at every call site.
+     */
+    moveToIndex(botName, index) {
+      const entries = [...get().entries]
+      const from = entries.findIndex(entry => entry.kind === 'chat' && entry.name === botName)
+
+      if (from === -1) {
+        return
+      }
+
+      const target = Math.max(0, Math.min(entries.length, index))
+
+      // Dropping a row immediately before or immediately after itself is the same
+      // arrangement, and writing it would churn the disk for nothing.
+      if (target === from || target === from + 1) {
+        return
+      }
+
+      const [moved] = entries.splice(from, 1)
+
+      if (!moved) {
+        return
+      }
+
+      entries.splice(target > from ? target - 1 : target, 0, moved)
+      write(entries)
+    },
+
     addDivider(name) {
       const id = newDividerId()
 
       write([...get().entries, { kind: 'divider', id, name }])
+
+      return id
+    },
+
+    /**
+     * A new section break directly above one chat.
+     *
+     * The chat itself does not move, which is the point: "Add divider above" on the
+     * row you are looking at means that row becomes the first one under a new
+     * heading. Returns null for a bot that is not in the arrangement rather than
+     * appending a heading to the end, which would be a divider nowhere near the
+     * row the reader right-clicked.
+     */
+    addDividerAbove(botName, name) {
+      const entries = [...get().entries]
+      const at = entries.findIndex(entry => entry.kind === 'chat' && entry.name === botName)
+
+      if (at === -1) {
+        return null
+      }
+
+      const id = newDividerId()
+
+      entries.splice(at, 0, { kind: 'divider', id, name })
+      write(entries)
 
       return id
     },
