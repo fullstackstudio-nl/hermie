@@ -51,6 +51,7 @@ const SPLASH_BACKGROUND_DARK = '#000000'
 const config: ExpoConfig = {
   name: 'Hermie',
   slug: 'hermie',
+  owner: 'fullstack-studio',
   version: '0.1.0',
   orientation: 'default',
   scheme: 'hermie',
