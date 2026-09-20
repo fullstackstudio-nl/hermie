@@ -179,3 +179,45 @@ describe('what is attached, in the composer', () => {
     expect(screen.queryByTestId('composer-attachments')).toBeNull()
   })
 })
+
+/**
+ * The drop zone is not a hover zone.
+ *
+ * It wraps the whole conversation, so anything it showed on a POINTER event
+ * would cover the transcript the moment the mouse entered the window — which is
+ * the shape of a separate report about the Mac build. The overlay is bound to
+ * the drag session's own callbacks and to nothing else, and this is the
+ * JavaScript half of ruling it out: there is no hover handler anywhere in the
+ * zone, so no pointer event has anything to reach.
+ */
+describe('the drop zone and a passing mouse', () => {
+  it('carries no hover handler at all', () => {
+    renderScreen(
+      <DropZone onFiles={jest.fn()}>
+        <Text>conversation</Text>
+      </DropZone>
+    )
+
+    const hovered = screen.UNSAFE_root.findAll(
+      node => typeof node.props?.onPointerEnter === 'function' || typeof node.props?.onPointerLeave === 'function'
+    )
+
+    expect(hovered).toEqual([])
+  })
+
+  it('shows nothing until a DRAG enters, and takes it away when the drag leaves', () => {
+    renderScreen(
+      <DropZone onFiles={jest.fn()} testID="zone">
+        <Text>conversation</Text>
+      </DropZone>
+    )
+
+    expect(screen.queryByTestId('zone-overlay')).toBeNull()
+
+    fireEvent(screen.getByTestId('zone'), 'dropEnter')
+    expect(screen.getByTestId('zone-overlay')).toBeTruthy()
+
+    fireEvent(screen.getByTestId('zone'), 'dropExit')
+    expect(screen.queryByTestId('zone-overlay')).toBeNull()
+  })
+})

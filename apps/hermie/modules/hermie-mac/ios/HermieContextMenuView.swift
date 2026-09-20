@@ -49,15 +49,17 @@ public final class HermieContextMenuView: ExpoView, UIContextMenuInteractionDele
   private var enabled = true
   private var hoverEffect = true
   private var cornerRadius: CGFloat = 0
+  /** Held so it can be taken away again; a prop can turn the effect off after it was on. */
+  private var pointerInteraction: UIPointerInteraction?
 
   public required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
 
     addInteraction(UIContextMenuInteraction(delegate: self))
-    // Ours, and it is what gives `hoverEffect` somewhere to be answered. A view with no pointer
-    // interaction of its own inherits whatever the context-menu interaction decides to draw under
-    // the pointer; with one, this delegate is asked first and can say "nothing".
-    addInteraction(UIPointerInteraction(delegate: self))
+    // The pointer interaction is NOT added here. It is added only where the effect is wanted —
+    // see `setHoverEffect`, and the note there about what a pointer interaction on a view the size
+    // of a transcript actually draws.
+    applyHoverStyle()
   }
 
   func setItems(_ raw: [Any]) {
@@ -91,20 +93,63 @@ public final class HermieContextMenuView: ExpoView, UIContextMenuInteractionDele
    */
   func setHoverEffect(_ value: Bool) {
     hoverEffect = value
+    applyHoverStyle()
+  }
+
+  /**
+   The two levers that decide whether a pointer may draw anything here, set together.
+
+   This is the fix for "the whole conversation goes blurry when the mouse enters the window", and
+   the shape of that bug is worth writing down because the previous attempt looked right:
+
+   - The view had a `UIPointerInteraction` added in `init`, unconditionally, and answered
+     `styleFor:` with `UIPointerStyle.system()` where the effect was meant to be OFF. That is not
+     "no effect" — it is the system's own hover treatment, which for a view with a context menu is
+     a highlight platter composited from a `UITargetedPreview` of the WHOLE view. The whole view,
+     here, is the transcript: one host wraps the list, so the platter was a blurred copy of every
+     bubble at once. The sidebar and the floating header stayed sharp because they are different
+     views, which is exactly what the screenshot showed.
+   - `previewForHighlightingMenuWithConfiguration` could never have corrected it. That delegate
+     method belongs to the CONTEXT MENU interaction and is consulted when the menu comes up; the
+     pointer effect builds its own preview and never asks.
+
+   So where the effect is off there is now no pointer interaction to ask, and `hoverStyle` — the
+   iOS 17 property that is how UIKit applies an automatic hover effect to any view, with or without
+   an interaction — is explicitly nil. Where it is on, the same property carries the radius the row
+   handed over, which is a better fit than the preview parameters were: it is the hover API saying
+   what hover should look like.
+   */
+  private func applyHoverStyle() {
+    if hoverEffect {
+      if pointerInteraction == nil {
+        let interaction = UIPointerInteraction(delegate: self)
+
+        pointerInteraction = interaction
+        addInteraction(interaction)
+      }
+    } else if let interaction = pointerInteraction {
+      removeInteraction(interaction)
+      pointerInteraction = nil
+    }
+
+    guard #available(iOS 17.0, *) else {
+      return
+    }
+
+    hoverStyle =
+      hoverEffect
+        ? UIHoverStyle(shape: cornerRadius > 0 ? .rect(cornerRadius: cornerRadius) : .rect)
+        : nil
   }
 
   public func pointerInteraction(
     _ interaction: UIPointerInteraction,
     styleFor region: UIPointerRegion
   ) -> UIPointerStyle? {
-    guard hoverEffect else {
-      // NOT `UIPointerStyle.hidden()`, which hides the CURSOR — over a wall of text the cursor is
-      // the one thing that must stay. `.system()` is "the system arrow, and no effect"; the shape
-      // initialiser no longer accepts nil on the iOS 27 SDK.
-      return UIPointerStyle.system()
-    }
-
-    return nil
+    // Only ever reached where the effect is wanted, and nil there means "UIKit's own", which is
+    // the row highlight this view exists to keep. The interaction is not installed at all
+    // otherwise — see `applyHoverStyle`.
+    nil
   }
 
   /**
@@ -120,14 +165,17 @@ public final class HermieContextMenuView: ExpoView, UIContextMenuInteractionDele
    */
   func setCornerRadius(_ value: Double?) {
     cornerRadius = value.map { CGFloat($0) } ?? 0
+    applyHoverStyle()
   }
 
   /**
-   The platter UIKit draws behind the view while the menu is coming up — and, on a pointer, while
-   the pointer is merely over it.
+   The platter UIKit draws behind the view while the MENU is coming up.
 
-   `nil` hands back UIKit's own: the whole view, on a SQUARE background. Preview parameters are the
-   only way to change either half, so both `hoverEffect` and `cornerRadius` are answered here.
+   Only the menu. It was once believed to cover the pointer's hover platter as well, and that
+   belief is what let the hover bug survive a round: the pointer effect builds its own preview and
+   never calls this. Hover is `applyHoverStyle` above; this is the lift under an opening menu.
+
+   `nil` hands back UIKit's own: the whole view, on a SQUARE background.
    */
   public func contextMenuInteraction(
     _ interaction: UIContextMenuInteraction,

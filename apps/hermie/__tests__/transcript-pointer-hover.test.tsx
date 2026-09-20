@@ -17,9 +17,17 @@
  *    of its own, so a future `useHover` on a big box cannot quietly reintroduce
  *    the same thing from the JavaScript side.
  *
- * The native half — that `UIPointerInteraction` and the cleared highlight
- * preview actually stop UIKit drawing it — is reasoned, not watched; see
- * docs/platform-notes.md.
+ * The native half is reasoned, not watched, and the first attempt at it was
+ * WRONG in a way this file could not see: the host added a `UIPointerInteraction`
+ * unconditionally and answered `styleFor:` with the system's own style where the
+ * effect was meant to be off, which is the highlight rather than the absence of
+ * one — and a highlight on a host that wraps a whole transcript row composites a
+ * blurred preview of the lot. `previewForHighlightingMenuWithConfiguration` was
+ * believed to cover it and does not; that delegate method belongs to the context
+ * MENU and the pointer effect never calls it. The host now installs no pointer
+ * interaction at all where the effect is off and sets `hoverStyle` to nil, which
+ * is the property UIKit actually applies hover through. See
+ * `HermieContextMenuView.swift` and docs/platform-notes.md.
  */
 import { screen } from '@testing-library/react-native'
 
