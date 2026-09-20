@@ -1,6 +1,6 @@
 import { StatusBar } from 'expo-status-bar'
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { AccessibilityInfo, useColorScheme } from 'react-native'
+import { AccessibilityInfo, Appearance, useColorScheme } from 'react-native'
 
 import { useSettingsStore } from '../store/settings'
 import {
@@ -226,8 +226,40 @@ export function ThemeProvider({ children, forceScheme, forceWallpaper }: ThemePr
     }
   }, [loaded])
 
-  const scheme = forceScheme ?? (appearance === 'system' ? system : appearance)
+  // `null` means "let the system decide", which is also what releases a pin.
+  const pinned = forceScheme ?? (appearance === 'system' ? null : appearance)
+  const scheme = pinned ?? system
   const wallpaperName = forceWallpaper ?? wallpaper
+
+  /**
+   * Tell UIKit which scheme won, because half the app is not ours to colour.
+   *
+   * The token set only reaches what JavaScript draws. A native material takes its
+   * appearance from the window's trait collection, so with the theme pinned to
+   * Light while macOS was in Dark, every glass panel on the Mac build rendered as
+   * murky dark glass under light ink — `expo-glass-effect`'s `UIGlassEffect`
+   * asked the window, and the window was still saying dark.
+   *
+   * `Appearance.setColorScheme` is the one lever React Native offers: it walks
+   * `UIApplication.connectedScenes` and sets `overrideUserInterfaceStyle` on every
+   * window in them (`RCTAppearance.mm`), which is the whole app — the root window,
+   * a `Modal`'s presented controller, and any native view that reads the trait.
+   * Passing `null` clears the override rather than pinning the current value, so
+   * "System" really goes back to following the system.
+   *
+   * It lives here for the same reason the status bar does: this is the one
+   * component that knows which of the pinned and the system scheme won.
+   *
+   * **The pin comes from the store, never from `useColorScheme()`.** Once the
+   * override is in place UIKit reports the pinned scheme back as the system one,
+   * so deriving the pin from what `useColorScheme()` says would be a loop with
+   * nothing to break it. `system` is only ever READ when nothing is pinned, which
+   * is exactly when no override is in place and the value is honest again.
+   */
+  useEffect(() => {
+    Appearance.setColorScheme(pinned)
+  }, [pinned])
+
   const theme = useMemo(
     () => buildTheme(scheme, wallpaperName, reduceTransparency, reduceMotion),
     [scheme, wallpaperName, reduceTransparency, reduceMotion]

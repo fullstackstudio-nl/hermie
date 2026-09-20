@@ -22,8 +22,9 @@ describe('SettingsScreen → Connection test', () => {
     )
 
     // The provider reads the (empty) configuration off disk before anything
-    // renders its values.
-    await waitFor(() => expect(screen.getByText('Settings')).toBeTruthy())
+    // renders its values. Waiting on the first group header rather than on a
+    // title: Settings has none of its own, because both shells name it above.
+    await waitFor(() => expect(screen.getByText('GATEWAY')).toBeTruthy())
     await user.press(screen.getByText('Connection test'))
 
     expect(screen.getByText('Connection test')).toBeTruthy()
@@ -43,7 +44,7 @@ describe('SettingsScreen → Connection test', () => {
       </GatewayProvider>
     )
 
-    await waitFor(() => expect(screen.getByText('Settings')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('GATEWAY')).toBeTruthy())
     await user.press(screen.getByText('Connection test'))
 
     const lines = screen.getAllByTestId('debug-transcript-line').map(node => node.props.children)

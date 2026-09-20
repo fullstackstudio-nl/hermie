@@ -6,7 +6,7 @@ import { chatStrings } from '../../chat-ui'
 import { useGateway } from '../../gateway'
 import { strings } from '../../i18n/strings'
 import { type Appearance, useSettingsStore } from '../../store/settings'
-import { InsetButtonRow, InsetGroup, InsetValueRow, Screen, Text } from '../../ui/primitives'
+import { InsetButtonRow, InsetGroup, InsetValueRow, Screen } from '../../ui/primitives'
 import { SegmentedRow, SwitchRow } from '../../ui/sheets'
 import { useTheme } from '../../ui/theme'
 import { useEscapeKey } from '../../ui/useEscapeKey'
@@ -96,7 +96,13 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
           alignSelf: 'center'
         }}
       >
-        <Text variant="title">{strings.settings.title}</Text>
+        {/*
+          No title here. Both shells already put one above this screen — the
+          overlay panel's header on the wide layout, the stack's own title bar on
+          the compact one — and a large title directly under either of them reads
+          as a stutter. Activity and Crons had already dropped theirs; this was
+          the last one left.
+        */}
 
         <InsetGroup header={strings.settings.gateway}>
           <InsetValueRow label={strings.settings.address} value={config?.baseUrl ?? strings.settings.unknown} />

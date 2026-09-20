@@ -183,9 +183,15 @@ export function GlassSurface({
  *
  * On iOS 26 this is the real material — a `UIVisualEffectView` carrying a
  * `UIGlassEffect`, which samples and refracts what is behind it rather than only
- * blurring it. `colorScheme` is pinned to `auto` deliberately: the app's own
- * light/dark choice already decides the tint token, and overriding the view's
- * interface style as well double-applies it.
+ * blurring it.
+ *
+ * Both materials are told the app's scheme rather than left on `auto`. A native
+ * material reads the window's trait collection, and with the theme pinned against
+ * the system's the two disagree: pinned Light on a Dark Mac drew murky dark glass
+ * under light ink. `ThemeProvider` now overrides the window's interface style, so
+ * `colorScheme` here is the same answer said twice — which is the point. It is
+ * the only thing standing between a material and the system appearance if a
+ * window ever escapes that override, and it costs one prop.
  *
  * `isInteractive` is left off. It makes the material react to touches, which is
  * right for a button and wrong for a panel that holds a scrolling list — and the
@@ -197,6 +203,7 @@ function Material({ intensity, tint, radius }: { intensity: number; tint?: strin
   if (GLASS_MATERIAL === 'native') {
     return (
       <GlassView
+        colorScheme={theme.scheme}
         glassEffectStyle="regular"
         pointerEvents="none"
         style={[StyleSheet.absoluteFill, { borderRadius: radius }]}

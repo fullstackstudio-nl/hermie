@@ -107,7 +107,9 @@ describe('About', () => {
     pressEscape()
 
     expect(view.queryByTestId('licences-list')).toBeNull()
-    expect(screen.getByText('Settings')).toBeTruthy()
+    // The first group of the Settings root. It used to be the screen's own large
+    // title, which is gone: both shells already name this screen above it.
+    expect(screen.getByText('GATEWAY')).toBeTruthy()
   })
 })
 
