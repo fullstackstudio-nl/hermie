@@ -319,3 +319,43 @@ npm run icons:check    # fail if any of them is stale (CI runs this)
 Changing the artwork means editing the SVG and running `npm run icons`, never
 editing a PNG. The renderer is deterministic, which is what makes the check
 meaningful.
+
+## The Play listing's images
+
+A listing asks for two images the app itself never ships. They live in
+`design/store/`, and the same two commands produce and check them — `npm run
+icons` runs `scripts/generate-store-assets.mjs` after the app's icons, and
+`npm run icons:check` is what CI runs against both.
+
+| File                               | Size       | Where it goes                                 |
+| ---------------------------------- | ---------- | --------------------------------------------- |
+| `design/store/feature-graphic.png` | 1024 x 500 | The banner across the top of the Play listing |
+| `design/store/play-icon-512.png`   | 512 x 512  | The listing's app icon                        |
+
+Both are written with **no alpha channel** — PNG colour type 2, three bytes per
+pixel — and with no metadata chunk of any kind. Play refuses a feature graphic
+that carries transparency, and the pair come to about 16 kB and 9 kB against a
+limit of 1 MB, so neither is anywhere near being too large.
+
+The 512 icon is `design/icon.svg` again, at the one size Play takes, with the
+**corners left square**: Play rounds and masks the icon itself, exactly as iOS
+and Android do, so a radius baked in here would show as a second one inside the
+store's.
+
+The feature graphic's source is `design/store/feature-graphic.svg`, hand-drawn
+at 1024 x 500 and rasterised 1:1. It is the mark from `design/icon.svg` at half
+scale beside the wordmark, on the icon's own gradient. Two things about that file
+are worth knowing before editing it, and its own header comment says both at
+length: the renderer **has no font engine**, so "Hermie" is drawn as geometry —
+circles, stems and two radial cuts on one set of metrics — rather than set in a
+typeface; and a counter is a shape filled with the _same_ gradient painted over
+the letter, which lands on exactly the colour underneath because gradients are
+evaluated in user space.
+
+It carries the lockup and nothing else. A tagline is the obvious addition and is
+deliberately absent: Play crops this image at several aspect ratios, and a line
+of copy in it would have to be re-drawn by hand — there is no font engine — for
+every language the listing is ever offered in.
+
+The listing also wants screenshots. Those are not generated: `docs/screenshots/`
+is what exists, and CONTRIBUTING's "Screenshots" section is the rule for them.

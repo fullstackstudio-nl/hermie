@@ -277,6 +277,10 @@ The icons are generated, not drawn per size. `design/icon.svg` is the source; `n
 rewrites every PNG from it and `npm run icons:check` — which CI runs — fails if one of them has
 drifted. Never edit a PNG in `apps/hermie/assets` directly.
 
+The same two commands also rewrite the Play listing's feature graphic and 512 px icon from
+`design/store/feature-graphic.svg` and `design/icon.svg`; [docs/release.md](docs/release.md)
+describes both.
+
 ## Commits
 
 Conventional commits, in the imperative, in English:
