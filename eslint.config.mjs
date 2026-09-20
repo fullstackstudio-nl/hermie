@@ -56,6 +56,10 @@ export default config(
       'scripts/**/*.mjs',
       'apps/*/scripts/**/*.mjs',
       'apps/*/plugins/**/*.js',
+      // The published entry point of @hermie/web. It is CommonJS on purpose —
+      // it has to run before anything is bundled, from a package with no build
+      // step of its own — so `require` is the only import it can use.
+      'packages/hermie-web/bin/*.js',
       '**/*.config.js',
       '**/*.config.mjs',
       '**/*.config.ts',
