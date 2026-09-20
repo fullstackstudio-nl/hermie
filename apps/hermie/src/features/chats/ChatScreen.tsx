@@ -54,8 +54,10 @@ import { KEYBOARD_AVOID_BEHAVIOR } from '../../ui/keyboard'
 import { Screen, Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { CONTROL_MIN_HEIGHT, TAP_SLOP } from '../../ui/tokens'
+import { DropZone } from '../../chat-ui/DropZone'
+import type { DroppedFile } from '../../platform/file-drop'
 import { openAppSettings, pickAttachment, type PickedAttachment } from './attachments'
-import { pickFile } from './file-attachments'
+import { droppedFile, pickFile, type PickedFile } from './file-attachments'
 import { FileUploadError, MAX_UPLOAD_BYTES } from './file-upload'
 import { ChatSheetHost, type RequestItem } from './ChatSheetHost'
 import type { AttachmentInput, ModelChoice } from './chat-controller'
@@ -702,14 +704,21 @@ function Conversation({
       ]
 
       chat.setDraft('')
-      setAttachments([])
-      setUploaded([])
       setSuggestions([])
 
       haptic('send')
 
       try {
         await chat.send(body, files)
+
+        // Cleared HERE, after the send has actually been accepted, and not
+        // before it. An attachment removed optimistically was gone for good on a
+        // failure — the draft came back and the file did not, so the one thing
+        // the reader could not retype was the one thing that vanished. The tray
+        // stays on screen for the second or so the send takes, which is also the
+        // honest picture of what is happening to it.
+        setAttachments([])
+        setUploaded([])
       } catch (error) {
         // The optimistic bubble stays — the words were the user's — and the
         // draft comes back so the message is not lost with it.
@@ -758,6 +767,45 @@ function Conversation({
    * that reached `uploaded`, so a prompt can never name a path the gateway does not
    * have.
    */
+  /**
+   * Stage one file's chip, upload it, and settle the chip either way.
+   *
+   * Declared BEFORE `attachFile`, which depends on it: a `useCallback` dependency
+   * array is evaluated while the component renders, so the other order is a
+   * temporal-dead-zone throw rather than a style preference.
+   *
+   * Separate from `attachFile` because there are two roads to it now — the `+`
+   * menu's picker and a file dragged onto the window — and only the first half
+   * differs. A second copy of the chip states would be a second place for
+   * "uploading" to get stuck.
+   */
+  const stageFile = useCallback(
+    async (picked: PickedFile) => {
+      const id = `pending-${Date.now().toString(36)}-${picked.name}`
+
+      setPendingFiles(current => [
+        ...current,
+        { id, name: picked.name, size: picked.size, status: 'uploading' as const }
+      ])
+
+      try {
+        const result = await chat.uploadFile(picked)
+
+        setPendingFiles(current => current.filter(file => file.id !== id))
+        setUploaded(current => [...current, { id: result.path, filename: result.filename, path: result.path }])
+      } catch (error) {
+        // A typed reason exists for exactly the failures a message can explain;
+        // anything else is the transport, and its own words are the best available.
+        const reason = error instanceof FileUploadError ? uploadChipError(error) : messageOf(error)
+
+        setPendingFiles(current =>
+          current.map(file => (file.id === id ? { ...file, status: 'error', error: reason } : file))
+        )
+      }
+    },
+    [chat]
+  )
+
   const attachFile = useCallback(async () => {
     setAttachBusy('file')
 
@@ -777,25 +825,24 @@ function Conversation({
       return
     }
 
-    const id = `pending-${Date.now().toString(36)}-${picked.name}`
+    await stageFile(picked)
+  }, [stageFile])
 
-    setPendingFiles(current => [...current, { id, name: picked.name, size: picked.size, status: 'uploading' as const }])
-
-    try {
-      const result = await chat.uploadFile(picked)
-
-      setPendingFiles(current => current.filter(file => file.id !== id))
-      setUploaded(current => [...current, { id: result.path, filename: result.filename, path: result.path }])
-    } catch (error) {
-      // A typed reason exists for exactly the failures a message can explain;
-      // anything else is the transport, and its own words are the best available.
-      const reason = error instanceof FileUploadError ? uploadChipError(error) : messageOf(error)
-
-      setPendingFiles(current =>
-        current.map(file => (file.id === id ? { ...file, status: 'error', error: reason } : file))
-      )
-    }
-  }, [chat])
+  /**
+   * Files dragged onto the chat, staged exactly as picked ones are.
+   *
+   * Every file in one drop, in order, and each gets its own chip — a drag of
+   * three files is three attachments, which is what the Finder promised when it
+   * let go of all three.
+   */
+  const dropFiles = useCallback(
+    (files: DroppedFile[]) => {
+      for (const file of files) {
+        void stageFile(droppedFile(file))
+      }
+    },
+    [stageFile]
+  )
 
   const querySlash = useCallback(
     (prefix: string) => {
@@ -933,37 +980,44 @@ function Conversation({
 
   return (
     <Screen edgeToEdgeTop={false} padded={false}>
-      <KeyboardAvoidingView
-        behavior={KEYBOARD_AVOID_BEHAVIOR}
-        // The chat header is inside this screen (the stack's own header is
-        // hidden for this route), so there is no external bar to offset past.
-        keyboardVerticalOffset={0}
-        style={{ flex: 1 }}
-      >
-        <Banner
-          // The connection's own account of a terminal refusal beats the RPC
-          // message it produced, which only ever says "gateway not connected".
-          error={chat.connectionError ?? chat.error ?? notice}
-          hydration={chat.hydration}
-          waitingForConnection={chat.waitingForConnection}
-          onDismiss={() => {
-            setNotice(null)
-            setNeedsPhotoAccess(false)
-            chat.clearError()
-          }}
-          onRetry={chat.reload}
-          {...(needsPhotoAccess ? { onOpenSettings: openAppSettings } : {})}
-        />
+      {/*
+        The whole conversation takes a dropped file, not the composer alone.
+        "Drop it on the chat" is what a reader means, and aiming a file at a
+        44pt field is not. Inert everywhere there is no drag session — see
+        `DropZone`, which renders its children bare when there is no native view.
+      */}
+      <DropZone onFiles={dropFiles} style={{ flex: 1 }} testID="chat-drop-zone">
+        <KeyboardAvoidingView
+          behavior={KEYBOARD_AVOID_BEHAVIOR}
+          // The chat header is inside this screen (the stack's own header is
+          // hidden for this route), so there is no external bar to offset past.
+          keyboardVerticalOffset={0}
+          style={{ flex: 1 }}
+        >
+          <Banner
+            // The connection's own account of a terminal refusal beats the RPC
+            // message it produced, which only ever says "gateway not connected".
+            error={chat.connectionError ?? chat.error ?? notice}
+            hydration={chat.hydration}
+            waitingForConnection={chat.waitingForConnection}
+            onDismiss={() => {
+              setNotice(null)
+              setNeedsPhotoAccess(false)
+              chat.clearError()
+            }}
+            onRetry={chat.reload}
+            {...(needsPhotoAccess ? { onOpenSettings: openAppSettings } : {})}
+          />
 
-        {/*
+          {/*
           `onRunCron` is deliberately absent. Run now is a side effect on the
           gateway and it lives on the cron's own detail behind its confirm; a
           transcript card is a receipt for a run that already happened, and one
           tap away from starting another one is not where that belongs.
         */}
-        <TranscriptList
-          canOpenCron={canOpenCron}
-          /*
+          <TranscriptList
+            canOpenCron={canOpenCron}
+            /*
             The transcript runs UNDER the floating chrome and pads its own content
             out of the way. An inverted list's content container has its top where
             the screen's bottom is, so the padding that clears a header at the
@@ -973,32 +1027,36 @@ function Conversation({
             laid out at, so the clearance and the thing it clears cannot drift
             apart when a subtitle wraps or a control size changes.
           */
-          contentStyle={{ paddingBottom: chromeHeight }}
-          header={
-            chat.subagents.length ? (
-              <AgentsBar count={chat.subagents.length} onPress={openAgents} startedAtMs={oldestStart(chat.subagents)} />
-            ) : null
-          }
-          images={images}
-          items={chat.items}
-          newMessageCount={newCount}
-          onEndReached={noop}
-          onOpenBot={openBot}
-          onOpenCron={openCron}
-          onOpenRequest={reopenRequest}
-          onOpenTranscript={openTranscript}
-          onScrolledAwayFromBottom={onScrolledAway}
-          ref={listRef}
-          selfHandle={botName}
-          subagents={subagents}
-          // The TURN is running and nothing has been said yet: three dots. Not
-          // `busy` — that also covers a tool or a child still working, and dots
-          // under a finished reply promise a sentence that is not coming.
-          typing={chat.turnActive && !hasStreamingText(chat.items)}
-          typingHandles={typing}
-        />
+            contentStyle={{ paddingBottom: chromeHeight }}
+            header={
+              chat.subagents.length ? (
+                <AgentsBar
+                  count={chat.subagents.length}
+                  onPress={openAgents}
+                  startedAtMs={oldestStart(chat.subagents)}
+                />
+              ) : null
+            }
+            images={images}
+            items={chat.items}
+            newMessageCount={newCount}
+            onEndReached={noop}
+            onOpenBot={openBot}
+            onOpenCron={openCron}
+            onOpenRequest={reopenRequest}
+            onOpenTranscript={openTranscript}
+            onScrolledAwayFromBottom={onScrolledAway}
+            ref={listRef}
+            selfHandle={botName}
+            subagents={subagents}
+            // The TURN is running and nothing has been said yet: three dots. Not
+            // `busy` — that also covers a tool or a child still working, and dots
+            // under a finished reply promise a sentence that is not coming.
+            typing={chat.turnActive && !hasStreamingText(chat.items)}
+            typingHandles={typing}
+          />
 
-        {/*
+          {/*
           The chrome, laid OVER the transcript rather than above it.
 
           The owner's reference is iPadOS 26 Messages: the buttons and the contact
@@ -1009,53 +1067,54 @@ function Conversation({
           It is a sibling of the list inside the keyboard-avoiding view, not a
           child of it, so the chrome does not move when the keyboard opens.
         */}
-        <View
-          onLayout={event => setChromeHeight(event.nativeEvent.layout.height)}
-          pointerEvents="box-none"
-          style={{ left: 0, position: 'absolute', right: 0, top: 0 }}
-        >
-          <ChatHeader
-            accentFill={theme.accent(accent).fill}
-            avatarUri={avatar}
-            handle={botName}
-            name={display}
-            onBack={onBack}
-            onOpenOptions={openOptions}
-            onToggleSidebar={onToggleSidebar}
-            // The resolved state, from the same function the chat list uses. It is
-            // what keeps the header from saying "Connecting…" over a live chat: the
-            // socket's own status is not a bot's state.
-            presence={presence.state}
-            {...(presence.lastSeenAt !== undefined ? { lastSeenAt: presence.lastSeenAt } : {})}
-            {...(subtitle ? { subtitle } : {})}
-          />
-        </View>
+          <View
+            onLayout={event => setChromeHeight(event.nativeEvent.layout.height)}
+            pointerEvents="box-none"
+            style={{ left: 0, position: 'absolute', right: 0, top: 0 }}
+          >
+            <ChatHeader
+              accentFill={theme.accent(accent).fill}
+              avatarUri={avatar}
+              handle={botName}
+              name={display}
+              onBack={onBack}
+              onOpenOptions={openOptions}
+              onToggleSidebar={onToggleSidebar}
+              // The resolved state, from the same function the chat list uses. It is
+              // what keeps the header from saying "Connecting…" over a live chat: the
+              // socket's own status is not a bot's state.
+              presence={presence.state}
+              {...(presence.lastSeenAt !== undefined ? { lastSeenAt: presence.lastSeenAt } : {})}
+              {...(subtitle ? { subtitle } : {})}
+            />
+          </View>
 
-        <Composer
-          attachBusy={attachBusy}
-          attachments={composerAttachments}
-          botName={display}
-          onAttach={() => void attach()}
-          // The `+` menu's second entry. Both pickers exist on every target this
-          // builds for, so neither is conditional.
-          onAttachFile={() => void attachFile()}
-          onChangeText={chat.setDraft}
-          onQuerySlash={querySlash}
-          onRemoveAttachment={id => {
-            setAttachments(current => current.filter(file => file.id !== id))
-            setPendingFiles(current => current.filter(file => file.id !== id))
-            // An uploaded file is left on the gateway: deleting it would need a
-            // second round trip to undo something the user only unstaged.
-            setUploaded(current => current.filter(file => file.id !== id))
-          }}
-          onSend={text => void send(text)}
-          onStop={() => void chat.stop()}
-          running={busy}
-          suggestions={suggestions}
-          value={chat.draft}
-          {...(chat.queuedText ? { queuedText: chat.queuedText } : {})}
-        />
-      </KeyboardAvoidingView>
+          <Composer
+            attachBusy={attachBusy}
+            attachments={composerAttachments}
+            botName={display}
+            onAttach={() => void attach()}
+            // The `+` menu's second entry. Both pickers exist on every target this
+            // builds for, so neither is conditional.
+            onAttachFile={() => void attachFile()}
+            onChangeText={chat.setDraft}
+            onQuerySlash={querySlash}
+            onRemoveAttachment={id => {
+              setAttachments(current => current.filter(file => file.id !== id))
+              setPendingFiles(current => current.filter(file => file.id !== id))
+              // An uploaded file is left on the gateway: deleting it would need a
+              // second round trip to undo something the user only unstaged.
+              setUploaded(current => current.filter(file => file.id !== id))
+            }}
+            onSend={text => void send(text)}
+            onStop={() => void chat.stop()}
+            running={busy}
+            suggestions={suggestions}
+            value={chat.draft}
+            {...(chat.queuedText ? { queuedText: chat.queuedText } : {})}
+          />
+        </KeyboardAvoidingView>
+      </DropZone>
 
       {/* One sheet, never four. `ChatSheetHost` decides which, and closes the
           one on screen before it opens the next. */}

@@ -150,6 +150,34 @@ describe('ChatScreen', () => {
     expect(haptic).toHaveBeenCalledWith('send')
   })
 
+  it('keeps a staged attachment on screen until the send is actually accepted', async () => {
+    // It used to be cleared optimistically, beside the draft. On a failure the
+    // draft came back and the file did not — so the one thing the reader could
+    // not retype was the one thing that vanished.
+    attachments.pickAttachment.mockResolvedValueOnce({
+      id: 'a1',
+      filename: 'shot.jpg',
+      base64: 'AAAA',
+      uri: 'file:///tmp/shot.jpg'
+    })
+    mockController.send.mockRejectedValueOnce(new Error('gateway not connected'))
+    renderChat()
+
+    fireEvent.press(screen.getByTestId('composer-attach'))
+    fireEvent.press(screen.getByTestId('composer-attach-menu-photo'))
+    await waitFor(() => expect(screen.getByTestId('composer-attachments')).toBeTruthy())
+
+    fireEvent.changeText(screen.getByTestId('composer-input'), 'look')
+    fireEvent.press(screen.getByTestId('composer-send'))
+
+    await waitFor(() => expect(screen.getByText(/gateway not connected/u)).toBeTruthy())
+    expect(screen.getByTestId('composer-attachments')).toBeTruthy()
+
+    // And it does go once a send lands, so the tray is not simply sticky.
+    fireEvent.press(screen.getByTestId('composer-send'))
+    await waitFor(() => expect(screen.queryByTestId('composer-attachments')).toBeNull())
+  })
+
   it('buzzes once when a reply lands and not when a turn merely runs', async () => {
     renderChat()
 

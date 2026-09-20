@@ -20,6 +20,7 @@
  * that is always true only invites a caller to branch on it.
  */
 import { openFilePicker } from '../../platform/attachments-picker'
+import type { DroppedFile } from '../../platform/file-drop'
 
 export interface PickedFile {
   name: string
@@ -72,5 +73,25 @@ export async function pickFile(): Promise<PickedFile | null> {
     mimeType: picked.mimeType || FALLBACK_MIME_TYPE,
     uri: picked.uri,
     body: picked.body
+  }
+}
+
+/**
+ * A dropped file, as the same thing the picker produces.
+ *
+ * The two roads into the composer are a document picker and a drag from the
+ * Finder, and they differ only in how the URI was obtained — the native side
+ * has already copied the bytes somewhere that outlives the gesture. So the drop
+ * is normalised HERE rather than at the call site, and everything downstream
+ * (the chip, the upload, the prompt) stays a single path.
+ */
+export function droppedFile(file: DroppedFile): PickedFile {
+  return {
+    name: nameFor(file.uri, file.name),
+    size: Number.isFinite(file.size) ? file.size : 0,
+    mimeType: file.mimeType || FALLBACK_MIME_TYPE,
+    uri: file.uri,
+    // React Native's `FormData` takes this shape and streams from the URI.
+    body: { uri: file.uri, name: file.name || 'attachment', type: file.mimeType || FALLBACK_MIME_TYPE }
   }
 }

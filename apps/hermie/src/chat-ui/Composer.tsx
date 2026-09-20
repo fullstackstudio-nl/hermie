@@ -593,68 +593,6 @@ export function Composer({
         </View>
       ) : null}
 
-      {/*
-        The tray. Images are thumbnails, files are chips, and they sit side by
-        side — §6.7. A chip carries its own upload state, which is how a rejected
-        file says "Too large · 100 MB max" instead of vanishing.
-      */}
-      {attachments.length ? (
-        <ScrollView
-          contentContainerStyle={{ alignItems: 'flex-end', gap: theme.space.sm, paddingHorizontal: theme.space.md }}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          // A horizontal ScrollView defaults to `flexGrow: 1`, which inside a
-          // column makes it as tall as the viewport. Learned on the gallery.
-          style={{ flexGrow: 0, marginBottom: theme.space.sm }}
-          testID="composer-attachments"
-        >
-          {attachments.map(attachment =>
-            attachment.kind === 'image' && attachment.uri ? (
-              <View key={attachment.id} style={{ height: 64, width: 64 }}>
-                <Image
-                  source={{ uri: attachment.uri }}
-                  style={{ borderRadius: theme.radii.thumb, height: 64, width: 64 }}
-                />
-
-                <Pressable
-                  accessibilityLabel={chatStrings.composer.removeAttachment}
-                  accessibilityRole="button"
-                  hitSlop={TAP_SLOP}
-                  onPress={() => onRemoveAttachment?.(attachment.id)}
-                  style={{
-                    alignItems: 'center',
-                    backgroundColor: 'rgba(8,20,44,0.62)',
-                    borderRadius: 11,
-                    height: 22,
-                    justifyContent: 'center',
-                    position: 'absolute',
-                    right: 2,
-                    top: 2,
-                    width: 22
-                  }}
-                  testID={`composer-attachment-remove-${attachment.id}`}
-                >
-                  <Text color="onAccent" style={{ fontSize: 14, lineHeight: 16 }}>
-                    {'×'}
-                  </Text>
-                </Pressable>
-              </View>
-            ) : (
-              <FileChip
-                key={attachment.id}
-                name={attachment.name}
-                {...(attachment.error ? { error: attachment.error } : {})}
-                onRemove={() => onRemoveAttachment?.(attachment.id)}
-                {...(attachment.progress !== undefined ? { progress: attachment.progress } : {})}
-                {...(attachment.size !== undefined ? { size: attachment.size } : {})}
-                {...(attachment.status ? { status: attachment.status } : {})}
-                testID={`composer-attachment-${attachment.id}`}
-              />
-            )
-          )}
-        </ScrollView>
-      ) : null}
-
       <View
         onLayout={event => setRowWidth(event.nativeEvent.layout.width)}
         style={{ paddingBottom: theme.space.sm, paddingHorizontal: theme.space.md, paddingTop: theme.space.sm }}
@@ -699,8 +637,10 @@ export function Composer({
 
           <GlassSurface
             contentStyle={{
-              alignItems: 'flex-end',
-              flexDirection: 'row',
+              // A COLUMN now, not a row: whatever is attached sits above the
+              // caret inside the same pill. The row that used to be here is the
+              // inner one below, so the field's own geometry is unchanged for a
+              // message with no attachments.
               paddingHorizontal: COMPOSER_FIELD_INSET + 6,
               paddingVertical: COMPOSER_FIELD_INSET
             }}
@@ -710,37 +650,115 @@ export function Composer({
             testID={`${testID}-field`}
             variant="float"
           >
-            <TextInput
-              accessibilityLabel={botName ? chatStrings.composer.messageTo(botName) : chatStrings.composer.placeholder}
-              multiline
-              onChangeText={onChangeText}
-              onKeyPress={onKeyPress}
-              onSelectionChange={onSelectionChange}
-              // Only reached where `submitBehavior` is 'submit', i.e. on a Mac.
-              onSubmitEditing={onSubmitEditing}
-              placeholder={placeholder ?? chatStrings.composer.placeholder}
-              placeholderTextColor={theme.colors.textFaint}
-              ref={inputRef}
-              selection={caret}
-              style={{
-                color: theme.colors.text,
-                flex: 1,
-                fontSize: theme.type.body.fontSize,
-                // An explicit leading, so the box the padding centres is a box
-                // this app chose rather than one the platform's font metrics
-                // happened to produce. See `COMPOSER_TEXT_LINE_HEIGHT`.
-                lineHeight: COMPOSER_TEXT_LINE_HEIGHT,
-                maxHeight: 132,
-                // No `minHeight`: the padding below already makes one line exactly
-                // `COMPOSER_LINE_HEIGHT` tall, and a minimum ON TOP of that is a box
-                // taller than its content — which on iOS a multiline field fills
-                // from the top, leaving the placeholder high and the gap below it.
-                ...composerFieldPadding(Platform.OS === 'ios' ? COMPOSER_IOS_TOP_INSET : 0)
-              }}
-              submitBehavior={submitBehavior}
-              testID="composer-input"
-              value={value}
-            />
+            {/*
+              The tray, INSIDE the field.
+
+              It used to sit above the composer row, as a strip of its own. The owner's
+              reference is iMessage: what is attached is attached to the MESSAGE, and a
+              message is the pill you are typing in — so a thumbnail or a chip sits at
+              the top of the field with the caret under it, and the whole thing grows
+              and shrinks as one control. A tray floating above the pill reads as a
+              staging area beside the message rather than as part of it.
+
+              Images are thumbnails, files are chips, and they sit side by side —
+              §6.7. A chip carries its own upload state, which is how a rejected file
+              says "Too large · 100 MB max" instead of vanishing.
+            */}
+            {attachments.length ? (
+              <ScrollView
+                // No horizontal padding of its own: the field's inset already places
+                // it, and a second one would step the thumbnails in from the caret
+                // below them.
+                contentContainerStyle={{ alignItems: 'flex-end', gap: theme.space.sm }}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                // A horizontal ScrollView defaults to `flexGrow: 1`, which inside a
+                // column makes it as tall as the viewport. Learned on the gallery.
+                style={{ flexGrow: 0, marginBottom: theme.space.xs, maxHeight: 76 }}
+                testID="composer-attachments"
+              >
+                {attachments.map(attachment =>
+                  attachment.kind === 'image' && attachment.uri ? (
+                    <View key={attachment.id} style={{ height: 64, width: 64 }}>
+                      <Image
+                        source={{ uri: attachment.uri }}
+                        style={{ borderRadius: theme.radii.thumb, height: 64, width: 64 }}
+                      />
+
+                      <Pressable
+                        accessibilityLabel={chatStrings.composer.removeAttachment}
+                        accessibilityRole="button"
+                        hitSlop={TAP_SLOP}
+                        onPress={() => onRemoveAttachment?.(attachment.id)}
+                        style={{
+                          alignItems: 'center',
+                          backgroundColor: 'rgba(8,20,44,0.62)',
+                          borderRadius: 11,
+                          height: 22,
+                          justifyContent: 'center',
+                          position: 'absolute',
+                          right: 2,
+                          top: 2,
+                          width: 22
+                        }}
+                        testID={`composer-attachment-remove-${attachment.id}`}
+                      >
+                        <Text color="onAccent" style={{ fontSize: 14, lineHeight: 16 }}>
+                          {'×'}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  ) : (
+                    <FileChip
+                      key={attachment.id}
+                      name={attachment.name}
+                      {...(attachment.error ? { error: attachment.error } : {})}
+                      onRemove={() => onRemoveAttachment?.(attachment.id)}
+                      {...(attachment.progress !== undefined ? { progress: attachment.progress } : {})}
+                      {...(attachment.size !== undefined ? { size: attachment.size } : {})}
+                      {...(attachment.status ? { status: attachment.status } : {})}
+                      testID={`composer-attachment-${attachment.id}`}
+                    />
+                  )
+                )}
+              </ScrollView>
+            ) : null}
+
+            <View style={{ alignItems: 'flex-end', flexDirection: 'row' }}>
+              <TextInput
+                accessibilityLabel={
+                  botName ? chatStrings.composer.messageTo(botName) : chatStrings.composer.placeholder
+                }
+                multiline
+                onChangeText={onChangeText}
+                onKeyPress={onKeyPress}
+                onSelectionChange={onSelectionChange}
+                // Only reached where `submitBehavior` is 'submit', i.e. on a Mac.
+                onSubmitEditing={onSubmitEditing}
+                placeholder={placeholder ?? chatStrings.composer.placeholder}
+                placeholderTextColor={theme.colors.textFaint}
+                ref={inputRef}
+                selection={caret}
+                style={{
+                  color: theme.colors.text,
+                  flex: 1,
+                  fontSize: theme.type.body.fontSize,
+                  // An explicit leading, so the box the padding centres is a box
+                  // this app chose rather than one the platform's font metrics
+                  // happened to produce. See `COMPOSER_TEXT_LINE_HEIGHT`.
+                  lineHeight: COMPOSER_TEXT_LINE_HEIGHT,
+                  maxHeight: 132,
+                  // No `minHeight`: the padding below already makes one line exactly
+                  // `COMPOSER_LINE_HEIGHT` tall, and a minimum ON TOP of that is a box
+                  // taller than its content — which on iOS a multiline field fills
+                  // from the top, leaving the placeholder high and the gap below it.
+                  ...composerFieldPadding(Platform.OS === 'ios' ? COMPOSER_IOS_TOP_INSET : 0)
+                }}
+                submitBehavior={submitBehavior}
+                testID="composer-input"
+                value={value}
+              />
+            </View>
           </GlassSurface>
 
           {/* Accent while it sends, a red stop SQUARE while a turn runs. */}
