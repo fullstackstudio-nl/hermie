@@ -51,6 +51,18 @@ export interface ScenarioReply {
    */
   toolGenerating?: boolean
   tool?: { name: string; args?: Record<string, unknown>; summary?: string; result?: unknown }
+  /**
+   * How many deltas go out BEFORE the tool call, so the tool lands mid-reply.
+   *
+   * Absent puts the whole tool block after the last delta, which is the shape
+   * every existing scenario expects. With a number, the reply is cut in two and
+   * the tool goes in the cut — which is the only way to produce the turn the
+   * client's `sealAssistantForTool` exists for: the half-streamed bubble is
+   * sealed as an INTERIM note, a tool row lands under it, and the deltas that
+   * follow open a second bubble that `message.complete` then settles. Three item
+   * kinds arriving in one turn, in the order a real agent produces them.
+   */
+  toolAfterDeltas?: number
 }
 
 export interface Scenario {
@@ -371,8 +383,62 @@ const TICKET_TTL_SECONDS = 30
 /** Frames one delegated child runs through: requested, start, thinking, tool, progress, complete. */
 const FRAMES_PER_CHILD = 6
 
+/**
+ * A reply long enough to fold, cut in half by a tool call.
+ *
+ * The transcript's own bug — the column jumping while a reply streams — needs a
+ * turn that lasts long enough to watch and that produces all three item kinds:
+ * an interim note sealed by the tool, the tool row, and a second bubble that
+ * grows past the fold's fourteen lines before it settles. Two deltas of
+ * `Looking that up for you.` produce none of that and finish inside one frame.
+ *
+ * Reached with a prompt containing `long`, so the short default is still what
+ * every other manual run and every test gets.
+ */
+const LONG_REPLY_DELTAS: string[] = [
+  'Right — let me walk through what I found, ',
+  'because there are a few threads here and they do not all point the same way.\n\n',
+  'First, the **release notes**. ',
+  'The changelog for 0.21 lists the gateway rewrite, ',
+  'but it does not mention the token refresh path at all, ',
+  'which is the part you were actually asking about.\n\n',
+  'Second, the tests. ',
+  'There are two suites that cover this and they disagree: ',
+  'one asserts the refresh happens before the socket opens, ',
+  'the other asserts it happens on the first 401. ',
+  'Both pass, because they stub different layers.\n\n',
+  'Let me read the file before I say which one is right.\n\n',
+  'So: the refresh is attempted **before** the socket opens, ',
+  'and the 401 path is a fallback that only runs when the stored token ',
+  'was still inside its validity window when the attempt started.\n\n',
+  'That means the second suite is testing a path that a healthy client ',
+  'reaches roughly never, which is why nobody noticed it had drifted.\n\n',
+  'Three things follow from that:\n\n',
+  '1. The refresh timer is the thing to instrument, not the 401 handler.\n',
+  '2. The second suite needs a comment saying which case it pins down.\n',
+  '3. The changelog entry is worth writing before this is forgotten again.\n\n',
+  'I can start with the first of those if you want.'
+]
+
 const DEFAULT_SCENARIO: Scenario = {
   replies: [
+    {
+      match: 'long',
+      reasoning: ['Reading the ', 'refresh path.'],
+      reasoningAvailable: 'Read the refresh path.',
+      toolGenerating: true,
+      deltas: LONG_REPLY_DELTAS,
+      text: LONG_REPLY_DELTAS.join(''),
+      // In the cut after "Let me read the file", which is where a real agent
+      // would reach for one.
+      toolAfterDeltas: 12,
+      tool: {
+        name: 'read_file',
+        args: { path: 'gateway/auth.py' },
+        summary: 'read gateway/auth.py',
+        result: 'def refresh(...):'
+      }
+    },
     {
       // Thinking first, then words: the order a real turn arrives in, and the order
       // the transcript's typing header has to survive.
@@ -2629,10 +2695,18 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       later(() => publish('reasoning.available', sid, { text: reply.reasoningAvailable }), at)
     }
 
-    for (const delta of deltas) {
-      at += streamDelayMs
-      later(() => publish('message.delta', sid, { text: delta }), at)
+    // Where the tool call goes. Past the end means "after everything", which is
+    // what a scenario without `toolAfterDeltas` asks for.
+    const cut = reply.toolAfterDeltas ?? deltas.length
+
+    const emitDeltas = (from: number, to: number) => {
+      for (const delta of deltas.slice(from, to)) {
+        at += streamDelayMs
+        later(() => publish('message.delta', sid, { text: delta }), at)
+      }
     }
+
+    emitDeltas(0, cut)
 
     if (reply.tool) {
       const toolId = `tool-${randomUUID().slice(0, 8)}`
@@ -2667,6 +2741,8 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
         at
       )
     }
+
+    emitDeltas(cut, deltas.length)
 
     if (/delegate/i.test(prompt)) {
       at = streamSubagents(sid, at)

@@ -11,6 +11,7 @@ const { values } = parseArgs({
     token: { type: 'string' },
     'close-code': { type: 'string' },
     scenario: { type: 'string' },
+    'stream-delay': { type: 'string' },
     host: { type: 'string', default: '127.0.0.1' },
     help: { type: 'boolean', default: false }
   }
@@ -27,6 +28,7 @@ if (values.help) {
       '  --token <value>         session token for --auth token',
       '  --close-code <n>        close code used when a WS upgrade fails auth (default 4401)',
       '  --scenario <file.json>  scripted prompt replies',
+      '  --stream-delay <ms>     delay between streamed frames (default 2, which is instant)',
       '',
       'Prompts steer the built-in scenario: "approve" raises an approval request,',
       '"delegate" fans out subagent events, anything else streams a reply with a tool call.',
@@ -57,6 +59,7 @@ const gateway = await startFakeGateway({
   auth,
   ...(values.token ? { token: values.token } : {}),
   ...(values['close-code'] ? { closeCode: Number.parseInt(values['close-code'], 10) } : {}),
+  ...(values['stream-delay'] ? { streamDelayMs: Number.parseInt(values['stream-delay'], 10) } : {}),
   ...(scenario ? { scenario } : {})
 })
 
