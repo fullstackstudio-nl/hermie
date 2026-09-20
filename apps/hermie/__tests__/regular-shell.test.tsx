@@ -21,7 +21,6 @@ import { RegularShell } from '../src/app/RegularShell'
 import { type Bot, useBotsStore } from '../src/store/bots'
 import { useChatLayoutStore } from '../src/store/chat-layout'
 import { useChatsStore } from '../src/store/chats'
-import { WINDOW_GAP } from '../src/ui/tokens'
 import { renderScreen } from './support/render'
 
 const gateway = { status: 'ready', config: { baseUrl: 'https://gateway.example.com', authMode: 'native_pkce' } }
@@ -158,26 +157,51 @@ describe('the shell insets', () => {
    * Reported from a real Mac session: the empty strip under the title bar was
    * gone above the chat column and still there above the list, because the
    * sidebar carried a top padding of its own that the Mac-aware inset never
-   * reached. The fix is structural — ONE source — so this asserts the structure
-   * rather than a number: the row that holds both panels carries the inset, and
-   * neither panel adds any.
+   * reached.
+   *
+   * The fix was structural — ONE source — and it stayed structural when the
+   * panels stopped floating. There is no row to inset any more: edge to edge the
+   * glass has to reach the window's edges and under the title bar, and only its
+   * CONTENT may be pushed clear. So both columns apply the same `insets` object
+   * to their own content box, from one hook call, and the property that mattered
+   * is what is asserted — the two cannot disagree.
    */
-  it('applies the safe area once, to the row that holds both panels', () => {
+  it('pushes both columns’ content clear of the safe area by the same amount', () => {
     renderScreen(<RegularShell />)
 
     // The metrics `renderScreen` provides are an iPhone 17 Pro's.
-    expect(paddingOf('shell-window').paddingTop).toBe(WINDOW_GAP + 59)
-    expect(paddingOf('shell-sidebar').paddingTop).toBeUndefined()
-    expect(paddingOf('shell-content').paddingTop).toBeUndefined()
+    expect(paddingOf('shell-sidebar-content').paddingTop).toBe(59)
+    expect(paddingOf('shell-content-panel').paddingTop).toBe(59)
   })
 
   it('leaves no strip above either column on a Mac', () => {
     runsOnMac.RUNS_ON_MAC = true
     renderScreen(<RegularShell />)
 
-    expect(paddingOf('shell-window').paddingTop).toBe(WINDOW_GAP)
-    expect(paddingOf('shell-sidebar').paddingTop).toBeUndefined()
-    expect(paddingOf('shell-content').paddingTop).toBeUndefined()
+    expect(paddingOf('shell-sidebar-content').paddingTop).toBe(0)
+    expect(paddingOf('shell-content-panel').paddingTop).toBe(0)
+  })
+
+  /**
+   * And the reason the insets moved at all: the owner rejected the floating
+   * panels. No outer gutter, no gap between the columns, no rounding, and one
+   * hairline where they meet — the reference is Messages on the Mac.
+   */
+  it('runs the columns to the window’s edges with one hairline between them', () => {
+    renderScreen(<RegularShell />)
+
+    const window = paddingOf('shell-window')
+
+    expect(window.padding).toBeUndefined()
+    expect(window.paddingTop).toBeUndefined()
+    expect(window.paddingLeft).toBeUndefined()
+    expect(window.gap).toBeUndefined()
+
+    const divider = StyleSheet.flatten(screen.getByTestId('shell-divider').props.style as never) as {
+      width?: number
+    }
+
+    expect(divider.width).toBe(StyleSheet.hairlineWidth)
   })
 })
 

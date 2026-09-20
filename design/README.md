@@ -1,6 +1,8 @@
 # Design
 
-`liquid-glass.html` is the **current** reference mockup for the Hermie interface (open it in a browser; no build needed), and `liquid-glass-tokens.md` is the token set the app's `src/ui/tokens.ts` is derived from. Between them they are the source of truth for look, states and motion: floating glass panels over a coloured wallpaper, a dark elevation ladder whose rungs are measurably apart, and one animated presence state.
+`liquid-glass.html` is the **current** reference mockup for the Hermie interface (open it in a browser; no build needed), and `liquid-glass-tokens.md` is the token set the app's `src/ui/tokens.ts` is derived from. Between them they are the source of truth for look, states and motion.
+
+⚠️ **The mockup is behind the app on two decisions the owner made on 2026-09-20**, and where they disagree the app is right: the wide layout is **edge to edge** (no window gutter, no rounded floating panels, one hairline between sidebar and chat) and there are **no gradients anywhere** — flat colours per theme, including the wallpaper and the outgoing bubble. `liquid-glass-tokens.md` opens with both rules and the reasoning; the HTML still draws the old composition.
 
 Two rules from that document are easy to lose and expensive to rediscover:
 

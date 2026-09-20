@@ -240,7 +240,7 @@ edge.
 | Rung  | Hex       | Used by                                  | Ratio vs. rung below |
 | ----- | --------- | ---------------------------------------- | -------------------- |
 | `e0`  | `#0A1830` | wallpaper floor                          | —                    |
-| `e1`  | `#1C2A45` | floating panels (sidebar, chat, overlay) | 1.24 : 1             |
+| `e1`  | `#1C2A45` | the sidebar pane, and the overlay panels | 1.24 : 1             |
 | `e2`  | `#28385A` | list row hover, inset groups             | 1.23 : 1             |
 | `e2s` | `#334670` | selected row (plus the chat colour tint) | 1.25 : 1             |
 | `e3`  | `#3E5480` | incoming bubble                          | 1.24 : 1             |
@@ -297,8 +297,17 @@ Wide-layout-only additions: the 30 pt title, and the composer caption
 
 ## 4. Spacing, radii, sizes
 
-**Spacing scale**: 4, 8, 12, 16, 20, 24, 32, 40, 48. The window gap — between a
-floating panel and the window edge, and between the two panels — is **14**.
+**Spacing scale**: 4, 8, 12, 16, 20, 24, 32, 40, 48.
+
+**The window gap is gone on the wide layout.** It was 14, between a floating panel
+and the window edge and between the two panels, and the owner rejected the result
+on a Mac screenshot on 2026-09-20: he does not want the space around everything.
+The wide shell is edge to edge now, after Messages on the Mac — sidebar flush to
+the leading edge and the full height of the window, chat column flush to the other
+three, no rounding on either, and one hairline where they meet. The constant
+survives for the two things that still float over a window rather than filling it
+(`SidebarOverlay`, `BottomSheet`'s wide column). The compact shell never had a
+gutter to lose.
 
 **Radii**: panel 30, sheet and composer 28, bubble 22 with a 6 px sender-side bottom
 corner, cards 18, thumbnails 14, inset controls 12, pills 999, phone frame 46,

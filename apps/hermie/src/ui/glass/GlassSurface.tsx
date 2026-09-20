@@ -47,6 +47,20 @@ export function useGlassDepth(): number {
   return useContext(GlassDepth)
 }
 
+/**
+ * Say that a background has already been painted between here and the window.
+ *
+ * `GlassSurface` does this for itself. This is for the ONE thing that is a
+ * background without being glass: the edge-to-edge chat column, which is the
+ * wallpaper rather than a floating panel (`RegularShell`). Everything inside it —
+ * the header, the composer, a `Screen` — has to read the same depth it read while
+ * the column was a panel, or the header drops to a level-3 tint and `Screen`
+ * paints the wallpaper's own rung over the wallpaper.
+ */
+export function GlassDepthProvider({ value, children }: { value: number; children: ReactNode }) {
+  return <GlassDepth.Provider value={value}>{children}</GlassDepth.Provider>
+}
+
 /** The level past which a surface stops blurring and becomes a plain tint. */
 const MAX_GLASS_DEPTH = 2
 
@@ -62,6 +76,8 @@ export type GlassSurfaceProps = Omit<ViewProps, 'style'> & {
   style?: StyleProp<ViewStyle>
   /** The outer box carries the shadow; this styles the clipped inner surface. */
   contentStyle?: StyleProp<ViewStyle>
+  /** A handle on that inner surface, for a caller whose padding lives there. */
+  contentTestID?: string
   children?: ReactNode
 }
 
@@ -95,6 +111,7 @@ export function GlassSurface({
   opaque = false,
   style,
   contentStyle,
+  contentTestID,
   children,
   ...rest
 }: GlassSurfaceProps) {
@@ -146,6 +163,7 @@ export function GlassSurface({
           },
           contentStyle
         ]}
+        testID={contentTestID}
       >
         {blurred ? <Material intensity={recipe.blurIntensity} tint={recipe.nativeTint} radius={cornerRadius} /> : null}
 

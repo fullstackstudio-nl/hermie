@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { View } from 'react-native'
+import { StyleSheet, View } from 'react-native'
 
 import type { DevInitialView } from '../dev'
 import { ActivityScreen } from '../features/activity'
@@ -10,18 +10,35 @@ import { SettingsScreen } from '../features/settings'
 import { strings } from '../i18n/strings'
 import { useSafeAreaInsets } from '../platform/safe-area'
 import { useChatLayoutStore } from '../store/chat-layout'
-import { GlassSurface, Wallpaper } from '../ui/glass'
+import { GlassDepthProvider, GlassSurface, Wallpaper } from '../ui/glass'
 import { useTheme } from '../ui/theme'
 import { useShortcut } from '../ui/useShortcut'
-import { SIDEBAR_RAIL_WIDTH, WINDOW_GAP } from '../ui/tokens'
+import { SIDEBAR_RAIL_WIDTH } from '../ui/tokens'
 import { OverlayPanel, type PanelFrame } from './OverlayPanel'
 import { PanelScrim } from './PanelScrim'
 import { SidebarOverlay } from './SidebarOverlay'
 import { useSidebarState, useSidebarWidth } from './useLayoutMode'
 
 /**
- * Two floating glass panels over a wallpaper, for a wide window — an iPad, or a
+ * A sidebar and a chat column, edge to edge, for a wide window — an iPad, or a
  * Mac.
+ *
+ * ## It used to be two floating panels and the owner rejected them
+ *
+ * There was a 14pt wallpaper gutter around everything and between the columns,
+ * and both columns were rounded glass panels floating in it. He sent a screenshot
+ * of the Mac window and said he does not like the space around everything; the
+ * reference he set instead is Messages on the Mac, and iPadOS 26 Messages in dark
+ * mode for the detail. So: the sidebar is flush to the window's leading edge and
+ * runs the full height, the chat column is flush to the other three, there is ONE
+ * hairline between them, and there is no outer gutter and no rounding anywhere.
+ *
+ * The wallpaper is the chat column and nothing else. The sidebar is a glass pane
+ * over the app's own floor, which is what makes the divider the only thing
+ * separating them — the reference has no second colour showing round the outside
+ * either.
+ *
+ * The compact shell is untouched: at 393pt there was never a gutter to remove.
  *
  * Deliberately no navigator: both panels are always mounted, so a stack would
  * only get in the way. The chat list IS the sidebar; Activity, Crons and
@@ -31,13 +48,15 @@ import { useSidebarState, useSidebarWidth } from './useLayoutMode'
  * A window narrower than two panels never reaches this component: `useLayoutMode`
  * hands that case to the compact stack instead.
  *
- * **One inset source for both columns.** The padding that clears the system's
- * safe area is applied ONCE, to the row that holds both panels, and neither
- * panel adds any of its own. A Mac reported this as a bug when they disagreed:
- * the strip under the title bar was gone above the chat and still there above
- * the list, because the sidebar carried a hard-coded top padding that the
- * Mac-aware inset never reached. Two columns cannot disagree about a number
- * they do not each own.
+ * **One inset source, and it moved INSIDE the columns.** While the panels floated
+ * there was a row around them to put the safe area on, and the rule was that the
+ * row owned it and neither panel added any — a Mac reported the bug that rule
+ * exists for, an empty strip above the list and not above the chat. Edge to edge
+ * there is no row to inset: the glass has to reach the window's edges and under
+ * the title bar, and only its CONTENT may be pushed clear. So each column applies
+ * the same `insets` object to its own content box, from one hook call, and the
+ * property that mattered is unchanged — the two cannot disagree about a number
+ * neither of them computes.
  *
  * ## The sidebar can be hidden, and what that means depends on the width
  *
@@ -160,83 +179,93 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
   )
 
   return (
-    <Wallpaper style={{ flex: 1 }} testID="wallpaper">
-      <View
-        style={{
+    <View
+      style={{
+        backgroundColor: theme.elevation.e0,
+        flex: 1,
+        flexDirection: 'row'
+      }}
+      testID="shell-window"
+    >
+      {/*
+        The rail and the sidebar are the same pane at two widths, and the same
+        `BotsScreen` in two variants — see `SidebarRail` for why the rail is a
+        variant rather than a component of its own. Flush left, full height, no
+        rounding and no border of its own: the divider below is the only edge it
+        has, which is what the reference draws.
+      */}
+      <GlassSurface
+        contentStyle={{
+          borderWidth: 0,
           flex: 1,
-          flexDirection: 'row',
-          gap: WINDOW_GAP,
-          paddingBottom: WINDOW_GAP + insets.bottom,
-          paddingLeft: WINDOW_GAP + insets.left,
-          paddingRight: WINDOW_GAP + insets.right,
-          paddingTop: WINDOW_GAP + insets.top
+          paddingBottom: insets.bottom,
+          paddingLeft: insets.left,
+          paddingTop: insets.top
         }}
-        testID="shell-window"
+        contentTestID="shell-sidebar-content"
+        radius={0}
+        shadow="none"
+        style={{ width: collapsed ? SIDEBAR_RAIL_WIDTH : sidebar }}
+        testID="shell-sidebar"
+        variant="panel"
       >
-        {/*
-          The rail and the sidebar are the same panel at two widths, and the same
-          `BotsScreen` in two variants — see `SidebarRail` for why the rail is a
-          variant rather than a component of its own. The window gap is unchanged in
-          both, so the content panel gains exactly the width the list gave up.
-        */}
-        <GlassSurface
-          contentStyle={{ flex: 1 }}
-          radius={theme.radii.panel}
-          style={{ width: collapsed ? SIDEBAR_RAIL_WIDTH : sidebar }}
-          testID="shell-sidebar"
-          variant="panel"
-        >
-          {collapsed ? (
-            /*
-              `onOpenBot` and `selectedBot` are handed to the rail as well, and they
-              are not decoration: ⌘1…9 and ⌘↑/↓ are registered by this component in
-              either variant, and without somewhere to send the chat they would fire
-              into nothing. A shortcut that reports success and does nothing is the
-              worst of the three possible behaviours.
-            */
-            <BotsScreen
-              currentTab={section ?? 'chats'}
-              onOpenBot={bot => openBot(bot.name)}
-              onOpenSection={openSection}
-              onShowList={showList}
-              selectedBot={section === null ? selectedBot : undefined}
-              variant="rail"
-            />
-          ) : (
-            list
-          )}
-
-          {/*
-            The sidebar is dimmed too, and not interactive while an overlay is up.
-
-            It used to be deliberately outside the scrim — "a different chat is one
-            tap away while Settings is open" — and the owner's answer to that was
-            that a bright, clickable list beside a dimmed chat makes the dim mean
-            nothing at all. Consulting Settings is one errand; the list is where you
-            go when it is finished, which is one Escape away.
-          */}
-          <PanelScrim
-            onPress={() => setSection(null)}
-            open={overlayOpen}
-            radius={theme.radii.panel}
-            testID="overlay-scrim-sidebar"
+        {collapsed ? (
+          /*
+            `onOpenBot` and `selectedBot` are handed to the rail as well, and they
+            are not decoration: ⌘1…9 and ⌘↑/↓ are registered by this component in
+            either variant, and without somewhere to send the chat they would fire
+            into nothing. A shortcut that reports success and does nothing is the
+            worst of the three possible behaviours.
+          */
+          <BotsScreen
+            currentTab={section ?? 'chats'}
+            onOpenBot={bot => openBot(bot.name)}
+            onOpenSection={openSection}
+            onShowList={showList}
+            selectedBot={section === null ? selectedBot : undefined}
+            variant="rail"
           />
-        </GlassSurface>
+        ) : (
+          list
+        )}
 
-        <View style={{ flex: 1, minWidth: 0 }} testID="shell-content">
-          <GlassSurface
-            contentStyle={{ flex: 1 }}
-            /*
-              Measured for the overlay, which has to be this panel's frame and not
-              an arithmetic guess at it from the window's insets. See `OverlayPanel`
-              — the guess was visibly wrong at the bottom of a Mac window.
-            */
-            onLayout={event => setContentFrame(event.nativeEvent.layout)}
-            radius={theme.radii.panel}
-            style={{ flex: 1 }}
-            testID="shell-content-panel"
-            variant="panel"
-          >
+        {/*
+          The sidebar is dimmed too, and not interactive while an overlay is up.
+
+          It used to be deliberately outside the scrim — "a different chat is one
+          tap away while Settings is open" — and the owner's answer to that was
+          that a bright, clickable list beside a dimmed chat makes the dim mean
+          nothing at all. Consulting Settings is one errand; the list is where you
+          go when it is finished, which is one Escape away.
+        */}
+        <PanelScrim onPress={() => setSection(null)} open={overlayOpen} radius={0} testID="overlay-scrim-sidebar" />
+      </GlassSurface>
+
+      {/*
+        The whole boundary between the two columns: one hairline, at the device's
+        own smallest drawable width. Not a border on either pane — a border
+        belongs to a shape, and neither of these is a shape any more.
+      */}
+      <View style={{ backgroundColor: theme.hairline, width: StyleSheet.hairlineWidth }} testID="shell-divider" />
+
+      <View style={{ flex: 1, minWidth: 0 }} testID="shell-content">
+        {/*
+          The chat column IS the wallpaper. Everything inside it reads a glass
+          depth of 1, exactly as it did while this was a floating panel: without
+          that the header and composer drop to a level-3 tint and `Screen` paints
+          the wallpaper's own rung over the wallpaper.
+        */}
+        <Wallpaper
+          /*
+            Measured for the overlay, which has to be this column's frame and not
+            an arithmetic guess at it from the window's insets. See `OverlayPanel`
+            — the guess was visibly wrong at the bottom of a Mac window.
+          */
+          onLayout={event => setContentFrame(event.nativeEvent.layout)}
+          style={{ flex: 1 }}
+          testID="wallpaper"
+        >
+          <GlassDepthProvider value={1}>
             {/*
               A dead session is not a chat problem and must not read as one, so
               it takes the whole column rather than sitting under a chat error.
@@ -254,53 +283,56 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
               also settles the label: the header's is always Hide, the rail's is
               always Show, and neither has to describe a state the other is in.
             */}
-            <ChatScreen
-              bot={selectedBot}
-              focusItemId={focusItemId}
-              onOpenBot={openBot}
-              onOpenCron={openCron}
-              onToggleSidebar={collapsed ? undefined : toggleSidebar}
-            />
+            <View
+              style={{
+                flex: 1,
+                paddingBottom: insets.bottom,
+                paddingRight: insets.right,
+                paddingTop: insets.top
+              }}
+              testID="shell-content-panel"
+            >
+              <ChatScreen
+                bot={selectedBot}
+                focusItemId={focusItemId}
+                onOpenBot={openBot}
+                onOpenCron={openCron}
+                onToggleSidebar={collapsed ? undefined : toggleSidebar}
+              />
+            </View>
 
             {/*
-              The chat's own dim, the last child of the chat panel so it covers the
-              header too. Tapping it closes one level, which is the answer Escape
-              gives — `overlay-scrim` keeps its name because it is still the scrim a
-              reader taps to dismiss the panel.
+              The chat's own dim, the last child of the chat column so it covers
+              the header too. Tapping it closes one level, which is the answer
+              Escape gives — `overlay-scrim` keeps its name because it is still the
+              scrim a reader taps to dismiss the panel.
             */}
-            <PanelScrim
-              onPress={() => setSection(null)}
-              open={overlayOpen}
-              radius={theme.radii.panel}
-              testID="overlay-scrim"
-            />
-          </GlassSurface>
+            <PanelScrim onPress={() => setSection(null)} open={overlayOpen} radius={0} testID="overlay-scrim" />
+          </GlassDepthProvider>
+        </Wallpaper>
 
-          <OverlayPanel
-            {...(contentFrame ? { frame: contentFrame } : {})}
-            onClose={() => setSection(null)}
-            title={titleFor(section)}
-            visible={overlayOpen}
-          >
-            {section === 'activity' ? <ActivityScreen onOpenBot={openBot} /> : null}
-            {section === 'cron' ? <CronScreen {...(cronJobId ? { initialJobId: cronJobId } : {})} /> : null}
-            {section === 'settings' ? (
-              <SettingsScreen {...(initial?.page ? { initialPage: initial.page } : {})} />
-            ) : null}
-          </OverlayPanel>
-        </View>
-
-        {/*
-          Over BOTH columns rather than inside the content one, because it stands in
-          for the sidebar and therefore starts at the window's own leading edge. It
-          is the last child so that Escape reaches it before the destination panel
-          when both are up — the stack delivers to whatever registered last.
-        */}
-        <SidebarOverlay onClose={() => setListOverlay(false)} visible={listOverlay} width={sidebar}>
-          {listOverlay ? list : null}
-        </SidebarOverlay>
+        <OverlayPanel
+          {...(contentFrame ? { frame: contentFrame } : {})}
+          onClose={() => setSection(null)}
+          title={titleFor(section)}
+          visible={overlayOpen}
+        >
+          {section === 'activity' ? <ActivityScreen onOpenBot={openBot} /> : null}
+          {section === 'cron' ? <CronScreen {...(cronJobId ? { initialJobId: cronJobId } : {})} /> : null}
+          {section === 'settings' ? <SettingsScreen {...(initial?.page ? { initialPage: initial.page } : {})} /> : null}
+        </OverlayPanel>
       </View>
-    </Wallpaper>
+
+      {/*
+        Over BOTH columns rather than inside the content one, because it stands in
+        for the sidebar and therefore starts at the window's own leading edge. It
+        is the last child so that Escape reaches it before the destination panel
+        when both are up — the stack delivers to whatever registered last.
+      */}
+      <SidebarOverlay onClose={() => setListOverlay(false)} visible={listOverlay} width={sidebar}>
+        {listOverlay ? list : null}
+      </SidebarOverlay>
+    </View>
   )
 }
 

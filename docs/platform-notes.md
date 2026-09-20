@@ -11,6 +11,45 @@ build** running as "Designed for iPad" (ADR-0011). Sections dated before 2026-09
 native macOS target described a platform that no longer exists — they were removed rather than
 rewritten, and git history has them.
 
+## The wide layout is edge to edge (2026-09-20)
+
+The sidebar and the chat column used to be two rounded glass panels floating in a
+14pt wallpaper gutter. The owner sent a screenshot of the Mac window and rejected
+it — he does not like the space around everything — and set Messages on the Mac as
+the reference, with iPadOS 26 Messages in dark mode for the detail.
+
+So `RegularShell` draws: sidebar flush to the window's leading edge and the full
+height of the window, chat column flush to the other three, **one** hairline
+between them, no outer gutter and no rounding on either. The wallpaper is the chat
+column and nothing else; the sidebar is a glass pane over the app's own floor.
+
+Two consequences worth knowing before touching that file:
+
+- **The safe area moved inside the columns.** There is no row left to inset: the
+  glass has to reach the window's edges and under the title bar, and only its
+  content may be pushed clear. Both columns apply the same `insets` object to
+  their own content box, from one hook call, which keeps the property the old rule
+  was protecting — they cannot disagree about a number neither computes.
+- **The chat column provides a glass depth of 1** (`GlassDepthProvider`). It is
+  the wallpaper rather than a `GlassSurface` now, and without that the header and
+  composer would drop to a level-3 tint and `Screen` would paint the wallpaper's
+  own rung over the wallpaper — which is the exact bug the depth rule was added
+  for in the first place.
+
+The compact shell is untouched: at 393pt there was never a gutter to remove.
+
+And in the same pass, **no gradients anywhere**. The owner's verdict was that they
+look generated. A wallpaper is one flat fill per scheme, a glass recipe and a
+bubble recipe are one wash each, and an accent's outgoing bubble is one colour.
+Every value kept is the one `npm run contrast:check` was already measuring, so no
+floor moved — it still reports 186 pairs at or above theirs. The only
+`LinearGradient` left in the app is the reading fold's mask, which is an alpha ramp
+doing a job rather than decoration.
+
+**Unverified:** none of this was seen in a real Mac window. It was read, typechecked
+and covered by the RNTL shell tests; how the hairline and the under-title-bar glass
+actually land is a question for a Mac.
+
 ## Summary
 
 | Question                                          | Answer                                          | Date       |

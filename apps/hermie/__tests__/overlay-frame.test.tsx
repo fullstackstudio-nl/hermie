@@ -25,7 +25,7 @@ import { RegularShell } from '../src/app/RegularShell'
 import { type Bot, useBotsStore } from '../src/store/bots'
 import { useChatLayoutStore } from '../src/store/chat-layout'
 import { useChatsStore } from '../src/store/chats'
-import { radii, SCRIM_COLOR, WINDOW_GAP } from '../src/ui/tokens'
+import { SCRIM_COLOR, WINDOW_GAP } from '../src/ui/tokens'
 import { renderScreen } from './support/render'
 
 const gateway = { status: 'ready', config: { baseUrl: 'https://gateway.example.com', authMode: 'native_pkce' } }
@@ -128,16 +128,19 @@ describe('the destination panel’s frame', () => {
 })
 
 describe('the dim', () => {
-  it('is inside BOTH panels, each with that panel’s own radius', () => {
+  it('is inside BOTH columns, in each column’s own shape', () => {
     openSettings()
 
     for (const id of ['overlay-scrim-dim', 'overlay-scrim-sidebar-dim']) {
       const dim = flat(id) as ViewStyle & { backgroundColor?: string }
 
-      // Its box is its PARENT's, which is the panel — so a dim cannot be a
-      // different shape from the thing it dims, and cannot reach past it.
+      // Its box is its PARENT's, which is the column — so a dim cannot be a
+      // different shape from the thing it dims, and cannot reach past it. The
+      // radius is 0 now for the reason everything else in this shell is: the
+      // owner rejected the floating panels, so neither column is a rounded shape
+      // any more and a rounded dim over a square column would show its corners.
       expect(dim).toMatchObject(StyleSheet.absoluteFill)
-      expect(dim.borderRadius).toBe(radii.panel)
+      expect(dim.borderRadius).toBe(0)
       expect(dim.backgroundColor).toBe(SCRIM_COLOR)
       expect(dim.overflow).toBe('hidden')
     }

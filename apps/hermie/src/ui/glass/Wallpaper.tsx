@@ -12,23 +12,19 @@
  * as a PNG has to ship at every scale factor for every device, and this is one
  * colour.
  */
-import type { ReactNode } from 'react'
-import { View, type StyleProp, type ViewStyle } from 'react-native'
+import { View, type ViewProps } from 'react-native'
 
 import { useTheme } from '../theme'
 
-export type WallpaperProps = {
-  children?: ReactNode
-  style?: StyleProp<ViewStyle>
-  testID?: string
-}
+/**
+ * A plain `View` with the floor's colour under it, so a caller can measure it —
+ * the wide shell's chat column is the wallpaper now, and `OverlayPanel` needs
+ * that column's real frame rather than an arithmetic guess at it.
+ */
+export type WallpaperProps = ViewProps
 
-export function Wallpaper({ children, style, testID }: WallpaperProps) {
+export function Wallpaper({ style, ...rest }: WallpaperProps) {
   const theme = useTheme()
 
-  return (
-    <View style={[{ backgroundColor: theme.wallpaper.fill }, style]} testID={testID}>
-      {children}
-    </View>
-  )
+  return <View {...rest} style={[{ backgroundColor: theme.wallpaper.fill }, style]} />
 }
