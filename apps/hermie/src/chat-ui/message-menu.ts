@@ -36,6 +36,7 @@ export type MessageMenuAction =
   | { kind: 'copyMarkdown'; text: string }
   | { kind: 'copyLink'; href: string }
   | { kind: 'openBot'; handle: string }
+  | { kind: 'selectText'; text: string }
   | { kind: 'toggleDetails' }
 
 /** `[text](href)` and `<https://…>`; the two forms a model actually writes. */
@@ -136,9 +137,25 @@ export interface MessageMenuModel {
   detailsOpen: boolean
   /** Whether the host can actually open another chat. */
   canOpenBot: boolean
+  /**
+   * Whether "Select text" is worth offering, which is a question about the
+   * POINTER rather than about the platform.
+   *
+   * The panel it opens works everywhere — on a phone it is a nested `Text`
+   * tree — but there it offers nothing the long press does not already give,
+   * so the line would be a second door to the same room. It is opt-in for
+   * exactly that reason, and `TranscriptList` passes `RUNS_ON_MAC`.
+   */
+  canSelectText?: boolean
 }
 
-export function messageMenuItems({ canOpenBot, detailsOpen, hasDetails, item }: MessageMenuModel): MenuItem[] {
+export function messageMenuItems({
+  canOpenBot,
+  canSelectText = false,
+  detailsOpen,
+  hasDetails,
+  item
+}: MessageMenuModel): MenuItem[] {
   const text = messageText(item)
   const links = messageLinks(text)
   const handle = counterpart(item)
@@ -157,6 +174,15 @@ export function messageMenuItems({ canOpenBot, detailsOpen, hasDetails, item }: 
         id: 'copyMarkdown',
         title: chatStrings.menu.copyMarkdown,
         systemImage: 'chevron.left.forwardslash.chevron.right'
+      },
+    // Directly under the two Copy lines, because it belongs to the same
+    // intention — "I want these words" — and above the links, which are about
+    // something the message merely contains.
+    Boolean(text) &&
+      canSelectText && {
+        id: 'selectText',
+        title: chatStrings.menu.selectText,
+        systemImage: 'selection.pin.in.out'
       },
     links.length > 0 && {
       id: 'links',
@@ -195,6 +221,12 @@ export function parseMessageMenuAction(id: string, item: TranscriptItem): Messag
 
   if (id === 'copyMarkdown') {
     return { kind: 'copyMarkdown', text }
+  }
+
+  // The markdown source, not the stripped words: the panel renders it, so it
+  // needs what the bubble has rather than what a Copy would put on a clipboard.
+  if (id === 'selectText') {
+    return text ? { kind: 'selectText', text } : null
   }
 
   if (id === 'toggleDetails') {

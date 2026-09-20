@@ -74,6 +74,7 @@ import { CronDeliveryCard } from './CronDeliveryCard'
 import { DateSeparator } from './DateSeparator'
 import { JumpToLatestPill } from './JumpToLatestPill'
 import { NoticePill } from './NoticePill'
+import { SelectTextOverlay } from './SelectTextOverlay'
 import { StatusRow } from './StatusRow'
 import { SubagentGroupCard } from './SubagentGroupCard'
 import { ToolCard } from './ToolCard'
@@ -129,6 +130,15 @@ export interface TranscriptContext {
   /** Re-opens the sheet for a question still sitting in the transcript. */
   onOpenRequest?: (item: ApprovalItem | ClarifyItem) => void
   onLinkPress?: (href: string) => void
+  /**
+   * Open the "Select text" panel over this message's markdown.
+   *
+   * Supplied by `TranscriptList` itself rather than by the host, and absent from
+   * `TranscriptListProps` for that reason: the panel is a `Modal`, and a modal
+   * mounted from a virtualised cell goes with the cell the moment it recycles.
+   * The list holds the state; a row only asks.
+   */
+  onSelectText?: (markdown: string) => void
   /** The cron card's two actions, where the host can provide them. */
   onOpenCron?: (jobName: string) => void
   /**
@@ -151,7 +161,10 @@ export interface TranscriptContext {
   images?: MarkdownImageSource
 }
 
-export interface TranscriptListProps extends TranscriptContext {
+// `onSelectText` is omitted rather than inherited: it is the list's own wiring to
+// its own modal, and a host that passed one would be overriding the only thing
+// that can keep that modal mounted.
+export interface TranscriptListProps extends Omit<TranscriptContext, 'onSelectText'> {
   items: VisibleItem[]
   /** Pinned above the list — the `AgentsBar` slot. */
   header?: ReactNode
@@ -602,6 +615,10 @@ function useMessageMenu(
     () =>
       messageMenuItems({
         canOpenBot: Boolean(context.onOpenBot),
+        // A Mac question rather than a capability one. The panel renders
+        // everywhere, but only where a pointer can drag across it does it offer
+        // anything the long press does not already give.
+        canSelectText: RUNS_ON_MAC && Boolean(context.onSelectText),
         detailsOpen: expanded,
         hasDetails,
         item
@@ -630,6 +647,11 @@ function useMessageMenu(
 
         case 'openBot':
           context.onOpenBot?.(action.handle)
+
+          return
+
+        case 'selectText':
+          context.onSelectText?.(action.text)
 
           return
 
@@ -807,6 +829,17 @@ function TranscriptListBody({
     applyDirectTouchPan(listRef.current)
   }, [])
 
+  /**
+   * The markdown the "Select text" panel is showing, or `null` for closed.
+   *
+   * The SOURCE rather than the item id, so the panel keeps showing what it was
+   * opened on even if the row it came from scrolls out of the window and is
+   * recycled — which on a long transcript is most of them.
+   */
+  const [selectingText, setSelectingText] = useState<string | null>(null)
+  const openSelectText = useCallback((markdown: string) => setSelectingText(markdown), [])
+  const closeSelectText = useCallback(() => setSelectingText(null), [])
+
   const context = useMemo<TranscriptContext>(
     () => ({
       accent: handlers.accent,
@@ -819,6 +852,7 @@ function TranscriptListBody({
       onOpenTranscript: handlers.onOpenTranscript,
       onRetry: handlers.onRetry,
       onRunCron: handlers.onRunCron,
+      onSelectText: openSelectText,
       selfHandle: handlers.selfHandle,
       subagents: handlers.subagents ?? {},
       typingHandles: handlers.typingHandles ?? EMPTY_HANDLES
@@ -835,6 +869,7 @@ function TranscriptListBody({
       handlers.onRetry,
       handlers.onRunCron,
       handlers.selfHandle,
+      openSelectText,
       handlers.subagents,
       handlers.typingHandles
     ]
@@ -1190,6 +1225,16 @@ function TranscriptListBody({
             <JumpToLatestPill count={newMessageCount} onPress={jump} />
           </View>
         ) : null}
+
+        {/*
+          Mounted HERE, from the list rather than from the row that opened it: a
+          `Modal` inside a virtualised cell is unmounted the moment the cell
+          recycles, which on a transcript happens while the reader is still
+          reading what it shows.
+        */}
+        {selectingText === null ? null : (
+          <SelectTextOverlay markdown={selectingText} onClose={closeSelectText} testID={`${testID}-select-text`} />
+        )}
       </BubbleColumn>
     </ExpandedProvider>
   )

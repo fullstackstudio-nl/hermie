@@ -129,6 +129,52 @@ public class HermieMacModule: Module {
       Prop("enabled") { (view: HermieContextMenuView, enabled: Bool?) in
         view.setEnabled(enabled ?? true)
       }
+
+      // Defaults to ON, because the view was built for list rows and that is what a row wants. The
+      // transcript is the one caller that turns it off; see `setHoverEffect`.
+      Prop("hoverEffect") { (view: HermieContextMenuView, hoverEffect: Bool?) in
+        view.setHoverEffect(hoverEffect ?? true)
+      }
+
+      // The radius the row is drawn with, so UIKit's highlight is cut to the same shape instead of
+      // laying a square block under a rounded row.
+      Prop("cornerRadius") { (view: HermieContextMenuView, radius: Double?) in
+        view.setCornerRadius(radius)
+      }
+    }
+
+    /**
+     A message as ONE selectable rich text. See `HermieSelectableTextView`.
+
+     `runs` is `[[String: Any]]` rather than a typed record for the same reason the menu's items
+     are: the shape is produced by `src/markdown/attributed.ts` and will grow a field before this
+     signature does, and a run whose keys are not the ones expected should lose its styling rather
+     than take a panel down.
+     */
+    View(HermieSelectableTextView.self) {
+      Prop("runs") { (view: HermieSelectableTextView, runs: [[String: Any]]?) in
+        view.setRuns(runs ?? [])
+      }
+
+      Prop("fontSize") { (view: HermieSelectableTextView, size: Double?) in
+        view.setFontSize(size)
+      }
+
+      Prop("textColor") { (view: HermieSelectableTextView, color: UIColor?) in
+        view.setTextColor(color)
+      }
+
+      Prop("mutedColor") { (view: HermieSelectableTextView, color: UIColor?) in
+        view.setMutedColor(color)
+      }
+
+      Prop("linkColor") { (view: HermieSelectableTextView, color: UIColor?) in
+        view.setLinkColor(color)
+      }
+
+      Prop("codeBackground") { (view: HermieSelectableTextView, color: UIColor?) in
+        view.setCodeBackground(color)
+      }
     }
 
     /**
@@ -142,6 +188,18 @@ public class HermieMacModule: Module {
       HermieMenuBar.setMenuBar(titles: titles, chats: chats)
     }
     .runOnQueue(.main)
+
+    /**
+     Whether this binary registers `HermieSelectableTextView`.
+
+     A probe, not a capability: it exists so JavaScript can ask the MODULE instead of asking for the
+     view, because `requireNativeView` throws for one that is not registered and an older binary
+     installed over a newer bundle is exactly the case that would hit it. Added in the same change as
+     the view, so the answer is never wrong in the direction that throws.
+     */
+    Function("supportsSelectableText") { () -> Bool in
+      true
+    }
 
     /** Whether the menu bar hook reached the app delegate's class. Reported on the developer screen. */
     Function("isMenuBarInstalled") { () -> Bool in

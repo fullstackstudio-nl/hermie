@@ -159,6 +159,57 @@ describe('a message’s menu', () => {
     expect(line(true)).toBe('Hide details')
   })
 
+  it('offers Select text only where a pointer can use it', () => {
+    // The panel renders on every platform, but only where a mouse can drag
+    // across it does it give a reader anything the long press does not. So the
+    // line is opt-in, and `TranscriptList` opts in on a Mac.
+    const withPointer = messageMenuItems({
+      canOpenBot: false,
+      canSelectText: true,
+      detailsOpen: false,
+      hasDetails: false,
+      item: assistant
+    }).map(item => item.id)
+
+    const without = messageMenuItems({
+      canOpenBot: false,
+      detailsOpen: false,
+      hasDetails: false,
+      item: assistant
+    }).map(item => item.id)
+
+    expect(withPointer).toContain('selectText')
+    expect(without).not.toContain('selectText')
+
+    // Directly under the two Copy lines: same intention, different destination.
+    expect(withPointer.indexOf('selectText')).toBe(withPointer.indexOf('copyMarkdown') + 1)
+  })
+
+  it('hands the panel the MARKDOWN, not the stripped words', () => {
+    // The panel renders the message; a Copy strips it. Handing over the stripped
+    // form would open a panel showing something the bubble never said.
+    expect(parseMessageMenuAction('selectText', assistant)).toEqual({
+      kind: 'selectText',
+      text: assistant.text
+    })
+  })
+
+  it('offers no Select text for a row with no words', () => {
+    const status: TranscriptItem = {
+      id: 's2',
+      kind: 'status',
+      origin: 'live',
+      seq: 4,
+      text: 'Reconnected',
+      version: 1
+    } as TranscriptItem
+
+    expect(
+      messageMenuItems({ canOpenBot: false, canSelectText: true, detailsOpen: false, hasDetails: false, item: status })
+    ).toEqual([])
+    expect(parseMessageMenuAction('selectText', status)).toBeNull()
+  })
+
   it('offers nothing at all for a row with no words and no disclosure', () => {
     const status: TranscriptItem = {
       id: 's1',

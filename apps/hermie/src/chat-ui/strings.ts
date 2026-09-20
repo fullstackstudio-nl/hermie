@@ -163,9 +163,33 @@ export const chatStrings = {
     showDetails: 'Show details',
     hideDetails: 'Hide details',
     openBotChat: (handle: string) => `Open @${handle}’s chat`,
+    /**
+     * Only where a pointer exists and the platform can draw a real text view;
+     * see `SelectTextOverlay` and `src/markdown/attributed.ts`.
+     */
+    selectText: 'Select text',
     /** What a screen reader announces the menu itself as. */
     message: 'Message actions'
   },
+
+  /** The panel `Select text` opens. */
+  selectText: {
+    title: 'Select text',
+    done: 'Done',
+    copyAll: 'Copy all',
+    /** The panel itself, for assistive technology. */
+    panel: 'Message as selectable text',
+    /** Under the title, because ⌘A and ⌘C are the point of the panel. */
+    hint: 'Drag to select · ⌘A all · ⌘C copy · Esc to close'
+  },
+  /** The overlay shown while a file is held over the window. */
+  drop: {
+    /** One line, on the target itself: what letting go will do. */
+    invitation: 'Drop file to attach',
+    /** What assistive technology calls the region. */
+    region: 'Drop files here to attach them'
+  },
+
   composer: {
     placeholder: 'Message',
     /** The field's accessibility label once the chat knows whose it is. */
