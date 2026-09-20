@@ -2451,6 +2451,23 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       title: session.title,
       profile_name: session.profile,
       stored_session_id: session.storedId,
+      /*
+       * The session's working directory, which a real gateway reports here and
+       * this server did not report at all.
+       *
+       * It is what makes the upload route above reachable. A client cannot
+       * invent this path — `@file:` is expanded with `allowed_root` set to the
+       * session's own cwd, so a file has to be uploaded INTO it — and Hermie
+       * refuses to upload rather than guess when the resume carries no `cwd`.
+       * Omitting it therefore meant `POST /api/files/upload-stream`, the 100 MB
+       * cap, the absolute-path rule and the "I received N bytes" reply below
+       * were all written against a path no run could ever take: every attach
+       * stopped at "No workspace to upload into" before a request was made.
+       *
+       * Absolute on purpose. With no locked managed-files root a relative path
+       * earns a 400, and that is the rule the upload route reproduces.
+       */
+      cwd: `/root/projects/${session.profile}`,
       desktop_contract: 7,
       version,
       running: state.runningSessions.has(session.storedId)
