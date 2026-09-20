@@ -10,6 +10,7 @@ const { values } = parseArgs({
     auth: { type: 'string', default: 'none' },
     token: { type: 'string' },
     'close-code': { type: 'string' },
+    'public-host': { type: 'string' },
     scenario: { type: 'string' },
     'stream-delay': { type: 'string' },
     host: { type: 'string', default: '127.0.0.1' },
@@ -24,8 +25,9 @@ if (values.help) {
       '',
       '  --port <n>              listen port (default 9119)',
       '  --host <addr>           bind address (default 127.0.0.1)',
-      '  --auth none|token|native  authentication mode (default none)',
+      '  --auth none|token|native|cookie  authentication mode (default none)',
       '  --token <value>         session token for --auth token',
+      '  --public-host <host>    enforce the Host/Origin guard against this host',
       '  --close-code <n>        close code used when a WS upgrade fails auth (default 4401)',
       '  --scenario <file.json>  scripted prompt replies',
       '  --stream-delay <ms>     delay between streamed frames (default 2, which is instant)',
@@ -42,8 +44,8 @@ if (values.help) {
 
 const auth = values.auth as FakeAuthMode
 
-if (!['none', 'token', 'native'].includes(auth)) {
-  console.error(`--auth must be none, token or native (got ${values.auth}).`)
+if (!['none', 'token', 'native', 'cookie'].includes(auth)) {
+  console.error(`--auth must be none, token, native or cookie (got ${values.auth}).`)
   process.exit(1)
 }
 
@@ -59,6 +61,7 @@ const gateway = await startFakeGateway({
   auth,
   ...(values.token ? { token: values.token } : {}),
   ...(values['close-code'] ? { closeCode: Number.parseInt(values['close-code'], 10) } : {}),
+  ...(values['public-host'] ? { publicHost: values['public-host'] } : {}),
   ...(values['stream-delay'] ? { streamDelayMs: Number.parseInt(values['stream-delay'], 10) } : {}),
   ...(scenario ? { scenario } : {})
 })
@@ -70,6 +73,10 @@ console.log(`  inject     curl -XPOST ${gateway.url}/__fake/inject -d '{"profile
 
 if (auth === 'token') {
   console.log(`  token      ${gateway.state.token}`)
+}
+
+if (auth === 'cookie') {
+  console.log('  sign in    tester / hunter2 (POST /auth/password-login)')
 }
 
 const shutdown = () => {

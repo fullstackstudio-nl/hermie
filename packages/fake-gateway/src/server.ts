@@ -16,7 +16,16 @@ import { WebSocket, WebSocketServer } from 'ws'
  * close frame) is on the handle, never on the wire.
  */
 
-export type FakeAuthMode = 'none' | 'token' | 'native'
+/**
+ * How the fake gateway authenticates.
+ *
+ * `cookie` is the browser flow: a sign-in page, a session cookie, and REST plus
+ * the ticket mint gated on that cookie rather than on a bearer. It exists so
+ * Hermie Web can be driven end to end without a real `hermes serve` — and,
+ * with `publicHost`, so the Host/Origin guard the proxy has to satisfy is
+ * actually enforced rather than assumed.
+ */
+export type FakeAuthMode = 'none' | 'token' | 'native' | 'cookie'
 
 export interface ScenarioReply {
   /** Substring of the prompt this reply answers; omitted means "anything". */
@@ -76,6 +85,17 @@ export interface FakeGatewayOptions {
   token?: string
   /** Close code used when a WebSocket upgrade fails auth (default 4401). */
   closeCode?: number
+  /**
+   * The host this gateway believes it is served on (`dashboard.public_url`).
+   *
+   * When set, the DNS-rebinding guard upstream runs is enforced here too: a
+   * request whose `Host`, or whose `Origin`, names a different host is refused.
+   * That is the guard Hermie Web exists to satisfy, so a test that does not
+   * turn it on proves nothing about the proxy's header rewrite.
+   */
+  publicHost?: string
+  /** User name and password accepted by `/auth/password-login` in cookie mode. */
+  password?: { username: string; password: string }
   scenario?: Scenario
   version?: string
   /** How many events per session the replay ring keeps. */
@@ -378,6 +398,8 @@ const LAUNCH_PROFILE = 'default'
 const WS_PATH = '/api/ws'
 const GATEWAY_WS_PROTOCOL = 'hermes-gateway-v1'
 const TICKET_PROTOCOL_PREFIX = 'hermes-gateway-ticket.'
+/** The access-token cookie, as `dashboard_auth/cookies.py` names it over plain HTTP. */
+const SESSION_COOKIE = 'hermes_session_at'
 const TICKET_TTL_SECONDS = 30
 
 /** Frames one delegated child runs through: requested, start, thinking, tool, progress, complete. */
@@ -1192,7 +1214,55 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     timer.unref?.()
   }
 
-  const gated = () => state.auth === 'native'
+  const gated = () => state.auth === 'native' || state.auth === 'cookie'
+  const publicHost = options.publicHost ?? ''
+  const passwordAccount = options.password ?? { username: 'tester', password: 'hunter2' }
+  const sessionCookies = new Set<string>()
+
+  /** Read one cookie out of a request's `Cookie` header. */
+  function cookieOf(req: IncomingMessage, name: string): string {
+    for (const part of String(req.headers.cookie ?? '').split(';')) {
+      const [key, ...rest] = part.trim().split('=')
+
+      if (key === name) {
+        return decodeURIComponent(rest.join('='))
+      }
+    }
+
+    return ''
+  }
+
+  /**
+   * The DNS-rebinding guard, as `web_server.py` and `web_server_chat.py` run it:
+   * the `Host` must be the host we believe we are, and an `Origin`, when there
+   * is one, must name the same host. Off unless `publicHost` was given, because
+   * every other test in this repository dials `127.0.0.1` directly.
+   */
+  function hostOriginRejection(req: IncomingMessage): string | null {
+    if (!publicHost) {
+      return null
+    }
+
+    const host = String(req.headers.host ?? '')
+
+    if (host !== publicHost) {
+      return `host_mismatch host=${host || '?'} expected=${publicHost}`
+    }
+
+    const origin = String(req.headers.origin ?? '')
+
+    if (origin) {
+      try {
+        if (new URL(origin).host !== publicHost) {
+          return `origin_mismatch origin=${origin} expected=${publicHost}`
+        }
+      } catch {
+        return `origin_unparseable origin=${origin}`
+      }
+    }
+
+    return null
+  }
 
   function bearerOf(req: IncomingMessage): string {
     const header = req.headers.authorization ?? ''
@@ -1207,6 +1277,12 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
 
     if (state.auth === 'token') {
       return req.headers['x-hermes-session-token'] === state.token
+    }
+
+    if (state.auth === 'cookie') {
+      const cookie = cookieOf(req, SESSION_COOKIE)
+
+      return cookie.length > 0 && sessionCookies.has(cookie)
     }
 
     const token = bearerOf(req)
@@ -1303,6 +1379,71 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     const path = url.pathname
     const method = req.method ?? 'GET'
 
+    const rejection = hostOriginRejection(req)
+
+    if (rejection !== null) {
+      json(res, 403, { detail: rejection })
+
+      return
+    }
+
+    if (state.auth === 'cookie' && path === '/login') {
+      // The gateway's own sign-in page. A form rather than JSON, because that is
+      // what a browser lands on when `/auth/login` redirects a password
+      // provider — and because the proxy has to carry HTML as happily as JSON.
+      html(
+        res,
+        200,
+        `<!doctype html><meta charset="utf-8"><title>Sign in</title><form id="f"><input name="username"><input name="password" type="password"><button>Sign in</button></form>`
+      )
+
+      return
+    }
+
+    if (state.auth === 'cookie' && path === '/auth/login') {
+      // Upstream redirects a password provider to its own /login page and an
+      // OAuth provider to the identity provider. The fake has no identity
+      // provider, so both land on /login.
+      const next = url.searchParams.get('next') ?? '/'
+      res.writeHead(302, { location: `/login?next=${encodeURIComponent(next)}` })
+      res.end()
+
+      return
+    }
+
+    if (state.auth === 'cookie' && path === '/auth/password-login' && method === 'POST') {
+      const body = await readBody(req)
+
+      if (
+        String(body.username ?? '') !== passwordAccount.username ||
+        String(body.password ?? '') !== passwordAccount.password
+      ) {
+        json(res, 401, { detail: 'Invalid credentials' })
+
+        return
+      }
+
+      const value = `sess-${randomUUID()}`
+      sessionCookies.add(value)
+      // `HttpOnly` and `SameSite=Lax`, no `Secure`: this fake is only ever
+      // reached over plain HTTP, and a `Secure` cookie there is discarded.
+      res.setHeader('set-cookie', `${SESSION_COOKIE}=${value}; HttpOnly; SameSite=Lax; Path=/`)
+      json(res, 200, { ok: true, next: String(body.next ?? '/') })
+
+      return
+    }
+
+    if (state.auth === 'cookie' && path === '/auth/logout' && method === 'POST') {
+      sessionCookies.delete(cookieOf(req, SESSION_COOKIE))
+      res.writeHead(302, {
+        location: '/login',
+        'set-cookie': `${SESSION_COOKIE}=; Max-Age=0; HttpOnly; SameSite=Lax; Path=/`
+      })
+      res.end()
+
+      return
+    }
+
     if (path === '/api/status') {
       json(res, 200, {
         version,
@@ -1311,7 +1452,7 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
         active_sessions: state.sessions.size,
         auth_required: gated(),
         auth_providers: gated() ? ['self-hosted'] : [],
-        auth_flows: gated() ? ['cookie', 'native_pkce'] : [],
+        auth_flows: state.auth === 'cookie' ? ['cookie'] : gated() ? ['cookie', 'native_pkce'] : [],
         // `status.py` puts the TOPOLOGY rows here, not a list of names. Nothing
         // in the app reads them, which is exactly why the fake could get away
         // with a different type for as long as it did.
@@ -1335,7 +1476,13 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       }
 
       json(res, 200, {
-        providers: [{ name: 'self-hosted', display_name: 'Self-Hosted OIDC', supports_password: false }]
+        providers: [
+          {
+            name: 'self-hosted',
+            display_name: 'Self-Hosted OIDC',
+            supports_password: state.auth === 'cookie'
+          }
+        ]
       })
 
       return
@@ -1924,6 +2071,17 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       return
     }
 
+    // HTTP middleware does not run for a WebSocket route upstream either, so the
+    // guard is repeated here rather than assumed.
+    const upgradeRejection = hostOriginRejection(req)
+
+    if (upgradeRejection !== null) {
+      state.rejectedUpgrades += 1
+      socket.end(`HTTP/1.1 403 Forbidden\r\nconnection: close\r\n\r\n${upgradeRejection}`)
+
+      return
+    }
+
     wss.handleUpgrade(req, socket, head, ws => {
       wss.emit('connection', ws, req)
     })
@@ -1977,6 +2135,8 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       return url.searchParams.get('token') === state.token ? null : state.closeCode
     }
 
+    // Cookie and native both dial with a ticket: a browser cannot put a
+    // credential anywhere else on an upgrade, which is why the ticket exists.
     const offered = String(req.headers['sec-websocket-protocol'] ?? '')
       .split(',')
       .map(value => value.trim())
