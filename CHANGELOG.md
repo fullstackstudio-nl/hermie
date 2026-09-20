@@ -42,6 +42,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The app did not launch on iOS 27.** UIKit refuses to start an app built against the iOS 27 SDK
+  that has not adopted the scene life cycle, and it refuses before any of our code runs: an
+  `EXC_BREAKPOINT` on the main thread in
+  `_UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption`. Expo SDK 54's template is an
+  application-life-cycle app and the SDK line ships no opt-in — scene support arrives in SDK 58, with
+  a back-port to 57.0.23 — so the app adopts scenes itself:
+  `plugins/with-ios-scene-lifecycle.js` writes the `UIApplicationSceneManifest` and
+  `modules/hermie-scene` ships the `HermieSceneDelegate` it names. The scene delegate adopts the
+  window the app delegate already created rather than making its own, because expo-dev-launcher
+  looks for that window during `didFinishLaunching` and calls `fatalError` when there is none, and
+  it hands the app delegate back the URL, user-activity and life-cycle events UIKit stops delivering
+  there. `AppState`, the splash hand-over and the dev client are unchanged; the iOS 26.5 simulator,
+  the iPad and the Mac build are unchanged. `docs/platform-notes.md` has the crash signature, why
+  three rounds of simulator work never saw it, and what is verified where.
+- **A pinned theme only coloured half the app.** Pinned to Light while the system was in Dark, every
+  glass panel rendered as murky dark glass under light ink — a `UIVisualEffectView` takes its
+  appearance from the window's trait collection, and the token set never reaches it. `ThemeProvider`
+  now calls `Appearance.setColorScheme` with the scheme that won, which sets
+  `overrideUserInterfaceStyle` on every window of every connected scene, and `null` when the choice
+  goes back to System so the override is released rather than frozen. The pin is read from the
+  settings store rather than from `useColorScheme()`, which reports the override back once it is in
+  place. `GlassSurface` passes the same scheme to `expo-glass-effect`'s `colorScheme` prop as well.
+  Measured in all four system × pinned combinations: a pinned scheme now draws the identical surface
+  whichever way the system is set.
+- **The dev menu stopped appearing in Debug builds** once the app adopted the scene life cycle:
+  expo-dev-menu builds its own window with no window scene, which UIKit never draws. The scene
+  delegate now adopts any window that shows itself without one.
+- **Settings said its name twice** in the overlay panel — the panel's bar and a large title directly
+  under it. Activity and Crons had already dropped theirs; this was the last one.
 - **Activity showed an empty timeline against a working gateway.** A
   `GatewayConnection` — and so the whole chat runtime — exists from the moment a gateway is
   CONFIGURED, long before its socket is up, and Activity's background load ran the instant the screen

@@ -157,12 +157,19 @@ no entitlement. Launch arguments are visible only to the process itself.
   `apps/hermie/app.config.ts` or a config plugin under `apps/hermie/plugins/`, never the generated
   files — `npx expo prebuild --clean` will throw your edits away. There is no third native project:
   the Mac is the iOS one.
-- `apps/hermie/modules` holds local Expo modules, and is **committed**. Today there is one,
-  `hermie-mac`, which exposes `ProcessInfo.processInfo.isiOSAppOnMac` as a constant because React
-  Native exposes nothing equivalent. Expo autolinks anything under `modules/` with no configuration,
-  so a module needs `package.json`, `expo-module.config.json` and its native sources and nothing
-  else. Note that a module's `ios/` directory is **not** the generated project: ignore rules that say
-  `ios/` without anchoring will swallow it, which `npx expo-doctor` catches.
+- `apps/hermie/modules` holds local Expo modules, and is **committed**. There are two. `hermie-mac`
+  exposes `ProcessInfo.processInfo.isiOSAppOnMac` and two keyboard answers, because React Native
+  exposes nothing equivalent. `hermie-scene` has no JavaScript side at all: it ships the
+  `UIWindowSceneDelegate` that `plugins/with-ios-scene-lifecycle.js` names in `Info.plist`, without
+  which **iOS 27 refuses to launch the app** — see the 2026-09-20 section of
+  [docs/platform-notes.md](docs/platform-notes.md). Expo autolinks anything under `modules/` with no
+  configuration, so a module needs `package.json`, `expo-module.config.json` and its native sources
+  and nothing else. Note that a module's `ios/` directory is **not** the generated project: ignore
+  rules that say `ios/` without anchoring will swallow it, which `npx expo-doctor` catches.
+- **Test an iOS change on the iOS 27 runtime, not only on 26.5.** The scene-life-cycle crash above
+  was invisible on every other surface: 26.5 simulators only warn, and the Mac build never checks.
+  And a `simctl launch` that prints a pid proves nothing — that crash printed one too. Follow it with
+  `xcrun simctl spawn <udid> launchctl list | grep hermie` a few seconds later.
 
 ## Vendored protocol sources
 

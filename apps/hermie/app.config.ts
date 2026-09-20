@@ -96,7 +96,11 @@ const config: ExpoConfig = {
         }
       }
     ],
-    ['./plugins/with-ios-deployment-target-floor', { deploymentTarget: IOS_DEPLOYMENT_TARGET }]
+    ['./plugins/with-ios-deployment-target-floor', { deploymentTarget: IOS_DEPLOYMENT_TARGET }],
+    // iOS 27 refuses to launch an app built against its SDK that has not adopted the UIKit scene
+    // life cycle, and SDK 54's template has not. The plugin writes the manifest; the scene delegate
+    // it names lives in modules/hermie-scene.
+    './plugins/with-ios-scene-lifecycle'
   ]
   // extra.eas.projectId is deliberately absent. `eas init` writes it, and it
   // ties the repository to one EAS account — a fork should get its own rather

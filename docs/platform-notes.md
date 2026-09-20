@@ -22,6 +22,8 @@ rewritten, and git history has them.
 | Does Escape close a sheet on a Mac?              | **Yes** — used by hand                         | 2026-09-19 |
 | Is `GCKeyboard` populated for an iOS app on Mac? | **Yes** — the three keys above prove it        | 2026-09-19 |
 | Is `expo-secure-store` keychain-backed on a Mac? | **Yes** — signed in across a quit and relaunch | 2026-09-19 |
+| Does the app launch on iOS 27?                   | **Yes, since scene adoption** — simulator      | 2026-09-20 |
+| Does `AppState` survive the scene life cycle?    | **Yes** — measured, background and foreground  | 2026-09-20 |
 | What AppState does a Mac window report?          | **Unverified** — see "A Mac never pauses"      | 2026-09-19 |
 | Is `TextDecoder` present at runtime?             | Not verified; the guard ships either way       | 2026-09-18 |
 
@@ -1543,3 +1545,337 @@ few attempts made here: Activity derives from transcripts the app has hydrated,
 and nothing had opened those chats. So the ledger ROWS are proven by the jest
 suite and not by a screenshot. Somebody with more budget should open the two
 chats first and then the panel.
+
+## iOS 27 refuses to launch the app: the UIScene life cycle (2026-09-20, later)
+
+The Release build on the owner's iPhone 17 Pro Max (iOS 27.0), built with Xcode 27
+against the iOS 27 SDK, died at launch every time:
+
+```
+EXC_BREAKPOINT (SIGTRAP), main thread
+UIKitCore ___UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption_block_invoke
+UIKitCore -[UIApplication workspace:didCreateScene:withTransitionContext:completion:]
+```
+
+The string behind that symbol is the whole diagnosis: _"Application failed to
+launch: UIScene life cycle is required for apps built with this SDK."_ UIKit
+evaluates it while the first scene connects, so nothing of ours is on the stack
+and no JavaScript has run — which is why it reads as an app that never started.
+It never did.
+
+Apple announced this for the release after iOS 26: an app linked against the iOS
+27 SDK that still uses the application-based life cycle does not launch. Expo SDK
+54's template is exactly that — `AppDelegate` creates the `UIWindow` in
+`application(_:didFinishLaunchingWithOptions:)` and hands it to
+`startReactNative`, and there is no `UIApplicationSceneManifest` anywhere in the
+generated project.
+
+### Why nothing here caught it
+
+Three gaps, and each is worth knowing on its own:
+
+- **The iOS 26.5 simulators do not enforce it.** Under the iOS 26 SDK this was a
+  runtime _issue_ — a purple warning in Xcode — and the runtime that ships with
+  Xcode 27 alongside iOS 27 still only warns. Every simulator round before this
+  one ran on 26.5.
+- **The Mac build does not enforce it either.** "Designed for iPad" on macOS 27
+  launches the same unmodified iOS binary and never trips the check, so
+  `npm run mac` stayed green through the whole thing.
+- **The device is the only enforcing surface anyone had used**, and installing to
+  it is the one step the build agent does not do.
+
+An iOS 27.0 runtime **is** installed on this machine, and it does enforce. The
+crash reproduces on `iPhone 18 Pro` (iOS 27.0) from a plain Debug build, same
+symbol, visible in `xcrun simctl spawn <udid> log show`:
+
+```
+E  Hermie[…] (UIKitCore) failure in void
+   _UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption(void)_block_invoke
+   (UIApplication_RuntimeIssues.m:106) : Application failed to launch: UIScene life
+   cycle is required for apps built with this SDK.
+```
+
+So the lesson is narrower than "test on a device": **the iOS 27 runtime has to be
+in the screenshot set.** A `simctl launch` that returns a pid proves nothing on
+its own — the process above got one and was gone a second later. `simctl spawn
+<udid> launchctl list | grep hermie` a few seconds after launch is the cheap
+liveness check, and it is now what every launch here is followed by.
+
+### What upstream offers, and what it does not
+
+Expo adopted the scene life cycle in **SDK 58**, and back-ported an opt-in to
+**SDK 57.0.23**: `expo-build-properties` grows an `ios.enableSceneSupport`
+property whose plugin writes the manifest and rewrites the AppDelegate. Both
+depend on `ExpoAppSceneDelegate` and `ExpoReactNativeFactoryProvider`, which ship
+in the `expo` pod from 57.0.23 onwards — the plugin refuses to run below that
+version and says so.
+
+Nothing of it reaches SDK 54. The newest patch on this line is `expo@54.0.37`,
+which is what is installed; `UIApplicationSceneManifest`, `ExpoAppSceneDelegate`
+and `enableSceneSupport` appear nowhere in the installed tree, checked across
+every package in `node_modules`. React Native's own template adopted scenes in
+`react-native-community/template#251`, on a much later release than 0.81.
+So there is no patch to take, and the fix is local.
+
+### The fix: adopt the scene, do not move the window
+
+`plugins/with-ios-scene-lifecycle.js` writes the manifest into `Info.plist`;
+`modules/hermie-scene` ships the `HermieSceneDelegate` it names. Two decisions
+inside that are the interesting part.
+
+**The delegate ships from an autolinked module, not from the Xcode project.**
+`Info.plist` names the scene delegate by class and UIKit resolves it through the
+Objective-C runtime, so it does not have to live in the app target —
+`@objc(HermieSceneDelegate)` plus a pod is enough, which is how Expo ships its own
+`EXExpoAppSceneDelegate`. That keeps `ios/` fully generated: no `withXcodeProject`
+surgery, nothing to re-insert after `expo prebuild --clean`. It works because the
+app target's `OTHER_LDFLAGS` already carries `-ObjC`; without it the linker would
+drop an object file that nothing references at compile time, since the only
+reference to this class is a string in a plist.
+
+**The scene delegate adopts the app delegate's window rather than creating one.**
+This is the opposite of the upstream migration, and the reason is a `fatalError`
+in SDK 54's dev client:
+
+```swift
+// ExpoDevLauncherAppDelegateSubscriber, expo-dev-launcher 6.0.21
+guard let window = UIApplication.shared.delegate?.window ?? … else {
+  fatalError("Cannot find the keyWindow. Make sure to call `window.makeKeyAndVisible()`.")
+}
+```
+
+That runs inside `application(_:didFinishLaunchingWithOptions:)`. A scene connects
+**after** that returns, so a window created in `scene(_:willConnectTo:options:)`
+does not exist yet when the dev client looks for one, and every Debug build would
+die on expo-dev-launcher instead of on UIKit. expo-dev-launcher 6.0.21 cannot be
+taught otherwise from outside, and it is the version SDK 54 bundles.
+
+So the window is still born where the template puts it, and
+`scene(_:willConnectTo:options:)` only finishes the job UIKit used to do
+implicitly: `window.windowScene = windowScene`, size it to the scene, make it key.
+Three things fall out of keeping that order, and all three are why this shape was
+chosen:
+
+- **expo-splash-screen is untouched.** It attaches the launch storyboard to the
+  React _root view_, never to the window (`SplashScreenManager.initWith(_:)` is
+  called from `customizeRootView`), so the hand-over does not care when the window
+  meets a scene.
+- **expo-system-ui keeps finding a window**, because
+  `UIApplication.shared.delegate?.window` is never nil.
+- **Nothing about `didFinishLaunching` changes**, which is the same thing as
+  saying no other subscriber's assumptions were disturbed.
+
+The window is explicitly resized to `windowScene.coordinateSpace.bounds` on
+connect. UIKit sizes a window it creates itself from the scene; this one was built
+from `UIScreen.main.bounds` before any scene existed, and on an iPad or a Mac
+window that is a different rectangle. `windowScene(_:didUpdate:…)` re-applies it,
+which is belt and braces — if UIKit already resizes the window with its scene, the
+same rectangle is a no-op.
+
+### The events UIKit stops delivering, and the one it does not
+
+Once a scene delegate exists, UIKit calls the **scene's** URL, user-activity and
+life-cycle methods and no longer the app delegate's. The generated `AppDelegate`
+overrides three of those and forwards them to `RCTLinkingManager` and to the Expo
+subscribers, so `HermieSceneDelegate` hands every scene callback back to it —
+deliberately to the app delegate's own method and not to `RCTLinkingManager`
+directly, because that override calls `RCTLinkingManager` itself and calling both
+would deliver the JavaScript `url` event twice.
+
+`AppState` needs no forwarding at all, and this is the part worth recording
+because it is easy to assume the opposite: `RCTAppState` (RN 0.81.5) observes
+`UIApplicationDidBecomeActive`, `…WillResignActive`, `…DidEnterBackground`,
+`…WillEnterForeground` and `…DidFinishLaunching` on `NotificationCenter`, not on
+the delegate, and `UIApplication` keeps posting all of them under the scene life
+cycle. **Measured**, on the iOS 27.0 simulator, with a temporary probe on
+`AppState` and no other change:
+
+```
+[probe] AppState at start -> active
+[probe] AppState -> inactive
+[probe] AppState -> background     ← another app brought to the front
+[probe] AppState -> active         ← Hermie brought back
+```
+
+which is exactly what `attachLifecycle` needs to keep closing and reopening the
+socket. The four scene life-cycle callbacks are forwarded to the app delegate
+anyway: no installed `ExpoAppDelegateSubscriber` implements them today, and one
+that started to would otherwise go quiet with nothing to see.
+
+One behaviour **does** change and is accepted rather than fixed: a URL that
+**cold-starts** the app now arrives in the scene's connection options instead of
+in the app delegate's launch options, so `Linking.getInitialURL()` would not see
+it. Hermie never receives links — ADR-0004 keeps the whole sign-in round trip
+inside a WebView, and nothing in `src/` reads `getInitialURL` or listens for
+`url` — so the only consumer is expo-dev-launcher, which is handed the URL through
+the forwarded `application(_:open:options:)` and opens the bundle from there. The
+documented dev path, `--initialUrl`, is a process argument that
+`EXDevLauncherController` reads before any of this and is unaffected.
+
+### One thing the manifest broke, and how it was caught
+
+**The dev menu opened onto nothing.** `DevMenuWindow` (expo-dev-menu 6.0.x) is
+`UIWindow(frame: UIScreen.main.bounds)` followed by `makeKeyAndVisible()`, which
+is how you put a second window on screen before scenes existed and is a no-op
+under them: a window with no `windowScene` belongs to no display and UIKit never
+draws it. Nothing threw, nothing logged — pressing the menu simply did nothing.
+
+It was caught by an A/B rather than by reading, and the control is worth writing
+down because it is cheap: copy the built `.app`, `PlistBuddy -c "Delete
+:UIApplicationSceneManifest"` its `Info.plist`, re-sign it ad hoc
+(`codesign -f -s -` with the entitlements read back off the original) and install
+that on an iOS **26.5** simulator, which tolerates the missing manifest. Same
+bundle, same JavaScript, one key different. The menu appeared on the control and
+not on the real build; that is the whole proof.
+
+`HermieSceneDelegate` now watches `UIWindow.didBecomeVisibleNotification` and
+gives its scene to any window that shows itself without one. Re-showing a window
+posts the notification again, and by then it has a scene, so the guard makes it
+idempotent. It is not `#if DEBUG` — a stray window is a UIKit-wide mechanism, not
+a dev-only one — but in practice a Release build never creates a second window,
+and React Native's `Modal` presents a view controller inside the existing one.
+
+### The plugin fails the prebuild rather than the launch
+
+`HermieSceneDelegate` does not patch the AppDelegate, so nothing the compiler
+knows about ties the two together — and a template change would show up as a black
+window or a silently dead deep link, on a device, weeks later. So the plugin reads
+the generated `AppDelegate.swift` and throws unless it still contains every line
+the scene delegate adopts: the `window` property, the `UIWindow(frame:)` in
+`didFinishLaunching`, `in: window` on `startReactNative`, and the two
+`RCTLinkingManager` calls. The error names each missing one and why it mattered.
+Same idea as the required rewrites in `scripts/sync-hermes-shared.mjs`: fail loudly
+at build time or produce something that silently no longer works.
+
+`__tests__/ios-scene-lifecycle.test.ts` covers both halves — the Info.plist
+transform is pure, and the AppDelegate assertion runs against a committed fixture
+of the generated file with one load-bearing line removed at a time. The fixture is
+also compared against `ios/Hermie/AppDelegate.swift` whenever a prebuild has run
+locally, so a stale fixture is a failing test rather than a false green.
+
+### Verified, and where
+
+| Surface                                   | Result                                                                                                 |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| iPhone 18 Pro, iOS 27.0, Debug            | Launches, stays alive, renders the chat screen                                                         |
+| iPhone 17 Pro, iOS 26.5, Debug            | Unchanged — same screenshot                                                                            |
+| iPad Pro 13" M5, iOS 27.0, Debug          | Wide layout at the scene's size, not the screen's                                                      |
+| iOS 27.0 simulator, Release configuration | Launches and renders onboarding                                                                        |
+| `npm run mac -- --no-open`                | BUILD SUCCEEDED                                                                                        |
+| `generic/platform=iOS`, Release, signed   | BUILD SUCCEEDED; manifest in the built `Info.plist`, `_OBJC_CLASS_$_HermieSceneDelegate` in the binary |
+| AppState across background and foreground | `active → inactive → background → active`, measured                                                    |
+| The dev menu, iOS 27.0, Debug             | Opens; A/B'd against a manifest-free copy                                                              |
+
+**None of that is the device.** Everything above is a simulator or a build; the
+crash that started this was on a physical iPhone 17 Pro Max, and a device install
+is the one step this machine does not do, so the owner's iPhone is what actually
+closes this.
+
+Two things stay unverified for want of a way to drive them headlessly: a **Mac
+window being dragged to a new size** (the `windowScene(_:didUpdate:…)` path), and
+**rotation** on a device — `simctl` has no rotate verb here, and the iPad screenshot
+above proves the connect-time sizing only.
+
+## A pinned theme only coloured half the app (2026-09-20, later)
+
+Reported from the Mac build with screenshots: Settings → Appearance → Theme
+pinned to **Light** while macOS itself was in **Dark**, and every glass panel —
+sidebar, content panel, overlay — came out as murky dark-grey glass, with
+light-theme ink on it and the light wallpaper around it. The inset Settings
+groups were white cards floating on grey.
+
+### The token set stops at the edge of what JavaScript draws
+
+`ThemeProvider` picked the winner between the stored appearance and
+`useColorScheme()` and handed it to every component as tokens. That is the whole
+app as far as React Native is concerned, and about half of it as far as the
+screen is concerned: a glass surface's actual material is a `UIVisualEffectView`
+— `UIGlassEffect` through `expo-glass-effect` on iOS 26+, `UIBlurEffect` through
+`expo-blur` below it — and a visual effect view takes its appearance from the
+**window's trait collection**. The window was still following the system. So the
+material rendered dark and the ink rendered light, on the same panel.
+
+**Reproduced on an iPad Pro 13" (iOS 27.0) simulator**, which is the useful part:
+this needs no Mac at all. `xcrun simctl ui <udid> appearance dark` sets the system
+side and `--hermieTheme light` pins the app side, and `gallery:chat` draws the real
+wide shell without a gateway. Sampled inside the sidebar panel and the chat panel:
+
+| System | Pinned | Sidebar   | Chat panel | Build  |
+| ------ | ------ | --------- | ---------- | ------ |
+| dark   | light  | `#7A7F92` | `#748196`  | before |
+| dark   | light  | `#EEF5FF` | `#E1F5FF`  | after  |
+| light  | light  | `#EEF5FF` | `#E1F5FF`  | after  |
+| light  | dark   | `#212F4F` | `#1E304F`  | after  |
+| dark   | dark   | `#212F4F` | `#1E304F`  | after  |
+
+After the fix the pinned scheme produces the identical surface whichever way the
+system is set, which is the entire claim.
+
+### `Appearance.setColorScheme` is the lever, and it is scene-shaped already
+
+React Native 0.81's `RCTAppearance.mm` walks `UIApplication.connectedScenes`,
+takes every window in them and sets `overrideUserInterfaceStyle` — so one call
+covers the root window, anything presented inside it, and every native view that
+reads the trait. Two things about it are worth knowing:
+
+- **It is already written against scenes**, so the UIScene adoption earlier today
+  neither helped nor hurt it. Before adoption UIKit created an implicit scene and
+  `connectedScenes` was populated anyway.
+- **`null` releases the override** rather than pinning whatever the system said at
+  the time, which is exactly what "System" has to mean.
+
+It is called from `ThemeProvider` for the same reason the status bar is rendered
+there: it is the one component that knows which of the pinned and the system
+scheme won. The pin is derived from the settings store and from `forceScheme`,
+**never** from `useColorScheme()` — once the override is in place UIKit reports
+the pinned scheme back as the system one, and deriving the pin from that would be
+a loop with nothing to break it. The system value is only ever read when nothing
+is pinned, which is precisely when no override is in place and it is honest again.
+
+`--hermieTheme` is pinned natively too. It has to be: a dark screenshot with light
+glass in it is not a picture of the dark theme.
+
+`GlassSurface` also passes `colorScheme` to `GlassView` now — `expo-glass-effect`
+0.1.x has the prop, documented for exactly this case, and a file comment here
+previously said it was left on `auto` on purpose, which turned out to be wrong.
+It is the same answer said twice, deliberately: the window override is the fix,
+and this is what is left if a window ever escapes it.
+`expo-blur`'s fallback was never affected — it is told `systemMaterialLight` or
+`systemMaterialDark` by name — but the native material is what a Mac and any
+iOS 26+ device actually draw.
+
+`__tests__/theme-native-override.test.tsx` pins the behaviour: pinned light and
+dark call the override, System passes `null`, and the development pin counts.
+
+**Android gets the same call for free**, and it does the analogous thing:
+`AppearanceModule.kt` maps it to `AppCompatDelegate.setDefaultNightMode`, with
+`unspecified` → `MODE_NIGHT_FOLLOW_SYSTEM`. So a pinned theme now also drives the
+native night mode there rather than only the tokens. Unverified on a device or an
+emulator this round; it is one call and it was already the right one to make.
+
+### Not verified
+
+- **On a Mac window.** The report came from one; the reproduction and the fix were
+  measured on an iPad simulator. The mechanism is the window's trait collection,
+  which a Mac window has like any other, but the owner's screenshots are what will
+  close this.
+- **Reduce Transparency.** With it on there is no material to mis-colour, so the
+  bug cannot occur, and that path was not re-photographed.
+
+### Two smaller things from the same report
+
+- **The Settings overlay said its name twice** — once in the overlay panel's bar
+  and again as a large title directly under it. Activity and Crons had already
+  dropped theirs, each with a comment saying both shells name the screen above it;
+  Settings was the one left. Removed, and `settings-screen.test.tsx` now proves it
+  came back from a sub page by the first group header instead of by the title.
+  Photographed on `overlay:settings` and `overlay:crons`: one title each.
+- **The overlay panel's bottom edge on a Mac-sized window: NOT REPRODUCED.** On the
+  iPad simulator the panel keeps its rounded bottom and its inset from the window
+  edge, and the content under it is a `ScrollView` whose content is meant to run
+  past the fold. `OverlayPanel` is `position: absolute` with `top`, `bottom` and
+  `right` all `WINDOW_GAP` inside a column that already carries the safe-area
+  padding, so there is no obvious asymmetry to point at either. Running the Mac
+  window is the one thing this agent does not do, so this is left open rather than
+  guessed at — the next look should compare the panel's top and bottom insets in a
+  Mac screenshot and say which one is wrong.
