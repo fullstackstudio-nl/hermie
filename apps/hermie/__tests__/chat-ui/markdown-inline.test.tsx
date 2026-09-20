@@ -92,7 +92,10 @@ describe('bold a model opened with a stray space', () => {
 
     expect(bold).toHaveLength(1)
 
-    const boldText = textOf(bold[0] as RenderedNode)
+    // Joiners stripped: a code chip inside the bold run is one unbreakable token
+    // and carries a word joiner between every pair of characters. See the chip
+    // section below for why.
+    const boldText = textOf(bold[0] as RenderedNode).replace(/\u2060/gu, '')
 
     expect(boldText).toContain('example.nl')
     expect(boldText).toContain('staat op autorenew=off')
@@ -103,7 +106,7 @@ describe('bold a model opened with a stray space', () => {
     const chips = codeNodes(descendants(bold[0] as RenderedNode))
 
     expect(chips).toHaveLength(1)
-    expect(textOf(chips[0] as RenderedNode)).toContain('example.nl')
+    expect(textOf(chips[0] as RenderedNode).replace(/\u2060/gu, '')).toContain('example.nl')
   })
 
   /**
@@ -262,11 +265,14 @@ describe('inline code chips', () => {
   /** The sentence from the running Mac build that painted the bar. */
   const TESTMAIL = 'Ik zag een testmail van gisteren naar `test@example.com`. Dat is niets om je zorgen over te maken.'
 
+  /** What is actually drawn, with the invisible joiners taken out. */
+  const visible = (chip: RenderedNode) => textOf(chip).replace(/\u2060/gu, '')
+
   it('pads the chip with non-breaking spaces, never an ASCII one', () => {
     const chips = codeNodes(renderNodes(TESTMAIL))
 
     expect(chips).toHaveLength(1)
-    expect(textOf(chips[0] as RenderedNode)).toBe('\u00a0test@example.com\u00a0')
+    expect(visible(chips[0] as RenderedNode)).toBe('\u00a0test@example.com\u00a0')
   })
 
   it('leaves no whitespace a line break could strand inside a chip', () => {
@@ -283,28 +289,69 @@ describe('inline code chips', () => {
       expect(chips.length).toBeGreaterThan(0)
 
       for (const chip of chips) {
-        const content = textOf(chip)
+        const content = visible(chip)
 
         // Every space is non-breaking, so no break can land on one and leave a
         // whitespace-only fragment behind. An ASCII space here is the bug.
-        expect(content).not.toMatch(/[ \t]/)
+        expect(content).not.toMatch(/[ \t]/u)
         // The chip's own edges cannot break at all: it travels whole.
         expect(content.startsWith('\u00a0')).toBe(true)
         expect(content.endsWith('\u00a0')).toBe(true)
         // And it is never padding alone.
-        expect(content.replace(/[\s\u200b]/g, '').length).toBeGreaterThan(0)
+        expect(content.replace(/\s/gu, '').length).toBeGreaterThan(0)
       }
     }
   })
 
-  it('still lets a multi-word span wrap on its own word boundaries', () => {
+  /**
+   * The two spans the owner photographed on the iPad build. Both grew EMPTY to
+   * the end of the line and continued mid-span on the next one, because UAX #14
+   * offers a break after `:` and after `.`, and inside a run of capitals with a
+   * space in it — and React Native paints the background of every line fragment
+   * of a nested `Text`'s range.
+   *
+   * Line breaking cannot be exercised here; the test renderer lays out no text.
+   * What is asserted is the CAUSE: there is no break opportunity left anywhere
+   * inside a chip, so the line breaker has to move the whole thing down.
+   */
+  it.each([
+    ['a domain with a colon and a dot', 'Check `sc-domain:hermie.dev` in Search Console'],
+    ['a phrase in capitals', 'Status: `WACHT OP VERIFICATIE` sinds gisteren'],
+    ['a path', 'Open `apps/hermie/src/markdown/Inline.tsx` and read it'],
+    ['a URL', 'Try `https://hermie.dev/docs?q=1` for the docs']
+  ])('offers no break opportunity inside %s', (_name, source) => {
+    const chip = codeNodes(renderNodes(source))[0] as RenderedNode
+    const content = textOf(chip)
+    const points = [...content]
+
+    // A word joiner between EVERY pair, so a break can land nowhere inside —
+    // not at the colon, not at the dot, not at a slash, not at a space that was
+    // turned into a non-breaking one.
+    for (let index = 1; index < points.length; index += 2) {
+      expect(points[index]).toBe('\u2060')
+    }
+
+    // And nothing that invites one: the zero-width space this used to insert is
+    // gone, because a chip is one token and goes to the next line whole.
+    expect(content).not.toContain('\u200b')
+  })
+
+  it('keeps every character of the code, in order', () => {
+    // The joiners are invisible and zero-width; they must not have eaten or
+    // reordered anything a reader is looking at.
+    const chip = codeNodes(renderNodes('Check `sc-domain:hermie.dev` today'))[0] as RenderedNode
+
+    expect(visible(chip)).toBe('\u00a0sc-domain:hermie.dev\u00a0')
+  })
+
+  it('carries a multi-word span across as one token, gaps and all', () => {
     const chips = codeNodes(renderNodes('Run `git commit --amend` again'))
 
     expect(chips).toHaveLength(1)
-    // A zero-width break IN FRONT of each gap: the wrap point paints nothing and
-    // the gap travels with the word after it. That is the 6.3 wrap rule kept
-    // without a breakable space.
-    expect(textOf(chips[0] as RenderedNode)).toBe('\u00a0git\u200b\u00a0commit\u200b\u00a0--amend\u00a0')
+    // The gaps keep their WIDTH as non-breaking spaces. They used to carry a
+    // zero-width break in front of them so the chip could wrap on its own word
+    // boundaries; that is exactly the break the owner did not want.
+    expect(visible(chips[0] as RenderedNode)).toBe('\u00a0git\u00a0commit\u00a0--amend\u00a0')
   })
 
   it('treats whitespace at the edge of the code as padding, not a wrap point', () => {
@@ -312,10 +359,9 @@ describe('inline code chips', () => {
 
     expect(chips).toHaveLength(1)
 
-    const content = textOf(chips[0] as RenderedNode)
+    const content = visible(chips[0] as RenderedNode)
 
     expect(content).toContain('padded')
-    expect(content).not.toContain('\u200b')
     expect(content.startsWith('\u00a0\u00a0')).toBe(true)
     expect(content.endsWith('\u00a0\u00a0')).toBe(true)
   })

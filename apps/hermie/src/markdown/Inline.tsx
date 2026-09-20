@@ -32,31 +32,68 @@ export interface InlineProps {
 const CODE_PAD = '\u00a0'
 
 /**
- * The wrap point inside a chip. Zero width, so the fragment it ends is painted
- * behind glyphs only — never a bar of empty background. It is what lets a chip
- * still wrap on word boundaries (design/liquid-glass-tokens.md, 6.3) now that
- * none of its spaces are breakable.
+ * U+2060 WORD JOINER: "you may not break here", with no width of its own.
+ *
+ * ## What it is for, and what it replaced
+ *
+ * The owner photographed `sc-domain:hermie.dev` and `WACHT OP VERIFICATIE` on the
+ * iPad build: the chip grew EMPTY to the end of the line and then continued, mid
+ * span, on the next one — a grey tail with nothing in it. The chip had not asked
+ * to break there. UAX #14 gives a break opportunity after `:` and after `.`, and
+ * one inside a run of capitals with a space in it, so CoreText took one; and
+ * because React Native paints the background of every line fragment of a nested
+ * `Text`'s range, the fragment that ended at that opportunity was painted across
+ * the rest of the line.
+ *
+ * A zero-width space used to be inserted at the chip's internal word gaps for the
+ * opposite reason — to give it somewhere sensible to break. That was the wrong
+ * trade: a chip is one token, and the owner's rule is the one every terminal and
+ * every code review uses —
+ *
+ *  1. **do not break it if it does not have to.** A chip that fits on the next
+ *     line goes to the next line WHOLE;
+ *  2. **break per character only when it genuinely cannot fit**, i.e. when it is
+ *     wider than the line itself;
+ *  3. **and the background hugs the glyphs**, never empty space.
+ *
+ * Joining every pair of characters says exactly (1): there is no break
+ * opportunity anywhere inside the chip, so the line breaker moves the whole thing
+ * down. (2) then comes free — CoreText falls back to a character-level break for
+ * a run that cannot fit on a line at all, which is the only case left. And (3)
+ * follows from both: every fragment that CAN exist now holds glyphs.
+ *
+ * Zero width, so it changes no measurement, and invisible to a reader. It IS on
+ * the clipboard if a reader long-presses and copies the whole paragraph on a
+ * phone; the context menu's own Copy goes through `plainTextBlock` over the
+ * markdown source and never sees it, and so does the Mac's Select text panel.
  */
-const CODE_BREAK = '\u200b'
+const CODE_JOIN = '\u2060'
 
 /**
- * Pad the chip and move its wrap points off its whitespace.
+ * Pad the chip, and make it one unbreakable token.
  *
- * No ASCII space survives inside a chip, at either edge or between words: any
- * of them could end up as a line's trailing whitespace and paint the bar above.
- * A gap between words keeps its width as non-breaking spaces and gains a
- * zero-width break opportunity in FRONT of it, so the gap travels to the next
- * line with the word it belongs to.
+ * No ASCII space survives inside a chip, at either edge or between words: any of
+ * them could end up as a line's trailing whitespace and paint the bar described
+ * above. A gap between words keeps its width as non-breaking spaces.
+ *
+ * Then a word joiner goes between every remaining pair of characters, which is
+ * what stops UAX #14 finding an opportunity at the `:` in `sc-domain:hermie.dev`
+ * or at the `.` before `dev`. Between EVERY pair rather than at a list of known
+ * punctuation: the list would be a guess at one line-breaking implementation, and
+ * the property wanted is simply "nowhere".
  */
 function padCode(text: string): string {
   const leading = /^\s*/.exec(text)?.[0] ?? ''
   const rest = text.slice(leading.length)
   const trailing = /\s*$/.exec(rest)?.[0] ?? ''
   const core = rest.slice(0, rest.length - trailing.length)
-  const wrapped = core.replace(/\s+/g, gap => `${CODE_BREAK}${CODE_PAD.repeat(gap.length)}`)
+  const spaced = core.replace(/\s+/gu, gap => CODE_PAD.repeat(gap.length))
 
-  // Whitespace the code itself opened or closed on is padding, not a wrap point.
-  return `${CODE_PAD}${CODE_PAD.repeat(leading.length)}${wrapped}${CODE_PAD.repeat(trailing.length)}${CODE_PAD}`
+  const padded = `${CODE_PAD}${CODE_PAD.repeat(leading.length)}${spaced}${CODE_PAD.repeat(trailing.length)}${CODE_PAD}`
+
+  // By code POINT, not by UTF-16 unit: a joiner between a surrogate pair's halves
+  // would be a broken character rather than a refused break.
+  return [...padded].join(CODE_JOIN)
 }
 
 /**
