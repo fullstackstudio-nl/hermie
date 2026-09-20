@@ -1,4 +1,4 @@
-# hermie-web
+# @hermie/web
 
 Hermie in a browser. One small Node process that serves the browser build of
 [Hermie](https://hermie.dev) — a client for [Hermes Agent](https://github.com/NousResearch/Hermes-Agent) —
@@ -10,12 +10,15 @@ gateway's cookie session reachable from a page. Bind it to loopback, and put TLS
 has to leave the machine.
 
 ```sh
-npx hermie-web --gateway http://127.0.0.1:9119
+npx @hermie/web --gateway http://127.0.0.1:9119
 # → http://127.0.0.1:9120
 ```
 
 Open that address. The setup wizard has no address step, because there is nothing to type: the
 gateway is whatever this process is in front of.
+
+The package is scoped and the command is not: `npm i -g @hermie/web` puts a `hermie-web` on your
+`PATH`, which is the name the Docker entry point, the systemd unit and the release zip all use.
 
 ## Flags
 

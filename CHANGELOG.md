@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Hermie runs in a browser, served by a small process of its own.** `npx hermie-web --gateway
+- **Hermie runs in a browser, served by a small process of its own.** `npx @hermie/web --gateway
   http://127.0.0.1:9119` puts the app on `http://127.0.0.1:9120` and proxies the gateway onto that
   same origin, which is the whole design rather than a deployment detail: the gateway's session is
   an `HttpOnly` cookie, and it refuses a WebSocket whose `Origin` is not its own — the defence that

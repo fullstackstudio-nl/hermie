@@ -28,7 +28,7 @@ ENV NODE_ENV=production
 
 # So the entry point can be the command's own name rather than a path: the same
 # `hermie-web ...` line works in the container, in the systemd unit and after
-# `npx hermie-web`.
+# `npm i -g @hermie/web`.
 RUN ln -s /app/bin/hermie-web.js /usr/local/bin/hermie-web
 
 USER node

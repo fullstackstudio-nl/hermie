@@ -16,7 +16,7 @@ Why it exists at all, and why the gateway is reached _through_ it rather than di
 
 ```sh
 # Next to `hermes serve` on the same machine:
-npx hermie-web --gateway http://127.0.0.1:9119
+npx @hermie/web --gateway http://127.0.0.1:9119
 # → http://127.0.0.1:9120
 ```
 

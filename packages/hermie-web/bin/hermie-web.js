@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // The published entry point. Everything real is in dist/server; this file only
-// exists so `npx hermie-web` and the Docker ENTRYPOINT have something stable to
+// exists so `npx @hermie/web` and the Docker ENTRYPOINT have something stable to
 // point at, and so a missing build fails with a sentence rather than a stack.
 'use strict'
 

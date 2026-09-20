@@ -58,7 +58,7 @@ direction.
 
 ## Decision
 
-**Hermie Web** (`packages/hermie-web`, published as `hermie-web`) is a Node server that does exactly
+**Hermie Web** (`packages/hermie-web`, published as `@hermie/web`) is a Node server that does exactly
 two things: it serves the exported browser build, and it proxies one fixed gateway onto its own
 origin.
 

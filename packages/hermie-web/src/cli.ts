@@ -11,7 +11,7 @@ import { rollback } from './update'
 import { startHermieWeb } from './server'
 
 const HELP = [
-  'hermie-web — serves Hermie in a browser and proxies one Hermes gateway',
+  '@hermie/web — serves Hermie in a browser and proxies one Hermes gateway',
   '',
   `  --gateway <url>      the gateway to proxy to (default ${DEFAULT_GATEWAY_URL}, env HERMIE_GATEWAY_URL)`,
   `  --port <n>           listen port (default ${DEFAULT_PORT}, env HERMIE_PORT)`,

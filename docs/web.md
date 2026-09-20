@@ -123,7 +123,7 @@ a release of the apps only.
 The same answer says whether this install can update itself, and when it cannot it carries the
 command that does work instead of a button that would fail. There are three noes: `--no-self-update`,
 a container (the image is the version — `docker pull`), and a copy under `node_modules`
-(`npm i -g hermie-web@latest`).
+(`npm i -g @hermie/web@latest`).
 
 **What it downloads and what it verifies.** `POST /hermie/update` fetches `hermie-web.zip` and the
 release's `SHA256SUMS`, both over https and nothing else. A zip the checksum file does not list is
@@ -164,13 +164,13 @@ happily), and gives up after a minute rather than spinning for ever.
 
 The configurations are in [deploy/web/README.md](../deploy/web/README.md); in brief:
 
-| Route            | What it is                                                                                                                                                                                                   |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `npx hermie-web` | One command next to `hermes serve`. Nothing to install, nothing to update — and no supervisor.                                                                                                               |
-| A release zip    | `hermie-web.zip` from a GitHub release, unpacked under `/opt/hermie-web/releases/<version>/` with a `current` symlink. This is the layout self-update expects.                                               |
-| Docker           | `ghcr.io/fullstackstudio-nl/hermie-web`. The image is the version, so self-update refuses and points at `docker pull`.                                                                                       |
-| systemd          | A unit pointing `ExecStart` at `current`, with `Restart=always` and the install root in `ReadWritePaths`.                                                                                                    |
-| TLS in front     | Caddy, nginx or `tailscale serve`. All three pass `X-Forwarded-Proto`, which is what makes the gateway issue `Secure` cookies; nginx needs the two upgrade headers spelled out or the socket never connects. |
+| Route             | What it is                                                                                                                                                                                                   |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `npx @hermie/web` | One command next to `hermes serve`. Nothing to install, nothing to update — and no supervisor.                                                                                                               |
+| A release zip     | `hermie-web.zip` from a GitHub release, unpacked under `/opt/hermie-web/releases/<version>/` with a `current` symlink. This is the layout self-update expects.                                               |
+| Docker            | `ghcr.io/fullstackstudio-nl/hermie-web`. The image is the version, so self-update refuses and points at `docker pull`.                                                                                       |
+| systemd           | A unit pointing `ExecStart` at `current`, with `Restart=always` and the install root in `ReadWritePaths`.                                                                                                    |
+| TLS in front      | Caddy, nginx or `tailscale serve`. All three pass `X-Forwarded-Proto`, which is what makes the gateway issue `Secure` cookies; nginx needs the two upgrade headers spelled out or the socket never connects. |
 
 The gateway needs `dashboard.public_url` set to the address Hermie Web claims to be, and
 `dashboard.trusted_proxies` naming Hermie Web's machine if the two are not the same host.

@@ -250,7 +250,7 @@ export function detectInstallShape(
   if (isGlobalNpmInstall(options.installRoot)) {
     return {
       canSelfUpdate: false,
-      reason: 'This copy is managed by npm. Update with `npm i -g hermie-web@latest`.'
+      reason: 'This copy is managed by npm. Update with `npm i -g @hermie/web@latest`.'
     }
   }
 

@@ -21,7 +21,7 @@ banner when it is false.
 
 ## Hermie Web
 
-The process started by `npx hermie-web` (`packages/hermie-web`): one small Node server, next to the
+The process started by `npx @hermie/web` (`packages/hermie-web`): one small Node server, next to the
 gateway and on its own port — 9120 by default — that serves Hermie's browser build and proxies
 **one** gateway onto its own origin. It is not a third kind of gateway and it authenticates nobody;
 it exists because the gateway's browser session is an `HttpOnly` cookie, a cookie belongs to an

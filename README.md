@@ -172,7 +172,7 @@ Nothing has been published to a store yet. When it is:
 - **Mac** — the same TestFlight build, or the same App Store listing: Apple
   offers an iPhone/iPad app on Apple Silicon Macs unless it is opted out
 - **Android** — Play internal testing _(link to follow)_
-- **A browser** — `npx hermie-web`, or the `hermie-web.zip` a tagged release
+- **A browser** — `npx @hermie/web`, or the `hermie-web.zip` a tagged release
   carries; see [Web](#web)
 
 The Android half is the furthest along: the upload key exists, and a tagged build
@@ -306,7 +306,7 @@ The fifth place is the one that installs nothing on the device: run one small
 process next to `hermes serve` and open Hermie in a browser.
 
 ```sh
-npx hermie-web --gateway http://127.0.0.1:9119
+npx @hermie/web --gateway http://127.0.0.1:9119
 # → http://127.0.0.1:9120
 ```
 
