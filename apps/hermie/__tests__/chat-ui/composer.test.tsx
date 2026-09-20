@@ -19,10 +19,11 @@ import { renderScreen } from '../support/render'
 
 const mockEscapeListeners = new Set<() => void>()
 let mockShiftDown = false
+let mockHardwareKeyboard = false
 
 jest.mock('../../src/platform/keyboard-modifiers', () => ({
   isShiftDown: () => mockShiftDown,
-  hasHardwareKeyboard: () => false,
+  hasHardwareKeyboard: () => mockHardwareKeyboard,
   subscribeToEscape: (handler: () => void) => {
     mockEscapeListeners.add(handler)
 
@@ -250,7 +251,14 @@ describe('the composer row', () => {
     // Half the single-line height: a true pill at one line, and the same caps
     // once it grows. A larger radius turns a tall field's ends into full
     // semicircles; 28pt on a 40pt box was the original bug.
-    expect(field.borderRadius).toBe(COMPOSER_FIELD_RADIUS)
+    //
+    // Per corner rather than one `borderRadius`: a glass surface spells all four
+    // out so that a bottom sheet can square its lower pair, and a blanket radius
+    // beside a per-corner one is two rules for one shape.
+    expect(field.borderTopLeftRadius).toBe(COMPOSER_FIELD_RADIUS)
+    expect(field.borderTopRightRadius).toBe(COMPOSER_FIELD_RADIUS)
+    expect(field.borderBottomLeftRadius).toBe(COMPOSER_FIELD_RADIUS)
+    expect(field.borderBottomRightRadius).toBe(COMPOSER_FIELD_RADIUS)
     expect(COMPOSER_FIELD_RADIUS).toBe((COMPOSER_LINE_HEIGHT + 2 * COMPOSER_FIELD_INSET) / 2)
 
     // The "+" and the send are siblings of the field, not children of it: the
@@ -496,6 +504,44 @@ describe('the Composer and Shift+Return', () => {
     // handler is not the one that runs — but if it does, it must not double up.
     expect(handlers.onChangeText).not.toHaveBeenCalled()
     expect(handlers.onSend).toHaveBeenCalledWith('Ship it')
+  })
+
+  /**
+   * The owner's second report: on an iPad in a keyboard case Enter did nothing
+   * useful, while the same build on a Mac sent. The decision had been hung on
+   * `RUNS_ON_MAC`, which is a proxy for "is there a keyboard" and is false on
+   * exactly that device. It now asks the HID state as well.
+   */
+  it('sends on a bare Return wherever a keyboard is actually attached', () => {
+    mockHardwareKeyboard = true
+
+    try {
+      // No `hardwareKeyboard` prop at all: this is the DEFAULT, which is what
+      // the chat screen relies on.
+      const handlers = renderComposer({ value: 'Ship it' })
+
+      fireEvent(screen.getByTestId('composer-input'), 'submitEditing')
+      expect(handlers.onSend).toHaveBeenCalledWith('Ship it')
+
+      // And Shift+Return there is still the newline.
+      mockShiftDown = true
+      fireEvent(screen.getByTestId('composer-input'), 'submitEditing')
+      expect(handlers.onChangeText).toHaveBeenCalledWith('Ship it\n')
+    } finally {
+      mockHardwareKeyboard = false
+      mockShiftDown = false
+    }
+  })
+
+  it('leaves a device with no keyboard on the software Return', () => {
+    const handlers = renderComposer({ value: 'Ship it' })
+
+    fireEvent(screen.getByTestId('composer-input'), 'submitEditing')
+
+    // `submitBehavior` is 'newline' there, so this handler is not the one that
+    // runs; reaching it at all means the platform asked to submit.
+    expect(handlers.onSend).toHaveBeenCalledWith('Ship it')
+    expect(screen.queryByTestId('composer-key-hint')).toBeNull()
   })
 
   it('shows the two chords under the field only where Return sends', () => {

@@ -26,7 +26,7 @@ import {
   View
 } from 'react-native'
 
-import { isShiftDown } from '../platform/keyboard-modifiers'
+import { hasHardwareKeyboard, isShiftDown } from '../platform/keyboard-modifiers'
 import { RUNS_ON_MAC } from '../platform/runs-on-mac'
 import { GlassGroup, GlassSurface } from '../ui/glass'
 import { KEYBOARD_AVOID_BEHAVIOR } from '../ui/keyboard'
@@ -80,11 +80,21 @@ export interface ComposerProps {
   /**
    * A bare Return sends instead of inserting a newline.
    *
-   * On by default only on a Mac, and deliberately not on an iPhone or iPad:
-   * neither iOS nor iPadOS tells React Native whether a keyboard is physical,
-   * and a bare Return that sends would leave a touch user with no way to type a
-   * newline at all. A Mac window always has a real keyboard, which is the whole
-   * reason `RUNS_ON_MAC` exists.
+   * Defaults to "a Mac window, OR a keyboard is actually attached". It used to be
+   * the Mac alone, and the owner's report is what that costs: on an iPad in a
+   * keyboard case Enter did nothing useful, while the same build on a Mac sent.
+   *
+   * The OS is the wrong question and only ever was — it is a proxy for "is there
+   * a keyboard". `RUNS_ON_MAC` stays as the first half because a Mac window
+   * always has one whether or not GameController has noticed it yet; the second
+   * half is the honest question, asked of the HID state (see
+   * `src/platform/keyboard-modifiers.ts`). A phone with nothing attached answers
+   * false to both and keeps a Return that breaks the line, which is the only way
+   * a touch user can write a second one.
+   *
+   * Evaluated per render rather than once, so a keyboard connected mid-session is
+   * picked up on the composer's next render — which is the next keystroke, the
+   * next focus or the next turn.
    */
   hardwareKeyboard?: boolean
   /**
@@ -221,7 +231,7 @@ export function Composer({
   queuedText,
   placeholder,
   botName,
-  hardwareKeyboard = RUNS_ON_MAC,
+  hardwareKeyboard = RUNS_ON_MAC || hasHardwareKeyboard(),
   keyboardAvoiding = false,
   testID = 'composer'
 }: ComposerProps) {

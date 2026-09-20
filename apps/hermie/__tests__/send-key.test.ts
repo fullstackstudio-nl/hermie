@@ -47,6 +47,34 @@ describe('what a key press means for the composer', () => {
     expect(shouldSend('Enter', { ctrl: true, hardwareKeyboard: false })).toBe('send')
   })
 
+  /**
+   * An iPad in a keyboard case, which is the owner's second report: the same
+   * build sent on a Mac and did nothing useful there.
+   *
+   * The table below was never the problem — `hardwareKeyboard: true` has always
+   * sent. What was wrong is where that flag came from: the composer defaulted it
+   * to `RUNS_ON_MAC`, which is a proxy for "is there a keyboard" that is false on
+   * exactly the device the owner was holding. It now defaults to a Mac window OR
+   * a keyboard the HID state can actually see, so these two cases are the iPad's.
+   */
+  describe('an iPad with a keyboard attached', () => {
+    const IPAD = { hardwareKeyboard: true }
+
+    it('sends on a bare Return, the same as a Mac window', () => {
+      expect(shouldSend('Enter', IPAD)).toBe('send')
+    })
+
+    it('still breaks the line on Shift+Return', () => {
+      expect(shouldSend('Enter', { ...IPAD, shift: true })).toBe('newline')
+    })
+
+    it('leaves the same iPad with NO keyboard on the software Return', () => {
+      // Unplug it and the on-screen keyboard's Return must go back to being the
+      // only way to write a second line.
+      expect(shouldSend('Enter', { hardwareKeyboard: false })).toBe('newline')
+    })
+  })
+
   it('never answers anything but the three outcomes', () => {
     const answers = new Set(
       [true, false].flatMap(hardwareKeyboard =>
