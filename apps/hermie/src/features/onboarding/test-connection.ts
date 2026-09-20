@@ -124,7 +124,7 @@ export async function runConnectionTest(
 
     onStage('rest')
 
-    if (authMode === 'native_pkce') {
+    if (authMode !== 'session_token') {
       const identity = await connection.http.authMe()
       userDisplayName = identity.displayName || identity.email || identity.userId
     } else {

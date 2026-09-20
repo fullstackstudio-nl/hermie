@@ -17,6 +17,7 @@ import type { SignOutReason, TokenSet } from '@hermie/gateway-client'
 import { useState } from 'react'
 import { View } from 'react-native'
 
+import { startCookieSignIn } from '../features/onboarding/cookie-sign-in'
 import { NativeSignInWebView } from '../features/onboarding/NativeSignInWebView'
 import { strings } from '../i18n/strings'
 import { GlassSurface } from '../ui/glass'
@@ -62,6 +63,7 @@ export function useReauth() {
   const [busy, setBusy] = useState(false)
 
   const native = config?.authMode === 'native_pkce'
+  const cookie = config?.authMode === 'cookie'
 
   return {
     /** True when the connection is signed out and there is a gateway to sign in to. */
@@ -69,10 +71,26 @@ export function useReauth() {
     busy,
     host: config ? hostOf(config.baseUrl) : '',
     /**
-     * Start signing in. A native gateway opens the in-app page; a session-token
-     * gateway has no page to open, so it goes back to the token step instead.
+     * Start signing in. A native gateway opens the in-app page; a cookie
+     * gateway sends the whole tab to its `/auth/login`, which is the only way
+     * an OAuth redirect chain can run; a session-token gateway has no page to
+     * open, so it goes back to the token step instead.
      */
-    signIn: () => (native ? setSigningIn(true) : void signOut()),
+    signIn: () => {
+      if (native) {
+        setSigningIn(true)
+
+        return
+      }
+
+      if (cookie && config) {
+        startCookieSignIn(config.baseUrl, config.provider)
+
+        return
+      }
+
+      void signOut()
+    },
     changeGateway,
     /** Render inside whichever component owns the action, once. */
     webView:

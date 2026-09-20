@@ -111,7 +111,23 @@ export async function loadGatewaySetup(): Promise<GatewaySetup | null> {
     }
   }
 
-  const hasCredentials = config.authMode === 'session_token' ? Boolean(sessionToken) : Boolean(accessToken)
+  /**
+   * Is there a credential to reconnect with?
+   *
+   * The cookie flow is the odd one out and deliberately answers TRUE without
+   * looking: its credential is an `HttpOnly` cookie in the browser's own jar,
+   * which this process cannot read by design. The only honest way to find out
+   * whether it is still good is to use it — so the app dials, and a lapsed
+   * session comes back as `needs_signin` from the gateway, which is the same
+   * answer with a real reason attached. Answering false here instead would send
+   * every reload of a perfectly signed-in tab back to the wizard.
+   */
+  const hasCredentials =
+    config.authMode === 'cookie'
+      ? true
+      : config.authMode === 'session_token'
+        ? Boolean(sessionToken)
+        : Boolean(accessToken)
 
   return { config, extraHeaders, sessionToken, hasCredentials, ...(credentialError ? { credentialError } : {}) }
 }

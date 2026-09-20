@@ -1,5 +1,7 @@
 import {
   type AuthTimelineSink,
+  CookieSessionCredentials,
+  type CredentialProvider,
   DialPlanSocketFactory,
   GatewayConnection,
   type GatewayConfig,
@@ -10,9 +12,9 @@ import {
   type TokenSet,
   type TokenStore
 } from '@hermie/gateway-client'
-import NetInfo from '@react-native-community/netinfo'
 import { AppState } from 'react-native'
 
+import { networkWatcher } from '../platform/net-info'
 import { RUNS_ON_MAC } from '../platform/runs-on-mac'
 import { secretStore } from '../platform/secret-store'
 import { PlatformWebSocket } from '../platform/socket'
@@ -158,21 +160,26 @@ export interface CreateConnectionOptions {
 export function createGatewayConnection(options: CreateConnectionOptions): GatewayConnection {
   const { config, timeline } = options
   const extraHeaders = config.extraHeaders ?? {}
-  const credentials =
-    config.authMode === 'session_token'
-      ? new SessionTokenCredentials({ token: options.sessionToken ?? '' })
-      : new NativePkceCredentials({
+  const credentials: CredentialProvider =
+    config.authMode === 'cookie'
+      ? new CookieSessionCredentials({
           baseUrl: config.baseUrl,
-          coordinator:
-            options.coordinator ??
-            createTokenCoordinator({
-              baseUrl: config.baseUrl,
-              extraHeaders,
-              ...(timeline ? { timeline } : {})
-            }),
-          extraHeaders,
           ...(timeline ? { timeline } : {})
         })
+      : config.authMode === 'session_token'
+        ? new SessionTokenCredentials({ token: options.sessionToken ?? '' })
+        : new NativePkceCredentials({
+            baseUrl: config.baseUrl,
+            coordinator:
+              options.coordinator ??
+              createTokenCoordinator({
+                baseUrl: config.baseUrl,
+                extraHeaders,
+                ...(timeline ? { timeline } : {})
+              }),
+            extraHeaders,
+            ...(timeline ? { timeline } : {})
+          })
 
   return new GatewayConnection({
     config,
@@ -221,7 +228,7 @@ export function attachLifecycle(connection: GatewayConnection): () => void {
   })
   subscriptions.push(() => appState.remove())
 
-  subscriptions.push(NetInfo.addEventListener(state => connection.setOnline(state.isConnected !== false)))
+  subscriptions.push(networkWatcher.subscribe(online => connection.setOnline(online)))
 
   return () => {
     for (const unsubscribe of subscriptions) {

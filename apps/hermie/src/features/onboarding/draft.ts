@@ -7,6 +7,7 @@ import {
 } from '@hermie/gateway-client'
 
 import type { StoredGatewayConfig } from '../../gateway/config'
+import { RUNS_IN_BROWSER } from '../../platform/runs-in-browser'
 
 /**
  * Everything the wizard has learned so far, held in memory only. Nothing here
@@ -16,8 +17,21 @@ import type { StoredGatewayConfig } from '../../gateway/config'
 
 export type OnboardingStep = 'welcome' | 'address' | 'signin' | 'test' | 'done'
 
+/**
+ * The wizard's order, which is one step shorter in a browser.
+ *
+ * Hermie Web serves the app and proxies the gateway onto the SAME origin, so
+ * the gateway address is not a question — it is `window.location.origin`, and
+ * any other answer would be wrong. Asking for it would be asking the user to
+ * retype the address bar. The server's own host is shown instead, read from
+ * `/hermie/config.json`.
+ */
+export const ONBOARDING_ORDER: OnboardingStep[] = RUNS_IN_BROWSER
+  ? ['welcome', 'signin', 'test', 'done']
+  : ['welcome', 'address', 'signin', 'test', 'done']
+
 /** The steps that carry a "step N of M" counter; Welcome is the cover, not a step. */
-export const NUMBERED_STEPS: OnboardingStep[] = ['address', 'signin', 'test', 'done']
+export const NUMBERED_STEPS: OnboardingStep[] = ONBOARDING_ORDER.filter(step => step !== 'welcome')
 
 export interface HeaderRow {
   /** Stable across edits so a re-render cannot move the focus to another row. */
@@ -43,6 +57,12 @@ export interface ConnectionTestOutcome {
   tokens?: TokenSet | null
 }
 
+/** Who the gateway says we are, once a cookie session has been established. */
+export interface CookieIdentity {
+  userId: string
+  displayName: string
+}
+
 export interface OnboardingDraft {
   /** Exactly what the user typed, before coercion. */
   rawAddress: string
@@ -53,6 +73,14 @@ export interface OnboardingDraft {
   provider: AuthProvider | null
   tokens: TokenSet | null
   sessionToken: string
+  /**
+   * Set once `GET /api/auth/me` has confirmed the gateway's session cookie.
+   *
+   * There is no credential to hold in the browser flow — the cookie is
+   * `HttpOnly` and belongs to the gateway — so "are we signed in" is a fact the
+   * server states rather than a token the wizard carries.
+   */
+  cookieIdentity: CookieIdentity | null
   test: ConnectionTestOutcome | null
 }
 
@@ -73,6 +101,7 @@ export function emptyDraft(): OnboardingDraft {
     provider: null,
     tokens: null,
     sessionToken: '',
+    cookieIdentity: null,
     test: null
   }
 }
@@ -93,8 +122,8 @@ export function draftFromConfig(config: StoredGatewayConfig): OnboardingDraft {
       : null,
     probe: {
       version: config.version ?? '',
-      authRequired: config.authMode === 'native_pkce',
-      authFlows: config.authMode === 'native_pkce' ? ['native_pkce'] : [],
+      authRequired: config.authMode !== 'session_token',
+      authFlows: config.authMode === 'session_token' ? [] : [config.authMode],
       providers: config.provider
         ? [
             {
@@ -109,9 +138,23 @@ export function draftFromConfig(config: StoredGatewayConfig): OnboardingDraft {
   }
 }
 
-/** A gated gateway signs in; an ungated one authenticates with its session token. */
+/**
+ * A gated gateway signs in; an ungated one authenticates with its session token.
+ *
+ * In a browser a gated gateway means the COOKIE flow, not the native one: a
+ * page cannot listen on a loopback port for an RFC 8252 redirect, and it does
+ * not have to — the gateway already has a browser session flow, and Hermie Web
+ * puts the app on the origin that flow's cookies belong to. `cookie` is only
+ * chosen when the gateway advertises it, so an old gateway that only knows
+ * `native_pkce` still reports the mode the sign-in step will refuse out loud
+ * rather than a mode nothing can complete.
+ */
 export function authModeOf(probe: ProbeResult | null): GatewayAuthMode {
-  return probe?.authRequired ? 'native_pkce' : 'session_token'
+  if (!probe?.authRequired) {
+    return 'session_token'
+  }
+
+  return RUNS_IN_BROWSER && probe.authFlows.includes('cookie') ? 'cookie' : 'native_pkce'
 }
 
 export function headerError(row: HeaderRow): string | null {
@@ -165,13 +208,20 @@ export function connectionPayloadKey(draft: OnboardingDraft): string {
     headers: headerRecord(draft.headers),
     authMode: authModeOf(draft.probe),
     provider: draft.provider?.name ?? '',
-    credential: draft.tokens?.accessToken ?? draft.sessionToken.trim()
+    credential: draft.tokens?.accessToken ?? draft.cookieIdentity?.userId ?? draft.sessionToken.trim()
   })
 }
 
 /** True when the draft holds a credential the gateway could actually be tested with. */
 export function hasCredential(draft: OnboardingDraft): boolean {
-  return authModeOf(draft.probe) === 'session_token' ? draft.sessionToken.trim().length > 0 : draft.tokens !== null
+  switch (authModeOf(draft.probe)) {
+    case 'session_token':
+      return draft.sessionToken.trim().length > 0
+    case 'cookie':
+      return draft.cookieIdentity !== null
+    case 'native_pkce':
+      return draft.tokens !== null
+  }
 }
 
 /** True when the current draft is exactly what the last successful test ran against. */
@@ -186,7 +236,7 @@ export function configFromDraft(draft: OnboardingDraft): StoredGatewayConfig {
   return {
     baseUrl: draft.baseUrl ?? '',
     authMode,
-    ...(authMode === 'native_pkce' && draft.provider
+    ...(authMode !== 'session_token' && draft.provider
       ? { provider: draft.provider.name, providerDisplayName: draft.provider.displayName }
       : {}),
     ...(draft.probe?.version ? { version: draft.probe.version } : {}),

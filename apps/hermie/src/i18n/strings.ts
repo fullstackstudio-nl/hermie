@@ -88,6 +88,8 @@ export const strings = {
         'The gateway hosts the sign-in page. Hermie opens it, reads the result and keeps the tokens on this device.',
       subtitleToken:
         'This gateway is not gated by an identity provider; it authenticates with the session token it prints at startup.',
+      subtitleCookie:
+        'The gateway hosts the sign-in page. Your browser keeps the session it hands back; Hermie never sees it.',
       chooseProvider: 'PROVIDER',
       signInWith: (provider: string) => `Sign in with ${provider}`,
       signedInAs: (user: string) => `Signed in as ${user}`,
@@ -101,6 +103,22 @@ export const strings = {
       tokenPlaceholder: 'Session token',
       showToken: 'Show token',
       hideToken: 'Hide token',
+
+      // Browser build only: the cookie flow.
+      servedFrom: (host: string) => `Served by Hermie Web, talking to ${host}.`,
+      servedFromUnknown: 'Served by Hermie Web.',
+      probingGateway: 'Reading the gateway…',
+      checkingSession: 'Checking whether you are already signed in…',
+      leavingForProvider: 'Taking you to the sign-in page…',
+      passwordUser: 'USER NAME',
+      passwordSecret: 'PASSWORD',
+      passwordSubmit: 'Sign in',
+      showPassword: 'Show password',
+      hidePassword: 'Hide password',
+      cookieBlockedTitle: 'This gateway is too old for browser sign-in',
+      cookieBlockedBody:
+        'It requires a sign-in but does not advertise the cookie flow, which is the only one a browser tab can complete. Update Hermes on the gateway.',
+      signOutOfSession: 'Sign out',
 
       webview: {
         title: 'Sign in',
@@ -137,10 +155,10 @@ export const strings = {
     test: {
       title: 'Test connection',
       subtitle: 'Hermie checks the REST surface and then opens the WebSocket, exactly as it will during use.',
-      run: 'Test connection',
-      running: 'Testing…',
-      required: 'Run the test before finishing setup.',
-      invalidated: 'Something changed since the last test. Run it again.',
+      running: 'Testing\u2026',
+      retry: 'Try again',
+      required: 'The connection has not been tested yet.',
+      invalidated: 'Something changed since the last test, so it is running again.',
       connectedAs: (user: string, bots: number) => `Connected as ${user} · ${bots === 1 ? '1 bot' : `${bots} bots`}`,
       connected: (bots: number) => `Connected · ${bots === 1 ? '1 bot' : `${bots} bots`}`,
       noBots: 'The connection works, but this gateway has no bot profiles yet.',
@@ -161,6 +179,11 @@ export const strings = {
     done: {
       title: 'Ready',
       subtitle: 'Hermie will store the gateway address on this device and the credentials in the system secret store.',
+      // Browser build: there is no credential to store. The session is a cookie
+      // the gateway set and the browser keeps, and saying otherwise would
+      // promise a keychain that is not there.
+      subtitleCookie:
+        'Hermie will remember this gateway in this browser. The session itself stays where the gateway put it \u2014 in a cookie Hermie cannot read.',
       gateway: 'GATEWAY',
       finish: 'Start chatting',
       saving: 'Saving…',
@@ -455,6 +478,22 @@ export const strings = {
     version: 'Version',
     user: 'Signed in as',
     authModeToken: 'Session token',
+
+    /** Browser build only: the Hermie Web server this page came from. */
+    webUpdate: {
+      header: 'HERMIE WEB',
+      running: 'Running',
+      state: 'Update',
+      checking: 'Checking\u2026',
+      upToDate: 'Up to date',
+      available: (version: string) => `${version} available`,
+      apply: 'Update',
+      updating: 'Downloading and installing\u2026',
+      restarting: 'Restarting\u2026',
+      failed: (reason: string) => `The update failed: ${reason}`,
+      needsSignIn: 'Sign in to the gateway before updating Hermie Web.',
+      restartTimedOut: 'Hermie Web did not come back within a minute. Check its logs.'
+    },
     status: 'Status',
     account: 'ACCOUNT',
     signOut: 'Sign out',

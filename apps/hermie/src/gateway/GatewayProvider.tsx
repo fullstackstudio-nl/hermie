@@ -96,10 +96,14 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
     (loaded: GatewaySetup, timeline: AuthTimeline) => {
       teardown()
 
+      // Only the native flow has tokens to rotate. A session token never
+      // changes, and a cookie is rotated by the gateway behind the browser's
+      // back — building a coordinator for either would give the connection a
+      // refresher with nothing to refresh.
       const coordinator =
-        loaded.config.authMode === 'session_token'
-          ? null
-          : createTokenCoordinator({ baseUrl: loaded.config.baseUrl, extraHeaders: loaded.extraHeaders, timeline })
+        loaded.config.authMode === 'native_pkce'
+          ? createTokenCoordinator({ baseUrl: loaded.config.baseUrl, extraHeaders: loaded.extraHeaders, timeline })
+          : null
 
       const connection = createGatewayConnection({
         config: toGatewayConfig(loaded),

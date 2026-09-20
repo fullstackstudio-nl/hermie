@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react'
 
 import { saveGatewaySetup, type StoredGatewayConfig } from '../../gateway/config'
 import { describeConnectionError } from '../../gateway/errors'
+import { WEB_GATEWAY_BASE_URL } from '../../gateway/web-config'
 import { strings } from '../../i18n/strings'
 import {
   authModeOf,
@@ -12,6 +13,7 @@ import {
   headerRecord,
   isTestCurrent,
   NUMBERED_STEPS,
+  ONBOARDING_ORDER,
   type OnboardingDraft,
   type OnboardingStep
 } from './draft'
@@ -22,7 +24,30 @@ import { SignInStep } from './steps/SignInStep'
 import { TestConnectionStep } from './steps/TestConnectionStep'
 import { WelcomeStep } from './steps/WelcomeStep'
 
-const ORDER: OnboardingStep[] = ['welcome', 'address', 'signin', 'test', 'done']
+/**
+ * The order, which the browser build shortens: there is no address to ask for
+ * when the app is served by a proxy that already fixes the gateway. See
+ * `ONBOARDING_ORDER`.
+ */
+const ORDER: OnboardingStep[] = ONBOARDING_ORDER
+
+/**
+ * The draft a wizard STARTS from.
+ *
+ * In a browser the gateway is the page's own origin, so the address is filled
+ * in before the first render rather than typed: every later step reads
+ * `draft.baseUrl`, and a wizard that skipped the address step without setting
+ * it would have nothing to probe.
+ */
+function initialDraftFor(resumeConfig: StoredGatewayConfig | null): OnboardingDraft {
+  const draft = resumeConfig ? draftFromConfig(resumeConfig) : emptyDraft()
+
+  if (!WEB_GATEWAY_BASE_URL) {
+    return draft
+  }
+
+  return { ...draft, rawAddress: WEB_GATEWAY_BASE_URL, baseUrl: WEB_GATEWAY_BASE_URL }
+}
 
 export interface OnboardingNavigatorProps {
   /** Resuming after a sign-out: the address survives, the credentials do not. */
@@ -56,9 +81,7 @@ export function OnboardingNavigator({
   initialDraft,
   probeDebounceMs
 }: OnboardingNavigatorProps) {
-  const [draft, setDraft] = useState<OnboardingDraft>(
-    () => initialDraft ?? (resumeConfig ? draftFromConfig(resumeConfig) : emptyDraft())
-  )
+  const [draft, setDraft] = useState<OnboardingDraft>(() => initialDraft ?? initialDraftFor(resumeConfig))
   const [step, setStep] = useState<OnboardingStep>(() => initialStep ?? (resumeConfig ? 'signin' : 'welcome'))
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -86,11 +109,19 @@ export function OnboardingNavigator({
         return true
       case 'address':
         return draft.probe !== null && draft.baseUrl !== null
-      case 'signin':
-        return (
-          hasCredential(draft) &&
-          (authModeOf(draft.probe) === 'session_token' || draft.probe?.supportsNativePkce === true)
-        )
+      case 'signin': {
+        if (!hasCredential(draft)) {
+          return false
+        }
+
+        const mode = authModeOf(draft.probe)
+
+        // The native flow is the only one with a capability to check: a gateway
+        // may be gated and still not offer it, which is a dead end the step
+        // says out loud. Cookie and session-token both prove themselves by
+        // producing a credential at all.
+        return mode !== 'native_pkce' || draft.probe?.supportsNativePkce === true
+      }
       case 'test':
         return isTestCurrent(draft)
       case 'done':
@@ -160,11 +191,16 @@ export function OnboardingNavigator({
               lead:
                 authMode === 'session_token'
                   ? strings.onboarding.signIn.subtitleToken
-                  : strings.onboarding.signIn.subtitleNative
+                  : authMode === 'cookie'
+                    ? strings.onboarding.signIn.subtitleCookie
+                    : strings.onboarding.signIn.subtitleNative
             }
           : step === 'test'
             ? { title: strings.onboarding.test.title, lead: strings.onboarding.test.subtitle }
-            : { title: strings.onboarding.done.title, lead: strings.onboarding.done.subtitle }
+            : {
+                title: strings.onboarding.done.title,
+                lead: authMode === 'cookie' ? strings.onboarding.done.subtitleCookie : strings.onboarding.done.subtitle
+              }
 
   return (
     <OnboardingCard
