@@ -253,35 +253,34 @@ export interface MarkdownBlockProps {
   /** The block's own source slice, exactly as `splitBlocks` cut it. */
   raw: string
   context: MarkdownContext
-  /** The tail of a reply still arriving: draws the streaming caret. */
-  streaming?: boolean
 }
 
-function MarkdownBlockView({ raw, context, streaming = false }: MarkdownBlockProps) {
+/**
+ * There is no streaming caret.
+ *
+ * There was one — a `▍` in the muted ink after the last block — and because a
+ * `Text` sibling of the blocks is a block-level box, it landed on a LINE OF ITS
+ * OWN under the reply: a small grey rectangle sitting in the bubble's last
+ * paragraph's worth of empty space. The owner's verdict was "make it look right
+ * or take it out", and there is nothing to make right: two other things already
+ * say a reply is arriving, and both of them say it where a reader is already
+ * looking. The dots are in the bubble until the first word lands, and the line
+ * under the bot's name says Typing for the whole of it.
+ */
+function MarkdownBlockView({ raw, context }: MarkdownBlockProps) {
   const tokens = useMemo(() => marked.lexer(raw), [raw])
 
   if (!raw.trim()) {
     return null
   }
 
-  return (
-    <View>
-      <Blocks context={context} tokens={tokens} />
-      {streaming ? (
-        <Text
-          accessibilityLabel="Streaming"
-          style={{ color: context.mutedTextColor, fontSize: context.fontSize, lineHeight: context.lineHeight }}
-        >
-          {'▍'}
-        </Text>
-      ) : null}
-    </View>
-  )
+  return <Blocks context={context} tokens={tokens} />
 }
 
 /**
- * Memoized on `(raw, context, streaming)`. `context` is one frozen object from
- * `Markdown`, so in practice the raw string is the only thing that changes —
- * which is exactly the invariant the streaming path depends on.
+ * Memoized on `(raw, context)`. `context` is one frozen object from `Markdown`,
+ * so in practice the raw string is the only thing that changes — which is
+ * exactly the invariant the streaming path depends on, and with the caret gone a
+ * settled block now renders exactly ONCE over a whole reply.
  */
 export const MarkdownBlock = memo(MarkdownBlockView)

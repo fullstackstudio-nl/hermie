@@ -183,7 +183,6 @@ export function AssistantBubble({
                 linkColor={theme.accent().text}
                 onBlockLayout={foldBlocks.onBlockLayout}
                 onLinkPress={onLinkPress}
-                streaming={item.streaming}
                 text={body}
               />
             </Fold>

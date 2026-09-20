@@ -1,15 +1,16 @@
 /**
- * `<Markdown text streaming? />` — the incremental renderer.
+ * `<Markdown text />` — the incremental renderer.
  *
  * The text is preprocessed, split into top-level blocks, and each block is
  * rendered by a component memoized on its own source slice. While a reply
  * streams, every block but the last keeps byte-identical source, so only the
  * last one re-lexes and re-renders.
  *
- * One block does re-render a second time: the tail carries the streaming caret,
- * so when the caret moves on it renders once more without it. Twice per block
- * over a whole reply, rather than once per delta — which is the bound
- * `__tests__/chat-ui/markdown-blocks.test.tsx` asserts.
+ * Nothing marks the tail, so a settled block renders exactly ONCE over a whole
+ * reply rather than once per delta — which is the bound
+ * `__tests__/chat-ui/markdown-blocks.test.tsx` asserts. It used to be twice,
+ * because the tail carried a streaming caret and rendered again when the caret
+ * moved on; there is no caret now, and `Block.tsx` says why.
  */
 import { useCallback, useMemo, useRef } from 'react'
 import { Linking, View, type LayoutChangeEvent, type ViewStyle } from 'react-native'
@@ -24,8 +25,6 @@ import { preprocessMarkdown } from './preprocess'
 
 export interface MarkdownProps {
   text: string
-  /** The reply is still arriving: draws a caret after the last block. */
-  streaming?: boolean
   /** Body colour role. Blue bubbles pass `onAccent`. */
   color?: ColorRole
   mutedColor?: ColorRole
@@ -102,7 +101,6 @@ function isAtomicBlock(raw: string): boolean {
 
 export function Markdown({
   text,
-  streaming = false,
   color = 'text',
   mutedColor = 'textMuted',
   linkColor,
@@ -185,15 +183,6 @@ export function Markdown({
   )
 
   const blocks = useMemo(() => splitBlocks(preprocessMarkdown(text)), [text])
-  const lastIndex = useMemo(() => {
-    for (let index = blocks.length - 1; index >= 0; index -= 1) {
-      if ((blocks[index] ?? '').trim()) {
-        return index
-      }
-    }
-
-    return -1
-  }, [blocks])
 
   // The callback may be a fresh closure per render; the wrapper must not be
   // rebuilt for that, and a block must never be invalidated by it.
@@ -220,9 +209,7 @@ export function Markdown({
   return (
     <View style={style}>
       {blocks.map((raw, index) => {
-        const block = (
-          <MarkdownBlock context={context} key={index} raw={raw} streaming={streaming && index === lastIndex} />
-        )
+        const block = <MarkdownBlock context={context} key={index} raw={raw} />
 
         // No wrapper at all where nobody asked for the geometry: a view per block
         // on every reply in the transcript, for a measurement only one caller
