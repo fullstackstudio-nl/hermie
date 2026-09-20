@@ -701,7 +701,8 @@ describe('a gateway served in the clear', () => {
   it('refreshes its tokens over http as well', async () => {
     const { connection, gateway, waitFor } = await harness({ auth: 'native' })
 
-    gateway.state.rejectNextUpgrades = 1
+    // Two refusals in a row: one is a stale ticket and only re-mints.
+    gateway.state.rejectNextUpgrades = 2
 
     connection.start()
     await waitFor('ready')
