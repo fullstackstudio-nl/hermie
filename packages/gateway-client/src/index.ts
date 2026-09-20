@@ -26,11 +26,19 @@ export {
 export {
   DEFAULT_HTTP_TIMEOUT_MS,
   type FetchLike,
+  looksLikeCertificateFailure,
   looksLikeTlsFailure,
   parseJsonBody,
   parseJsonObject,
   requestText
 } from './fetch-json'
+export {
+  classifyHost,
+  type HostClassification,
+  type HostPrivacy,
+  hostOfAddress,
+  isExposedCleartext
+} from './host-privacy'
 export {
   type AuthIdentity,
   DEFAULT_REST_TIMEOUT_MS,
@@ -64,7 +72,15 @@ export {
   type RandomBytes,
   REDIRECT_URI
 } from './pkce'
-export { type AuthProvider, NATIVE_PKCE_FLOW, PROBE_TIMEOUT_MS, probeGateway, type ProbeResult } from './probe'
+export {
+  type AuthProvider,
+  NATIVE_PKCE_FLOW,
+  PROBE_TIMEOUT_MS,
+  probeGateway,
+  type ProbeResult,
+  resolveGatewayAddress,
+  type ResolvedAddress
+} from './probe'
 export { DialPlanSocketFactory, type SocketCloseInfo, type WebSocketConstructorLike } from './socket-factory'
 export {
   asGatewayError,
@@ -81,6 +97,7 @@ export {
   apiUrl,
   BLOCKED_HEADER_NAMES,
   GATEWAY_WS_PATH,
+  hasExplicitScheme,
   isBlockedHeaderName,
   normalizeBaseUrl,
   normalizeHeader,

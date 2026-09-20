@@ -10,6 +10,11 @@ identity provider and model provider throughout — the commands below use place
 
 Budget an hour, most of which is waiting for the installer and for DNS.
 
+This runbook deliberately builds the **public** case, because it is the one with the most moving
+parts: a routable host, a certificate, an identity provider that will only redirect to `https`. That
+is not the only supported shape. A gateway on a tailnet is reached over plain `http://` and Hermie
+connects to it as it stands — see "Keep the gateway off the public internet" in the README.
+
 ## Before you start
 
 - A host with a public IPv4 address, ports 80 and 443 reachable.

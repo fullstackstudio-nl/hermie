@@ -36,10 +36,13 @@ jest.mock('../src/features/settings/licences-data', () => ({
   })
 }))
 
+const HTTPS_CONFIG = { authMode: 'native_pkce', baseUrl: 'https://gateway.example.com', version: '1.2.3' }
+let mockGatewayConfig: Record<string, unknown> = HTTPS_CONFIG
+
 jest.mock('../src/gateway', () => ({
   useGateway: () => ({
     changeGateway: jest.fn(),
-    config: { authMode: 'native_pkce', baseUrl: 'https://gateway.example.com', version: '1.2.3' },
+    config: mockGatewayConfig,
     signOut: jest.fn(),
     status: 'ready'
   })
@@ -47,6 +50,7 @@ jest.mock('../src/gateway', () => ({
 
 beforeEach(() => {
   mockEscapeListeners.clear()
+  mockGatewayConfig = HTTPS_CONFIG
   useSettingsStore.getState().reset()
 })
 
@@ -110,6 +114,35 @@ describe('About', () => {
     // The first group of the Settings root. It used to be the screen's own large
     // title, which is gone: both shells already name this screen above it.
     expect(screen.getByText('GATEWAY')).toBeTruthy()
+  })
+})
+
+/**
+ * Settings names the scheme in the address either way. The extra line under it
+ * is only for the case the reader can do something about: cleartext to an
+ * address anybody can be on the path to.
+ */
+describe('Settings and a cleartext gateway', () => {
+  it('says nothing under an https address', () => {
+    renderScreen(<SettingsScreen />)
+
+    expect(screen.getByText('https://gateway.example.com')).toBeTruthy()
+    expect(screen.queryByTestId('transport-notice')).toBeNull()
+  })
+
+  it('says nothing under a tailnet address, which is the ordinary setup', () => {
+    mockGatewayConfig = { ...HTTPS_CONFIG, baseUrl: 'http://hermes.tail9f3c.ts.net' }
+    renderScreen(<SettingsScreen />)
+
+    expect(screen.getByText('http://hermes.tail9f3c.ts.net')).toBeTruthy()
+    expect(screen.queryByTestId('transport-notice')).toBeNull()
+  })
+
+  it('warns under a public http address', () => {
+    mockGatewayConfig = { ...HTTPS_CONFIG, baseUrl: 'http://gateway.example.com' }
+    renderScreen(<SettingsScreen />)
+
+    expect(screen.getByTestId('transport-notice')).toHaveTextContent(/Anyone on the path/)
   })
 })
 

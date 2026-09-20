@@ -1,9 +1,11 @@
+import { isExposedCleartext } from '@hermie/gateway-client'
 import type { Verbosity } from '@hermie/transcript'
 import { useState } from 'react'
 import { ScrollView, View } from 'react-native'
 
 import { chatStrings } from '../../chat-ui'
 import { useGateway } from '../../gateway'
+import { TransportNotice } from '../../gateway/TransportNotice'
 import { strings } from '../../i18n/strings'
 import { type Appearance, useSettingsStore } from '../../store/settings'
 import { InsetButtonRow, InsetGroup, InsetValueRow, Screen } from '../../ui/primitives'
@@ -104,7 +106,15 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
           the last one left.
         */}
 
-        <InsetGroup header={strings.settings.gateway}>
+        <InsetGroup
+          header={strings.settings.gateway}
+          // Only the exposed case speaks here. A tailnet gateway over http is
+          // the ordinary setup, and Settings is not where somebody wants to be
+          // told again that their own network is their own network.
+          {...(isExposedCleartext(config?.baseUrl ?? '')
+            ? { footer: <TransportNotice baseUrl={config?.baseUrl} testID="transport-notice" /> }
+            : {})}
+        >
           <InsetValueRow label={strings.settings.address} value={config?.baseUrl ?? strings.settings.unknown} />
           <InsetValueRow
             label={strings.settings.provider}

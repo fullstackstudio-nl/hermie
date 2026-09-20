@@ -24,6 +24,7 @@ rewritten, and git history has them.
 | Is `expo-secure-store` keychain-backed on a Mac? | **Yes** — signed in across a quit and relaunch | 2026-09-19 |
 | Does the app launch on iOS 27?                   | **Yes, since scene adoption** — simulator      | 2026-09-20 |
 | Does `AppState` survive the scene life cycle?    | **Yes** — measured, background and foreground  | 2026-09-20 |
+| Can a Release build reach a gateway over http?   | **Yes, since the ATS key** — iOS 27 simulator  | 2026-09-20 |
 | What AppState does a Mac window report?          | **Unverified** — see "A Mac never pauses"      | 2026-09-19 |
 | Is `TextDecoder` present at runtime?             | Not verified; the guard ships either way       | 2026-09-18 |
 
@@ -1879,3 +1880,148 @@ emulator this round; it is one call and it was already the right one to make.
   window is the one thing this agent does not do, so this is left open rather than
   guessed at — the next look should compare the panel's top and bottom insets in a
   Mac screenshot and say which one is wrong.
+
+## Plain http to a private gateway, and what ATS actually blocked (2026-09-20, later)
+
+Everything below was measured on the **iPhone 18 Pro simulator (iOS 27.0)** against a
+**Release-configuration** build of the app, signed ad-hoc, driven by hand — not in a development
+build and not reasoned from the documentation. The gateway was `npm run fake-gateway -- --host
+0.0.0.0` on the Mac's LAN address, so every request left loopback.
+
+Two addresses matter, and they are the same machine:
+
+| Address                     | What it stands for                                                      |
+| --------------------------- | ----------------------------------------------------------------------- |
+| `192.168.2.250:9119`        | a bare private IP — a tailnet `100.x` address                           |
+| `192-168-2-250.nip.io:9119` | a fully qualified name that resolves to it — a MagicDNS `*.ts.net` name |
+
+`nip.io` is a public wildcard zone that answers with the address in the label, so the second row is
+an FQDN in a public zone pointing at a private host, which is exactly the shape of a tailnet name
+and needs no edit to `/etc/hosts` to arrange.
+
+### `NSAllowsLocalNetworking` covers the IP and not the name
+
+The Expo SDK 54 template writes `NSAllowsArbitraryLoads: false` with `NSAllowsLocalNetworking: true`,
+and that was Hermie's configuration until this round. Measured, same binary, plist edited in the
+installed bundle:
+
+| Request                                       | Result                                     |
+| --------------------------------------------- | ------------------------------------------ |
+| `http://192.168.2.250:9119/api/status`        | **allowed** — the wizard found the gateway |
+| `http://192-168-2-250.nip.io:9119/api/status` | **blocked**, `NSURLErrorDomain -1022`      |
+
+```
+Error Domain=NSURLErrorDomain Code=-1022 "The resource could not be loaded because the App
+Transport Security policy requires the use of a secure connection."
+NSErrorFailingURLStringKey=http://192-168-2-250.nip.io:9119/api/status
+```
+
+So ATS decides on the host as WRITTEN, not on the address it resolves to. A MagicDNS name is a
+fully qualified name in a public zone; `NSAllowsLocalNetworking` never reaches it, and the owner's
+stated case — `http://host.tailnet.ts.net` — was refused.
+
+Two things about how this stayed hidden, and they are not the same thing:
+
+- **On iOS there was no debug/release difference.** `Info.plist` does not vary by configuration, so a
+  development build refused that address exactly as a release build did. What hid it is that
+  everything this project has ever typed into the address field was `localhost`, an emulator alias or
+  a LAN IP — every one of them covered by `NSAllowsLocalNetworking`.
+- **On Android there is one, and it is the bad kind.** The template sets
+  `usesCleartextTraffic="true"` in the debug manifest only, so every development build works and the
+  release build is where it breaks.
+
+### `NSAllowsArbitraryLoads` is IGNORED when one of its neighbours is present
+
+This is the part that cost an hour and is invisible unless you measure it. The first attempt at a
+fix shipped all three keys:
+
+```
+NSAllowsArbitraryLoads = true
+NSAllowsArbitraryLoadsInWebContent = true
+NSAllowsLocalNetworking = true
+```
+
+and the FQDN was still refused with `-1022`. That is documented behaviour rather than a bug: since
+iOS 10, the presence of `NSAllowsLocalNetworking`, `NSAllowsArbitraryLoadsInWebContent` or
+`NSAllowsArbitraryLoadsForMedia` makes the system **ignore** `NSAllowsArbitraryLoads` and use its
+default of false. Writing the belt as well as the braces removed the trousers.
+
+Deleting the other two from the same installed bundle and relaunching — one key left — allowed it
+immediately. `app.config.ts` therefore sets exactly one key, and the template's
+`NSAllowsLocalNetworking` goes with it, because keeping it would switch the fix off.
+
+### What one key actually buys, all of it measured
+
+With `NSAppTransportSecurity = { NSAllowsArbitraryLoads: true }`, in the Release build:
+
+| Surface                                   | Address                                                   | Result |
+| ----------------------------------------- | --------------------------------------------------------- | ------ |
+| `fetch` (the probe)                       | `http://192.168.2.250:9119`                               | works  |
+| `fetch` (the probe)                       | `http://192-168-2-250.nip.io:9119`                        | works  |
+| `ws://` (the connection test and the app) | `ws://192.168.2.250:9119/api/ws`                          | works  |
+| `WKWebView` (the native sign-in page)     | `http://192.168.2.250:9119/auth/native/authorize`         | works  |
+| the whole PKCE round trip                 | authorize → loopback redirect → `POST /auth/native/token` | works  |
+
+The web view is the row worth noting: web content follows `NSAllowsArbitraryLoads` when
+`NSAllowsArbitraryLoadsInWebContent` is ABSENT, so leaving the web key out does not cost the sign-in
+page anything. Adding it would have cost the rest of the app everything.
+
+End to end in that build: onboarding found the gateway over http, the connection test reported
+**Connected · 2 bots**, and the chats list drew both bots live. In `--auth native` the sign-in page
+rendered inside the app, "Approve as tester" produced the loopback redirect, the code exchange
+succeeded and the test reported **Connected as Fake Tester · 2 bots**.
+
+### React Native's `fetch` throws away the reason, so nothing can tell a TLS failure apart
+
+This was found by disbelieving a screenshot. The wizard probed `https://192-168-2-250.nip.io:9119`,
+where a plain-HTTP server was listening, and reported **"Could not reach …"**. The simulator's own
+log said something quite different about the same request:
+
+```
+Error Domain=NSURLErrorDomain Code=-1200 "A TLS error caused the secure connection to fail."
+UserInfo={_kCFStreamErrorCodeKey=-9836, …
+NSErrorFailingURLStringKey=https://192-168-2-250.nip.io:9119/api/status}
+```
+
+CFNetwork knows exactly what happened. JavaScript never hears it. React Native's `fetch` is
+`whatwg-fetch` over its own `XMLHttpRequest` (`Libraries/Network/fetch.js` is a three-line re-export
+of the polyfill), and the polyfill's `xhr.onerror` rejects with a flat
+`TypeError('Network request failed')`. The `NSError`, its domain, its code and its description are
+all gone by then, and OkHttp's exception goes the same way on Android.
+
+Consequences, and they are not small:
+
+- **`looksLikeTlsFailure` cannot fire for a `fetch` failure on a device, on any platform.** Its
+  comment claimed iOS put `-1200` in the message; nothing puts anything in the message. The
+  predicate still earns its place in Node — the package is used from vitest and from the fake
+  gateway's own tests, where a real error message arrives — and `strings.errors.tls` is therefore
+  reachable in principle and unreachable in the app as it ships. Said plainly rather than left as a
+  string somebody assumes is in use.
+- **The scheme fallback always gets its chance**, because every transport failure classifies as
+  `network`. That is what the tailnet case needs.
+- **And the rule it was supposed to respect is weaker on a device than in the code.** The resolver
+  refuses to retry in the clear when the https attempt failed over a CERTIFICATE, and on a device it
+  cannot see that it did. So: a scheme-less address whose https server has an untrusted certificate,
+  with something also answering as a Hermes gateway over http, will end up on http. It is not
+  silent — the probe line says `Found over http://` and a public host gets the warning — but the
+  guarantee lives in `packages/gateway-client` and not in the app's transport. Closing it needs the
+  `NSError` surfaced through a native module, which is a bigger change than this round.
+
+The split between `looksLikeTlsFailure` and `looksLikeCertificateFailure` stays, because it is
+correct wherever a real message does arrive and costs nothing where one does not.
+
+### What this pass did NOT verify
+
+- **A real tailnet.** No Tailscale or Headscale node was involved. `nip.io` reproduces the SHAPE of
+  a MagicDNS name — fully qualified, public zone, private address — and ATS is documented and now
+  measured to judge the name rather than the address, but a `.ts.net` name was never typed into the
+  app on a machine that could resolve one.
+- **Android, at runtime.** `usesCleartextTraffic="true"` is in the generated main manifest and the
+  template's debug manifest already carried it, so the debug/release difference is closed on paper.
+  No APK was built and no emulator was run this round.
+- **A real identity provider behind an http gateway.** The sign-in went through the fake gateway's
+  own authorize page. The mixed-content question — an http gateway redirecting to an https IdP and
+  back — is a chain of top-level NAVIGATIONS rather than sub-resource loads, which WKWebView permits,
+  but nothing here exercised it.
+- **The Mac window.** The Mac is the same binary and the same Info.plist, so the ATS behaviour is the
+  iOS one; nothing was run in a Mac window.

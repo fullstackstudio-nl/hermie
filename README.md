@@ -104,10 +104,13 @@ start:
   on. It is what makes the gateway build sign-in redirects that come back to
   itself rather than to `localhost`, and a gateway without it will hand Hermie a
   sign-in page that cannot complete.
-- **Reach it over HTTPS** if it is not on the same machine. A reverse proxy in
-  front of `hermes serve` has to pass WebSocket upgrades through; setup tests
-  exactly that before it saves anything, so a proxy that does not will fail
-  during setup rather than a week later.
+- **Reach it over HTTPS if it is exposed to the open internet.** On a private
+  network — a tailnet, a LAN, or the same machine — plain `http://` is fine and
+  Hermie supports it; see [Keep the gateway off the public
+  internet](#keep-the-gateway-off-the-public-internet). If you do put a reverse
+  proxy in front of `hermes serve`, it has to pass WebSocket upgrades through;
+  setup tests exactly that before it saves anything, so a proxy that does not
+  will fail during setup rather than a week later.
 
 [docs/test-gateway.md](docs/test-gateway.md) is a runbook for standing one up
 from scratch.
@@ -122,11 +125,22 @@ would rather host the control server yourself. Both use the same clients.
 
 - Put the gateway machine and every device that runs Hermie on the same tailnet,
   and give Hermie the gateway's tailnet name as its address.
-- Serve it over HTTPS there too. `tailscale serve` puts a certificate for the
-  machine's tailnet name in front of `hermes serve` and passes WebSocket upgrades
-  through; with Headscale, a reverse proxy with its own certificate does the same
-  job.
-- Set `dashboard.public_url` to that tailnet address, for the reason above.
+- **Plain `http://` is fine on a tailnet.** WireGuard has already encrypted
+  everything between the two machines, so TLS on top of it protects nothing that
+  is not protected already. Hermie talks to `http://100.x.y.z:9119` or
+  `http://host.tailnet.ts.net:9119` as happily as to an https address, says so on
+  screen when it does, and only warns when the address is one anybody could be on
+  the path to.
+- TLS there is **optional**, and worth the trouble in two cases: an identity
+  provider that insists on an `https` redirect URI, and wanting a
+  browser-trusted certificate for the dashboard. `tailscale serve` puts one for
+  the machine's tailnet name in front of `hermes serve` and passes WebSocket
+  upgrades through; with Headscale, a reverse proxy with its own certificate does
+  the same job.
+- Set `dashboard.public_url` to the address you actually use — **scheme
+  included**. It is what the gateway builds sign-in redirects from, so
+  `http://host.tailnet.ts.net:9119` and `https://host.tailnet.ts.net` are not
+  interchangeable here.
 - If the gateway signs you in through an identity provider, the provider's
   sign-in page has to be reachable from the device as well. A public provider
   already is; one that lives on the tailnet is reachable as long as the VPN is up.
@@ -184,9 +198,13 @@ step — abandoning it halfway leaves no credential behind.
 
 1. **Welcome.** What Hermie is and what it needs.
 2. **Gateway address.** The address you would open in a browser to reach the
-   gateway dashboard. Without a scheme, `https://` is assumed. Hermie probes it
-   while you type and says what it found: the version, and whether it wants a
-   sign-in or a session token. **Advanced** takes extra request headers.
+   gateway dashboard. Leave the scheme out and Hermie tries `https://` first and
+   `http://` only if nothing answers — and tells you which one it found. Type
+   `https://` yourself and it is never downgraded. Hermie probes while you type
+   and says what it found: the version, and whether it wants a sign-in or a
+   session token. A cleartext address gets one line saying so, which is a
+   warning only when the host is not on a private network. **Advanced** takes
+   extra request headers.
 3. **Sign in.** On a gated gateway, a "Sign in with …" button per identity
    provider, which opens the gateway's own sign-in page in a forgetful in-app web
    view and reads the result out of the redirect. On an ungated gateway, the

@@ -10,6 +10,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A gateway can be reached over plain `http://`, and the app says so.** On a tailnet — Tailscale,
+  or Headscale — WireGuard has already encrypted the path, so `http://100.x.y.z:9119` or
+  `http://host.tailnet.ts.net` is a complete and correct setup, and until now the operating system
+  refused it — on iOS in every configuration, on Android in release builds only, because the
+  template grants cleartext in the debug manifest alone. iOS now ships an App Transport
+  Security exception and Android `usesCleartextTraffic`, both set from `app.config.ts`; the address
+  is only known at runtime, so there is no domain to name in a narrower rule, and
+  `NSAllowsLocalNetworking` does not reach a MagicDNS name because it is fully qualified — measured
+  on an iOS 27 simulator as `NSURLErrorDomain -1022` against a cleartext FQDN that resolves to a
+  private address the same build reached happily by its IP. The exception is exactly ONE key:
+  adding `NSAllowsArbitraryLoadsInWebContent` or keeping the template's `NSAllowsLocalNetworking`
+  beside it makes iOS ignore `NSAllowsArbitraryLoads` altogether, which is how the first version of
+  this fix fixed nothing. [ADR-0014](docs/adr/0014-plain-http-on-private-networks.md) records the
+  decision, `docs/platform-notes.md` the measurements, and `docs/release.md` the note App Review
+  will ask for.
+- **The address step tries both schemes, in the right order, and never silently.** Typed without a
+  scheme, an address is probed over `https://` first and over `http://` only when https does not
+  answer at all — not when a certificate was rejected, and not when something answered with a
+  status. When http is what answered, the probe line says `Found over http://`. An address typed
+  with `https://` is probed over https and nothing else.
+- **One line about a cleartext connection, in the tone the host deserves.** Loopback, RFC 1918,
+  link-local, CGNAT (Tailscale's range), `.ts.net`, `.local` and unqualified names are stated as
+  fact; anything else is a warning with a `Use https instead` action beside it that re-probes with
+  the scheme spelled out, port and path prefix intact. The classifier is pure and tested — IPv4,
+  IPv6 ULA `fc00::/7`, Tailscale's `fd7a:115c:a1e0::/48`, IPv4-mapped addresses, brackets, ports,
+  trailing dots and case. Settings shows the same line under the gateway address, and only for the
+  case worth acting on.
+
 - **The four sheet interiors, against the mockup.** The approval sheet reads in §6.9's order — who
   is asking and where, then the command well in monospace on the sunk tint, then the consequence —
   rather than the description-above-the-command it had; the buttons are still exactly the server's
@@ -39,6 +67,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`gallery:chat` renders in the real wide shell** on a wide window — the same gaps, sidebar width
   and two panels `RegularShell` draws — over a seeded fixture roster, so a screenshot of the chat
   screen is a screenshot of a shape the app actually shows.
+
+### Fixed
+
+- **The transport's TLS classification was built on a message that does not exist.**
+  `looksLikeTlsFailure` matched `ssl`, `certificate` and the literal `-1200`, with a comment saying
+  iOS puts the NSURLError code in the message. Measured on iOS 27: CFNetwork logs
+  `-1200 "A TLS error caused the secure connection to fail."` for a request the app reports as
+  "Could not reach …", because React Native's `fetch` is `whatwg-fetch` over its own
+  `XMLHttpRequest` and the polyfill rejects every transport failure with a flat
+  `TypeError('Network request failed')` — the `NSError` never reaches JavaScript, and OkHttp's
+  exception does not either. So `GatewayError('tls')` cannot arise from a `fetch` in the app at all,
+  and `docs/platform-notes.md` says so rather than leaving a string everyone assumes is in use. The
+  predicate now also matches `tls` as a word, and a second one separates a rejected CERTIFICATE from
+  a handshake that died because nothing there spoke TLS — the line the scheme fallback is drawn on,
+  correct wherever a real message does arrive.
+
+### Changed
+
+- **The wording that made https sound compulsory.** The address hint read "Without a scheme, Hermie
+  assumes https://.", which reads as a requirement; it now says what is true — https is assumed, and
+  http works for a gateway on a private network. The README's "Keep the gateway off the public
+  internet" told you to run `tailscale serve` in front of the gateway as though TLS were needed on a
+  tailnet: it is optional there, and useful mainly when an identity provider insists on an https
+  redirect URI or you want a browser-trusted certificate. "Reach it over HTTPS if it is not on the
+  same machine" is now "if it is exposed to the open internet". `SECURITY.md` has a Transport
+  section stating the stance, and `dashboard.public_url` must still match the address in use,
+  scheme included.
 
 ### Fixed
 

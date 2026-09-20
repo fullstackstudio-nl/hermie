@@ -24,6 +24,7 @@ new record supersedes it, and the old one gets a line at the top pointing forwar
 | [0011](0011-mac-via-the-ipad-build.md)            | The Mac version is the iPad build                              | Accepted           |
 | [0012](0012-local-chat-list-layout.md)            | The chat list's arrangement and colours are client-local       | Accepted           |
 | [0013](0013-cron-deliveries-in-the-transcript.md) | A cron delivery is its own item kind, detected from its header | Accepted           |
+| [0014](0014-plain-http-on-private-networks.md)    | Plain http is supported on a private network                   | Accepted           |
 
 ## Template
 

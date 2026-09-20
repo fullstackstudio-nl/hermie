@@ -57,7 +57,7 @@ export const strings = {
       subtitle: 'The address you would open in a browser to reach the gateway dashboard.',
       label: 'ADDRESS',
       placeholder: 'hermes.example.com',
-      hint: 'Without a scheme, Hermie assumes https://.',
+      hint: 'https:// is assumed when you leave the scheme out. http:// works too, for a gateway on a private network.',
       advanced: 'Advanced',
       advancedHint:
         'Extra request headers are sent with every call and with the sign-in page. An access proxy such as Cloudflare Access needs them here.',
@@ -242,6 +242,25 @@ export const strings = {
     listNote: 'Showing the last saved list.'
   },
 
+  /**
+   * What the app says about a cleartext gateway.
+   *
+   * None of these is a refusal, and only the last one is a warning. A Hermes
+   * gateway on a tailnet is normally served over plain http, because WireGuard
+   * has already done the encrypting — telling that user off is how a warning
+   * stops being read.
+   */
+  transport: {
+    foundOverHttp: 'Found over http://',
+    httpLoopback: 'Plain http://, and this connection never leaves this machine.',
+    httpLocalNetwork: 'Plain http://, to an address on a local network. It is not reachable from outside that network.',
+    httpTailnet:
+      'Plain http://, over a tailnet address. WireGuard has already encrypted the path between this device and the gateway.',
+    httpExposed:
+      'Plain http:// to a public address. Anyone on the path can read your messages and your sign-in. Use https://, or reach the gateway over a private network such as Tailscale.',
+    useHttps: 'Use https instead'
+  },
+
   gateway: {
     connectionSettings: 'Connection settings',
     latency: (ms: number) => `${ms} ms`,
@@ -416,8 +435,14 @@ export const strings = {
   errors: {
     network: (host: string) =>
       `Could not reach ${host}. Check the address, and that the gateway is running and reachable from this device.`,
+    /**
+     * Covers both halves of a failed handshake: a certificate this device will
+     * not accept, and a port that is not speaking TLS at all. The second is
+     * common on a private network, and naming only the certificate sent people
+     * looking for one that was never offered.
+     */
     tls: (host: string) =>
-      `The TLS certificate for ${host} was rejected. A self-signed certificate has to be trusted by this device before Hermie can use it.`,
+      `The secure connection to ${host} failed. A self-signed certificate has to be trusted by this device first — or, if the gateway serves plain http there, leave the https:// off and let Hermie find it.`,
     timeout: (host: string) => `${host} did not answer in time. It may be starting up or behind a slow link.`,
     notHermes: (host: string) =>
       `${host} answered, but not like a Hermes gateway. Check the address and any path prefix.`,

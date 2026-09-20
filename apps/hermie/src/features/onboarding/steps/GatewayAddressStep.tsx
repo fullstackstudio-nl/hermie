@@ -1,8 +1,9 @@
-import { normalizeBaseUrl, probeGateway } from '@hermie/gateway-client'
+import { normalizeBaseUrl, resolveGatewayAddress } from '@hermie/gateway-client'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Pressable, View } from 'react-native'
 
 import { describeProbeError } from '../../../gateway/errors'
+import { TransportNotice } from '../../../gateway/TransportNotice'
 import { strings } from '../../../i18n/strings'
 import { InsetButtonRow, InsetGroup, InsetRow, SecretField, Text, TextField } from '../../../ui/primitives'
 import { useTheme } from '../../../ui/theme'
@@ -23,6 +24,10 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
   const [advanced, setAdvanced] = useState(draft.headers.length > 0)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Only true when the user named no scheme and https did not answer. It is
+  // said out loud rather than kept: a downgrade nobody is told about is the
+  // thing worth avoiding, not the downgrade.
+  const [foundOverHttp, setFoundOverHttp] = useState(false)
 
   // A probe is slower than typing, so answers can come back out of order. Every
   // run takes a ticket and a late answer with a stale ticket is dropped rather
@@ -39,6 +44,7 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
       sequence.current += 1
       setBusy(false)
       setError(null)
+      setFoundOverHttp(false)
       updateRef.current({ probe: null, baseUrl: null })
 
       return
@@ -47,10 +53,13 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
     let normalized: string
 
     try {
+      // Only to reject what is not an address at all, before a debounce and a
+      // round trip. Which SCHEME answers is the resolver's question.
       normalized = normalizeBaseUrl(raw)
     } catch (normalizeError) {
       sequence.current += 1
       setBusy(false)
+      setFoundOverHttp(false)
       setError(describeProbeError(normalizeError, raw))
       updateRef.current({ probe: null, baseUrl: null })
 
@@ -63,15 +72,16 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
     setError(null)
 
     const timer = setTimeout(() => {
-      probeGateway(normalized, JSON.parse(headersKey) as Record<string, string>)
-        .then(result => {
+      resolveGatewayAddress(raw, JSON.parse(headersKey) as Record<string, string>)
+        .then(({ baseUrl, foundOverHttp: overHttp, ...result }) => {
           if (cancelled || ticket !== sequence.current) {
             return
           }
 
           setBusy(false)
           setError(null)
-          updateRef.current({ probe: result, baseUrl: normalized })
+          setFoundOverHttp(overHttp)
+          updateRef.current({ probe: result, baseUrl })
         })
         .catch(probeError => {
           if (cancelled || ticket !== sequence.current) {
@@ -79,6 +89,7 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
           }
 
           setBusy(false)
+          setFoundOverHttp(false)
           setError(describeProbeError(probeError, normalized))
           updateRef.current({ probe: null, baseUrl: null })
         })
@@ -89,6 +100,15 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
       clearTimeout(timer)
     }
   }, [debounceMs, headersKey, raw])
+
+  // Re-typing the address with the scheme spelled out is exactly what stops the
+  // fallback from running again: an explicit `https://` is never downgraded.
+  // The port and any path prefix come along — they are not the scheme's.
+  const useHttpsInstead = useCallback(() => {
+    const current = draft.baseUrl ?? draft.rawAddress.trim()
+
+    update({ rawAddress: `https://${current.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '')}` })
+  }, [draft.baseUrl, draft.rawAddress, update])
 
   const setHeader = useCallback(
     (id: string, patch: Partial<{ name: string; value: string }>) => {
@@ -125,7 +145,14 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
         </InsetRow>
       </InsetGroup>
 
-      <ProbeLine busy={busy} error={error} draft={draft} />
+      <View style={{ gap: theme.space.sm }}>
+        <ProbeLine busy={busy} error={error} draft={draft} foundOverHttp={foundOverHttp} />
+        <TransportNotice
+          baseUrl={busy || error ? null : draft.baseUrl}
+          testID="transport-notice"
+          onUseHttps={useHttpsInstead}
+        />
+      </View>
 
       <View style={{ gap: theme.space.md }}>
         <Pressable
@@ -186,7 +213,17 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
   )
 }
 
-function ProbeLine({ busy, error, draft }: { busy: boolean; error: string | null; draft: OnboardingDraft }) {
+function ProbeLine({
+  busy,
+  error,
+  draft,
+  foundOverHttp
+}: {
+  busy: boolean
+  error: string | null
+  draft: OnboardingDraft
+  foundOverHttp: boolean
+}) {
   if (busy) {
     return (
       <Text color="textMuted" testID="probe-result">
@@ -209,10 +246,14 @@ function ProbeLine({ busy, error, draft }: { busy: boolean; error: string | null
     return null
   }
 
+  // The scheme the address ended up on is part of what the probe found, so it
+  // belongs on the same line rather than in a notice the eye can skip.
+  const found = foundOverHttp ? ` · ${strings.transport.foundOverHttp}` : ''
+
   if (!probe.authRequired) {
     return (
       <Text color="okText" testID="probe-result">
-        {strings.onboarding.address.sessionTokenRequired(probe.version)}
+        {`${strings.onboarding.address.sessionTokenRequired(probe.version)}${found}`}
       </Text>
     )
   }
@@ -220,17 +261,17 @@ function ProbeLine({ busy, error, draft }: { busy: boolean; error: string | null
   if (probe.providers.length === 0) {
     return (
       <Text color="dangerText" testID="probe-result">
-        {strings.onboarding.address.signInRequiredNoProviders(probe.version)}
+        {`${strings.onboarding.address.signInRequiredNoProviders(probe.version)}${found}`}
       </Text>
     )
   }
 
   return (
     <Text color="okText" testID="probe-result">
-      {strings.onboarding.address.signInRequired(
+      {`${strings.onboarding.address.signInRequired(
         probe.version,
         probe.providers.map(provider => provider.displayName)
-      )}
+      )}${found}`}
     </Text>
   )
 }

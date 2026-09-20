@@ -46,6 +46,27 @@ build did ask for a sign-in again. The cause was not established — a fresh ins
 are both in the picture, and a different keychain access context is a plausible reading — so it is
 written down as something seen once, not as a known behaviour.
 
+## Transport
+
+Hermie talks to one gateway, at an address the user types during setup, and to the identity provider
+that gateway redirects the sign-in page to. It is not known at build time, so the app cannot declare
+per-domain transport rules for it: iOS ships `NSAllowsArbitraryLoads` and Android
+`usesCleartextTraffic`, which permit cleartext to **any** host either platform is asked to reach.
+[ADR-0014](docs/adr/0014-plain-http-on-private-networks.md) records why, and which narrower options
+were measured and ruled out.
+
+Permission is not use. The app has no address of its own to call: every request goes to the
+configured gateway. An address typed without a scheme is probed over `https://` first and only tried
+over `http://` when https does not answer at all; an address typed with `https://` is never
+downgraded; and the app says on screen when the connection it ended up with is in the clear.
+
+**Which transport is safe is the operator's call, and it is a real one.** Over Tailscale, Headscale
+or on the same machine, plain `http://` is encrypted by WireGuard or never leaves the host, and TLS
+on top adds nothing. Over the open internet it is a different sentence: the session token, the bearer
+token, the sign-in and every message are readable by anyone on the path, and Hermie warns about
+exactly that case rather than refusing it. Hermie does not pin certificates and does not ship a trust
+store of its own; a self-signed certificate has to be trusted by the device.
+
 ## Supported versions
 
 | Version            | Supported                         |

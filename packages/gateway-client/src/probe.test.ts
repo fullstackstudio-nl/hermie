@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { PROBE_TIMEOUT_MS, probeGateway } from './probe'
+import { PROBE_TIMEOUT_MS, probeGateway, resolveGatewayAddress } from './probe'
 import { GatewayError } from './types'
 
 type Route = { status?: number; body?: unknown; text?: string; throws?: Error }
@@ -172,5 +172,162 @@ describe('probeGateway', () => {
 
   it('refuses an address that is not http(s) before it touches the network', async () => {
     await expect(probeGateway('ws://example.test')).rejects.toBeInstanceOf(GatewayError)
+  })
+})
+
+describe('resolveGatewayAddress', () => {
+  const ungated = { version: '0.21.3', auth_required: false, auth_flows: [] }
+
+  /** Answers as a gateway on ONE scheme and fails to connect on the other. */
+  function stubScheme(answersOn: 'http:' | 'https:', failure = new Error('connect ECONNREFUSED')): typeof fetch {
+    return (async (input: RequestInfo | URL) => {
+      const url = new URL(String(input))
+
+      if (url.protocol !== answersOn) {
+        throw failure
+      }
+
+      return new Response(JSON.stringify(ungated), { status: 200 })
+    }) as typeof fetch
+  }
+
+  it('keeps https when the address has no scheme and https answers', async () => {
+    const result = await resolveGatewayAddress('example.test', {}, stubScheme('https:'))
+
+    expect(result.baseUrl).toBe('https://example.test')
+    expect(result.foundOverHttp).toBe(false)
+    expect(result.version).toBe('0.21.3')
+  })
+
+  it('falls back to http when the address has no scheme and nothing answers on https', async () => {
+    const result = await resolveGatewayAddress('hermes.tail9f3c.ts.net', {}, stubScheme('http:'))
+
+    expect(result.baseUrl).toBe('http://hermes.tail9f3c.ts.net')
+    expect(result.foundOverHttp).toBe(true)
+  })
+
+  it('keeps a port and a path prefix across the fallback', async () => {
+    const result = await resolveGatewayAddress('192.168.2.250:9119/hermes', {}, stubScheme('http:'))
+
+    expect(result.baseUrl).toBe('http://192.168.2.250:9119/hermes')
+    expect(result.foundOverHttp).toBe(true)
+  })
+
+  it('never downgrades an address the user typed https:// on', async () => {
+    const seen: string[] = []
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      seen.push(new URL(String(input)).protocol)
+
+      throw new Error('connect ECONNREFUSED')
+    }) as typeof fetch
+
+    await expect(resolveGatewayAddress('https://example.test', {}, fetchImpl)).rejects.toMatchObject({
+      kind: 'network'
+    })
+    expect(seen).toEqual(['https:'])
+  })
+
+  it('does not probe https at all when the user typed http://', async () => {
+    const seen: string[] = []
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      seen.push(new URL(String(input)).protocol)
+
+      return new Response(JSON.stringify(ungated), { status: 200 })
+    }) as typeof fetch
+
+    const result = await resolveGatewayAddress('http://192.168.2.250:9119', {}, fetchImpl)
+
+    expect(result.baseUrl).toBe('http://192.168.2.250:9119')
+    expect(result.foundOverHttp).toBe(false)
+    expect(seen).toEqual(['http:'])
+  })
+
+  it('does not fall back when the certificate was rejected — that is a real https server', async () => {
+    const seen: string[] = []
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      seen.push(new URL(String(input)).protocol)
+
+      throw new Error('unable to verify the first certificate')
+    }) as typeof fetch
+
+    await expect(resolveGatewayAddress('example.test', {}, fetchImpl)).rejects.toMatchObject({ kind: 'tls' })
+    expect(seen).toEqual(['https:'])
+  })
+
+  it.each([
+    // iOS 27, measured: React Native passes the localized description through.
+    ['iOS', 'A TLS error caused the secure connection to fail.'],
+    // OkHttp, where a plain-HTTP peer looks like a protocol violation.
+    ['Android', 'javax.net.ssl.SSLException: Unable to parse TLS packet header'],
+    ['Node', 'write EPROTO ... wrong version number']
+  ])('does fall back when the %s TLS error is a peer that never spoke TLS', async (_platform, message) => {
+    const seen: string[] = []
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      const url = new URL(String(input))
+      seen.push(url.protocol)
+
+      if (url.protocol === 'https:') {
+        throw new Error(message)
+      }
+
+      return new Response(JSON.stringify(ungated), { status: 200 })
+    }) as typeof fetch
+
+    const result = await resolveGatewayAddress('192.168.2.250:9119', {}, fetchImpl)
+
+    expect(result.baseUrl).toBe('http://192.168.2.250:9119')
+    expect(result.foundOverHttp).toBe(true)
+    expect(seen).toEqual(['https:', 'http:'])
+  })
+
+  it.each([
+    ['a 404', 404, 'not_hermes'],
+    ['an access proxy', 401, 'auth'],
+    ['an unhealthy gateway', 502, 'server']
+  ])('does not fall back when https answered with %s', async (_label, status, kind) => {
+    const seen: string[] = []
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      seen.push(new URL(String(input)).protocol)
+
+      return new Response('', { status })
+    }) as typeof fetch
+
+    await expect(resolveGatewayAddress('example.test', {}, fetchImpl)).rejects.toMatchObject({ kind })
+    expect(seen).toEqual(['https:'])
+  })
+
+  it('reports the https failure when neither scheme answers', async () => {
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      const url = new URL(String(input))
+
+      throw new Error(url.protocol === 'https:' ? 'getaddrinfo ENOTFOUND' : 'connect ECONNREFUSED')
+    }) as typeof fetch
+
+    await expect(resolveGatewayAddress('example.test', {}, fetchImpl)).rejects.toMatchObject({
+      kind: 'network',
+      message: expect.stringContaining('https://example.test')
+    })
+  })
+
+  it('sends the extra headers on both attempts', async () => {
+    const seen: { protocol: string; header: string | undefined }[] = []
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input))
+      const headers = (init?.headers ?? {}) as Record<string, string>
+      seen.push({ protocol: url.protocol, header: headers['CF-Access-Client-Id'] })
+
+      if (url.protocol === 'https:') {
+        throw new Error('connect ECONNREFUSED')
+      }
+
+      return new Response(JSON.stringify(ungated), { status: 200 })
+    }) as typeof fetch
+
+    await resolveGatewayAddress('192.168.2.250:9119', { 'CF-Access-Client-Id': 'abc' }, fetchImpl)
+
+    expect(seen).toEqual([
+      { protocol: 'https:', header: 'abc' },
+      { protocol: 'http:', header: 'abc' }
+    ])
   })
 })

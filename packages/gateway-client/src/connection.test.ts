@@ -16,6 +16,7 @@ import { exchangeCode, TokenCoordinator, type TokenSet, type TokenStore } from '
 import { buildAuthorizeUrl, createPkce, parseLoopbackRedirect, REDIRECT_URI } from './pkce'
 import { DialPlanSocketFactory, type WebSocketConstructorLike } from './socket-factory'
 import type { ConnectionStatus } from './types'
+import { wsUrlFor } from './url'
 
 const SocketImpl = NodeWebSocket as unknown as WebSocketConstructorLike
 
@@ -554,6 +555,46 @@ describe('rpcTimeoutMs', () => {
 
   it('gives everything else thirty seconds', () => {
     expect(rpcTimeoutMs('profiles.list', false)).toBe(DEFAULT_RPC_TIMEOUT_MS)
+  })
+})
+
+/**
+ * The fake gateway only ever speaks plain http, so every test above is already
+ * a cleartext test. This one says so on purpose: a gateway on a tailnet is
+ * reached over `http://` and `ws://`, and the whole sign-in round trip has to
+ * survive that. What it pins is that nothing in the flow — the authorize URL,
+ * the loopback redirect, the code exchange, the ticket or the dial — upgrades a
+ * scheme behind the caller's back.
+ */
+describe('a gateway served in the clear', () => {
+  it('signs in with PKCE and dials over http/ws, forcing no scheme anywhere', async () => {
+    const { connection, gateway, waitFor } = await harness({ auth: 'native' })
+
+    expect(gateway.url.startsWith('http://')).toBe(true)
+    expect(wsUrlFor(gateway.url).startsWith('ws://')).toBe(true)
+    expect(buildAuthorizeUrl(gateway.url, { challenge: 'c', state: 's' }).startsWith('http://')).toBe(true)
+    // The redirect the web view intercepts is loopback http by RFC 8252, on
+    // every gateway, whatever the gateway's own scheme is.
+    expect(REDIRECT_URI.startsWith('http://127.0.0.1')).toBe(true)
+
+    connection.start()
+    await waitFor('ready')
+
+    expect(gateway.state.ticketsConsumed).toBe(1)
+
+    const profiles = await connection.request('profiles.list', { include_sessions: true })
+    expect(profiles.profiles?.map(profile => profile.name)).toEqual(['researcher', 'writer'])
+  })
+
+  it('refreshes its tokens over http as well', async () => {
+    const { connection, gateway, waitFor } = await harness({ auth: 'native' })
+
+    gateway.state.rejectNextUpgrades = 1
+
+    connection.start()
+    await waitFor('ready')
+
+    expect(gateway.state.refreshCalls).toBe(1)
   })
 })
 

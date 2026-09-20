@@ -21,13 +21,47 @@ export interface JsonResponse {
 }
 
 /**
- * iOS surfaces a failed TLS handshake as NSURLErrorSecureConnectionFailed
- * (-1200) inside the message; Android and Node say "certificate" or "SSL".
+ * Did the secure channel fail, whatever the reason?
+ *
+ * Worth knowing where this DOES and does not fire. React Native's `fetch` is
+ * `whatwg-fetch` over its own `XMLHttpRequest`, and the polyfill's `onerror`
+ * rejects with a flat `TypeError('Network request failed')` — the `NSError` and
+ * OkHttp's exception are both discarded before JavaScript sees them. Measured
+ * on iOS 27: CFNetwork logged `NSURLErrorDomain -1200 "A TLS error caused the
+ * secure connection to fail."` for a request the app reported as unreachable.
+ * So in the app this predicate is never true; it earns its place in Node, where
+ * a real message arrives, and it is what the fallback in `probe.ts` reads.
  */
 export function looksLikeTlsFailure(message: string): boolean {
   const lowered = message.toLowerCase()
 
-  return lowered.includes('ssl') || lowered.includes('certificate') || lowered.includes('-1200')
+  return (
+    lowered.includes('ssl') || lowered.includes('certificate') || lowered.includes('tls') || lowered.includes('-1200')
+  )
+}
+
+/**
+ * Did the secure channel fail because of the CERTIFICATE, rather than because
+ * there was no TLS there at all?
+ *
+ * The difference decides whether an address the user typed without a scheme may
+ * be retried in the clear. A rejected certificate means there IS an https
+ * server on that port and it has a problem worth fixing; a handshake that died
+ * because the peer answered in plain HTTP means there is no https server there,
+ * which is the ordinary shape of `hermes serve` on a tailnet port somebody
+ * probed with `https://` first.
+ */
+export function looksLikeCertificateFailure(message: string): boolean {
+  const lowered = message.toLowerCase()
+
+  return (
+    lowered.includes('certificate') ||
+    lowered.includes('untrusted') ||
+    lowered.includes('self signed') ||
+    lowered.includes('self-signed') ||
+    // NSURLErrorServerCertificateUntrusted and its neighbours.
+    /-120[2-6]\b/.test(lowered)
+  )
 }
 
 /**
@@ -83,7 +117,15 @@ export async function requestText(url: string, request: JsonRequest = {}): Promi
     const message = error instanceof Error ? error.message : String(error)
 
     if (looksLikeTlsFailure(message)) {
-      throw new GatewayError('tls', `The TLS certificate for ${url} was rejected: ${message}`, { cause: error })
+      // Two different stories, and naming a certificate that was never offered
+      // sends the reader looking for one.
+      throw new GatewayError(
+        'tls',
+        looksLikeCertificateFailure(message)
+          ? `The TLS certificate for ${url} was rejected: ${message}`
+          : `The TLS handshake with ${url} failed: ${message}`,
+        { cause: error }
+      )
     }
 
     throw new GatewayError('network', `Could not reach ${url}: ${message}`, { cause: error })

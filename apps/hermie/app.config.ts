@@ -40,9 +40,32 @@ const config: ExpoConfig = {
     bundleIdentifier: BUNDLE_ID,
     supportsTablet: true,
     infoPlist: {
-      // Everything Hermie sends goes over the platform's own HTTPS stack. Saying
-      // so here is what keeps App Store Connect from asking on every upload.
-      ITSAppUsesNonExemptEncryption: false
+      // Everything Hermie sends goes over the platform's own TLS or HTTP stack,
+      // with no cryptography of its own. Saying so here is what keeps App Store
+      // Connect from asking on every upload.
+      ITSAppUsesNonExemptEncryption: false,
+      /*
+       * Hermie talks to ONE server: the gateway the user names during setup,
+       * and the identity provider that gateway redirects the sign-in page to.
+       * A self-hosted gateway on a tailnet is normally served in the clear,
+       * because WireGuard has already encrypted the path — and its address is
+       * only known at runtime, so `NSExceptionDomains` has nothing to name.
+       *
+       * This key is ALONE on purpose, and the template's `NSAllowsLocalNetworking`
+       * is gone with it. Since iOS 10 the presence of `NSAllowsLocalNetworking`,
+       * `NSAllowsArbitraryLoadsInWebContent` or `NSAllowsArbitraryLoadsForMedia`
+       * makes the system IGNORE `NSAllowsArbitraryLoads` and use its default of
+       * false — so the three-key version of this dictionary blocked exactly the
+       * case it was written for, measured as NSURLErrorDomain -1022 against a
+       * cleartext FQDN. Web content follows this key when the web key is
+       * absent, which is what the sign-in view needs.
+       *
+       * docs/adr/0014-plain-http-on-private-networks.md has the measurements and
+       * docs/release.md the App Review note this requires.
+       */
+      NSAppTransportSecurity: {
+        NSAllowsArbitraryLoads: true
+      }
     }
   },
   android: {
@@ -93,6 +116,14 @@ const config: ExpoConfig = {
       {
         ios: {
           deploymentTarget: IOS_DEPLOYMENT_TARGET
+        },
+        android: {
+          // The counterpart of the ATS exception above. Cleartext is off by
+          // default for a release build targeting API 28 or newer, which would
+          // make a gateway on `http://<tailnet name>` unreachable on Android
+          // while working in every debug build — the template's debug manifest
+          // already sets this, so the gap only ever shows up after release.
+          usesCleartextTraffic: true
         }
       }
     ],

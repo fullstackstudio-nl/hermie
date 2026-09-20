@@ -19,7 +19,13 @@ import { describe, expect, it } from 'vitest'
 
 import type { CredentialProvider } from './credentials'
 import { exchangeCode, refreshTokens } from './native-auth'
-import { parseJsonBody, parseJsonObject, type FetchLike } from './fetch-json'
+import {
+  looksLikeCertificateFailure,
+  looksLikeTlsFailure,
+  parseJsonBody,
+  parseJsonObject,
+  type FetchLike
+} from './fetch-json'
 import { GatewayHttp } from './http'
 import { probeGateway } from './probe'
 import type { GatewayError } from './types'
@@ -42,6 +48,46 @@ const anonymous: CredentialProvider = {
 }
 
 const httpWith = (fetchImpl: FetchLike) => new GatewayHttp({ baseUrl: BASE, credentials: anonymous, fetchImpl })
+
+/**
+ * The two TLS predicates. They are not the same question, and the second one
+ * decides whether a scheme-less address may be retried over http.
+ */
+describe('classifying a failed secure connection', () => {
+  it.each([
+    // Measured on the iOS 27 simulator: no error code in the message at all.
+    'A TLS error caused the secure connection to fail.',
+    'javax.net.ssl.SSLException: Unable to parse TLS packet header',
+    'unable to verify the first certificate',
+    'Error code=-1200'
+  ])('reads %s as a TLS failure', message => {
+    expect(looksLikeTlsFailure(message)).toBe(true)
+  })
+
+  it('does not read an ordinary connection failure as one', () => {
+    expect(looksLikeTlsFailure('connect ECONNREFUSED 10.0.0.4:443')).toBe(false)
+    expect(looksLikeTlsFailure('getaddrinfo ENOTFOUND hermes.test')).toBe(false)
+  })
+
+  it.each([
+    'unable to verify the first certificate',
+    'The certificate for this server is invalid',
+    'Hostname/IP does not match certificate altnames',
+    'self signed certificate in certificate chain',
+    'NSURLErrorDomain Code=-1202'
+  ])('reads %s as a CERTIFICATE failure — there is a real https server there', message => {
+    expect(looksLikeCertificateFailure(message)).toBe(true)
+  })
+
+  it.each([
+    'A TLS error caused the secure connection to fail.',
+    'javax.net.ssl.SSLException: Unable to parse TLS packet header',
+    'write EPROTO ... wrong version number',
+    'NSURLErrorDomain Code=-1200'
+  ])('does not read %s as one — nothing there spoke TLS', message => {
+    expect(looksLikeCertificateFailure(message)).toBe(false)
+  })
+})
 
 describe('parseJsonBody', () => {
   it('accepts an array, which is what the cron list answers with', () => {

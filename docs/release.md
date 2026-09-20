@@ -155,6 +155,38 @@ them block a tagged GitHub release.
   third-party network call in the app.
 - **`ITSAppUsesNonExemptEncryption` is already `false`** in `app.config.ts`, so
   the export-compliance question does not come back on every upload.
+- **The App Transport Security exception needs a review note.** See below; it is
+  the one thing in this list that a reviewer will actively ask about.
+
+## The App Transport Security note for App Review
+
+`app.config.ts` sets `NSAllowsArbitraryLoads`, and only that key — see ADR-0014 for why adding a
+second one switches the first off. Apple asks for a justification whenever a
+submission lowers ATS, and the answer has to be in **App Store Connect → the
+version → App Review Information → Notes**. Paste this, or something that says
+the same thing:
+
+> Hermie is a client for Hermes Agent, a server the user runs themselves. The
+> server's address is typed by the user during setup and is not known at build
+> time, so a per-domain `NSExceptionDomains` entry cannot be written for it. The
+> common deployment is a private VPN — Tailscale or a self-hosted Headscale —
+> where the gateway is served over plain HTTP on a tailnet name such as
+> `host.tailnet.ts.net`, because WireGuard has already encrypted the path.
+> `NSAllowsLocalNetworking` does not cover that case: a MagicDNS name is fully
+> qualified, so ATS treats it as an ordinary internet host. The app talks to that
+> one user-configured server and to the identity provider it redirects the
+> sign-in page to, and to nothing else; it contains no analytics or advertising
+> SDK. The app defaults to `https://` when the user types no scheme, only tries
+> `http://` when `https://` does not answer at all, never downgrades an address
+> the user typed `https://` on, and tells the user when the connection is in the
+> clear — with a warning when the address is not on a private network.
+
+[ADR-0014](adr/0014-plain-http-on-private-networks.md) records what was measured
+and which narrower options were ruled out, which is the material to draw on if a
+reviewer comes back with a follow-up.
+
+Android needs no note. `usesCleartextTraffic` is set through
+`expo-build-properties` and Play does not ask about it.
 
 ## The icons
 

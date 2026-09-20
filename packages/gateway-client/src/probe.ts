@@ -1,6 +1,6 @@
-import { type FetchLike, parseJsonObject, requestText } from './fetch-json'
-import { apiUrl, normalizeHeaders } from './url'
-import { GatewayError } from './types'
+import { type FetchLike, looksLikeCertificateFailure, parseJsonObject, requestText } from './fetch-json'
+import { apiUrl, hasExplicitScheme, normalizeBaseUrl, normalizeHeaders } from './url'
+import { GatewayError, isGatewayError } from './types'
 
 /** How long a probe waits for one HTTP answer before giving up. */
 export const PROBE_TIMEOUT_MS = 10_000
@@ -88,6 +88,94 @@ export async function probeGateway(
     authFlows,
     supportsNativePkce,
     providers: await probeProviders(baseUrl, headers, fetchImpl)
+  }
+}
+
+export interface ResolvedAddress extends ProbeResult {
+  /** The address that answered, scheme included. */
+  baseUrl: string
+  /**
+   * True when the user named no scheme, `https://` did not answer at all, and
+   * the same host answered as a Hermes gateway over `http://`. The wizard says
+   * so out loud: a downgrade nobody is told about is the thing to avoid here,
+   * not the downgrade itself.
+   */
+  foundOverHttp: boolean
+}
+
+/**
+ * Is this a failure to get an answer at all, as opposed to an answer we did not
+ * like? Only the first is a reason to try the other scheme.
+ *
+ * Anything carrying an HTTP status is a server that spoke, and it spoke over
+ * https — there is nothing to look for on the other port.
+ *
+ * A TLS failure is split. A rejected CERTIFICATE means there is a real https
+ * server here and the user has a certificate to fix; retrying in the clear
+ * would answer a question they did not ask. A handshake that failed because
+ * the peer never spoke TLS is the opposite — it is what `hermes serve` on a
+ * plain port looks like when you knock on it with `https://` — and that is
+ * exactly the address this fallback exists for. Which of the two a platform
+ * reports is a matter of its wording, so it is read from the underlying error
+ * rather than from the sentence this package wrapped it in.
+ */
+function isTransportFailure(error: unknown): boolean {
+  if (!isGatewayError(error) || error.status !== undefined) {
+    return false
+  }
+
+  if (error.kind === 'network' || error.kind === 'timeout') {
+    return true
+  }
+
+  if (error.kind === 'tls') {
+    return !looksLikeCertificateFailure(error.cause instanceof Error ? error.cause.message : '')
+  }
+
+  return false
+}
+
+/**
+ * Probe what the user typed, trying `http://` when they named no scheme and
+ * `https://` did not answer.
+ *
+ * Hermes gateways on a tailnet are commonly served in the clear — WireGuard has
+ * already encrypted the path — so "https or nothing" would make the ordinary
+ * private setup fail with a network error and no hint. Typing `https://`
+ * explicitly still means https and nothing else.
+ */
+export async function resolveGatewayAddress(
+  raw: string,
+  extraHeaders: Record<string, string> = {},
+  fetchImpl: FetchLike = fetch
+): Promise<ResolvedAddress> {
+  const baseUrl = normalizeBaseUrl(raw)
+
+  if (hasExplicitScheme(raw)) {
+    return { ...(await probeGateway(baseUrl, extraHeaders, fetchImpl)), baseUrl, foundOverHttp: false }
+  }
+
+  try {
+    return { ...(await probeGateway(baseUrl, extraHeaders, fetchImpl)), baseUrl, foundOverHttp: false }
+  } catch (httpsError) {
+    if (!isTransportFailure(httpsError)) {
+      throw httpsError
+    }
+
+    const cleartextUrl = `http://${baseUrl.slice('https://'.length)}`
+
+    try {
+      return {
+        ...(await probeGateway(cleartextUrl, extraHeaders, fetchImpl)),
+        baseUrl: cleartextUrl,
+        foundOverHttp: true
+      }
+    } catch {
+      // The https attempt is the one the user implied, so its failure is the
+      // one worth reading. Reporting the http error instead would send someone
+      // chasing a port they never asked about.
+      throw httpsError
+    }
   }
 }
 
