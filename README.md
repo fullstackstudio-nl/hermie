@@ -238,12 +238,12 @@ say stays between you and the machine you run them on.
 
 ## Platforms
 
-| Platform             | State                                                                           |
-| -------------------- | ------------------------------------------------------------------------------- |
-| iOS 15.1+            | The primary target                                                              |
-| iPadOS               | The same build, with a sidebar layout on wide windows                           |
-| Android              | Builds and runs; exercised least of the three                                   |
-| macOS, Apple Silicon | The same build again, as "Designed for iPad" — a window with the sidebar layout |
+| Platform              | State                                                                           |
+| --------------------- | ------------------------------------------------------------------------------- |
+| iOS 15.1+             | The primary target                                                              |
+| iPadOS                | The same build, with a sidebar layout on wide windows                           |
+| Android 7.0+ (API 24) | Debug and release both build and run — driven on an emulator, never on hardware |
+| macOS, Apple Silicon  | The same build again, as "Designed for iPad" — a window with the sidebar layout |
 
 The Mac is not a separate port. It is the iOS app, which Apple runs on Apple
 Silicon Macs unmodified, so it has the same keychain, the same modules and the
@@ -267,8 +267,10 @@ been verified on a Mac.
 | Crons                                                        | Done        |
 | Release: icons, build profiles, signing, this README         | In progress |
 
-After that: paging back through long history, notifications, and an Android pass
-that deserves the name.
+After that: paging back through long history, notifications, and Android on real
+hardware — the emulator pass is done and written up in
+[docs/platform-notes.md](docs/platform-notes.md), but no physical device has run
+this yet and the release APK is still debug-signed.
 
 ## Contributing
 

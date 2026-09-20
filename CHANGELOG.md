@@ -40,6 +40,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `reasoningAvailable` frame and `tool.generating`, and the default scenario uses all three — so a
   turn arriving as thinking-then-words is reproducible locally. It was not before, which is why the
   transcript bug below survived two rounds.
+- **Android is built and run for the first time.** Debug and release APKs both assemble with no
+  change to the project, and the release build was driven end to end on an emulator: onboarding
+  over plain `http://` to `10.0.2.2`, a chat with every item kind, the approval sheet, the options
+  sheet and its pages, Activity, Crons, Settings and Licences, the attach menu, and the two-panel
+  layout in landscape. That closes two things that had only ever been read rather than watched —
+  that `usesCleartextTraffic` reaches the main manifest and not just the template's debug one, and
+  that a pinned theme drives the native night mode and the status bar ink. The release APK is
+  debug-signed, as the React Native template leaves it; it is not a shippable artefact.
+  [docs/platform-notes.md](docs/platform-notes.md) has what was measured and what was not.
+- **The fake gateway reports the session's working directory.** `SessionLiveInfo.cwd` is in the
+  contract and this server answered without it, which made its own file-upload route unreachable:
+  the client uploads into the session's cwd because `@file:` is expanded with `allowed_root` set to
+  that directory, and it refuses rather than guesses when a resume carries no `cwd`. Every attach
+  stopped at "No workspace to upload into" before a request was made, so the upload endpoint, the
+  absolute-path rule and the 100 MB cap had never been exercised by a run.
+
+### Fixed
+
+- **Android's back button reaches the surfaces that are not modals.** A `Modal` consumes the press
+  itself, so every sheet was already right — including the blocking approval sheet, which correctly
+  swallows it. Nothing else heard it: back on Activity, Crons or Settings in the wide layout left
+  the app for the launcher with the panel still open, and back from a page Settings opens over
+  itself (Licences, the connection test, the gallery) or from a cron's detail popped the whole
+  screen instead of returning one level. `useHardwareBack` is a second stack beside `useEscapeKey`
+  with the same last-wins rule, so "one level" falls out of mount order as it already did for
+  Escape. Back inside the chat options sheet arrives as `onRequestClose` and now pops the page
+  rather than closing the sheet.
+- **A dimmed button no longer shows its own shadow through itself.** Android paints an elevation
+  shadow behind a view and clips nothing, so at `opacity: 0.35` the disabled send button stopped
+  hiding its shadow and the platform's polygon approximation of a circle read through the fill as a
+  lighter octagon. iOS clips a shadow to outside the view's path and never showed it.
+
 - **The setup wizard is one glass card on the wallpaper.** Every step used to be a flat full-screen
   form: an eyebrow, a title, a paragraph, a tall empty middle, a hairline, and a pinned footer
   holding Continue and Back. It is now a single centred card, at most 520pt wide, whose height

@@ -33,6 +33,12 @@ rewritten, and git history has them.
 | Is the sidebar tab strip present in portrait?    | **Yes** in the real shell; the gallery lied     | 2026-09-20 |
 | Does `contrast:check` cover avatar tints?        | **No** — measure those by hand                  | 2026-09-20 |
 | Is `TextDecoder` present at runtime?             | Not verified; the guard ships either way        | 2026-09-18 |
+| Does the Android app build, Debug and Release?   | **Yes** — both, with no change to the project   | 2026-09-20 |
+| Is the Android release APK shippable?            | **No** — debug-signed; there is no keystore     | 2026-09-20 |
+| Does a RELEASE build reach http on Android?      | **Yes** — measured on an emulator, not read     | 2026-09-20 |
+| Does Android's back button close a panel?        | **Yes, since `useHardwareBack`** — it did not   | 2026-09-20 |
+| Does a default AVD report Reduce Motion?         | **Yes** — its animation scales ship at 0        | 2026-09-20 |
+| Does the Android native sign-in work?            | **Unverified** — `--auth native` was not run    | 2026-09-20 |
 
 "Unverified at runtime" is exact: the app builds, is signed and is wrapped, and the code path was read
 rather than watched. Several rows that said so were closed on 2026-09-19 by a hand session in a real
@@ -296,10 +302,15 @@ the bug in one line: a light bar with light ink.
 In practice, in light mode: the clock, battery and signal bars were a pale grey smudge on the chats
 list (`#F2F2F7`) and **completely invisible** on a native stack header, which is plain white.
 
-`src/platform/safe-area.android.tsx` now renders `<StatusBar style="auto" />` from `expo-status-bar`
+`src/platform/safe-area.android.tsx` rendered `<StatusBar style="auto" />` from `expo-status-bar`
 inside the provider. That provider is the only wrapper already present on every Android screen and it
 sits above the navigator, so the setting survives screen changes. Verified dark-on-light in light
 mode and light-on-dark in dark mode, on both the chats list and a native header.
+
+> **Superseded the same week.** That file no longer exists: the status bar moved into `ThemeProvider`
+> (see "The status bar belongs to the theme" below) because `style="auto"` follows the SYSTEM scheme
+> and a reader who pins the app to Light on a Dark phone gets the wrong ink. The 2026-09-20 Android
+> section confirms the replacement on a device.
 
 One caveat is left: `style="auto"` follows the _system_ scheme, which is the same source the theme
 uses while Appearance is on "System" (the default). A user who pins the app to Light while the phone
@@ -309,6 +320,11 @@ is Dark gets the system's ink rather than the app's. Fixing that needs the statu
 ### `adjustResize` is a no-op under edge-to-edge — the composer hides behind the keyboard
 
 **Not fixed; it needs a change to shared code.** This is the worst thing found on Android.
+
+> **Fixed the following day, and watched a day after that.** `KEYBOARD_AVOID_BEHAVIOR` is `'padding'`
+> everywhere (see "`padding` is the keyboard behaviour on Android too"), and the 2026-09-20 Android
+> section is the emulator run that confirms the composer, the sheets and the onboarding footer all
+> clear the keyboard. The diagnosis below is kept because it is why the constant exists.
 
 `AndroidManifest.xml` carries `android:windowSoftInputMode="adjustResize"`, and the app's keyboard
 avoidance is built on it:
@@ -2721,3 +2737,239 @@ last three are the ones nothing here could watch.
    appear, and not when they are replaced by the reply. Run the fake gateway with
    no arguments; its default reply now thinks before it speaks, which is the turn
    that used to trigger it.
+
+## Android (2026-09-20)
+
+The first Gradle build, the first APK and the first run of a **release** build on Android. Everything
+below was measured on a `Medium_Phone` AVD — Android 17 (API 37), arm64, 1080×2400 at 420 dpi, so
+411 dp wide in portrait and 914 dp in landscape — against `npm run fake-gateway -- --auth token
+--token demo` on the host, reached at `http://10.0.2.2:9119`.
+
+### The documented way to get a JDK does not work here, and the reason is not Java
+
+`brew install --cask temurin@17` installs a `.pkg`, and a cask that installs a pkg runs `sudo
+installer`. There is no passwordless sudo on this machine, so the command cannot complete
+unattended. `brew install openjdk@17` is a formula, needs no sudo, and gives the same JDK 17 —
+17.0.20.1 here.
+
+It is **keg-only**, which is the part that bites. Homebrew does not link an alternate-version JDK
+into `/Library/Java/JavaVirtualMachines`, and that directory is the only place `/usr/libexec/java_home`
+looks. So the recipe in the 2026-09-19 section — `export JAVA_HOME=$(/usr/libexec/java_home -v 17)`
+— still reports "Unable to locate a Java Runtime" with a working JDK 17 installed. Name the keg:
+
+```sh
+export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
+```
+
+The symlink Homebrew's caveat offers is the thing that needs sudo, so it is not a way round it.
+
+### What the SDK actually has to contain, which is not what CONTRIBUTING said
+
+`expo-root-project` resolves the versions; asking Gradle rather than guessing:
+
+```sh
+./gradlew -q app:properties | grep -E 'compileSdk|targetSdk|minSdk|buildTools|ndkVersion'
+```
+
+| Setting      | Value         |
+| ------------ | ------------- |
+| `compileSdk` | 36            |
+| `targetSdk`  | 36            |
+| `minSdk`     | 24            |
+| `buildTools` | 36.0.0        |
+| `ndkVersion` | 27.1.12297006 |
+
+CONTRIBUTING asked for "platform 35, build-tools 35", which is a version behind what SDK 54 wants
+and would not have built. Corrected there.
+
+`cmdline-tools` was absent, so there was no `sdkmanager` and no `avdmanager`. Nothing needed them —
+platform 36, build-tools 36.0.0 and the NDK were already installed — but creating an AVD does.
+`brew install --cask android-commandlinetools` is a cask that only extracts, so it needs no sudo;
+point it at the real SDK with `--sdk_root=$ANDROID_HOME`, because it defaults to its own.
+
+### Both builds pass unmodified
+
+`npx expo prebuild --platform android --clean` then `./gradlew assembleDebug assembleRelease`:
+**BUILD SUCCESSFUL in 2m 51s**, 1304 tasks, no config-plugin change and no edit to anything under
+`android/`. Debug 177 MB, Release 105 MB — both carry all four ABIs
+(`reactNativeArchitectures=armeabi-v7a,arm64-v8a,x86,x86_64`).
+
+**The release APK is debug-signed.** `app/build.gradle` gives the release build type
+`signingConfig signingConfigs.debug`, which is the React Native template's default and is still what
+is there; no keystore exists in the repository. It installs and runs, and it is not a shippable
+artefact. Play signing is untouched by any of this.
+
+### Cleartext works in the release build, which is the thing that had never been checked
+
+The 2026-09-20 ATS section closed the debug/release gap "on paper" and said so. Measured now, in the
+**release** APK, typing the scheme-less address `10.0.2.2:9119` into the wizard:
+
+| Surface                     | Result                                                             |
+| --------------------------- | ------------------------------------------------------------------ |
+| the probe, `https://` first | fails, falls back                                                  |
+| the probe, `http://`        | `Hermes 0.21.3-fake · session token required · Found over http://` |
+| `ws://10.0.2.2:9119/api/ws` | REST, WebSocket and Profiles all green, **Connected · 2 bots**     |
+
+So `usesCleartextTraffic: true` reaching the **main** manifest — not just the template's debug one —
+is confirmed by a run rather than by reading the generated XML. Onboarding completed all four steps,
+the credentials went into `expo-secure-store`, and a cold restart came straight back to the chats
+list with both bots.
+
+### An AVD reports Reduce Motion, and nothing in the app is wrong
+
+`Connection test` printed `reduce motion: true` on a device with no accessibility setting touched.
+A stock AVD ships with all three animation scales at zero:
+
+```sh
+adb shell settings get global animator_duration_scale   # 0
+```
+
+React Native maps `animator_duration_scale == 0` to `isReduceMotionEnabled()`, so `theme.reduceMotion`
+is true and the typing dots, the presence pulse and the panel slide all correctly collapse to their
+static forms. **A default emulator therefore exercises only the reduced-motion half of the app**, and
+a run that does not say which half it was looking at is not evidence about the other. Turn them on
+before judging any animation:
+
+```sh
+adb shell settings put global animator_duration_scale 1
+adb shell settings put global transition_animation_scale 1
+adb shell settings put global window_animation_scale 1
+```
+
+The same screen is the fastest confirmation of the rest of the platform seam: `iOS app on a Mac:
+false`, `hardware keyboard: false`, and **`glass material: solid`** — the fallback path the elevation
+ladder exists for, drawn on a device for the first time. It reads correctly in both themes; the
+wallpaper gradients, the bubble tails and the ticks (all `react-native-svg`, including the tail's
+`scaleX: -1` mirror) render with no seam.
+
+### A `Modal` hears the back button; nothing else does
+
+This is the one real gap the run found, and it splits in two.
+
+Every sheet was already correct, and not by accident: a `Modal` consumes the back press itself and
+answers `onRequestClose`, so `BottomSheet`'s `blocking ? undefined : onRequestClose` makes a blocking
+approval swallow the key exactly as ADR-0010 requires. Confirmed by hand — back on the permission
+sheet did nothing at all.
+
+What had nothing was every surface that is **not** a Modal:
+
+- `OverlayPanel` — Activity, Crons and Settings on the wide layout. A back press went to the
+  activity and **left the app for the launcher** with the panel still open.
+- the pages Settings opens over itself (Licences, the connection test, the gallery) and a cron's
+  detail and run pages. These are state inside their screen, not navigator entries, so back popped
+  the whole screen instead of returning one level — on the phone layout as well.
+
+All of it had been written against `useEscapeKey`, whose comments say "Escape goes back exactly ONE
+level" and mean it; the stack is real and the ordering falls out of mount order. It simply never
+fires off an Apple keyboard. `src/ui/useHardwareBack.ts` is a second stack beside it with the same
+rule, and the two are deliberately separate: `Composer` registers Escape to stop a running turn, and
+a back press that stopped generating instead of leaving the chat would be a worse answer than the bug.
+
+One sheet needed its own line rather than the hook. The chat options sheet's pages are inside a
+Modal, so the press arrives as `onRequestClose` — which closed the whole sheet. It now reads
+`pane === 'root' ? close() : setPane('root')`, the same one level, said to the platform's own
+dismiss request.
+
+### An elevation shadow shows through anything translucent
+
+The disabled send button drew a lighter **octagon** inside its circle. Android paints an elevation
+shadow behind the view and clips nothing, so at `opacity: 0.35` the fill stopped hiding its own
+shadow and the platform's polygon approximation of a circle read straight through it. iOS clips a
+shadow to outside the view's path, which is why it was never visible there.
+
+The fix is to drop the shadow while the control is dimmed — a disabled button has nothing to float
+above. Worth remembering as a rule rather than as one button: **`...theme.shadows.*` on a view whose
+opacity is below 1 is visible on Android.**
+
+### The keyboard, the insets and the status bar
+
+`KEYBOARD_AVOID_BEHAVIOR = 'padding'` is correct and is now watched rather than reasoned about. The
+onboarding card lifts fully clear — Continue and Back both reachable with the keyboard up, which is
+the failure the 2026-09-19 section called the worst thing on Android — and so do the composer and
+the sheets. Edge-to-edge insets are right everywhere: the tab strip clears the gesture pill, the
+native stack header sits below the status bar, no overlap anywhere.
+
+The status bar is the `ThemeProvider` fix, confirmed the only way that means anything: the **app**
+pinned to Dark while the **system** was still Light gave light ink on the dark wallpaper. Pinning
+also proved the other half — `Appearance.setColorScheme` maps to `AppCompatDelegate.setDefaultNightMode`,
+which is a `uiMode` configuration change, and `uiMode` is in the activity's `configChanges`, so
+nothing remounted: the Settings scroll position survived the switch.
+
+### The wide layout needs no tablet
+
+`REGULAR_LAYOUT_MIN_WIDTH` is 700 and this phone is **914 dp in landscape**, so rotating it is enough
+to get the two-panel shell — no tablet AVD required, which is worth knowing before anyone builds one:
+
+```sh
+adb shell settings put system accelerometer_rotation 0
+adb shell settings put system user_rotation 1
+```
+
+Sidebar plus detail panel, the tab strip present in the sidebar (the gallery's portrait lie stays
+fixed), wallpaper around both panels, and the overlay panel over the chat column.
+
+### The file upload, and why it had never run anywhere
+
+`expo-document-picker` with `copyToCacheDirectory: true` hands back a `file://` URI in the app's own
+cache, not the `content://` the picker started from, so React Native's `FormData` streams it as-is
+and nothing on the Android side needs a branch. Measured end to end: a 25.99 kB file chosen from the
+system picker arrived as
+
+> I received ui.xml (**25987 bytes**) at `/root/projects/researcher/uploads/hermie/2026-09-20/8setj4h3-ui.xml`
+
+which is the picker's own byte count, the `<cwd>/uploads/hermie/<date>/<random>-<name>` convention,
+and proof that `@file:` expanded on the far side.
+
+**It could not have run before today, on any platform.** `packages/fake-gateway` answered
+`session.resume` without `cwd`, and `uploadFile` refuses rather than guesses when the session reports
+no working directory — so every attach stopped at "No workspace to upload into" before a request was
+made, and the server's own upload route, its absolute-path rule, its 100 MB cap and its "I received N
+bytes" reply were all unreachable. The server now reports one.
+
+### Found on the way, and NOT fixed: a file-only send comes back twice
+
+With the upload path reachable for the first time, sending an attachment **with no text** paints two
+outgoing bubbles: the optimistic one showing `ui.xml` and the persisted row showing
+`8setj4h3-ui.xml`.
+
+`reconcile.ts:323` indexes the live tail for pairing with
+
+```ts
+if (item.rowId !== undefined || !normalizedItemText(item)) {
+  continue
+}
+```
+
+so an item whose projected text is **empty** is never a candidate, and a file-only turn projects to
+exactly that. The 2026-09-20 duplicate work fixed the case where the two sides projected to
+_different_ text; this is the case where they project to _no_ text and the attachments are all there
+is to match on — and those do not match either, because `beginLocalTurn` replaces the projected
+`@file:"…"` refs with the friendlier display name while the persisted row keeps the directive.
+`UserItem.attachments` is documented as holding the directive strings, so the optimistic side is the
+one departing from the contract.
+
+Not fixed here: it is shared code, it is not an Android defect, and the honest repair is to give the
+optimistic item the projected refs to match on without losing the friendly chip — a change to the
+transcript package's contract and its tests, not a line. Filed as what it is.
+
+### What this pass did NOT verify
+
+- **The native sign-in flow.** `--auth native` was not run on Android, so neither the in-app WebView
+  nor `webViewMayCarryHeaders()` returning false with extra headers configured — the documented
+  refusal path — was watched. It is the largest untested branch on this platform.
+- **A real device.** Everything here is one arm64 emulator. No physical hardware, no other OEM skin,
+  no API level below 37, and `minSdk` is 24.
+- **Play signing, and anything downstream of it.** The release APK is debug-signed; no bundle was
+  built, nothing was uploaded, and no notification path exists to test.
+- **The photo picker.** The attach menu's photo entry was opened but no image was picked, so
+  `expo-image-picker` → `ImageManipulator` → `image.attach_bytes` is still the 2026-09-19 result
+  rather than this one's.
+- **Haptics.** `VIBRATE` is in `blockedPermissions`, so `haptic()` reaches a native module that
+  cannot fire. It cannot crash — every branch catches — but nothing buzzes on Android and the
+  comment in `app.config.ts` that says "nothing in the app vibrates" reads oddly next to four call
+  sites that ask it to.
+- **A long transcript's frame rate.** The wallpaper stacks a base gradient plus a bloom per corner
+  behind an inverted list, and no frame timings were taken on a device whose GPU is software.
+- **One thing seen once and not diagnosed.** After dismissing the keyboard with the back button
+  during a streaming turn, the transcript was left slightly above the bottom with the jump pill
+  showing over the newest bubble; tapping the pill recovered it. Not reproduced deliberately.

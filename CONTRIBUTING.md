@@ -12,7 +12,7 @@ the conventions that are easy to get wrong.
 | Xcode       | 16.1 or newer                           | iOS and Mac builds |
 | CocoaPods   | 1.15 or newer                           | the iOS pods       |
 | JDK         | 17                                      | Android builds     |
-| Android SDK | platform 35, build-tools 35             | Android builds     |
+| Android SDK | platform 36, build-tools 36, NDK 27.1   | Android builds     |
 
 A Mac build needs one more thing: an **Apple Developer team**. It is the iOS app
 built for the "Designed for iPad" destination, and that configuration runs App
@@ -20,7 +20,17 @@ Store validation, so it cannot be built unsigned. Set `HERMIE_APPLE_TEAM_ID` to
 your ten-character team identifier.
 
 Set `ANDROID_HOME` to your SDK location (usually `~/Library/Android/sdk` on macOS) before building
-for Android.
+for Android. Those versions are not a guess: `cd apps/hermie/android && ./gradlew -q app:properties`
+prints what `expo-root-project` resolved, and that is what has to be installed.
+
+Any JDK 17 works — React Native 0.81 / AGP 8 want 17, not 21 and not 11. On macOS,
+`brew install --cask temurin@17` needs `sudo` for its installer; `brew install openjdk@17` does not,
+but it is keg-only, so `/usr/libexec/java_home -v 17` cannot see it and `JAVA_HOME` has to name the
+keg directly:
+
+```sh
+export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
+```
 
 ## Getting set up
 
