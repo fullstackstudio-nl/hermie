@@ -31,11 +31,16 @@
  *     is at the bottom, so there is nothing to correct and nothing to animate —
  *     and it does hold one once they scroll away, where the correction is the
  *     behaviour a reader wants;
- *  2. nothing whose height changes during a turn is rendered inside the scroll
- *     view before the cells.
+ *  2. the list never scrolls ITSELF when a row comes or goes, at either end of
+ *     that switch.
  *
- * A change that puts the typing bubble back into the list, or turns the anchor
- * back on at the bottom, breaks one of these two and this file says which.
+ * The typing bubble used to be pinned outside the scroll view and is a CELL now,
+ * at index 0, which on an inverted list is the bottom of the conversation. That
+ * is only safe because of (1): its height arriving is an insertion like any
+ * other, corrected where the reader is up in the history and free where they are
+ * at the bottom. So the dots come with their own pair of cases below — inserted
+ * and removed, away and at the bottom — and they are the same cases a message
+ * row gets.
  */
 import { act, fireEvent, screen } from '@testing-library/react-native'
 import { FlatList } from 'react-native'
@@ -130,16 +135,97 @@ describe('the list’s anchor', () => {
     expect(anchorProp()).not.toHaveProperty('autoscrollToTopThreshold')
   })
 
-  it('is the only thing between the scroll view and its cells', () => {
-    // The typing bubble is what used to sit here, and its height is exactly what
-    // moved the first cell. It is a pinned sibling now, so it must NOT be a
-    // descendant of the scroll view at all.
+  it('carries the typing bubble as a cell, so it scrolls with the conversation', () => {
+    // The dots were a pinned sibling below the scroll view for as long as the
+    // anchor was held at the bottom. They are a row now, and a row is inside.
     renderScreen(<TranscriptList items={visible([userItem])} subagents={subagentMap} typing />)
 
     const scroll = screen.getByTestId('transcript-list-scroll')
-    const slot = screen.getByTestId('transcript-list-typing-slot')
 
-    expect(within(scroll, slot)).toBe(false)
+    expect(within(scroll, screen.getByTestId('transcript-list-typing-slot'))).toBe(true)
+    expect(screen.getByTestId('typing-indicator')).toBeTruthy()
+  })
+
+  it('draws no typing row at all once the turn has a bubble of its own', () => {
+    // §6.2: one bubble from start to finish. The streaming reply holds the dots,
+    // so the row must not exist beside it — an empty row at index 0 is content
+    // whose height comes and goes for nothing.
+    renderScreen(
+      <TranscriptList
+        items={[...visible([userItem]), { item: thinking, presentation: 'full' }]}
+        subagents={subagentMap}
+        typing
+      />
+    )
+
+    expect(screen.queryByTestId('transcript-list-typing-slot')).toBeNull()
+  })
+})
+
+/**
+ * The typing row, inserted and removed, in both anchor states.
+ *
+ * This is the whole of what moving it into the list had to prove: at the bottom
+ * the list must not move because there is no anchor and inversion pins offset 0;
+ * away from the bottom it must not move ITSELF either — the correction there is
+ * the native anchor's, applied inside the scroll view, and any `scrollToOffset`
+ * from JavaScript on top of it is a second, visible jump.
+ */
+describe('the typing row coming and going', () => {
+  const body = (extra: { typing?: boolean } = {}) => (
+    <TranscriptList items={visible([userItem, assistantItem])} subagents={subagentMap} {...extra} />
+  )
+
+  function watchScroll(): jest.SpyInstance {
+    return jest.spyOn(FlatList.prototype, 'scrollToOffset').mockImplementation(() => {})
+  }
+
+  it('moves nothing while the reader is scrolled away, in or out', () => {
+    const scrollToOffset = watchScroll()
+
+    try {
+      const view = renderScreen(body())
+
+      scrollTo(400)
+      expect(anchorProp()).toEqual({ minIndexForVisible: 0 })
+      scrollToOffset.mockClear()
+
+      // In: a row appears at index 0 under a reader who is not looking at it.
+      view.rerender(withProviders(body({ typing: true })))
+      scrollTo(400)
+      expect(anchorProp()).toEqual({ minIndexForVisible: 0 })
+      expect(scrollToOffset).not.toHaveBeenCalled()
+
+      // Out: the reply arrives and the dots go with it.
+      view.rerender(withProviders(body()))
+      scrollTo(400)
+      expect(scrollToOffset).not.toHaveBeenCalled()
+    } finally {
+      scrollToOffset.mockRestore()
+    }
+  })
+
+  it('moves nothing while the reader is at the bottom, in or out', () => {
+    const scrollToOffset = watchScroll()
+
+    try {
+      const view = renderScreen(body())
+
+      scrollTo(0)
+      scrollToOffset.mockClear()
+
+      view.rerender(withProviders(body({ typing: true })))
+      scrollTo(0)
+      expect(anchorProp()).toBeUndefined()
+      expect(scrollToOffset).not.toHaveBeenCalled()
+
+      view.rerender(withProviders(body()))
+      scrollTo(0)
+      expect(anchorProp()).toBeUndefined()
+      expect(scrollToOffset).not.toHaveBeenCalled()
+    } finally {
+      scrollToOffset.mockRestore()
+    }
   })
 })
 
@@ -247,6 +333,29 @@ describe('opening a disclosure', () => {
 
       expect(scrollToOffset).toHaveBeenCalledWith({ animated: false, offset: growth })
       expect(scrollToOffset).not.toHaveBeenCalledWith({ animated: false, offset: 0 })
+    } finally {
+      scrollToOffset.mockRestore()
+    }
+  })
+
+  it('lets the held place go when the typing row arrives under it', () => {
+    // A hold is a promise about ONE expansion. The dots are a row now, so their
+    // arrival changes the content by their own height as well — and forcing the
+    // offset to a target computed before that row existed would undo the
+    // correction the anchor just made and move the reader by the row's height.
+    const scrollToOffset = jest.spyOn(FlatList.prototype, 'scrollToOffset').mockImplementation(() => {})
+
+    try {
+      const view = renderScreen(<TranscriptList items={visible([userItem, long])} subagents={subagentMap} />)
+
+      scrollTo(420)
+      press()
+      scrollToOffset.mockClear()
+
+      view.rerender(withProviders(<TranscriptList items={visible([userItem, long])} subagents={subagentMap} typing />))
+      scrollTo(0)
+
+      expect(scrollToOffset).not.toHaveBeenCalled()
     } finally {
       scrollToOffset.mockRestore()
     }

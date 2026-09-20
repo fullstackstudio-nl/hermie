@@ -86,26 +86,28 @@ describe('the typing bubble', () => {
   it('gets the same gap above it as any other change of speaker', () => {
     renderScreen(<TranscriptList items={visible([userItem])} subagents={subagentMap} typing />)
 
-    const slot = StyleSheet.flatten(screen.getByTestId('transcript-list-typing-slot').props.style) as {
-      paddingTop?: number
+    const row = StyleSheet.flatten(screen.getByTestId('transcript-list-typing-slot').props.style) as {
+      marginTop?: number
     }
 
     expect(screen.getByTestId('typing-indicator')).toBeTruthy()
-    expect(slot.paddingTop).toBe(BUBBLE_GAP.separate)
+    // The row's own margin, the way every other row states its gap — the dots
+    // are a cell now, not a pinned strip with padding.
+    expect(row.marginTop).toBe(BUBBLE_GAP.separate)
   })
 
-  it('leaves its slot in place for the whole turn, and never inside the list', () => {
-    // The slot lives BELOW the scroll view now. Its height still comes and goes,
-    // but it is no longer content, so nothing it does can move a cell's origin —
-    // which is what `maintainVisibleContentPosition` measures. The list's own
-    // anchor is the constant spacer asserted in `transcript-anchor.test.tsx`.
+  it('is a row only while it is the turn, and hands over to the reply’s own bubble', () => {
+    // The row exists for exactly the stretch of a turn that has produced no text.
+    // Before it there is nothing at index 0 but the last message; after the first
+    // token the streaming bubble holds the dots (§6.2) and the row is gone, so
+    // the transcript never shows two sets of them.
     const view = renderScreen(<TranscriptList items={visible([userItem])} subagents={subagentMap} />)
 
-    expect(screen.getByTestId('transcript-list-typing-slot')).toBeTruthy()
-    expect(screen.queryByTestId('typing-indicator')).toBeNull()
+    expect(screen.queryByTestId('transcript-list-typing-slot')).toBeNull()
 
     view.rerender(withProviders(<TranscriptList items={visible([userItem])} subagents={subagentMap} typing />))
     expect(screen.getByTestId('transcript-list-typing-slot')).toBeTruthy()
+    expect(screen.getByTestId('typing-indicator')).toBeTruthy()
 
     view.rerender(
       withProviders(
@@ -117,9 +119,7 @@ describe('the typing bubble', () => {
       )
     )
 
-    // The reply's own bubble holds the dots now (§6.2), and the slot collapses
-    // to nothing rather than disappearing.
-    expect(screen.getByTestId('transcript-list-typing-slot')).toBeTruthy()
+    expect(screen.queryByTestId('transcript-list-typing-slot')).toBeNull()
     expect(screen.queryByTestId('typing-indicator')).toBeNull()
     expect(screen.getByTestId('assistant-typing-a-live')).toBeTruthy()
   })

@@ -773,6 +773,33 @@ export function holdCorrection(held: number | undefined, offset: number): number
 /** A stable empty array, so the context memo does not churn on every render. */
 const EMPTY_HANDLES: readonly string[] = []
 
+/**
+ * The typing bubble's own row, at index 0 of the inverted list.
+ *
+ * It used to be pinned BELOW the scroll view, because a height that comes and
+ * goes at the bottom of an inverted list moves the first cell's origin — which
+ * is the view `maintainVisibleContentPosition` anchors on. That is still true,
+ * and it is no longer a reason to keep it out: the anchor is only held while the
+ * reader is scrolled AWAY from the bottom, where correcting for an inserted row
+ * is precisely what a reader wants, and at the bottom there is no anchor to
+ * move. So the dots can be what they look like — the last row of the transcript,
+ * scrolling with the content, off screen the moment the reader goes up.
+ *
+ * One frozen object rather than a fresh one per render: it is the identity the
+ * list's `keyExtractor` and row memo see.
+ */
+const TYPING_ROW = { typing: true } as const
+
+/** The key the typing row keeps for as long as it exists. */
+const TYPING_ROW_KEY = 'transcript-typing'
+
+/** What the list actually holds: the visible items, plus the dots at the end. */
+type ListRow = VisibleItem | typeof TYPING_ROW
+
+function isTypingRow(row: ListRow): row is typeof TYPING_ROW {
+  return 'typing' in row
+}
+
 /** One shared object, so a row with no layout of its own still memoizes. */
 const FALLBACK_LAYOUT: RowLayout = { grouped: false, ledgerRun: false, tail: true }
 
@@ -835,7 +862,7 @@ function TranscriptListBody({
   ...handlers
 }: TranscriptListProps & { listRef: React.ForwardedRef<TranscriptListHandle> }) {
   const theme = useTheme()
-  const listRef = useRef<FlatList<VisibleItem>>(null)
+  const listRef = useRef<FlatList<ListRow>>(null)
   const [away, setAway] = useState(false)
 
   /**
@@ -940,6 +967,15 @@ function TranscriptListBody({
   const streamingTail = data[0]?.item.kind === 'assistant' && data[0].item.streaming
 
   /**
+   * The rows the scroll view holds, dots included.
+   *
+   * Index 0 of an inverted list is the BOTTOM of the conversation, so prepending
+   * the typing row is what puts it under the last message and nowhere else.
+   */
+  const showTyping = typing && !streamingTail
+  const rows = useMemo<ListRow[]>(() => (showTyping ? [TYPING_ROW, ...data] : data), [data, showTyping])
+
+  /**
    * A jump the LIST started, not the reader.
    *
    * `scrollToOffset({ animated: true })` emits a scroll event per frame on the way
@@ -971,13 +1007,17 @@ function TranscriptListBody({
    * existed would undo the correction the anchor just made and move the reader
    * by the row's height. So a changed row count retires the hold, the same way a
    * drag does.
+   *
+   * Counted over `rows` rather than over `items`, so the typing row is one of
+   * them: the dots appearing or going is an insertion and a removal at index 0,
+   * and it has to retire a hold for exactly the same reason a message does.
    */
   const rowCount = useRef(0)
   const holdingRows = useRef(0)
 
-  // Read in the render body, below, where `data` is what the list is about to
+  // Read in the render body, below, where `rows` is what the list is about to
   // show. A ref rather than state: nothing renders differently because of it.
-  rowCount.current = data.length
+  rowCount.current = rows.length
 
   // A row came or went while a place was held; see `holdingRows`.
   if (rowCount.current !== holdingRows.current && holdingTo.current !== undefined) {
@@ -1131,7 +1171,7 @@ function TranscriptListBody({
     forwarded,
     () => ({
       scrollToItem(itemId) {
-        const index = data.findIndex(entry => entry.item.id === itemId)
+        const index = rows.findIndex(row => !isTypingRow(row) && row.item.id === itemId)
 
         if (index < 0) {
           return false
@@ -1146,7 +1186,7 @@ function TranscriptListBody({
       },
       scrollToLatest: jump
     }),
-    [data, jump]
+    [rows, jump]
   )
 
   /**
@@ -1164,16 +1204,26 @@ function TranscriptListBody({
   }, [])
 
   const renderItem = useCallback(
-    ({ item: entry }: { item: VisibleItem }) => (
-      <TranscriptRowFrame
-        context={context}
-        {...(dmRoles[entry.item.id] ? { dmRole: dmRoles[entry.item.id] } : {})}
-        entry={entry}
-        layout={layout[entry.item.id] ?? FALLBACK_LAYOUT}
-        {...(entry.item.id === lastOwnId && receipt ? { receipt } : {})}
-      />
-    ),
-    [context, dmRoles, lastOwnId, layout, receipt]
+    ({ item: entry }: { item: ListRow }) =>
+      isTypingRow(entry) ? (
+        /*
+          The dots are a turn starting, so they open the same gap above them as
+          any other change of speaker — `gapAbove` would say `BUBBLE_GAP.separate`
+          for a row with no grouping, and this row can never be grouped.
+        */
+        <View style={{ marginTop: BUBBLE_GAP.separate }} testID={`${testID}-typing-slot`}>
+          <TypingIndicator />
+        </View>
+      ) : (
+        <TranscriptRowFrame
+          context={context}
+          {...(dmRoles[entry.item.id] ? { dmRole: dmRoles[entry.item.id] } : {})}
+          entry={entry}
+          layout={layout[entry.item.id] ?? FALLBACK_LAYOUT}
+          {...(entry.item.id === lastOwnId && receipt ? { receipt } : {})}
+        />
+      ),
+    [context, dmRoles, lastOwnId, layout, receipt, testID]
   )
 
   return (
@@ -1197,9 +1247,9 @@ function TranscriptListBody({
             </Text>
           }
           contentContainerStyle={[{ paddingHorizontal: theme.space.md, paddingVertical: theme.space.md }, contentStyle]}
-          data={data}
+          data={rows}
           inverted
-          keyExtractor={entry => entry.item.id}
+          keyExtractor={row => (isTypingRow(row) ? TYPING_ROW_KEY : row.item.id)}
           // Dragging the transcript down lowers the keyboard with the finger, which
           // is what every messenger does and what the inverted list makes possible
           // without a gesture handler. Android has no interactive dismissal — the
@@ -1239,6 +1289,11 @@ function TranscriptListBody({
            * never looks at the header. There is no value of `minIndexForVisible`
            * that reaches it — which is why the header is gone rather than tuned.
            *
+           * The typing row is an insertion and a removal at index 0 like any
+           * other, and it is answered by the same two branches: away from the
+           * bottom the anchor corrects for it, at the bottom there is nothing to
+           * correct. That is what let the dots move into the list at all.
+           *
            * Off at the bottom nothing has to be corrected: an inverted list already
            * keeps offset 0 pinned to the newest row while the content grows above
            * it. Away from the bottom the anchor is a genuinely visible row and the
@@ -1266,32 +1321,10 @@ function TranscriptListBody({
         />
 
         {/*
-        The typing bubble, PINNED below the list rather than carried inside it.
-
-        Its height is the whole problem: anything whose height comes and goes at the
-        bottom of an inverted list moves the first cell's origin, which is the view
-        `maintainVisibleContentPosition` anchors on while the reader is scrolled
-        away. Out here the list's content does not change at all when a turn starts
-        — only the list's own frame does, and a frame change moves no subview
-        origin.
-
-        It is the same shape as the agents bar, which is pinned above the list for
-        the same kind of reason. Left-aligned and inset to match the content
-        container's own padding, so it lands exactly where an incoming bubble would
-        (§6.2). It stands down the moment a streaming reply exists, because that
-        reply's own bubble holds the dots.
-      */}
-        <View
-          style={
-            typing && !streamingTail
-              ? { paddingBottom: theme.space.md, paddingHorizontal: theme.space.md, paddingTop: BUBBLE_GAP.separate }
-              : undefined
-          }
-          testID={`${testID}-typing-slot`}
-        >
-          {typing && !streamingTail ? <TypingIndicator /> : null}
-        </View>
-
+          "Jump to latest" is the only thing left floating over the conversation.
+          The typing bubble used to be pinned here beside it; it is a cell now —
+          see `TYPING_ROW`.
+        */}
         {away ? (
           <View style={{ alignItems: 'center', bottom: theme.space.md, left: 0, position: 'absolute', right: 0 }}>
             <JumpToLatestPill count={newMessageCount} onPress={jump} />
