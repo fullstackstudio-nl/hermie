@@ -22,6 +22,7 @@ import {
   type ApprovalItem,
   type ClarifyItem,
   type TranscriptItem,
+  type TurnActivity,
   type Verbosity
 } from '@hermie/transcript'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -668,9 +669,8 @@ function Conversation({
   const subtitle = subtitleFor({
     status,
     hydration: chat.hydration,
-    busy,
-    queued: Boolean(chat.queuedText),
-    needsInput
+    activity: chat.activity,
+    queued: Boolean(chat.queuedText)
   })
 
   /**
@@ -1235,19 +1235,40 @@ function resolveBot(handle: string, names: readonly string[]): string {
   return names.find(name => name.toLowerCase() === needle) ?? needle
 }
 
+/**
+ * What the bot is doing, and failing that, what the connection is.
+ *
+ * The two halves are in that order on purpose and the rule is the owner's: a
+ * chat that is visibly streaming must never be described by the socket's
+ * bookkeeping. So anything `turnActivity` can prove about the TURN wins, and
+ * the connection's own words are what is left when the turn has nothing to say.
+ *
+ * It replaced a single `Working…` that covered the whole of a turn. That line
+ * was true for every second of it and told a reader nothing about which second
+ * they were looking at — whether the model was thinking, writing, running a
+ * command on their machine, or waiting on them.
+ */
 function subtitleFor(state: {
   status: string
   hydration: UseChatResult['hydration']
-  busy: boolean
+  activity: TurnActivity
   queued: boolean
-  needsInput: boolean
 }): string {
-  if (state.needsInput) {
-    return strings.bots.needsInput
-  }
-
-  if (state.busy) {
-    return strings.chat.subtitle.working
+  switch (state.activity.kind) {
+    case 'waiting':
+      return strings.chat.subtitle.waiting
+    case 'thinking':
+      return strings.chat.subtitle.thinking
+    case 'typing':
+      return strings.chat.subtitle.typing
+    case 'tool':
+      return strings.chat.subtitle.running(state.activity.tool)
+    case 'delegating':
+      return strings.chat.subtitle.delegating
+    case 'working':
+      return strings.chat.subtitle.working
+    case 'idle':
+      break
   }
 
   if (state.queued) {
@@ -1256,7 +1277,7 @@ function subtitleFor(state: {
 
   switch (state.status) {
     case 'ready':
-      return strings.chat.subtitle.connected
+      return strings.chat.subtitle.idle
     case 'offline':
       return strings.chat.subtitle.offline
     case 'reconnecting':
@@ -1271,7 +1292,7 @@ function subtitleFor(state: {
       // pre-dial ladder again while that session keeps working, and
       // "Connecting…" over a conversation the reader can see updating describes
       // the socket's bookkeeping rather than this chat.
-      return state.hydration === 'live' ? strings.chat.subtitle.connected : strings.chat.subtitle.connecting
+      return state.hydration === 'live' ? strings.chat.subtitle.idle : strings.chat.subtitle.connecting
     default:
       return strings.connection.status.disconnected
   }

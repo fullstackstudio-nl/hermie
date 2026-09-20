@@ -24,6 +24,8 @@ import {
   type Subagent,
   type SubagentNode,
   subagentTree,
+  turnActivity,
+  type TurnActivity,
   type TranscriptItem,
   type VisibleItem,
   visibleItems
@@ -55,6 +57,11 @@ export interface UseChatResult {
    * keeps working is not about to say anything.
    */
   turnActive: boolean
+  /**
+   * What the bot is doing, for the line under its name. Narrower again than
+   * `turnActive`: thinking, typing, running a tool, blocked on the reader.
+   */
+  activity: TurnActivity
   hydration: 'cold' | 'cached' | 'hydrating' | 'live' | 'stale' | 'error'
   /** Approval and clarify cards still waiting on the user. */
   requests: TranscriptItem[]
@@ -225,6 +232,20 @@ export function useChat(botName: string): UseChatResult {
     [version, chat?.botName]
   )
 
+  /**
+   * Memoized on the same key as the rest, and for the same reason: this is read
+   * on every render of the header, and it walks the order twice.
+   *
+   * `turn.active` is deliberately in the key beside `version`. Ending a turn
+   * patches no item, so `itemsVersion` can be unchanged across exactly the
+   * transition that takes the line back to idle.
+   */
+  const activity = useMemo<TurnActivity>(
+    () => (chat ? turnActivity(chat) : { kind: 'idle' }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [version, chat?.botName, chat?.turn.active, chat?.turn.draftingTool]
+  )
+
   const controller = runtime?.controller
 
   const notReady = useCallback(() => Promise.reject(new Error('The chat is not connected yet.')), [])
@@ -236,6 +257,7 @@ export function useChat(botName: string): UseChatResult {
     draft: chat?.draft ?? '',
     busy: chat ? isBusy(chat) : false,
     turnActive: chat?.turn.active ?? false,
+    activity,
     hydration: chat?.hydration ?? 'cold',
     requests,
     subagents,

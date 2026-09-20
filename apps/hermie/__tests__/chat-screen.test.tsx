@@ -199,6 +199,51 @@ describe('ChatScreen', () => {
     )
   })
 
+  /**
+   * The line under the bot's name, driven the way a turn drives it.
+   *
+   * The selector has its own table in `@hermie/transcript`; what is asserted
+   * here is that the header is reading it at all — the previous line said
+   * `Working…` from the first frame of a turn to the last, and the way that
+   * survived was that nothing ever looked at it.
+   */
+  it('says what the bot is doing, and goes quiet when it stops', async () => {
+    renderChat()
+
+    act(() => {
+      useChatsStore.getState().beginTurn('researcher', 'do a thing')
+    })
+    await waitFor(() => expect(screen.getByText('Working…')).toBeTruthy())
+
+    act(() => {
+      useChatsStore
+        .getState()
+        .dispatchEvent('researcher', { type: 'reasoning.delta', seq: 91, payload: { text: 'Let me think.' } })
+    })
+    await waitFor(() => expect(screen.getByText('Thinking…')).toBeTruthy())
+
+    act(() => {
+      useChatsStore
+        .getState()
+        .dispatchEvent('researcher', { type: 'message.delta', seq: 92, payload: { text: 'Right — ' } })
+    })
+    await waitFor(() => expect(screen.getByText('Typing…')).toBeTruthy())
+
+    act(() => {
+      useChatsStore
+        .getState()
+        .dispatchEvent('researcher', { type: 'tool.start', seq: 93, payload: { tool_id: 'c1', name: 'terminal' } })
+    })
+    await waitFor(() => expect(screen.getByText('Running terminal…')).toBeTruthy())
+
+    act(() => {
+      useChatsStore
+        .getState()
+        .dispatchEvent('researcher', { type: 'message.complete', seq: 94, payload: { text: 'Right — done.' } })
+    })
+    await waitFor(() => expect(screen.getByText('Online')).toBeTruthy())
+  })
+
   it('stops a running turn instead of sending', async () => {
     renderChat()
 
@@ -402,11 +447,11 @@ describe('ChatScreen', () => {
     fireEvent.press(screen.getByTestId('clarify-skip'))
 
     // "Later" takes the sheet away and nothing else: the agent is still
-    // blocked, so the header must not go back to saying Connected.
+    // blocked, so the header must not go back to the idle label.
     // The sheet leaves after its close animation (or the host's settle
     // fallback), which can take longer than the default wait on a slow runner.
     await waitFor(() => expect(screen.queryByTestId('clarify-sheet')).toBeNull(), { timeout: 4000 })
-    expect(screen.getByText('Needs your input')).toBeTruthy()
+    expect(screen.getByText('Waiting for you')).toBeTruthy()
     // …and the transcript still offers the way back to it.
     expect(screen.getByText('Answer')).toBeTruthy()
   })

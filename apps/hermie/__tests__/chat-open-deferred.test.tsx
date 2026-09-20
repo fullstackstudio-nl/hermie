@@ -249,7 +249,7 @@ describe('a connection that will not become ready on its own', () => {
 })
 
 describe('the header subtitle', () => {
-  it('says Connected for a live chat while the socket re-dials', async () => {
+  it('says Online for a live chat while the socket re-dials', async () => {
     const view = renderChat()
     view.setStatus('ready')
 
@@ -264,7 +264,8 @@ describe('the header subtitle', () => {
     // again while the session keeps streaming.
     view.setStatus('connecting')
 
-    await waitFor(() => expect(screen.getByText('Connected')).toBeTruthy())
+    // The idle label is the BOT's word, not the socket's — see `subtitleFor`.
+    await waitFor(() => expect(screen.getByText('Online')).toBeTruthy())
     expect(screen.queryByText('Connecting…')).toBeNull()
   })
 

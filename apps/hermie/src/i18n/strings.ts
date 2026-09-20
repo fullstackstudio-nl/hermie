@@ -431,10 +431,28 @@ export const strings = {
     subagents: (count: number) => (count === 1 ? '1 subagent running' : `${count} subagents running`),
     retry: 'Try again',
     pickBot: 'Pick a conversation to start reading.',
+    /**
+     * The line under the bot's name.
+     *
+     * The top half is what the BOT is doing, from `turnActivity`, and the
+     * bottom half is what the CONNECTION is doing. `working` is the honest
+     * gap between the two: a turn has started and has not yet said which of
+     * the others it is.
+     *
+     * `idle` says Online rather than Connected, because the reader is being
+     * told about a bot and not about a socket — and it is the word the chat
+     * list's own presence line already uses, which is the point.
+     */
     subtitle: {
       working: 'Working…',
+      thinking: 'Thinking…',
+      typing: 'Typing…',
+      /** `Running terminal…` — the tool's own name, as the gateway spells it. */
+      running: (tool: string) => `Running ${tool}…`,
+      waiting: 'Waiting for you',
+      delegating: 'Delegating…',
       queued: 'Queued',
-      connected: 'Connected',
+      idle: 'Online',
       offline: 'Offline',
       reconnecting: 'Reconnecting…',
       connecting: 'Connecting…',
