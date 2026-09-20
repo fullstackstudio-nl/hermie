@@ -273,6 +273,56 @@ describe('a foreign turn', () => {
     ).toBe(false)
   })
 
+  /**
+   * The owner's report: a message he sent on his phone was not in the chat on
+   * his Mac.
+   *
+   * `message.start` carries no author, so the second device stands an empty
+   * `unknownAuthor` bubble in and waits to be told who spoke — and nothing on
+   * the socket ever tells it, because the deltas that follow are the REPLY. The
+   * only frame that used to fill the placeholder was `message.complete`, and the
+   * sweep that could have filled it earlier skipped every chat that was mid-turn.
+   * So for the whole of a turn the other device's message was not in the
+   * transcript, and an empty placeholder draws nothing (`selectors.ts`), so there
+   * was not even a gap to explain it.
+   */
+  it('a turn started on another device shows its user message here', async () => {
+    jest.useFakeTimers()
+
+    try {
+      const { gateway, controller } = setup()
+
+      controller.start()
+      await controller.openChat(RESEARCHER)
+
+      // Mid-turn the gateway has written the PROMPT and nothing else: the reply
+      // is still arriving on the socket.
+      gateway.restMessages = [...HISTORY, { role: 'user', text: 'Sent from the phone.', row_id: 3 }]
+
+      gateway.emit({ type: 'message.start', session_id: 'runtime-1', seq: 10, payload: {} })
+      gateway.emit({ type: 'message.delta', session_id: 'runtime-1', seq: 11, payload: { text: 'Looking…' } })
+      gateway.emit({ type: 'sessions.changed', payload: {} })
+
+      jest.advanceTimersByTime(600)
+      await flushFakeTimers()
+
+      const items = chatOf().order.map(id => chatOf().items[id])
+
+      // The prompt is there, above the reply that is still streaming, and the
+      // placeholder it filled is gone rather than left standing beside it.
+      expect(items.map(item => `${item?.kind}:${(item as { text?: string } | undefined)?.text ?? ''}`)).toEqual([
+        'user:Introduce yourself.',
+        'assistant:I am researcher.',
+        'user:Sent from the phone.',
+        'assistant:Looking…'
+      ])
+      expect(items.some(item => item?.kind === 'user' && item.unknownAuthor)).toBe(false)
+      expect(chatOf().turn.active).toBe(true)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   it('reconciles every live chat on a debounced sessions.changed, but not one mid-turn', async () => {
     jest.useFakeTimers()
 

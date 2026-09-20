@@ -567,6 +567,23 @@ export class ChatController {
    * live chat that is not mid-turn. A chat that IS mid-turn is receiving the
    * truth on the socket already, and a tail fetch racing it would fight the
    * bubble being streamed.
+   *
+   * With one exception, and it is the whole of "a message I sent on my phone is
+   * missing on my Mac". `message.start` carries no author, so a turn somebody
+   * else began stands an empty `unknownAuthor` bubble in and waits to be told who
+   * spoke. Nothing on the socket ever tells us: the deltas are the REPLY. The
+   * only frame that filled it was `message.complete`, so until the turn ended —
+   * seconds for a greeting, minutes for real work — the other device's message
+   * simply was not in the transcript, and `selectors.ts` hides an empty
+   * placeholder rather than drawing a blank bubble, so there was not even a gap
+   * to explain it.
+   *
+   * A pending placeholder therefore outranks the mid-turn rule. The risk that
+   * rule guards against does not apply to it: `reconcileTail` splices rows in
+   * FRONT of the live tail and never drops a live item, so the worst case is the
+   * prompt landing above the bubble that is still streaming — which is where it
+   * belongs. And the gateway has already written that row; it is what
+   * `sessions.changed` is announcing.
    */
   private async sweep(): Promise<void> {
     const names = liveChatNames(this.chats.getState())
@@ -576,7 +593,11 @@ export class ChatController {
       ...names.map(name => {
         const chat = this.chats.getState().chats[name]
 
-        return chat && !chat.turn.active ? this.reconcileTailFor(name) : Promise.resolve()
+        if (!chat) {
+          return Promise.resolve()
+        }
+
+        return !chat.turn.active || chat.turn.foreignReconcilePending ? this.reconcileTailFor(name) : Promise.resolve()
       })
     ])
   }
