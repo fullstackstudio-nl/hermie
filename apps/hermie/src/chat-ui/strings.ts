@@ -173,6 +173,8 @@ export const chatStrings = {
     send: 'Send message',
     stop: 'Stop response',
     attach: 'Add attachment',
+    /** The catcher behind the attach popover. Only assistive technology reads it. */
+    dismissAttach: 'Dismiss attachment menu',
     photoLibrary: 'Photo library',
     chooseFile: 'Choose file',
     /** Shown under the field only where a bare Return sends. */

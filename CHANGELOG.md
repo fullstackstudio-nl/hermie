@@ -10,6 +10,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A fourth wallpaper, Slate, and it brings its own bubble colour.** Graphite was compared first and
+  measured rather than eyeballed: its dark ramp is near-black (`#171B22 → #0D0F14`), where Slate's is
+  about three times that luminance (`#3B4552 → #2E3640`), so on Graphite the panels are pale shapes
+  floating in the dark and on Slate they sit one step above their background and the whole window
+  reads as one desaturated grey-blue object. That is a different composition, not a tuning of the
+  same one. A wallpaper may now name the accent that **Default** resolves to, and Slate names its own
+  (`#4F6B96`): the outgoing bubble is the largest saturated area in a window, and a desaturated
+  wallpaper under the stock blue bubble is a grey window with a blue stripe down one side. A chat
+  whose colour the reader picked keeps it. Slate's blooms are hue shifts at the base's luminance
+  rather than highlights, because `npm run contrast:check` measures every ink against the brightest
+  point of every dark wallpaper — all 186 pairs still clear their floor, with the dark panel's worst
+  ink at 5.43 : 1.
+- **The `+` menu is a popover anchored on the `+`.** Two round glass buttons with drawn icons —
+  _Photo library_, _Choose file_ — their labels underneath, and a pointer whose tip lands on the
+  button's centre, which is the thing the two full-width rows of text never said. It dismisses on
+  Escape, on the `+` again, and on a tap anywhere else in the composer. A composer narrower than
+  260pt keeps the stacked list: a squeezed popover is worse than the list it replaced.
+
 - **The wide layout's sidebar can be hidden.** A round button in the chat header, ⌘⇧S / ⌃⇧S on a
   hardware keyboard, and **Hide Sidebar** / **Show Sidebar** in the Mac's Chats menu all reach the
   same toggle. Hiding it leaves a 56pt glass rail carrying the way back and the three tab-strip
@@ -77,6 +95,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that directory, and it refuses rather than guesses when a resume carries no `cwd`. Every attach
   stopped at "No workspace to upload into" before a request was made, so the upload endpoint, the
   absolute-path rule and the 100 MB cap had never been exercised by a run.
+
+### Changed
+
+- **A bubble's clock sits on the end of its last line, and every bubble carries one.** It was a line
+  of its own under the body, which made a one-word message twice as tall as its text, and it appeared
+  only on the bubble that ended a run, which cost a reader the time of every message but the last.
+  Both of those existed because the clock occupied a row; it no longer does. Outgoing bubbles still
+  show the delivery ticks only where the gateway has a receipt to report — one per conversation —
+  because painting a tick on an older bubble would be inventing a delivery nobody confirmed.
+- **Bubbles hug their content, and the proportions are WhatsApp's.** Radius 16 rather than 22 (a 22pt
+  arc around a 10pt-tall content box turns a one-word message into a lozenge), a 4pt corner down the
+  sender's side, 10pt vertical and 14pt horizontal padding, and — the part a reader actually sees —
+  6pt between two bubbles of one run against 24pt on a change of author. At 3 against 12 the two were
+  the same order of magnitude and the grouping could not be seen at a glance on a large window. The
+  tail-side bottom corner is now tucked on EVERY bubble rather than only on the one carrying the
+  tail, which is what makes a run read as one block instead of as a stack of separate lozenges. The
+  width cap is unchanged and is still a ceiling, never a size.
+- **The date stamp takes the same rhythm as a reply's eyebrow** — the author-change gap above it, 4pt
+  below — and the row under it drops its own margin, so a day boundary is a boundary rather than
+  48pt of nothing.
+- **A destination panel is exactly the chat panel's frame, and the dim covers the sidebar.** The
+  panel was positioned from the window — a gap plus whatever the insets said — which on the Mac put
+  it past the chat panel's rounded bottom corner and against the window's own edge, square. It is now
+  that panel's measured frame: same top, same bottom, same right edge, same radius. The dim moved
+  inside each panel it covers, including the sidebar, which is also no longer clickable while a panel
+  is open. One scrim over the window was wrong twice — it darkened the 14pt wallpaper gap around and
+  between the panels, and left the list bright and usable beside a dimmed chat, which makes the dim
+  mean nothing. Tapping either dim closes one level, exactly as Escape does.
+- **The search field's magnifier and its placeholder share one centre line.** The icon now sits in a
+  slot the height of the text LINE rather than the size of the mark, the field states its own leading
+  instead of taking whatever the platform's font metrics produce, and it adds no vertical padding of
+  its own — iOS adds an asymmetric inset of its own on top of whatever the style asks for. The 44pt
+  tap target moved to the row, where it belongs.
+- **One line in the composer is vertically centred in its pill.** The padding is computed from the
+  field height and an explicit leading, with the platform's own top inset taken off the top so the
+  two VISIBLE gaps match, and the field has no minimum height any more: a box taller than its content
+  is a box an iOS multiline field fills from the top, which is why the placeholder sat high in it.
+  Multi-line growth is unchanged and the buttons still ride the bottom edge.
 
 ### Fixed
 

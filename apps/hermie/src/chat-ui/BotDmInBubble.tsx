@@ -85,7 +85,20 @@ export function BotDmInBubble({
   const recipe = theme.bubbles[variant]
 
   return (
-    <Bubble grouped={grouped} side="other" tail={tail} testID={`bot-dm-in-${item.id}`} variant={variant}>
+    <Bubble
+      grouped={grouped}
+      meta={
+        <MetaLine
+          {...(answered ? { marker: chatStrings.botDm.answered } : {})}
+          testID={`bot-dm-in-meta-${item.id}`}
+          time={time}
+        />
+      }
+      side="other"
+      tail={tail}
+      testID={`bot-dm-in-${item.id}`}
+      variant={variant}
+    >
       {grouped ? null : (
         <View style={{ gap: 1, marginBottom: theme.space.xs }} testID={`bot-dm-in-header-${item.id}`}>
           <Text color="accentText" variant="micro">
@@ -116,12 +129,6 @@ export function BotDmInBubble({
           text={item.text}
         />
       </Fold>
-
-      <MetaLine
-        {...(answered ? { marker: chatStrings.botDm.answered } : {})}
-        testID={`bot-dm-in-meta-${item.id}`}
-        time={time}
-      />
     </Bubble>
   )
 }

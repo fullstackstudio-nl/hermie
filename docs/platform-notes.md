@@ -3368,3 +3368,62 @@ whatever is under the coordinate at the moment it arrives, so a tap meant to
 dismiss the keyboard opened a tool card instead; and the back chevron did not
 respond while the keyboard was up. Relaunching with a different `--hermieOpen` is
 cheaper than navigating, and that is what the final list shot was taken with.
+
+## Two measurements from the WhatsApp comparison pass (2026-09-20, later)
+
+### A hugging box cannot also wrap: Yoga sizes it from the first pass
+
+The clock that sits on the end of a bubble's last line was built the obvious way
+first — one `flexDirection: 'row'` with `flexWrap: 'wrap'`, the body and the
+clock as its two children. It fits, the clock sits at the end of the line; it
+does not, Yoga moves it to the next line. That is exactly the rule, and it is
+wrong on a device.
+
+Inside a box that HUGS its content — which a bubble does, by having a `maxWidth`
+and no width — the wrapping container reported the height of ONE line while
+laying two out. The clock was drawn below the bubble's bottom padding edge and
+the bubble's own `overflow: 'hidden'` cut it in half. Photographed on an iPhone
+18 Pro (iOS 27, RN 0.81) at a 402pt window: the bubble measured 48pt tall for a
+25pt text line plus 20pt of padding, with the clock's glyphs straddling the
+bottom edge.
+
+Three variants of the same idea behaved identically, so it is the interaction
+and not the details: `alignItems: 'flex-end'` replaced by the default stretch,
+`alignContent: 'flex-start'` stated explicitly, and `flexGrow: 1` on the clock's
+slot replaced by `marginLeft: 'auto'`. What works is not to wrap at all — measure
+the body and the clock with `onLayout`, give the content column a `minWidth` of
+`body + gap + clock` when the two fit, and lift the clock by its own height onto
+the body's last line. The body's own measurement is taken on a view INSIDE the
+column, so the number that decides is never changed by the decision and there is
+nothing to oscillate at the boundary.
+
+### What iOS adds at the top of a multiline field: 2pt
+
+A multiline `TextInput` is a `UITextView`, and it lays its text out from the top
+of its container rather than centring it — so a field with a `minHeight` larger
+than its content puts all of the slack BELOW the first line, which is why the
+composer's placeholder sat high in its pill.
+
+Measured off a 3x screenshot of the composer on an iPhone 18 Pro rather than
+assumed, by counting pixels between the pill's inner edges and the placeholder's
+ink:
+
+| measurement                | pixels | points |
+| -------------------------- | ------ | ------ |
+| pill inner height          | 120    | 40.00  |
+| ink (cap top to descender) | 46     | 15.33  |
+| gap above the ink          | 42     | 14.00  |
+| gap below the ink          | 33     | 11.00  |
+
+The ink is not symmetric in its own line box — `Message` has a descender and San
+Francisco's ascent is far larger than its descent — so the 14-against-11 is the
+FONT, not the layout. Reconstructing the 22pt line box from the metrics (cap top
+sits 4.9pt into it) puts it at 9.1pt from the pill's top and 8.9pt from its
+bottom: centred, to within a rounding error.
+
+Those 9pt are `4` (the field's glass padding) + `3` (the style's `paddingTop`) +
+`2` (the platform's own inset) above, against `4 + 5` below — which is what
+`COMPOSER_IOS_TOP_INSET = 2` in `src/chat-ui/Composer.tsx` is, and the reason the
+style's two paddings are deliberately NOT equal. The pill's 40pt is
+`COMPOSER_LINE_HEIGHT + 2 × COMPOSER_FIELD_INSET` exactly, with no `minHeight`
+involved anywhere.

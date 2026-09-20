@@ -471,6 +471,13 @@ const TranscriptRow = memo(
 
 /** The gap a row opens above itself. Speech rhythm, or §6.6's ledger one. */
 function gapAbove(layout: RowLayout): number {
+  // A date stamp owns the boundary it opens: it carries the author-change gap
+  // above it and 4pt below, and a row margin stacked on top of that is 48pt of
+  // nothing between two days.
+  if (layout.dateStamp) {
+    return 0
+  }
+
   return layout.grouped ? BUBBLE_GAP.grouped : layout.ledgerRun ? DM_LINE_GAP : BUBBLE_GAP.separate
 }
 

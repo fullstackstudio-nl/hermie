@@ -19,6 +19,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StyleSheet,
   type TextInputKeyPressEventData,
   type TextInputSelectionChangeEventData,
   TextInput,
@@ -120,6 +121,60 @@ export const COMPOSER_FIELD_INSET = 4
 export const COMPOSER_LINE_HEIGHT = 32
 
 /**
+ * The leading the field's own text takes.
+ *
+ * 22, not the body's 25. 25 is a READING leading — chosen so that paragraphs of a
+ * reply breathe — and a composer is one line at a time; 22 is the leading a control
+ * gets. It is also the number that makes the vertical padding below a WHOLE point,
+ * `(32 − 22) / 2`, which matters more than it sounds: the Mac renders this build
+ * scaled, so a half-point more space above a line of text than below it is a
+ * visibly off-centre placeholder rather than a rounding detail.
+ *
+ * Stating it at all is the point. Without an explicit leading the field's line box
+ * is whatever the platform's font metrics produce — about 20.3pt for 17pt San
+ * Francisco, and something else on Android — so the padding that was supposed to
+ * centre one line was centring a box nobody had measured.
+ */
+export const COMPOSER_TEXT_LINE_HEIGHT = 22
+
+/**
+ * What iOS adds at the TOP of a MULTILINE field, over and above the padding asked
+ * for.
+ *
+ * A multiline `TextInput` is a `UITextView`, and a `UITextView` lays its text out
+ * from the top of its container rather than centring it in the box — so on a field
+ * with a `minHeight` the platform's own container inset lands entirely above the
+ * first line and the single-line placeholder sits low in the pill. That is the
+ * owner's report, and it is why the vertical padding here is not symmetric in the
+ * STYLE: the visible gaps are what have to match, and the style has to compensate
+ * for the inset to make them.
+ *
+ * Measured on the iOS 27 simulator during the 2026-09-20 pass — see
+ * `docs/platform-notes.md`. A number rather than a guess, and zero would be a
+ * perfectly good answer for a platform that adds nothing.
+ */
+export const COMPOSER_IOS_TOP_INSET = 2
+
+/**
+ * Symmetric vertical padding for ONE line in the field.
+ *
+ * `(field height − line height) / 2` on both sides, with the platform's own top
+ * inset taken off the top so that what a reader SEES is even. The field still grows:
+ * these are paddings, not a height, so a second line makes the pill taller by
+ * exactly one leading and the buttons beside it stay on its bottom edge
+ * (`alignItems: 'flex-end'`).
+ *
+ * A pure function because the assertion is arithmetic — `paddingTop + inset ===
+ * paddingBottom` — and arithmetic asserted against a rendered style is the version
+ * of this test that passed while the placeholder was visibly low.
+ */
+export function composerFieldPadding(iosTopInset: number): { paddingBottom: number; paddingTop: number } {
+  const even = (COMPOSER_LINE_HEIGHT - COMPOSER_TEXT_LINE_HEIGHT) / 2
+
+  return { paddingBottom: even, paddingTop: Math.max(0, even - iosTopInset) }
+}
+
+/**
  * The round controls flanking the field.
  *
  * A Mac window is the wide layout, so it takes the 38pt control; everything else
@@ -130,6 +185,16 @@ export const COMPOSER_ROUND_SIZE = RUNS_ON_MAC ? CONTROL_SIZE.regular : CONTROL_
 
 /** Half the single-line field height. See the note above. */
 export const COMPOSER_FIELD_RADIUS = (COMPOSER_LINE_HEIGHT + 2 * COMPOSER_FIELD_INSET) / 2
+
+/**
+ * How much composer the attach POPOVER needs before it stops being the right shape.
+ *
+ * Two round buttons, their labels, the popover's own padding and the gap between
+ * them, plus enough composer left over that the popover reads as anchored to one end
+ * of it rather than as filling it. Below this the stacked list is the honest answer —
+ * which is the owner's own allowance for the phone.
+ */
+export const ATTACH_POPOVER_MIN_WIDTH = 260
 
 function slashPrefix(text: string): string | null {
   // Only a leading slash opens the popover — `/` in the middle of a sentence is
@@ -198,6 +263,15 @@ export function Composer({
    * move the dead air.
    */
   const [menuOpen, setMenuOpen] = useState(false)
+  /**
+   * The composer's own width, for the popover-or-list decision.
+   *
+   * Measured rather than read off the window: on the wide layout the composer IS the
+   * chat column, whose width a collapsed sidebar and an open sheet both change, and
+   * a popover that fits the window can still not fit the column. Nothing depends on
+   * it before the first layout pass, because the menu only exists after a tap.
+   */
+  const [rowWidth, setRowWidth] = useState(0)
 
   /**
    * Close the menu once the picker has been and gone.
@@ -442,6 +516,18 @@ export function Composer({
 
   const round = COMPOSER_ROUND_SIZE
 
+  /**
+   * Popover or list.
+   *
+   * Two round buttons with a label under each need about `ATTACH_POPOVER_MIN_WIDTH`
+   * of composer to sit in without the labels having to shrink. Below that the old
+   * stacked rows are the honest answer rather than a squeezed popover — the owner's
+   * own allowance for the phone. It is the COMPOSER's width that decides, not the
+   * window's: on the wide layout the composer is the chat column, which a collapsed
+   * sidebar and an open sheet both change.
+   */
+  const menuLayout = rowWidth > 0 && rowWidth < ATTACH_POPOVER_MIN_WIDTH ? 'list' : 'popover'
+
   return (
     // Without `behavior` a `KeyboardAvoidingView` is a plain `View`, which is
     // exactly what the composer wants inside a screen that already has one.
@@ -483,7 +569,19 @@ export function Composer({
 
       {menuVisible ? (
         <View style={{ paddingHorizontal: theme.space.md }}>
-          <AttachMenu choices={choices} onChoose={choose} />
+          <AttachMenu
+            choices={choices}
+            layout={menuLayout}
+            onChoose={choose}
+            /*
+              The popover's leading edge and the row's leading edge are the same
+              (both are inside this padding), so the `+`'s centre is half its own
+              width in — which makes the pointer's tip land on the button rather
+              than near it. The composer owns this number because the composer owns
+              the button; the popover would have to guess.
+            */
+            pointerOffset={round / 2}
+          />
         </View>
       ) : null}
 
@@ -549,7 +647,11 @@ export function Composer({
         </ScrollView>
       ) : null}
 
-      <View style={{ paddingBottom: theme.space.sm, paddingHorizontal: theme.space.md, paddingTop: theme.space.sm }}>
+      <View
+        onLayout={event => setRowWidth(event.nativeEvent.layout.width)}
+        style={{ paddingBottom: theme.space.sm, paddingHorizontal: theme.space.md, paddingTop: theme.space.sm }}
+        testID="composer-row"
+      >
         {/*
           Three separate controls, not one box: a round `+`, the pill field, and
           the round send. `GlassGroup` is what lets iOS 26 merge them where they
@@ -610,13 +712,16 @@ export function Composer({
                 color: theme.colors.text,
                 flex: 1,
                 fontSize: theme.type.body.fontSize,
+                // An explicit leading, so the box the padding centres is a box
+                // this app chose rather than one the platform's font metrics
+                // happened to produce. See `COMPOSER_TEXT_LINE_HEIGHT`.
+                lineHeight: COMPOSER_TEXT_LINE_HEIGHT,
                 maxHeight: 132,
-                minHeight: COMPOSER_LINE_HEIGHT,
-                // Centres one line of 17pt text in the 32pt line box. iOS adds
-                // its own inset to a multiline field, which is why the two
-                // numbers differ.
-                paddingBottom: Platform.OS === 'ios' ? 7 : 4,
-                paddingTop: Platform.OS === 'ios' ? 7 : 4
+                // No `minHeight`: the padding below already makes one line exactly
+                // `COMPOSER_LINE_HEIGHT` tall, and a minimum ON TOP of that is a box
+                // taller than its content — which on iOS a multiline field fills
+                // from the top, leaving the placeholder high and the gap below it.
+                ...composerFieldPadding(Platform.OS === 'ios' ? COMPOSER_IOS_TOP_INSET : 0)
               }}
               submitBehavior={submitBehavior}
               testID="composer-input"
@@ -684,6 +789,31 @@ export function Composer({
         ) : null}
 
         {queuedText ? <QueuedChip testID="composer-queued" text={queuedText} /> : null}
+
+        {/*
+          Outside tap.
+
+          A popover is dismissed by a tap that is not on it, and the taps that reach
+          this composer are the field, the tray and the three controls — so the
+          catcher covers the row the popover stands on, the popover itself being
+          above it. The first tap dismisses and does nothing else, which is what a
+          popover does everywhere.
+
+          It does NOT reach the transcript above: the menu is the composer's own
+          state and a screen-wide catcher would mean lifting it to `ChatScreen`. The
+          three dismissals that DO work — this, Escape (registered last, so it beats
+          the panel's), and the `+` again — are what the reader has; `design/README.md`
+          records the gap.
+        */}
+        {menuVisible ? (
+          <Pressable
+            accessibilityLabel={chatStrings.composer.dismissAttach}
+            accessibilityRole="button"
+            onPress={() => setMenuOpen(false)}
+            style={StyleSheet.absoluteFill}
+            testID="composer-attach-dismiss"
+          />
+        ) : null}
       </View>
     </KeyboardAvoidingView>
   )

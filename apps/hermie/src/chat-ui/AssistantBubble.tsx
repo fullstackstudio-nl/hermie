@@ -143,6 +143,12 @@ export function AssistantBubble({
       {hasBody || item.streaming ? (
         <Bubble
           grouped={grouped}
+          /*
+            Every reply carries its clock, on the last line of its body. Nothing
+            while the turn is still only dots: a timestamp beside a bubble that has
+            said nothing yet is a time for an event that has not happened.
+          */
+          {...(hasBody ? { meta: <MetaLine testID={`assistant-meta-${item.id}`} time={time} /> } : {})}
           side="other"
           // An interim note is mid-turn commentary, not the answer: the design
           // mutes it rather than giving it a different shape. A reply addressed at
@@ -180,16 +186,6 @@ export function AssistantBubble({
             // instead of text — never an empty box with a timestamp in it.
             <TypingDots testID={`assistant-typing-${item.id}`} />
           )}
-
-          {/*
-            One clock per RUN, on the bubble that ends it. Four consecutive
-            replies from one bot are one turn as far as a reader is concerned, and
-            a timestamp inside each of them is three repetitions of a fact that
-            has not changed — it is also what stopped the run from reading as one
-            block. The tail marks the same bubble, so the clock and the tail land
-            together, which is where the mockup puts both.
-          */}
-          {hasBody && tail ? <MetaLine testID={`assistant-meta-${item.id}`} time={time} /> : null}
         </Bubble>
       ) : null}
 

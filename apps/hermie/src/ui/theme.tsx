@@ -116,6 +116,7 @@ function buildTheme(
   reduceMotion: boolean
 ): Theme {
   const dark = scheme === 'dark'
+  const wallpaper = WALLPAPERS[wallpaperName][scheme]
 
   return {
     scheme,
@@ -125,7 +126,7 @@ function buildTheme(
     bubbles: dark ? darkBubbles : lightBubbles,
     presence: dark ? darkPresence : lightPresence,
     shadows: dark ? darkShadows : lightShadows,
-    wallpaper: WALLPAPERS[wallpaperName][scheme],
+    wallpaper,
     wallpaperName,
     space,
     radii,
@@ -140,7 +141,18 @@ function buildTheme(
     okSoft: OK_SOFT[scheme],
     reduceTransparency,
     reduceMotion,
-    accent: name => resolveAccent(name ?? 'default', scheme)
+    /*
+      "Default" is the WALLPAPER's accent where the wallpaper names one, and the
+      stock blue otherwise.
+
+      A wallpaper is the one setting a reader picks that is meant to change the whole
+      composition, and the outgoing bubble is the largest saturated area in it — so a
+      desaturated wallpaper under the stock blue bubble is a grey window with a blue
+      stripe down one side, which is not the thing that was chosen. A chat whose
+      colour the reader picked is untouched: that choice is about the conversation,
+      not about the window it is in, and `name` arriving here at all is what says so.
+    */
+    accent: name => resolveAccent(name ?? wallpaper.accent ?? 'default', scheme)
   }
 }
 

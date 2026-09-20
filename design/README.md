@@ -28,6 +28,50 @@ a decision, not a shortfall; if the mockup should change instead, change it and 
   the owner reported; see the 2026-09-20 section of docs/platform-notes.md. Visually identical,
   including the gap above it.
 
+- **The clock is placed per BLOCK, not per rendered line.** The rule is WhatsApp's: the time sits at
+  the end of the body's last line, and takes a right-aligned line of its own when that line has no
+  room. What decides here is whether the whole body BOX fits beside the clock, which is the same
+  answer for a one-line message (inline) and for a body that wrapped (its own line) and a different
+  one only for a two-line body whose second line happens to be short — that one gets its own line
+  too. The width of a rendered line is a fact only the text layout engine has, and neither React
+  Native nor Yoga reports it; the alternative is a hidden spacer injected into the last text run,
+  which is not possible through a Markdown renderer that owns its own blocks.
+
+  It is also MEASURED rather than wrapped. A `flexWrap: 'wrap'` row is the obvious construction and
+  it is wrong on a device: inside a box that hugs its content, Yoga sizes the wrapping container from
+  its first pass and reports one line's height while laying two out, so the clock was drawn below the
+  bubble's edge and cut in half by the bubble's own `overflow`. Photographed on an iPhone 18 Pro
+  (iOS 27) — see the 2026-09-20 section of docs/platform-notes.md.
+
+- **A run's tail-side bottom corner is tucked on every bubble, not only on the tailed one.** §6.1
+  reads as though the small corner belongs to the tail. It belongs to the SIDE: a bubble mid-run has
+  another bubble under that corner, and giving it the full radius put a 16pt arc between two bubbles
+  6pt apart, which is what stopped a run from reading as one block. The tailed bubble's corner is
+  unchanged; the ones above it now match it.
+
+- **A date stamp is centred, not indented to the bubble's text.** It takes the eyebrow's rhythm — the
+  author-change gap above, 4pt below, `micro` muted — but not its alignment. A day boundary belongs
+  to the whole column rather than to the message under it, which is where WhatsApp puts it too, and a
+  left-aligned stamp reads as a label on the next bubble.
+
+- **The `Writer · bot` chip stays INSIDE the incoming DM bubble and keeps its accent.** It takes the
+  eyebrow's spacing and type, but it is not muted: §6.6 makes the violet identity non-decorative —
+  this is a `role:user` row that is not the human speaking — and a muted chip loses exactly the thing
+  it exists to say.
+
+- **Slate does not carry its own elevation ladder.** The wallpaper's panels, cards and controls are
+  the glass recipe composited over its base, which is how every surface in this app gets its colour:
+  `panel` over `#3B4552` lands around `#434D5A`, a card around `#4B5563`. The ladder in `tokens.ts`
+  is the OPAQUE fallback — Android, Reduce Transparency, a test renderer — and it is scheme-wide, so
+  a Slate window under Reduce Transparency falls back to the shared blue-slate rungs. Making the
+  ladder per-wallpaper would also take it out of reach of `npm run contrast:check`, which reads the
+  scheme-wide tokens.
+
+- **The attach popover does not dismiss on a tap in the TRANSCRIPT.** Escape, the `+` again, and a
+  tap anywhere in the composer all close it. A tap on the conversation above does not, because the
+  menu is the composer's own state and a screen-wide catcher means lifting that state to
+  `ChatScreen` — worth doing, not done here.
+
 - **The bubble tail is drawn BEHIND the bubble, not inside it.** §6.1 says the tail is an inline SVG
   child of the bubble, absolutely positioned at its bottom corner. It is a sibling rendered first
   instead, so the bubble's own fill covers the overlapping part. Drawn on top, the tail's flat colour

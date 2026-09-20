@@ -11,9 +11,11 @@ import { strings } from '../i18n/strings'
 import { useSafeAreaInsets } from '../platform/safe-area'
 import { useChatLayoutStore } from '../store/chat-layout'
 import { GlassSurface, Wallpaper } from '../ui/glass'
+import { useTheme } from '../ui/theme'
 import { useShortcut } from '../ui/useShortcut'
 import { SIDEBAR_RAIL_WIDTH, WINDOW_GAP } from '../ui/tokens'
-import { OverlayPanel } from './OverlayPanel'
+import { OverlayPanel, type PanelFrame } from './OverlayPanel'
+import { PanelScrim } from './PanelScrim'
 import { SidebarOverlay } from './SidebarOverlay'
 import { useSidebarState, useSidebarWidth } from './useLayoutMode'
 
@@ -61,6 +63,7 @@ import { useSidebarState, useSidebarWidth } from './useLayoutMode'
  * action (`platform/desktop-shortcuts`), so there is nothing to keep in step.
  */
 export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
+  const theme = useTheme()
   const insets = useSafeAreaInsets()
   const sidebar = useSidebarWidth()
   const { collapsed, overlays } = useSidebarState()
@@ -72,6 +75,9 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
   // Showing the list temporarily is a thing this WINDOW is doing, not a thing the
   // owner has decided about their list, so it never reaches the store.
   const [listOverlay, setListOverlay] = useState(false)
+  // The content panel's own box, for the overlay that has to be exactly it.
+  const [contentFrame, setContentFrame] = useState<PanelFrame | undefined>(undefined)
+  const overlayOpen = section !== null
 
   const openBot = useCallback((name: string, options?: OpenChatOptions) => {
     setSelectedBot(name)
@@ -175,6 +181,7 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
         */}
         <GlassSurface
           contentStyle={{ flex: 1 }}
+          radius={theme.radii.panel}
           style={{ width: collapsed ? SIDEBAR_RAIL_WIDTH : sidebar }}
           testID="shell-sidebar"
           variant="panel"
@@ -198,10 +205,38 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
           ) : (
             list
           )}
+
+          {/*
+            The sidebar is dimmed too, and not interactive while an overlay is up.
+
+            It used to be deliberately outside the scrim — "a different chat is one
+            tap away while Settings is open" — and the owner's answer to that was
+            that a bright, clickable list beside a dimmed chat makes the dim mean
+            nothing at all. Consulting Settings is one errand; the list is where you
+            go when it is finished, which is one Escape away.
+          */}
+          <PanelScrim
+            onPress={() => setSection(null)}
+            open={overlayOpen}
+            radius={theme.radii.panel}
+            testID="overlay-scrim-sidebar"
+          />
         </GlassSurface>
 
         <View style={{ flex: 1, minWidth: 0 }} testID="shell-content">
-          <GlassSurface contentStyle={{ flex: 1 }} style={{ flex: 1 }} variant="panel">
+          <GlassSurface
+            contentStyle={{ flex: 1 }}
+            /*
+              Measured for the overlay, which has to be this panel's frame and not
+              an arithmetic guess at it from the window's insets. See `OverlayPanel`
+              — the guess was visibly wrong at the bottom of a Mac window.
+            */
+            onLayout={event => setContentFrame(event.nativeEvent.layout)}
+            radius={theme.radii.panel}
+            style={{ flex: 1 }}
+            testID="shell-content-panel"
+            variant="panel"
+          >
             {/*
               A dead session is not a chat problem and must not read as one, so
               it takes the whole column rather than sitting under a chat error.
@@ -226,9 +261,27 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
               onOpenCron={openCron}
               onToggleSidebar={collapsed ? undefined : toggleSidebar}
             />
+
+            {/*
+              The chat's own dim, the last child of the chat panel so it covers the
+              header too. Tapping it closes one level, which is the answer Escape
+              gives — `overlay-scrim` keeps its name because it is still the scrim a
+              reader taps to dismiss the panel.
+            */}
+            <PanelScrim
+              onPress={() => setSection(null)}
+              open={overlayOpen}
+              radius={theme.radii.panel}
+              testID="overlay-scrim"
+            />
           </GlassSurface>
 
-          <OverlayPanel onClose={() => setSection(null)} title={titleFor(section)} visible={section !== null}>
+          <OverlayPanel
+            {...(contentFrame ? { frame: contentFrame } : {})}
+            onClose={() => setSection(null)}
+            title={titleFor(section)}
+            visible={overlayOpen}
+          >
             {section === 'activity' ? <ActivityScreen onOpenBot={openBot} /> : null}
             {section === 'cron' ? <CronScreen {...(cronJobId ? { initialJobId: cronJobId } : {})} /> : null}
             {section === 'settings' ? (

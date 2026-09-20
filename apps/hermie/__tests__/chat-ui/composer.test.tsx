@@ -2,14 +2,18 @@
  * The composer: send, stop, the slash popover, and the attachment tray.
  */
 import { act, fireEvent, screen } from '@testing-library/react-native'
-import { StyleSheet } from 'react-native'
+import { Platform, StyleSheet } from 'react-native'
 
 import { Composer } from '../../src/chat-ui'
 import {
+  ATTACH_POPOVER_MIN_WIDTH,
   COMPOSER_FIELD_INSET,
   COMPOSER_FIELD_RADIUS,
+  composerFieldPadding,
+  COMPOSER_IOS_TOP_INSET,
   COMPOSER_LINE_HEIGHT,
-  COMPOSER_ROUND_SIZE
+  COMPOSER_ROUND_SIZE,
+  COMPOSER_TEXT_LINE_HEIGHT
 } from '../../src/chat-ui/Composer'
 import { renderScreen } from '../support/render'
 
@@ -274,9 +278,50 @@ describe('the composer row', () => {
 
     // The input is the only thing allowed to grow; the round controls ride the
     // bottom line rather than stretching with it.
-    expect(styleOf('composer-input').minHeight).toBe(COMPOSER_LINE_HEIGHT)
     expect(styleOf('composer-input').maxHeight).toBeGreaterThan(COMPOSER_LINE_HEIGHT)
     expect(styleOf('composer-send').height).toBe(COMPOSER_ROUND_SIZE)
+  })
+
+  /**
+   * One line, vertically centred — and why the field has no `minHeight` any more.
+   *
+   * A `minHeight` made the box taller than its content, and an iOS multiline field
+   * lays its text out from the TOP of a box like that: the placeholder sat high with
+   * the slack below it, which is what the owner reported. The height of one line now
+   * comes from the leading plus the padding, so there is no slack for the platform to
+   * put anywhere.
+   */
+  it('centres one line in the pill from an explicit leading, not from a minimum height', () => {
+    renderComposer({ value: '' })
+
+    const style = styleOf('composer-input') as {
+      lineHeight?: number
+      minHeight?: number
+      paddingBottom?: number
+      paddingTop?: number
+    }
+
+    expect(style.lineHeight).toBe(COMPOSER_TEXT_LINE_HEIGHT)
+    expect(style.minHeight).toBeUndefined()
+
+    // Leading plus both paddings IS the single-line field height, so the pill is a
+    // true pill at one line without anything having to be a minimum.
+    const inset = Platform.OS === 'ios' ? COMPOSER_IOS_TOP_INSET : 0
+
+    expect(COMPOSER_TEXT_LINE_HEIGHT + (style.paddingTop ?? 0) + inset + (style.paddingBottom ?? 0)).toBe(
+      COMPOSER_LINE_HEIGHT
+    )
+  })
+
+  it('leaves the two visible gaps equal, with the platform’s own inset taken off the top', () => {
+    // The arithmetic, stated where it is decided. `paddingTop` is deliberately NOT
+    // `paddingBottom` on iOS: the platform adds its own space above the first line,
+    // and what has to be symmetric is what a reader sees.
+    expect(composerFieldPadding(0)).toEqual({ paddingBottom: 5, paddingTop: 5 })
+    expect(composerFieldPadding(2)).toEqual({ paddingBottom: 5, paddingTop: 3 })
+
+    // …and never negative, however large a platform's inset turns out to be.
+    expect(composerFieldPadding(99).paddingTop).toBe(0)
   })
 
   it('keeps the stop button on exactly the same geometry', () => {
@@ -502,5 +547,121 @@ describe('the Composer and Escape', () => {
     // With the popover gone the turn is next in line.
     pressEscape()
     expect(handlers.onStop).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * The attach menu as a POPOVER.
+ *
+ * It was a list of two rows in a card above the composer, and the owner's note was
+ * that nothing in it said which control had opened it. WhatsApp's answer is a
+ * popover with a pointer at the button and the choices as round icon buttons with
+ * their labels underneath — so the three facts asserted here are the pointer's
+ * existence, the pointer's POSITION (a pointer a few points off its anchor reads as
+ * a rendering fault, which is worse than none), and that a choice is a drawn icon
+ * rather than a row of text.
+ */
+describe('the attach popover', () => {
+  const hidden = { includeHiddenElements: true } as const
+
+  const pressEscape = () =>
+    act(() => {
+      for (const listener of [...mockEscapeListeners]) {
+        listener()
+      }
+    })
+
+  const openMenu = (props: Record<string, unknown> = {}) => {
+    const handlers = renderComposer(props)
+
+    fireEvent.press(screen.getByTestId('composer-attach'))
+
+    return handlers
+  }
+
+  it('points at the “+” it belongs to, and at its centre', () => {
+    openMenu()
+
+    const pointer = StyleSheet.flatten(
+      screen.getByTestId('composer-attach-menu-pointer', hidden).props.style as never
+    ) as { bottom?: number; left?: number; width?: number }
+
+    // Below the card, not inside it: the shape escapes the popover the way the
+    // bubble's tail escapes the bubble.
+    expect(pointer.bottom).toBeLessThan(0)
+
+    // The tip lands on the button's centre. `left` is the tip less half the shape,
+    // so tip = left + width / 2 = half the round control.
+    expect((pointer.left ?? 0) + (pointer.width ?? 0) / 2).toBe(COMPOSER_ROUND_SIZE / 2)
+  })
+
+  it('draws each choice as an icon with its label underneath, not as a row of text', () => {
+    openMenu()
+
+    // A drawn mark, per choice — not a glyph, not a row.
+    expect(screen.getByTestId('composer-attach-menu-photo')).toBeTruthy()
+    expect(screen.getByTestId('composer-attach-menu-file')).toBeTruthy()
+    expect(screen.getByText('Photo library')).toBeTruthy()
+    expect(screen.getByText('Choose file')).toBeTruthy()
+
+    // The popover is a ROW of choices; a column of two is the list layout.
+    const inner = StyleSheet.flatten(screen.getByTestId('composer-attach-menu').props.style as never)
+
+    expect(inner).toBeTruthy()
+  })
+
+  it('dismisses on a tap that is not on it', () => {
+    openMenu()
+
+    expect(screen.getByTestId('composer-attach-menu')).toBeTruthy()
+
+    fireEvent.press(screen.getByTestId('composer-attach-dismiss'))
+
+    expect(screen.queryByTestId('composer-attach-menu')).toBeNull()
+  })
+
+  it('dismisses on Escape, before anything else Escape could mean', () => {
+    const handlers = openMenu({ running: true })
+
+    pressEscape()
+
+    expect(screen.queryByTestId('composer-attach-menu')).toBeNull()
+    // Registered last, so the running turn is untouched — the menu is the level the
+    // reader is looking at.
+    expect(handlers.onStop).not.toHaveBeenCalled()
+  })
+
+  it('has no catcher to tap when it is closed', () => {
+    renderComposer()
+
+    expect(screen.queryByTestId('composer-attach-dismiss')).toBeNull()
+  })
+
+  it('falls back to the stacked list where the popover cannot fit', () => {
+    renderComposer()
+
+    // The composer's own width, reported as a phone's with the tray open.
+    fireEvent(screen.getByTestId('composer-row'), 'layout', {
+      nativeEvent: { layout: { width: ATTACH_POPOVER_MIN_WIDTH - 1, height: 60, x: 0, y: 0 } }
+    })
+    fireEvent.press(screen.getByTestId('composer-attach'))
+
+    // The list has no pointer, because it is not anchored to anything.
+    expect(screen.getByTestId('composer-attach-menu')).toBeTruthy()
+    expect(screen.queryByTestId('composer-attach-menu-pointer', hidden)).toBeNull()
+    // …and the choices are still both there and still both work.
+    expect(screen.getByText('Photo library')).toBeTruthy()
+    expect(screen.getByText('Choose file')).toBeTruthy()
+  })
+
+  it('takes the popover at the width a chat column actually has', () => {
+    renderComposer()
+
+    fireEvent(screen.getByTestId('composer-row'), 'layout', {
+      nativeEvent: { layout: { width: ATTACH_POPOVER_MIN_WIDTH, height: 60, x: 0, y: 0 } }
+    })
+    fireEvent.press(screen.getByTestId('composer-attach'))
+
+    expect(screen.getByTestId('composer-attach-menu-pointer', hidden)).toBeTruthy()
   })
 })

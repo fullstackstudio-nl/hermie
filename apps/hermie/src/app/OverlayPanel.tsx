@@ -1,13 +1,32 @@
 /**
  * Activity, Crons and Settings on the wide layout: a glass panel that slides in
- * over the CHAT COLUMN from the right, behind a dimmed scrim, while the sidebar
- * stays put and stays usable.
+ * over the CHAT COLUMN from the right while both panels behind it are dimmed.
  *
- * That last part is the whole point of the shape. These destinations are things
- * you consult, not places you go, and replacing the chat with them costs the
- * reader their place; covering half the window and leaving the list alone does
- * not. The sidebar is outside the scrim on purpose — a different chat is one tap
- * away while Settings is open.
+ * These destinations are things you consult, not places you go, and replacing the
+ * chat with them costs the reader their place; covering it and leaving the list
+ * where it is does not.
+ *
+ * ### It is exactly the content panel's frame
+ *
+ * Not "roughly over the chat column": the same top edge, the same bottom edge, the
+ * same right edge and the same corner radius, so the two read as one panel with a
+ * new face rather than as a card floating on a card. The frame is MEASURED and
+ * handed in (`frame`) rather than derived from the window, which is what it used to
+ * be — window insets plus a gap, guessed at from the outside. On the Mac that guess
+ * was visibly wrong at the bottom: the panel ran past the chat panel's rounded
+ * corner and met the window's own edge, square. A measured box cannot be wrong
+ * about a box it measured.
+ *
+ * Before the first layout there is no measurement, and the fallback is the parent's
+ * own fill — which is the same box, because the panel is a sibling of the content
+ * panel inside a container both of them fill. So the first frame is right too; the
+ * measurement is what keeps it right if that ever stops being true.
+ *
+ * ### The dim is not here
+ *
+ * It is inside each panel it covers (`PanelScrim`), including the sidebar. A single
+ * scrim over the window dimmed the wallpaper GAP — a dark frame around two bright
+ * panels — and left the sidebar undimmed. See `PanelScrim` for the whole argument.
  *
  * ### Escape goes back one level
  *
@@ -26,18 +45,27 @@ import { GlassSurface } from '../ui/glass'
 import { Icon, ICON_SIZE } from '../ui/Icon'
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
-import { OVERLAY_MAX_WIDTH, SCRIM_COLOR, TAP_SLOP, WINDOW_GAP } from '../ui/tokens'
+import { OVERLAY_MAX_WIDTH, TAP_SLOP, WINDOW_GAP } from '../ui/tokens'
 import { useEscapeKey } from '../ui/useEscapeKey'
 import { useHardwareBack } from '../ui/useHardwareBack'
+
+/** A measured box, in the coordinates of the container the panel is placed in. */
+export type PanelFrame = { x: number; y: number; width: number; height: number }
 
 export type OverlayPanelProps = {
   visible: boolean
   title: string
   onClose: () => void
+  /**
+   * The content panel's measured frame, from its own `onLayout`.
+   *
+   * Absent until the first layout pass, which falls back to filling the parent.
+   */
+  frame?: PanelFrame
   children: ReactNode
 }
 
-export function OverlayPanel({ children, onClose, title, visible }: OverlayPanelProps) {
+export function OverlayPanel({ children, frame, onClose, title, visible }: OverlayPanelProps) {
   const theme = useTheme()
   const progress = useRef(new Animated.Value(0)).current
   // Kept mounted for the slide-out, then dropped: a panel that unmounts on the
@@ -80,30 +108,34 @@ export function OverlayPanel({ children, onClose, title, visible }: OverlayPanel
   }
 
   return (
-    <>
-      <Animated.View
-        pointerEvents={visible ? 'auto' : 'none'}
-        style={[StyleSheet.absoluteFill, { backgroundColor: SCRIM_COLOR, opacity: progress }]}
-      >
-        <Pressable
-          accessibilityLabel={strings.layout.close}
-          accessibilityRole="button"
-          onPress={onClose}
-          style={StyleSheet.absoluteFill}
-          testID="overlay-scrim"
-        />
-      </Animated.View>
-
+    /*
+      The measured frame, as a box that does nothing but hold the panel against the
+      content panel's edges. `pointerEvents="box-none"` because this box covers the
+      whole column: the chat's own dim is inside the chat panel and must keep
+      receiving the taps that land beside the 520pt panel.
+    */
+    <View
+      pointerEvents="box-none"
+      style={
+        frame
+          ? { height: frame.height, left: frame.x, position: 'absolute', top: frame.y, width: frame.width }
+          : StyleSheet.absoluteFill
+      }
+      testID="overlay-frame"
+    >
       <Animated.View
         style={{
-          bottom: WINDOW_GAP,
+          // Flush with the content panel on all three edges it shares with it. The
+          // 14pt window gap does NOT appear here: that gap is between the panels
+          // and the window, and this panel's edges are the chat panel's edges.
+          bottom: 0,
           position: 'absolute',
-          right: WINDOW_GAP,
-          top: WINDOW_GAP,
+          right: 0,
+          top: 0,
           transform: [
             {
-              // Off to the right by its own width plus the gap, so no part of it
-              // is left peeking at the window edge.
+              // Off to the right by its own width plus the window gap, so no part
+              // of it is left peeking past the panel it slides out of.
               translateX: progress.interpolate({
                 inputRange: [0, 1],
                 outputRange: [OVERLAY_MAX_WIDTH + WINDOW_GAP, 0]
@@ -117,7 +149,13 @@ export function OverlayPanel({ children, onClose, title, visible }: OverlayPanel
         }}
         testID="overlay-panel"
       >
-        <GlassSurface contentStyle={{ flex: 1 }} style={{ flex: 1 }} variant="panel">
+        {/*
+          The radius is named rather than left to the variant, so that "the same
+          radius as the panel underneath" is a fact in the code and not a
+          coincidence between two lookup tables. `PanelScrim` is handed the same
+          number.
+        */}
+        <GlassSurface contentStyle={{ flex: 1 }} radius={theme.radii.panel} style={{ flex: 1 }} variant="panel">
           <View
             style={{
               alignItems: 'center',
@@ -150,6 +188,6 @@ export function OverlayPanel({ children, onClose, title, visible }: OverlayPanel
           <View style={{ flex: 1 }}>{children}</View>
         </GlassSurface>
       </Animated.View>
-    </>
+    </View>
   )
 }

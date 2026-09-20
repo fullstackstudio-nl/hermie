@@ -9,9 +9,10 @@
  * and what a screenshot of a Mac window cannot.
  *
  * The one thing worth stating about the overlay: it COVERS the chat column, it
- * does not replace it. The sidebar stays outside the scrim and stays usable,
- * which is the whole reason the destinations are an overlay rather than a third
- * pane.
+ * does not replace it — the list stays mounted and in place, so closing the panel
+ * returns the reader to exactly where they were rather than to a rebuilt list. It
+ * is DIMMED while the panel is open, and not interactive; `overlay-frame.test.tsx`
+ * owns that half, and the geometry of the frame with it.
  */
 import { fireEvent, screen, waitFor } from '@testing-library/react-native'
 import { StyleSheet, useWindowDimensions } from 'react-native'
@@ -115,14 +116,15 @@ describe('RegularShell', () => {
 })
 
 describe('the overlay panel', () => {
-  it('slides Activity over the chat column and leaves the sidebar alone', () => {
+  it('slides Activity over the chat column without unmounting anything', () => {
     renderScreen(<RegularShell />)
 
     fireEvent.press(screen.getByTestId('tab-activity'))
 
     expect(screen.getByTestId('overlay-panel')).toBeTruthy()
     expect(screen.getByTestId('activity-list')).toBeTruthy()
-    // Covered, not replaced — and the list underneath is still there to tap.
+    // Covered, not replaced: both columns are still mounted under the dim, so
+    // closing the panel restores the reader's place rather than rebuilding it.
     expect(screen.getByText('Pick a conversation to start reading.')).toBeTruthy()
     expect(screen.getByTestId('bot-row-writer')).toBeTruthy()
   })

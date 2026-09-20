@@ -1,9 +1,16 @@
 /**
  * A speech bubble, and the only thing in the kit allowed to be one.
  *
- * Geometry from `design/liquid-glass-tokens.md` §4 and §6.1: radius 22 with a
- * 6pt sender-side bottom corner, a width cap that is a percentage plus a point
+ * Geometry from `design/liquid-glass-tokens.md` §4 and §6.1: radius 16 with a 4pt
+ * corner down the sender's side, a width cap that is a percentage plus a point
  * cap, and a tail that is ONE path belonging to the bubble.
+ *
+ * **The bubble hugs its content.** Nothing here sets a width, and the wrapper
+ * aligns rather than stretches, so a one-word message is a one-word bubble: its
+ * width is the text, the clock that shares the line with it, and the padding. The
+ * cap is a ceiling and never a size — see `bubble-geometry.test.tsx`, which asserts
+ * exactly that, because "it looked right on my window" is how the opposite
+ * survived a round.
  *
  * Four things here are load-bearing and should not be "tidied":
  *
@@ -32,13 +39,14 @@
  *    wash so its contrast stops being a function of the wallpaper.
  */
 import { LinearGradient } from 'expo-linear-gradient'
-import type { ReactNode } from 'react'
-import { useWindowDimensions, View, type StyleProp, type ViewStyle } from 'react-native'
+import { useCallback, useState, type ReactNode } from 'react'
+import { useWindowDimensions, View, type LayoutChangeEvent, type StyleProp, type ViewStyle } from 'react-native'
 import Svg, { Path } from 'react-native-svg'
 
 import { useTheme } from '../../ui/theme'
 import {
   BUBBLE_MAX,
+  INLINE_META_GAP,
   REGULAR_LAYOUT_MIN_WIDTH,
   TAIL,
   TAIL_OVERLAP,
@@ -68,6 +76,15 @@ export interface BubbleProps {
   /** Continues a run: the top corner on the sender's side tucks in too. */
   grouped?: boolean
   children: ReactNode
+  /**
+   * The clock, and on an outgoing bubble the ticks — placed ON the body's last
+   * line where there is room for it, and on a line of its own where there is not.
+   *
+   * A prop rather than something the caller stacks under `children`, because
+   * "on the last line, or on a line of its own" is one decision about two
+   * siblings and neither sibling can make it alone. See `useInlineMeta` below.
+   */
+  meta?: ReactNode
   style?: StyleProp<ViewStyle>
   testID?: string
 }
@@ -188,6 +205,122 @@ function Tail({ side, color }: { side: 'own' | 'other'; color: string }) {
   )
 }
 
+/**
+ * The four corners, from the two facts a row knows about its neighbours.
+ *
+ * The rule is stated on the TAIL SIDE — right for an outgoing bubble, left for an
+ * incoming one — because that is the side a run is built along:
+ *
+ *  - **Bottom, tail side: always tucked.** Either the tail flows out of it (this
+ *    is the last bubble of the run) or the next bubble of the run sits under it
+ *    (this is an inner corner). Both want the small radius, so `tail` does not
+ *    appear in this table at all any more — it decides whether the SHAPE is drawn,
+ *    not what the corner measures. The previous build gave a mid-run bubble its
+ *    full radius here, which put a 22pt arc between two bubbles 3pt apart: the run
+ *    read as separate lozenges, not as one block.
+ *  - **Top, tail side: tucked only when a bubble of the same run sits above.**
+ *  - **Everything on the far side: full.** That asymmetry IS the silhouette — a
+ *    straight-ish edge down the sender's side and a fully rounded one away from
+ *    it.
+ *
+ * Exported so a test can state the table rather than re-derive it from a rendered
+ * style, and so the four cases can be named per run position.
+ */
+export function bubbleCorners(
+  radii: { bubble: number; tail: number },
+  side: 'own' | 'other',
+  grouped: boolean
+): Pick<
+  ViewStyle,
+  'borderBottomLeftRadius' | 'borderBottomRightRadius' | 'borderTopLeftRadius' | 'borderTopRightRadius'
+> {
+  const own = side === 'own'
+  const topTailSide = grouped ? radii.tail : radii.bubble
+
+  return {
+    borderBottomLeftRadius: own ? radii.bubble : radii.tail,
+    borderBottomRightRadius: own ? radii.tail : radii.bubble,
+    borderTopLeftRadius: own ? radii.bubble : topTailSide,
+    borderTopRightRadius: own ? topTailSide : radii.bubble
+  }
+}
+
+/**
+ * The body and its clock, sharing a line where the line has room.
+ *
+ * ### Why this is measured rather than wrapped
+ *
+ * The obvious construction is a `flexWrap: 'wrap'` row — body and clock fit, the
+ * clock sits at the end of the line; they do not, Yoga moves it to the next one.
+ * It was built that way first and it is wrong on a device: inside a box that HUGS
+ * its content, Yoga sizes a wrapping container from the first pass and reports the
+ * height of one line even when it has laid two out. The clock ended up drawn below
+ * the bubble's bottom edge and clipped in half by the bubble's own `overflow`.
+ * Photographed on an iPhone 18 Pro (iOS 27) before it was replaced — see
+ * `docs/platform-notes.md`. Three variants of the same idea did the same thing,
+ * because it is the interaction between hugging and wrapping and not the details.
+ *
+ * So the decision is made from two measurements instead, and the geometry is plain
+ * flexbox that cannot be measured wrong:
+ *
+ *  - The content column takes a `minWidth` of `body + gap + clock` when the clock
+ *    fits beside the body. That is what reserves the space, and it is why the
+ *    bubble ends up exactly as wide as text-plus-clock-plus-padding.
+ *  - The clock is `alignSelf: 'flex-end'` and is pulled UP by its own height, so it
+ *    lands on the body's last line, at the right-hand end of the reserved space.
+ *  - When it does not fit, both of those are off: no reserved width, no pull, and
+ *    the clock is a right-aligned line of its own inside the bubble — which is the
+ *    second half of the rule, not a fallback.
+ *
+ * **The body's own measurement can never move.** It is taken on a view inside the
+ * column, and only the COLUMN grows — so the number that decides is not changed by
+ * the decision, and there is no oscillation at the boundary.
+ *
+ * What this does NOT do is measure the last RENDERED line. The unit is the body
+ * block: a one-line message takes the inline case and a body that wrapped takes the
+ * own-line case, which are the two the rule names. A two-line body whose second
+ * line happens to be short still gets its own line for the clock, because the width
+ * of that line is a fact only the text layout engine has and it does not report it.
+ * `design/README.md` records that as a deviation.
+ */
+function useInlineMeta(inner: number): {
+  inline: boolean
+  reserve: number
+  lift: number
+  onBody: (event: LayoutChangeEvent) => void
+  onMeta: (event: LayoutChangeEvent) => void
+} {
+  const [body, setBody] = useState(0)
+  const [meta, setMeta] = useState({ height: 0, width: 0 })
+
+  const onBody = useCallback((event: LayoutChangeEvent) => {
+    const { width } = event.nativeEvent.layout
+
+    // Layout fires on every pass; only a real move is worth a render, which in a
+    // virtualised list is the difference between one extra pass per cell and one
+    // per frame.
+    setBody(current => (Math.abs(current - width) < 0.5 ? current : width))
+  }, [])
+
+  const onMeta = useCallback((event: LayoutChangeEvent) => {
+    const { height, width } = event.nativeEvent.layout
+
+    setMeta(current =>
+      Math.abs(current.width - width) < 0.5 && Math.abs(current.height - height) < 0.5 ? current : { height, width }
+    )
+  }, [])
+
+  const inline = body > 0 && meta.width > 0 && body + INLINE_META_GAP + meta.width <= inner
+
+  return {
+    inline,
+    lift: inline ? -meta.height : 0,
+    onBody,
+    onMeta,
+    reserve: inline ? body + INLINE_META_GAP + meta.width : 0
+  }
+}
+
 export function Bubble({
   side,
   variant = 'in',
@@ -195,6 +328,7 @@ export function Bubble({
   tail = true,
   grouped = false,
   children,
+  meta,
   style,
   testID
 }: BubbleProps) {
@@ -204,17 +338,9 @@ export function Bubble({
   const recipe = theme.bubbles[variant]
   const gradient = own ? accent : undefined
   const reading = variant === 'inRead' || variant === 'dmRead'
-
-  // The sender-side bottom corner tucks in so the tail can meet it — but only on
-  // the bubble that HAS a tail. A bubble in the middle of a run keeps its full
-  // radius there, which is what makes the run read as one block.
-  const tuck = tail ? theme.radii.tail : theme.radii.bubble
-  const corners = {
-    borderBottomLeftRadius: own ? theme.radii.bubble : tuck,
-    borderBottomRightRadius: own ? tuck : theme.radii.bubble,
-    borderTopLeftRadius: grouped && !own ? theme.radii.tail : theme.radii.bubble,
-    borderTopRightRadius: grouped && own ? theme.radii.tail : theme.radii.bubble
-  }
+  const corners = bubbleCorners(theme.radii, side, grouped)
+  const paddingX = bubblePaddingX(theme.space, reading)
+  const clock = useInlineMeta(max - paddingX * 2)
 
   const tailColor = own ? (gradient?.bottom ?? theme.accent().bubble.bottom) : recipe.tail
 
@@ -265,12 +391,38 @@ export function Bubble({
         />
 
         <View
-          style={{
-            paddingHorizontal: bubblePaddingX(theme.space, reading),
-            paddingVertical: theme.space.sm + 2
-          }}
+          style={{ paddingHorizontal: paddingX, paddingVertical: theme.space.sm + 2 }}
+          // The padded box, which is where "10 vertical, 14 horizontal" lives. A
+          // test that asserts the bubble's own style asserts the corners and
+          // learns nothing about the inset the text actually gets.
+          testID={testID ? `${testID}-body` : undefined}
         >
-          {children}
+          {meta ? (
+            <View
+              style={{ alignItems: 'flex-start', minWidth: clock.reserve || undefined }}
+              testID={testID ? `${testID}-meta-row` : undefined}
+            >
+              {/*
+                The body's own box, and the thing that is MEASURED. It is separate
+                from the column above it on purpose: the column is what grows to
+                reserve the clock's space, so measuring the column would feed the
+                decision back into itself and oscillate at the boundary.
+              */}
+              <View onLayout={clock.onBody} testID={testID ? `${testID}-content` : undefined}>
+                {children}
+              </View>
+
+              <View
+                onLayout={clock.onMeta}
+                style={{ alignSelf: 'flex-end', marginTop: clock.lift }}
+                testID={testID ? `${testID}-meta-slot` : undefined}
+              >
+                {meta}
+              </View>
+            </View>
+          ) : (
+            children
+          )}
         </View>
       </View>
     </View>

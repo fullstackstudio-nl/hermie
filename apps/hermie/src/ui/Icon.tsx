@@ -48,6 +48,8 @@ export type IconName =
   | 'sidebar'
   | 'search'
   | 'plus'
+  | 'photo'
+  | 'file'
   | 'close'
   | 'chevronLeft'
   | 'chevronRight'
@@ -194,6 +196,41 @@ function Glyph({ color, name, stroke }: { color: string; name: IconName; stroke:
 
     case 'plus':
       return <Line color={color} d="M12 5V19M5 12H19" stroke={stroke} />
+
+    /**
+     * The photo library: a frame with a hill and a sun in it.
+     *
+     * A frame on its own is a frame; the two marks inside are what make it a
+     * PICTURE. The hill is drawn as two straight segments rather than a curve
+     * because at 19pt a curve of this size renders as a slightly wobbly straight
+     * line anyway, and a deliberate fold reads as a landscape.
+     */
+    case 'photo':
+      return (
+        <>
+          <Rect fill="none" height={15} rx={3.4} stroke={color} strokeWidth={stroke} width={17} x={3.5} y={4.5} />
+          <Circle cx={9} cy={9.6} fill="none" r={1.7} stroke={color} strokeWidth={stroke} />
+          <Line color={color} d="M4.4 17.2L9.6 12.6L13 15.6L16.2 13L20.1 16.4" stroke={stroke} />
+        </>
+      )
+
+    /**
+     * A file: a sheet with its corner folded.
+     *
+     * The fold is two strokes and not a filled triangle, so the mark stays a line
+     * drawing at the weight everything else in this set is drawn at.
+     */
+    case 'file':
+      return (
+        <>
+          <Line
+            color={color}
+            d="M13.6 3.6H7.4A2.4 2.4 0 0 0 5 6V18A2.4 2.4 0 0 0 7.4 20.4H16.6A2.4 2.4 0 0 0 19 18V9Z"
+            stroke={stroke}
+          />
+          <Line color={color} d="M13.4 3.8V8.8H18.8" stroke={stroke} />
+        </>
+      )
 
     case 'close':
       return <Line color={color} d="M6.6 6.6L17.4 17.4M17.4 6.6L6.6 17.4" stroke={stroke} />

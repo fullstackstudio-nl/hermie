@@ -827,6 +827,28 @@ function DropLine() {
   )
 }
 
+/**
+ * The search field, and the rule for any field with a leading icon.
+ *
+ * The icon and the placeholder have to sit on ONE centre line, and getting there
+ * takes three things that all have to be said out loud:
+ *
+ *  - **The icon's SLOT is the text line's height, not the mark's size.** An
+ *    `Icon size={15}` with no slot is a 15pt box; the text line beside it is 20pt.
+ *    Two boxes of different heights, both centred in a 44pt row, centre at the same
+ *    y — but only while nothing else moves either of them, which is what the next
+ *    two points are about. Giving the icon the line's own box makes the alignment a
+ *    property of the pair rather than a coincidence of the row.
+ *  - **The line height is explicit.** Without it the field's text box is whatever
+ *    the platform's font metrics make it, which is not the 20pt the icon was sized
+ *    against and differs between iOS and Android.
+ *  - **`paddingVertical: 0`.** iOS adds a vertical inset of its own to a
+ *    `TextInput` on top of whatever the style asks for. That inset is not symmetric,
+ *    and it is the whole reason the placeholder sat a point or two below the
+ *    magnifier: the icon was centred and the text was centred-plus-an-inset. The
+ *    44pt tap target moves to the ROW, where it belongs — it is a property of the
+ *    control, not of the text inside it.
+ */
 function SearchField({
   inputRef,
   onChangeText,
@@ -839,6 +861,9 @@ function SearchField({
   value: string
 }) {
   const theme = useTheme()
+  // One token for the size AND its leading, so the icon's slot and the text's line
+  // box cannot be derived from two different numbers.
+  const line = theme.type.preview
 
   return (
     <View
@@ -852,10 +877,18 @@ function SearchField({
         gap: theme.space.sm,
         marginBottom: theme.space.md,
         marginHorizontal: theme.space.lg,
+        minHeight: CONTROL_MIN_HEIGHT,
         paddingHorizontal: theme.space.md
       }}
+      testID="bots-search-field"
     >
-      <Icon color={theme.colors.textFaint} name="search" size={ICON_SIZE.inline} />
+      <Icon
+        color={theme.colors.textFaint}
+        name="search"
+        size={ICON_SIZE.inline}
+        slot={line.lineHeight}
+        testID="bots-search-icon"
+      />
       <TextInput
         accessibilityLabel={strings.bots.search}
         autoCapitalize="none"
@@ -870,8 +903,9 @@ function SearchField({
         style={{
           color: theme.colors.text,
           flex: 1,
-          fontSize: 15,
-          minHeight: CONTROL_MIN_HEIGHT
+          fontSize: line.fontSize,
+          lineHeight: line.lineHeight,
+          paddingVertical: 0
         }}
         testID="bots-search"
         value={value}

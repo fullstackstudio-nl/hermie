@@ -256,6 +256,14 @@
     radial-gradient(52% 48% at 14% 84%, #DDE2EB, rgba(221,226,235,0) 72%),
     linear-gradient(158deg, #EFF1F5 0%, #DFE3EB 48%, #CFD5E0 100%);
 }
+:root[data-theme="light"][data-wall="slate"]{
+  --wall:
+    radial-gradient(70% 58% at 6% 2%, rgba(255,255,255,.90), rgba(255,255,255,0) 58%),
+    radial-gradient(62% 54% at 84% 8%, #D9DEE6, rgba(217,222,230,0) 72%),
+    radial-gradient(56% 50% at 96% 86%, #C9D1DB, rgba(201,209,219,0) 74%),
+    radial-gradient(52% 48% at 14% 84%, #DCE1E8, rgba(220,225,232,0) 72%),
+    linear-gradient(158deg, #EEF0F3 0%, #DFE3E9 48%, #CED4DC 100%);
+}
 :root[data-theme="dark"][data-wall="blue"]{
   --wall:
     radial-gradient(64% 56% at 78% 6%, #17457F, rgba(23,69,127,0) 72%),
@@ -278,6 +286,32 @@
     radial-gradient(54% 48% at 12% 84%, #262C36, rgba(38,44,54,0) 72%),
     linear-gradient(158deg, #171B22 0%, #12151B 48%, #0D0F14 100%);
 }
+/* Slate is NOT a lighter Graphite: Graphite's dark base is near-black
+   (#171B22 -> #0D0F14) and every panel on it is a pale shape in the dark,
+   while Slate's (#3B4552 -> #2E3640) is about three times the luminance, so
+   the panels sit one step above their background and the whole window reads
+   as one desaturated grey-blue object. Its blooms are hue shifts at the same
+   luminance rather than highlights: the dark ink set is calibrated against a
+   deep wallpaper, and `npm run contrast:check` measures every ink against the
+   BRIGHTEST point of every dark wallpaper, so a bloom above #3B4552 fails. */
+:root[data-theme="dark"][data-wall="slate"]{
+  --wall:
+    radial-gradient(64% 56% at 80% 6%, #39445A, rgba(57,68,90,0) 72%),
+    radial-gradient(58% 52% at 96% 86%, #323B47, rgba(50,59,71,0) 74%),
+    radial-gradient(54% 48% at 12% 84%, #374250, rgba(55,66,80,0) 72%),
+    linear-gradient(158deg, #3B4552 0%, #343D48 48%, #2E3640 100%);
+}
+/* A wallpaper may name its own DEFAULT accent, and Slate does. The outgoing
+   bubble is the largest saturated area in the composition, so a desaturated
+   wallpaper under the stock blue bubble is a grey window with a blue stripe
+   down one side. A chat whose colour the reader picked keeps it. */
+:root[data-wall="slate"] [data-accent="default"],
+:root[data-wall="slate"] .chat:not([data-accent]){
+  --chat-accent:#4F6B96; --chat-accent-text:#3F5A83; --chat-soft:rgba(79,107,150,.13);
+  --chat-out-top:#4F6B96; --chat-out-bot:#3B5476;
+}
+:root[data-theme="dark"][data-wall="slate"] [data-accent="default"],
+:root[data-theme="dark"][data-wall="slate"] .chat:not([data-accent]){ --chat-accent-text:#C6D8F2; }
 
 /* light-theme rungs (the ladder matters most in dark, but the names
    are shared so components never branch on theme) */
@@ -313,6 +347,7 @@
 [data-accent="teal"]    { --chat-accent:#0E7A84; --chat-accent-text:#0A6670; --chat-soft:rgba(14,122,132,.13); --chat-out-top:#14828C; --chat-out-bot:#07606A; }
 [data-accent="green"]   { --chat-accent:#16783C; --chat-accent-text:#12652F; --chat-soft:rgba(22,120,60,.13);  --chat-out-top:#1A8043; --chat-out-bot:#0E5C2E; }
 [data-accent="graphite"]{ --chat-accent:#485468; --chat-accent-text:#3D4859; --chat-soft:rgba(72,84,104,.13);  --chat-out-top:#54607A; --chat-out-bot:#343E52; }
+[data-accent="slate"]   { --chat-accent:#4F6B96; --chat-accent-text:#3F5A83; --chat-soft:rgba(79,107,150,.13); --chat-out-top:#4F6B96; --chat-out-bot:#3B5476; }
 :root[data-theme="dark"] [data-accent="indigo"]  { --chat-accent-text:#CCCDFF; }
 :root[data-theme="dark"] [data-accent="violet"]  { --chat-accent-text:#E0C8FF; }
 :root[data-theme="dark"] [data-accent="magenta"] { --chat-accent-text:#FFC2E2; }
@@ -321,6 +356,7 @@
 :root[data-theme="dark"] [data-accent="teal"]    { --chat-accent-text:#A6E8EE; }
 :root[data-theme="dark"] [data-accent="green"]   { --chat-accent-text:#A8ECBE; }
 :root[data-theme="dark"] [data-accent="graphite"]{ --chat-accent-text:#D2DAE6; }
+:root[data-theme="dark"] [data-accent="slate"]   { --chat-accent-text:#C6D8F2; }
 
 /* ---------- 2. BASE + PAGE CHROME ---------- */
 *,*::before,*::after{ box-sizing:border-box; }
@@ -1057,7 +1093,28 @@ button{ font:inherit; color:inherit; background:none; border:0; margin:0; paddin
 .sheet__acts{ display:grid; gap:var(--s2); }
 .sheet__esc{ margin-top:var(--s3); text-align:center; font:var(--t-meta); font-size:12px; color:var(--text-3); }
 
-/* overlay panel: slides over the chat column, sidebar stays put */
+/* The dim a destination panel lays over what it covers, INSIDE each panel.
+
+   Not one scrim over the window. That shape is wrong twice: it darkens the 14pt
+   wallpaper gap around and between the panels — a dark frame around two bright
+   objects — and, pushed off the sidebar to avoid dimming it, it leaves the list
+   bright and clickable beside a dimmed chat, which makes the dim mean nothing.
+   A child of each panel is the panel's own rounded rectangle, so its corners
+   cannot disagree with the panel's and it cannot reach the gap. The sidebar is
+   not interactive under it; Esc or a tap on either dim closes one level. */
+.panel__dim{
+  position:absolute; inset:0; z-index:19; opacity:0; pointer-events:none;
+  border-radius:inherit; overflow:hidden;
+  background:rgba(8,20,44,.34);
+  transition:opacity var(--dur-base) var(--ease-out);
+}
+.is-over .panel__dim{ opacity:1; pointer-events:auto; }
+
+/* overlay panel: EXACTLY the content panel's frame — same top, same bottom, same
+   right edge, same radius — sliding in from the right. Positioned from that
+   panel rather than from the window: arithmetic off the window's insets put it
+   past the chat panel's rounded bottom corner on a Mac, square against the
+   window's own edge. */
 .over{
   position:absolute; inset:var(--gap-window) var(--gap-window) var(--gap-window) auto;
   width:min(520px, calc(100% - 372px)); z-index:22;
@@ -1216,6 +1273,7 @@ button{ font:inherit; color:inherit; background:none; border:0; margin:0; paddin
       <button type="button" data-wall-set="blue" aria-pressed="true">Blue</button>
       <button type="button" data-wall-set="warm" aria-pressed="false">Warm</button>
       <button type="button" data-wall-set="graphite" aria-pressed="false">Graphite</button>
+      <button type="button" data-wall-set="slate" aria-pressed="false">Slate</button>
     </div>
   </div>
 </header>
@@ -1791,6 +1849,7 @@ Status:     clientTransferProhibited</pre></div>
                 <button type="button" class="sw8" data-accent="teal" aria-pressed="false" aria-label="Teal"></button>
                 <button type="button" class="sw8" data-accent="green" aria-pressed="false" aria-label="Green"></button>
                 <button type="button" class="sw8" data-accent="graphite" aria-pressed="false" aria-label="Graphite"></button>
+                <button type="button" class="sw8" data-accent="slate" aria-pressed="false" aria-label="Slate"></button>
               </div>
               <p class="grp__note" style="padding:0 var(--s4) var(--s3)">Tints the avatar ring, the selected row, the header accent and your outgoing bubbles.</p>
             </div>
@@ -1958,6 +2017,7 @@ Status:     clientTransferProhibited</pre></div>
               Settings
             </span>
           </nav>
+          <div class="panel__dim" data-close-over></div>
         </aside>
 
         <section class="panel chat">
@@ -1998,9 +2058,9 @@ Status:     clientTransferProhibited</pre></div>
             </div>
             <p class="composer__hint">Enter to send · Shift+Enter for a new line</p>
           </div>
+          <div class="panel__dim" data-close-over></div>
         </section>
 
-        <div class="scrim" style="left:372px"></div>
         <aside class="panel over" id="settingsA" role="dialog" aria-label="Settings">
           <header class="over__hd">
             <h3>Settings</h3>
@@ -2363,6 +2423,7 @@ Status:     clientTransferProhibited</pre></div>
               <button type="button" class="sw8" data-accent="teal" aria-label="Teal"></button>
               <button type="button" class="sw8" data-accent="green" aria-label="Green"></button>
               <button type="button" class="sw8" data-accent="graphite" aria-label="Graphite"></button>
+              <button type="button" class="sw8" data-accent="slate" aria-label="Slate"></button>
             </div>
             <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); margin-top:var(--s4)">
               <div class="demo" style="--bubble-max:100%">

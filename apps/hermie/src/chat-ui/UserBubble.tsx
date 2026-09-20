@@ -1,6 +1,7 @@
 /**
  * The human's own turn: right-aligned, the chat's accent gradient, white text,
- * a tail on the last of a run, the clock and — under the last one only — ticks.
+ * a tail on the last of a run, the clock on the body's last line and — on the last
+ * sent message only — ticks beside it.
  *
  * The body is real Markdown, not raw characters. A person who types `**done**` or
  * a path in backticks was writing markup, and the reply beside it renders the
@@ -72,7 +73,21 @@ export function UserBubble({
   const bubble = accent ?? theme.accent().bubble
 
   return (
-    <Bubble accent={bubble} grouped={grouped} side="own" tail={tail} testID={`user-${item.id}`}>
+    <Bubble
+      accent={bubble}
+      grouped={grouped}
+      /*
+        The clock on EVERY bubble, on the body's last line. The ticks still only
+        appear where the engine has a receipt to report — which is the last sent
+        message and nothing else, because a receipt is one fact about the
+        conversation rather than one per message. Painting a tick on an older
+        bubble would be inventing a delivery the gateway never confirmed.
+      */
+      meta={<MetaLine onAccent receipt={receipt} testID={`user-meta-${item.id}`} time={time} />}
+      side="own"
+      tail={tail}
+      testID={`user-${item.id}`}
+    >
       {item.text ? (
         <Markdown
           // White on the gradient. The accent link colour is the bubble's own
@@ -103,14 +118,6 @@ export function UserBubble({
           ))}
         </View>
       ) : null}
-
-      {/*
-        One clock per run, on the bubble that ends it — the same rule the reply
-        side follows. `receipt` keeps it alive independently: the tick is the only
-        thing that says a message left the device, so a bubble carrying one shows
-        its line even mid-run, which is the case where the two facts disagree.
-      */}
-      {tail || receipt ? <MetaLine onAccent receipt={receipt} testID={`user-meta-${item.id}`} time={time} /> : null}
     </Bubble>
   )
 }

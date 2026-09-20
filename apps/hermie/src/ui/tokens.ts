@@ -136,12 +136,26 @@ export const radii = {
   thumb: 14,
   xl: 16,
   card: 18,
-  bubble: 22,
+  /**
+   * A speech bubble's outer corner.
+   *
+   * 16, not the 22 this was: WhatsApp's proportions are a small radius on a tight
+   * bubble, and 22 on a bubble whose content box is 10pt tall leaves the corner
+   * arc taller than the text it surrounds — a one-word message read as a lozenge
+   * rather than as a bubble, which is what the owner was comparing against.
+   */
+  bubble: 16,
   sheet: 28,
   panel: 30,
   pill: 999,
-  /** The sender-side corner a bubble tucks in so its tail can meet it. */
-  tail: 6
+  /**
+   * The tail-side corner: where the tail meets the bubble, and where two bubbles
+   * of one run meet each other.
+   *
+   * One number for both because they are the same corner seen from either end of
+   * a run — see `Bubble`'s corner table.
+   */
+  tail: 4
 } as const
 
 export type TypeStyle = {
@@ -220,7 +234,8 @@ export const BEAD_SIZE = { avatar: 14, inline: 9, legend: 18 } as const
  * than they look like they need to be: they have to clear 4.5:1 on a reading
  * bubble, the lightest surface they ever sit on.
  */
-export type AccentName = 'default' | 'indigo' | 'violet' | 'magenta' | 'red' | 'orange' | 'teal' | 'green' | 'graphite'
+export type AccentName =
+  'default' | 'indigo' | 'violet' | 'magenta' | 'red' | 'orange' | 'teal' | 'green' | 'graphite' | 'slate'
 
 export type AccentSwatch = {
   /** Solid fill: the avatar ring, the swatch itself. */
@@ -276,10 +291,28 @@ export const ACCENTS: Record<AccentName, AccentSwatch> = {
     fill: '#485468',
     text: { light: '#3D4859', dark: '#D2DAE6' },
     bubble: { top: '#54607A', bottom: '#343E52' }
+  },
+  /**
+   * Slate: the Slate wallpaper's own outgoing bubble.
+   *
+   * A desaturated BLUE, which is what makes it a different swatch from Graphite
+   * rather than a second name for it: Graphite is grey with a hint of blue in it
+   * (`#54607A`), and this is blue with most of the blue taken out (`#4F6B96`). Side
+   * by side on the picker they read as two different answers to the same question,
+   * which is the only reason to have both.
+   *
+   * The top stop IS the value the owner sampled, and it is the stop white has to be
+   * readable on — so nothing lighter can be added above it without the contrast
+   * check saying so.
+   */
+  slate: {
+    fill: '#4F6B96',
+    text: { light: '#3F5A83', dark: '#C6D8F2' },
+    bubble: { top: '#4F6B96', bottom: '#3B5476' }
   }
 }
 
-/** Picker order: Default first, then the eight curated colours. */
+/** Picker order: Default first, then the curated colours. */
 export const ACCENT_ORDER: readonly AccentName[] = [
   'default',
   'indigo',
@@ -289,7 +322,8 @@ export const ACCENT_ORDER: readonly AccentName[] = [
   'orange',
   'teal',
   'green',
-  'graphite'
+  'graphite',
+  'slate'
 ]
 
 /** The soft tint a chat's colour lays under a selected row or an icon well. */
@@ -298,7 +332,7 @@ export function accentSoft(name: AccentName, scheme: Scheme): string {
 }
 
 /**
- * Wallpapers: three, each with a light and a dark variant, all gradients.
+ * Wallpapers: four, each with a light and a dark variant, all gradients.
  *
  * No image files — an app that ships wallpaper PNGs ships them at every scale
  * factor for every device. Dark wallpapers are deep but COLOURED; `#000000` is
@@ -308,8 +342,20 @@ export function accentSoft(name: AccentName, scheme: Scheme): string {
  * corner fields the mockup builds from radial gradients; React Native has no
  * radial gradient, so each one is drawn as a large circle of its colour fading
  * out along the diagonal (see `src/ui/glass/Wallpaper.tsx`).
+ *
+ * ### A wallpaper may name its own accent
+ *
+ * `accent` is what "Default" resolves to while that wallpaper is on. It exists for
+ * exactly one reason: a wallpaper is the only setting a reader picks that is
+ * supposed to change the whole COMPOSITION, and the outgoing bubble is the largest
+ * saturated thing in that composition. A desaturated wallpaper with the stock blue
+ * bubble on it is not a desaturated window; it is a grey window with a blue stripe
+ * down one side.
+ *
+ * It only ever replaces the DEFAULT. A chat whose colour the reader chose keeps it,
+ * because that choice is about that conversation and not about the wallpaper.
  */
-export type WallpaperName = 'blue' | 'warm' | 'graphite'
+export type WallpaperName = 'blue' | 'warm' | 'graphite' | 'slate'
 
 export type Bloom = {
   color: string
@@ -324,6 +370,8 @@ export type Bloom = {
 export type WallpaperSpec = {
   base: readonly string[]
   blooms: readonly Bloom[]
+  /** What "Default" resolves to while this wallpaper is on. See the note above. */
+  accent?: AccentName
 }
 
 export const WALLPAPERS: Record<WallpaperName, Record<Scheme, WallpaperSpec>> = {
@@ -386,10 +434,65 @@ export const WALLPAPERS: Record<WallpaperName, Record<Scheme, WallpaperSpec>> = 
         { color: '#262C36', x: 0.12, y: 0.84, size: 1.0, opacity: 1 }
       ]
     }
+  },
+  /**
+   * Slate: the desaturated composition.
+   *
+   * ### Why it is not Graphite
+   *
+   * Graphite was compared first, and it is a different thing. Its dark ramp runs
+   * `#171B22 → #0D0F14`: a near-black wallpaper, where every panel on it is a pale
+   * shape floating in the dark and the contrast between the window and its contents
+   * is the loudest thing on screen. Slate's runs `#3B4552 → #2E3640` — about three
+   * times the luminance — so the panels sit a step above their background rather
+   * than a chasm above it, and the whole window reads as one desaturated grey-blue
+   * object. That is the rendering the owner asked for, and no amount of tuning
+   * Graphite's blooms produces it: the difference is the BASE, and Graphite's base
+   * is the point of Graphite.
+   *
+   * ### Why the panels are not listed here
+   *
+   * They are the glass recipe over this base, which is how every surface in this app
+   * gets its colour: `panel` is a 3–10 % white wash, so over `#3B4552` it composites
+   * to about `#434D5A`, a card to about `#4B5563`, a control higher again. Those are
+   * the values the owner sampled off a desaturated window, and they fall out of the
+   * wallpaper rather than needing a second elevation ladder beside the first. The
+   * ladder in this file is the OPAQUE fallback — Android, Reduce Transparency, a test
+   * renderer — and it is scheme-wide, not per wallpaper; `design/README.md` records
+   * that Slate under Reduce Transparency therefore falls back to the shared rungs.
+   *
+   * ### The ceiling on the blooms is a contrast ceiling
+   *
+   * `npm run contrast:check` measures every ink against the BRIGHTEST point of every
+   * dark wallpaper, and the dark ink set is calibrated against a deep one. `#3B4552`
+   * is already about as bright as the Blue wallpaper's worst bloom, so nothing here
+   * may go above it — the blooms are hue shifts at the same luminance, not
+   * highlights. A brighter bloom does not look better; it fails the check.
+   */
+  slate: {
+    light: {
+      accent: 'slate',
+      base: ['#EEF0F3', '#DFE3E9', '#CED4DC'],
+      blooms: [
+        { color: '#FFFFFF', x: 0.06, y: 0.02, size: 1.3, opacity: 0.9 },
+        { color: '#D9DEE6', x: 0.84, y: 0.08, size: 1.2, opacity: 1 },
+        { color: '#C9D1DB', x: 0.96, y: 0.86, size: 1.05, opacity: 1 },
+        { color: '#DCE1E8', x: 0.14, y: 0.84, size: 1.0, opacity: 1 }
+      ]
+    },
+    dark: {
+      accent: 'slate',
+      base: ['#3B4552', '#343D48', '#2E3640'],
+      blooms: [
+        { color: '#39445A', x: 0.8, y: 0.06, size: 1.2, opacity: 1 },
+        { color: '#323B47', x: 0.96, y: 0.86, size: 1.1, opacity: 1 },
+        { color: '#374250', x: 0.12, y: 0.84, size: 1.0, opacity: 1 }
+      ]
+    }
   }
 }
 
-export const WALLPAPER_ORDER: readonly WallpaperName[] = ['blue', 'warm', 'graphite']
+export const WALLPAPER_ORDER: readonly WallpaperName[] = ['blue', 'warm', 'graphite', 'slate']
 
 export const DEFAULT_WALLPAPER: WallpaperName = 'blue'
 
@@ -637,12 +740,27 @@ export const FOLD_FADE_LINES = 2.5
  * How far apart two bubbles sit: within one sender's run, and between two turns.
  *
  * The ratio is what makes a run read as one block rather than as four separate
- * rounded rectangles — 3pt is "the same person, still talking" and the separate
- * gap is "somebody else now". At 10 the two were close enough that the grouping
- * was hard to see at a glance on a large window; 12 is the scale's own step
- * below `lg` and reads as a turn boundary without opening a hole in the column.
+ * rounded rectangles — the small gap is "the same person, still talking" and the
+ * separate one is "somebody else now".
+ *
+ * Both numbers moved this round, to the proportions the owner was comparing
+ * against. 3pt was too tight to be a gap at all: two bubbles 3pt apart with a
+ * 4pt tucked corner between them read as one bubble with a scratch across it, so
+ * the run lost the thing the gap was for. And 12pt between two TURNS is the same
+ * order of magnitude as the gap inside a run, which is why the grouping was hard
+ * to see at a glance — 6 against 24 is a ratio a reader can resolve without
+ * measuring, and 24 is what an author change needs to read as a paragraph break.
  */
-export const BUBBLE_GAP = { grouped: 3, separate: 12 } as const
+export const BUBBLE_GAP = { grouped: 6, separate: 24 } as const
+
+/**
+ * The gap between a bubble's last text line and the time that sits on it.
+ *
+ * `space.sm`'s number, but its own token: this is a gap between two RUNS OF TEXT
+ * sharing a line, not spacing between blocks, and the two have no reason to move
+ * together. It is also the number a test has to be able to name.
+ */
+export const INLINE_META_GAP = 8
 
 /**
  * Consecutive bot-to-bot lines, from §6.6.

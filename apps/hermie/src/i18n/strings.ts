@@ -255,7 +255,8 @@ export const strings = {
       orange: 'Orange',
       teal: 'Teal',
       green: 'Green',
-      graphite: 'Graphite'
+      graphite: 'Graphite',
+      slate: 'Slate'
     },
     rowActions: (name: string) => `Actions for ${name}`,
     close: 'Close',
@@ -476,7 +477,7 @@ export const strings = {
     theme: 'Theme',
     themeOptions: { system: 'System', light: 'Light', dark: 'Dark' },
     wallpaper: 'Wallpaper',
-    wallpaperOptions: { blue: 'Blue', warm: 'Warm', graphite: 'Graphite' },
+    wallpaperOptions: { blue: 'Blue', warm: 'Warm', graphite: 'Graphite', slate: 'Slate' },
     about: 'ABOUT',
     licences: 'Licences',
     licencesHint: 'The open-source packages Hermie is built from, and what each one asks for.',
