@@ -180,6 +180,29 @@ configuration explains. Only the session-token flow can be seeded — a native P
 credential is minted by a round trip through an identity provider and there is
 nothing to copy from a command line.
 
+**On Android the same grammar arrives as Intent extras**, because `adb` cannot set
+a process argument vector. `modules/hermie-dev-launch` reads
+`getIntent().getExtras()` and flattens each string extra into the `--flag value`
+pair the parser already takes, so a key is spelled without the dashes:
+
+```sh
+adb shell am force-stop nl.fullstackstudio.hermie
+adb shell am start -a android.intent.action.VIEW \
+  -n nl.fullstackstudio.hermie/.MainActivity \
+  -d 'exp+hermie://expo-development-client/?url=http%3A%2F%2F10.0.2.2%3A8081' \
+  --es hermieGateway http://10.0.2.2:9119 --es hermieToken demo \
+  --es hermieTheme light --es hermieWallpaper blue \
+  --es hermieOpen chat:researcher
+```
+
+Two things that are only true here. `MainActivity` is `launchMode="singleTask"`,
+so `getIntent()` keeps answering the intent the activity was **created** with — a
+second `am start` against a live process lands in `onNewIntent` and changes
+nothing, which is why the force-stop above is not optional. And the `-d` URL is
+`expo-dev-client`'s, not ours: without it a Debug build stops on its launcher
+instead of loading Metro's bundle. The emulator reaches the host at `10.0.2.2`,
+never `localhost`.
+
 `--hermieOpen=<value>` works too. Section ids come from `GALLERY_SECTION_IDS` in
 `apps/hermie/src/features/settings/GalleryScreen.tsx`, which is the registry the
 gallery renders from — adding a component to the kit means adding a row there, and
@@ -191,11 +214,22 @@ A gallery section needs no gateway and no onboarding: it is decided before the
 connection phase is, so a clean simulator is enough. `chat:` and `overlay:` do
 need a configured gateway — which is what `--hermieGateway` above is for.
 
-**None of this reaches a release build**, by three independent gates: the native
-constant it reads is inside `#if DEBUG` in `modules/hermie-mac/ios/HermieMacModule.swift`,
-the JavaScript is behind `__DEV__`, and nothing is registered with the system — no
-URL scheme, no `CFBundleURLTypes`, no entitlement. Launch arguments are visible
-only to the process itself.
+**None of this reaches a release build.** On Apple platforms that is three
+independent gates: the native constant it reads is inside `#if DEBUG` in
+`modules/hermie-mac/ios/HermieMacModule.swift`, the JavaScript is behind
+`__DEV__`, and nothing is registered with the system — no URL scheme, no
+`CFBundleURLTypes`, no entitlement. Launch arguments are visible only to the
+process itself.
+
+Android has the `__DEV__` gate and a different first one, and the difference is
+worth stating rather than glossing. A library's `BuildConfig.DEBUG` is not a
+trustworthy stand-in for `#if DEBUG`, so `HermieDevLaunchModule` checks the
+application's own `FLAG_DEBUGGABLE` instead — set by the debug manifest merge and
+by nothing else, so a release APK reads no extras. That is a **runtime** gate: the
+code is present in a release APK, it just never sees an extra. The third gate does
+not hold at all — `MainActivity` is `exported`, because a launcher activity has to
+be, so any app on the device can start it with extras. `FLAG_DEBUGGABLE` is what
+makes that harmless in anything shipped.
 
 What the `__DEV__` gate removes was measured on 2026-09-20 rather than assumed
 (`npx expo export:embed --platform ios --dev false`): in the production bundle the

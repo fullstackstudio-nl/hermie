@@ -5,6 +5,7 @@ coverage
 .expo
 apps/hermie/ios
 apps/hermie/android
+apps/hermie/modules/*/android/build
 CHANGELOG.md
 packages/hermes-shared/src
 design/*.html

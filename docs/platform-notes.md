@@ -45,6 +45,9 @@ rewritten, and git history has them.
 | Does Android's back button close a panel?         | **Yes, since `useHardwareBack`** — it did not   | 2026-09-20 |
 | Does a default AVD report Reduce Motion?          | **Yes** — its animation scales ship at 0        | 2026-09-20 |
 | Does the Android native sign-in work?             | **Unverified** — `--auth native` was not run    | 2026-09-20 |
+| Can a launch argument open one Android screen?    | **Yes** — Intent extras, `hermie-dev-launch`    | 2026-09-20 |
+| Is that Android channel absent from Release?      | **No** — present but gated on `FLAG_DEBUGGABLE` | 2026-09-20 |
+| Does the wide layout need a tablet AVD?           | **No**, but two were built anyway; see below    | 2026-09-20 |
 
 "Unverified at runtime" is exact: the app builds, is signed and is wrapped, and the code path was read
 rather than watched. Several rows that said so were closed on 2026-09-19 by a hand session in a real
@@ -3427,3 +3430,109 @@ Those 9pt are `4` (the field's glass padding) + `3` (the style's `paddingTop`) +
 style's two paddings are deliberately NOT equal. The pill's 40pt is
 `COMPOSER_LINE_HEIGHT + 2 × COMPOSER_FIELD_INSET` exactly, with no `minHeight`
 involved anywhere.
+
+## The Play screenshots, and what Android had to grow to take them (2026-09-20, later)
+
+`design/store/screenshots/` is the listing's images, made on emulators against
+`npm run fake-gateway -- --auth token --token demo`. `design/store/README.md` is
+the recipe; what belongs here is the four things the round had to find out first.
+
+### Android had no way to open one screen, and now it has one
+
+`--hermieOpen` and the rest read `ProcessInfo.processInfo.arguments` through
+`hermie-mac`, which is Apple-only, so on Android `nativeArguments()` answered an
+empty array and every screenshot began with the five-step wizard and a run of
+coordinate arithmetic. `adb` cannot set a process argument vector at all, so the
+question was which channel to grow.
+
+**Intent extras, not a URL scheme.** `expo-linking` with `hermie://` was the
+smaller diff and the wrong one: `scheme: 'hermie'` is already in `app.config.ts`
+for the dev client, so a deep link that seeds a gateway would be registered with
+the system in a **release** build too, and the whole point of the three gates is
+that this channel is not one flag away from a shipped app. Extras reach an
+activity that any app can already start, but nothing has to be registered for
+them, and what reads them can be switched off.
+
+`apps/hermie/modules/hermie-dev-launch` is the result: one Kotlin file, an
+`expo-module.config.json` and a `build.gradle`. It flattens `--es hermieGateway
+<url>` into `['--hermieGateway', '<url>']`, which is the shape
+`parseDevLaunchArguments` already takes, so the grammar and its tests did not
+move. `launch-intent.ts` now asks `HermieMac` then `HermieDevLaunch`; exactly one
+exists in any binary, so there is no `Platform.OS` branch.
+
+Two things bite, and both cost a screenshot before they were understood:
+
+- **`MainActivity` is `launchMode="singleTask"`.** A second `am start` against a
+  live process lands in `onNewIntent` while `getIntent()` still answers the intent
+  the activity was **created** with, so relaunching with different arguments
+  silently repeats the previous screen. `am force-stop` first, every time.
+- **A Debug build stops on `expo-dev-client`'s launcher.** `-d
+'exp+hermie://expo-development-client/?url=http%3A%2F%2F10.0.2.2%3A8081'` on the
+  same intent goes straight to Metro's bundle, and the extras ride along with it.
+
+### The Release gate is a runtime check here, and that was measured
+
+iOS deletes the constant with `#if DEBUG`. A library's `BuildConfig.DEBUG` is not
+a trustworthy stand-in, so the module reads the application's own
+`FLAG_DEBUGGABLE` instead — which means the code IS in a release APK and simply
+never sees an extra. That is a weaker claim than the iOS one and it was checked
+rather than asserted: `./gradlew assembleRelease`, installed over the debug build,
+launched with `--es hermieGateway … --es hermieTheme dark --es hermieWallpaper
+warm --es hermieOpen chat:researcher`, and the app came up on **Welcome to
+Hermie** in the light theme on the Blue wallpaper. Every argument ignored.
+
+The third iOS gate does not hold at all on Android and the docs now say so:
+`MainActivity` is `exported`, because a launcher activity has to be.
+
+### Two tablet AVDs, written by hand because `avdmanager` could not see the image
+
+Only `system-images;android-37.1;google_apis_playstore_ps16k;arm64-v8a` is
+installed, and `avdmanager` answered `Error: Package path is not valid. Valid
+system image paths are: null` for it under every combination of `ANDROID_HOME`,
+`ANDROID_SDK_ROOT` and `--sdk_root`. Writing the two files by hand — a
+`~/.android/avd/<name>.ini` and a `config.ini` copied from `Medium_Phone`'s with
+`hw.lcd.width/height/density` changed and `hw.device.name`/`hash2` dropped — works
+and takes a minute. 2560×1600 at 276 dpi is 1484 dp wide; 1200×1920 at 320 dpi is
+960 dp in landscape. Both clear `REGULAR_LAYOUT_MIN_WIDTH`, so the 7" tablet gets
+the same two-panel shell the 10" one does.
+
+### A fresh AVD always has something in its status bar, and demo mode will not hide it
+
+`sysui_demo_allowed` plus the `com.android.systemui.demo` broadcasts pin the
+clock, the battery and the radios, which is what everyone documents. What nobody
+mentions is that `-e command notifications -e visible false` did **not** hide the
+notification icon on this build: a shield sat next to the clock in every capture.
+It is a Safety Center "set a screen lock" notification from `pkg=android`, and the
+tablets had a Play Store one instead. `adb shell cmd notification list` names them
+and `cmd notification snooze --for 86400000 '<key>'` removes them, which is the
+only step that reliably produced a status bar worth publishing.
+
+Setting a screen lock to satisfy Safety Center does not work quickly enough —
+`locksettings set-pin` leaves the notification posted until the next rescan.
+
+### A screenshot at 1080×2400 is rejected by Play, and nothing says so until you upload
+
+Play's limit is an aspect ratio no wider than 2:1. `Medium_Phone` is 1080×2400,
+which is 2.22:1. `adb shell wm size 1080x1920` with the density left at 420 gives
+a real 9:16 display to lay out into rather than a crop, and `wm size reset` puts
+the shared AVD back.
+
+### Two states the app draws that a store listing should not show
+
+Both were fixed in the **setup**, not in the image:
+
+- The crons list drew `Weekly digest` in red with `Cron job 'Weekly digest' has no
+model configured.` The fake gateway ships that job with `last_status: 'error'`
+  on purpose. `PUT /api/cron/jobs/job-digest` with `{"updates":{"last_status":"ok",
+"last_error":null,"model":"…"}}` is a fixture edit, not a retouch.
+- Settings showed `Version: Unknown`, which is exactly what `seed-gateway.ts`
+  documents: the seed does not probe, and `configFromDraft` only writes `version`
+  when `draft.probe?.version` is truthy. Nothing repairs it afterwards — the row
+  is a one-shot snapshot of onboarding's `/api/status` call, and the only writers
+  of the stored config are `OnboardingNavigator.finish` and the seeder. So that
+  one image needed the real wizard run by hand, and a relaunch **without**
+  `--hermieGateway`, because the seed rewrites the config on every launch.
+
+`adb shell input` drives all of this comfortably, which is the standing difference
+from the simulators: the wizard was completed with taps and `input text` in about
+a minute, and that is the thing iOS still cannot do.

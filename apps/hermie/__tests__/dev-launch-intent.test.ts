@@ -162,3 +162,58 @@ describe('the __DEV__ gate', () => {
     expect(withDev(true)).toBeNull()
   })
 })
+
+describe('which native module the arguments come from', () => {
+  /**
+   * There are two, one per platform family, and the JavaScript asks both rather
+   * than branching on `Platform.OS`: `HermieMac` reports the process's own
+   * argument vector, which is what `xcrun simctl launch` sets, and
+   * `HermieDevLaunch` reports an Android launch's Intent extras flattened into the
+   * same shape. Exactly one of them exists in a given binary — so the case that
+   * has to hold is that a missing first module does not stop the second being
+   * read, which is the whole of the Android path.
+   */
+  const withModules = (modules: Record<string, unknown>) => {
+    jest.resetModules()
+    jest.doMock('expo', () => ({
+      ...jest.requireActual<Record<string, unknown>>('expo'),
+      requireOptionalNativeModule: (name: string) => modules[name]
+    }))
+
+    const previous = (globalThis as { __DEV__?: boolean }).__DEV__
+
+    ;(globalThis as { __DEV__?: boolean }).__DEV__ = true
+
+    try {
+      return require('../src/dev/launch-intent').DEV_LAUNCH_INTENT as unknown
+    } finally {
+      ;(globalThis as { __DEV__?: boolean }).__DEV__ = previous
+      jest.dontMock('expo')
+    }
+  }
+
+  it('reads the Apple module when it is the one that exists', () => {
+    expect(withModules({ HermieMac: { devLaunchArguments: ['--hermieTheme', 'dark'] } })).toEqual({ scheme: 'dark' })
+  })
+
+  it('falls through to the Android module, which is the only one on that platform', () => {
+    expect(withModules({ HermieDevLaunch: { devLaunchArguments: ['--hermieOpen', 'chat:researcher'] } })).toEqual({
+      open: { kind: 'chat', bot: 'researcher' }
+    })
+  })
+
+  it('survives a module that exists but answers nothing, and one that throws', () => {
+    // `HermieDevLaunch` answers an empty list in a release APK — the activity's
+    // extras are never read there — and a host with no module at all throws.
+    // Neither is an error: both mean this launch asked for nothing.
+    expect(withModules({ HermieMac: {}, HermieDevLaunch: { devLaunchArguments: [] } })).toBeNull()
+    expect(
+      withModules({
+        get HermieMac(): never {
+          throw new Error('no module host')
+        },
+        HermieDevLaunch: { devLaunchArguments: ['--hermieWallpaper', 'warm'] }
+      })
+    ).toEqual({ wallpaper: 'warm' })
+  })
+})

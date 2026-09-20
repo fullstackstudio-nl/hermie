@@ -11,6 +11,12 @@ coverage/
 apps/hermie/ios/
 apps/hermie/android/
 
+# Gradle's output for the local Expo modules, whose `android/` IS committed —
+# so unlike the generated project above, only the build directories go.
+apps/hermie/modules/*/android/build/
+apps/hermie/modules/*/android/.gradle/
+apps/hermie/modules/*/android/.cxx/
+
 # Xcode build products, including the wrapped Mac bundle `npm run mac` writes
 DerivedData/
 apps/hermie/build/

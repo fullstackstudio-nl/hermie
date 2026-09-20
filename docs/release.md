@@ -250,6 +250,14 @@ two places, and which one signed a given upload is worth knowing before Play
 rejects one. Pick one — the local properties for builds from this machine and from
 CI, EAS if releases move to EAS entirely — and if both are in use, make sure both
 hold the _same_ upload key.
+The listing's images are in the repository:
+[design/store/screenshots/](../design/store/screenshots/) holds a phone set at
+1080×1920 and 10" and 7" tablet sets at 2560×1600 and 1920×1200, which is the
+three sections Play asks for.
+[design/store/README.md](../design/store/README.md) says what each one shows and
+how to make them again — including the trap that a 1080×2400 phone capture is
+2.22:1 and Play refuses anything wider than 2:1. **There is no iOS set**, so App
+Store Connect still needs its screenshots made by hand.
 
 ## Before the first store submission
 

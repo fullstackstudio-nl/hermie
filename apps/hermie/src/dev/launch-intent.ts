@@ -28,6 +28,14 @@
  *     are visible only to the process itself, and nothing but a debugger or
  *     `simctl` can set them on a device.
  *
+ * **Android reaches the same grammar through Intent extras**, because there is no
+ * process argument vector to set there — see `modules/hermie-dev-launch`, which
+ * flattens `--es hermieGateway <url>` into the same `argv` this file parses. It
+ * has gates 2 and 3 from above but not gate 1 in the same form: the native read is
+ * behind a runtime `FLAG_DEBUGGABLE` check rather than removed by the compiler,
+ * and `MainActivity` is `exported` because a launcher activity has to be. The
+ * module's own comment says so rather than claiming parity.
+ *
  * **What gate 2 actually removes, measured** rather than assumed — the claim used
  * to be that the minifier folds "the code" out, and that is not quite true.
  * `npx expo export:embed --platform ios --dev false` on 2026-09-20 produced a
@@ -292,16 +300,34 @@ export function parseDevLaunchArguments(argv: readonly string[]): DevLaunchInten
 
 type DevLaunchModule = { devLaunchArguments?: unknown }
 
-function nativeArguments(): readonly string[] {
-  try {
-    const value = requireOptionalNativeModule<DevLaunchModule>('HermieMac')?.devLaunchArguments
+/**
+ * The two native modules that can answer, in the order they are tried.
+ *
+ * `HermieMac` is Apple-only and reports the process's own argument vector, which
+ * is what `xcrun simctl launch` sets. Android has no argument vector to set, so
+ * `HermieDevLaunch` reports this launch's Intent extras flattened into the same
+ * shape — see `modules/hermie-dev-launch`. Exactly one of the two exists in any
+ * given binary, so the order only decides which `undefined` is skipped first.
+ */
+const DEV_LAUNCH_MODULES = ['HermieMac', 'HermieDevLaunch'] as const
 
-    return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []
-  } catch {
-    // No Expo module host: a unit test renderer, or Android, where the module is
-    // Apple-only. Nothing to read is the honest answer, not an error.
-    return []
+function nativeArguments(): readonly string[] {
+  for (const name of DEV_LAUNCH_MODULES) {
+    try {
+      const value = requireOptionalNativeModule<DevLaunchModule>(name)?.devLaunchArguments
+      const argv = Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []
+
+      if (argv.length > 0) {
+        return argv
+      }
+    } catch {
+      // No Expo module host: a unit test renderer, or a platform this module was
+      // not built for. Nothing to read is the honest answer, not an error.
+      continue
+    }
   }
+
+  return []
 }
 
 /**
