@@ -610,7 +610,7 @@ xcodebuild -workspace Hermie.xcworkspace -scheme Hermie -configuration Release \
   signing, and `-allowProvisioningUpdates` to mint the profile. The team identifier comes from
   `HERMIE_APPLE_TEAM_ID` or `--team`, never from a file: this is a public repository. The resulting
   bundle is signed `Apple Development`, with `application-identifier` set to
-  `<team>.nl.fullstackstudio.hermie`.
+  `<team>.dev.hermie.app`.
 
 ### A bare iOS .app will not launch — it has to be wrapped
 
@@ -1335,7 +1335,7 @@ for anyone planning a pass:
   skips the dialog entirely:
 
   ```sh
-  xcrun simctl launch <udid> nl.fullstackstudio.hermie --initialUrl http://localhost:8081
+  xcrun simctl launch <udid> dev.hermie.app --initialUrl http://localhost:8081
   ```
 
 - **Onboarding can be skipped by copying another simulator's state.** The gateway address is in
@@ -2321,20 +2321,23 @@ group change would produce.
 ### What the build actually claims, measured
 
 `codesign -d --entitlements - /Applications/Hermie.app` (which resolves through `WrappedBundle` to
-the inner bundle):
+the inner bundle). Both transcripts in this section were taken before the application identifier
+moved to `dev.hermie.app` and before the paid team existed; they are reproduced with today's
+identifier and with the team written as `<team>`, because the reasoning is about the SHAPE of these
+strings and a team identifier is an account rather than something this repository holds:
 
 ```
 Authority=Apple Development: <redacted>
-TeamIdentifier=S8832KD227
-[Key] application-identifier            [String] S8832KD227.nl.fullstackstudio.hermie
-[Key] com.apple.developer.team-identifier [String] S8832KD227
+TeamIdentifier=<team>
+[Key] application-identifier            [String] <team>.dev.hermie.app
+[Key] com.apple.developer.team-identifier [String] <team>
 [Key] get-task-allow                    [Bool] true
 ```
 
 **No `keychain-access-groups`.** `apps/hermie/ios/Hermie/Hermie.entitlements` was an empty `<dict/>`,
 because `app.config.ts` set no `ios.entitlements`. So the effective group was entirely implicit,
 derived by the system from the signing identity. The embedded provisioning profile grants
-`S8832KD227.*` and is a **seven-day automatic profile**, minted again whenever it has lapsed;
+`<team>.*` and is a **seven-day automatic profile**, minted again whenever it has lapsed;
 `apps/hermie/scripts/run-mac.mjs` contains **no `codesign` call at all** — the inner bundle keeps
 whatever `xcodebuild` produced and the outer wrapper is not signed at all.
 
@@ -2354,8 +2357,8 @@ that moved was not named, and this section does not pretend to name it.
 Two things, neither of which is claimed as the fix:
 
 - **`app.config.ts` now names the group.** `ios.entitlements['keychain-access-groups']` is
-  `['$(AppIdentifierPrefix)nl.fullstackstudio.hermie']`. That is the same string the implicit
-  default already resolved to, and it is first in the list on purpose: `SecItemAdd` without an
+  `['$(AppIdentifierPrefix)dev.hermie.app']`. That is the same string the implicit default already
+  resolved to, and it is first in the list on purpose: `SecItemAdd` without an
   explicit group writes to the FIRST entry and `SecItemCopyMatching` searches EVERY entry, so
   naming it moves no write and leaves every existing item readable. There is no migration. What it
   buys is that the group is declared by this repository, is auditable in `codesign`, and no longer
@@ -2366,12 +2369,12 @@ Two things, neither of which is claimed as the fix:
   bundle `npm run mac` produced after the change:
 
   ```
-  [Key] application-identifier    [String] S8832KD227.nl.fullstackstudio.hermie
-  [Key] keychain-access-groups    [Array]  S8832KD227.nl.fullstackstudio.hermie
+  [Key] application-identifier    [String] <team>.dev.hermie.app
+  [Key] keychain-access-groups    [Array]  <team>.dev.hermie.app
   ```
 
-  `$(AppIdentifierPrefix)nl.fullstackstudio.hermie` resolved to the same string the
-  `application-identifier` already was — which is exactly what the implicit default resolves to. So
+  `$(AppIdentifierPrefix)dev.hermie.app` resolved to the same string the `application-identifier`
+  already was — which is exactly what the implicit default resolves to. So
   the first (and only) entry is byte-identical to where items were already being written.
 
 - **The next occurrence explains itself.** `loadGatewaySetup` now catches a refusing secret store

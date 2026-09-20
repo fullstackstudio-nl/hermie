@@ -10,7 +10,7 @@
  * channel `simctl` does have, and one launch then equals one screenshot:
  *
  * ```sh
- * xcrun simctl launch <udid> nl.fullstackstudio.hermie \
+ * xcrun simctl launch <udid> dev.hermie.app \
  *   --initialUrl http://localhost:8081 \
  *   --hermieOpen gallery:sheets/options-model-page --hermieTheme dark
  * ```

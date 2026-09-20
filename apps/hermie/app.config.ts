@@ -31,7 +31,7 @@ function git(args: string[], fallback: string): string {
 const COMMIT = git(['rev-parse', '--short', 'HEAD'], 'dev')
 const BUILD_NUMBER = Number.parseInt(git(['rev-list', '--count', 'HEAD'], '1'), 10) || 1
 
-const BUNDLE_ID = 'nl.fullstackstudio.hermie'
+const BUNDLE_ID = 'dev.hermie.app'
 const IOS_DEPLOYMENT_TARGET = '15.1'
 
 /**
@@ -86,9 +86,9 @@ const config: ExpoConfig = {
      * bundle from scratch on every build, under a seven-day automatic
      * provisioning profile that is minted again whenever it has lapsed.
      *
-     * `$(AppIdentifierPrefix)nl.fullstackstudio.hermie` is the same string the
-     * implicit default already resolves to, and it is FIRST on purpose: writes
-     * go to the first entry and reads search every entry, so naming it changes
+     * `$(AppIdentifierPrefix)dev.hermie.app` is the same string the implicit
+     * default already resolves to, and it is FIRST on purpose: writes go to the
+     * first entry and reads search every entry, so naming it changes
      * where nothing is written and leaves every existing item readable. What it
      * buys is that the group is now declared by this repository rather than
      * inferred from build metadata, and it is auditable in `codesign

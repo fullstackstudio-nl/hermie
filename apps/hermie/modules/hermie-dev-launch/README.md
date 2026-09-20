@@ -10,7 +10,7 @@ argument vector to set, so the same grammar arrives as **Intent extras** and thi
 module flattens them into the `argv` shape the parser already takes:
 
 ```sh
-adb shell am start -n nl.fullstackstudio.hermie/.MainActivity \
+adb shell am start -n dev.hermie.app/.MainActivity \
   --es hermieGateway http://10.0.2.2:9119 --es hermieOpen chat:researcher
 ```
 
@@ -27,7 +27,7 @@ platform branch.
 - **Force-stop between launches.** `MainActivity` is `launchMode="singleTask"`, so
   a second `am start` against a live process arrives at `onNewIntent` while
   `getIntent()` still answers the intent the activity was created with. Without
-  `adb shell am force-stop nl.fullstackstudio.hermie` the app shows you the
+  `adb shell am force-stop dev.hermie.app` the app shows you the
   previous launch's arguments.
 - **The gate is `FLAG_DEBUGGABLE`, at runtime.** iOS removes its constant at
   compile time with `#if DEBUG`; a library's `BuildConfig.DEBUG` is not a

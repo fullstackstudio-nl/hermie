@@ -133,7 +133,7 @@ coordinate arithmetic, and they are the only thing that still works when two
 changes are in flight against one Metro instance — so a Debug build reads them:
 
 ```sh
-xcrun simctl launch <udid> nl.fullstackstudio.hermie \
+xcrun simctl launch <udid> dev.hermie.app \
   --initialUrl http://localhost:8081 \
   --hermieOpen gallery:sheet-options-model-page \
   --hermieTheme dark --hermieWallpaper warm
@@ -161,7 +161,7 @@ passes. With the fake gateway running in session-token mode:
 ```sh
 npm run fake-gateway -- --auth token --token demo
 
-xcrun simctl launch <udid> nl.fullstackstudio.hermie \
+xcrun simctl launch <udid> dev.hermie.app \
   --initialUrl http://localhost:8081 \
   --hermieGateway http://localhost:9119 --hermieToken demo \
   --hermieTheme light --hermieWallpaper blue --hermieOpen chat:researcher
@@ -186,9 +186,9 @@ a process argument vector. `modules/hermie-dev-launch` reads
 pair the parser already takes, so a key is spelled without the dashes:
 
 ```sh
-adb shell am force-stop nl.fullstackstudio.hermie
+adb shell am force-stop dev.hermie.app
 adb shell am start -a android.intent.action.VIEW \
-  -n nl.fullstackstudio.hermie/.MainActivity \
+  -n dev.hermie.app/.MainActivity \
   -d 'exp+hermie://expo-development-client/?url=http%3A%2F%2F10.0.2.2%3A8081' \
   --es hermieGateway http://10.0.2.2:9119 --es hermieToken demo \
   --es hermieTheme light --es hermieWallpaper blue \

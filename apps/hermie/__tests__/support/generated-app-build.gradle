@@ -87,9 +87,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'nl.fullstackstudio.hermie'
+    namespace 'dev.hermie.app'
     defaultConfig {
-        applicationId 'nl.fullstackstudio.hermie'
+        applicationId 'dev.hermie.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

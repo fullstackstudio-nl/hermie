@@ -147,6 +147,16 @@ app-specific password were all for the macOS `.app`, and that artefact no longer
 exists — a Mac user installs from TestFlight or the App Store, where EAS holds the
 credentials.
 
+## The application identifier
+
+`dev.hermie.app` — `ios.bundleIdentifier` and `android.package` in
+`apps/hermie/app.config.ts`, and the keychain access group that follows from it. It
+used to be `nl.fullstackstudio.hermie`, an App ID stuck in a personal Apple team that
+cannot be moved to the paid one; nothing had ever been uploaded under it, so renaming
+it cost nothing but a prebuild. A build made before the change keeps its own data: the
+identifier is the container, so an installed copy is a different app to the system and
+has to be signed in again once.
+
 ## The two accounts this is waiting on
 
 Neither half of the store release can be rehearsed yet, and the reason is the same

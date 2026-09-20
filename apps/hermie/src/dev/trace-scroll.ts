@@ -21,7 +21,7 @@
  * Turn it on with `--hermieTraceScroll`:
  *
  * ```sh
- * xcrun simctl launch <udid> nl.fullstackstudio.hermie \
+ * xcrun simctl launch <udid> dev.hermie.app \
  *   --hermieGateway http://localhost:9119 --hermieToken demo \
  *   --hermieOpen chat:researcher --hermieTraceScroll
  * ```

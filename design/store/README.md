@@ -103,9 +103,9 @@ photograph the previous set's arguments. The `-d` URL is what sends a Debug buil
 past `expo-dev-client`'s launcher straight to Metro's bundle:
 
 ```sh
-adb shell am force-stop nl.fullstackstudio.hermie
+adb shell am force-stop dev.hermie.app
 adb shell am start -a android.intent.action.VIEW \
-  -n nl.fullstackstudio.hermie/.MainActivity \
+  -n dev.hermie.app/.MainActivity \
   -d 'exp+hermie://expo-development-client/?url=http%3A%2F%2F10.0.2.2%3A8081' \
   --es hermieGateway http://10.0.2.2:9119 --es hermieToken demo \
   --es hermieTheme light --es hermieWallpaper blue \

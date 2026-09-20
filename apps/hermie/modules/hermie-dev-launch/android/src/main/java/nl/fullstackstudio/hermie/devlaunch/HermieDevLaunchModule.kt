@@ -14,7 +14,7 @@ import expo.modules.kotlin.modules.ModuleDefinition
  * module flattens them back into the `argv` shape the parser already takes:
  *
  * ```sh
- * adb shell am start -n nl.fullstackstudio.hermie/.MainActivity \
+ * adb shell am start -n dev.hermie.app/.MainActivity \
  *   --es hermieGateway http://10.0.2.2:9119 --es hermieToken demo \
  *   --es hermieTheme light --es hermieOpen chat:researcher
  * ```
@@ -46,7 +46,7 @@ import expo.modules.kotlin.modules.ModuleDefinition
  * **`singleTask` bites.** `MainActivity` is `launchMode="singleTask"`, so a second
  * `am start` against a live process arrives at `onNewIntent` and `getIntent()`
  * still answers the intent the activity was created with. Force-stop between
- * launches — `adb shell am force-stop nl.fullstackstudio.hermie` — or the app will
+ * launches — `adb shell am force-stop dev.hermie.app` — or the app will
  * show you the previous screenshot's arguments.
  */
 class HermieDevLaunchModule : Module() {

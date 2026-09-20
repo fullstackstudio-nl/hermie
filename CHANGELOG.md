@@ -383,10 +383,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The application identifier is `dev.hermie.app`.** `ios.bundleIdentifier`, `android.package` and
+  the keychain access group derived from it all move together, and the deep-link scheme stays
+  `hermie`. The previous identifier belonged to an App ID registered in a personal Apple team, which
+  Apple does not let you move to another team; nothing had ever been uploaded under it, so the
+  cheapest fix was to stop using it before the first upload rather than after. `docs/release.md`
+  says so in one place. The identifier is what the system uses to tell apps apart, so a copy
+  installed from an earlier build is a different app to it: it keeps its own container and keychain
+  items, and the new one asks for the gateway and a sign-in once.
+
 - **The iOS build names its keychain access group instead of inheriting one.**
-  `keychain-access-groups` is now `$(AppIdentifierPrefix)nl.fullstackstudio.hermie`, the same string
-  the implicit default already resolved to and first in the list, so writes go where they always
-  went and every existing item stays readable — there is no migration, and nothing a user has to do.
+  `keychain-access-groups` is now `$(AppIdentifierPrefix)dev.hermie.app`, the same string the
+  implicit default already resolved to and first in the list, so writes go where they always went and every existing item stays readable — there is no migration, and nothing a user has to do.
   What changes is that the group is declared by this repository and auditable in `codesign` rather
   than inferred from whatever signing metadata a build happened to produce. It is a precaution
   against the "signed out after replacing the .app bundle" report, not a proven fix for it: see

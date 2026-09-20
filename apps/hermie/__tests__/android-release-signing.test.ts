@@ -191,6 +191,17 @@ describe('the shape it depends on', () => {
   })
 })
 
+/**
+ * The two lines a prebuild fills in per checkout rather than per template.
+ * `versionCode` is the git commit COUNT and `versionName` the marketing version,
+ * so a real `android/` disagrees with the fixture on both for reasons that have
+ * nothing to do with signing — every commit moves one of them. Everything else
+ * has to match byte for byte, which is the point of the comparison.
+ */
+function withoutGeneratedVersions(contents: string): string {
+  return contents.replace(/^(\s*version(?:Code|Name) ).*$/gm, '$1<generated>')
+}
+
 describe('the generated project, when one has been prebuilt here', () => {
   // `android/` is generated and not committed, so CI reasons about the fixture. When a prebuild has
   // run, hold the two against each other: a template change then fails a test instead of shipping
@@ -199,7 +210,7 @@ describe('the generated project, when one has been prebuilt here', () => {
   const test = generated === undefined ? it.skip : it
 
   test('is what this plugin produces from the fixture', () => {
-    expect(generated).toBe(patched)
+    expect(withoutGeneratedVersions(generated as string)).toBe(withoutGeneratedVersions(patched))
   })
 
   test('carries the property names and no value', () => {
