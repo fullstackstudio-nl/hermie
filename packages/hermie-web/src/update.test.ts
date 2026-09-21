@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 import { type FakeGateway, startFakeGateway } from '@hermie/fake-gateway'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { startHermieWeb, type HermieWebServer } from './server'
 import {
@@ -249,6 +249,93 @@ describe('release directories', () => {
     // And the one before it is still there, which is what makes the rollback
     // above possible after a real update.
     expect(await rollback(root)).toBe('0.1.0')
+  })
+})
+
+/**
+ * When an unpacked release gets an `npm ci`, and when it must not.
+ *
+ * This is the half of the update that cannot be seen from outside: it runs
+ * between the unpack and the `current` flip, and when it refuses to run the
+ * update simply finishes — which is exactly what a wrong answer here looks
+ * like too. So each case asserts BOTH the install decision and that the release
+ * landed, because an update that stops half way leaves `current` on the old
+ * version and a button that appears to do nothing.
+ */
+describe('the install step', () => {
+  const installed: string[] = []
+  const spy = async (directory: string) => {
+    installed.push(directory)
+  }
+
+  async function install(files: [string, string][]): Promise<string> {
+    const root = await mkdtemp(path.join(tmpdir(), 'hermie-web-install-'))
+    await mkdir(path.join(root, 'releases', '0.1.0'), { recursive: true })
+    await switchCurrent(root, '0.1.0')
+
+    const zip = makeZip(files)
+
+    await applyUpdate({
+      installRoot: root,
+      release: parseRelease(RELEASE_JSON) as ReleaseInfo,
+      download: async url => (url.endsWith('SHA256SUMS') ? Buffer.from(`${sha256(zip)}  hermie-web.zip\n`) : zip),
+      installDependencies: spy
+    })
+
+    return root
+  }
+
+  beforeEach(() => {
+    installed.length = 0
+  })
+
+  it('skips npm for a release that declares no dependencies', async () => {
+    // This is the real artefact: the server has zero runtime dependencies, so
+    // the zip carries no lockfile and `npm ci` would refuse it outright.
+    const root = await install([
+      ['hermie-web/package.json', '{"name":"hermie-web","version":"0.2.0"}'],
+      ['hermie-web/dist/web/index.html', '<!doctype html>']
+    ])
+
+    expect(installed).toEqual([])
+    expect(await currentVersion(root)).toBe('0.2.0')
+    expect(await readFile(path.join(root, 'current', 'dist', 'web', 'index.html'), 'utf8')).toContain('doctype')
+  })
+
+  it('installs for a release that declares dependencies and ships its lockfile', async () => {
+    const root = await install([
+      ['hermie-web/package.json', '{"name":"hermie-web","dependencies":{"ws":"^8.18.0"}}'],
+      ['hermie-web/package-lock.json', '{"lockfileVersion":3}'],
+      ['hermie-web/dist/web/index.html', '<!doctype html>']
+    ])
+
+    expect(installed).toEqual([path.join(root, 'releases', '0.2.0.incoming')])
+    expect(await currentVersion(root)).toBe('0.2.0')
+  })
+
+  it('skips npm when the dependencies have no lockfile to install from', async () => {
+    // `npm ci` refuses without one, and that refusal used to take the whole
+    // update down with it. Skipping leaves a release that may be missing a
+    // dependency — which is a bug in the RELEASE: a zip that declares
+    // dependencies belongs with its `package-lock.json` beside them.
+    const root = await install([
+      ['hermie-web/package.json', '{"name":"hermie-web","dependencies":{"ws":"^8.18.0"}}'],
+      ['hermie-web/dist/web/index.html', '<!doctype html>']
+    ])
+
+    expect(installed).toEqual([])
+    expect(await currentVersion(root)).toBe('0.2.0')
+  })
+
+  it('leaves a bundled node_modules alone', async () => {
+    const root = await install([
+      ['hermie-web/package.json', '{"name":"hermie-web","dependencies":{"ws":"^8.18.0"}}'],
+      ['hermie-web/package-lock.json', '{"lockfileVersion":3}'],
+      ['hermie-web/node_modules/ws/index.js', 'module.exports = {}']
+    ])
+
+    expect(installed).toEqual([])
+    expect(await currentVersion(root)).toBe('0.2.0')
   })
 })
 
