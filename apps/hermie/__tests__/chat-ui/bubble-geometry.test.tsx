@@ -31,8 +31,8 @@ import { dateStampFor } from '../../src/chat-ui/grouping'
 import { Path } from 'react-native-svg'
 
 import { Text } from '../../src/ui/primitives'
-import { compositeHex } from '../../src/ui/themes'
-import { BUBBLE_GAP, INLINE_META_GAP, radii, TAIL, TAIL_OVERLAP } from '../../src/ui/tokens'
+import { bubblesFor, compositeHex, resolveThemeFace, THEME_PRESET_ORDER, type Scheme } from '../../src/ui/themes'
+import { BUBBLE_GAP, INLINE_META_GAP, MIN_BUBBLE_HEIGHT, radii, TAIL, TAIL_OVERLAP } from '../../src/ui/tokens'
 import { renderScreen } from '../support/render'
 
 jest.mock('react-native/Libraries/Utilities/useWindowDimensions')
@@ -477,6 +477,50 @@ describe('the tail', () => {
   it('is drawn in whole points, which is what the Mac’s scaling needs', () => {
     for (const [x, y] of shape) {
       expect({ x: Number.isInteger(x), y: Number.isInteger(y) }).toEqual({ x: true, y: true })
+    }
+  })
+
+  it('is no taller than the shape it holds', () => {
+    // Both ends, because slack at either one is a defect: too little and the
+    // curve's last half point is clipped flat at Mac scaling, too much and the
+    // box is a rectangle of bubble colour standing behind the bubble.
+    expect(Math.min(...shape.map(([, y]) => y))).toBe(0)
+    expect(Math.max(...shape.map(([, y]) => y))).toBe(TAIL.height)
+  })
+
+  it('cannot reach the corner at the other end of the shortest bubble there is', () => {
+    /*
+      The defect this replaced, measured on an iPhone 17 Pro in Graphite dark: the
+      box was 25 tall with 11 points of plain rectangle above the shape, and the
+      typing indicator is 34 tall with an 18pt corner arc at its top. The
+      rectangle stood behind that arc and painted the notch the corner rounds
+      away, so the bubble had two left edges with a step between them — a seam
+      that no other bubble in the app is short enough to show.
+
+      The tail lives where the bubble's edge is STRAIGHT. That is the rule, and
+      this is it as arithmetic.
+    */
+    expect(TAIL.height + radii.bubble).toBeLessThanOrEqual(MIN_BUBBLE_HEIGHT)
+  })
+})
+
+/**
+ * The tail's colour, in every theme rather than in the one that was reported.
+ *
+ * `bubblesFor` derives it with `compositeHex` and the component paints those same
+ * two layers, so this cannot fail by arithmetic — it fails if somebody gives one
+ * of the recipes a tail of its own, which is exactly what the recipes looked like
+ * before they were derived.
+ */
+describe('the tail composites to the body, on every theme', () => {
+  const cases = THEME_PRESET_ORDER.flatMap(name => (['light', 'dark'] as Scheme[]).map(scheme => ({ name, scheme })))
+
+  it.each(cases)('$name $scheme', ({ name, scheme }) => {
+    const face = resolveThemeFace({ kind: 'preset', name }, scheme)
+    const bubbles = bubblesFor(scheme, face.elevation)
+
+    for (const [variant, recipe] of Object.entries(bubbles)) {
+      expect({ variant, tail: recipe.tail }).toEqual({ variant, tail: compositeHex(recipe.fill, recipe.solid) })
     }
   })
 })

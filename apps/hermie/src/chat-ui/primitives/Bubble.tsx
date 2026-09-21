@@ -176,12 +176,18 @@ export function useLedgerWidth(): number | undefined {
 /**
  * The tail.
  *
- * The box is the shape's own extent exactly — no slack. The previous path was
- * drawn with control points that overshot its nominal height, so the view had to
- * be a point taller than the shape to keep the curve's last half point from being
- * clipped into a flat edge at Mac scaling. `TAIL.path` is now derived rather than
- * eyeballed and touches 0 and `TAIL.height` and nothing beyond them, so the slack
- * would only move the shape half a point off the bubble's bottom line.
+ * The box is the shape's own extent exactly — no slack, in either direction.
+ *
+ * Not too little: the previous path was drawn with control points that overshot
+ * its nominal height, so the view had to be a point taller than the shape to keep
+ * the curve's last half point from being clipped into a flat edge at Mac scaling.
+ * `TAIL.path` is derived rather than eyeballed and touches 0 and `TAIL.height` and
+ * nothing beyond them.
+ *
+ * And not too MUCH: a box taller than the shape is a rectangle of bubble colour
+ * standing behind the bubble, and on a short bubble it stands behind the rounded
+ * corner at the other end — where the bubble is not painting, and the rectangle
+ * is. `TAIL` has the measurement that found it.
  */
 function Tail({ side, color }: { side: 'own' | 'other'; color: string }) {
   const own = side === 'own'

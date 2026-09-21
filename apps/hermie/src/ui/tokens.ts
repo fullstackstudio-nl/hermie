@@ -420,9 +420,26 @@ export type BubbleRecipe = {
 /**
  * The tail, as ONE path that belongs to the bubble: the classic droplet.
  *
- * 20 × 25, drawn for the sender's side and mirrored with `scaleX(-1)` for the
+ * 20 × 14, drawn for the sender's side and mirrored with `scaleX(-1)` for the
  * other. It is offset `TAIL_OVERLAP` into the bubble, so within this box the
- * bubble's own edge stands at x = 13 and the tail reaches 7 past it. There is
+ * bubble's own edge stands at x = 13 and the tail reaches 7 past it.
+ *
+ * ### The height is 14 and NOT a comfortable round number
+ *
+ * It used to be 25, of which the top 11 was a plain rectangle sitting behind the
+ * bubble and covering nothing. That rectangle is harmless under a paragraph and
+ * wrong under the shortest bubble in the app: the typing indicator is 34pt tall
+ * and its top corner arc is `radii.bubble` — 18 — so the bubble's own edge is
+ * curving away for the top 18pt while the tail's rectangle stood straight up
+ * behind 25 of them. What showed, measured on an iPhone 17 Pro in Graphite dark,
+ * is a STEP in the left edge: crisp bubble colour out to the tail's edge for the
+ * top 25pt and the corner's own arc above it. The bubble had two left edges.
+ *
+ * 14 is everything the shape does: 10 for the droplet's arc and 4 for the
+ * bubble's own tail-side bottom corner, which the tail deliberately fills. Above
+ * that the tail covered nothing and could only ever collide with the corner at
+ * the other end. `bubble-geometry.test.tsx` holds it against `MIN_BUBBLE_HEIGHT`
+ * so a taller tail or a tighter padding cannot bring the step back. There is
  * deliberately no separately positioned tail VIEW: the build before last drew the
  * tail as an absolutely positioned square with one rounded corner, and at certain
  * bubble heights the square's straight corners escaped the bubble's own rounding
@@ -438,7 +455,7 @@ export type BubbleRecipe = {
  * starting AT the edge whose 10pt bottom-left rounding cuts the curl. What
  * survives the cut is the only part that was ever visible, and it is this path:
  *
- *  - `13,15 → 20,25` is that 10pt cut, as an arc. It is the tail's whole visible
+ *  - `13,4 → 20,14` is that 10pt cut, as an arc. It is the tail's whole visible
  *    silhouette — a concave edge leaving the bubble 10pt above its bottom,
  *    sweeping down and out to a point on the bubble's own bottom line, 7 out.
  *  - the rest is behind the bubble and exists only so the shape is closed and
@@ -454,16 +471,27 @@ export type BubbleRecipe = {
  * reads as a notch under the corner — which is the same artefact, by a different
  * route, that the positioned-square tail was replaced for. So the outline stays
  * on the bottom line until x = 6, which is comfortably inside the corner, and
- * tucks up from there where only the bubble can see it.
+ * tucks up from there where only the bubble can see it. That tuck is what sets
+ * the box's height: the arc reaches the top edge at x = 0, and nothing in the
+ * shape is above it.
  *
  * Every number is whole. The Mac renders the iPad build scaled, so a sub-point
  * offset that is invisible at 3x is a visible sliver there.
  */
 export const TAIL = {
   width: 20,
-  height: 25,
-  path: 'M0 0 L13 0 L13 15 A10 10 0 0 0 20 25 L6 25 A6 14 0 0 1 0 11 Z'
+  height: 14,
+  path: 'M0 0 L13 0 L13 4 A10 10 0 0 0 20 14 L6 14 A6 14 0 0 1 0 0 Z'
 } as const
+
+/**
+ * The shortest bubble the app draws, and why the number above has to clear it.
+ *
+ * The typing indicator: the dots' own row (8pt tall inside 3pt of padding) inside
+ * the bubble's vertical padding (`space.sm + 2`, twice). Nothing in the transcript
+ * is shorter, and `bubble-geometry.test.tsx` holds the tail against it.
+ */
+export const MIN_BUBBLE_HEIGHT = 8 + 3 * 2 + (space.sm + 2) * 2
 
 export const TAIL_OVERLAP = 13
 

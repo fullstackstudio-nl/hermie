@@ -318,6 +318,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prefix (`openai/`, `openrouter/anthropic/`, `duo-chat-`) becomes a separate provider value, and an
   id it has never seen is Title-Cased with its numbers intact. The wire id is never changed and never
   lost: the model picker prints it under the name, which is also what its search matches on.
+- **The typing bubble's tail is part of its silhouette again.** In Graphite dark the dots' bubble had
+  a step in its left edge: one edge for the top of the bubble and another, further out, below it. The
+  tail's box was 25pt tall of which the top 11 was a plain rectangle behind the bubble, covering
+  nothing — and the typing indicator is the shortest bubble in the app at 34pt, with an 18pt corner
+  arc at its top. The rectangle stood behind that arc and painted the notch the corner rounds away.
+  The box is now exactly the shape it holds, 14pt, which is the droplet's own arc plus the bubble's
+  tail-side bottom corner; the tail can only ever be where the bubble's edge is straight, and a test
+  holds that against the shortest bubble so a taller tail or a tighter padding cannot bring it back.
 - **A tap beside a bottom sheet closes it again.** The scrim was a flex sibling ABOVE the panel in a
   column, so it covered only the space over the sheet; on the wide layout, where the panel is capped
   and parked over the content column, most of what reads as backdrop is BESIDE it — and that area
