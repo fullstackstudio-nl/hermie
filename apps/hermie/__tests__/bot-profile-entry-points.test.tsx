@@ -61,7 +61,6 @@ describe('the row menu', () => {
     botName: 'researcher',
     displayName: 'Researcher',
     movable: true,
-    sections: [],
     unread: false
   }
 

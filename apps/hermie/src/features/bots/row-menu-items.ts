@@ -24,8 +24,15 @@ export interface RowMenuModel {
   archived: boolean
   /** Greys out Mark as read for a row that has nothing unread. */
   unread: boolean
-  /** Every folder the row could move to; `null` is the loose top level. */
-  folders: readonly { id: string | null; name: string }[]
+  /**
+   * Every folder the row could move to; `null` is the loose top level.
+   *
+   * Optional the way `movable` is, and for the same reason: a caller with
+   * nowhere to offer leaves it out and the menu simply has no Move to folder
+   * line. This module is the menu as DATA and everything that draws one reads
+   * it, so a model that merely says less must not be a model that throws.
+   */
+  folders?: readonly { id: string | null; name: string }[]
   /** False in the archive drawer, where up and down mean nothing. */
   movable?: boolean
   /**
@@ -102,11 +109,22 @@ function muteItems(model: { mutedUntil?: number | null; now?: number }): MenuIte
  *
  * Open first because it is what the row already does on a click, and a context
  * menu whose first line is not the obvious one reads as a menu of exceptions.
- * Archive last but one and the destructive-looking things never above the
- * harmless ones.
+ * Mark as read second, for the same reason: between them they are what somebody
+ * opens this menu for without having thought about it.
+ *
+ * Then Edit profile, which is the one line here about the BOT rather than about
+ * its row in this list — so it sits directly under the two obvious ones and
+ * above everything that is about the row.
+ *
+ * Then the two ways a row's place in the list is changed and the one way it is
+ * silenced: Mute, where it lives, and how to move it. Colour and Archive come
+ * last, together, because both are ways of dressing or filing a row that is
+ * otherwise unchanged — decoration has no business above the things somebody
+ * came here to do, and Archive stays where it always was, at the bottom with
+ * nothing destructive under it.
  */
 export function rowMenuItems(model: RowMenuModel): MenuItem[] {
-  const folders = model.folders.map<MenuItem>(folder => ({
+  const folders = (model.folders ?? []).map<MenuItem>(folder => ({
     id: `folder:${folder.id ?? FOLDER_TOP}`,
     title: folder.name || strings.layout.unnamedFolder
   }))
@@ -124,16 +142,7 @@ export function rowMenuItems(model: RowMenuModel): MenuItem[] {
       title: strings.botProfile.menuItem,
       systemImage: 'person.crop.circle'
     },
-    {
-      id: 'colour',
-      title: strings.layout.colour,
-      systemImage: 'paintpalette',
-      children: ACCENT_ORDER.map<MenuItem>(name => ({
-        id: `accent:${name}`,
-        title: strings.layout.accents[name],
-        selected: name === model.accent
-      }))
-    },
+    ...muteItems(model),
     folders.length > 0 && {
       id: 'folder',
       title: strings.layout.moveToFolderMenu,
@@ -154,7 +163,16 @@ export function rowMenuItems(model: RowMenuModel): MenuItem[] {
       title: strings.layout.newFolder,
       systemImage: 'folder.badge.plus'
     },
-    ...muteItems(model),
+    {
+      id: 'colour',
+      title: strings.layout.colour,
+      systemImage: 'paintpalette',
+      children: ACCENT_ORDER.map<MenuItem>(name => ({
+        id: `accent:${name}`,
+        title: strings.layout.accents[name],
+        selected: name === model.accent
+      }))
+    },
     {
       id: 'archive',
       title: model.archived ? strings.layout.unarchive : strings.layout.archive,

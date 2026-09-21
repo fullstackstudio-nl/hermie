@@ -45,7 +45,8 @@ function renderRow(preview: string) {
       bot={bot(preview)}
       compact={false}
       editing={false}
-      menuSections={[]}
+      menuFolders={[]}
+      mutedUntil={null}
       onMenuSelect={() => undefined}
       onOpenMenu={() => undefined}
       onPress={() => undefined}
