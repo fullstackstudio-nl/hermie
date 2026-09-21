@@ -7577,3 +7577,164 @@ the platform APIs; what a device check has to cover:
   chosen rather than measured.
 - **Dictation on the web.** The Chrome and Safari path is written from the API's documented
   behaviour; neither has been driven in a browser here.
+
+## Desktop parity, part one: bots, capabilities, MCP and skills
+
+Four surfaces that Hermes Desktop has and Hermie did not: making a bot, switching one bot's
+toolsets, skills and MCP servers, a gateway-wide MCP page, and a skills catalogue. All four were
+written against the vendored contract and the upstream handlers, and most of what follows is about
+the places where the gateway's shape is not the shape the screen wants.
+
+### The desktop was the wrong thing to copy, twice
+
+The round's brief said to mirror "the exact gateway method the desktop uses". For two of these four
+that instruction could not be followed, and finding out why was most of the reading.
+
+**The desktop toggles toolsets and skills over REST.** `apps/desktop/src/app/capabilities/` calls
+`PUT /api/tools/toolsets/{name}` and `PUT /api/skills/toggle`, through Electron IPC to the backend's
+HTTP server. There is no REST-over-socket tunnel, so a client with only the WebSocket cannot reach
+either. `tools.configure` — the socket method that looks like the answer — is called by the TUI and
+by nothing else in the desktop app at all.
+
+It is also the wrong method here even though it exists. Its handler reads `session_id` and takes the
+live session's profile home as authoritative, and says so in a comment: _"The client sends
+session_id, not profile; the live session is authoritative."_ A sheet opened on `writer` while
+`researcher` is mid-turn would edit `researcher`. So the per-bot path is `profiles.configure`, which
+is profile-scoped and needs no live session, and `tools.configure` is pinned in the shape tests
+without being used by the app.
+
+**The desktop never sees `reload.mcp`'s confirm gate.** All three of its call sites send
+`confirm: true` unconditionally, so the sheet Hermie shows has no prior art to copy and is written
+from `methods_tools.py` directly. This matters because the call refuses by SUCCEEDING: without
+`confirm`, and while `approvals.mcp_reload_confirm` is set, it answers HTTP 200 carrying
+`{status: 'confirm_required', message}` and no error frame. A client that inspects only the error
+would report a reload that never happened.
+
+The opt-out is not ours to keep. `always` makes the gateway run `save_config_value(
+"approvals.mcp_reload_confirm", False)` — in the GATEWAY's config, shared with the CLI and the
+desktop app. Storing it locally instead would keep asking on a gateway that had already been told to
+stop, so the sheet says what the button actually does.
+
+### Three polarities in one call
+
+`profiles.configure` carries all three capability sections, and no two of them are stored the same
+way. This is upstream's `_configure_cfg_sections` and the three savers beside it:
+
+- **skills** → `save_disabled_skills`, which stores the COMPLEMENT. The wire carries
+  `disabled_skills`, and it replaces the stored set whole.
+- **toolsets** → `_save_toolset_pin`, which writes `tools.enabled_toolsets` when the list has
+  anything in it and **pops the key when it is empty**. So `[]` means unpin, not "nothing enabled",
+  and a bot with no pin still has enabled toolsets: the platform defaults.
+- **MCP servers** → `_save_mcp_toggles`, which pops `disabled` off every server named and sets it on
+  every other server in the config. The wire carries the ENABLED list.
+
+Two of these are invisible from the screen and both are hazards. Reading `toolsets_pinned: false` as
+"nothing is on" draws a page of switches all off and then writes that back; sending the full toolset
+list when everything is enabled pins a snapshot of the gateway's defaults that then stops following
+them, so the bot silently misses any toolset added later. `configureParamsFor` sends `[]` in that
+case, which is what the desktop's own editor does.
+
+`_describe_toolsets` also makes the list non-constant: a `_DEFAULT_OFF_TOOLSETS` entry is omitted
+ENTIRELY while it is off, so enabling one makes a row appear that was never there.
+
+### There is no way to delete a bot
+
+`tui_gateway/methods_profiles.py` registers `profiles.list`, `create`, `describe`, `configure`,
+`set_asset`, `get_asset` and `remember_onboarding`. That is the whole surface, and the generated
+contract agrees — there is no `profiles.delete` anywhere in it. Deleting a profile removes a
+directory that may hold memories, skills and a cron store, and upstream has not exposed it over a
+socket.
+
+So the brief's danger zone is HIDDEN rather than shown-and-refused, and the reasoning is written
+where somebody will find it (`PROFILE_DELETE_UNAVAILABLE`, in `features/profiles/profiles-controller.ts`).
+A control that always fails teaches the reader that the app is broken; an absent one is a missing
+feature, and the README names the CLI command.
+
+**No ADR, because no product rule changed.** The brief asked how deletion interacts with ADR-0007's
+one-canonical-chat rule; the answer is that it cannot, because it cannot happen. Creation does
+interact and is consistent with it rather than amending it: `profiles.create` writes a directory and
+nothing else, so the new bot has no `canonical_session`, and `NewBotFlow` re-reads the roster and
+calls the existing `BotsController.resolveCanonical` — the same path tapping an existing bot takes.
+Minting a session at create time would have been a SECOND way to make a canonical chat, and two ways
+is how one gets forked. If upstream ever adds a delete, the interaction is already stated: the
+profile takes its canonical chat with it, so the client would have to forget the bot in the roster,
+the chat store, the transcript cache and the mute and folder entries in the same step.
+
+### The bot's display name has nowhere to go
+
+The brief asked for a display-name field in the New-bot form. There is no parameter for one.
+`ProfileRow.display_name` is read-only, `profiles.create` has no such field and neither does
+`profiles.configure`; a search of the vendored contract finds `display_name` on the profile row and
+on hosted-room members, and nowhere that writes a profile's. The field is therefore not in the form,
+because it could only have been a lie. The handle is what the roster shows until the gateway grows a
+way to set the other.
+
+### Four calls, four meanings of "working"
+
+The MCP page keeps them apart on purpose:
+
+- `mcp.servers.list` is the CONFIG. It knows what is defined and whether it is switched on, and
+  nothing about whether it works. Its `env` is KEY NAMES only; the gateway never sends the values.
+- `mcp.servers.status` is CACHED runtime state and upstream's docstring is explicit that it _"never
+  connects, probes, or starts auth"_. An unauthorised server looks exactly like a healthy one here.
+- `mcp.servers.test` is the only call that finds out, and a failure is a SUCCESSFUL RPC answering
+  `{ok: false, error, tools: []}`. So is the needs-auth case: an `auth: oauth` server that would
+  serve `tools/list` anonymously is still reported `ok: false` with no token on disk, because
+  upstream refuses to call that a pass.
+- `reload.mcp` applies changes to live chats, and is the confirm gate above.
+
+Because `test` connects and a cold `npx` server takes seconds, nothing is probed on arrival. The
+list paints from the first two and a probe is a button. "Needs authorising" is the PAIR —
+`oauth_needed` and no token — because the flag alone is true of a server that is already signed in.
+
+`client_redirect_uri` is deliberately not sent. It exists so a client that can host a loopback
+listener takes the redirect itself, which is what the desktop does from Electron's main process.
+This app has no loopback to offer, so the gateway keeps its own; sending the parameter without a
+listener behind it would hang the flow at the redirect.
+
+### What is unverified here
+
+**Nothing in this round has been run against a live `hermes serve`.** Everything below is the
+suites, the vendored contract and a reading of the upstream handlers, and the fake was written to
+match those handlers rather than to match the app.
+
+- **No bot has actually been created.** The three-step flow — create, re-read the roster, resolve
+  the canonical chat — is asserted against a fake that answers the shape upstream's handler answers.
+  Whether a real `create_profile` takes long enough that the roster refresh races it has not been
+  seen. Upstream builds in a hidden sibling directory and publishes with one rename precisely
+  because a multiplexer rescans `profiles/`, which suggests it does not, but that is an inference.
+- **The alias collision is guessed at, on purpose.** `check_alias_collision` runs `which <name>` on
+  the HOST, so a name that is a binary on that machine and not on any other is a collision no client
+  can predict. The form warns about the `hermes` subcommands it knows and says the bot will be fine,
+  which is true; it cannot warn about the rest.
+- **`_HERMES_SUBCOMMANDS` is abridged.** Upstream's set is longer than the seventeen names in
+  `profile-name.ts`, and the ones left out produce no warning. The consequence is a missing note,
+  never a wrong refusal, because the list is only ever consulted to warn.
+- **No MCP server has been probed, and no OAuth flow has been walked.** The poll loop's interval and
+  its six-minute ceiling are copied from the desktop's driver rather than measured, and what a real
+  gateway does when the browser is closed mid-flow — as opposed to the fake's `error` status — has
+  not been seen. `oauth.cancel` is called in a `finally`; whether an older gateway lacking that
+  method leaves a flow stranded is unknown.
+- **`Linking.openURL` has not been watched on any of the four targets.** On a Mac window built from
+  the iPad target in particular, whether the authorisation URL reaches the default browser or an
+  in-app view is exactly the kind of thing that differs.
+- **No skill has been installed from the hub.** `_skills_install` calls `do_install(skip_confirm=
+True)` and answers `{installed: true, name}`, which is what the fake does — but the desktop's REST
+  path parses a SECURITY-SCAN refusal out of CLI stdout (`store/hub-actions.ts`), and whether that
+  refusal reaches a socket caller as an exception, as a silent no-op, or not at all has not been
+  established. If it arrives as a thrown error it is shown; if it arrives as a successful install
+  that did not happen, this page would report a lie.
+- **The category map's keys are invented.** `skills.manage list` answers whatever
+  `get_available_skills()` files things under; the fake uses `bundled` and `installed`, and the app
+  reads `Object.values(...)` rather than either name, so a different vocabulary costs the grouping
+  and not the list. Nobody has seen the real keys.
+- **Toolset labels, descriptions and tool counts are the fake's.** `resolve_toolset` is what fills
+  `tool_count` upstream, and the five toolsets in the fixture are plausible rather than real.
+- **`profiles.describe` against a gateway with many skills has not been tried.** The sheet draws
+  every row with no paging, which is the right shape for the handful a profile usually has and
+  untested against a profile carrying a hundred.
+- **The Settings rows for Skills and MCP servers are pages over Settings**, the same shape Licences
+  uses, and they have been rendered only by the type checker. Neither page has been opened on a
+  device, and the wide shell's overlay panel holds Settings without a navigator — so whether a
+  sub-page inside an overlay behaves the way the compact shell's does is asserted by construction
+  (it is the existing pattern) rather than by having looked.

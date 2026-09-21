@@ -57,6 +57,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Make a bot from the app.** The chat list's header gains **New bot…**, and so does Settings.
+  Name it, describe it, pick a model from the gateway's own catalogue, optionally clone another
+  bot's settings, and the new conversation opens. The handle is checked while it is typed, against
+  a transcription of the gateway's own validator — `^[a-z0-9][a-z0-9_-]{0,63}$`, the six reserved
+  names, and `default`, which is the one name that is simultaneously legal everywhere else and
+  refused here because it IS the built-in bot. `Scout` is accepted and stored as `scout`; a name
+  that collides with a `hermes` subcommand is accepted with a note that the shell shortcut will not
+  be made, because that is what the gateway does rather than what looks tidy. Creating a bot does
+  not mint its chat: the gateway writes a profile directory and nothing else, so the roster is
+  re-read and the canonical Bot Chat is resolved the ordinary way (ADR-0007), which is the only
+  thing standing between a new bot and a forked conversation. **There is no delete**, and its
+  absence is deliberate: the gateway has no profile-delete method at all — `methods_profiles.py`
+  registers list, create, describe, configure and the two asset calls, and that is the whole
+  surface — so a danger zone here could only ever have failed. `hermes profile delete <name>` on
+  the host is where it lives.
+
+- **What a bot can do, per bot.** The bot profile sheet gains **Capabilities**: toolsets, skills
+  and MCP servers as three groups of switches, each writing immediately. The three are stored with
+  three different polarities in one gateway call and the sheet is only correct because it keeps
+  them apart — skills go over the wire as the DISABLED list, MCP servers as the ENABLED one, and
+  toolsets as a pin whose EMPTY value means "follow the gateway's defaults" rather than "nothing is
+  on". That last one is said out loud in the sheet: a bot with no pin is following the gateway, and
+  the first switch anybody moves pins the whole list. Changing an MCP server offers a reload,
+  because a config change does not reach a chat that is already running — and `reload.mcp` is the
+  one call in this family that can refuse by SUCCEEDING, answering `confirm_required` with a 200
+  and the gateway's own warning about the prompt cache. Hermie shows that warning and its two
+  answers; **Reload, and stop asking** is the gateway's `always`, which silences the CLI and the
+  desktop app too, and says so.
+
+- **MCP servers, in Settings.** The gateway's servers with what each one is, whether it is
+  connected, and what it offers. Nothing is probed on arrival — `mcp.servers.test` connects, and a
+  cold `npx` server takes seconds — so the list paints from the configuration and the gateway's own
+  cached runtime view, and testing a connection is a button on the server's page. A server behind
+  OAuth can be authorised from here: the gateway's URL opens in the browser and the flow is polled
+  until it settles. The needs-auth state is a PROBE result rather than a list badge, because the
+  cheap status view never connects and cannot tell an unauthorised server from a healthy one — and
+  a server that declares OAuth is reported that way whether or not it is signed in, so "needs
+  authorising" is the pair: wanted, and no token.
+
+- **Skills, in Settings.** What is installed, with a switch per skill for a chosen bot, and a
+  search of the hub with an **Install** on anything not already there. The two halves come from two
+  methods that each answer half the question: `skills.manage` says what a bot has and never whether
+  it is on, and only `profiles.describe` says that. Without a bot chosen there are no switches
+  rather than switches at a guessed position. Installing over the socket works and is used; the
+  `hermes skills install` command is printed only when a gateway answers that it has no such
+  action at all.
+
 - **Read a reply aloud.** A reply's menu gains **Read aloud**, and **Stop reading** while it is
   speaking. The voice is the one built into the device — `AVSpeechSynthesizer`, Android's
   `TextToSpeech`, the browser's `speechSynthesis` — so **nothing is sent anywhere to be
