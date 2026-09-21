@@ -56,7 +56,7 @@ import { Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { useHover } from '../../ui/useHover'
 import { useNumberedShortcuts, useShortcut } from '../../ui/useShortcut'
-import { CONTROL_MIN_HEIGHT, TAP_SLOP, type AccentName } from '../../ui/tokens'
+import { CONTROL_MIN_HEIGHT, TAP_SLOP } from '../../ui/tokens'
 import { formatListTime } from '../../chat-ui'
 import { useChatRuntime } from '../chats/ChatRuntime'
 import { type MessageMatch, useMessageSearch } from '../search'
@@ -64,11 +64,11 @@ import { BotRow } from './BotRow'
 import { ConnectionLine } from './ConnectionLine'
 import { dragAnchors, entryIndexByKey } from './drag-order'
 import { presenceOf, type Presence } from './presence'
-import { parseRowMenuAction } from './row-menu-items'
+import { parseRowMenuAction, rowMenuItems } from './row-menu-items'
 import { RowMenu } from './RowMenu'
 import { SidebarFooter, type BotsSection, type TabKey } from './SidebarFooter'
 import { SidebarRail } from './SidebarRail'
-import { useRowDrag } from './use-row-drag'
+import { LIFT_SCALE, useRowDrag } from './use-row-drag'
 
 export type { BotsSection }
 
@@ -440,7 +440,8 @@ export function BotsScreen({
     }, []),
     onCommit: useCallback((name: string, index: number) => {
       useChatLayoutStore.getState().moveToIndex(name, index)
-    }, [])
+    }, []),
+    reduceMotion: theme.reduceMotion
   })
 
   const openIndex = useCallback(
@@ -666,8 +667,6 @@ export function BotsScreen({
         onScroll={onListScroll}
         refreshControl={<RefreshControl onRefresh={refresh} refreshing={refreshing} />}
         renderItem={({ item }) => {
-          const line = drag.dropKey === item.key ? <DropLine /> : null
-
           if (item.kind === 'archiveHeader') {
             return (
               <ArchiveHeader count={item.count} onToggle={() => setArchiveOpen(open => !open)} open={archiveOpen} />
@@ -702,8 +701,10 @@ export function BotsScreen({
 
           if (item.kind === 'divider') {
             return (
-              <View onLayout={drag.measure(item.key)}>
-                {line}
+              <Animated.View
+                onLayout={drag.measure(item.key)}
+                style={{ transform: [{ translateY: drag.offsetFor(item.key) }] }}
+              >
                 <Divider
                   autoFocus={item.id === addedDividerId}
                   editing={editing}
@@ -711,16 +712,18 @@ export function BotsScreen({
                   name={item.name}
                   onRename={renameDivider}
                 />
-              </View>
+              </Animated.View>
             )
           }
 
           if (item.kind === 'sectionEmpty') {
             return (
-              <View onLayout={drag.measure(item.key)}>
-                {line}
+              <Animated.View
+                onLayout={drag.measure(item.key)}
+                style={{ transform: [{ translateY: drag.offsetFor(item.key) }] }}
+              >
                 <SectionEmpty id={item.id} />
-              </View>
+              </Animated.View>
             )
           }
 
@@ -742,22 +745,33 @@ export function BotsScreen({
             <Animated.View
               onLayout={drag.measure(item.key)}
               {...(item.archived ? {} : drag.rowHandlers(item.bot.name))}
+              /*
+               * Two states, one style: LIFTED reads off the drag's own `lift`
+               * value, everything else off its row offset. Neither is a boolean
+               * in a style object any more — a row that changed size in one frame
+               * was the tell that this was a transform applied rather than a row
+               * picked up.
+               */
               style={
                 lifted
                   ? {
                       elevation: 8,
                       shadowColor: '#000',
                       shadowOffset: { height: 6, width: 0 },
-                      shadowOpacity: 0.28,
+                      // Interpolated off the lift so the shadow arrives with the
+                      // scale and leaves with it, rather than blinking on.
+                      shadowOpacity: drag.lift.interpolate({ inputRange: [0, 1], outputRange: [0, 0.28] }),
                       shadowRadius: 12,
-                      transform: [{ translateY: drag.translateY }, { scale: 1.02 }],
+                      transform: [
+                        { translateY: drag.translateY },
+                        { scale: drag.lift.interpolate({ inputRange: [0, 1], outputRange: [1, LIFT_SCALE] }) }
+                      ],
                       zIndex: 2
                     }
-                  : undefined
+                  : { transform: [{ translateY: drag.offsetFor(item.key) }] }
               }
               testID={lifted ? `bot-row-lifted-${item.bot.name}` : undefined}
             >
-              {line}
               <BotRow
                 accent={accents[item.bot.name] ?? 'default'}
                 archived={item.archived}
@@ -800,19 +814,28 @@ export function BotsScreen({
       {onOpenSection ? <SidebarFooter current={currentTab} onOpenSection={onOpenSection} /> : null}
 
       {menuFor ? (
+        /*
+          The same list the native menu draws, and the same handler it reports to.
+
+          It used to build its own — which is how it came to offer a colour, an
+          Archive and one line per section, and nothing that reorders. See
+          `RowMenu`.
+        */
         <RowMenu
           accent={accents[menuFor] ?? 'default'}
-          archived={Boolean(archivedSet[menuFor])}
           botName={menuFor}
           displayName={byName[menuFor]?.displayName ?? menuFor}
+          items={rowMenuItems({
+            accent: accents[menuFor] ?? 'default',
+            archived: Boolean(archivedSet[menuFor]),
+            botName: menuFor,
+            displayName: byName[menuFor]?.displayName ?? menuFor,
+            movable: !archivedSet[menuFor],
+            sections: menuSections,
+            unread: unreadFor(menuFor).unread
+          })}
           onClose={() => setMenuFor(null)}
-          onMoveToSection={id => useChatLayoutStore.getState().moveToSection(menuFor, id)}
-          onSetAccent={(accent: AccentName) => useChatLayoutStore.getState().setAccent(menuFor, accent)}
-          onSetArchived={archived => useChatLayoutStore.getState().setArchived(menuFor, archived)}
-          sections={[
-            { id: null, name: strings.layout.topGroup },
-            ...dividers.map(divider => ({ id: divider.id, name: divider.name }))
-          ]}
+          onSelect={id => onMenuSelect(menuFor, id)}
           visible
         />
       ) : null}
@@ -888,30 +911,22 @@ function Head({
   )
 }
 
-/**
- * Where a dragged row would land.
- *
- * Two points of the accent, full width of the row's own inset. A line rather than a
- * gap that opens up: a gap moves every row below it on every slot change, which on a
- * list of forty is forty layout passes per centimetre of finger travel.
- */
-function DropLine() {
-  const theme = useTheme()
+/*
+  There is no drop LINE any more, and the objection that put one here is worth
+  keeping rather than deleting.
 
-  return (
-    <View
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
-      style={{
-        backgroundColor: theme.colors.accentText,
-        borderRadius: 1,
-        height: 2,
-        marginHorizontal: theme.space.md
-      }}
-      testID="drop-line"
-    />
-  )
-}
+  It said: a gap that opens up moves every row below it on every slot change,
+  which on a list of forty is forty layout passes per centimetre of finger
+  travel. That was true of a gap made of LAYOUT. The gap under the finger is now
+  made of `transform: translateY` on the native driver (`use-row-drag.ts`), which
+  triggers no layout at all and does not touch the JavaScript thread — and
+  `rowShift` moves only the rows BETWEEN the lifted row's own place and the gap,
+  so the count is the distance dragged rather than the length of the list.
+
+  With the gap affordable, the line is redundant: every native list answers
+  "where would this land" with the shape of the list, and a line as well is a
+  second answer to a question already answered.
+*/
 
 /**
  * The search field, and the rule for any field with a leading icon.

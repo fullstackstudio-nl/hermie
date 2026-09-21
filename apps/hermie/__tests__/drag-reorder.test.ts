@@ -13,6 +13,7 @@ import {
   dropEntryIndex,
   dropSlot,
   entryIndexByKey,
+  rowShift,
   type DragAnchor,
   type RowBox
 } from '../src/features/bots/drag-order'
@@ -170,3 +171,49 @@ describe('a divider added above a row', () => {
 function describe_(entry: LayoutEntry): string {
   return entry.kind === 'divider' ? `#${entry.name}` : entry.name
 }
+
+/**
+ * The rows that are not being dragged.
+ *
+ * A drop LINE says where a row would land; rows moving aside say it in the shape
+ * of the list, which is what every native list does and what the owner means by
+ * "it must feel native". The rule is only ever about the span between where the
+ * lifted row started and the gap it is over — a list of forty rows must not
+ * re-animate thirty-eight of them because one moved.
+ */
+describe('rowShift', () => {
+  it('leaves the lifted row to its own translation', () => {
+    expect(rowShift(2, 2, 5)).toBe(0)
+  })
+
+  it('shifts nothing while the row is over its own place', () => {
+    // Both of these gaps mean "back where it started".
+    expect(rowShift(1, 2, 2)).toBe(0)
+    expect(rowShift(3, 2, 3)).toBe(0)
+    expect(rowShift(4, 2, 3)).toBe(0)
+  })
+
+  it('closes the gap behind a row dragged down', () => {
+    // Lifted row 1, hovering the gap below row 3: rows 2 and 3 come up one.
+    expect(rowShift(2, 1, 4)).toBe(-1)
+    expect(rowShift(3, 1, 4)).toBe(-1)
+    // Row 4 is below the gap and stays.
+    expect(rowShift(4, 1, 4)).toBe(0)
+    expect(rowShift(0, 1, 4)).toBe(0)
+  })
+
+  it('opens a gap in front of a row dragged up', () => {
+    // Lifted row 4, hovering the gap above row 1: rows 1, 2 and 3 go down one.
+    expect(rowShift(1, 4, 1)).toBe(1)
+    expect(rowShift(3, 4, 1)).toBe(1)
+    // Row 0 is above the gap and stays.
+    expect(rowShift(0, 4, 1)).toBe(0)
+    expect(rowShift(5, 4, 1)).toBe(0)
+  })
+
+  it('moves exactly one row for a swap with the neighbour', () => {
+    const shifts = [0, 1, 2, 3].map(anchor => rowShift(anchor, 1, 3))
+
+    expect(shifts).toEqual([0, 0, -1, 0])
+  })
+})

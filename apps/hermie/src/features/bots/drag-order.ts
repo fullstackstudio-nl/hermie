@@ -142,3 +142,37 @@ export function dropSlot(
 export function dropEntryIndex(anchors: readonly DragAnchor[], slot: number, entryCount: number): number {
   return anchors[slot]?.entryIndex ?? entryCount
 }
+
+/**
+ * How far a row that is NOT being dragged has to move out of the way.
+ *
+ * `-1` is one row's height up, `1` is one down, `0` is stay put. It is the whole
+ * of "the other rows animate aside", and it is arithmetic rather than animation:
+ * a row between where the lifted row came FROM and the gap it is over has to
+ * close up behind it or open up in front of it, and everything outside that span
+ * is untouched.
+ *
+ * `from` is the lifted row's own anchor index; `slot` is the gap the drop line
+ * would sit at, which is an index BETWEEN anchors — so a slot equal to `from` or
+ * to `from + 1` both mean "back where it started" and shift nothing.
+ *
+ * Pure, because the alternative is discovering at 60 frames a second that a row
+ * moved the wrong way.
+ */
+export function rowShift(anchor: number, from: number, slot: number): -1 | 0 | 1 {
+  if (anchor === from) {
+    return 0
+  }
+
+  // Dragging DOWN: everything it has passed comes up one.
+  if (slot > from + 1 && anchor > from && anchor < slot) {
+    return -1
+  }
+
+  // Dragging UP: everything it has passed goes down one.
+  if (slot <= from - 1 && anchor >= slot && anchor < from) {
+    return 1
+  }
+
+  return 0
+}

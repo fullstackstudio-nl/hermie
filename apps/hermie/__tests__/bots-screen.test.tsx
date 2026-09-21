@@ -380,6 +380,10 @@ describe('the row context menu', () => {
     fireEvent.press(screen.getByTestId('swatch-writer-teal'))
     expect(useChatLayoutStore.getState().accents).toEqual({ writer: 'teal' })
 
+    // A selection closes the menu, the way the platform's own does — so a second
+    // colour is a second long press rather than a second tap in a sheet that
+    // stayed open behind the first.
+    fireEvent(screen.getByTestId('bot-row-writer'), 'longPress')
     fireEvent.press(screen.getByTestId('swatch-writer-default'))
     expect(useChatLayoutStore.getState().accents).toEqual({})
   })
@@ -390,11 +394,59 @@ describe('the row context menu', () => {
 
     renderScreen(<BotsScreen />)
     fireEvent(screen.getByTestId('bot-row-researcher'), 'longPress')
+    fireEvent.press(screen.getByTestId('row-menu-section'))
     fireEvent.press(screen.getByTestId(`row-menu-section-${id}`))
 
     const entries = useChatLayoutStore.getState().entries
 
     expect(entries[entries.length - 1]).toEqual({ kind: 'chat', name: 'researcher' })
+  })
+
+  /*
+    The drift this sheet was rebuilt to close.
+
+    `row-menu-items.ts` has said from the start that the native menu and this
+    sheet are two drawings of ONE list; only the native side was ever moved onto
+    it. What a reader on a build without the platform menu could do to the ORDER
+    of their list was: move a chat to the top group. Everything below is in the
+    native menu and was not in this one.
+  */
+  it('offers everything the platform menu offers, and moves a row with it', () => {
+    useChatLayoutStore.getState().reconcile(['researcher', 'writer'])
+
+    renderScreen(<BotsScreen />)
+    fireEvent(screen.getByTestId('bot-row-writer'), 'longPress')
+
+    for (const id of ['row-menu-open', 'row-menu-markRead', 'row-menu-dividerAbove', 'row-menu-archive']) {
+      expect(screen.getByTestId(id)).toBeTruthy()
+    }
+
+    fireEvent.press(screen.getByTestId('row-menu-move--1'))
+
+    expect(useChatLayoutStore.getState().entries).toEqual([
+      { kind: 'chat', name: 'writer' },
+      { kind: 'chat', name: 'researcher' }
+    ])
+  })
+
+  it('moves a row down as well as up', () => {
+    useChatLayoutStore.getState().reconcile(['researcher', 'writer'])
+
+    renderScreen(<BotsScreen />)
+    fireEvent(screen.getByTestId('bot-row-researcher'), 'longPress')
+    fireEvent.press(screen.getByTestId('row-menu-move-1'))
+
+    expect(useChatLayoutStore.getState().entries).toEqual([
+      { kind: 'chat', name: 'writer' },
+      { kind: 'chat', name: 'researcher' }
+    ])
+  })
+
+  it('opens the chat from the menu, which is what its first line says', () => {
+    renderScreen(<BotsScreen />)
+    fireEvent(screen.getByTestId('bot-row-writer'), 'longPress')
+
+    expect(screen.getByTestId('row-menu-open')).toBeTruthy()
   })
 })
 
