@@ -18,6 +18,7 @@ import {
   delegationBatchText,
   dmReplyProcessText,
   kanbanNotificationText,
+  modelSwitchMarkerText,
   plainProcessText,
   priorContextText,
   restHistoryRows,
@@ -476,5 +477,53 @@ describe('a persisted steer row', () => {
     const [persisted] = rowsToItems([{ role: 'user', row_id: 51, text: steerWrapperText }], 'rpc') as [UserItem]
 
     expect(normalizedItemText(persisted)).toBe(steerWrapperBody)
+  })
+})
+
+describe('the [System: …] wrapper, on the history path', () => {
+  const unwrapped =
+    'The active model for this chat has changed to k3 via provider moonshot. From this point forward, use this ' +
+    'runtime metadata when answering questions about what model/provider is active.'
+
+  it('comes off a row the gateway labelled, whichever label it used', () => {
+    const rows: TranscriptRow[] = [
+      { role: 'user', text: modelSwitchMarkerText, display_kind: 'model_switch', row_id: 1 },
+      { role: 'user', text: modelSwitchMarkerText, display_kind: 'personality_switch', row_id: 2 },
+      { role: 'user', text: modelSwitchMarkerText, display_kind: 'auto_continue', row_id: 3 }
+    ]
+
+    for (const item of rowsToItems(rows, 'rpc')) {
+      expect((item as NoticeItem).body).toBe(unwrapped)
+    }
+  })
+
+  it('comes off a row nothing labelled, to exactly the same words', () => {
+    const [item] = rowsToItems([{ role: 'user', text: modelSwitchMarkerText, row_id: 9 }], 'rpc')
+
+    expect(item).toMatchObject({ kind: 'notice', noticeKind: 'system_note', body: unwrapped })
+  })
+
+  it('leaves the two descriptions of one row saying the same thing', () => {
+    /*
+      The whole reason the unwrap sits in one place. A labelled row keeps the
+      gateway's own title and an unlabelled one gets a title made from the
+      sentence, so the two disagree about what the row is CALLED — which
+      ADR-0018 allows. They must not disagree about what it SAYS: that is the
+      key the two are paired on, and a mismatch paints the row twice.
+    */
+    const [labelled] = rowsToItems(
+      [{ role: 'user', text: modelSwitchMarkerText, display_kind: 'model_switch', row_id: 1 }],
+      'rpc'
+    )
+    const [bare] = rowsToItems([{ role: 'user', text: modelSwitchMarkerText, row_id: 1 }], 'rpc')
+
+    expect((labelled as NoticeItem).title).not.toBe((bare as NoticeItem).title)
+    expect(normalizedItemText(labelled!)).toBe(normalizedItemText(bare!))
+  })
+
+  it('leaves a body that is not a system note alone', () => {
+    const [item] = rowsToItems([{ role: 'user', text: plainProcessText, row_id: 4 }], 'rpc')
+
+    expect((item as NoticeItem).body).toBe('error TS2345: Argument of type string is not assignable.')
   })
 })

@@ -87,6 +87,48 @@ export const priorContextText = [
   '[END OF PRIOR CONTEXT — COMPACTION SUMMARY BELOW]'
 ].join('\n')
 
+/**
+ * The model-switch marker, verbatim from
+ * `tui_gateway/server.py::_append_model_switch_marker` (line 1705). Persisted
+ * with `display_kind: "model_switch"` where the gateway can, and with nothing at
+ * all where it cannot — which is why the text has to be readable on its own.
+ */
+export const modelSwitchMarkerText =
+  '[System: The active model for this chat has changed to k3 via provider moonshot. From this point forward, use ' +
+  'this runtime metadata when answering questions about what model/provider is active.]'
+
+/** The personality counterpart, `tui_gateway/agent_callbacks.py` (line 270). */
+export const personalitySwitchMarkerText =
+  '[System: The user has cleared the personality overlay. From this point forward, respond in your normal default ' +
+  'style.]'
+
+/** `tools/todo_tool.py::TODO_INJECTION_HEADER` with the list it preserved. */
+export const todoInjectionText = [
+  '[Your active task list was preserved across context compression]',
+  '[>] Rotate the staging certificate',
+  '[ ] Write the release notes'
+].join('\n')
+
+/** The planning half of the same compaction handoff. */
+export const planningPreservedText = [
+  '[Planning state preserved across context compression]',
+  'Step 2 of 4: draft the migration.'
+].join('\n')
+
+/**
+ * `cron/scheduler_delivery.py`'s platform-delivery wrapper (line 1958): the
+ * name, the job id, a rule of dashes, then the report and the how-to-stop line.
+ */
+export const cronjobResponseText = [
+  'Cronjob Response: daily-report',
+  '(job_id: job_9f21)',
+  '-------------',
+  '',
+  'Three deploys, all green.',
+  '',
+  'To stop or manage this job, send me a new message (e.g. "stop reminder daily-report").'
+].join('\n')
+
 /** One kanban event as `_format_kanban_event_text` (line 331) renders it. */
 export const kanbanNotificationText = '✔ [ops] @researcher Kanban task-4412 done — Rotate the staging certificate'
 

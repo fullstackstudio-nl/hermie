@@ -13,7 +13,7 @@ import { Pressable, View, type PanResponderInstance } from 'react-native'
 
 import { unreadBadgeLabel } from '@hermie/transcript'
 
-import { Avatar, formatListTime, formatPreview } from '../../chat-ui'
+import { Avatar, formatListTime } from '../../chat-ui'
 import { strings } from '../../i18n/strings'
 import { ContextMenuHost, HAS_NATIVE_CONTEXT_MENU } from '../../platform/context-menu'
 import { secondaryClick } from '../../platform/secondary-click'
@@ -25,6 +25,7 @@ import { useTheme } from '../../ui/theme'
 import { AVATAR_SIZE, ROW_HEIGHT, TAP_SLOP, type AccentName } from '../../ui/tokens'
 import type { Presence } from './presence'
 import { rowMenuItems } from './row-menu-items'
+import { useRowPreview } from './row-preview'
 
 export type BotRowProps = {
   bot: Bot
@@ -111,14 +112,23 @@ export const BotRow = memo(function BotRow({
     [accent, archived, bot.displayName, bot.name, menuSections, unread]
   )
 
+  // The last REAL message this bot's chat holds, from the transcript when there
+  // is one and from the gateway's own string when there is not. Never the raw
+  // `[System: …]` wrapper either way — see `chatRowPreview`.
+  const derived = useRowPreview(bot.name, bot.canonical?.preview ?? '')
+
   // Offline replaces the preview with when the bot was last heard from: a stale
   // last message under a dead connection reads as if it just arrived.
-  const preview =
-    presence.state === 'offline' && presence.lastSeenAt
-      ? strings.presence.offlineSince(formatListTime(presence.lastSeenAt))
-      : bot.canonical?.preview
-        ? formatPreview(bot.canonical.preview)
-        : bot.description || strings.bots.noPreview
+  const offline = presence.state === 'offline' && Boolean(presence.lastSeenAt)
+  const preview = offline
+    ? strings.presence.offlineSince(formatListTime(presence.lastSeenAt))
+    : derived.text || bot.description || strings.bots.noPreview
+
+  // A second muted style, one step quieter and in italics, for a line nobody
+  // said. It is the difference between "the chat's last message" and "the last
+  // thing that happened to the chat", and without it the switch marker reads as
+  // if the bot had announced it.
+  const systemLine = !offline && derived.system && Boolean(derived.text)
 
   const stamp = stampOf(presence, bot)
 
@@ -211,9 +221,9 @@ export const BotRow = memo(function BotRow({
         </View>
 
         <Text
-          color={unread ? 'text' : 'textMuted'}
+          color={systemLine ? 'textFaint' : unread ? 'text' : 'textMuted'}
           numberOfLines={1}
-          style={{ marginTop: 2 }}
+          style={{ marginTop: 2, ...(systemLine ? { fontStyle: 'italic' as const } : {}) }}
           testID={`bot-preview-${bot.name}`}
           variant="preview"
         >
