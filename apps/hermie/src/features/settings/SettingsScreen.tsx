@@ -13,6 +13,7 @@ import { RefreshNotice } from '../../gateway/RefreshNotice'
 import { TransportNotice } from '../../gateway/TransportNotice'
 import { strings } from '../../i18n/strings'
 import { directTouchPanRef } from '../../platform/pointer-drag'
+import { pluginPresence, usePluginStore } from '../../store/plugin'
 import { useSettingsStore } from '../../store/settings'
 import { InsetButtonRow, InsetGroup, InsetValueRow, Screen } from '../../ui/primitives'
 import { SegmentedRow, SwitchRow } from '../../ui/sheets'
@@ -49,6 +50,8 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
   const theme = useTheme()
   const { canRefresh, config, status, signOut, changeGateway } = useGateway()
   const runtime = useChatRuntime()
+  const advert = usePluginStore(state => state.advert)
+  const presence = usePluginStore(pluginPresence)
   const defaults = useSettingsStore(state => state.defaults)
   const setDefaults = useSettingsStore(state => state.setDefaults)
   const [showConnectionTest, setShowConnectionTest] = useState(initialPage === 'connection')
@@ -162,6 +165,23 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
             <InsetValueRow label={strings.settings.user} value={config.userDisplayName} />
           ) : null}
           <InsetValueRow label={strings.settings.status} value={strings.connection.status[status]} />
+          {/*
+            Whether the gateway-side plugin is there, which is what decides
+            whether notifications can come from the gateway at all. "Checking…"
+            rather than "Not installed" until a roster has actually arrived: the
+            two look the same for a second and only one of them is a reason to
+            send somebody to a shell.
+          */}
+          <InsetValueRow
+            label={strings.settings.plugin}
+            value={
+              presence === 'unknown'
+                ? strings.settings.pluginUnknown
+                : presence === 'installed'
+                  ? strings.settings.pluginInstalled(advert?.version ?? '')
+                  : strings.settings.pluginAbsent
+            }
+          />
         </InsetGroup>
 
         <InsetGroup header={strings.settings.account}>

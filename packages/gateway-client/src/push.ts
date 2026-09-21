@@ -35,8 +35,21 @@ export const PUSH_SECTION_VERSION = 1
 /** Where the registrations sit inside the `hermie-app` key. */
 export const PUSH_SECTION_KEY = 'push'
 
-/** Every event a device can ask about. A registration that names none is off. */
-export const PUSH_TYPES = ['message', 'request', 'dm', 'cron'] as const
+/**
+ * Every event a device can ask about. A registration that names none is off.
+ *
+ * `dm` is deliberately NOT here any more. ADR-0017's amendment records why: a
+ * bot-to-bot DM has no hook in Hermes, so the plugin — which is now the default
+ * notifier — cannot produce one and does not advertise it. The type stays in
+ * the wire schema, because a registration written by an older build still
+ * carries it and `hermie-web --push` can still send one; what changed is that
+ * this app no longer offers a switch for something that will never arrive.
+ *
+ * `turn_done` and `turn_failed` are the amendment's two additions, from
+ * `on_session_end`. An INTERRUPTED turn is deliberately neither: somebody
+ * pressed stop, and they know.
+ */
+export const PUSH_TYPES = ['message', 'request', 'cron', 'turn_done', 'turn_failed'] as const
 
 export type PushType = (typeof PUSH_TYPES)[number]
 

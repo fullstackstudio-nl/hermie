@@ -35,7 +35,7 @@ const registration = (patch: Partial<PushRegistrationInput> = {}): PushRegistrat
   installationId: 'i-phone',
   address: { transport: 'expo', token: 'ExponentPushToken[abc]' },
   platform: 'ios',
-  types: { message: true, request: true, dm: false, cron: false },
+  types: { message: true, request: true, cron: false, turn_done: false, turn_failed: false },
   preview: false,
   updatedAt: NOW,
   ...patch
@@ -75,7 +75,7 @@ describe('one row', () => {
       transport: 'expo',
       token: 'ExponentPushToken[abc]',
       platform: 'ios',
-      types: { message: true, request: true, dm: false, cron: false },
+      types: { message: true, request: true, cron: false, turn_done: false, turn_failed: false },
       preview: false,
       updatedAt: NOW
     })
@@ -98,7 +98,7 @@ describe('one row', () => {
   })
 
   it('copies the types rather than aliasing the caller’s object', () => {
-    const types = { message: true, request: false, dm: false, cron: false }
+    const types = { message: true, request: false, cron: false, turn_done: false, turn_failed: false }
     const row = pushRowFor(registration({ types })) as { types: Record<string, boolean> }
 
     types.message = false
@@ -205,10 +205,18 @@ describe('the small pieces', () => {
     expect(pushTypesOf({ message: true, request: 'yes' })).toEqual({
       message: true,
       request: false,
-      dm: false,
-      cron: false
+      cron: false,
+      turn_done: false,
+      turn_failed: false
     })
     expect(pushTypesOf(null)).toEqual(noPushTypes())
+  })
+
+  it('drops a `dm` an older build of this app wrote, rather than carrying it', () => {
+    // The plugin cannot produce one — there is no hook — so a switch for it
+    // would be a switch that never does anything. `hermie-web --push` can still
+    // send one and reads its own list; this is only about what the app offers.
+    expect(pushTypesOf({ message: true, dm: true })).not.toHaveProperty('dm')
   })
 
   it('stamps in seconds, because that is what the daemon compares against', () => {

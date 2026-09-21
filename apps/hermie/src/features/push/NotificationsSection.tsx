@@ -20,10 +20,12 @@ import { PUSH_TYPES, type PushType } from '@hermie/gateway-client/push'
 import { useCallback, useEffect, useState } from 'react'
 
 import { strings } from '../../i18n/strings'
+import { pluginPresence, usePluginStore } from '../../store/plugin'
 import { usePushStore } from '../../store/push'
 import { InsetButtonRow, InsetGroup, InsetRow, Text } from '../../ui/primitives'
 import { SwitchRow } from '../../ui/sheets'
 import type { PushPermission } from './platform-contract'
+import { PluginInstall } from './PluginInstall'
 import type { PushSync } from './push-sync'
 import { pushRegistrationState, pushRetryable, type PushRegistrationState } from './status'
 
@@ -52,8 +54,9 @@ function statusLine(state: PushRegistrationState): string {
 const TYPE_LABELS: Record<PushType, string> = {
   message: strings.settings.notifications.typeMessage,
   request: strings.settings.notifications.typeRequest,
-  dm: strings.settings.notifications.typeDm,
-  cron: strings.settings.notifications.typeCron
+  cron: strings.settings.notifications.typeCron,
+  turn_done: strings.settings.notifications.typeTurnDone,
+  turn_failed: strings.settings.notifications.typeTurnFailed
 }
 
 export interface NotificationsSectionProps {
@@ -72,6 +75,7 @@ export function NotificationsSection({ push, available = true, testID = 'setting
   const setPreview = usePushStore(state => state.setPreview)
   const address = usePushStore(state => state.address)
   const addressFailure = usePushStore(state => state.addressFailure)
+  const presence = usePluginStore(pluginPresence)
   const [permission, setPermission] = useState<PushPermission>('undetermined')
   const [busy, setBusy] = useState(false)
 
@@ -156,7 +160,26 @@ export function NotificationsSection({ push, available = true, testID = 'setting
 
   return (
     <>
-      <InsetGroup footer={footer} header={strings.settings.notifications.header}>
+      {/*
+        The gateway has no plugin, so nothing there can send a notification.
+        The same screen the wizard shows, rather than a paraphrase of it: a
+        reader who skipped it during setup and came looking later should find
+        what they skipped.
+
+        Above the switch and not instead of it. `hermie-web --push` is still
+        supported and somebody may already be running it, in which case the
+        switch works and hiding it would be the app refusing a feature that is
+        available.
+      */}
+      {presence === 'absent' ? (
+        <InsetGroup header={strings.settings.notifications.header}>
+          <InsetRow>
+            <PluginInstall testID="settings-plugin-install" />
+          </InsetRow>
+        </InsetGroup>
+      ) : null}
+
+      <InsetGroup footer={footer} header={presence === 'absent' ? undefined : strings.settings.notifications.header}>
         <SwitchRow
           disabled={!available || busy}
           label={strings.settings.notifications.enabled}

@@ -368,7 +368,7 @@ describe('every way a registration goes away', () => {
     sync.stop()
   })
 
-  it('drops the neighbours’ rows on retire rather than writing them to the next gateway', async () => {
+  it('keeps the neighbours’ rows on retire, because the last write still carries them', async () => {
     const { sync } = await enabled()
 
     usePushStore.getState().applyRemote({
@@ -378,10 +378,21 @@ describe('every way a registration goes away', () => {
 
     await sync.retire()
 
-    // They belong to the gateway that was just left. Carrying them into the
-    // next one would register somebody else's phone somewhere it never was.
-    expect(usePushStore.getState().others).toEqual({})
-    expect((snapshotFromStores().app as HermieAppShape).push).toBeUndefined()
+    /*
+      This used to clear them, and the reasoning was that they belong to the
+      gateway being left. True, and the write that removes THIS device's row
+      goes to that same gateway while the socket is still up — so a store that
+      had already forgotten them would send a section with nobody in it and
+      unregister every other device on it. That is how a Mac's registration
+      disappeared from the owner's gateway.
+
+      Ours goes; theirs stays. They are dropped when the connection does, in
+      `ChatRuntime`, which is the first moment nothing is going to write them.
+    */
+    const section = (snapshotFromStores().app as HermieAppShape).push
+
+    expect(Object.keys(section?.registrations ?? {})).toEqual(['i-tablet'])
+    expect(section?.seen).toEqual({ 'i-tablet': NOW })
 
     sync.stop()
   })
@@ -691,6 +702,9 @@ describe('the row the store builds', () => {
     const row = section?.registrations[usePushStore.getState().installationId] as Record<string, unknown>
 
     expect(row).toMatchObject({ platform: 'android', preview: true })
-    expect(row.types).toEqual({ message: true, request: true, dm: true, cron: false })
+    // Every type the reader did not turn off. A switch that has just been moved
+    // to ON gets all of them, because the notifier only ever sends what the
+    // gateway can actually produce — see `DEFAULT_PUSH_TYPES`.
+    expect(row.types).toEqual({ message: true, request: true, cron: false, turn_done: true, turn_failed: true })
   })
 })

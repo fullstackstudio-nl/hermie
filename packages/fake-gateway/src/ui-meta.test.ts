@@ -27,7 +27,7 @@
 import { describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
 
-import { startFakeGateway } from './server'
+import { PLUGIN_ADVERT, startFakeGateway } from './server'
 
 /** One JSON-RPC round trip, so a case reads as the call it is about. */
 async function withGateway<T>(run: (call: Call) => Promise<T>): Promise<T> {
@@ -103,7 +103,9 @@ const revisionsOf = async (call: Call, name: string): Promise<Record<string, num
 describe('profiles.configure ui_meta', () => {
   it('starts with the marker another tool put there', async () => {
     await withGateway(async call => {
-      expect(await metaOf(call, 'researcher')).toEqual({ 'hermes-bots': {} })
+      // And the plugin's advert, which is another key this client does not own.
+      expect(Object.keys(await metaOf(call, 'researcher')).sort()).toEqual(['hermes-bots', 'hermie-plugin'])
+      expect(await metaOf(call, 'writer')).toEqual({ 'hermes-bots': {} })
     })
   })
 
@@ -225,8 +227,51 @@ describe('profiles.configure ui_meta', () => {
       expect(removal.applied?.ui_meta).toBe(true)
       // A removal is a write, so the revision moves with it.
       expect(removal.applied?.ui_meta_revisions?.hermie).toBe(2)
-      expect(await metaOf(call, 'researcher')).toEqual({ 'hermes-bots': {} })
+      expect(await metaOf(call, 'researcher')).not.toHaveProperty('hermie')
+      // And it took nothing else with it — including the plugin's own key,
+      // which no client version ever writes.
+      expect(Object.keys(await metaOf(call, 'researcher')).sort()).toEqual(['hermes-bots', 'hermie-plugin'])
     })
+  })
+
+  /**
+   * The gateway-side plugin's own key.
+   *
+   * It is the fake's job to stage both answers, because the app has to behave
+   * differently for each and "not installed" is not a state anybody can produce
+   * on a real gateway without uninstalling something.
+   */
+  it('publishes the plugin advert on the default profile by default', async () => {
+    await withGateway(async call => {
+      const meta = await metaOf(call, 'researcher')
+
+      expect(meta['hermie-plugin']).toEqual(PLUGIN_ADVERT)
+      // The plugin's key, not the app's. It carries its own revision, which is
+      // the whole reason it is separate: a write from the gateway side under
+      // `hermie-app` would make the app's next settings write fail.
+      expect(await metaOf(call, 'writer')).not.toHaveProperty('hermie-plugin')
+    })
+  })
+
+  it('omits it entirely when the gateway is staged without a plugin', async () => {
+    const gateway = await startFakeGateway({ port: 0, plugin: false })
+
+    try {
+      const socket = new WebSocket(gateway.wsUrl, ['hermes-gateway-v1'])
+
+      await new Promise<void>((resolve, reject) => {
+        socket.once('open', () => resolve())
+        socket.once('error', reject)
+      })
+
+      try {
+        expect(await metaOf(callOn(socket), 'researcher')).not.toHaveProperty('hermie-plugin')
+      } finally {
+        socket.close()
+      }
+    } finally {
+      await gateway.close()
+    }
   })
 
   it('refuses a profile it does not have rather than inventing one', async () => {

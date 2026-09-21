@@ -44,14 +44,26 @@ import { randomBytes } from '../platform/random'
 /** Everything this device stores about push, under one key. */
 export const PUSH_KEY = 'hermie.push'
 
-/** The types a reader who has just switched notifications on gets. */
+/**
+ * The types a reader who has just switched notifications on gets: all of them.
+ *
+ * Every one, rather than a careful subset, because the plugin only ever sends
+ * what the gateway can actually produce — a gateway with the `cron` type
+ * switched off sends no cron notification however loudly a device asks — and
+ * because the alternative is a reader who turned notifications on, heard
+ * nothing about the turn that failed overnight, and had no reason to suspect
+ * there was a switch for it.
+ *
+ * Turning one OFF is the decision worth making, and it is one switch away.
+ */
 export const DEFAULT_PUSH_TYPES: Record<PushType, boolean> = {
   // A messenger that does not tell you about a message is not one.
   message: true,
   // A question with a countdown on it is the one thing worth waking a phone for.
   request: true,
-  dm: true,
-  cron: true
+  cron: true,
+  turn_done: true,
+  turn_failed: true
 }
 
 /** The part of this store that survives a launch. Ours only; never theirs. */
@@ -235,9 +247,24 @@ export const usePushStore = create<PushState>((set, get) => {
     },
 
     retire() {
-      // The id survives. A sign-out is not a new installation, and keeping it
-      // means signing back in re-registers the same row rather than adding one.
-      set({ enabled: false, address: null, updatedAt: 0, others: {}, seen: {}, addressFailure: null })
+      /*
+        OURS goes; theirs stays.
+
+        The id survives — a sign-out is not a new installation, and keeping it
+        means signing back in re-registers the same row rather than adding one.
+        So do the other devices' rows and stamps: this store is what the next
+        write of the section is built from, and emptying `others` here would
+        make that write a section with nobody in it, which removes the key and
+        unregisters every phone on the gateway. The removal this is for is one
+        row, and that row is the one `ownRegistration` stops producing the
+        moment `enabled` is false.
+      */
+      const installationId = get().installationId
+      const seen = { ...get().seen }
+
+      delete seen[installationId]
+
+      set({ enabled: false, address: null, updatedAt: 0, seen, addressFailure: null })
       save()
     },
 

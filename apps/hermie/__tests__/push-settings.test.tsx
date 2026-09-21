@@ -61,7 +61,7 @@ it('shows one switch, off, and no per-type controls', () => {
   expect(screen.queryByTestId('settings-push-preview')).toBeNull()
 })
 
-it('opens the four types and the preview switch once it is on', async () => {
+it('opens every type and the preview switch once it is on', async () => {
   const push = syncWith('granted')
 
   paint(push)
@@ -69,9 +69,16 @@ it('opens the four types and the preview switch once it is on', async () => {
 
   await waitFor(() => expect(screen.getByTestId('settings-push-preview')).toBeTruthy())
 
-  for (const type of ['message', 'request', 'dm', 'cron']) {
+  /*
+    All of them, and `dm` is not one of them. ADR-0017's amendment: Hermes fires
+    no hook when a bot-to-bot DM arrives, so the plugin cannot produce one — a
+    switch for it would be a switch that never does anything.
+  */
+  for (const type of ['message', 'request', 'cron', 'turn_done', 'turn_failed']) {
     expect(screen.getByTestId(`settings-push-type-${type}`).props.accessibilityState.checked).toBe(true)
   }
+
+  expect(screen.queryByTestId('settings-push-type-dm')).toBeNull()
 
   // ADR-0017's default: a notification says who and what kind, never what was
   // said, because it is rendered on a lock screen by somebody else's software.

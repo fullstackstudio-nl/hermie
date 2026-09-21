@@ -19,6 +19,7 @@ import { useBotsStore } from '../../store/bots'
 import { useChatLayoutStore } from '../../store/chat-layout'
 import { useChatsStore } from '../../store/chats'
 import { OWNER_USER_ID, useDeviceContextStore } from '../../store/device-context'
+import { usePluginStore } from '../../store/plugin'
 import { usePushStore } from '../../store/push'
 import { useSettingsStore } from '../../store/settings'
 import { UiMetaBridge } from '../../store/ui-meta-bridge'
@@ -116,6 +117,22 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     if (!connection) {
       useChatsStore.getState().reset()
       useBotsStore.getState().reset()
+      // The advert belongs to a gateway; the next one is not this one.
+      usePluginStore.getState().reset()
+      /*
+        And neither are the neighbours.
+
+        The rows belonging to other devices and other people are carried
+        through every write of the `hermie-app` key, so they have to survive a
+        sign-out long enough for the LAST write to that gateway to carry them —
+        `setPushRetire` flushes while the socket is still up, and a store that
+        had already forgotten them would write a section with nobody in it and
+        unregister every other phone. The moment there is no connection is the
+        first moment they are safe to drop, and dropping them then is what stops
+        one gateway's rows from being offered to the next.
+      */
+      usePushStore.getState().applyRemote({ others: {}, seen: {} })
+      useDeviceContextStore.getState().applyRemote({ others: {}, remoteDefault: '' })
       setValue(null)
       valueRef.current = null
 

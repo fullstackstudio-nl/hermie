@@ -21,6 +21,7 @@ import { startFakeGateway } from '@hermie/fake-gateway'
 import { describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
 
+import { HERMIE_PLUGIN_KEY } from './plugin'
 import {
   BOT_MARKER_KEY,
   HERMIE_APP_KEY,
@@ -152,7 +153,10 @@ describe('one device writing', () => {
       const meta = await metaOf(request, 'researcher')
 
       expect(meta).toHaveProperty(BOT_MARKER_KEY)
-      expect(Object.keys(meta).sort()).toEqual([BOT_MARKER_KEY, HERMIE_KEY].sort())
+      // `hermie-plugin` is there too, and belongs to the gateway-side plugin.
+      // Naming it here is the same assertion as the marker's: this client
+      // writes its own key and leaves every other one exactly where it was.
+      expect(Object.keys(meta).sort()).toEqual([BOT_MARKER_KEY, HERMIE_PLUGIN_KEY, HERMIE_KEY].sort())
     })
   })
 

@@ -251,10 +251,17 @@ export const useDeviceContextStore = create<DeviceContextState>((set, get) => {
     },
 
     retire() {
-      // The reader's own preferences survive — a sign-out is not a change of
-      // mind about what they are willing to share — but the identity and
-      // everybody else's rows belong to the gateway that is going away.
-      set({ baseUrl: '', gated: false, userId: '', displayName: '', others: {}, remoteDefault: '' })
+      /*
+        The identity goes and the preferences stay — a sign-out is not a change
+        of mind about what somebody is willing to share. The OTHER people's rows
+        stay too, for the same reason the push store keeps its neighbours: this
+        store is what the next write of the section is built from, and clearing
+        them here would write a section with only the leaving person's absence
+        in it and take everybody else's context with it. They are replaced
+        wholesale by the next gateway's reconcile, which runs before its first
+        flush.
+      */
+      set({ baseUrl: '', gated: false, userId: '', displayName: '' })
     },
 
     reset() {

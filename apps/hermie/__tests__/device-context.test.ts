@@ -203,17 +203,24 @@ describe('the stamp', () => {
 })
 
 describe('signing out', () => {
-  it('forgets the identity and the neighbours, and keeps the reader’s own switches', async () => {
+  it('forgets the identity, keeps the switches, and keeps everybody else’s rows', async () => {
     await signedIn()
     store().acknowledge(GATEWAY)
     store().setShareAbout(true, NOW)
-    store().applyRemote({ others: { 'colleague@example.invalid': {} }, remoteDefault: '' })
+    store().applyRemote({ others: { 'colleague@example.invalid': { displayName: 'Robin' } }, remoteDefault: '' })
 
     store().retire()
 
     expect(store().userId).toBe('')
-    expect(store().others).toEqual({})
     expect(store().shareAbout).toBe(true)
     expect(ownContextRow(store())).toBeNull()
+    /*
+      Theirs stays. The write that removes this person's row goes to the gateway
+      being left, while the socket is still up, and a store that had already
+      forgotten the others would send a section with nobody in it — the same way
+      a Mac's push registration disappeared from the owner's gateway. They are
+      dropped when the connection is, in `ChatRuntime`.
+    */
+    expect(store().others).toEqual({ 'colleague@example.invalid': { displayName: 'Robin' } })
   })
 })

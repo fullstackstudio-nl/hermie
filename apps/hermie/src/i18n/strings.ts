@@ -210,6 +210,38 @@ export const strings = {
       }
     },
 
+    /**
+     * The step between a working connection and a finished wizard.
+     *
+     * It has two faces because the gateway has two states, and they ask for
+     * opposite things. With the plugin installed there is a switch to move and
+     * the only question is whether to move it now. Without it there is nothing
+     * the app can do at all, so the screen's whole job is to hand over two
+     * commands and get out of the way — and to be skippable, because the person
+     * setting the app up on a train is not the person with a shell open.
+     */
+    notifications: {
+      title: 'Notifications',
+      subtitle: 'Your gateway can tell this device when a bot answers, asks for something, or finishes a long task.',
+      enable: 'Turn on notifications',
+      enabling: 'Asking…',
+      enabled: 'Notifications are on for this device.',
+      denied: 'Permission was refused. You can turn it on later in your device settings.',
+      skip: 'You can turn this on later in Settings.',
+
+      missingTitle: 'Get push notifications',
+      missingSubtitle:
+        'This gateway has no Hermie plugin, so nothing there can send a notification. It installs with two commands on the machine running `hermes serve`.',
+      missingHint:
+        'Hermie never talks to the plugin. It reads what your gateway already knows, so there is no second address and nothing new to expose.',
+      install: 'ON THE GATEWAY',
+      copy: 'Copy',
+      copied: 'Copied',
+      guide: 'Open guide',
+      fallback:
+        'Already running Hermie Web with --push? That keeps working, and you can turn notifications on now. Do not run both — they would notify this device twice.'
+    },
+
     done: {
       title: 'Ready',
       subtitle: 'Hermie will store the gateway address on this device and the credentials in the system secret store.',
@@ -612,6 +644,10 @@ export const strings = {
       restartTimedOut: 'Hermie Web did not come back within a minute. Check its logs.'
     },
     status: 'Status',
+    plugin: 'Plugin',
+    pluginInstalled: (version: string) => (version ? `Hermie plugin ${version}` : 'Hermie plugin'),
+    pluginAbsent: 'Not installed',
+    pluginUnknown: 'Checking…',
 
     /**
      * ADR-0017. The wording is doing a job: a reader has to be able to tell,
@@ -622,16 +658,18 @@ export const strings = {
       header: 'NOTIFICATIONS',
       enabled: 'Notifications',
       enabledHint:
-        'Hermie Web watches your bots and sends a notification when one has news. It has to be running with --push.',
+        'The Hermie plugin runs inside your gateway and sends a notification when a bot has news. Hermie Web with --push does the same job from outside, if a plugin cannot be installed.',
       denied: 'Notifications are turned off for Hermie in your device settings. Turn them on there first.',
       unavailable: 'This device cannot register for notifications. Nothing has been sent.',
       webInsecure: 'The browser only offers notifications when Hermie Web is served over https.',
       types: 'TELL ME ABOUT',
       typeMessage: 'New message',
       typeRequest: 'Needs input',
-      typeDm: 'Bot-to-bot',
       typeCron: 'Routines',
-      typesHint: 'A bot answering, a bot asking permission, a message from another bot, and a routine’s delivery.',
+      typeTurnDone: 'Finished working',
+      typeTurnFailed: 'Something went wrong',
+      typesHint:
+        'A bot answering, a bot asking permission, a routine’s delivery, and a long task reaching its end either way. A turn you stopped yourself is never one of these.',
       preview: 'Show a preview',
       previewHint:
         'Off, a notification says which bot and what happened. On, it carries the message as well — and a lock screen is where it will be read.',

@@ -144,6 +144,21 @@ export interface FakeGatewayOptions {
   /** `push.seen`: the heartbeat a device writes while a chat is on screen. */
   pushSeen?: Record<string, number>
   /**
+   * The gateway-side plugin's advert, under its own `hermie-plugin` key.
+   *
+   * Present by default, because a gateway WITH the plugin is the case the app
+   * is built for and a fixture that omits it by default would let the "get the
+   * plugin" screen become the one every test exercises. `false` omits the key
+   * entirely, which is the state the app must read as "not installed" — a
+   * plugin too old to write the key, a plugin that is disabled, and no plugin
+   * at all are the same thing from the outside, and that is exactly the shape
+   * worth being able to stage.
+   *
+   * An object replaces the default, so a test can stage a `v` from the future,
+   * a build with fewer capabilities, or a module switched off.
+   */
+  plugin?: Record<string, unknown> | false
+  /**
    * Whether an accepted `session.steer` writes a `display_kind: "steer"` row.
    *
    * Default true, because that is the harder case for a client: it has its own
@@ -604,6 +619,44 @@ export interface FakeGateway {
  * with an explicit scope.
  */
 const LAUNCH_PROFILE = 'default'
+
+/**
+ * The `hermie-plugin` advert, as the gateway-side plugin publishes it.
+ *
+ * Copied from the plugin's own `contract.py` rather than invented here: the
+ * app reads capability STRINGS and never a version number, so a fixture that
+ * spelled one of them differently would stage a gateway whose plugin exists
+ * and offers nothing, which is not a state any real gateway is in.
+ *
+ * `dm` is not among the types, and that is the point of the fixture as much as
+ * anything in it: Hermes fires no hook when a bot-to-bot DM arrives, so a
+ * plugin cannot produce one and does not advertise it.
+ */
+export const PLUGIN_ADVERT: Record<string, unknown> = {
+  v: 1,
+  version: '0.1.0',
+  capabilities: [
+    'context.per_bot',
+    'context.system_prompt',
+    'push.expo',
+    'push.preview',
+    'push.type.turn_done',
+    'push.type.turn_failed',
+    'push.webpush'
+  ],
+  modules: {
+    attachments: 'planned',
+    context: 'on',
+    presence: 'planned',
+    push: 'on',
+    search: 'planned',
+    sessions: 'planned',
+    transcripts: 'planned',
+    usage: 'planned'
+  },
+  limits: { payloadBytes: 3500, contextChars: 1200 },
+  updatedAt: 1_790_001_453
+}
 
 /**
  * `cron/scheduler_delivery.py::_deliver_to_bot_chat`'s header, verbatim.
@@ -1423,6 +1476,15 @@ function initialState(options: FakeGatewayOptions): FakeGatewayState {
               push: { registrations: options.pushRegistrations ?? {}, seen: options.pushSeen ?? {} }
             }
           }
+        : {}),
+      /*
+        The plugin's own key, on the default profile, written by the gateway
+        side and never by the app. It carries its own revision, which is the
+        point of it being a separate key: a write from behind `hermie-app`
+        would make the app's next settings write fail.
+      */
+      ...(session.profile === researcher.profile && options.plugin !== false
+        ? { 'hermie-plugin': options.plugin ?? PLUGIN_ADVERT }
         : {})
     }
   })

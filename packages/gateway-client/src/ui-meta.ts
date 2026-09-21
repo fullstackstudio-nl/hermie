@@ -33,6 +33,7 @@
  * is in force so a screen can be honest about it, and a refusal is retried on the
  * next reconcile rather than being retried forever.
  */
+import { pluginAdvert, type PluginAdvert } from './plugin'
 import type { ProfileRow, ProfilesConfigureResult, ProfilesListResult } from '@hermes/shared/gateway-contract'
 
 /** That bot's profile: everything about one conversation. */
@@ -80,6 +81,43 @@ export interface UiMetaSnapshot {
   app: HermieAppSection | null
   /** Bot name → its section. A bot with no section is simply absent. */
   bots: Record<string, HermieBotSection>
+  /**
+   * The gateway plugin's advert, when the roster carried one.
+   *
+   * Read-only and one-directional: the key belongs to the plugin and nothing
+   * here ever writes it. It rides on this snapshot rather than on a reader of
+   * its own because it comes out of the same `profiles.list` the reconcile
+   * already makes, and a second round trip for one key would be a second round
+   * trip on every reconnect.
+   *
+   * `undefined` on a snapshot the APP produced, which says nothing about the
+   * gateway; `null` on one the GATEWAY produced with no advert in it, which
+   * says the plugin is not there.
+   */
+  plugin?: PluginAdvert | null
+  /**
+   * The gateway's own app section, UNMERGED, even when `app` is the local copy.
+   *
+   * This exists because one `ui_meta` key holds two kinds of thing. The chat
+   * arrangement and the theme set are whole values, and for those last-writer-
+   * wins per section is the decision ADR-0016 made deliberately. The push
+   * registrations and the context users are MAPS KEYED BY DEVICE OR PERSON, and
+   * for those it is simply wrong: the entry another device wrote is not a rival
+   * version of ours, it is somebody else's.
+   *
+   * An app cannot merge what it was not shown. `withPendingKept` hands back the
+   * LOCAL app section whenever this device is holding an unsent change — which
+   * is exactly the state a device is in while it is registering itself — so a
+   * reader that took the neighbours out of `app` took them out of its own copy
+   * and found none. It then wrote a section with only its own row in it, and
+   * the other device's registration was gone. Measured on the owner's gateway:
+   * a Mac registered, a reinstalled iPhone registered, and only the iPhone
+   * remained.
+   *
+   * So the gateway's own copy travels beside the merged one, and the per-device
+   * maps are always read from here.
+   */
+  remote?: HermieAppSection | null
 }
 
 export type UiMetaMode = 'synced' | 'local'
@@ -295,6 +333,8 @@ export class UiMetaSync {
 
     const local = this.read()
     const bots = { ...remote.bots }
+    // The advert is the gateway's either way: it is never local and never dirty.
+    const plugin = remote.plugin ?? null
 
     for (const botName of this.dirtyBots) {
       const section = local.bots[botName]
@@ -306,7 +346,7 @@ export class UiMetaSync {
       }
     }
 
-    return { app: this.dirtyApp ? local.app : remote.app, bots }
+    return { app: this.dirtyApp ? local.app : remote.app, bots, plugin, remote: remote.app }
   }
 
   /** Read `profiles.list` and project the two keys out of it. */
@@ -325,6 +365,7 @@ export class UiMetaSync {
 
     const rows = Array.isArray(result?.profiles) ? result.profiles : []
     const bots: Record<string, HermieBotSection> = {}
+    const plugin = pluginAdvert(rows)
     let app: HermieAppSection | null = null
 
     for (const row of rows) {
@@ -352,7 +393,7 @@ export class UiMetaSync {
 
     this.currentMode = 'synced'
 
-    return { app, bots }
+    return { app, bots, plugin, remote: app }
   }
 
   /**
@@ -381,7 +422,6 @@ export class UiMetaSync {
   }
 
   private async run(): Promise<void> {
-    const snapshot = this.read()
     /*
       Grouped by profile, which matters in exactly one case and that case is the
       common one: the default profile is also a BOT, so a reader who colours the
@@ -391,16 +431,16 @@ export class UiMetaSync {
       are independent inside a single request, which is the whole point of
       sections being independent.
     */
-    const byProfile = new Map<string, Record<string, unknown>>()
+    const byProfile = new Map<string, string[]>()
 
-    const at = (profile: string): Record<string, unknown> => {
+    const at = (profile: string): string[] => {
       const existing = byProfile.get(profile)
 
       if (existing) {
         return existing
       }
 
-      const created: Record<string, unknown> = {}
+      const created: string[] = []
 
       byProfile.set(profile, created)
 
@@ -408,18 +448,41 @@ export class UiMetaSync {
     }
 
     for (const botName of this.dirtyBots) {
-      const section = snapshot.bots[botName]
-
-      at(botName)[HERMIE_KEY] = section ? { ...section, v: HERMIE_SECTION_VERSION } : null
+      at(botName).push(HERMIE_KEY)
     }
 
     if (this.dirtyApp && this.defaultProfile) {
-      at(this.defaultProfile)[HERMIE_APP_KEY] = snapshot.app ? { ...snapshot.app, v: HERMIE_APP_SECTION_VERSION } : null
+      at(this.defaultProfile).push(HERMIE_APP_KEY)
     }
 
-    for (const [profile, sections] of byProfile) {
-      await this.send(profile, sections)
+    for (const [profile, keys] of byProfile) {
+      await this.send(profile, keys)
     }
+  }
+
+  /**
+   * The value for each key, taken from the app AT THE MOMENT OF THE ATTEMPT.
+   *
+   * Built per attempt rather than once per flush, which is what makes the
+   * conflict retry below correct: a retry re-reads the gateway first, the app's
+   * stores take the neighbours out of that answer, and the value this builds is
+   * therefore the merge rather than the same losing bytes a second time.
+   */
+  private sectionsFor(profile: string, keys: readonly string[]): Record<string, unknown> {
+    const snapshot = this.read()
+    const sections: Record<string, unknown> = {}
+
+    for (const key of keys) {
+      if (key === HERMIE_APP_KEY) {
+        sections[key] = snapshot.app ? { ...snapshot.app, v: HERMIE_APP_SECTION_VERSION } : null
+      } else {
+        const section = snapshot.bots[profile]
+
+        sections[key] = section ? { ...section, v: HERMIE_SECTION_VERSION } : null
+      }
+    }
+
+    return sections
   }
 
   /**
@@ -429,10 +492,9 @@ export class UiMetaSync {
    * archived and has no colour has nothing to say, and leaving an empty object
    * behind would be a key on somebody's profile that means nothing.
    */
-  private async send(profile: string, sections: Record<string, unknown>): Promise<void> {
-    const keys = Object.keys(sections)
-
+  private async send(profile: string, keys: readonly string[]): Promise<void> {
     for (let attempt = 0; attempt <= this.retries; attempt += 1) {
+      const sections = this.sectionsFor(profile, keys)
       const expected: Record<string, number> = {}
 
       for (const key of keys) {
@@ -464,9 +526,6 @@ export class UiMetaSync {
       }
 
       for (const [key, conflict] of Object.entries(conflicts)) {
-        // Take the revision that won. The VALUE that won is deliberately not
-        // read: last writer wins per section, and this client is the later
-        // writer — it is about to say so again with the right revision.
         this.revisions.set(`${profile}:${key}`, conflict.actual)
       }
 
@@ -475,6 +534,23 @@ export class UiMetaSync {
 
         return
       }
+
+      /*
+        The value that won is READ before this device says its own again.
+
+        It used to be deliberately ignored — last writer wins per section, and
+        this client is the later writer. That is still the right rule for the
+        whole values in the key, and it is the wrong one for the maps keyed by
+        device and by person that now live in it: the entry that won is not a
+        rival version of ours, it is another device's registration or another
+        person's context, and re-sending our own bytes with a newer revision
+        would delete it with the protocol's blessing.
+
+        So a conflict re-reads the gateway and lets the app fold the winner's
+        rows back in. `sectionsFor` is called again at the top of the next
+        attempt, so what goes out second is the merge.
+      */
+      await this.reread()
     }
 
     // Out of retries with a conflict still standing: something else is writing
@@ -488,6 +564,20 @@ export class UiMetaSync {
       } else {
         this.dirtyBots.delete(profile)
       }
+    }
+  }
+
+  /**
+   * Read the gateway again and hand its copy to the app, keeping what is dirty.
+   *
+   * The same two steps `reconcile` opens with, without the flush at the end —
+   * this runs INSIDE a flush and would otherwise re-enter it.
+   */
+  private async reread(): Promise<void> {
+    const remote = await this.pull()
+
+    if (remote) {
+      this.apply(this.withPendingKept(remote))
     }
   }
 

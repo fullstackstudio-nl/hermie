@@ -47,6 +47,7 @@ import { Platform } from 'react-native'
 import { ACCENTS, type AccentName } from '../ui/tokens'
 import { useChatLayoutStore, type LayoutEntry } from './chat-layout'
 import { ownContextRow, useDeviceContextStore } from './device-context'
+import { usePluginStore } from './plugin'
 import { ownRegistration, usePushStore } from './push'
 import { asThemeChoice, asUserThemes, DEFAULT_CHAT_VIEW, useSettingsStore, type ChatViewSettings } from './settings'
 
@@ -201,6 +202,16 @@ export function applySnapshot(snapshot: UiMetaSnapshot): void {
 
   const app = snapshot.app as HermieAppShape | null
   const entries = entriesOf(app?.entries)
+  /*
+    The per-device and per-person MAPS come from the gateway's own copy, never
+    from the merged one. `app` is this device's local section whenever it is
+    holding an unsent change — which is exactly the state a device is in while
+    it registers itself — and a device that took the neighbours out of its own
+    copy found none and then wrote a section with only its own row in it. See
+    `UiMetaSnapshot.remote`; on the owner's gateway that lost a Mac's push
+    registration the moment a reinstalled iPhone registered.
+  */
+  const neighbours = (snapshot.remote ?? app) as HermieAppShape | null
 
   useChatLayoutStore.getState().applyRemote({
     // An absent list is not an empty one. A gateway that has never been written
@@ -217,14 +228,24 @@ export function applySnapshot(snapshot: UiMetaSnapshot): void {
     that a write from this device does not erase somebody else's heartbeat.
   */
   usePushStore.getState().applyRemote({
-    others: foreignPushRows(app, usePushStore.getState().installationId),
-    seen: pushSeenOf(app)
+    others: foreignPushRows(neighbours, usePushStore.getState().installationId),
+    seen: pushSeenOf(neighbours)
   })
+
+  /*
+    The advert, one-directionally. It is only ever present on a snapshot the
+    GATEWAY produced — `snapshotFromStores` leaves it undefined — so an
+    `undefined` here is "the app asked itself" and must not be read as "the
+    plugin is gone".
+  */
+  if (snapshot.plugin !== undefined) {
+    usePluginStore.getState().apply(snapshot.plugin)
+  }
 
   /* Ours is replaced, theirs is taken — see the push section above. */
   useDeviceContextStore.getState().applyRemote({
-    others: foreignContextUsers(app, useDeviceContextStore.getState().userId),
-    remoteDefault: contextDefaultOf(app)
+    others: foreignContextUsers(neighbours, useDeviceContextStore.getState().userId),
+    remoteDefault: contextDefaultOf(neighbours)
   })
 
   useSettingsStore.getState().applyAppSettings({

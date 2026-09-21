@@ -4,6 +4,7 @@ export {
   type FakeGatewayOptions,
   type FakeGatewayState,
   type FakeSession,
+  PLUGIN_ADVERT,
   type Scenario,
   type ScenarioReply,
   startFakeGateway,
