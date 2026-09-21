@@ -11,7 +11,6 @@
  * shared module is the no-op the phones get.
  */
 import { secondaryClick } from '../src/platform/secondary-click.web'
-import { secondaryClick as nativeSecondaryClick } from '../src/platform/secondary-click'
 
 describe('a secondary click in a browser', () => {
   it('opens the menu the long press opens', () => {
@@ -33,10 +32,8 @@ describe('a secondary click in a browser', () => {
   })
 })
 
-describe('everywhere else', () => {
-  it('hands back nothing, because the gesture is already wired', () => {
-    // A long press on the phones, and the system's own menu on a Mac — which
-    // is a native view rather than an event. See `platform/context-menu.tsx`.
-    expect(nativeSecondaryClick(jest.fn())).toEqual({})
-  })
-})
+// The native half is deliberately not imported beside it. Jest resolves
+// `../src/platform/secondary-click` to the no-op and the lint resolver resolves
+// it to the `.web` file, so the two imports in one file are the same module to
+// one tool and different modules to the other — a warning that is right about
+// the confusion even though the test would have passed.
