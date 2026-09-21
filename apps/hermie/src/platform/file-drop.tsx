@@ -41,6 +41,16 @@ export interface DroppedFile {
   name: string
   size: number
   mimeType: string
+  /**
+   * The `FormData` part, where the platform has one of its own.
+   *
+   * Absent on the native side, which streams from the URI. A browser drop
+   * carries the `File` here for the same reason the browser PICKER does: a
+   * browser's `FormData` streams a `File` and rejects React Native's
+   * `{uri, name, type}` blob, so an upload rebuilt from the object URL alone
+   * would fail at the last step. Mirrors `PickedFile.body`.
+   */
+  body?: unknown
 }
 
 export interface NativeDropViewProps {
@@ -112,7 +122,11 @@ export function normaliseDroppedFiles(payload: unknown): DroppedFile[] {
       mimeType: typeof item.mimeType === 'string' && item.mimeType ? item.mimeType : FALLBACK_MIME_TYPE,
       name: decodeURIComponent(name),
       size: typeof item.size === 'number' && Number.isFinite(item.size) && item.size > 0 ? item.size : 0,
-      uri
+      uri,
+      // Carried through rather than rebuilt: the browser drop puts the `File`
+      // here and only that object can be streamed by a browser's `FormData`.
+      // The native side sends nothing, and the key stays absent.
+      ...(item.body === undefined || item.body === null ? {} : { body: item.body })
     })
   }
 

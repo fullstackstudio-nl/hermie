@@ -232,6 +232,20 @@ export const chatStrings = {
     region: 'Drop files here to attach them'
   },
 
+  /** The full-screen image viewer, and the cards that open it. */
+  viewer: {
+    close: 'Close image',
+    /**
+     * Two verbs, because the action really is two things. A phone or a Mac
+     * opens the share sheet; a browser cannot, and downloads instead. Naming
+     * the button "Share" in a browser would promise a sheet that is not
+     * coming. `SHARE_FILE_VERB` picks which one.
+     */
+    share: 'Share image',
+    download: 'Download image',
+    openHint: 'Opens the full-screen view'
+  },
+
   composer: {
     placeholder: 'Message',
     /** The field's accessibility label once the chat knows whose it is. */
@@ -247,7 +261,20 @@ export const chatStrings = {
     keyHint: 'Enter to send · Shift+Enter for a new line',
     removeAttachment: 'Remove attachment',
     queued: (text: string) => `↳ 1 message queued · “${text}”`,
-    slashHint: 'Commands'
+    slashHint: 'Commands',
+    /**
+     * The tray's own label, and the reason it exists.
+     *
+     * A staged card and a sent card are the same card — that is the point of
+     * §6.7 — so the one thing the tray has to say is which of the two this is.
+     * "Not sent yet" rather than "Attached": attached is what it looks like
+     * already, and the question a reader actually has is whether it has gone.
+     */
+    notSentYet: 'Not sent yet',
+    pendingCount: (count: number) => (count === 1 ? '1 file' : `${count} files`),
+    /** The send button's label while the tray has something in it. */
+    sendWithAttachments: (count: number) =>
+      count === 1 ? 'Send message with 1 attachment' : `Send message with ${count} attachments`
   },
   header: {
     back: 'Back to chats',

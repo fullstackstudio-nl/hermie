@@ -77,6 +77,8 @@ import { DateSeparator } from './DateSeparator'
 import { Appear } from '../ui/Appear'
 import { JumpToLatestPill } from './JumpToLatestPill'
 import { NoticePill } from './NoticePill'
+import type { GalleryAttachment } from './AttachmentGallery'
+import { ImageViewer } from './ImageViewer'
 import { SelectTextOverlay } from './SelectTextOverlay'
 import { StatusRow } from './StatusRow'
 import { SubagentGroupCard } from './SubagentGroupCard'
@@ -133,6 +135,20 @@ export interface TranscriptContext {
   /** Re-opens the sheet for a question still sitting in the transcript. */
   onOpenRequest?: (item: ApprovalItem | ClarifyItem) => void
   onLinkPress?: (href: string) => void
+  /**
+   * Something `Image` can load for an attachment reference, or `undefined`.
+   *
+   * The host's answer, because only it knows which attachments it still holds
+   * bytes for — a reference is a path on the gateway's disk and no endpoint
+   * serves one back. Absent means every attachment draws as a chip.
+   */
+  attachmentUri?: (reference: string) => string | undefined
+  /**
+   * Open an attachment. Supplied by `TranscriptList` itself for a picture, the
+   * same way `onSelectText` is: the viewer is a `Modal`, and a modal mounted
+   * from a virtualised cell goes with the cell the moment it recycles.
+   */
+  onOpenAttachment?: (attachment: GalleryAttachment) => void
   /**
    * Open the "Select text" panel over this message's markdown.
    *
@@ -410,9 +426,11 @@ function RowView({ entry, context, receipt, layout, dmRole }: RowProps) {
       return (
         <UserBubble
           {...(context.accent ? { accent: context.accent } : {})}
+          {...(context.attachmentUri ? { attachmentUri: context.attachmentUri } : {})}
           grouped={layout.grouped}
           item={item}
           onLinkPress={context.onLinkPress}
+          {...(context.onOpenAttachment ? { onOpenAttachment: context.onOpenAttachment } : {})}
           presentation={presentation}
           receipt={receipt}
           tail={layout.tail}
@@ -1004,6 +1022,45 @@ function TranscriptListBody({
   const openSelectText = useCallback((markdown: string) => setSelectingText(markdown), [])
   const closeSelectText = useCallback(() => setSelectingText(null), [])
 
+  /**
+   * The attachment the full-screen viewer is showing.
+   *
+   * Held HERE for the same reason the select-text panel is: the viewer is a
+   * `Modal`, and a modal mounted from a virtualised row unmounts with the row
+   * the moment the list recycles it — which, with a full-screen image over the
+   * top, is as soon as the transcript scrolls underneath.
+   *
+   * A file that is not a picture never reaches this state. It has no viewer to
+   * open, so it goes straight to the host's handler, which hands it to the
+   * share sheet or downloads it.
+   */
+  const [viewing, setViewing] = useState<GalleryAttachment | null>(null)
+  const closeViewer = useCallback(() => setViewing(null), [])
+
+  /*
+    The host's handler is reached through a REF, not through the dependency
+    array.
+
+    `handlers` is the props object and is new on every render, so depending on
+    it rebuilt this callback each time, which rebuilt the context, which is the
+    one thing `transcript-memo.test.tsx` exists to prevent — every settled row
+    re-rendered on every streaming delta. The ref keeps the callback's identity
+    stable while still calling whatever the host passed most recently.
+  */
+  const openFile = useRef(handlers.onOpenAttachment)
+
+  openFile.current = handlers.onOpenAttachment
+
+  const openAttachment = useCallback((attachment: GalleryAttachment) => {
+    if (attachment.uri) {
+      setViewing(attachment)
+
+      return
+    }
+
+    openFile.current?.(attachment)
+  }, [])
+
   const context = useMemo<TranscriptContext>(
     () => ({
       accent: handlers.accent,
@@ -1017,6 +1074,8 @@ function TranscriptListBody({
       onRetry: handlers.onRetry,
       onRunCron: handlers.onRunCron,
       onSelectText: openSelectText,
+      onOpenAttachment: openAttachment,
+      ...(handlers.attachmentUri ? { attachmentUri: handlers.attachmentUri } : {}),
       selfHandle: handlers.selfHandle,
       subagents: handlers.subagents ?? {},
       typingHandles: handlers.typingHandles ?? EMPTY_HANDLES
@@ -1030,8 +1089,10 @@ function TranscriptListBody({
       handlers.onOpenCron,
       handlers.onOpenRequest,
       handlers.onOpenTranscript,
+      handlers.attachmentUri,
       handlers.onRetry,
       handlers.onRunCron,
+      openAttachment,
       handlers.selfHandle,
       openSelectText,
       handlers.subagents,
@@ -1633,6 +1694,15 @@ function TranscriptListBody({
         {selectingText === null ? null : (
           <SelectTextOverlay markdown={selectingText} onClose={closeSelectText} testID={`${testID}-select-text`} />
         )}
+
+        {/* Same reason, same place: a full-screen image over a list that is
+            still scrolling underneath it must not belong to a row. */}
+        <ImageViewer
+          onClose={closeViewer}
+          testID={`${testID}-image-viewer`}
+          uri={viewing?.uri ?? null}
+          {...(viewing?.name ? { name: viewing.name } : {})}
+        />
       </BubbleColumn>
     </ExpandedProvider>
   )

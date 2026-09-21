@@ -900,3 +900,86 @@ describe('the attach popover', () => {
     expect(widthFloorOf('composer-attach-menu')).toBeUndefined()
   })
 })
+
+/**
+ * The pending tray.
+ *
+ * The cards in it are deliberately the SAME cards a sent message shows — that
+ * is §6.7 — which is exactly what made the state ambiguous: the owner could not
+ * tell a file that was attached from one already on its way. So the tray has to
+ * say which it is in words, and the send button has to carry the fact too,
+ * because the tray scrolls out of reach on a short screen with the keyboard up
+ * and the button never does.
+ *
+ * It stays INSIDE the field. Lifting it back out into a strip of its own is the
+ * shape this composer deliberately moved away from, and these assertions are
+ * what stop a later change from undoing that by accident.
+ */
+describe('the Composer pending tray', () => {
+  const image = { id: 'att-1', kind: 'image' as const, name: 'shot.png', uri: 'file:///tmp/shot.png' }
+  const doc = { id: 'att-2', kind: 'file' as const, name: 'report.pdf', size: 2048 }
+
+  it('says in words that the file has not gone anywhere', () => {
+    renderComposer({ attachments: [doc] })
+
+    expect(screen.getByTestId('composer-attachments-pending')).toBeTruthy()
+    expect(screen.getByText('Not sent yet')).toBeTruthy()
+    expect(screen.getByText('· 1 file')).toBeTruthy()
+  })
+
+  it('counts what is waiting', () => {
+    renderComposer({ attachments: [image, doc] })
+
+    expect(screen.getByText('· 2 files')).toBeTruthy()
+  })
+
+  it('has no tray at all with nothing attached', () => {
+    renderComposer({ value: 'just words' })
+
+    expect(screen.queryByTestId('composer-attachments-pending')).toBeNull()
+    expect(screen.queryByTestId('composer-attachments')).toBeNull()
+  })
+
+  it('keeps the tray inside the field rather than above it', () => {
+    renderComposer({ attachments: [doc] })
+
+    // The field is the pill the caret is in; what is attached is attached to
+    // the MESSAGE, which is that pill.
+    expect(screen.getByTestId('composer-field')).toBeTruthy()
+    expect(screen.getByTestId('composer-attachments-pending')).toBeTruthy()
+  })
+
+  it('still removes an image from its own ×', () => {
+    const handlers = renderComposer({ attachments: [image] })
+
+    fireEvent.press(screen.getByTestId('composer-attachment-remove-att-1'))
+    expect(handlers.onRemoveAttachment).toHaveBeenCalledWith('att-1')
+  })
+
+  it('still removes a file from its own ×', () => {
+    const handlers = renderComposer({ attachments: [doc] })
+
+    fireEvent.press(screen.getByTestId('composer-attachment-att-2-remove'))
+    expect(handlers.onRemoveAttachment).toHaveBeenCalledWith('att-2')
+  })
+
+  it('shows the count on the send button too', () => {
+    renderComposer({ attachments: [image, doc] })
+
+    expect(screen.getByTestId('composer-send-badge')).toBeTruthy()
+    expect(screen.getByTestId('composer-send').props.accessibilityLabel).toBe('Send message with 2 attachments')
+  })
+
+  it('names a single attachment in the singular', () => {
+    renderComposer({ attachments: [doc] })
+
+    expect(screen.getByTestId('composer-send').props.accessibilityLabel).toBe('Send message with 1 attachment')
+  })
+
+  it('has no badge with nothing attached', () => {
+    renderComposer({ value: 'just words' })
+
+    expect(screen.queryByTestId('composer-send-badge')).toBeNull()
+    expect(screen.getByTestId('composer-send').props.accessibilityLabel).toBe('Send message')
+  })
+})

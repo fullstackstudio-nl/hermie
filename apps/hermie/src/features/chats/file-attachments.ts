@@ -91,7 +91,10 @@ export function droppedFile(file: DroppedFile): PickedFile {
     size: Number.isFinite(file.size) ? file.size : 0,
     mimeType: file.mimeType || FALLBACK_MIME_TYPE,
     uri: file.uri,
-    // React Native's `FormData` takes this shape and streams from the URI.
-    body: { uri: file.uri, name: file.name || 'attachment', type: file.mimeType || FALLBACK_MIME_TYPE }
+    // A browser drop already carries the `File`, and only that object can be
+    // streamed by a browser's `FormData` — rebuilding the React Native blob
+    // over the top of it would fail at the upload. Everywhere else there is no
+    // body and the `{uri}` shape is what streams from disk.
+    body: file.body ?? { uri: file.uri, name: file.name || 'attachment', type: file.mimeType || FALLBACK_MIME_TYPE }
   }
 }

@@ -9,6 +9,14 @@ export { AgentsBar, type AgentsBarProps } from './AgentsBar'
 export { AttachMenu, type AttachMenuProps } from './AttachMenu'
 export { AgentsSheet, type AgentsSheetProps, type SubagentTranscript } from './AgentsSheet'
 export { AssistantBubble, type AssistantBubbleProps } from './AssistantBubble'
+export {
+  AttachmentGallery,
+  GALLERY_GRID_HEIGHT,
+  GALLERY_SOLO_MAX_HEIGHT,
+  gridColumns,
+  type AttachmentGalleryProps,
+  type GalleryAttachment
+} from './AttachmentGallery'
 export { BotDmInBubble, type BotDmInBubbleProps } from './BotDmInBubble'
 export { BotDmOutLine, markerFor, type BotDmOutLineProps } from './BotDmOutLine'
 export { BotDmRollup, useRollupExpanded, type BotDmRollupProps } from './BotDmRollup'
@@ -18,6 +26,17 @@ export { CronDeliveryCard, type CronDeliveryCardProps } from './CronDeliveryCard
 export { DateSeparator, type DateSeparatorProps } from './DateSeparator'
 export { DiffView, type DiffViewProps } from './DiffView'
 export { FileChip, fileGlyph, type FileChipProps } from './FileChip'
+export { ImageCard, type ImageCardProps } from './ImageCard'
+export {
+  clampScale,
+  DISMISS_FRACTION,
+  ImageViewer,
+  MAX_SCALE,
+  MIN_SCALE,
+  pinchDistance,
+  shouldDismiss,
+  type ImageViewerProps
+} from './ImageViewer'
 export { ErrorCard, type ErrorCardProps } from './ErrorCard'
 export { JumpToLatestPill, type JumpToLatestPillProps } from './JumpToLatestPill'
 export { NoticePill, type NoticePillProps } from './NoticePill'

@@ -13,7 +13,7 @@ import { View } from 'react-native'
 
 import { Markdown } from '../markdown'
 import { useTheme } from '../ui/theme'
-import { FileChip } from './FileChip'
+import { AttachmentGallery, type GalleryAttachment } from './AttachmentGallery'
 import { Bubble } from './primitives/Bubble'
 import { Chip } from './primitives/Chip'
 import { MetaLine } from './primitives/MetaLine'
@@ -33,6 +33,17 @@ export interface UserBubbleProps {
   /** The chat's outgoing fill, from `useChatAccent`. */
   accent?: string
   onLinkPress?: (href: string) => void
+  /**
+   * Something `Image` can load for this reference, when the host has one.
+   *
+   * A reference is a path on the GATEWAY's disk, which nothing here can fetch,
+   * so the bubble cannot decide on its own whether an attachment is showable —
+   * only the screen knows which images it still holds bytes for. Returning
+   * `undefined` is the ordinary answer and draws the chip.
+   */
+  attachmentUri?: (reference: string) => string | undefined
+  /** Open one: the full-screen viewer for a picture, the system for a file. */
+  onOpenAttachment?: (attachment: GalleryAttachment) => void
 }
 
 /**
@@ -58,7 +69,9 @@ export function UserBubble({
   tail = true,
   grouped = false,
   accent,
-  onLinkPress
+  onLinkPress,
+  attachmentUri,
+  onOpenAttachment
 }: UserBubbleProps) {
   const theme = useTheme()
 
@@ -128,10 +141,17 @@ export function UserBubble({
         message.
       */}
       {item.attachments?.length ? (
-        <View style={{ gap: theme.space.xs, marginTop: item.text ? theme.space.sm : 0 }}>
-          {item.attachments.map(reference => (
-            <FileChip key={reference} name={attachmentName(reference)} onAccent testID={`user-file-${item.id}`} />
-          ))}
+        <View style={{ marginTop: item.text ? theme.space.sm : 0 }}>
+          <AttachmentGallery
+            attachments={item.attachments.map(reference => {
+              const uri = attachmentUri?.(reference)
+
+              return { name: attachmentName(reference), reference, ...(uri ? { uri } : {}) }
+            })}
+            onAccent
+            {...(onOpenAttachment ? { onOpen: onOpenAttachment } : {})}
+            testID={`user-file-${item.id}`}
+          />
         </View>
       ) : null}
     </Bubble>
