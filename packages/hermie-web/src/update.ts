@@ -30,7 +30,7 @@
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdir, readdir, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readlink, rename, rm, symlink, writeFile, readFile } from 'node:fs/promises'
 import http from 'node:http'
 import https from 'node:https'
 import path from 'node:path'
@@ -437,7 +437,10 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<string> 
   await mkdir(staging, { recursive: true })
   await extractZip(zip, staging, { stripTopLevel: true })
 
-  if (!existsSync(path.join(staging, 'node_modules'))) {
+  // The server has no runtime dependencies, so a release zip carries neither a
+  // lockfile nor node_modules, and `npm ci` would refuse it. Only a package that
+  // declares dependencies and ships its lockfile gets an install.
+  if (!existsSync(path.join(staging, 'node_modules')) && (await declaresRuntimeDependencies(staging))) {
     await (options.installDependencies ?? npmCiOmitDev)(staging)
   }
 
@@ -446,6 +449,18 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<string> 
   await switchCurrent(installRoot, release.version)
 
   return release.version
+}
+
+async function declaresRuntimeDependencies(directory: string): Promise<boolean> {
+  try {
+    const manifest = JSON.parse(await readFile(path.join(directory, 'package.json'), 'utf8')) as {
+      dependencies?: Record<string, string>
+    }
+    const count = Object.keys(manifest.dependencies ?? {}).length
+    return count > 0 && existsSync(path.join(directory, 'package-lock.json'))
+  } catch {
+    return false
+  }
 }
 
 function npmCiOmitDev(directory: string): Promise<void> {

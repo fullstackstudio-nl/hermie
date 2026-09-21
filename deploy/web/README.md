@@ -134,7 +134,7 @@ sha256sum --check --ignore-missing SHA256SUMS
 
 sudo mkdir -p /opt/hermie-web/releases
 sudo unzip -q hermie-web.zip -d "/opt/hermie-web/releases/$VERSION"
-cd "/opt/hermie-web/releases/$VERSION" && sudo npm ci --omit=dev   # a no-op today: no runtime deps
+# no install step: the server has no runtime dependencies
 sudo ln -sfn "/opt/hermie-web/releases/$VERSION" /opt/hermie-web/current
 sudo node /opt/hermie-web/current/bin/hermie-web --gateway http://127.0.0.1:9119
 ```
