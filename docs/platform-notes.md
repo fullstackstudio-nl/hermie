@@ -5361,3 +5361,214 @@ no session yet. `PushWatcher.resumed` now exists so a caller can wait for the se
   resident set behave.
 - **Long-running behaviour.** The receipt sweep, the availability heartbeat and the ticket ageing
   are all on quarter-hour and five-minute timers that no test waits out.
+
+## Four reports from build 163, on an iPad that can now be tapped (2026-09-21, later)
+
+The thing that changed about this round is the instrument. Every earlier section
+here opens with some version of "`simctl` has no tap verb", and everything behind
+a tap was therefore covered by tests and unwatched. A dedicated simulator tool
+now injects taps, long presses and arbitrary touch PATHS in device points, which
+is what made three of the four reports below reproducible rather than reasoned
+about. Everything was driven on an **iPad Pro 13" (M5)** and an **iPhone 17 Pro**,
+Debug, against `packages/fake-gateway`, with the recipe this file already
+records (`RCT_USE_PREBUILT_RNCORE=0`, a UTF-8 locale, `xcodebuild` + `simctl
+install` + `--hermieGateway`).
+
+### A backdrop that was only ever the space ABOVE the sheet
+
+Reproduced and then fixed, both watched. `BottomSheet`'s scrim was a `flex: 1`
+sibling ABOVE the panel in a column, so it was exactly the leftover height over
+the sheet. On a phone that is the whole backdrop and the defect cannot be seen.
+On the iPad the panel is capped at `SHEET_MAX_WIDTH` and parked over the content
+column, so most of what a reader sees as backdrop is BESIDE it — and that area is
+the `KeyboardAvoidingView` that centres the panel, a transparent view, which
+absorbs a tap exactly as an opaque one does.
+
+Measured on the iPad, window 1032 × 1376, with the chat options sheet up: the
+panel occupies x ≈ 422…978. A tap at **(350, 1100)** — left of the panel, well
+below its top edge — left the sheet open. With the scrim moved to
+`StyleSheet.absoluteFill` and the column set to `pointerEvents="box-none"`, taps
+at **(350, 1100)** and **(1012, 1100)** both close it. The A/B was done by
+flipping that one prop through Metro's fast refresh, so the two screenshots
+differ by one line of code.
+
+`__tests__/sheet-backdrop.test.tsx` pins the two properties that ARE the hit test
+— the scrim's absolute fill, the column's `box-none` — and says in its own header
+that it is not hit testing, because the test renderer has no layout engine. The
+tap is the evidence; the file is the regression.
+
+### The accent that is a swatch, drawn as a word
+
+`InsetButtonRow` defaulted to `tone='accent'` and rendered `<Text color={tone}>`.
+`accent` is the swatch FILL and has no contrast floor — deliberately, because
+holding it to one would rule out both the Graphite accent and the studio's lime.
+Measured on the inset card each Settings row sits on:
+
+```
+graphite/dark  accent(fill)=1.33   accentText=7.25
+lime/light     accent(fill)=1.14   accentText=6.11
+blue/dark      accent(fill)=2.02   accentText=6.84
+```
+
+The owner reported Graphite. Lime light was worse.
+
+Two things were wrong and only one of them is a colour. `npm run contrast` could
+not fail, because a fill is not an ink and nothing measured it — and it also
+never reached the surface in question: `surfacesFor` measured the four GLASS
+variants, the bubbles and three tints, and the inset card is `elevation.e3c`, a
+flat rung that no glass recipe touches.
+
+Both are closed, and the first one structurally: `Text`'s `color` prop is typed
+`TextColorRole`, which is `ColorRole` minus the three fills, so naming a fill is
+a compile error. That alone turned up **seven more** call sites drawing a status
+word or a chip in an unfloored colour — a subagent's `completed`/`running` words,
+a ledger row's `ok` tone. The check now also measures the opaque rungs `e1`, `e2`,
+`e3` and `e3c` against every ink. `e4` is the one rung with a narrowed list: it is
+not a panel, it is the selected segment of a segmented control, and the only ink
+drawn on it is `text`. 743 pairs across three themes.
+
+A type-level line in `contrast.ts` fails to compile if a role is ever added to
+`TextColorRole` without being added to the table, which is the difference between
+a table that is complete and one that happens to be.
+
+### A bare `k` that was a ⌘K, and the two gates behind it
+
+The native allow-list already required Command for `search`, so the reported
+keystroke should have been impossible. It was not, and the cause is written out
+three inches above it in the same file: `HermieMacModule` kept a `shiftLatch`
+because GameController's polled `isPressed` sticks ON when a modifier's key-UP is
+delivered to another window. Command has exactly the same problem and had no
+latch — so a ⌘ released over another app leaves `command` true for ever, and every
+bare letter on the table becomes its own chord. It is one mechanism for every
+modifier now (`heldModifiers`), cleared on scene activation and on keyboard
+connect, and a modifier is believed only when the poll and the latch agree.
+
+**Not reproduced on a device**, and it cannot be from here: making the poll stick
+needs a real modifier released into another window, and the simulator control has
+no chord injection. What is reproduced is the shape of the bug in its Shift form,
+which is already in this file under "the owner's report is what it looks like
+when it is trusted".
+
+Two gates were added in front of the dispatcher, and those ARE tested
+(`desktop-shortcuts.test.tsx`, 20 cases):
+
+- **`typing`** travels with the event. The GameController handler sits below the
+  responder chain — which is what makes it survive a presented `Modal` — so it
+  cannot tell a shortcut from a keystroke; it reports whether the first responder
+  is a `UITextInput` and `useShortcut` decides. Only the composer's own list keys
+  and ⌘W are delivered while a field has the caret.
+- **A modal scope stack.** `search`, `toggleSidebar`, `nextChat`, `previousChat`
+  and ⌘1…9 go to the surface UNDER an open sheet or panel, so they are dropped
+  while one is up. `BottomSheet` and `OverlayPanel` register; `SidebarOverlay`
+  deliberately does not, because at that width the overlay IS the chat list.
+
+The menu bar's own path reports `typing: false` whatever is focused, and that is
+not an oversight: a `UIKeyCommand` is IN the responder chain, so the focused text
+view was offered the keystroke first and declined it.
+
+**A finding this round did not fix.** On a Mac both paths are live, so ⌘W fires
+`onShortcut` twice — once from GameController and once from the menu item — and
+`closeTopmost()` twice closes two levels. Suppressing the keyboard path for
+menu-provided actions is the obvious fix and is wrong: the menu path is a
+responder-chain path, which is the one thing that does not survive a presented
+`Modal`, and that is the case ⌘W matters most in. A timing-based dedupe is worse
+than the symptom. It wants a decision, not a patch.
+
+### "Move up and Move down are gone" — on the platform's menu, they are not
+
+A long press on a chat row on the iPad draws the system menu with **Open, Mark as
+read, Colour ▸, Move to section ▸, Move up, Move down, Add divider above,
+Archive**. Screenshot taken. Nothing is missing there, and nothing in the history
+ever said "Move to top".
+
+What IS true, and is the one place the report is literally right: the FALLBACK
+sheet — the menu on Android and on any build whose native side predates
+`HermieContextMenuView` — was never moved onto the shared model.
+`row-menu-items.ts` opens by saying the two menus "are two ways of drawing ONE
+list of intentions"; only the native drawing ever read it. The sheet offered a
+colour, Archive, and one line per section, the first of which is the top group —
+so on that path, moving a chat to the top really was all a reader could do to the
+order. It is rendered from `rowMenuItems` now, with the colour node drawn as
+swatches and a submenu opened as a `SheetPage`, and it reports to the same
+handler the native menu does.
+
+### The drag, and what it was missing
+
+It worked; it did not feel like anything. Driven on the iPad with a touch path —
+press, 400 ms dwell, then eight samples down one row — the row moved and the
+arrangement committed through `moveToIndex`, which is `ui_meta`. What was absent
+was every part of the gesture that is not the translation: the lift was a style
+that switched (`scale: 1.02` in one frame), the drop was instant, and the other
+rows did not move at all — a two-point line said where the row would land.
+
+Now: `lift` springs 0 → 1 and the scale and shadow interpolate off it;
+`rowShift` decides which rows move aside and they spring on the native driver;
+releasing springs the lifted row into the gap and commits on that animation's
+completion, so the re-render that follows moves nothing. All three collapse to
+zero under Reduce Motion through `Animated.timing(duration: 0)`, which keeps the
+completion callback that commits the drop on exactly one code path.
+
+The drop LINE is gone and the objection that put it there is preserved beside its
+grave: it said a gap costs a layout pass per row per slot change. True of a gap
+made of layout; this one is `transform` on the native driver and touches neither
+layout nor the JavaScript thread, and `rowShift` moves only the rows between the
+lifted row's place and the gap.
+
+Watched, mid-drag, at 780 ms into the path: the neighbour had moved up into the
+vacated slot with the lifted row still under the finger. **Not** separately
+confirmed by eye: the shadow and the 1.03 scale, which at a dark theme's contrast
+and a screenshot's resolution are not distinguishable from the unlifted row.
+
+Two more, watched: a dwell of 1.2 s before moving gets the system context menu
+instead of the drag, which is the documented split and is what the Files app
+does; and `delayLongPress={300}` means a path that drifts a point or two during
+the dwell arms neither.
+
+**The grab cursor is not implemented, and cannot be from JavaScript.** React
+Native 0.81's `CursorValue` is `'auto' | 'pointer'` and nothing else
+(`StyleSheet.d.ts:30`). A grab cursor over a draggable row and a grabbing cursor
+during the drag need a `UIPointerInteraction` in the local module.
+
+### The slash walkthrough, and two things it found
+
+On the iPhone, against the fake gateway: `/` opens the popover with `/model`,
+`/reasoning`, `/status` and `/help`; `/mo` narrows it to `/model` alone; sending
+`/model` prints `ⓘ /model — Current model: example-provider/exam…` in the
+transcript. All watched.
+
+Two defects in between, both fixed and both re-watched:
+
+- **Return did not take the highlighted row.** `submit()` has always put the list
+  first, and on a phone it was never reached: `submitBehavior` is `'newline'`
+  without a hardware keyboard, so Return inserted a line break and `onKeyPress`
+  declined it. The list is now `'submit'` while it is open, on any keyboard.
+- **The send button could not send a slash command at all.** It called `submit()`,
+  which prefers the list — so with `/model` fully typed the list stayed open on
+  the exact match and the button re-accepted a suggestion instead of sending, with
+  no way out, because the only thing that dismisses the popover is Escape. It
+  sends now. Return stays ambiguous and keeps the list; a tap on the round button
+  is not ambiguous.
+
+### The bubble tail from 7747ddf, zoomed
+
+Dark Blue, incoming bubble, bottom-left corner at 3× : the tail is the bubble's
+own colour with no seam and no darker notch where the two meet. The fix holds.
+
+### What this round did NOT verify
+
+- **Anything on a Mac.** ADR-0011's build is scripted and the run needs a window;
+  the owner's own Hermie holds that bundle identifier. Every "on a Mac" sentence
+  above is about the iPad build, which is the same binary.
+- **The stale-Command fix itself**, for the reason given above. What is verified
+  is that it compiles, that the Shift path it generalises still answers, and that
+  the two JavaScript gates behind it do what they say.
+- **Reduce Motion**, still. `simctl ui` offers appearance, contrast and content
+  size and nothing else, so the zero durations in the drag are covered by the one
+  code path and by tests, and unwatched.
+- **Haptics**, still: a simulator has no Taptic engine, so the per-slot tick added
+  to the drag is unobservable there.
+- **Render counters under a drag.** The claim that the aside animation costs no
+  layout pass is read off the native driver's contract and off `rowShift`'s own
+  arithmetic, not off a trace.
+- **Android.** The fallback row menu is the path Android actually uses, and it was
+  exercised in Jest and on neither an emulator nor a device.

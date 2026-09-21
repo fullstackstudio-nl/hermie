@@ -280,6 +280,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A tap beside a bottom sheet closes it again.** The scrim was a flex sibling ABOVE the panel in a
+  column, so it covered only the space over the sheet; on the wide layout, where the panel is capped
+  and parked over the content column, most of what reads as backdrop is BESIDE it — and that area
+  was a transparent container, which absorbs a tap as readily as an opaque one. The scrim is now an
+  absolute fill under the whole modal and the column that centres the panel takes no touch of its
+  own. Escape and a drag down were never affected.
+- **The Settings rows an accent colour names are readable in every theme.** `Sign out`, `Advanced`
+  and `Licences` were painted in the accent SWATCH rather than in the floored accent INK — 1.33 : 1
+  on the Graphite dark card, and 1.14 : 1 on Lime light. Every fill role (`accent`, `danger`, `ok`)
+  is now unreachable from a `Text`: the prop's type is the inks only, which turned up seven more
+  places drawing a status word or a chip in a colour with no contrast floor. `npm run contrast`
+  additionally measures the opaque rungs — the inset card every Settings row sits on, the navigator's
+  own background, a pressed row — which nothing in the table reached before.
+- **Typing no longer fires a shortcut.** A `k` typed into the theme editor moved the caret to the
+  chat list's search field. The keyboard path polls the HID state for modifiers, and a Command
+  released while another window had focus stays down for ever there — so every bare `k` was a ⌘K.
+  A modifier is now believed only when this process watched it go down (the mechanism the Shift latch
+  already used, generalised). Behind that, two gates: an app-wide shortcut is not delivered while a
+  text input holds the caret, and a shortcut that switches SURFACE is not delivered while a sheet or
+  an overlay is open over that surface.
+- **The row menu offers the same things wherever it is drawn.** The fallback sheet — the menu on
+  Android, and on any build without the platform's own — was still building its own list, so it had
+  a colour, Archive and one line per section, and the only thing it could do to the ORDER of the
+  list was move a chat to the top group. It is rendered from `rowMenuItems` now, the same list the
+  platform menu draws: Open, Mark as read, Colour, Move to section, Move up, Move down, Add divider
+  above, Archive.
+- **A slash suggestion can be taken without a hardware keyboard.** Return inserted a line break
+  instead of accepting the highlighted command, and the round send button re-accepted the suggestion
+  instead of sending — so on a phone a fully typed `/model` could not be sent at all. Return takes
+  the suggestion while the list is open; the send button sends, which is the one thing it means.
+
 - **An attachment sent with nothing typed no longer paints two outgoing bubbles.** Reconciliation
   pairs a locally sent turn with the row the gateway persists for it on what the turn SAYS, because
   `prompt.submit` answers with a status and never a row id. A send carrying only a file says nothing:
