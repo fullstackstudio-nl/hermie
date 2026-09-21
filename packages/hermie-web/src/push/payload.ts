@@ -1,0 +1,104 @@
+/**
+ * What a notification says.
+ *
+ * ADR-0017: **bot name and event type only.** No message content, no snippet, no
+ * request text, unless the owner turned `preview` on for that device. A
+ * notification is handed to Apple, Google or a browser vendor and drawn on a
+ * lock screen, so the default is the least it can say and still be worth
+ * tapping.
+ *
+ * The `data` bag is what a tap resolves against the gateway — never an
+ * instruction. An approval carries its request id so the app can look it up, and
+ * the app answers only if that request is still open and still says what the
+ * notification said it did.
+ */
+import type { PushMessage } from './expo'
+import type { InboundKind } from './inbound'
+import type { PushType } from './registrations'
+
+/** The notification category the app registers its Allow / Deny actions under. */
+export const APPROVAL_CATEGORY = 'hermie.approval'
+
+export interface NotifiableEvent {
+  type: PushType
+  /** The bot whose chat this is, as the roster spells it. */
+  bot: string
+  /** The bot's display name, when it has one. */
+  botLabel?: string
+  /** Canonical session id, so a tap lands on the right chat. */
+  sessionId: string
+  /** `request` only: the server request's id, re-validated by the app before anything is answered. */
+  requestId?: string
+  /** `request` only: `approval`, `clarify`, … */
+  requestMethod?: string
+  /** `dm` — the sender; `cron` — the job. */
+  name?: string
+  /** `cron` — the run failed rather than reported. */
+  failed?: boolean
+  /** The text, carried only to devices that asked for it. */
+  preview?: string
+}
+
+/** A short, safe line. Long enough to be useful, short enough not to be a transcript. */
+const PREVIEW_LIMIT = 120
+
+export function trimPreview(text: string, limit = PREVIEW_LIMIT): string {
+  const single = text.replace(/\s+/gu, ' ').trim()
+
+  return single.length > limit ? `${single.slice(0, limit - 1)}…` : single
+}
+
+const titleOf = (event: NotifiableEvent): string => event.botLabel || event.bot
+
+/** The line a device that asked for no preview sees. */
+function summaryOf(event: NotifiableEvent): string {
+  switch (event.type) {
+    case 'message':
+      return 'sent you a message'
+
+    case 'dm':
+      return event.name ? `heard from ${event.name}` : 'heard from another bot'
+
+    case 'cron':
+      if (event.failed) {
+        return event.name ? `cron “${event.name}” failed` : 'a cron run failed'
+      }
+
+      return event.name ? `cron “${event.name}” reported` : 'a cron job reported'
+
+    case 'request':
+      return event.requestMethod === 'clarify' ? 'has a question for you' : 'is waiting for your approval'
+  }
+}
+
+/**
+ * Build the notification for one event, at one device's preview setting.
+ *
+ * `preview` is deliberately a parameter rather than a property of the event: the
+ * same event goes to a phone that wants the text and a watch that does not, and
+ * the decision belongs to the registration, not to what happened.
+ */
+export function pushMessageFor(event: NotifiableEvent, preview: boolean): PushMessage {
+  const summary = summaryOf(event)
+  const body = preview && event.preview ? trimPreview(event.preview) : summary
+
+  return {
+    title: titleOf(event),
+    body,
+    data: {
+      bot: event.bot,
+      type: event.type,
+      session: event.sessionId,
+      ...(event.requestId ? { request: event.requestId } : {}),
+      ...(event.requestMethod ? { method: event.requestMethod } : {})
+    },
+    // Only an approval has anything to act on from the notification itself, and
+    // even then the action is a hint: the app re-reads the open requests first.
+    ...(event.type === 'request' && event.requestMethod === 'approval' ? { categoryId: APPROVAL_CATEGORY } : {})
+  }
+}
+
+/** The event type a turn's inbound row implies. */
+export function typeForInbound(kind: InboundKind): PushType {
+  return kind === 'cron' ? 'cron' : kind === 'dm' ? 'dm' : 'message'
+}

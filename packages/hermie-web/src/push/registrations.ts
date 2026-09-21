@@ -22,6 +22,15 @@ export const PUSH_SECTION_VERSION = 1
 /** Where the registrations sit inside the `hermie-app` key. */
 export const PUSH_SECTION_KEY = 'push'
 
+/**
+ * The app-wide `ui_meta` key, on the default profile.
+ *
+ * [ADR-0016](../../../../docs/adr/0016-ui-meta-sync.md) put it there because the
+ * default row is the one every client can find without being told which bot to
+ * ask, and ADR-0017 hangs `push` off it for the same reason.
+ */
+export const HERMIE_APP_KEY = 'hermie-app'
+
 /** Every event a device can ask about. A registration that names none is off. */
 export const PUSH_TYPES = ['message', 'request', 'dm', 'cron'] as const
 

@@ -45,6 +45,8 @@ beforeEach(async () => {
   daemon = await startPushDaemon({
     gatewayUrl: gateway.url,
     stateDir,
+    // The link is what is under test here; the watcher has its own suite.
+    watch: false,
     log: () => undefined,
     onEvent: event => events.push(event),
     onServerRequest: request => requests.push(request),

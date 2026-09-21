@@ -160,6 +160,11 @@ export class GatewayLink {
     return this.watermarks.get(sessionId) ?? 0
   }
 
+  /** Every watermark this link holds, so the daemon can persist them. */
+  snapshotWatermarks(): Record<string, number> {
+    return Object.fromEntries(this.watermarks)
+  }
+
   /** Seed a watermark from the persisted state, so a restart is not a replay of everything. */
   seedWatermark(sessionId: string, seq: number): void {
     if (seq > this.watermarkOf(sessionId)) {
