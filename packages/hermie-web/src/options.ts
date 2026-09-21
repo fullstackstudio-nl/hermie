@@ -28,6 +28,19 @@ export interface HermieWebOptions {
    * heard of, so it has to be rewritten rather than forwarded.
    */
   publicUrl: string
+  /**
+   * The path the gateway sends the browser to once a sign-in finishes.
+   *
+   * The app puts it in `next=` on `/auth/login`, and the gateway hands it back
+   * as a RELATIVE redirect from `/auth/callback` — which is on
+   * `dashboard.public_url`, not here. So on a deployment where Hermie Web sits
+   * on a different port of that same host, the browser lands on the gateway
+   * rather than on the app, and this is the path an operator points back at
+   * Hermie Web (a redirect in the reverse proxy; `deploy/web/README.md` has the
+   * worked example). `/` is right whenever the two share an origin.
+   */
+  loginReturn: string
+
   /** Directory holding the exported web build. */
   staticDir: string
   /** Hermie Web's own version, reported by `/healthz` and `/hermie/config.json`. */
@@ -73,6 +86,7 @@ export interface HermieWebOptions {
 export const DEFAULT_GATEWAY_URL = 'http://127.0.0.1:9119'
 export const DEFAULT_PORT = 9120
 export const DEFAULT_HOST = '127.0.0.1'
+export const DEFAULT_LOGIN_RETURN = '/'
 /** Named so a test can say it, and so the docs and the code cannot drift apart. */
 export const DEFAULT_VAPID_SUBJECT = 'https://hermie.dev'
 
@@ -130,12 +144,51 @@ export function normalizePublicUrl(raw: string, gatewayUrl: string): string {
   return new URL(withScheme).origin
 }
 
+/**
+ * Is this a path on our own origin, and nothing else?
+ *
+ * Everything that is not one is a way to send a signed-in browser somewhere
+ * else: `https://evil.example` is obvious, `//evil.example` is a
+ * protocol-relative URL that reads as a host, and `/\evil.example` is the same
+ * trick for the browsers that normalise a backslash into a slash. Control
+ * characters are refused because a header cannot carry them and something
+ * downstream would have to decide what to do with them.
+ *
+ * The gateway validates `next=` again on arrival, which is the check that
+ * actually protects the session. This one exists so a mistake in a unit file is
+ * a startup failure with a name on it rather than a redirect that works.
+ */
+export function isSameOriginPath(raw: string): boolean {
+  if (!raw.startsWith('/') || raw.startsWith('//')) {
+    return false
+  }
+
+  // eslint-disable-next-line no-control-regex
+  return !/[\s\\]|[\u0000-\u001f\u007f]/.test(raw)
+}
+
+/** `--login-return`, checked. Empty means the default; anything unsafe throws. */
+export function normalizeLoginReturn(raw: string): string {
+  const trimmed = raw.trim()
+
+  if (!trimmed) {
+    return DEFAULT_LOGIN_RETURN
+  }
+
+  if (!isSameOriginPath(trimmed)) {
+    throw new Error(`--login-return must be a path on this origin, starting with a single "/" (got ${raw}).`)
+  }
+
+  return trimmed
+}
+
 export interface ResolveOptionsInput {
   gatewayUrl?: string | undefined
   port?: string | number | undefined
   host?: string | undefined
   publicUrl?: string | undefined
   staticDir?: string | undefined
+  loginReturn?: string | undefined
   version?: string | undefined
   selfUpdate?: boolean | undefined
   installRoot?: string | undefined
@@ -170,6 +223,7 @@ export function resolveOptions(input: ResolveOptionsInput = {}): HermieWebOption
     host: input.host ?? env.HERMIE_HOST ?? DEFAULT_HOST,
     publicUrl: normalizePublicUrl(input.publicUrl ?? env.HERMIE_PUBLIC_URL ?? '', gatewayUrl),
     staticDir: path.resolve(input.staticDir ?? env.HERMIE_STATIC_DIR ?? path.join(packageRoot, 'dist', 'web')),
+    loginReturn: normalizeLoginReturn(input.loginReturn ?? env.HERMIE_LOGIN_RETURN ?? DEFAULT_LOGIN_RETURN),
     version: input.version ?? env.HERMIE_VERSION ?? readOwnVersion(packageRoot),
     selfUpdate,
     installRoot: path.resolve(input.installRoot ?? env.HERMIE_INSTALL_ROOT ?? path.join(packageRoot, '..')),

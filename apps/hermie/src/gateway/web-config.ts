@@ -8,6 +8,18 @@
 export interface HermieWebConfig {
   /** The gateway host Hermie Web proxies to, for display only. */
   gatewayHost: string
+  /**
+   * Where a finished sign-in should put the browser: the `next=` the app hands
+   * `/auth/login`.
+   *
+   * It is the server's to decide because only the server knows the deployment.
+   * The gateway's OAuth callback is fixed to its own `dashboard.public_url`, so
+   * on an install where Hermie Web answers on another PORT of that host, the
+   * redirect at the end of the chain lands on the gateway and not here; the
+   * operator points a path there back at Hermie Web and names that path with
+   * `--login-return`. `/` on every deployment that shares one origin.
+   */
+  loginReturn: string
   /** The Hermie Web version serving this bundle. */
   version: string
 }

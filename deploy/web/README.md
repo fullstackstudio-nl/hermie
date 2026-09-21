@@ -50,6 +50,7 @@ A mismatch shows up as HTTP 403 on `/api/status`, or a WebSocket that refuses th
 | `--host <addr>`      | `HERMIE_HOST`          | `127.0.0.1`              | Anything else puts an unauthenticated port on the network.       |
 | `--public-url <url>` | `HERMIE_PUBLIC_URL`    | derived from `--gateway` | Written into `Host` and `Origin` on proxied requests.            |
 | `--static <dir>`     | `HERMIE_STATIC_DIR`    | the bundled `dist/web`   |                                                                  |
+| `--login-return <p>` | `HERMIE_LOGIN_RETURN`  | `/`                      | Where a finished sign-in should land. See **OIDC** below.        |
 | `--install-root`     | `HERMIE_INSTALL_ROOT`  | the package's parent     | Where self-update unpacks releases and keeps the `current` link. |
 | `--no-self-update`   | `HERMIE_SELF_UPDATE=0` | on                       | Turns `/hermie/update` into a refusal.                           |
 | `--rollback`         |                        |                          | Point `current` at the previous release and exit.                |
@@ -201,6 +202,82 @@ docker run -d --name hermie-web \
 which is not where `hermes serve` is. Inside a container the self-update endpoint reports
 `canSelfUpdate: false` and points at `docker pull`, because the image is the version.
 
+## OIDC: Hermie Web must share the gateway's public hostname (another port)
+
+If your gateway signs people in with OIDC, this is the one rule that decides whether the sign-in can
+work at all. Get it wrong and the round trip ends on:
+
+```json
+{ "detail": "Missing PKCE state cookie" }
+```
+
+**The callback is fixed to `public_url`.** The gateway builds the `redirect_uri` it gives the
+identity provider out of `dashboard.public_url` and nothing else. The PKCE state that has to be
+there when the browser comes back is a cookie, and a cookie belongs to a **host name** — it ignores
+the port, but not the name. So Hermie Web has to answer on the **same hostname** as `public_url`,
+on **another port**. A second hostname (`hermie.example.com` next to `hermes.example.com`) cannot
+work, however carefully the rest is configured: the cookie is on a host the callback never visits.
+
+**Then point the landing back.** `next=` comes back from `/auth/callback` as a relative redirect, so
+the browser resolves it against the gateway's port — a successful sign-in would finish on the
+dashboard. Give the gateway's own vhost a path that redirects to Hermie Web, and start Hermie Web
+with `--login-return <that path>`. It is published in `/hermie/config.json` as `loginReturn` and the
+app sends it as `next=`; both ends refuse anything that is not a path on this origin.
+
+Worked example: gateway on `https://hermes.example.com` (443), Hermie Web on 9443 of that same name.
+
+```nginx
+# Hermie Web on its own port, same name as the gateway's public_url — that is
+# what lets the PKCE cookie survive the round trip to the identity provider.
+server {
+    listen 443 ssl http2;                 # the gateway's own vhost, unchanged
+    server_name hermes.example.com;
+
+    # ... the gateway proxy_pass block ...
+
+    # Where /auth/callback lands people when the app asked for next=/hermie.
+    # A path of its own, so it can never collide with a dashboard route.
+    location = /hermie { return 302 https://$host:9443/; }
+}
+
+server {
+    listen 9443 ssl http2;
+    server_name hermes.example.com;       # the SAME name, deliberately
+
+    ssl_certificate     /etc/letsencrypt/live/hermes.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/hermes.example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:9120;
+        proxy_http_version 1.1;
+
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host  $host;
+
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}
+```
+
+```sh
+hermie-web --gateway http://127.0.0.1:9119 \
+  --public-url https://hermes.example.com \
+  --login-return /hermie
+```
+
+Open `https://hermes.example.com:9443/` to use it. Whatever port you pick has to be open in the
+firewall on the interface Hermie Web is reached over, and the certificate has to cover that name —
+a wildcard or the gateway's own certificate already does.
+
+Password providers are unaffected: `POST /auth/password-login` answers in place and never leaves the
+page, so nothing about it depends on where the callback points.
+
 ## Putting TLS in front
 
 Hermie Web speaks plain HTTP and expects something in front of it whenever it is reachable beyond
@@ -287,13 +364,15 @@ The previous release directory is kept, which is what makes that possible.
 
 ## Troubleshooting
 
-| What you see                                          | What it usually is                                                                       |
-| ----------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| 403 on `/api/status`                                  | `--public-url` does not match the gateway's `dashboard.public_url`.                      |
-| REST works, the socket never connects                 | The reverse proxy is not passing the upgrade (see the nginx block above).                |
-| Signed in, then signed out again on reload            | A `Secure` cookie over a plain-HTTP origin. Put TLS in front, or reach it over loopback. |
-| Every client shows up as Hermie Web's address in logs | `dashboard.trusted_proxies` does not name the machine Hermie Web runs on.                |
-| `no_web_build` from `/`                               | The static export is missing. `npm run web:build`, or point `--static` at one.           |
+| What you see                                          | What it usually is                                                                           |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| 403 on `/api/status`                                  | `--public-url` does not match the gateway's `dashboard.public_url`.                          |
+| `Missing PKCE state cookie` at the end of a sign-in   | Hermie Web is on a different HOSTNAME from the gateway's `public_url`. See **OIDC** above.   |
+| Signed in successfully, but landed on the dashboard   | The gateway's redirect went to its own port. Set `--login-return` and the matching redirect. |
+| REST works, the socket never connects                 | The reverse proxy is not passing the upgrade (see the nginx block above).                    |
+| Signed in, then signed out again on reload            | A `Secure` cookie over a plain-HTTP origin. Put TLS in front, or reach it over loopback.     |
+| Every client shows up as Hermie Web's address in logs | `dashboard.trusted_proxies` does not name the machine Hermie Web runs on.                    |
+| `no_web_build` from `/`                               | The static export is missing. `npm run web:build`, or point `--static` at one.               |
 
 With `--push`:
 

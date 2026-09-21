@@ -33,6 +33,7 @@ beforeAll(async () => {
     port: 0,
     publicUrl: `http://${PUBLIC_HOST}`,
     staticDir,
+    loginReturn: '/hermie',
     version: '9.9.9',
     selfUpdate: false
   })
@@ -80,9 +81,10 @@ describe('local endpoints', () => {
     expect(await (await fetch(`${web.url}/healthz`)).json()).toEqual({ ok: true, version: '9.9.9' })
   })
 
-  it('tells the app which gateway host it proxies to', async () => {
+  it('tells the app which gateway host it proxies to, and where to come back to', async () => {
     expect(await (await fetch(`${web.url}/hermie/config.json`)).json()).toEqual({
       gatewayHost: PUBLIC_HOST,
+      loginReturn: '/hermie',
       version: '9.9.9'
     })
   })

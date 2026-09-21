@@ -20,6 +20,10 @@ const HELP = [
   '  --public-url <url>   the gateway’s own dashboard.public_url; written into Host and Origin',
   '                       on every proxied request (default: derived from --gateway)',
   '  --static <dir>       the exported web build (default: the bundled dist/web)',
+  '  --login-return <p>   where the gateway sends the browser after a sign-in (default /,',
+  '                       env HERMIE_LOGIN_RETURN). Only needed when Hermie Web and the',
+  '                       gateway’s public_url differ in PORT: the callback is fixed to',
+  '                       public_url, so the round trip has to be pointed back here.',
   '  --install-root <dir> where releases are unpacked and the `current` link lives',
   '  --no-self-update     refuse the self-update endpoints (env HERMIE_SELF_UPDATE=0)',
   '  --rollback           switch `current` back to the previous release and exit',
@@ -55,6 +59,7 @@ async function main(): Promise<void> {
       host: { type: 'string' },
       'public-url': { type: 'string' },
       static: { type: 'string' },
+      'login-return': { type: 'string' },
       'install-root': { type: 'string' },
       'no-self-update': { type: 'boolean', default: false },
       rollback: { type: 'boolean', default: false },
@@ -82,6 +87,7 @@ async function main(): Promise<void> {
     host: values.host,
     publicUrl: values['public-url'],
     staticDir: values.static,
+    loginReturn: values['login-return'],
     installRoot: values['install-root'],
     gatewayToken: values['gateway-token'],
     stateDir: values['state-dir'],
@@ -123,6 +129,7 @@ async function main(): Promise<void> {
     host: options.host,
     publicUrl: options.publicUrl,
     staticDir: options.staticDir,
+    loginReturn: options.loginReturn,
     installRoot: options.installRoot,
     selfUpdate: options.selfUpdate,
     push: options.push,
@@ -136,6 +143,7 @@ async function main(): Promise<void> {
   console.warn(`  gateway    ${options.gatewayUrl}`)
   console.warn(`  public url ${options.publicUrl} (sent as Host and Origin)`)
   console.warn(`  static     ${options.staticDir}`)
+  console.warn(`  login ret  ${options.loginReturn} (the app’s next= on /auth/login)`)
 
   if (options.push) {
     console.warn(`  push       on, state in ${options.stateDir}`)

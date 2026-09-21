@@ -97,6 +97,38 @@ The app's credential provider is `CookieSessionCredentials`: no `Authorization` 
 `credentials: 'include'` so the browser attaches the cookie, a ticket per dial. There is no refresh
 token within reach, so a rejection is always "sign in again" rather than a silent renewal.
 
+### OIDC: Hermie Web must share the gateway's public hostname
+
+There is one deployment rule that OAuth makes non-negotiable, and it is worth stating on its own
+because getting it wrong produces a sign-in that fails at the very last hop with
+`{"detail":"Missing PKCE state cookie"}`.
+
+**The callback is fixed to `dashboard.public_url`.** The gateway builds the `redirect_uri` it hands
+the identity provider out of that setting and nothing else — not out of the request, not out of
+`X-Forwarded-Host`. So the IdP always returns the browser to
+`https://<public_url>/auth/callback`, wherever the sign-in was started from.
+
+The PKCE state is a cookie set when the chain starts. A cookie belongs to a **host**, and a host is
+not an origin: **cookies ignore the port** but they do not ignore the name. So:
+
+| Where Hermie Web answers                   | What happens at the callback                              |
+| ------------------------------------------ | --------------------------------------------------------- |
+| Same host and port as `public_url`         | Works. One origin, one cookie jar.                        |
+| Same host, **another port** — e.g. `:9443` | Works. The cookie was set for the host, port and all.     |
+| **Another host** — `hermie.example.com`    | Fails. The cookie is on a host the callback never visits. |
+
+This is exactly what [ADR-0015](adr/0015-web-variant-on-its-own-port.md) chose "own port" for. A
+separate hostname for the browser build looks tidier and cannot carry a session through an OAuth
+round trip.
+
+**Which leaves the landing.** `next=` is validated by the gateway and handed back as a **relative**
+redirect from `/auth/callback`, so the browser resolves it against the callback's host _and port_ —
+the gateway's, not Hermie Web's. A successful sign-in therefore ends on the dashboard rather than in
+the app. The fix is a redirect the operator owns: put a path on the gateway's own port that points
+back at Hermie Web, and tell Hermie Web to ask for that path with `--login-return`. It goes into
+`/hermie/config.json` as `loginReturn`, the app uses it as `next=`, and both ends validate it as a
+same-origin path before it is used. `deploy/web/README.md` has the worked nginx configuration.
+
 ### What the wizard does differently
 
 It has no address step. Welcome → Sign in → Test → Done, where the native wizard has five steps and
