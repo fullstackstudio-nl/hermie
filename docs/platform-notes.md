@@ -6046,3 +6046,218 @@ The browser tab keeps the last screen's title while signed out: signing out of
 Settings leaves "Settings · Hermie" on a page showing the wizard, and a fresh
 visit shows "Hermie". `page-title.web.ts` follows the route, and the wizard is
 not a route. Small, real, and not touched this round.
+
+## Web QA, third pass (2026-09-21, last)
+
+The conversation sweep the two passes above kept deferring, done FIRST and on a
+clean fixture as the second pass asked — and then the 4× jank it measured, on a
+server of its own started with `--history-rows 390`. Five commits.
+
+What follows is what was driven, what was fixed, what was found and left, and
+the part that matters most: how much of the sweep this pass did NOT reach.
+
+### The method note
+
+**The control surface had a hole in it, and it was the reason for a whole
+column of "not covered".** Two of the three question shapes a client has to
+survive could be raised by typing a sentence into a chat — "approve" parks the
+turn on an approval, "delegate" fans out — and `clarify` could only be raised by
+a test holding the gateway object. So the clarify sheet was the one question
+card no manual pass had ever opened, which is exactly what both passes above
+report. `POST /__fake/request {profile, method, params}` raises any
+server→client request from outside the process, and the sheet opened first try.
+
+The second note is about the browser and not the app: **Puppeteer's drag is two
+`mousemove` samples**, and `PanResponder` builds its gesture from a stream of
+them. A real-input drag from the sheet's grip therefore proves nothing, and
+synthetic events only reach the responder system when they are dispatched on a
+node whose `composedPath` contains the view carrying `panHandlers` —
+react-native-web's `ResponderSystem` reads the path off the event, so a
+`mousemove` dispatched at `document` or at whatever is under the pointer never
+gets there. Twenty moves dispatched on the sheet's own panel do, and the sheet
+dismissed on release.
+
+And one measurement mistake worth recording because it cost two runs: **a blank
+row detector inside the timing loop is a layout thrash**. Calling
+`getBoundingClientRect` on every mounted row once per frame added long tasks
+that were not there, and made an improved list look worse than the one it
+replaced. Blankness is now checked at rest, between runs.
+
+### Fixed
+
+| What                                                                      | Commit    |
+| ------------------------------------------------------------------------- | --------- |
+| Show thinking wrote the setting and did nothing to the conversation       | `5722ac4` |
+| An answered card swallowed the next question that reused its transport id | `b41029a` |
+| Every keyboard shortcut was dead in a tab — ⌘K, ⌘1…9, and the slash list  | `a3000c8` |
+| Every mounted row was rebuilt on every scrolled frame                     | `b1e4b66` |
+| `clarify` could not be raised from outside the gateway process            | `98b38b7` |
+
+Three are worth repeating, because each turned out to be bigger than the line.
+
+- **`version` is the reducer's counter, and one read-time copy lies about it.**
+  Verbosity works because it hands the row a different `presentation`, which the
+  row's memo key compares. Show thinking is answered by handing the row a COPY
+  of the same item with `reasoning` stripped — same id, same version, same
+  presentation — so the memo declared the two identical and the transcript kept
+  drawing thoughts after the switch was off. The same line also rebuilt every
+  assistant row on every call, which on a four-hundred-row conversation is four
+  hundred allocations per streamed frame for rows that never had a thought.
+
+- **`srq-N` is a per-process counter.** `cache.ts` already carries
+  `lastSeqSessionId` because "the gateway restarts event numbering at 1 for
+  every runtime session"; server-request ids have the same property and never
+  got the same protection. An answered "Allowed once" restored from the cache
+  sits on `srq-1`, the first question of the new session arrives as `srq-1`, and
+  `applyServerRequest` dropped it — no card, no sheet, a turn parked forever on
+  an answer nobody was asked for. Reproduced by accident (a clarify raised
+  against a restarted fake gateway showed the previous session's approval) and
+  then on purpose. The queue id already had the right rule written beside it in
+  `openApprovalIdOf`; the transport id now has it too.
+
+- **The whole shortcut table was dead on the web, and Escape hid it.**
+  `subscribeToShortcuts` had one source, the `HermieMac` native module, and
+  `requireOptionalNativeModule` returns null in a tab — so it subscribed to
+  nothing and returned an unsubscribe for it. ⌘K, ⌘,, ⇧⌘S, ⌘↑/⌘↓, ⌃Tab, ⌘1…9 and
+  the composer's own bare ↑, ↓ and Tab all come down that road. Escape kept
+  working the whole time because it arrives through `keyboard-modifiers.web.ts`,
+  a different seam, which is why nothing ever looked broken. The seam is split
+  the way `keyboard-modifiers` already is, and `deliver` now reports whether a
+  screen took the action so the browser prevents the default only then — a bare
+  Tab still moves focus while no suggestion list is open.
+
+### Verified, at 1280 in the dark scheme
+
+Driven in Chromium against the clean fixture. Each of these was watched in the
+DOM rather than in an image, per the first pass's rule.
+
+- **Tool cards** expand and collapse: `aria-expanded` flips, the body mounts and
+  unmounts, the card goes 76px → 225px → 76px.
+- **Thoughts** appear and disappear the moment the switch moves, both ways.
+- **Verbosity** — Quiet hides tool cards entirely, Normal collapses them. Quiet
+  was the stored default on this machine, which is why the first look at the
+  conversation had no tool cards in it at all.
+- **Cron cards** and the **bot-to-bot line** render and carry their disclosures
+  (`cron-delivery-*-toggle`, the `Message to @writer` line with its reply
+  preview).
+- **The approval sheet** — raised by a prompt containing "approve", four
+  choices, Escape closes it and leaves the question in the transcript as a row
+  with an Answer button, and answering it turns the row into
+  "Allowed once · rm -rf ./build".
+- **The clarify sheet** — raised through the new control endpoint: the question,
+  three choices, a free-text field, Submit, Lock answer and Later.
+- **Backdrop click** dismisses, and the geometry behind that fix is real: at
+  1280 the panel is capped and centred over the content column, and
+  `elementFromPoint` beside it returns the scrim, not the column.
+- **Mouse drag** on the grip dismisses on release (see the method note for what
+  that does and does not prove).
+- **The attach menu** opens above the composer inside the content column, 16px
+  radius, a float shadow and no tail, and Escape closes it one level.
+- **The slash popover** — `/` opens it, ↑ and ↓ move the highlight, Tab takes
+  the highlighted entry into the field without moving focus, Escape closes it,
+  and the argument-taking `/reasoning` keeps the list open afterwards.
+- **⌘K** puts the caret in the chat search, **⇧⌘S** collapses and restores the
+  sidebar, **⌘2** opens the second chat — and ⇧⌘S while the caret is in the
+  search field does nothing, which is `shortcutIsDeliverable`'s typing gate
+  working rather than a bug.
+- **Paging** on the long fixture: wheel-scrolling to the far end grew the list
+  from 8,932px to 47,000px, and no offset in a fling leaves the middle of the
+  viewport undrawn.
+
+### Measured, before and after
+
+Same fixture and same harness as the second pass: the Writer chat with
+`--history-rows 390`, ~47,000px of content in a 793px viewport, flung end to end
+and back twice at 240px per frame, `requestAnimationFrame` deltas and a
+`longtask` observer, CPU throttled through the DevTools protocol and verified
+against a busy loop.
+
+| Run                 | p50     | p95     | p99     | max     | frames > 16.7 ms | long tasks |
+| ------------------- | ------- | ------- | ------- | ------- | ---------------- | ---------- |
+| Unthrottled, before | 8.3 ms  | 10.3 ms | 12.8 ms | 35.8 ms | 2 of 775         | 0          |
+| 4×, before          | 12.0 ms | 35.5 ms | 39.6 ms | 97.5 ms | **344 of 775**   | 1          |
+| Unthrottled, after  | 8.3 ms  | 9.9 ms  | 11.9 ms | 17.3 ms | 3 of 775         | 0          |
+| 4×, after           | 10.7 ms | 24.4 ms | 44.0 ms | 240 ms  | **145 of 775**   | 3          |
+
+Dropped frames at 4× go from 44% to 19% and p95 by a third. **It does not reach
+the p95 of 20ms that was asked for, and the long-task count is not better.**
+
+Where the time went, and where it still goes:
+
+- **The memo that was not reached.** `TranscriptRow` has been memoized since it
+  was written; `VirtualizedList` never gets that far. The list re-renders on its
+  own state every time the render window moves, `CellRenderer` has no
+  `shouldComponentUpdate`, so `renderItem` runs again and the FRAME around the
+  memoized row — its hooks, a `ContextMenuHost`, two wrapper views — ran for
+  sixty-odd rows every frame. Identical output either way, which is why it
+  survived. That is most of the p95 improvement.
+- **The window was never stated.** `windowSize` defaults to 21 — twenty-one
+  VIEWPORTS — and `maxToRenderPerBatch` to 10, which is ten Markdown bubbles
+  mounted inside one frame. Eleven and four.
+- **Markdown was not the cost.** `markdown/blocks.ts` already holds an
+  exact-string cache and a streaming-append cache, so a row re-mounted by a
+  fling is not re-lexed. Deferring off-screen markdown, which the brief
+  suggested, would buy nothing here and would change row heights on an inverted
+  list, which moves the reader.
+- **A forced reflow of 125ms per run, from `get y`.** That is
+  react-native-web's own scroll event: `normalizeScrollEvent` builds
+  `contentOffset`, `contentSize` and `layoutMeasurement` as GETTERS over
+  `scrollTop`, `scrollHeight` and `offsetHeight`, so every reader of the event —
+  ours and `VirtualizedList`'s own — flushes layout of the whole scroller right
+  after React invalidated it. Real, and second-order next to the mounting.
+- **What is left is the mounting itself.** A fling at 240px per frame mounts a
+  viewport of rows every ~55ms whatever the window is, and four Markdown bubbles
+  in one frame is ~6ms of real work, which is 24ms at 4×. Getting under 20
+  means making a row cheaper to mount rather than mounting fewer of them.
+- **`removeClippedSubviews` is a no-op here.** react-native-web's `View` has no
+  such prop. The web's own answer is `content-visibility: auto` with
+  `contain-intrinsic-size`, and a wrong intrinsic size on an INVERTED list moves
+  the reader — so it wants its own round with the scroll trace on, not a line in
+  this one.
+
+### Found, not fixed
+
+- **A cached answered request row is history the gateway does not have.**
+  `cache.ts` keeps answered approvals and clarifies, deliberately — an "Allowed
+  once" is a record. But it is restored with no session identity, so the only
+  thing keeping it distinguishable from a new question is the collision fix
+  above. Giving a cached request the same `lastSeqSessionId` treatment the
+  event watermark has would make the id question moot.
+- **Signed out, the app calls its own origin the gateway.** "Your session on
+  127.0.0.1:9120 has expired" on the signed-out notice, which is Hermie Web's
+  address and not the gateway's — the same defect the second pass fixed in
+  Settings and in the wizard, in a third place.
+- **The fixture's `/login` page cannot sign anybody in**, and the app's
+  signed-out "Sign in" button navigates to it. It is a stub that exists to prove
+  the proxy carries HTML, so the form has no action and submits to itself as a
+  GET with the password in the query string. Harmless for a fixture credential
+  and not the app's defect — but it means the one route the signed-out screen
+  offers is a dead end in development, and a pass that did not know to POST
+  `/auth/password-login` by hand would read that as the app being broken.
+- **`initialNumToRender` and the first screen.** Raised to 14 here by
+  measurement, not by design: nobody has ever looked at what the first frame of
+  a chat actually draws on a phone.
+
+### Not covered
+
+Shorter than the last two lists in some places and longer in others, because
+this pass spent its room on the two items above.
+
+- **820px and 390px, and the light scheme.** Everything in this pass is 1280 in
+  the dark scheme, exactly as the second pass was. The narrow layouts have now
+  not been walked for three passes.
+- **Attachments, entirely.** The file input, drag-and-drop onto the page and
+  pasting an image were not driven, and neither were the composer's pending
+  thumbnails. The attach MENU was; what it opens was not.
+- **The queued strip, Steer/Edit/Delete**, and the jump-to-latest pill.
+- **Mouse drag reorder of chat rows** — the lifted row, the neighbours shifting,
+  the drop between — and arrow-key navigation in the chat list. The keyboard
+  seam that would carry the second of those exists now; nothing was driven
+  through it.
+- **Settings sub-pages and Esc one level**, and **Crons and Activity in depth**.
+  Untouched for three passes.
+- **Whether the sheet's panel follows a mouse drag.** The release dismisses;
+  whether the panel tracks the pointer on the way could not be measured, because
+  a synchronous dispatch loop reads the transform before `Animated` has
+  committed a frame.
+- **Web Push**, still, and for the reason the second pass demonstrated.
