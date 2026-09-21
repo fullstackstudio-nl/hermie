@@ -19,13 +19,19 @@
  *  - **The per-bot notes are a field per bot, in roster order.** A note is
  *    addressed to one conversation, and a single field with a bot picker above
  *    it would hide the fact that three of them already have one.
+ *  - **The name switch shows the DECISION, and the name is a row of its own.**
+ *    The switch used to be rendered from "the setting, and a name to use it
+ *    on", so a gateway that names nobody showed it off while the setting was
+ *    on — and an off switch says "this is not being sent", which was the one
+ *    thing it did not mean. The row under it is the same honesty as the device
+ *    facts: the name that will travel, printed, rather than described.
  */
 import { CONTEXT_LIMITS } from '@hermie/gateway-client/context'
 import { useCallback } from 'react'
 
 import { strings } from '../../i18n/strings'
 import { useBotsStore } from '../../store/bots'
-import { needsSharingNotice, useDeviceContextStore } from '../../store/device-context'
+import { effectiveDisplayName, needsSharingNotice, useDeviceContextStore } from '../../store/device-context'
 import { InsetButtonRow, InsetGroup, InsetRow, InsetValueRow, Text, TextField } from '../../ui/primitives'
 import { SwitchRow } from '../../ui/sheets'
 
@@ -38,7 +44,7 @@ export interface ContextSectionProps {
 export function ContextSection({ testID = 'settings-context' }: ContextSectionProps) {
   const loaded = useDeviceContextStore(state => state.loaded)
   const baseUrl = useDeviceContextStore(state => state.baseUrl)
-  const displayName = useDeviceContextStore(state => state.displayName)
+  const displayName = useDeviceContextStore(effectiveDisplayName)
   const shareDisplayName = useDeviceContextStore(state => state.shareDisplayName)
   const shareAbout = useDeviceContextStore(state => state.shareAbout)
   const about = useDeviceContextStore(state => state.about)
@@ -86,17 +92,16 @@ export function ContextSection({ testID = 'settings-context' }: ContextSectionPr
     <>
       <InsetGroup footer={text.hint} header={text.header}>
         <SwitchRow
-          disabled={!displayName}
           label={text.displayName}
           onChange={on => setShareDisplayName(on, stamp())}
           testID={`${testID}-name`}
-          value={shareDisplayName && Boolean(displayName)}
+          value={shareDisplayName}
         />
-        <InsetRow>
-          <Text color="textMuted" variant="meta">
-            {displayName ? text.displayNameHint(displayName) : text.displayNameUnknown}
-          </Text>
-        </InsetRow>
+        <InsetValueRow
+          detail={displayName ? text.displayNameSource : undefined}
+          label={text.displayNameValue}
+          value={displayName || text.displayNameNone}
+        />
       </InsetGroup>
 
       <InsetGroup footer={text.aboutHint}>

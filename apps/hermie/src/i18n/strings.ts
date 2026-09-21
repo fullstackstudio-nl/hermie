@@ -791,8 +791,9 @@ export const strings = {
       noticePending: 'Nothing has been shared yet.',
 
       displayName: 'Use my name',
-      displayNameHint: (name: string) => `Bots are told they are talking to ${name}.`,
-      displayNameUnknown: 'The gateway has not said who you are, so there is no name to use.',
+      displayNameValue: 'Name sent',
+      displayNameSource: 'From your gateway sign-in',
+      displayNameNone: 'No name known yet',
 
       about: 'About me / this device',
       aboutHint:

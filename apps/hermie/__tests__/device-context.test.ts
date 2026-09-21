@@ -14,12 +14,16 @@
  *  - **The free text is off until somebody turns it on**, and a switch that is
  *    off has to keep the text out of the bytes rather than merely hiding the
  *    field.
+ *  - **A gateway that names nobody still sends a name**, as far down the ladder
+ *    in `effectiveDisplayName` as it has to go, because a real one answered
+ *    `/api/auth/me` with a subject and nothing else.
  */
 import { CONTEXT_LIMITS } from '@hermie/gateway-client/context'
 
 import { keyValueStore } from '../src/platform/key-value-store'
 import {
   DEVICE_CONTEXT_KEY,
+  effectiveDisplayName,
   needsSharingNotice,
   ownContextRow,
   OWNER_USER_ID,
@@ -41,13 +45,16 @@ const FACTS = {
 const store = () => useDeviceContextStore.getState()
 
 /** Signed in on a gateway with accounts, with the device's facts already read. */
-async function signedIn(patch: { gated?: boolean } = {}): Promise<void> {
+async function signedIn(
+  patch: { gated?: boolean; userId?: string; displayName?: string; email?: string } = {}
+): Promise<void> {
   await store().hydrate()
   store().setIdentity({
     baseUrl: GATEWAY,
     gated: patch.gated ?? true,
-    userId: 'tester@example.invalid',
-    displayName: 'Sebas'
+    userId: patch.userId ?? 'tester@example.invalid',
+    displayName: patch.displayName ?? 'Sebas',
+    email: patch.email ?? ''
   })
   store().refreshFacts(NOW, FACTS)
 }
@@ -95,7 +102,7 @@ describe('the sharing notice', () => {
 
   it('does not apply to a gateway with no accounts', async () => {
     await store().hydrate()
-    store().setIdentity({ baseUrl: GATEWAY, gated: false, userId: OWNER_USER_ID, displayName: '' })
+    store().setIdentity({ baseUrl: GATEWAY, gated: false, userId: OWNER_USER_ID, displayName: '', email: '' })
     store().refreshFacts(NOW, FACTS)
 
     expect(needsSharingNotice(store())).toBe(false)
@@ -109,10 +116,57 @@ describe('the sharing notice', () => {
       baseUrl: 'https://other.example',
       gated: true,
       userId: 'tester@example.invalid',
-      displayName: 'Sebas'
+      displayName: 'Sebas',
+      email: ''
     })
 
     expect(needsSharingNotice(store())).toBe(true)
+  })
+})
+
+/**
+ * The bug Sebas hit on TestFlight: the switch read OFF on a gateway whose
+ * `/api/auth/me` answers with a subject and neither a display name nor an
+ * address, because it was being rendered from "the setting AND a name". The
+ * setting is a decision and the name is a lookup, and these pin the lookup.
+ */
+describe('the name a bot is told', () => {
+  const name = (patch: { displayName?: string; email?: string; userId?: string }): string =>
+    effectiveDisplayName({ displayName: '', email: '', userId: '', ...patch })
+
+  it('is the gateway’s own display name when there is one', () => {
+    expect(name({ displayName: 'Sebas', email: 'sebas@example.invalid', userId: 'oidc:7f3a' })).toBe('Sebas')
+  })
+
+  it('falls back to the local part of the address', () => {
+    expect(name({ email: 'sebas@example.invalid', userId: 'oidc:7f3a' })).toBe('sebas')
+  })
+
+  it('falls back last to the user id, with the provider prefix taken off', () => {
+    expect(name({ userId: 'authentik:7f3a-ce10' })).toBe('7f3a-ce10')
+  })
+
+  it('leaves a subject that is a URL alone rather than cutting at its scheme', () => {
+    expect(name({ userId: 'https://issuer.example/users/7f3a' })).toBe('https://issuer.example/users/7f3a')
+  })
+
+  it('shows the owner id of a gateway with no accounts as it is', () => {
+    expect(name({ userId: OWNER_USER_ID })).toBe(OWNER_USER_ID)
+  })
+
+  it('is empty only when the gateway has named nobody at all', () => {
+    expect(name({})).toBe('')
+  })
+
+  it('is cut at the cap the plugin renders with', () => {
+    expect(name({ displayName: 'a'.repeat(200) })).toHaveLength(CONTEXT_LIMITS.displayName)
+  })
+
+  it('keeps the switch and the name apart: on, over a gateway that named nobody', async () => {
+    await signedIn({ displayName: '', userId: '' })
+
+    expect(store().shareDisplayName).toBe(true)
+    expect(effectiveDisplayName(store())).toBe('')
   })
 })
 
@@ -133,6 +187,25 @@ describe('the projection', () => {
       timezone: 'Europe/Amsterdam',
       locale: 'nl-NL'
     })
+  })
+
+  it('sends the fallback name where the gateway supplied none', async () => {
+    await signedIn({ displayName: '', email: 'sebas@example.invalid', userId: 'oidc:7f3a' })
+    store().acknowledge(GATEWAY)
+
+    expect((snapshotFromStores().app as HermieAppShape).context?.users['oidc:7f3a']).toMatchObject({
+      displayName: 'sebas'
+    })
+  })
+
+  it('sends no name at all when even the user id is empty, with the switch still on', async () => {
+    await signedIn({ displayName: '', userId: '' })
+    store().acknowledge(GATEWAY)
+
+    expect(store().shareDisplayName).toBe(true)
+    // No identity means no row, so the section is not there to carry a name.
+    expect(ownContextRow(store())).toBeNull()
+    expect(snapshotFromStores().app as HermieAppShape).not.toHaveProperty('context')
   })
 
   it('leaves the name out when the switch is off', () => {

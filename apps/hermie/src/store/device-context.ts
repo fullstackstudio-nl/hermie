@@ -12,7 +12,9 @@
  *
  *  - **The name.** It is the gateway's own identity for them, which everybody
  *    with access to the gateway can already read off the roster; telling the
- *    bot who it is talking to is the whole point of the feature.
+ *    bot who it is talking to is the whole point of the feature. The switch is
+ *    about the DECISION and nothing else — see `effectiveDisplayName` for why
+ *    it may not be read off whether a name happens to be known.
  *  - **The free text.** The switch is on and the text itself is EMPTY, which is
  *    the distinction that makes an on-by-default switch honest here: nothing is
  *    shared until somebody writes something, and when they do it works without
@@ -51,6 +53,13 @@ export const OWNER_USER_ID = 'owner'
 
 const EMPTY_FACTS: DeviceFacts = { model: '', os: '', appVersion: '', timezone: '', locale: '' }
 
+/**
+ * A cap for the stored address. RFC 5321's longest path, and nothing rides on
+ * the exact number: the address itself is never sent, only the part of it that
+ * becomes a name, and that is cut again at `CONTEXT_LIMITS.displayName`.
+ */
+const EMAIL_LIMIT = 320
+
 /** The part of this store that survives a launch. The reader's half only. */
 interface PersistedContext {
   shareDisplayName: boolean
@@ -74,8 +83,10 @@ export interface DeviceContextState {
   gated: boolean
   /** Who the gateway says this is. Empty until an identity has been read. */
   userId: string
-  /** The gateway's own display name for them. Sent only with the switch on. */
+  /** The gateway's own display name for them. Often empty; see `effectiveDisplayName`. */
   displayName: string
+  /** The address the gateway signed them in with, if it named one. Never sent. */
+  email: string
   shareDisplayName: boolean
   shareAbout: boolean
   about: string
@@ -93,7 +104,13 @@ export interface DeviceContextState {
 
   hydrate: () => Promise<void>
   /** Who this device is on which gateway. Empty `userId` writes no row at all. */
-  setIdentity: (identity: { baseUrl: string; gated: boolean; userId: string; displayName: string }) => void
+  setIdentity: (identity: {
+    baseUrl: string
+    gated: boolean
+    userId: string
+    displayName: string
+    email: string
+  }) => void
   setShareDisplayName: (on: boolean, stamp: number) => void
   setShareAbout: (on: boolean, stamp: number) => void
   setAbout: (about: string, stamp: number) => void
@@ -151,6 +168,7 @@ export const useDeviceContextStore = create<DeviceContextState>((set, get) => {
     gated: false,
     userId: '',
     displayName: '',
+    email: '',
     // Both on: see the note at the top about what an on-by-default switch over
     // an empty field does and does not share.
     shareDisplayName: true,
@@ -190,21 +208,23 @@ export const useDeviceContextStore = create<DeviceContextState>((set, get) => {
       })
     },
 
-    setIdentity({ baseUrl, gated, userId, displayName }) {
+    setIdentity({ baseUrl, gated, userId, displayName, email }) {
       const id = contextTextOf(userId, CONTEXT_LIMITS.userId)
       const name = contextTextOf(displayName, CONTEXT_LIMITS.displayName)
+      const address = contextTextOf(email, EMAIL_LIMIT)
       const current = get()
 
       if (
         current.userId === id &&
         current.displayName === name &&
+        current.email === address &&
         current.baseUrl === baseUrl &&
         current.gated === gated
       ) {
         return
       }
 
-      set({ baseUrl, gated, userId: id, displayName: name })
+      set({ baseUrl, gated, userId: id, displayName: name, email: address })
     },
 
     setShareDisplayName(on, stamp) {
@@ -274,7 +294,7 @@ export const useDeviceContextStore = create<DeviceContextState>((set, get) => {
         wholesale by the next gateway's reconcile, which runs before its first
         flush.
       */
-      set({ baseUrl: '', gated: false, userId: '', displayName: '' })
+      set({ baseUrl: '', gated: false, userId: '', displayName: '', email: '' })
     },
 
     reset() {
@@ -283,6 +303,7 @@ export const useDeviceContextStore = create<DeviceContextState>((set, get) => {
         gated: false,
         userId: '',
         displayName: '',
+        email: '',
         shareDisplayName: true,
         shareAbout: true,
         about: '',
@@ -310,6 +331,60 @@ export function needsSharingNotice(state: DeviceContextState): boolean {
   return state.gated && Boolean(state.baseUrl) && state.acknowledgedFor !== state.baseUrl
 }
 
+/** `sebas@example.invalid` → `sebas`. Nothing at all for something that is not one. */
+const EMAIL_LOCAL_PART = /^([^@\s]+)@[^@\s]+$/u
+
+/**
+ * `authentik:7f3a…` → `7f3a…`, and `https://issuer/…` left alone.
+ *
+ * The gateway addresses a person as `<provider>:<subject>`, and the provider is
+ * the half that says nothing about WHO: two people on the same gateway share
+ * it. The negative lookahead is the whole reason this is a regular expression
+ * rather than a `split(':')` — an issuer URL used as a subject also has a colon
+ * in it, and cutting at that one turns `https://issuer/x` into `//issuer/x`.
+ */
+const PROVIDER_PREFIX = /^[A-Za-z][A-Za-z0-9._-]*:(?!\/\/)(.+)$/u
+
+/**
+ * The name a bot is actually told, which is rarely the one the gateway sends.
+ *
+ * Measured on a real gateway with OIDC: `/api/auth/me` answered with a user id
+ * and NOTHING else — no `display_name`, no `email`. The switch above used to be
+ * rendered from `shareDisplayName && displayName`, so it showed OFF on a
+ * gateway where the setting was on, and the only honest reading of an off
+ * switch is "this is not being sent". Hence two separate things:
+ *
+ *  - **the switch is the decision**, and it is on by default;
+ *  - **the name is whatever can be found**, down this ladder.
+ *
+ * The rungs, in order, are the gateway's own display name, the local part of
+ * the address it signed them in with, and last the user id with the provider
+ * prefix taken off. The last rung is deliberately not prettified: an OIDC
+ * subject is an opaque string and guessing a person's name out of it would put
+ * a wrong name in a system prompt, which is worse than an ugly right one. On a
+ * gateway with no accounts the id is `owner`, and `owner` is what it says.
+ *
+ * Empty only when the gateway has not named anybody at all — in which case the
+ * switch stays on and the row simply carries no name.
+ */
+export function effectiveDisplayName(state: Pick<DeviceContextState, 'displayName' | 'email' | 'userId'>): string {
+  const given = contextTextOf(state.displayName, CONTEXT_LIMITS.displayName)
+
+  if (given) {
+    return given
+  }
+
+  const local = EMAIL_LOCAL_PART.exec(contextTextOf(state.email, EMAIL_LIMIT))?.[1]
+
+  if (local) {
+    return contextTextOf(local, CONTEXT_LIMITS.displayName)
+  }
+
+  const id = contextTextOf(state.userId, CONTEXT_LIMITS.userId)
+
+  return contextTextOf(PROVIDER_PREFIX.exec(id)?.[1] ?? id, CONTEXT_LIMITS.displayName)
+}
+
 /**
  * This device's row for the section, or `null` when nothing may be written.
  *
@@ -325,9 +400,11 @@ export function ownContextRow(state: DeviceContextState): ContextUserInput | nul
     return null
   }
 
+  const displayName = state.shareDisplayName ? effectiveDisplayName(state) : ''
+
   return {
     userId: state.userId,
-    ...(state.shareDisplayName && state.displayName ? { displayName: state.displayName } : {}),
+    ...(displayName ? { displayName } : {}),
     ...(state.shareAbout && state.about.trim() ? { about: state.about } : {}),
     device: { model: state.facts.model, os: state.facts.os, appVersion: state.facts.appVersion },
     timezone: state.facts.timezone,

@@ -52,23 +52,29 @@ export interface ChatRuntimeValue {
  * build has no user id in it, and a display name changes at the provider
  * without the app being told. A refusal is not an error — it leaves the
  * identity empty, which is exactly the state in which nothing is written.
+ *
+ * All three identity fields are handed over SEPARATELY, and the address is not
+ * folded into the name on the way. `display_name` and `email` are both optional
+ * on the far side — an OIDC gateway answered with neither, only a subject — so
+ * which of them ends up being shown is a question with one answer, and it lives
+ * in `effectiveDisplayName` rather than being decided twice.
  */
 async function readIdentity(
   config: { baseUrl: string; authMode: string } | null,
   http: { authMe: () => Promise<{ userId: string; email: string; displayName: string }> } | null
-): Promise<{ baseUrl: string; gated: boolean; userId: string; displayName: string }> {
+): Promise<{ baseUrl: string; gated: boolean; userId: string; displayName: string; email: string }> {
   const baseUrl = config?.baseUrl ?? ''
   const gated = config?.authMode !== 'session_token'
 
   if (!gated) {
-    return { baseUrl, gated: false, userId: OWNER_USER_ID, displayName: '' }
+    return { baseUrl, gated: false, userId: OWNER_USER_ID, displayName: '', email: '' }
   }
 
   if (!http) {
     // Gated, and no REST half to ask. Empty rather than the owner id: writing
     // somebody's context under a name the gateway never agreed to is worse
     // than writing none.
-    return { baseUrl, gated: true, userId: '', displayName: '' }
+    return { baseUrl, gated: true, userId: '', displayName: '', email: '' }
   }
 
   const identity = await http.authMe()
@@ -77,7 +83,8 @@ async function readIdentity(
     baseUrl,
     gated: true,
     userId: identity.userId || identity.email,
-    displayName: identity.displayName || identity.email
+    displayName: identity.displayName,
+    email: identity.email
   }
 }
 

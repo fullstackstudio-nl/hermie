@@ -52,7 +52,7 @@ import type { ChatGateway } from '../../gateway/link'
 import { strings } from '../../i18n/strings'
 import { Avatar } from '../../chat-ui/primitives/Avatar'
 import { useChatLayoutStore } from '../../store/chat-layout'
-import { needsSharingNotice, useDeviceContextStore } from '../../store/device-context'
+import { effectiveDisplayName, needsSharingNotice, useDeviceContextStore } from '../../store/device-context'
 import type { Bot } from '../../store/bots'
 import { AccentSwatches } from '../../ui/AccentSwatches'
 import { BottomSheet } from '../../ui/BottomSheet'
@@ -126,7 +126,9 @@ export function BotProfileSheet({
   const setBotNote = useDeviceContextStore(state => state.setBotNote)
   const shareDisplayName = useDeviceContextStore(state => state.shareDisplayName)
   const shareAbout = useDeviceContextStore(state => state.shareAbout)
-  const contextDisplayName = useDeviceContextStore(state => state.displayName)
+  // The same fallback ladder the Settings row prints, so this line cannot say a
+  // name is withheld while the projection is sending one.
+  const contextDisplayName = useDeviceContextStore(effectiveDisplayName)
   const contextAbout = useDeviceContextStore(state => state.about)
   const pendingNotice = useDeviceContextStore(needsSharingNotice)
   const contextBaseUrl = useDeviceContextStore(state => state.baseUrl)
