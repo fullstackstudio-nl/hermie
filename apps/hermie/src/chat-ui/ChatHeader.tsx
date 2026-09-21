@@ -55,7 +55,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Animated, View } from 'react-native'
 
 import { GlassGroup, GlassSurface } from '../ui/glass'
-import { durationFor, easing } from '../ui/motion'
+import { durationFor, easing, NATIVE_DRIVER } from '../ui/motion'
 import { PresenceBead } from '../ui/PresenceBead'
 import { RoundIconButton, Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
@@ -175,9 +175,9 @@ function StatusLine({ line, reduceMotion }: { line: string; reduceMotion: boolea
 
     const duration = durationFor('press', reduceMotion) / 2
 
-    Animated.timing(fade, { duration, easing: easing.exit, toValue: 0, useNativeDriver: true }).start(() => {
+    Animated.timing(fade, { duration, easing: easing.exit, toValue: 0, useNativeDriver: NATIVE_DRIVER }).start(() => {
       setShown(latest.current)
-      Animated.timing(fade, { duration, easing: easing.enter, toValue: 1, useNativeDriver: true }).start()
+      Animated.timing(fade, { duration, easing: easing.enter, toValue: 1, useNativeDriver: NATIVE_DRIVER }).start()
     })
   }, [fade, line, reduceMotion, shown])
 

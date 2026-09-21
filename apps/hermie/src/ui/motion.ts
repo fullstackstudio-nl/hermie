@@ -32,7 +32,7 @@
  * `Easing.bezier` allocates, and an easing built inside a component body builds
  * a new one per render. These are built once, at module scope.
  */
-import { Animated, Easing, type EasingFunction } from 'react-native'
+import { Animated, Easing, Platform, type EasingFunction } from 'react-native'
 import { useEffect, useRef, useState } from 'react'
 
 /**
@@ -96,6 +96,21 @@ export const spring = { settle: { bounciness: 0 } } as const
  */
 export const durationFor = (token: MotionToken, reduceMotion: boolean): number => (reduceMotion ? 0 : motion[token])
 
+/**
+ * Whether `Animated` can hand an animation to the platform.
+ *
+ * The native driver moves a value on the UI thread, which is why every
+ * transform and opacity in this app asks for it. There is no such thread in a
+ * browser: react-native-web ships no `RCTAnimation`, so `useNativeDriver: true`
+ * there is answered with a fallback to the JS driver and a five-line warning
+ * about running `pod install` — printed once per animation, which on one load
+ * of a transcript was a dozen copies of advice that cannot apply.
+ *
+ * The behaviour was always the fallback. This only stops asking for something
+ * the platform has already said it does not have.
+ */
+export const NATIVE_DRIVER = Platform.OS !== 'web'
+
 export interface PresenceOptions {
   /** Which duration this surface moves at. */
   token: MotionToken
@@ -139,7 +154,7 @@ export interface Presence {
  * wrong by omission.
  */
 export function usePresence(visible: boolean, options: PresenceOptions): Presence {
-  const { onExited, reduceMotion, token, useNativeDriver = true } = options
+  const { onExited, reduceMotion, token, useNativeDriver = NATIVE_DRIVER } = options
   const progress = useRef(new Animated.Value(0)).current
   const [present, setPresent] = useState(visible)
   const exited = useRef(onExited)

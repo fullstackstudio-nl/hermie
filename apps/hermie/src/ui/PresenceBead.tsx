@@ -16,7 +16,7 @@ import { useEffect, useRef } from 'react'
 import { Animated, View } from 'react-native'
 
 import type { PresenceState } from '../features/bots/presence'
-import { easing, motion } from './motion'
+import { easing, motion, NATIVE_DRIVER } from './motion'
 import { useTheme } from './theme'
 import { BEAD_SIZE } from './tokens'
 
@@ -121,7 +121,7 @@ function Pulse({ box, color, enabled, offset }: { box: number; color: string; en
         duration: motion.pulse,
         easing: easing.pulse,
         toValue: 1,
-        useNativeDriver: true
+        useNativeDriver: NATIVE_DRIVER
       })
     )
 

@@ -75,7 +75,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Animated, PanResponder, type PanResponderInstance } from 'react-native'
 
 import { haptic } from '../../platform/haptics'
-import { spring as springToken } from '../../ui/motion'
+import { NATIVE_DRIVER, spring as springToken } from '../../ui/motion'
 import { dropEntryIndex, dropSlot, neighbourOffsets, rowShift, type DragAnchor, type RowBox } from './drag-order'
 
 /** Beyond this, a press has become a drag. Below it, a finger is merely resting. */
@@ -101,8 +101,8 @@ export const LIFT_SCALE = 1.03
  */
 function settle(value: Animated.Value, toValue: number, reduceMotion: boolean): Animated.CompositeAnimation {
   return reduceMotion
-    ? Animated.timing(value, { duration: 0, toValue, useNativeDriver: true })
-    : Animated.spring(value, { ...springToken.settle, toValue, useNativeDriver: true })
+    ? Animated.timing(value, { duration: 0, toValue, useNativeDriver: NATIVE_DRIVER })
+    : Animated.spring(value, { ...springToken.settle, toValue, useNativeDriver: NATIVE_DRIVER })
 }
 
 export interface RowDragOptions {
