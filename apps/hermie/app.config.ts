@@ -134,7 +134,25 @@ const config: ExpoConfig = {
        */
       NSAppTransportSecurity: {
         NSAllowsArbitraryLoads: true
-      }
+      },
+      /*
+       * The two strings the microphone needs, written here as well as in the
+       * plugin's options below.
+       *
+       * The plugin fills them in only when they are ABSENT, so these are the
+       * ones that ship; they are repeated rather than left to the plugin
+       * because its defaults are "Allow Hermie to use the microphone", which
+       * says what the app wants and not why — and App Review reads these.
+       *
+       * Both of them say the words never leave the device, because on iOS that
+       * is enforced rather than promised: the recognizer is asked for
+       * `requiresOnDeviceRecognition` and refuses where there is no offline
+       * model (see `platform/speech-recognition.ts`).
+       */
+      NSMicrophoneUsageDescription:
+        'Hermie uses the microphone so you can dictate a message instead of typing it. Audio is transcribed on this device and never sent anywhere.',
+      NSSpeechRecognitionUsageDescription:
+        'Hermie uses on-device speech recognition to turn what you say into the text of a message. Nothing is sent to Apple or to any other service.'
     }
   },
   android: {
@@ -151,11 +169,14 @@ const config: ExpoConfig = {
       backgroundColor: ICON_BACKGROUND
     },
     edgeToEdgeEnabled: true,
-    // A chat client needs the network and the photo library, and that is the
-    // whole list. The two blocked below are pulled in by dependencies rather
-    // than asked for: nothing in the app vibrates, and nothing writes to shared
-    // storage — an attachment is read, resized in memory and sent.
-    permissions: ['android.permission.INTERNET'],
+    // A chat client needs the network, the photo library and — since dictation —
+    // the microphone, and that is the whole list. `RECORD_AUDIO` is named here
+    // as well as being added by the speech-recognition plugin, so this array
+    // stays the one place to read what the app asks a phone for. The two blocked
+    // below are pulled in by dependencies rather than asked for: nothing in the
+    // app vibrates, and nothing writes to shared storage — an attachment is
+    // read, resized in memory and sent.
+    permissions: ['android.permission.INTERNET', 'android.permission.RECORD_AUDIO'],
     blockedPermissions: ['android.permission.VIBRATE', 'android.permission.WRITE_EXTERNAL_STORAGE']
   },
   /*
@@ -188,6 +209,25 @@ const config: ExpoConfig = {
         photosPermission: 'Hermie uses your photo library so you can attach an image to a message.',
         cameraPermission: false,
         microphonePermission: false
+      }
+    ],
+    [
+      /*
+       * Dictation. The plugin writes the two iOS usage strings when they are
+       * missing, adds `RECORD_AUDIO` on Android, and — the part that is easy to
+       * miss — declares a `<queries>` entry for the recognition service, without
+       * which Android 11 and newer cannot SEE the recognizer at all and the
+       * feature fails on a release build while working in development.
+       *
+       * The strings are passed explicitly so the ones in `ios.infoPlist` above
+       * and the ones here cannot drift; the plugin prefers these.
+       */
+      'expo-speech-recognition',
+      {
+        microphonePermission:
+          'Hermie uses the microphone so you can dictate a message instead of typing it. Audio is transcribed on this device and never sent anywhere.',
+        speechRecognitionPermission:
+          'Hermie uses on-device speech recognition to turn what you say into the text of a message. Nothing is sent to Apple or to any other service.'
       }
     ],
     [

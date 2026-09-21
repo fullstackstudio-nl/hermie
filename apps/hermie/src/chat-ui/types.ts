@@ -113,3 +113,46 @@ export interface PickerOption {
   /** Asks the caller to confirm before switching, per `confirm_expensive_model`. */
   expensive?: boolean
 }
+
+/**
+ * The composer's microphone, as data.
+ *
+ * The chat kit draws the control and owns the FIELD; the recognizer, the
+ * permission dialog and the caret arithmetic live in `features/voice`, which is
+ * the layer that may import this one and not the other way round. So the two
+ * meet here, in a plain interface with no engine anywhere in it — the same shape
+ * `suggestions` and `slashFailure` already use for the slash popover.
+ *
+ * The one piece that is not obviously data is `caret`. A transcript lands as a
+ * new draft, and the caret has to go after the words that were just inserted
+ * rather than to the end of the field — so the binding hands over a position,
+ * and the composer applies it when the OBJECT changes. Identity is the token:
+ * the binding allocates one per result, so two consecutive results that produce
+ * the same position are still two events.
+ */
+export interface ComposerDictation {
+  /** Draw the control at all. False where the platform has no recognizer. */
+  available: boolean
+  /** Listening, or about to be: the button is lit and says "Stop dictating". */
+  listening: boolean
+  /**
+   * A one-line explanation under the composer, or nothing.
+   *
+   * Only ever one line, and only for something the reader can act on or would
+   * otherwise be confused by — a refused microphone, a device that cannot do
+   * this, a tap that heard nothing. `onAction` is absent where the platform has
+   * nowhere to send them: a browser's microphone permission lives in the site
+   * popover, which no page can open.
+   */
+  notice: { message: string; actionLabel?: string; onAction?: () => void } | null
+  /** A finger went down on the mic. */
+  onPressIn: () => void
+  /** And came off it. Hold-to-talk versus tap-to-toggle is decided above. */
+  onPressOut: () => void
+  /** The secondary gesture's one entry, where the platform has a secondary gesture. */
+  onOpenVoiceMode?: () => void
+  /** Where the caret goes after the latest result. New object per result. */
+  caret: { start: number; end: number } | null
+  /** The field's selection, so the binding can take its anchor when it starts. */
+  onSelection: (start: number, end: number) => void
+}

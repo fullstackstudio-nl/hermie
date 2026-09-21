@@ -100,6 +100,12 @@ no third-party network call. The only address Hermie knows is the one you typed.
   recited, a table is read a row at a time, links read their label, and
   mathematics is read as it was written. A chat can be set to read every finished
   reply on its own, and it never speaks a reply that is still being written.
+- **Dictate instead of typing.** A microphone in the composer: hold it to talk,
+  or tap it and tap again. What you say appears at the caret as you speak, so it
+  drops into a half-written message where you put it, and it is a draft like any
+  other — nothing is sent until you send it. On iPhone, iPad, Android and the Mac
+  the transcription happens on the device; a browser's speech API does not offer
+  that guarantee, and one without the API shows no microphone at all.
 - **Take the conversation with you.** Export a chat as Markdown or plain text,
   into the share sheet on a phone or the Mac and as a download in a browser. What
   you get is what is on screen: a chat you have set to Quiet exports the quiet

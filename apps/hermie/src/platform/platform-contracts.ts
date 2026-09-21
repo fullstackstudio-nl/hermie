@@ -164,3 +164,61 @@ export interface SpeechEngine {
   /** Silence, now. Any `onDone` still pending is dropped rather than fired. */
   stop(): void
 }
+
+/** Why a recognizer stopped, in the only four shapes a caller acts on. */
+export type RecognitionFailure = 'permission' | 'no-speech' | 'unavailable' | 'failed'
+
+/** What a microphone permission request came back with. */
+export type RecognitionPermission = 'granted' | 'denied' | 'unavailable'
+
+export interface RecognitionRequest {
+  /** BCP-47. Nothing means the device's own language. */
+  language?: string
+  /**
+   * Keep listening through pauses.
+   *
+   * Off for push-to-talk, where the reader's finger is the end of the utterance;
+   * on for voice mode, where a silence IS the end and the loop wants one final
+   * result rather than a session that restarts under it.
+   */
+  continuous?: boolean
+  /** Text so far, replaced on every event. Never final. */
+  onPartial?: (text: string) => void
+  /** The recognizer's own answer. Fired at most once per session. */
+  onFinal?: (text: string) => void
+  /** Input level, roughly 0…1, where the platform reports one. */
+  onVolume?: (level: number) => void
+  onError?: (failure: RecognitionFailure) => void
+  /** The session is over, however it ended. Always the last callback. */
+  onEnd?: () => void
+}
+
+/**
+ * Listening, as the one call the app makes.
+ *
+ * `available` answers "is there a recognizer here at all" and nothing about
+ * permission — a phone whose owner has refused the microphone is still a phone
+ * with a recognizer, and the two facts drive different copy: a missing
+ * recognizer hides the button, a refused permission explains itself and offers
+ * Settings.
+ */
+export interface RecognitionEngine {
+  readonly available: boolean
+  /** Ask the platform. Safe to call repeatedly; the system only prompts once. */
+  requestPermission(): Promise<RecognitionPermission>
+  /**
+   * BCP-47 tags this device can actually recognise OFFLINE, or an empty list.
+   *
+   * Empty means "this platform will not say", not "none" — Android below API 31
+   * has no way to answer and a browser has none at all — so the caller offers
+   * the device's own language alone rather than an empty picker. Asking the
+   * platform beats a list in this repository, which would be a promise about
+   * somebody else's models that goes stale the first time one ships.
+   */
+  supportedLanguages(): Promise<string[]>
+  start(request: RecognitionRequest): void
+  /** Stop listening and ask for a final result. */
+  stop(): void
+  /** Stop listening and throw away what was heard. */
+  abort(): void
+}

@@ -19,7 +19,7 @@ import { ContextMeter } from '../../chat-ui/ContextMeter'
 import { chatStrings } from '../../chat-ui/strings'
 import type { PickerOption, Verbosity } from '../../chat-ui/types'
 import { formatMuteUntil, MUTE_DURATIONS, MUTE_FOREVER, muteUntil, type MuteDuration } from '../../store/mute'
-import { RATE_STEPS } from '../../features/voice/voice-settings'
+import { DICTATION_AUTO, RATE_STEPS } from '../../features/voice/voice-settings'
 import { strings } from '../../i18n/strings'
 import { AccentSwatches } from '../AccentSwatches'
 import { BottomSheet, SheetEyebrow, SheetPage } from '../BottomSheet'
@@ -119,6 +119,27 @@ export interface ChatOptionsSheetProps {
     /** Something is being read right now, so there is something to stop. */
     reading: boolean
     onStopReading: () => void
+    /**
+     * The dictation half, or nothing where the platform cannot listen.
+     *
+     * Separate from the speaking half because the two capabilities really are
+     * separate: a browser with `speechSynthesis` and no `SpeechRecognition` is
+     * the common case, and it should get the reading rows and not a language
+     * picker for a microphone it does not have.
+     */
+    dictation?: {
+      /** `auto`, or a BCP-47 tag. */
+      language: string
+      onChangeLanguage: (language: string) => void
+      /**
+       * Tags this device can recognise offline, from the platform itself.
+       *
+       * Empty is the ordinary case rather than a failure — Android below API 31
+       * will not say and the web has no way to ask — and it means the picker
+       * offers the device's own language alone.
+       */
+      languages: readonly string[]
+    }
   }
 
   verbosity: Verbosity
@@ -153,7 +174,23 @@ export interface ChatOptionsSheetProps {
   onConfirmExpensiveModel?: () => void
 }
 
-type Pane = 'root' | 'reasoning' | 'model' | 'colour' | 'mute' | 'rate'
+type Pane = 'root' | 'reasoning' | 'model' | 'colour' | 'mute' | 'rate' | 'dictationLanguage'
+
+/**
+ * A language tag, in the reader's own words where the platform knows them.
+ *
+ * `Intl.DisplayNames` is in every engine this app runs on and is still wrapped:
+ * it throws on a tag it cannot parse, and the tags here come from the device's
+ * recognizer rather than from this repository. The tag itself is the fallback,
+ * which is worse to read and never wrong.
+ */
+export function languageLabel(tag: string): string {
+  try {
+    return new Intl.DisplayNames(undefined, { type: 'language' }).of(tag) ?? tag
+  } catch {
+    return tag
+  }
+}
 
 /**
  * The five speaking rates, named rather than numbered.
@@ -465,6 +502,27 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
           // of these values, so the round trip through `String` is exact.
           value={String(props.voice?.rate ?? 1)}
         />
+      ) : pane === 'dictationLanguage' ? (
+        <PickerPane
+          onBack={() => setPane('root')}
+          onPick={option => {
+            props.voice?.dictation?.onChangeLanguage(option.value)
+            setPane('root')
+          }}
+          options={[
+            { value: DICTATION_AUTO, label: chatStrings.voice.dictationAuto },
+            ...(props.voice?.dictation?.languages ?? []).map(tag => ({
+              value: tag,
+              label: languageLabel(tag),
+              detail: tag
+            }))
+          ]}
+          // A list of installed models can be long on a phone that has collected
+          // a few, and it is the same shape as the model list next door.
+          searchable
+          title={chatStrings.voice.dictationLanguage}
+          value={props.voice?.dictation?.language ?? DICTATION_AUTO}
+        />
       ) : pane === 'reasoning' ? (
         <PickerPane
           onBack={() => setPane('root')}
@@ -629,6 +687,18 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
                 surface that can stop a read the reader did not start from a
                 row: an automatic one.
               */}
+              {props.voice.dictation ? (
+                <DisclosureRow
+                  label={chatStrings.voice.dictationLanguage}
+                  onPress={() => setPane('dictationLanguage')}
+                  testID="option-dictation-language"
+                  value={
+                    props.voice.dictation.language === DICTATION_AUTO
+                      ? chatStrings.voice.dictationAuto
+                      : languageLabel(props.voice.dictation.language)
+                  }
+                />
+              ) : null}
               {props.voice.reading ? (
                 <InsetButtonRow
                   onPress={props.voice.onStopReading}

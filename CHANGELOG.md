@@ -24,6 +24,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reply is read on its own is per chat, because a phone in a car and a Mac in an office want
   different answers for the same bot.
 
+- **Dictate a message.** A microphone appears in the composer, left of send, wherever the platform
+  has a recognizer. **Hold it to talk** and let go, or **tap it** and tap again — one button, and
+  the rule is how long your finger stayed down, which is how the platform keyboards' own dictation
+  keys behave. What is heard streams into the field **at the caret** as you speak, so a sentence
+  dictated into the middle of a half-typed message lands where you put it; a revision replaces the
+  last guess rather than being appended to it. Nothing is sent: what you get is a draft like any
+  other, to edit and send yourself.
+
+  On iOS and Android the recognizer is asked for the **on-device** model, and a device that has no
+  offline model is refused rather than quietly falling back to the network — the words are a message
+  you are about to send to your own gateway. That guarantee does not hold in a browser, where the
+  Web Speech API transcribes on the vendor's servers and offers no switch; Firefox has no such API
+  and gets no microphone at all rather than a button that cannot work. A refused microphone says so
+  in one line under the composer, with **Open Settings** where there is a settings screen to open.
+  The dictation language follows the device by default, and the picker offers the languages the
+  device reports it has installed offline.
+
 - **Edit and resend, and Regenerate.** A message's own menu gains two lines that start a turn: on one
   of your own turns, **Edit and resend** puts the text back in the composer with the attachment
   references it carried — the turn already in the conversation stays exactly where it is, which is

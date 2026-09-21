@@ -86,6 +86,8 @@ import { findMatchingItem } from '../search'
 import { connectionNotice, RETRY_OFFER_MS } from './connection-notice'
 import { countsAsRead, readWatermark } from './read-watermark'
 import { regenerateLastTurn } from './regenerate'
+import { useComposerDictation } from '../voice/useComposerDictation'
+import { useDictationLanguages } from '../voice/useDictationLanguages'
 import { useReadAloud } from '../voice/useReadAloud'
 import { useVoiceSettingsStore } from '../voice/voice-settings'
 import { ChatConnectingState, ReconnectPill } from './ConnectionState'
@@ -1476,6 +1478,18 @@ function Conversation({
   const readAloud = useReadAloud({ botName, items: chat.items, turnRunning: chat.turnActive })
   const autoRead = useVoiceSettingsStore(state => state.autoReadByChat[botName] === true)
   const voiceRate = useVoiceSettingsStore(state => state.rate)
+  const voiceLanguage = useVoiceSettingsStore(state => state.dictationLanguage)
+
+  /**
+   * The composer's microphone.
+   *
+   * It writes through `chat.setDraft`, which is the same setter the reader's own
+   * typing goes through — so a dictated sentence is a draft like any other: it
+   * survives navigating away, it is what the store persists, and it can be
+   * edited before it is sent. Dictation never sends anything.
+   */
+  const dictation = useComposerDictation({ onChangeText: chat.setDraft, value: chat.draft })
+  const dictationLanguages = useDictationLanguages()
 
   /**
    * Put one of the reader's own turns back in the composer.
@@ -1885,6 +1899,7 @@ function Conversation({
             // The `+` menu's second entry. Both pickers exist on every target this
             // builds for, so neither is conditional.
             onAttachFile={() => void attachFile()}
+            dictation={dictation}
             onChangeText={chat.setDraft}
             onQuerySlash={querySlash}
             onRemoveAttachment={id => {
@@ -2007,7 +2022,20 @@ function Conversation({
                   onChangeRate: (value: number) => useVoiceSettingsStore.getState().setRate(value),
                   onStopReading: readAloud.stop,
                   rate: voiceRate,
-                  reading: readAloud.reading
+                  reading: readAloud.reading,
+                  // The listening half only where there is a microphone behind
+                  // it: a browser with speech synthesis and no recognizer gets
+                  // the reading rows and no language picker.
+                  ...(dictation.available
+                    ? {
+                        dictation: {
+                          language: voiceLanguage,
+                          languages: dictationLanguages,
+                          onChangeLanguage: (value: string) =>
+                            useVoiceSettingsStore.getState().setDictationLanguage(value)
+                        }
+                      }
+                    : {})
                 }
               }
             : {}),
