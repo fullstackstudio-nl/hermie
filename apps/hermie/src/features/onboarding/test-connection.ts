@@ -6,7 +6,7 @@ import {
   authModeOf,
   connectionPayloadKey,
   type ConnectionTestOutcome,
-  headerRecord,
+  effectiveHeaders,
   type OnboardingDraft
 } from './draft'
 
@@ -103,7 +103,7 @@ export async function runConnectionTest(
   }
 
   const authMode = authModeOf(draft.probe)
-  const extraHeaders = headerRecord(draft.headers)
+  const extraHeaders = effectiveHeaders(draft)
   const coordinator =
     authMode === 'native_pkce'
       ? createTokenCoordinator({ baseUrl, extraHeaders, store: createMemoryTokenStore(draft.tokens) })

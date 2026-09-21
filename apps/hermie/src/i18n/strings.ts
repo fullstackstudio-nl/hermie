@@ -52,6 +52,30 @@ export const strings = {
     dismiss: 'Dismiss'
   },
 
+  /**
+   * The locked app, which says four things and deliberately not a fifth.
+   *
+   * No bot names, no counts, no "3 new messages": everything a lock screen
+   * adds beyond "this is Hermie and it is locked" is something it has given
+   * away. `features/lock/LockPlate.tsx` is built so it could not say more if
+   * the copy asked it to.
+   */
+  lock: {
+    /** The line the platform prints above its own Face ID / passcode prompt. */
+    prompt: 'Unlock Hermie',
+    plateBody: 'Hermie is locked.',
+    unlock: 'Unlock',
+    /**
+     * The one case the plate has to explain rather than just ask.
+     *
+     * Reachable only by removing the device passcode after switching the lock
+     * on — the setting refuses to go on without one — and from inside the
+     * plate there is nothing to tap that would fix it.
+     */
+    stranded:
+      'Hermie is locked, and this device has no passcode or biometric set up to unlock it. Add one in your device settings.'
+  },
+
   onboarding: {
     stepCounter: (current: number, total: number) => `Step ${current} of ${total}`,
 
@@ -74,7 +98,39 @@ export const strings = {
       hint: 'Leave the scheme out and Hermie tries https:// first, then http://. Type a scheme yourself to pin it.',
       advanced: 'Advanced',
       advancedHint:
-        'Extra request headers are sent with every call and with the sign-in page. An access proxy such as Cloudflare Access needs them here.',
+        'Extra request headers are sent with every call and with the sign-in page. A reverse proxy that wants a shared secret needs it here.',
+
+      /**
+       * The Advanced preset picker, and the labelled fields behind one of them.
+       *
+       * The Cloudflare wording has one job beyond naming the fields: to say, up
+       * front, the thing that only becomes visible as a 403 halfway through a
+       * sign-in. A service token gets a request past the edge; it does not get
+       * a BROWSER past it, and the sign-in page is a browser.
+       */
+      frontDoor: {
+        label: 'IN FRONT OF THE GATEWAY',
+        custom: 'Custom headers',
+        cloudflare: 'Cloudflare Access',
+        hint: 'Pick how the proxy in front of your gateway lets Hermie through. Nothing here is sent anywhere but the gateway’s own address.',
+        clientId: 'Client ID',
+        clientIdPlaceholder: 'abc123.access',
+        clientSecret: 'Client Secret',
+        cloudflareHint:
+          'A service token from your Access application. Hermie sends it with every request, the WebSocket and the sign-in page. Exempt /auth/* and /login from the Access policy: a service token cannot carry a redirect-based sign-in through the edge.',
+        /**
+         * Said instead of the hint when the gateway is reached in the clear.
+         *
+         * A service token is a long-lived credential for a whole Access
+         * tenant, and an http gateway is one this app supports on purpose
+         * (ADR-0014). Rather than refuse either, the headers are withheld and
+         * the reason is on screen — a silent withholding would surface as an
+         * unexplained 403.
+         */
+        insecure:
+          'This gateway is reached over http://, so the service token is not being sent — it is a long-lived credential for your whole Access tenant. Use https:// for the address the Access application covers.'
+      },
+
       headerName: 'Header',
       headerValue: 'Value',
       addHeader: 'Add a header',
@@ -979,7 +1035,37 @@ export const strings = {
 
     /** The destructive half of what "Change gateway" used to be. */
     forgetGateway: 'Forget this gateway',
-    forgetGatewayHint: 'Deletes the address and the credentials from this device and starts setup empty.'
+    forgetGatewayHint: 'Deletes the address and the credentials from this device and starts setup empty.',
+
+    privacy: 'PRIVACY & SECURITY',
+
+    /**
+     * The app lock.
+     *
+     * The option labels are as short as they can be said, because five
+     * segments share one row and a phone is narrow. The hints carry the part
+     * that matters and is easy to get wrong: this setting is about THIS
+     * device, and nothing about it travels to another one.
+     */
+    lock: {
+      label: 'Require unlock',
+      options: {
+        off: 'Off',
+        immediately: 'Now',
+        '1m': '1 min',
+        '5m': '5 min',
+        '15m': '15 min'
+      } as const,
+      hint: 'Ask for Face ID, Touch ID or this device’s passcode before Hermie can be read. This setting stays on this device.',
+      hintOn:
+        'Hermie asks again after it has been away for this long, and always after it has been started fresh. This setting stays on this device.',
+      /** Hardware is there, nothing is enrolled: the one refusal that is actionable. */
+      noEnrolment:
+        'Set up a passcode, Face ID or a fingerprint in your device settings first — otherwise Hermie would lock with no way to open it.',
+      unavailable: 'This device has no unlock method Hermie can ask for.',
+      passcodeOnly: 'No biometrics are enrolled, so Hermie will ask for this device’s passcode.',
+      web: 'Hermie cannot lock itself in a browser: the page and anything enforcing a lock are the same code. Lock the screen or close the tab.'
+    }
   },
 
   connection: {
@@ -1028,6 +1114,23 @@ export const strings = {
     timeout: (host: string) => `${host} did not answer in time. It may be starting up or behind a slow link.`,
     notHermes: (host: string) =>
       `${host} answered, but not like a Hermes gateway. Check the address and any path prefix.`,
+    /** What came back, said as what was SEEN and nothing more. */
+    landingPage: 'This looks like a web page, not a gateway.',
+    /**
+     * Where the address points, which is a different fact from what came back.
+     *
+     * Said only when the host is one `classifyHost` can actually place on a
+     * network of its own — an RFC 1918 or CGNAT address, a `.ts.net`,
+     * `.internal` or `.local` name, a name with no dots — and only when
+     * something either answered with a web page or failed to answer at all on
+     * mobile data. An earlier version of this line went out for every landing
+     * page on any host, which sent people to check a VPN when what they had was
+     * a typo.
+     *
+     * Deliberately not naming a product. A tailnet is Tailscale, Headscale or
+     * anything else somebody runs, and the reader knows which one they have.
+     */
+    privateNetworkOnly: 'This address only answers on a private network — is this device on the VPN/tailnet?',
     /**
      * Where the answer came from.
      *
@@ -1040,6 +1143,12 @@ export const strings = {
     redirected: (from: string, to: string) =>
       `${from} redirected to ${to}, which is a different host. Nothing was read from it.`,
     useRedirectTarget: (host: string) => `Use ${host} instead`,
+    /**
+     * The way out of a 401 or 403 from something standing in front of the
+     * gateway. Generic: Cloudflare Access is one such proxy and the preset
+     * behind this button names it, but the sentence must fit the others too.
+     */
+    openFrontDoor: 'Add the proxy’s credentials',
     authProxy: (status: number) =>
       `An access proxy answered HTTP ${status} before the gateway did. Add its headers under Advanced, or exempt /api/status, /auth/* and /login from it.`,
     server: (status: number) => `The gateway answered HTTP ${status}. It is running but unhealthy; check its logs.`,

@@ -29,6 +29,7 @@ import { ContextSection } from './ContextSection'
 import { DebugConnectionScreen } from './DebugConnectionScreen'
 import { GALLERY_ROW_TITLE, GalleryScreen } from './GalleryScreen'
 import { LicencesScreen } from './LicencesScreen'
+import { PrivacySection } from './PrivacySection'
 import { ThemesScreen } from './ThemesScreen'
 import { WebUpdateRow } from './WebUpdateRow'
 
@@ -269,6 +270,10 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
         {/* What a bot is told about whoever is holding the device. Nothing is
             written on a gateway with accounts until the notice is accepted. */}
         <ContextSection />
+
+        {/* The app lock. Per device, and never carried to another one by
+            ADR-0016's sync. */}
+        <PrivacySection />
 
         <AppearanceSection onOpenAdvanced={() => setShowThemes(true)} />
 

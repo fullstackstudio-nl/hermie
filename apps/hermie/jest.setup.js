@@ -26,6 +26,27 @@ jest.mock('expo-secure-store', () => {
 })
 
 /**
+ * `expo-local-authentication`, which the app lock's platform seam imports at
+ * module scope — and `app/App.tsx` pulls that seam in through the gate, so a
+ * suite that renders anything at all would reach for it.
+ *
+ * The stand-in answers "a device with Face ID enrolled, and the person in front
+ * of it says yes". A suite that wants another answer mocks the SEAM
+ * (`platform/biometrics`) rather than this module: the seam is the contract,
+ * and the web build has no `expo-local-authentication` to mock at all.
+ */
+jest.mock('expo-local-authentication', () => ({
+  SecurityLevel: { NONE: 0, SECRET: 1, BIOMETRIC_WEAK: 2, BIOMETRIC_STRONG: 3 },
+  AuthenticationType: { FINGERPRINT: 1, FACIAL_RECOGNITION: 2, IRIS: 3 },
+  hasHardwareAsync: jest.fn(async () => true),
+  isEnrolledAsync: jest.fn(async () => true),
+  getEnrolledLevelAsync: jest.fn(async () => 3),
+  supportedAuthenticationTypesAsync: jest.fn(async () => [2]),
+  authenticateAsync: jest.fn(async () => ({ success: true })),
+  cancelAuthenticate: jest.fn(async () => undefined)
+}))
+
+/**
  * The glass stack. All three render native views, and two of them reach for a
  * native module the moment they are imported — `expo-glass-effect` throws
  * outright from `requireNativeModule`, which is exactly the case

@@ -9,6 +9,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A lock on the app itself.** Settings → Privacy & security → **Require unlock**: off, immediately,
+  or after 1, 5 or 15 minutes in the background. It asks with Face ID, Touch ID, Optic ID or
+  Android's BiometricPrompt, and falls back to the device passcode the way the platform does; a
+  device with nothing enrolled is told to set something up first rather than being locked out of its
+  own chats. A locked Hermie does not draw the app under a plate — it does not render it at all, so
+  there is no transcript, no chat list and no connection behind the lock screen, and nothing for the
+  app switcher's snapshot to photograph. The plate is also the first thing on screen after a cold
+  start, before anything is read from the gateway. The setting stays on the device it was made on:
+  it is not carried to a second device by the settings sync, because a phone in a pocket and a Mac
+  in a locked room are not the same question. In a browser there is no lock and the screen says so —
+  a plate drawn over this app's own page is removed by the page's own devtools.
+
+- **Cloudflare Access, as a preset rather than as two headers you have to know the names of.**
+  Setup → Advanced now asks which proxy is in front of the gateway: **Custom headers**, which is the
+  name/value rows it has always had, or **Behind Cloudflare Access**, which is a Client ID and a
+  Client Secret. The service token rides on every REST call, the WebSocket dial, the ticket mint
+  before it and both of the probe's requests — and on the sign-in page, where a document-start
+  script also puts it on the page's own `fetch` so the gateway's `/login` form reaches the gateway
+  instead of the Access login screen. It is stored in the keystore bound to the gateway origin it
+  was entered for, so it cannot follow the app to another address, and it is withheld from an
+  `http://` gateway with the reason on screen rather than in silence. Nothing prints it: the
+  developer screen says `cf-access: present` and header values are redacted wholesale rather than by
+  a list of names. One limit is stated up front in the field's own hint rather than discovered as a
+  403 halfway through a sign-in — a service token cannot carry a redirect-based sign-in through the
+  edge, so `/auth/*` and `/login` have to be exempt from the Access policy. Setup also restores the
+  headers and the preset after a sign-out now, which it never did: a gateway behind a proxy could
+  not get past its own probe to reach the sign-in it had reopened for.
+  [ADR-0021](docs/adr/0021-header-based-front-doors.md)
+
+### Changed
+
+- **Setup says which of your problems you have.** An address that answers with a web page, on a
+  host only one network can reach — an RFC 1918 or Tailscale address, a `.ts.net`, `.internal` or
+  `.local` name — now says so: *this address only answers on a private network, is this device on
+  the VPN/tailnet?* So does an address that will not resolve at all while the device is on mobile
+  data. It stays quiet everywhere the same evidence would be a guess: a public name that answered
+  with somebody's front page says nothing about a tunnel, an unreachable address on Wi-Fi is as
+  likely to be a gateway that is switched off, and `localhost` is a network nobody can join. A
+  failure that has a next move in it now offers one as a button rather than describing it — **Use
+  &lt;host&gt;** when a redirect landed somewhere else, and a way straight to the proxy credentials
+  when something refused before the gateway was reached.
+
 - **Edit and resend, and Regenerate.** A message's own menu gains two lines that start a turn: on one
   of your own turns, **Edit and resend** puts the text back in the composer with the attachment
   references it carried — the turn already in the conversation stays exactly where it is, which is

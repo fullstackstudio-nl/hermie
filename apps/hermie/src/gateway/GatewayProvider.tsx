@@ -9,9 +9,11 @@ import type {
   TokenCoordinator,
   TokenSet
 } from '@hermie/gateway-client'
+import { describeFrontDoor } from '@hermie/gateway-client'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { seedDevGateway } from '../dev/seed-gateway'
+import type { ResumeAccess } from '../features/onboarding/draft'
 import { retirePushRegistration } from '../features/push/runtime'
 import { createPersistentAuthTimeline } from './auth-timeline'
 import { attachLifecycle, createGatewayConnection, createTokenCoordinator, endGatewaySession } from './client'
@@ -40,6 +42,16 @@ export interface GatewayContextValue {
   phase: GatewayPhase
   /** Set when the user signed out: the address survives, the credentials do not. */
   resumeConfig: StoredGatewayConfig | null
+  /**
+   * The way IN to that address: the custom headers and the front door.
+   *
+   * Handed to the wizard beside `resumeConfig` because without it a resumed
+   * setup cannot get past its own probe — a gateway behind an access proxy
+   * answers `/api/status` with a 403 to anyone who does not carry the proxy's
+   * credential, so the step would fail before reaching the sign-in it opened
+   * for. Null when nothing is configured.
+   */
+  resumeAccess: ResumeAccess | null
   /** Which step the wizard opens on, and whether it can be backed out of. */
   resumeIntent: OnboardingIntent
   connection: GatewayConnection | null
@@ -102,6 +114,7 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
   const [phase, setPhase] = useState<GatewayPhase>('loading')
   const [setup, setSetup] = useState<GatewaySetup | null>(null)
   const [resumeConfig, setResumeConfig] = useState<StoredGatewayConfig | null>(null)
+  const [resumeAccess, setResumeAccess] = useState<ResumeAccess | null>(null)
   const [resumeIntent, setResumeIntent] = useState<OnboardingIntent>('fresh')
 
   const connectionRef = useRef<GatewayConnection | null>(null)
@@ -115,6 +128,7 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
   const lastError = useConnectionStore(state => state.lastError)
   const setStatus = useConnectionStore(state => state.setStatus)
   const setStoredConfig = useConnectionStore(state => state.setConfig)
+  const setStoredFrontDoor = useConnectionStore(state => state.setFrontDoor)
   const resetStore = useConnectionStore(state => state.reset)
 
   const teardown = useCallback(() => {
@@ -153,13 +167,18 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
       unsubscribeRef.current = connection.onStatus((next, error) => setStatus(next, error))
       detachRef.current = attachLifecycle(connection)
       setStoredConfig(loaded.config)
+      // The phrase, not the headers: `describeFrontDoor` reduces them to
+      // presence here, once, so nothing downstream ever holds a value it could
+      // print. See the note on `ConnectionStoreState.frontDoor`.
+      setStoredFrontDoor(describeFrontDoor(loaded.extraHeaders))
       setSetup(loaded)
       setResumeConfig(null)
+      setResumeAccess(null)
       setResumeIntent('fresh')
       setPhase('connected')
       connection.start()
     },
-    [setStatus, setStoredConfig, teardown]
+    [setStatus, setStoredConfig, setStoredFrontDoor, teardown]
   )
 
   const reload = useCallback(async () => {
@@ -186,6 +205,7 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
       teardown()
       setSetup(loaded)
       setResumeConfig(loaded?.config ?? null)
+      setResumeAccess(loaded ? { customHeaders: loaded.customHeaders, frontDoor: loaded.frontDoor } : null)
       setResumeIntent(loaded ? 'signin' : 'fresh')
       setPhase('onboarding')
 
@@ -328,6 +348,7 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
     () => ({
       phase,
       resumeConfig,
+      resumeAccess,
       resumeIntent,
       connection: connectionRef.current,
       status,
@@ -354,6 +375,7 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
       recordAuth,
       reload,
       request,
+      resumeAccess,
       resumeConfig,
       resumeIntent,
       retryNow,

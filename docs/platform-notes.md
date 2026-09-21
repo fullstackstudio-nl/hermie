@@ -6924,3 +6924,310 @@ an optimisation on it.
 - **`Copy as Markdown` was already there** and is unchanged. It is still hidden on a message whose
   markdown and whose words are the same string, which is deliberate — two identical Copy lines read
   as a bug — and the brief's "add it next to the existing copy" was already satisfied.
+
+## The app lock, and the two frames nobody looks at (2026-09-22)
+
+A lock on the app is mostly not a cryptography problem. It is a rendering
+problem and a lifecycle problem, and both of them are about frames a person
+never deliberately looks at: the one between the splash handing over and the
+first read off disk, and the one the operating system photographs on its way
+out.
+
+### The plate is not an overlay, and the difference is the feature
+
+The obvious shape is a full-screen view with a high z-index over the app. It is
+the wrong one, and not for a style reason. Under an overlay the transcript is
+still mounted, the chat list is still mounted, the WebSocket is still open and
+the query client is still refetching — so the lock holds a person's eyes and
+nothing else. Everything it was supposed to keep back is one `opacity: 0` bug,
+one `Modal` that fails to present, or one screenshot API away.
+
+`features/lock/AppLock.tsx` therefore does not render `children` at all while it
+is up, and it sits ABOVE `GatewayProvider` in `app/App.tsx` rather than inside
+it, so a locked app holds no connection either. The test asserts the absence
+rather than the covering — `expect(screen.toJSON()).not.toContain(SECRET)` —
+because "is the plate on top" is the kind of claim that goes quietly false.
+
+The cost is real and is the reason to write it down: unlocking re-mounts the
+provider and re-dials. The stores are module-level and survive, so what is paid
+is one trip up the reconnect ladder, not the conversation.
+
+### `immediately` has to lock on the way OUT
+
+iOS takes the app-switcher snapshot on the transition to `inactive`, not on the
+return. A lock applied when the app comes back is therefore a lock applied one
+frame after the card in the switcher has already been drawn from the transcript.
+So `background()` is what locks at `immediately`, and the store maps BOTH
+`inactive` and `background` onto it. `inactive` is also what a "Designed for
+iPad" window on a Mac reports when it loses focus, which is the transition that
+matters there.
+
+That mapping opens a trap, and it is the reason `prompting` exists on the store
+rather than being a spinner: **the Face ID sheet itself takes the app out of
+`active`.** Without the guard, asking for an unlock fires `inactive`, which locks
+the app underneath its own prompt, which on success unlocks it and on any
+subsequent lifecycle event locks it again. An unlock that cannot finish because
+asking is what breaks it. Every AppState change is ignored while a prompt is in
+flight.
+
+### The frame between the splash and the preference
+
+The threshold is in `AsyncStorage`, which is asynchronous, so there is a real
+moment where the app does not know whether it is locked. Three things can be
+drawn in it and two are wrong:
+
+| Drawn while the preference is unread | Who sees the wrong thing               |
+| ------------------------------------ | -------------------------------------- |
+| the app                              | everyone who turned the lock ON        |
+| the plate                            | everyone who did not                   |
+| a field of `elevation.e0`            | nobody — it is the splash's own colour |
+
+`AppLock` draws the third and the gate's `ready` flag is set in exactly one
+place, so the blank lasts one disk read. `__tests__/app-lock-gate.test.tsx` pins
+the first frame by holding the biometric prompt open on a deferred promise;
+without that, hydration wins the race and the assertion passes for the wrong
+reason.
+
+### `getEnrolledLevelAsync`, not `hasHardware` plus `isEnrolled`
+
+The intuitive pair answers the wrong question. `isEnrolledAsync()` is about
+BIOMETRICS, so it answers false on a phone with a passcode and no face — a phone
+this lock works perfectly well on, because `disableDeviceFallback` stays at its
+default and the platform collects the passcode itself.
+`getEnrolledLevelAsync()` distinguishes `NONE` from `SECRET` (PIN, pattern,
+passcode) from the two biometric levels, which is exactly the four-way split the
+settings screen needs: refuse, refuse with a reason, "it will ask for your
+passcode", and the ordinary case.
+
+`NONE` is split further by `hasHardwareAsync()`, because only one of the two
+sentences is actionable: "this device cannot" versus "set up a passcode first".
+
+### A cold start ignores the grace period, deliberately
+
+`15m` does not mean "unlocked for fifteen minutes after the process died". The
+grace period exists so that switching to a password manager and back does not
+cost a prompt, and a process the OS killed is not that. There is also nothing
+honest to measure against — the only record of when the app went away died with
+it — so honouring it would mean trusting a timestamp written to disk to decide
+whether to ask for a face. `start()` locks whenever the threshold is not `off`.
+
+### What is unverified here
+
+- **No real Face ID, Touch ID or BiometricPrompt has been through this.** There
+  is no device in reach from here. Everything above about the module is read from
+  `expo-local-authentication`'s own types and source; everything about behaviour
+  is the pure machine's table and a jest suite with the SEAM
+  (`platform/biometrics`) mocked, not the module. What needs a hand check: that
+  the iOS prompt appears at all with `NSFaceIDUsageDescription` set the way
+  `app.config.ts` sets it, that a cancelled prompt leaves the plate up rather
+  than dismissing it, that the passcode fallback appears after a run of failed
+  faces, and that the `prompting` guard is actually enough — i.e. that no
+  lifecycle event arrives between the guard clearing and the app becoming active
+  again.
+- **The app-switcher snapshot has not been looked at.** The claim that
+  `inactive` is the transition to lock on is Apple's documented behaviour, not
+  something measured here. What a locked Hermie's card in the switcher looks
+  like on a device is unknown.
+- **What a Mac window reports.** `client.ts` already records that the AppState
+  values a "Designed for iPad" window reports have never been measured. The lock
+  inherits that gap: whether a Mac window losing focus reports `inactive` — and
+  therefore whether `immediately` locks when you click another app — is a
+  reasonable reading of an iOS binary's behaviour and nothing more.
+
+## Cloudflare Access, and the request a web view cannot make (2026-09-22)
+
+A service token gets a REQUEST past Cloudflare Access. It does not get a
+BROWSER past it, and the sign-in page is a browser. Everything awkward about
+this feature is downstream of that one sentence.
+
+### What `source.headers` does and does not cover
+
+`react-native-webview`'s `source.headers` applies to the load the app initiates.
+It does not apply to anything the page does afterwards, and there are two
+different kinds of "afterwards":
+
+| What the page does                           | Reached by `source.headers` | Reached by a document-start script |
+| -------------------------------------------- | --------------------------- | ---------------------------------- |
+| `fetch` / XHR to the gateway (`/login` POST) | no                          | yes                                |
+| a sub-resource on the gateway origin         | no                          | no (not a scripted request)        |
+| a top-level navigation it performs           | no                          | no                                 |
+
+The middle row is why the script exists at all and the bottom row is why it is
+not enough. The gateway's `/login` form posts with `fetch`, so without the
+script a password provider behind Access is answered by the Access login page —
+inside a web view that is already showing a sign-in, which is about as confusing
+as a failure gets. `/auth/native/authorize` then navigates to the identity
+provider and the provider navigates back, and those are top-level navigations:
+no header this app sets and no wrapper this app installs is on them.
+
+So the operator instruction in ADR-0004 — exempt `/auth/*` and `/login` — is not
+a convenience. It is the only configuration in which the in-app flow completes
+on a service token, and it is now in the field's own hint rather than only in a
+decision record.
+
+### The https rule, and why it is not an inconvenience
+
+`frontDoorHeaders` returns `{}` for an `http://` or `ws://` address. A service
+token is a long-lived bearer credential for a whole Access application, and this
+app deliberately supports cleartext (ADR-0014) because a tailnet has already
+encrypted the path — those two facts do not belong on the same wire. Conduit
+applies the same rule in `Conduit/Services/CloudflareAccess.swift` and gives the
+same reason.
+
+The combination this forbids does not exist in practice: Access terminates TLS,
+so a gateway behind it is reachable over https or not at all. What the rule
+actually catches is a half-finished setup — an address typed without a scheme
+that fell back to http, a `http://` typed out of habit — and the address step
+says the token is being withheld rather than letting it look like a wrong
+secret.
+
+### `cf-access: present`, computed once
+
+The developer screen is one screenshot away from an issue tracker, so the rule
+is that it never holds a header value to begin with. `describeFrontDoor` runs at
+the provider, at connect time, and what goes into the connection store is the
+phrase. `redactHeaders` exists for anything that has to show a whole map, and it
+replaces EVERY value rather than a list of known names — the custom preset is
+there precisely so somebody can put their proxy's secret in a header this
+codebase has never heard of, and a redaction allowlist is a list somebody
+forgets to add to.
+
+### Turnstile: read, not built
+
+Conduit has a live-WebKit regression test for this,
+`ConduitTests/TurnstileSubframeBoundaryTests.swift`. What it establishes is that
+Cloudflare's Turnstile WebView requirements need the navigation delegate to
+ALLOW `about:blank` and `about:srcdoc` subframe navigations, and that cancelling
+a `srcdoc` subframe stops its document instantiating at all — measured against a
+real engine rather than reasoned about.
+
+Hermie's equivalent is `onShouldStartLoadWithRequest`, and
+`inspectSignInNavigation` returns `continue` for everything that is not the
+loopback redirect. So on the face of it the app already allows what Turnstile
+needs. Two things stop that being a claim:
+
+- **Whether the callback fires for subframes at all has not been measured**, on
+  either platform. iOS routes it through `decidePolicyForNavigationAction`,
+  which WebKit does consult for subframes; whether `react-native-webview`
+  forwards a subframe navigation to JavaScript, and what it passes as the URL
+  for `about:srcdoc`, is not something reading the prop's documentation settles.
+- **No Access policy with Turnstile has ever been put in front of this app.**
+  There is no tenant to point it at from here.
+
+Nothing was added for it. An allowance written for a callback that may never
+fire is a line of code that encodes a guess and then gets copied — and if the
+callback does fire and does cancel, the symptom is specific and findable: the
+Access challenge renders as an empty box. That is worth more than a speculative
+`if`.
+
+### What is unverified here
+
+- **No real Cloudflare Access front door has been through any of this.** There
+  is no tenant available from here. Everything is the gateway client's suites
+  against a mocked `fetch`, the app's suites against a mocked resolver, and the
+  header names read from Cloudflare's documented service-token scheme.
+- **The document-start script has never run in a web view.** It is asserted as a
+  STRING — that it is built from the values, that it pins both origins, that a
+  hostile secret cannot close the literal — and jest's web view is a stand-in
+  that renders props. Whether `injectedJavaScriptBeforeContentLoaded` actually
+  beats the gateway's own page scripts to `window.fetch` on WKWebView is the
+  prop's documented contract and not a measurement.
+- **The redirect-back behaviour is reasoned, not observed.** The claim that the
+  Access edge answers the returning top-level navigation with its own login page
+  follows from how Access works; what that looks like inside the sign-in modal,
+  and whether the interactive Access login completes there under `incognito`
+  with `sharedCookiesEnabled={false}`, has not been seen.
+- **The origin binding has never rejected a real record.** Its tests write the
+  mismatch by hand. The case it is for — a restore onto another device, or a
+  record from a build before the binding existed — cannot be produced here.
+
+## Two sentences the setup step could not say (2026-09-22)
+
+The address step had a message for every failure kind and no way to say the two
+things that actually resolve a stuck setup: that the address is fine and the
+NETWORK is the problem, and that there is something to press.
+
+### Why the hint is a code and not a sentence
+
+`probe.ts` already wrote a private-network line, in the gateway client, in
+English. That is right for a library with no string table and wrong for the app,
+which has one — a screen printing a sentence composed inside a package is a
+screen whose voice cannot be read from `i18n/strings.ts`, and the word that
+needed changing would be in the file nobody looks in.
+
+So `classifyProbeFailure` answers in codes. `GatewayError` gained one structured
+field to make that possible, `sawLandingPage`, because the decision needs to
+know whether a WEB PAGE came back and the only other record of that was the
+English sentence it would have had to match on. `error.hint` stays exactly as it
+was, for callers that are not this app.
+
+### What the private-network line requires, and what it refuses
+
+Two triggers, both facts rather than inferences:
+
+| What happened                | Host                        | Link     | Says it |
+| ---------------------------- | --------------------------- | -------- | ------- |
+| a web page came back         | `10.x`, CGNAT, `.ts.net`, … | any      | yes     |
+| a web page came back         | a public name               | any      | no      |
+| JSON that is not a gateway's | `10.x`                      | any      | no      |
+| nothing answered             | `.ts.net`                   | cellular | yes     |
+| nothing answered             | `.ts.net`                   | Wi-Fi    | no      |
+| nothing answered             | `.ts.net`                   | unknown  | no      |
+| nothing answered             | a public name               | cellular | no      |
+| anything                     | loopback                    | any      | no      |
+
+The refusals are the point. A "check your VPN" told to somebody whose gateway is
+simply switched off costs them the next twenty minutes, and the earlier version
+of this line went out for every landing page on any host — which sent readers to
+a tunnel when what they had was a typo. Wi-Fi is excluded for the same reason:
+on a LAN, an unreachable tailnet name is as likely to be a gateway that is off.
+Loopback is excluded because the device IS that network.
+
+**The case it deliberately misses**: a Headscale operator's own domain. Nothing
+here resolves a name, so `hermes.example.org` that only answers inside a tunnel
+looks public and gets the ordinary sentence. Reading it as private would mean
+guessing about every public name on the internet, and the sentence it would
+produce is the one that wastes the most time when it is wrong.
+
+### The link is asked for after the failure, not held
+
+`networkWatcher.kind()` is a new method on the seam rather than a second value
+on the subscription, because nothing reacts to it: the one reader is this hint,
+and it asks in the probe's own `catch`. That also makes the answer describe the
+moment the probe ran rather than whenever the step last mounted — which on a
+phone that has just left the house is a different answer.
+
+NetInfo's four values collapse to `wifi`, `cellular`, `other` and `unknown`, and
+`none` maps to `other` on purpose: "no interface at all" is a real answer, and
+it is one this hint must not read as mobile data. The browser seam answers
+`unknown` unconditionally rather than reaching for `navigator.connection`, which
+is unimplemented in Safari and Firefox, is a fingerprinting surface, and would
+buy one sentence in a wizard step the web build does not have.
+
+### A test that had to change, and why
+
+`__tests__/onboarding-address-step.test.tsx` asserted the pinned-https message
+with `toHaveTextContent(string)`. That matcher is EXACT in
+`@testing-library/react-native` — `matches(..., exact = true)` in
+`build/matches.js` — not a substring check the way jest-dom's is. The failure
+mode is also worth knowing: the assertion never passes, `waitFor` spins, and
+what the run reports is "Exceeded timeout of 5000 ms" with no mention of text at
+all, which reads as a hang rather than as a mismatch.
+
+The fixture address in that test is `hermes.fss.internal` and NetInfo's test
+double reports `cellular`, so it is exactly the pair the new sentence is for.
+The assertion now spells out the whole message; the new suite uses regexes.
+
+### What is unverified here
+
+- **Nothing here has been seen on a device.** No gateway behind a landing page,
+  no phone taken off a tailnet onto mobile data. The link type comes from
+  NetInfo's jest double, which reports `cellular` unconditionally, so what a
+  real `NetInfo.fetch()` answers on a phone with Wi-Fi assist, on a Mac, or on
+  an iPad with no cellular radio at all has not been looked at.
+- **`other` for `none` is a reading, not a measurement.** It matters only if a
+  device can report `none` while a probe still fails in a way worth hinting
+  about, which would be odd.
+- **The landing-page detector is unchanged and still crude**: `<!doctype html`
+  or `<html` in the first 2000 characters. A proxy that answers with an error
+  page that opens with a comment or a BOM is not detected, and never was.

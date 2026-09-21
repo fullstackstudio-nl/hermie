@@ -1,14 +1,40 @@
-import { hasExplicitScheme, isGatewayError, normalizeBaseUrl, resolveGatewayAddress } from '@hermie/gateway-client'
+import {
+  classifyProbeFailure,
+  type FrontDoorKind,
+  frontDoorWithheld,
+  hasExplicitScheme,
+  NO_FRONT_DOOR,
+  normalizeBaseUrl,
+  originOf,
+  type ProbeAction,
+  resolveGatewayAddress
+} from '@hermie/gateway-client'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Pressable, View } from 'react-native'
 
 import { describeProbeError } from '../../../gateway/errors'
+import { networkWatcher } from '../../../platform/net-info'
 import { TransportNotice } from '../../../gateway/TransportNotice'
 import { strings } from '../../../i18n/strings'
 import { InsetButtonRow, InsetGroup, InsetRow, SecretField, Text, TextField } from '../../../ui/primitives'
+import { SegmentedRow } from '../../../ui/sheets'
 import { useTheme } from '../../../ui/theme'
-import { headerError, headerRecord, newHeaderRow, type OnboardingDraft } from '../draft'
+import { effectiveHeaders, headerError, newHeaderRow, type OnboardingDraft } from '../draft'
 import { StatusLine } from '../StatusLine'
+
+/**
+ * The Advanced presets.
+ *
+ * Two, and the second one is named. Header-based front doors all work the same
+ * way — a pair of headers on every request — but only one of them is common
+ * enough in front of a self-hosted gateway to be worth labelled fields, a
+ * stored origin and a sentence about what it cannot do. Everything else is the
+ * first preset, which is the field pair this step has always had.
+ */
+const PRESETS: { value: FrontDoorKind; label: string }[] = [
+  { value: 'none', label: strings.onboarding.address.frontDoor.custom },
+  { value: 'cloudflare_access', label: strings.onboarding.address.frontDoor.cloudflare }
+]
 
 /** Long enough that typing an address does not fire a probe per keystroke. */
 export const PROBE_DEBOUNCE_MS = 500
@@ -22,17 +48,24 @@ export interface GatewayAddressStepProps {
 
 export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_MS }: GatewayAddressStepProps) {
   const theme = useTheme()
-  const [advanced, setAdvanced] = useState(draft.headers.length > 0)
+  // Open when there is already something in it, which after a sign-out there
+  // is: the wizard restores the way in along with the address.
+  const [advanced, setAdvanced] = useState(draft.headers.length > 0 || draft.frontDoor.kind !== 'none')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   /*
-    The host a redirect actually reached, when one did.
+    What the reader can press, when the failure leaves anything to press.
 
-    Kept beside the message so the step can OFFER it rather than only describe
-    it: the address that was typed is correct as far as the reader knows, and
-    the only useful next move is to point the wizard at the host that answered.
+    Kept beside the message rather than derived from it, and produced by the
+    same classifier that decided the message's extra sentences — so the buttons
+    and the words under them cannot come to different conclusions about what
+    went wrong. Two cases today: a redirect landed somewhere else, and a proxy
+    refused before the gateway was reached.
+
+    Offered, never performed. An app that followed a redirect by itself is
+    exactly what the cached 301 did.
   */
-  const [redirectedTo, setRedirectedTo] = useState<string | null>(null)
+  const [actions, setActions] = useState<ProbeAction[]>([])
   // Only true when the user named no scheme and https did not answer. It is
   // said out loud rather than kept: a downgrade nobody is told about is the
   // thing worth avoiding, not the downgrade.
@@ -46,7 +79,10 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
   updateRef.current = update
 
   const raw = draft.rawAddress.trim()
-  const headersKey = JSON.stringify(headerRecord(draft.headers))
+  // The FRONT DOOR is in here too, so editing a service token re-probes. On a
+  // gated edge that is the only way to find out whether the pair is right:
+  // `/api/status` is the first thing Access refuses.
+  const headersKey = JSON.stringify(effectiveHeaders(draft))
   // The resolver tries https first and falls back to http only when the reader
   // left the scheme out, so which of the two is in flight is knowable here
   // without instrumenting the resolver.
@@ -57,7 +93,7 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
       sequence.current += 1
       setBusy(false)
       setError(null)
-      setRedirectedTo(null)
+      setActions([])
       setFoundOverHttp(false)
       updateRef.current({ probe: null, baseUrl: null })
 
@@ -99,19 +135,29 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
 
           setBusy(false)
           setError(null)
-          setRedirectedTo(null)
+          setActions([])
           setFoundOverHttp(overHttp)
           updateRef.current({ probe: result, baseUrl })
         })
-        .catch(probeError => {
+        .catch(async probeError => {
+          /*
+            The link is asked for AFTER the failure, not kept in state.
+
+            It is one native round trip, it only matters once a probe has
+            already failed, and asking here means the answer describes the
+            moment the probe ran rather than whenever the step last mounted —
+            which on a phone that just left the house is a different answer.
+          */
+          const network = await networkWatcher.kind().catch(() => 'unknown' as const)
+
           if (cancelled || ticket !== sequence.current) {
             return
           }
 
           setBusy(false)
           setFoundOverHttp(false)
-          setRedirectedTo(isGatewayError(probeError) ? (probeError.redirectedTo ?? null) : null)
-          setError(describeProbeError(probeError, normalized, httpsWasPinned))
+          setActions(classifyProbeFailure(probeError, { address: normalized, network }).actions)
+          setError(describeProbeError(probeError, normalized, httpsWasPinned, network))
           updateRef.current({ probe: null, baseUrl: null })
         })
     }, debounceMs)
@@ -128,11 +174,34 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
   /** Point the wizard at the host that actually answered, scheme and all. */
   const takeRedirectTarget = useCallback(
     (host: string) => {
-      setRedirectedTo(null)
+      setActions([])
       update({ rawAddress: host, probe: null, baseUrl: null })
     },
     [update]
   )
+
+  /**
+   * Open Advanced on the Cloudflare preset, which is what a 401 or 403 from
+   * something in front of the gateway most often wants.
+   *
+   * It does not choose for the reader beyond that: the preset is switched on
+   * and the fields are empty, and "Custom headers" is one tap away for a proxy
+   * that is not Cloudflare.
+   */
+  const openFrontDoor = useCallback(() => {
+    setAdvanced(true)
+
+    if (draft.frontDoor.kind === 'none') {
+      update({
+        frontDoor: {
+          kind: 'cloudflare_access',
+          clientId: '',
+          clientSecret: '',
+          origin: originOf(draft.baseUrl ?? draft.rawAddress)
+        }
+      })
+    }
+  }, [draft.baseUrl, draft.frontDoor.kind, draft.rawAddress, update])
 
   const useHttpsInstead = useCallback(() => {
     const current = draft.baseUrl ?? draft.rawAddress.trim()
@@ -145,6 +214,37 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
       update({ headers: draft.headers.map(row => (row.id === id ? { ...row, ...patch } : row)) })
     },
     [draft.headers, update]
+  )
+
+  /**
+   * Switch preset.
+   *
+   * Leaving Cloudflare Access DROPS the pair rather than parking it, which is
+   * the whole reason this is a switch and not a checkbox: a secret the reader
+   * has turned off should not be sitting in the draft waiting to be saved with
+   * the next gateway.
+   */
+  const setPreset = useCallback(
+    (kind: FrontDoorKind) => {
+      update({
+        frontDoor:
+          kind === 'cloudflare_access'
+            ? { kind, clientId: '', clientSecret: '', origin: originOf(draft.baseUrl ?? draft.rawAddress) }
+            : NO_FRONT_DOOR
+      })
+    },
+    [draft.baseUrl, draft.rawAddress, update]
+  )
+
+  const setAccess = useCallback(
+    (patch: { clientId?: string; clientSecret?: string }) => {
+      if (draft.frontDoor.kind !== 'cloudflare_access') {
+        return
+      }
+
+      update({ frontDoor: { ...draft.frontDoor, ...patch, origin: originOf(draft.baseUrl ?? draft.rawAddress) } })
+    },
+    [draft.baseUrl, draft.frontDoor, draft.rawAddress, update]
   )
 
   return (
@@ -187,13 +287,25 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
           necessarily the one the owner meant, and a wizard that followed it by
           itself is exactly what the cached 301 did.
         */}
-        {redirectedTo ? (
+        {actions.length > 0 ? (
           <InsetGroup>
-            <InsetButtonRow
-              onPress={() => takeRedirectTarget(redirectedTo)}
-              testID="probe-use-redirect"
-              title={strings.errors.useRedirectTarget(redirectedTo)}
-            />
+            {actions.map(action =>
+              action.kind === 'use_host' ? (
+                <InsetButtonRow
+                  key="use-host"
+                  onPress={() => takeRedirectTarget(action.host)}
+                  testID="probe-use-redirect"
+                  title={strings.errors.useRedirectTarget(action.host)}
+                />
+              ) : (
+                <InsetButtonRow
+                  key="front-door"
+                  onPress={openFrontDoor}
+                  testID="probe-front-door"
+                  title={strings.errors.openFrontDoor}
+                />
+              )
+            )}
           </InsetGroup>
         ) : null}
         <TransportNotice
@@ -218,6 +330,57 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
         </Pressable>
 
         {advanced ? (
+          <InsetGroup footer={strings.onboarding.address.frontDoor.hint}>
+            <SegmentedRow
+              label={strings.onboarding.address.frontDoor.label}
+              onChange={setPreset}
+              options={PRESETS}
+              testID="front-door-preset"
+              value={draft.frontDoor.kind}
+            />
+          </InsetGroup>
+        ) : null}
+
+        {advanced && draft.frontDoor.kind === 'cloudflare_access' ? (
+          <InsetGroup
+            footer={
+              frontDoorWithheld(draft.frontDoor, draft.baseUrl ?? '')
+                ? strings.onboarding.address.frontDoor.insecure
+                : strings.onboarding.address.frontDoor.cloudflareHint
+            }
+          >
+            <InsetRow style={{ gap: theme.space.sm }}>
+              <TextField
+                autoCapitalize="none"
+                autoCorrect={false}
+                label={strings.onboarding.address.frontDoor.clientId}
+                onChangeText={clientId => setAccess({ clientId })}
+                placeholder={strings.onboarding.address.frontDoor.clientIdPlaceholder}
+                returnKeyType="done"
+                testID="cf-access-client-id"
+                value={draft.frontDoor.clientId}
+              />
+              {/*
+                A `SecretField`, the same as a custom header's value: it is a
+                long-lived tenant credential and it is pasted in rooms with
+                other people in them.
+              */}
+              <SecretField
+                autoCapitalize="none"
+                autoCorrect={false}
+                concealLabel={strings.onboarding.address.hideValue}
+                label={strings.onboarding.address.frontDoor.clientSecret}
+                onChangeText={clientSecret => setAccess({ clientSecret })}
+                returnKeyType="done"
+                revealLabel={strings.onboarding.address.showValue}
+                testID="cf-access-client-secret"
+                value={draft.frontDoor.clientSecret}
+              />
+            </InsetRow>
+          </InsetGroup>
+        ) : null}
+
+        {advanced && draft.frontDoor.kind === 'none' ? (
           <InsetGroup footer={strings.onboarding.address.advancedHint}>
             {draft.headers.map(row => (
               <InsetRow key={row.id} style={{ gap: theme.space.sm }}>

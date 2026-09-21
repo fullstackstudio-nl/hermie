@@ -12,9 +12,9 @@
  * request made to find out whether requests work is a request made to a gateway
  * the user may not want touched on a schedule.
  */
-import type { NetworkWatcher } from './platform-contracts'
+import type { NetworkKind, NetworkWatcher } from './platform-contracts'
 
-export type { NetworkWatcher } from './platform-contracts'
+export type { NetworkKind, NetworkWatcher } from './platform-contracts'
 
 export const networkWatcher: NetworkWatcher = {
   subscribe(onChange) {
@@ -32,5 +32,18 @@ export const networkWatcher: NetworkWatcher = {
       window.removeEventListener('online', report)
       window.removeEventListener('offline', report)
     }
+  },
+
+  /*
+    Always `unknown`, and deliberately not `navigator.connection`.
+
+    The Network Information API is not implemented in Safari or Firefox, and
+    where it IS implemented it is a fingerprinting surface the app has no other
+    reason to touch. What it would buy is one sentence in a wizard the browser
+    build does not even show — Hermie Web fixes the gateway to its own origin,
+    so there is no address step to hint about.
+  */
+  async kind(): Promise<NetworkKind> {
+    return 'unknown'
   }
 }

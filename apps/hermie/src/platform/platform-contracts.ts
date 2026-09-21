@@ -7,6 +7,10 @@
  * share therefore lives here, where neither owns it, and each seam re-exports
  * the ones its callers expect to find next to the implementation.
  */
+import type { NetworkKind } from '@hermie/gateway-client'
+
+/** Re-exported so both `net-info` seams name the same four values. */
+export type { NetworkKind } from '@hermie/gateway-client'
 
 /**
  * Storage for values that must never land in a plain-text preference file:
@@ -39,6 +43,53 @@ export type HapticMoment = 'send' | 'choice' | 'complete'
  */
 export interface NetworkWatcher {
   subscribe(onChange: (online: boolean) => void): () => void
+  /**
+   * What kind of link this device says it is on, asked once.
+   *
+   * Not part of the subscription, because nothing reacts to it: the one reader
+   * is the onboarding probe's failure hint, which asks at the moment a probe
+   * has already failed. A cellular link is the one answer strong enough to be
+   * worth a sentence — it means this device is not on the LAN and, unless a
+   * tunnel is up, not on the tailnet either — and `unknown` is a real answer
+   * rather than an error, which is what a browser gives.
+   */
+  kind(): Promise<NetworkKind>
+}
+
+/**
+ * What this device can ask for before it hands the app back.
+ *
+ * A closed set rather than the module's own enums, because the only thing any
+ * caller branches on is which of four sentences to say and whether the setting
+ * may be switched on at all:
+ *
+ * - `unavailable` there is no hardware, or no module at all. The browser.
+ * - `none`        hardware, and nothing enrolled: no face, no finger, no
+ *                 passcode. The lock cannot be switched on, because switching
+ *                 it on would lock the app with nothing able to open it.
+ * - `passcode`    a device passcode and no biometric. The prompt is still
+ *                 worth offering; it simply asks for digits.
+ * - `biometric`   a face, a finger or an iris is enrolled, with the device
+ *                 passcode behind it as the platform's own fallback.
+ */
+export type BiometricEnrolment = 'unavailable' | 'none' | 'passcode' | 'biometric'
+
+/** What the platform prompt answered. `unavailable` is the module refusing to run at all. */
+export type BiometricVerdict = 'ok' | 'failed' | 'unavailable'
+
+/**
+ * The device's own "prove it is you", behind one seam.
+ *
+ * Two methods and no state: the app lock keeps every decision it makes in
+ * `features/lock/lock-state.ts`, and this only answers what the hardware can do
+ * and what the person in front of it just did.
+ */
+export interface Biometrics {
+  /** False where there is no such prompt at all, which is what the browser answers. */
+  readonly available: boolean
+  enrolment(): Promise<BiometricEnrolment>
+  /** `reason` is the line the platform prints above its own prompt. */
+  authenticate(reason: string): Promise<BiometricVerdict>
 }
 
 /** Which ink the system status bar draws its clock and indicators in. */

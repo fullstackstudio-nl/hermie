@@ -104,6 +104,11 @@ no third-party network call. The only address Hermie knows is the one you typed.
   not show the row.
 - **Offline-tolerant.** The last stretch of every conversation is cached, so a
   chat paints before the gateway answers and is still readable on a plane.
+- **A lock, if you want one.** Face ID, Touch ID, Optic ID or your Android
+  fingerprint, with the device passcode behind it — immediately, or after a few
+  minutes away. A locked Hermie does not draw its contents behind the plate; it
+  does not draw them at all, which is also what the app switcher's snapshot
+  gets. The setting lives on the device you made it on and is never synced.
 - **Widgets.** A home-screen widget for one chat — avatar, name, bead and the
   last line — one for the three most recent, and on iOS a lock-screen line that
   says how many conversations are waiting on you. Tapping one opens that chat.
@@ -128,6 +133,15 @@ Hermie is a client, not a server. It needs a Hermes gateway you can reach:
   is reached with the session token `hermes serve` prints at startup. Either way,
   if the gateway sits behind an access proxy, extra request headers can be added
   during setup and are then sent with everything, including the sign-in page.
+- **Behind Cloudflare Access?** Setup has a preset for it: Client ID and Client
+  Secret from a service token, kept in the device keystore and bound to that
+  gateway's address. Two things to know before you try it. The gateway must be
+  on `https://` — a service token is a long-lived credential for your whole
+  Access application, so Hermie will not put one on a cleartext connection. And
+  **`/auth/*` and `/login` have to be exempt from the Access policy**: a service
+  token gets a request past the edge, not a browser, and the sign-in page is a
+  browser. See
+  [ADR-0021](docs/adr/0021-header-based-front-doors.md).
 
 Two things about the gateway's own configuration are worth knowing before you
 start:

@@ -89,10 +89,26 @@ function AuthTimelineBlock() {
   const theme = useTheme()
   const timeline = useConnectionStore(state => state.authTimeline)
   const reason = timeline.lastSignOut
+  /*
+    Whether a front door is configured, and nothing else about it.
+
+    A 401 with no front door and a 401 despite one are different problems, and
+    the ring cannot tell them apart on its own — headers are not events. The
+    store holds the sentence rather than the headers, so the values never reach
+    this screen at all; `describeFrontDoor` produced it once, at the provider,
+    and this screen is one screenshot away from an issue tracker.
+  */
+  const frontDoor = useConnectionStore(state => state.frontDoor)
 
   return (
     <View style={{ gap: theme.space.xxs }}>
       <Text variant="name">Auth timeline</Text>
+
+      {frontDoor ? (
+        <Text color="textMuted" testID="debug-front-door" variant="meta">
+          {frontDoor}
+        </Text>
+      ) : null}
 
       <Text color="textMuted" testID="debug-auth-signout" variant="meta">
         {reason

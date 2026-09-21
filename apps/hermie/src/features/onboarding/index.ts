@@ -7,6 +7,7 @@ export {
   draftFromConfig,
   emptyDraft,
   hasCredential,
+  effectiveHeaders,
   type HeaderRow,
   headerError,
   headerRecord,
@@ -14,7 +15,8 @@ export {
   newHeaderRow,
   NUMBERED_STEPS,
   type OnboardingDraft,
-  type OnboardingStep
+  type OnboardingStep,
+  type ResumeAccess
 } from './draft'
 export { inspectSignInNavigation, type SignInNavigation } from './loopback'
 export { NativeSignInWebView, type NativeSignInWebViewProps, SIGN_IN_TIMEOUT_MS } from './NativeSignInWebView'
