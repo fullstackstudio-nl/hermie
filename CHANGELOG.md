@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A slash list that cannot load says so instead of showing nothing.** Typing `/` against a gateway
+  that refused `commands.catalog` or `complete.slash` drew an empty composer — the same build showed
+  the list on the web and on a simulator, and the only record of the refusal was the developer
+  screen's ring. The popover now opens on a refusal too, with one non-selectable row naming the
+  method and repeating the gateway's own words, and it clears on the next answer that works. A first
+  catalogue fetch still in the air after 400 ms draws a `Loading…` row, so a slow gateway is
+  distinguishable from a silent one. The catalogue refusing while `complete.slash` answers is shown
+  as well, because that is the state where the list looks right and Return sends the pick as prose.
+
 ## [0.1.1] - 2026-09-22
 
 

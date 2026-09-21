@@ -1189,6 +1189,101 @@ describe('slash commands', () => {
     expect(gateway.calls.filter(call => call.method === 'complete.slash')).toHaveLength(2)
   })
 
+  /**
+   * A refused completion call is a FACT the popover can draw, not a silence.
+   *
+   * The report this closes: on the owner's phone, against his real gateway,
+   * typing `/` showed nothing, while the same build showed the list on the web
+   * and on the simulator. Both calls were inside a `catch` that answered
+   * `{ items: [] }`, which is indistinguishable from a gateway that simply has
+   * no commands — so the app had recorded the refusal in the developer
+   * screen's ring and told the reader nothing at all.
+   */
+  it('reports a refused complete.slash as a failure rather than an empty list', async () => {
+    const { gateway, controller } = setup()
+
+    gateway.reply('commands.catalog', { pairs: [['/model', 'Switch the model']] }).reply('complete.slash', () => {
+      // The shape the real channel rejects with: the serialized JSON-RPC error.
+      throw new Error('{"code":4018,"message":"skill command: use command.dispatch for /docx"}')
+    })
+
+    await controller.openChat(RESEARCHER)
+
+    expect(await controller.querySlash('researcher', '/do')).toEqual({
+      items: [],
+      failure: { method: 'complete.slash', reason: '4018 skill command: use command.dispatch for /docx' }
+    })
+  })
+
+  it('reports a timed-out complete.slash, which carries no code at all', async () => {
+    const { gateway, controller } = setup()
+
+    gateway.reply('commands.catalog', {}).reply('complete.slash', () => {
+      // A transport failure, not a refusal: there was nobody to send a code.
+      throw new Error('Timed out after 10000ms')
+    })
+
+    await controller.openChat(RESEARCHER)
+
+    expect(await controller.querySlash('researcher', '/mo')).toEqual({
+      items: [],
+      failure: { method: 'complete.slash', reason: 'Timed out after 10000ms' }
+    })
+  })
+
+  it('names the catalogue when that is the call that refused, and still paints the items', async () => {
+    // The state that makes the list LOOK fine and Return do the wrong thing:
+    // `complete.slash` answers from the session, but `knowsSlashCommand` routes
+    // on the catalogue, so without it an accepted suggestion goes out as prose.
+    const { gateway, controller } = setup()
+
+    gateway
+      .reply('commands.catalog', () => {
+        throw new Error('{"code":5030,"message":"worker exited"}')
+      })
+      .reply('complete.slash', { items: [{ text: '/model' }] })
+
+    await controller.openChat(RESEARCHER)
+
+    expect(await controller.querySlash('researcher', '/mo')).toEqual({
+      items: [{ text: '/model' }],
+      failure: { method: 'commands.catalog', reason: '5030 worker exited' }
+    })
+    expect(controller.knowsSlashCommand('researcher', 'model')).toBe(false)
+  })
+
+  it('clears the failure on the next answer that works', async () => {
+    const { gateway, controller } = setup()
+
+    gateway.reply('commands.catalog', {}).reply('complete.slash', () => {
+      throw new Error('{"code":5030,"message":"worker exited"}')
+    })
+
+    await controller.openChat(RESEARCHER)
+    expect(await controller.querySlash('researcher', '/mo')).toHaveProperty('failure')
+
+    gateway.reply('complete.slash', { items: [{ text: '/model' }] })
+
+    expect(await controller.querySlash('researcher', '/mo')).toEqual({ items: [{ text: '/model' }] })
+  })
+
+  it('still records the refusal in the developer ring', async () => {
+    // The ring is not replaced by the visible row: it is the thing that carries
+    // every absorbed refusal in the session, and the row is about the last
+    // answer to the line in front of the caret.
+    const failures: RpcFailure[] = []
+    const { gateway, controller } = setup({ onRpcFailure: failure => failures.push(failure) })
+
+    gateway.reply('commands.catalog', {}).reply('complete.slash', () => {
+      throw new Error('{"code":4018,"message":"nope"}')
+    })
+
+    await controller.openChat(RESEARCHER)
+    await controller.querySlash('researcher', '/mo')
+
+    expect(failures).toEqual([expect.objectContaining({ method: 'complete.slash', code: 4018, message: 'nope' })])
+  })
+
   it('answers from the catalogue which names are commands and which are prose', async () => {
     const { gateway, controller } = setup()
 

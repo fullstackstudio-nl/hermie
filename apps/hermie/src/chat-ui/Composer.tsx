@@ -43,7 +43,7 @@ import { FileChip } from './FileChip'
 import { QueuedChip } from './QueuedChip'
 import { shouldSend } from './send-key'
 import { chatStrings } from './strings'
-import type { AttachChoice, ComposerAttachment, SlashSuggestion } from './types'
+import type { AttachChoice, ComposerAttachment, SlashFailure, SlashSuggestion } from './types'
 
 export interface ComposerProps {
   /** Controlled draft. */
@@ -90,6 +90,27 @@ export interface ComposerProps {
   /** Slash candidates for the current prefix; the caller fetches them. */
   suggestions?: SlashSuggestion[]
   onQuerySlash?: (prefix: string) => void
+  /**
+   * The completion call that would not answer, when the last one did not.
+   *
+   * The popover used to open only on `suggestions.length > 0`, so a gateway
+   * that refused `commands.catalog` and `complete.slash` drew NOTHING: the
+   * owner typed `/` on his phone, saw an empty composer, and the same build
+   * showed the list on the web and on the simulator. An empty list and a
+   * refused call look identical from the outside and they are not the same
+   * thing, so the refused one says so.
+   */
+  slashFailure?: SlashFailure | null
+  /**
+   * A first catalogue fetch is still in the air.
+   *
+   * Only the FIRST: every later keystroke is answered from a catalogue that is
+   * already in memory, and a row that blinked on each of them would be noise.
+   * The composer waits `SLASH_SLOW_MS` before drawing anything, so a gateway
+   * that answers promptly never shows it at all — which is what makes the row
+   * mean "this one is slow" rather than "this one is loading".
+   */
+  slashLoading?: boolean
   /** A prompt the backend parked behind the running turn. */
   queuedText?: string
   placeholder?: string
@@ -245,6 +266,19 @@ export const ATTACH_POPOVER_MIN_WIDTH = 260
 export const MENU_BACKDROP_REACH = 4000
 
 /**
+ * How long a first catalogue fetch may take before the popover says so.
+ *
+ * Long enough that a gateway on the same machine — which answers in single
+ * milliseconds — never draws the row at all, and short enough that a reader who
+ * typed `/` and is staring at nothing gets an answer before they conclude the
+ * feature is broken. The report this serves is exactly that conclusion: the
+ * same build showed the list on the web and on the simulator and nothing on the
+ * owner's phone, and a silent composer gives a reader no way to tell a slow
+ * gateway from a refusing one.
+ */
+export const SLASH_SLOW_MS = 400
+
+/**
  * The line the completion list is for, or `null` while there is no list.
  *
  * A LEADING slash and nothing else: `/` in the middle of a sentence is a slash,
@@ -275,6 +309,8 @@ export function Composer({
   onRemoveAttachment,
   suggestions = [],
   onQuerySlash,
+  slashFailure = null,
+  slashLoading = false,
   queuedText,
   placeholder,
   botName,
@@ -402,7 +438,39 @@ export function Composer({
     setPopoverDismissed(false)
   }, [prefix])
 
+  /**
+   * A slow first fetch, which is a different fact from an empty list.
+   *
+   * The timer runs only while a query is genuinely outstanding, and it is torn
+   * down on every change of either input — so a gateway that answers inside the
+   * window never sets the flag, and one that answers just after it clears it on
+   * the same render that fills the list.
+   */
+  const [slashSlow, setSlashSlow] = useState(false)
+
+  useEffect(() => {
+    if (!slashLoading || prefix === null) {
+      setSlashSlow(false)
+
+      return
+    }
+
+    const timer = setTimeout(() => setSlashSlow(true), SLASH_SLOW_MS)
+
+    return () => clearTimeout(timer)
+  }, [prefix, slashLoading])
+
+  /*
+    Three reasons to open, and only the first of them is selectable.
+
+    A failure and a slow fetch both open a popover with nothing to accept in it,
+    which is why `submit()` and the arrow keys below all read `suggestions`
+    rather than this flag: an open popover with no rows must not swallow the
+    Return that would have sent the line.
+  */
+  const slashNotice = prefix !== null && !popoverDismissed && (Boolean(slashFailure) || slashSlow)
   const showSuggestions = prefix !== null && suggestions.length > 0 && !popoverDismissed
+  const showPopover = showSuggestions || slashNotice
 
   useEffect(() => setActive(0), [suggestions])
 
@@ -618,7 +686,13 @@ export function Composer({
    * composer registers later still and outranks both.
    */
   useEscapeKey(() => onStop?.(), running)
-  useEscapeKey(() => setPopoverDismissed(true), showSuggestions)
+  /*
+    `showPopover`, not `showSuggestions`: a popover holding only the failure row
+    is still a popover in front of the caret, and on a Mac Escape is the only
+    thing that puts it away. The ORDER is unchanged — the list still outranks
+    the running turn — and so is what the key means at each level.
+  */
+  useEscapeKey(() => setPopoverDismissed(true), showPopover)
 
   /*
     ↑, ↓ and Tab, from the keyboard seam rather than from the field.
@@ -743,7 +817,7 @@ export function Composer({
         is anchored above the composer and a list that rose from below would
         appear to come out of the wrong control.
       */}
-      <Appear exit="cut" rise={-8} visible={showSuggestions}>
+      <Appear exit="cut" rise={-8} visible={showPopover}>
         <GlassSurface
           contentStyle={{ maxHeight: 220 }}
           radius={theme.radii.card}
@@ -753,6 +827,42 @@ export function Composer({
           variant="float"
         >
           <ScrollView keyboardShouldPersistTaps="handled">
+            {/*
+              Not a `Pressable`, and deliberately so: there is nothing to accept
+              here, and a row that highlighted under a finger would be offering
+              one. It is a plain `View` with the danger tint's readable ink, which
+              is the same hierarchy decision §3 makes about a danger TINT versus
+              the saturated fill — this is a sentence, not a status mark.
+            */}
+            {slashFailure ? (
+              <View
+                style={{ paddingHorizontal: theme.space.lg, paddingVertical: theme.space.sm + 2 }}
+                testID="slash-failure"
+              >
+                <Text color="dangerText" variant="name">
+                  {chatStrings.composer.slashUnavailable(slashFailure.method)}
+                </Text>
+                <Text color="textFaint" variant="meta">
+                  {slashFailure.reason}
+                </Text>
+              </View>
+            ) : null}
+
+            {/*
+              Only while nothing has arrived. A failure is the more specific
+              answer to the same question, so the two never draw together.
+            */}
+            {!slashFailure && slashSlow ? (
+              <View
+                style={{ paddingHorizontal: theme.space.lg, paddingVertical: theme.space.sm + 2 }}
+                testID="slash-loading"
+              >
+                <Text color="textMuted" variant="name">
+                  {chatStrings.composer.slashLoading}
+                </Text>
+              </View>
+            ) : null}
+
             {suggestions.map((suggestion, index) => (
               <Pressable
                 accessibilityRole="button"

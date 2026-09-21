@@ -54,6 +54,20 @@ export interface SlashSuggestion {
 }
 
 /**
+ * A completion call the gateway would not answer, as the popover prints it.
+ *
+ * Structurally the same two fields the controller produces
+ * (`features/chats/chat-controller.ts`), declared here so the chat-ui layer
+ * does not import from a feature to draw one of its own rows.
+ */
+export interface SlashFailure {
+  /** The JSON-RPC method that refused, e.g. `commands.catalog`. */
+  method: string
+  /** The gateway's own words, with its code in front when it sent one. */
+  reason: string
+}
+
+/**
  * A file or image staged in the composer's attachment tray.
  *
  * `kind` is not derived from `uri`: an image and a file leave by different roads

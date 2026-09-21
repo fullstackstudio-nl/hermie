@@ -14,9 +14,10 @@ import {
   COMPOSER_IOS_TOP_INSET,
   COMPOSER_LINE_HEIGHT,
   COMPOSER_ROUND_SIZE,
-  COMPOSER_TEXT_LINE_HEIGHT
+  COMPOSER_TEXT_LINE_HEIGHT,
+  SLASH_SLOW_MS
 } from '../../src/chat-ui/Composer'
-import { renderScreen } from '../support/render'
+import { renderScreen, withProviders } from '../support/render'
 
 const mockEscapeListeners = new Set<() => void>()
 const mockShortcutListeners = new Set<(action: string) => void>()
@@ -99,6 +100,44 @@ function renderComposer(props: Record<string, unknown> = {}) {
   renderScreen(<Composer value="" {...handlers} {...props} />)
 
   return handlers
+}
+
+/**
+ * The same render, with a way to hand the composer a NEW set of props.
+ *
+ * Several of the cases below are about a prop changing under a mounted
+ * composer — a failure clearing, a slow fetch being overtaken by its own answer
+ * — and those are the ones a fresh render cannot express: the whole question is
+ * what the component does with the transition.
+ */
+function renderComposerHandle(props: Record<string, unknown> = {}) {
+  const handlers = {
+    onAttach: jest.fn(),
+    onAttachFile: jest.fn(),
+    onChangeText: jest.fn(),
+    onQuerySlash: jest.fn(),
+    onRemoveAttachment: jest.fn(),
+    onSend: jest.fn(),
+    onStop: jest.fn()
+  }
+  const rendered = renderScreen(<Composer value="" {...handlers} {...props} />)
+
+  return {
+    handlers,
+    // Through the providers again: `renderScreen` wraps the tree, and a bare
+    // rerender would replace the theme and safe-area context with nothing.
+    rerender: (next: Record<string, unknown>) =>
+      rendered.rerender(withProviders(<Composer value="" {...handlers} {...next} />))
+  }
+}
+
+/** Escape, as the keyboard seam delivers it. */
+function pressEscape() {
+  act(() => {
+    for (const listener of [...mockEscapeListeners]) {
+      listener()
+    }
+  })
 }
 
 describe('Composer', () => {
@@ -199,6 +238,123 @@ describe('Composer', () => {
 
     expect(handlers.onQuerySlash).not.toHaveBeenCalled()
     expect(screen.queryByTestId('composer-slash-popover')).toBeNull()
+  })
+
+  /**
+   * A refused completion call, and a slow one, are two facts an empty popover
+   * used to say nothing about.
+   *
+   * The popover opened on `suggestions.length > 0` alone, so against a gateway
+   * that refused both calls the composer drew NOTHING — the owner typed `/` on
+   * his phone and saw an empty field, while the same build showed the list on
+   * the web and on the simulator.
+   */
+  describe('when the gateway will not answer', () => {
+    const FAILURE = { method: 'commands.catalog', reason: '5030 worker exited' }
+
+    it('opens the popover on a failure with no suggestions at all', () => {
+      renderComposer({ slashFailure: FAILURE, value: '/' })
+
+      expect(screen.getByTestId('composer-slash-popover')).toBeTruthy()
+      expect(screen.getByTestId('slash-failure')).toBeTruthy()
+      expect(screen.getByText('Commands unavailable — commands.catalog')).toBeTruthy()
+      expect(screen.getByText('5030 worker exited')).toBeTruthy()
+    })
+
+    it('draws the failure row as text rather than as something to accept', () => {
+      const handlers = renderComposer({ slashFailure: FAILURE, value: '/' })
+
+      // Not a `Pressable`: there is nothing to pick, and a row that took a tap
+      // would be offering one.
+      const row = screen.getByTestId('slash-failure')
+
+      expect(row.props.accessibilityRole).toBeUndefined()
+      expect(row.props.onClick).toBeUndefined()
+
+      // And Return still sends the line rather than being swallowed by a list
+      // with nothing in it.
+      fireEvent(screen.getByTestId('composer-input'), 'submitEditing')
+      expect(handlers.onSend).toHaveBeenCalledWith('/')
+    })
+
+    it('says so beside the list when the catalogue alone refused', () => {
+      // `complete.slash` answers from the session and the catalogue is what
+      // routing reads, so this is the state where the list looks fine and
+      // Return sends the pick as prose.
+      renderComposer({ slashFailure: FAILURE, suggestions: SUGGESTIONS, value: '/co' })
+
+      expect(screen.getByTestId('slash-failure')).toBeTruthy()
+      expect(screen.getByTestId('slash-option-compact')).toBeTruthy()
+    })
+
+    it('clears the row on the next answer that works', () => {
+      const { rerender } = renderComposerHandle({ slashFailure: FAILURE, value: '/co' })
+
+      expect(screen.getByTestId('slash-failure')).toBeTruthy()
+
+      rerender({ slashFailure: null, suggestions: SUGGESTIONS, value: '/co' })
+
+      expect(screen.queryByTestId('slash-failure')).toBeNull()
+      expect(screen.getByTestId('slash-option-compact')).toBeTruthy()
+    })
+
+    it('is dismissed by Escape like any other popover', () => {
+      renderComposer({ slashFailure: FAILURE, value: '/' })
+
+      expect(screen.getByTestId('slash-failure')).toBeTruthy()
+      pressEscape()
+      expect(screen.queryByTestId('composer-slash-popover')).toBeNull()
+    })
+  })
+
+  /**
+   * A slow first fetch is a third fact, and the one that tells a reader to wait
+   * rather than to conclude the feature is broken.
+   */
+  describe('while the first catalogue fetch is slow', () => {
+    beforeEach(() => jest.useFakeTimers())
+    afterEach(() => jest.useRealTimers())
+
+    it('says nothing at all before the threshold', () => {
+      renderComposer({ slashLoading: true, value: '/' })
+
+      act(() => void jest.advanceTimersByTime(SLASH_SLOW_MS - 1))
+
+      expect(screen.queryByTestId('slash-loading')).toBeNull()
+      expect(screen.queryByTestId('composer-slash-popover')).toBeNull()
+    })
+
+    it('opens a Loading row once the fetch has taken long enough', () => {
+      renderComposer({ slashLoading: true, value: '/' })
+
+      act(() => void jest.advanceTimersByTime(SLASH_SLOW_MS))
+
+      expect(screen.getByTestId('composer-slash-popover')).toBeTruthy()
+      expect(screen.getByTestId('slash-loading')).toBeTruthy()
+    })
+
+    it('gives way to the failure, which is the more specific answer', () => {
+      const { rerender } = renderComposerHandle({ slashLoading: true, value: '/' })
+
+      act(() => void jest.advanceTimersByTime(SLASH_SLOW_MS))
+      expect(screen.getByTestId('slash-loading')).toBeTruthy()
+
+      rerender({ slashFailure: { method: 'complete.slash', reason: 'no answer' }, slashLoading: false, value: '/' })
+
+      expect(screen.queryByTestId('slash-loading')).toBeNull()
+      expect(screen.getByTestId('slash-failure')).toBeTruthy()
+    })
+
+    it('never draws the row for a gateway that answers promptly', () => {
+      const { rerender } = renderComposerHandle({ slashLoading: true, value: '/' })
+
+      act(() => void jest.advanceTimersByTime(SLASH_SLOW_MS - 100))
+      rerender({ slashLoading: false, suggestions: SUGGESTIONS, value: '/' })
+      act(() => void jest.advanceTimersByTime(SLASH_SLOW_MS))
+
+      expect(screen.queryByTestId('slash-loading')).toBeNull()
+      expect(screen.getByTestId('slash-option-compact')).toBeTruthy()
+    })
   })
 
   it('offers attachments and can remove one', () => {

@@ -263,6 +263,18 @@ export const chatStrings = {
     queued: (text: string) => `↳ 1 message queued · “${text}”`,
     slashHint: 'Commands',
     /**
+     * The popover's own refusal row.
+     *
+     * It names the METHOD because that is the half a reader can act on — a
+     * `commands.catalog` that refuses and a `complete.slash` that refuses are
+     * different gateways being wrong in different ways — and the gateway's own
+     * words go on the line under it rather than into this sentence, so a long
+     * refusal cannot push the heading out of the popover.
+     */
+    slashUnavailable: (method: string) => `Commands unavailable — ${method}`,
+    /** Only after `SLASH_SLOW_MS`; see the note on that constant. */
+    slashLoading: 'Loading…',
+    /**
      * The tray's own label, and the reason it exists.
      *
      * A staged card and a sent card are the same card — that is the point of

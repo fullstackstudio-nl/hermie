@@ -273,8 +273,15 @@ export class ChatController {
   private readonly parked = new Map<string, GatewayServerRequest[]>()
   private readonly opening = new Map<string, Promise<void>>()
   private readonly slashCatalogs = new Map<string, CommandsCatalogResult>()
-  /** One catalogue fetch per session, shared by every keystroke that wants it. */
-  private readonly slashCatalogLoads = new Map<string, Promise<void>>()
+  /**
+   * One catalogue fetch per session, shared by every keystroke that wants it.
+   *
+   * It resolves to the REFUSAL when there was one, so the six keystrokes that
+   * arrive while a catalogue is in the air all learn the same answer — and the
+   * popover a reader is looking at says the same thing whichever of them it was
+   * painted by.
+   */
+  private readonly slashCatalogLoads = new Map<string, Promise<SlashFailure | null>>()
   private sessionsChangedTimer: ReturnType<typeof setTimeout> | undefined
   private approvalPollTimer: ReturnType<typeof setInterval> | undefined
   private subagentPollTimer: ReturnType<typeof setInterval> | undefined
@@ -1793,9 +1800,10 @@ export class ChatController {
    */
   async querySlash(botName: string, typed: string): Promise<SlashCompletions> {
     const sessionId = this.requireRuntime(botName)
+    let failure: SlashFailure | undefined
 
     if (!this.slashCatalogs.has(sessionId)) {
-      await this.fetchSlashCatalog(botName, sessionId)
+      failure = (await this.fetchSlashCatalog(botName, sessionId)) ?? undefined
     }
 
     try {
@@ -1808,12 +1816,24 @@ export class ChatController {
         // much of the line its answer stands for. A real gateway answers 1 for a
         // bare `/mo` — the slash is kept and the item's own `text` carries no
         // slash — and `text.rfind(' ') + 1` once there is an argument.
-        ...(typeof result?.replace_from === 'number' ? { replaceFrom: result.replace_from } : {})
+        ...(typeof result?.replace_from === 'number' ? { replaceFrom: result.replace_from } : {}),
+        /*
+          A catalogue that would not load is still worth saying even when the
+          completions themselves arrived. `complete.slash` answers from the
+          session, `commands.catalog` is what `knowsSlashCommand` routes on — so
+          a reader whose catalogue is missing gets a list they can pick from and
+          a Return that sends the pick as PROSE, which is the confusing half of
+          this bug rather than the visible one.
+        */
+        ...(failure ? { failure } : {})
       }
     } catch (error) {
-      this.noteRpcFailure('complete.slash', error)
+      const reported = this.noteRpcFailure('complete.slash', error)
 
-      return { items: [] }
+      // The nearer failure wins: `complete.slash` is the call that was supposed
+      // to fill this popover, and naming the catalogue instead would point a
+      // reader at the call that did not fail last.
+      return { items: [], failure: reported }
     }
   }
 
@@ -1825,30 +1845,28 @@ export class ChatController {
    * is what shipped, was an empty catalogue pinned to the session for as long as
    * it lived.
    */
-  private async fetchSlashCatalog(botName: string, sessionId: string): Promise<void> {
+  private async fetchSlashCatalog(botName: string, sessionId: string): Promise<SlashFailure | null> {
     const inFlight = this.slashCatalogLoads.get(sessionId)
 
     if (inFlight) {
-      await inFlight
-
-      return
+      return await inFlight
     }
 
     const load = this.gateway
       .request('commands.catalog', { session_id: sessionId, profile: botName })
-      .then(catalog => {
+      .then((catalog): SlashFailure | null => {
         this.slashCatalogs.set(sessionId, catalog ?? {})
+
+        return null
       })
-      .catch((error: unknown) => {
-        this.noteRpcFailure('commands.catalog', error)
-      })
+      .catch((error: unknown): SlashFailure | null => this.noteRpcFailure('commands.catalog', error))
       .finally(() => {
         this.slashCatalogLoads.delete(sessionId)
       })
 
     this.slashCatalogLoads.set(sessionId, load)
 
-    await load
+    return await load
   }
 
   /**
@@ -2342,9 +2360,21 @@ export class ChatController {
     })
   }
 
-  /** Remember a swallowed gateway refusal so the debug screen can show it. */
-  private noteRpcFailure(method: string, error: unknown): void {
-    this.onRpcFailure?.(describeRpcFailure(method, error, this.now()))
+  /**
+   * Remember a swallowed gateway refusal so the debug screen can show it, and
+   * hand the caller the same failure in the shape a SURFACE can draw.
+   *
+   * The ring was the only reader for a long time, and that is exactly how the
+   * composer's empty popover stayed invisible: a call failed, the developer
+   * screen recorded it, and the reader saw nothing at all. A method that
+   * absorbs a refusal now gets the words back and can decide to show them.
+   */
+  private noteRpcFailure(method: string, error: unknown): SlashFailure {
+    const failure = describeRpcFailure(method, error, this.now())
+
+    this.onRpcFailure?.(failure)
+
+    return slashFailureOf(failure)
   }
 
   // ── chat options ───────────────────────────────────────────────────────────
@@ -2662,10 +2692,52 @@ function newConversationNotice(retired: string, asked: string, refusedName: stri
  * An image, which goes over the socket as bytes. `kind` is optional so every
  * existing call site keeps compiling and keeps meaning what it meant.
  */
+/**
+ * A completion call that did not answer, in the words a popover can print.
+ *
+ * Two fields and no error object: the surface that draws this is a row in a
+ * list, and the one thing it has to be able to do is say WHICH call failed and
+ * what the gateway said about it. `describeRpcFailure` has already pulled the
+ * gateway's `{code, message}` out of the transport's envelope and capped it, so
+ * nothing here re-parses anything.
+ */
+export interface SlashFailure {
+  /** The JSON-RPC method that refused, e.g. `commands.catalog`. */
+  method: string
+  /** The gateway's own words, with its code in front when it sent one. */
+  reason: string
+}
+
+/**
+ * A ring entry, as a row.
+ *
+ * A transport failure carries no message at all — the socket went away, there
+ * was nobody to say anything — and an empty reason would draw as a dangling
+ * dash. `noAnswer` is the honest word for it and is the only text this layer
+ * invents.
+ */
+export function slashFailureOf(failure: RpcFailure): SlashFailure {
+  const said = failure.message.trim()
+  const reason = failure.code === undefined ? said : `${failure.code} ${said}`.trim()
+
+  return { method: failure.method, reason: reason || SLASH_NO_ANSWER }
+}
+
+/** What a failure with no words from the gateway says instead. */
+export const SLASH_NO_ANSWER = 'no answer'
+
 /** What `complete.slash` answered, and how much of the line it stands for. */
 export interface SlashCompletions {
   items: CompletionItem[]
   replaceFrom?: number
+  /**
+   * The call that would not answer, when one of them did not.
+   *
+   * Present ALONGSIDE `items` rather than instead of them: a failed catalogue
+   * and a working `complete.slash` is a real state, and it is the one where the
+   * list looks fine and Return does the wrong thing.
+   */
+  failure?: SlashFailure
 }
 
 export interface ImageAttachmentInput {

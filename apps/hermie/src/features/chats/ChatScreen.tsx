@@ -37,6 +37,7 @@ import {
   type ComposerAttachment,
   type PickerOption,
   SidebarToggleButton,
+  type SlashFailure,
   type SlashSuggestion,
   shortToolName,
   QueuedStrip,
@@ -73,7 +74,7 @@ import { openAppSettings, pickAttachment, type PickedAttachment } from './attach
 import { droppedFile, pickFile, type PickedFile } from './file-attachments'
 import { FileUploadError, MAX_UPLOAD_BYTES } from './file-upload'
 import { ChatSheetHost, type RequestItem } from './ChatSheetHost'
-import type { AttachmentInput, ModelChoice } from './chat-controller'
+import { SLASH_NO_ANSWER, type AttachmentInput, type ModelChoice } from './chat-controller'
 import type { ManualSheet } from './sheet-host'
 import { useChatRuntime } from './ChatRuntime'
 import { findMatchingItem } from '../search'
@@ -398,8 +399,29 @@ function Conversation({
    */
   const [uploaded, setUploaded] = useState<{ id: string; filename: string; path: string }[]>([])
   const [suggestions, setSuggestions] = useState<SlashSuggestion[]>([])
+  /**
+   * The completion call that refused, until one of them answers.
+   *
+   * Kept as state rather than read off the connection store's failure ring: the
+   * ring is every absorbed refusal in the session and the popover is about the
+   * LAST answer to the line in front of the caret. A successful answer clears
+   * it, which is what makes the row disappear the moment the gateway comes
+   * back rather than at the next reconnect.
+   */
+  const [slashFailure, setSlashFailure] = useState<SlashFailure | null>(null)
+  /** A query is outstanding and this chat has never had one answered. */
+  const [slashLoading, setSlashLoading] = useState(false)
   /** Which completion query is allowed to paint; see `querySlash` below. */
   const slashSeq = useRef(0)
+  /**
+   * Has any completion call for this chat ever come back?
+   *
+   * The "Loading…" row is for the FIRST fetch — the one that builds the
+   * catalogue — and a ref rather than state because nothing renders from it
+   * directly: it only decides whether the next query is allowed to set the
+   * loading flag at all.
+   */
+  const slashAnswered = useRef(false)
   const [models, setModels] = useState<ModelChoice[]>([])
   const [dismissedRequests, setDismissed] = useState<string[]>([])
   const [newCount, setNewCount] = useState(0)
@@ -1288,12 +1310,20 @@ function Conversation({
       */
       const seq = (slashSeq.current += 1)
 
+      if (!slashAnswered.current) {
+        setSlashLoading(true)
+      }
+
       void chat
         .querySlash(typed)
-        .then(({ items, replaceFrom }) => {
+        .then(({ failure, items, replaceFrom }) => {
           if (seq !== slashSeq.current) {
             return
           }
+
+          slashAnswered.current = true
+          setSlashLoading(false)
+          setSlashFailure(failure ?? null)
 
           setSuggestions(
             items.slice(0, 6).map(item => {
@@ -1304,10 +1334,21 @@ function Conversation({
             })
           )
         })
-        .catch(() => {
-          if (seq === slashSeq.current) {
-            setSuggestions([])
+        .catch((error: unknown) => {
+          if (seq !== slashSeq.current) {
+            return
           }
+
+          /*
+            `querySlash` absorbs the gateway's own refusals and reports them as a
+            `failure`, so reaching this catch means the call did not get as far
+            as the gateway — no runtime session for this chat yet, most often.
+            It is still a reason the popover has nothing, and the reader is owed
+            the same row rather than the silence this used to be.
+          */
+          setSlashLoading(false)
+          setSuggestions([])
+          setSlashFailure({ method: 'complete.slash', reason: slashReasonOf(error) })
         })
     },
     [chat]
@@ -1700,6 +1741,8 @@ function Conversation({
               either throws the words away or invents a queue nobody asked for.
             */
             sendBlocked={connectionState.kind !== 'none'}
+            slashFailure={slashFailure}
+            slashLoading={slashLoading}
             suggestions={suggestions}
             value={chat.draft}
             {...(chat.queuedText ? { queuedText: chat.queuedText } : {})}
@@ -1890,6 +1933,20 @@ function resolveBot(handle: string, names: readonly string[]): string {
  * they were looking at — whether the model was thinking, writing, running a
  * command on their machine, or waiting on them.
  */
+/**
+ * A thrown value, as one printable line.
+ *
+ * Only for the rejections `querySlash` does NOT absorb — a missing runtime
+ * session, most often — because everything the gateway itself refused has
+ * already been through `describeRpcFailure` and arrives with its words picked
+ * out. Capped at the same length for the same reason: this lands in a popover.
+ */
+function slashReasonOf(error: unknown): string {
+  const raw = (error instanceof Error ? error.message : String(error ?? '')).replace(/\s+/gu, ' ').trim()
+
+  return raw.slice(0, 300) || SLASH_NO_ANSWER
+}
+
 function subtitleFor(state: {
   status: string
   hydration: UseChatResult['hydration']
