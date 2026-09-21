@@ -9,12 +9,30 @@
  * Silent tools (`todo`, `react_to_message`) render NOTHING while they succeed —
  * their UI is somewhere else entirely — but they do render when they fail,
  * because a failure nobody can see is the worst of both.
+ *
+ * ## The inline answer
+ *
+ * ADR-0010 keeps the sheet: a question the agent is BLOCKED on has to arrive in
+ * front of the reader rather than wait somewhere in a scrolled-away transcript.
+ * What the sheet cannot do is answer the reader who has already scrolled to the
+ * card, read the arguments, and knows what they want — for them the sheet is a
+ * second surface asking a question they have finished thinking about.
+ *
+ * So `approval` draws the server's choices ON the card, in the server's order,
+ * with the same rule the sheet follows: the buttons are exactly `choices` and
+ * never a set this component invented. One tap answers, and because both
+ * surfaces read the same request store the sheet goes down with it.
+ *
+ * It is a PROP rather than a lookup, and that is the honest shape: the gateway's
+ * approval carries a tool NAME and no tool-call id (see docs/platform-notes.md),
+ * so only the host can decide which card a question belongs to, and only the
+ * host can decline to decide when two calls share a name.
  */
 import { useState } from 'react'
 import { ActivityIndicator, Pressable, View } from 'react-native'
 
 import { MONOSPACE } from '../markdown'
-import { Text } from '../ui/primitives'
+import { Button, Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
 import { Icon, ICON_SIZE } from '../ui/Icon'
 import { CONTROL_MIN_HEIGHT, TAP_SLOP } from '../ui/tokens'
@@ -26,12 +44,46 @@ import { isSilentTool, toolFamily, toolGlyph } from './tool-render-class'
 import { useLedgerWidth } from './primitives/Bubble'
 import type { Presentation, ToolItem } from './types'
 
+/**
+ * A question waiting on this card, as the little the card needs to draw it.
+ *
+ * Not the `ApprovalItem`: the card has no business knowing about request ids or
+ * about the queue, and a shape this small is one a test can state in a line.
+ */
+export interface InlineApproval {
+  /** Exactly the server's `choices`, in the server's order. Never invented. */
+  choices: readonly string[]
+  /** `choice` is one of `choices`, verbatim. */
+  onRespond: (choice: string) => void
+}
+
+/** `always` → "Always allow"; an unknown choice keeps its own name. */
+function choiceLabel(choice: string): string {
+  return chatStrings.approval.choices[choice] ?? choice.replace(/_/gu, ' ')
+}
+
+function choiceVariant(choice: string): 'primary' | 'secondary' | 'danger' {
+  if (choice === 'deny') {
+    return 'danger'
+  }
+
+  return choice === 'once' ? 'primary' : 'secondary'
+}
+
 export interface ToolCardProps {
   item: ToolItem
   presentation?: Presentation
   /** Controlled disclosure; omit to let the card manage its own. */
   expanded?: boolean
   onToggleExpanded?: (expanded: boolean) => void
+  /**
+   * An open question about THIS call, answerable here.
+   *
+   * Absent for every card the host has not linked to a question, which is all
+   * of them most of the time. See the note at the top about why the host
+   * decides and not the card.
+   */
+  approval?: InlineApproval
 }
 
 const LONG_VALUE_CHARS = 280
@@ -101,7 +153,7 @@ function oneLineSummary(item: ToolItem): string {
   return ''
 }
 
-export function ToolCard({ item, presentation = 'collapsed', expanded, onToggleExpanded }: ToolCardProps) {
+export function ToolCard({ item, presentation = 'collapsed', expanded, onToggleExpanded, approval }: ToolCardProps) {
   const theme = useTheme()
   const maxWidth = useLedgerWidth()
   // `null` means "the user has not decided", so a verbosity change still opens
@@ -199,6 +251,39 @@ export function ToolCard({ item, presentation = 'collapsed', expanded, onToggleE
           />
         </View>
       </Pressable>
+
+      {/*
+        Above the body, not inside it.
+
+        A collapsed card is one line, and a question folded away inside a
+        disclosure the reader has to open first is a question that is not being
+        asked. It sits under the summary row either way, which is where the eye
+        already is.
+      */}
+      {approval ? (
+        <View
+          style={{
+            borderTopColor: theme.hairline,
+            borderTopWidth: 1,
+            gap: theme.space.sm,
+            padding: theme.space.md
+          }}
+          testID={`tool-approval-${item.id}`}
+        >
+          <Text color="textMuted" variant="meta">
+            {chatStrings.approval.title}
+          </Text>
+          {approval.choices.map(choice => (
+            <Button
+              key={choice}
+              onPress={() => approval.onRespond(choice)}
+              testID={`tool-approval-${item.id}-${choice}`}
+              title={choiceLabel(choice)}
+              variant={choiceVariant(choice)}
+            />
+          ))}
+        </View>
+      ) : null}
 
       {isExpanded ? (
         <View

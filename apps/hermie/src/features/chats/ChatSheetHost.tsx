@@ -65,6 +65,17 @@ export interface ChatSheetHostProps {
    * the transcript, and the error is on the banner.
    */
   onCloseRequest: (item: RequestItem) => void
+  /**
+   * Questions the reader has already dealt with somewhere else in this chat.
+   *
+   * The host holds a question by id so it can still show the outcome of one
+   * that resolved on another device. An answer given INLINE, on the card in
+   * the transcript, is not that: the reader has just answered it, here, and a
+   * sheet that stays up to tell them so is the same two seconds of "Answered:
+   * Allow once" the sheet already stopped doing. So a held id that appears in
+   * this list is let go of.
+   */
+  dismissedIds?: readonly string[]
 
   agents: Omit<AgentsSheetProps, 'visible' | 'onClose' | 'onClosed'>
   options: Omit<ChatOptionsSheetProps, 'visible' | 'onClose' | 'onClosed'>
@@ -105,7 +116,8 @@ export function ChatSheetHost({
   agents,
   options,
   profile,
-  tapGuardMs
+  tapGuardMs,
+  dismissedIds
 }: ChatSheetHostProps) {
   const [held, setHeld] = useState<string | null>(() => request?.id ?? null)
   const [state, dispatch] = useReducer(sheetHostReducer, initialSheetHostState)
@@ -114,7 +126,8 @@ export function ChatSheetHost({
   // stays while it is open, and keeps its place afterwards so its outcome can
   // be read — but a NEW question waiting on the agent takes over at once.
   const heldItem = held ? findRequest(held) : undefined
-  const keepHeld = Boolean(heldItem) && (heldItem?.state === 'open' || !request)
+  const letGo = Boolean(held && dismissedIds?.includes(held))
+  const keepHeld = !letGo && Boolean(heldItem) && (heldItem?.state === 'open' || !request)
   const shownId = keepHeld ? held : (request?.id ?? null)
   const shown = shownId ? findRequest(shownId) : undefined
 

@@ -102,6 +102,7 @@ import type {
   Presentation,
   Receipt,
   Subagent,
+  ToolItem,
   TranscriptItem,
   VisibleItem
 } from './types'
@@ -135,6 +136,26 @@ export interface TranscriptContext {
   onOpenTranscript?: (subagentId: string) => void
   /** Re-opens the sheet for a question still sitting in the transcript. */
   onOpenRequest?: (item: ApprovalItem | ClarifyItem) => void
+  /**
+   * Answer an approval without leaving the transcript (ADR-0010, amended).
+   *
+   * The sheet is still how a question ARRIVES. This is how one is answered by
+   * a reader who has already scrolled to it and read the arguments — for them
+   * the sheet is a second surface asking something they have finished thinking
+   * about. Absent leaves the `Answer` button as the only way through, which is
+   * what the developer gallery gets.
+   */
+  onRespondApproval?: (item: ApprovalItem, choice: string) => void
+  /**
+   * Which open approval belongs to a tool card, if the host can say.
+   *
+   * The host's answer because the gateway's approval carries a tool NAME and
+   * no tool-call id, so nothing in the transcript can resolve it on its own —
+   * see docs/platform-notes.md. A host that cannot tell answers `undefined`
+   * and the card draws no buttons, which is the right failure: the sheet is
+   * still there.
+   */
+  approvalForTool?: (item: ToolItem) => ApprovalItem | undefined
   onLinkPress?: (href: string) => void
   /**
    * Something `Image` can load for an attachment reference, or `undefined`.
@@ -290,11 +311,13 @@ function outcomeLabel(item: ApprovalItem | ClarifyItem): string {
 function RequestRow({
   item,
   presentation,
-  onOpen
+  onOpen,
+  onRespond
 }: {
   item: ApprovalItem | ClarifyItem
   presentation: Presentation
   onOpen?: (item: ApprovalItem | ClarifyItem) => void
+  onRespond?: (item: ApprovalItem, choice: string) => void
 }) {
   const theme = useTheme()
   const maxWidth = useLedgerWidth()
@@ -333,6 +356,30 @@ function RequestRow({
       <Text color="textMuted" numberOfLines={2} variant="preview">
         {approval ? (item as ApprovalItem).command : ((item as ClarifyItem).questions[0]?.question ?? '')}
       </Text>
+      {/*
+        The choices, here, in the server's order.
+
+        An approval is a closed question — the gateway said exactly which
+        answers it will accept — so there is nothing the sheet can ask that this
+        card cannot. A clarify is not: it can be several questions, some of them
+        free text, so it keeps the `Answer` button and the sheet that can hold a
+        stepper.
+      */}
+      {approval && onRespond ? (
+        <View style={{ gap: theme.space.sm }}>
+          {(item as ApprovalItem).choices.map(choice => (
+            <Button
+              key={choice}
+              onPress={() => onRespond(item as ApprovalItem, choice)}
+              style={{ alignSelf: 'flex-start' }}
+              testID={`request-choice-${item.id}-${choice}`}
+              title={chatStrings.approval.choices[choice] ?? choice.replace(/_/gu, ' ')}
+              variant={choice === 'deny' ? 'danger' : choice === 'once' ? 'primary' : 'secondary'}
+            />
+          ))}
+        </View>
+      ) : null}
+
       {onOpen ? (
         // Content width, not card width. The card is capped at the ledger's, and
         // on a wide window that cap is 640pt — an `Answer` running all of it
@@ -344,6 +391,7 @@ function RequestRow({
           style={{ alignSelf: 'flex-start' }}
           testID={`request-open-${item.id}`}
           title={chatStrings.transcript.answer}
+          variant={approval && onRespond ? 'secondary' : 'primary'}
         />
       ) : null}
     </GlassSurface>
@@ -497,8 +545,28 @@ function RowView({ entry, context, receipt, layout, dmRole }: RowProps) {
         />
       )
 
-    case 'tool':
-      return <ToolCard item={item} presentation={presentation} />
+    case 'tool': {
+      /*
+        A question waiting on THIS call, if the host can say which call it is.
+
+        `approvalForTool` is the host's, because the gateway's approval names a
+        tool and carries no call id — see the note on `TranscriptContext`. The
+        responder is the same one the request card uses, so an answer given
+        here and an answer given there are one code path.
+      */
+      const waiting = context.approvalForTool?.(item)
+      const respond = context.onRespondApproval
+
+      return (
+        <ToolCard
+          {...(waiting && respond
+            ? { approval: { choices: waiting.choices, onRespond: (choice: string) => respond(waiting, choice) } }
+            : {})}
+          item={item}
+          presentation={presentation}
+        />
+      )
+    }
 
     case 'bot_dm_out':
       return <DmOutRow context={context} entry={entry} role={dmRole} />
@@ -521,7 +589,14 @@ function RowView({ entry, context, receipt, layout, dmRole }: RowProps) {
 
     case 'approval':
     case 'clarify':
-      return <RequestRow item={item} onOpen={context.onOpenRequest} presentation={presentation} />
+      return (
+        <RequestRow
+          item={item}
+          onOpen={context.onOpenRequest}
+          {...(context.onRespondApproval ? { onRespond: context.onRespondApproval } : {})}
+          presentation={presentation}
+        />
+      )
 
     // A cron delivery is a machine event, not the owner's own bubble — which is
     // exactly what it used to render as. See ADR-0013 for why the projection has
@@ -1137,6 +1212,8 @@ function TranscriptListBody({
       onOpenBot: handlers.onOpenBot,
       onOpenCron: handlers.onOpenCron,
       onOpenRequest: handlers.onOpenRequest,
+      onRespondApproval: handlers.onRespondApproval,
+      approvalForTool: handlers.approvalForTool,
       onOpenTranscript: handlers.onOpenTranscript,
       onRetry: handlers.onRetry,
       onRunCron: handlers.onRunCron,
@@ -1155,6 +1232,8 @@ function TranscriptListBody({
       handlers.onOpenBot,
       handlers.onOpenCron,
       handlers.onOpenRequest,
+      handlers.onRespondApproval,
+      handlers.approvalForTool,
       handlers.onOpenTranscript,
       handlers.attachmentUri,
       handlers.onRetry,

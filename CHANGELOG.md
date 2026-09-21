@@ -20,6 +20,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A permission request can be answered from the transcript, without the sheet.** ADR-0010's sheet
+  stays — a question that holds the agent's turn has to arrive in front of the reader rather than
+  wait in a transcript they may have scrolled away from — but it is no longer the only way through.
+  The request card in the transcript draws the choices itself, and a tool card can draw them too.
+  The buttons are exactly the gateway's own `choices` in the gateway's own order on every surface,
+  both read the same request store, and an inline answer takes the sheet down with it rather than
+  leaving it up to report what the reader just did. Clarifying questions keep the sheet and only the
+  sheet: a stepper over several questions, some of them free text, does not belong on a transcript
+  row. ADR-0010 is amended.
+
 - **Folders can be dragged.** The drag hook was keyed by bot name from end to end and rebuilt the
   lifted row's key as `bot:<name>`, so the one row it could never pick up was a folder — the lookup
   for its anchor could only miss, which put the lift's origin at the top of the list and moved every

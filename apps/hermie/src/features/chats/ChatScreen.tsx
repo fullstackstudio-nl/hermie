@@ -23,6 +23,7 @@ import {
   transcriptFileName,
   type ApprovalItem,
   type ClarifyItem,
+  type ToolItem,
   type TranscriptItem,
   type TurnActivity,
   type Verbosity
@@ -1713,6 +1714,47 @@ function Conversation({
     [chat]
   )
 
+  /**
+   * Answer an approval from the transcript, without the sheet.
+   *
+   * Two steps in one, and the order matters: the question is taken off the
+   * screen FIRST so a sheet that happens to be up starts leaving before the
+   * RPC is handed to the socket, and the answer travels second. It is the same
+   * order `ChatSheetHost` uses for a tap on the sheet's own buttons, and the
+   * same pair of handlers — an answer given on a card and an answer given on
+   * the sheet are one code path from here down.
+   */
+  const answerApprovalInline = useCallback(
+    (item: ApprovalItem, choice: string) => {
+      dismissRequest(item)
+      respondApproval(item, choice)
+    },
+    [dismissRequest, respondApproval]
+  )
+
+  /**
+   * Which open approval belongs to a tool card, when that can be said at all.
+   *
+   * The gateway's approval carries a tool NAME and no tool-call id, so this is
+   * a match on the name and on the card not having finished. Two concurrent
+   * calls to the same tool would therefore both draw the question — which is
+   * the same question drawn twice rather than the wrong one, and answering
+   * either answers it. A card that has a result is never offered one: the
+   * decision it was waiting for has already been made.
+   */
+  const approvalForTool = useCallback(
+    (tool: ToolItem): ApprovalItem | undefined => {
+      if (tool.resultKnown || !tool.name) {
+        return undefined
+      }
+
+      return chat.requests.find(
+        (item): item is ApprovalItem => item.kind === 'approval' && item.state === 'open' && item.toolName === tool.name
+      )
+    },
+    [chat.requests]
+  )
+
   const submitClarify = useCallback(
     (item: ClarifyItem, answers: Record<string, string>) => {
       haptic('choice')
@@ -1852,7 +1894,9 @@ function Conversation({
                 turnRunning={chat.turnActive}
                 onOpenBot={openBot}
                 onOpenCron={openCron}
+                approvalForTool={approvalForTool}
                 onOpenRequest={reopenRequest}
+                onRespondApproval={answerApprovalInline}
                 onOpenTranscript={openTranscript}
                 onScrolledAwayFromBottom={onScrolledAway}
                 ref={listRef}
@@ -2070,6 +2114,7 @@ function Conversation({
           tree: chat.subagentTree
         }}
         botHandle={botName}
+        dismissedIds={dismissedRequests}
         findRequest={findRequest}
         manual={sheet}
         {...(byName[botName]
