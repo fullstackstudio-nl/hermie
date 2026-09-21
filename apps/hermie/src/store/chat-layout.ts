@@ -3,11 +3,16 @@
  *
  * The order of the rows, the named dividers between them, which bots are
  * archived, what colour each chat carries and whether the list is showing at all
- * on the wide layout are the owner's arrangement of their own list. None of it is
- * sent to the gateway, for the same reason verbosity is not (ADR-0008): the
- * gateway's settings are global, so a divider called "Finance" created on a phone
- * would rearrange Hermes Desktop and the TUI as well, and there is no per-client
- * scope to put it in. ADR-0012 is the decision; this is the implementation.
+ * on the wide layout are the owner's arrangement of their own list.
+ *
+ * ADR-0012 kept all of it on the device, because the only gateway scope then in
+ * view was `config.set` — global settings that Hermes Desktop and the TUI read
+ * too, so a divider called "Finance" created on a phone would have rearranged
+ * both. ADR-0016 found the scope that does fit: `ui_meta`, per profile, per
+ * top-level key, read by nothing but Hermie. So this store is still the thing
+ * the UI paints from and still the thing that works with no gateway at all —
+ * and `store/ui-meta-bridge.ts` mirrors it, without this file knowing. The one
+ * field that stays purely local is `sidebarCollapsed`; see `applyRemote`.
  *
  * Two consequences worth stating, because they are the ones a reader will hit:
  *
@@ -87,6 +92,19 @@ export interface ChatLayoutState {
   setAccent: (botName: string, accent: AccentName) => void
   /** Record an explicit Hide/Show. There is no "back to automatic" — see the type. */
   setSidebarCollapsed: (collapsed: boolean) => void
+  /**
+   * Replace the parts ADR-0016 syncs with the gateway's copy.
+   *
+   * `sidebarCollapsed` is deliberately NOT in here. It is about the WINDOW the
+   * reader is looking at — a phone has no sidebar and a Mac window has one at a
+   * different width — so a desktop hiding its list must not collapse a tablet's.
+   * It stays what ADR-0012 made it: local to the device.
+   *
+   * The arrival is persisted like any other change, because the device's own copy
+   * is what the UI paints from and a copy that only lived in memory would be gone
+   * on the next launch.
+   */
+  applyRemote: (patch: { entries?: LayoutEntry[]; archived?: string[]; accents?: Record<string, AccentName> }) => void
   reset: () => void
 }
 
@@ -429,6 +447,21 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
 
     setSidebarCollapsed(collapsed) {
       set({ sidebarCollapsed: collapsed })
+      save()
+    },
+
+    applyRemote(patch) {
+      const archived: Record<string, true> = {}
+
+      for (const name of patch.archived ?? []) {
+        archived[name] = true
+      }
+
+      set({
+        ...(patch.entries ? { entries: patch.entries } : {}),
+        ...(patch.archived ? { archived } : {}),
+        ...(patch.accents ? { accents: patch.accents } : {})
+      })
       save()
     },
 

@@ -110,6 +110,21 @@ export {
   isGatewayError
 } from './types'
 export {
+  BOT_MARKER_KEY,
+  HERMIE_APP_KEY,
+  HERMIE_APP_SECTION_VERSION,
+  HERMIE_KEY,
+  HERMIE_SECTION_VERSION,
+  type HermieAppSection,
+  type HermieBotSection,
+  readSection,
+  UiMetaSync,
+  type UiMetaGateway,
+  type UiMetaMode,
+  type UiMetaSnapshot,
+  type UiMetaSyncOptions
+} from './ui-meta'
+export {
   apiUrl,
   BLOCKED_HEADER_NAMES,
   GATEWAY_WS_PATH,

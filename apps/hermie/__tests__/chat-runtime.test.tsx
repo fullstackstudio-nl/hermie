@@ -29,7 +29,12 @@ jest.mock('../src/gateway', () => ({
   useGateway: () => ({ connection: mockConnection, status: mockStatus })
 }))
 
-jest.mock('../src/gateway/link', () => ({ chatGatewayFor: () => ({}) }))
+// `on` is not decoration here: the runtime subscribes to `sessions.changed` to
+// re-read ADR-0016's settings section, because a profile row changing is the
+// only signal a gateway gives that another client wrote one.
+jest.mock('../src/gateway/link', () => ({
+  chatGatewayFor: () => ({ on: () => () => undefined, request: async () => ({}) })
+}))
 
 jest.mock('../src/features/bots/bots-controller', () => ({
   BotsController: class {

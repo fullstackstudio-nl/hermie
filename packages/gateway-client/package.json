@@ -16,6 +16,7 @@
     "./probe": "./src/probe.ts",
     "./socket-factory": "./src/socket-factory.ts",
     "./types": "./src/types.ts",
+    "./ui-meta": "./src/ui-meta.ts",
     "./url": "./src/url.ts"
   },
   "dependencies": {

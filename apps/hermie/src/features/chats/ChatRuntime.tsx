@@ -10,19 +10,24 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import { AppState } from 'react-native'
 
 import { useGateway } from '../../gateway'
-import { chatGatewayFor } from '../../gateway/link'
+import { chatGatewayFor, type ChatGateway } from '../../gateway/link'
 import { chatCache } from '../../platform/chat-cache'
 import { RUNS_ON_MAC } from '../../platform/runs-on-mac'
 import { useBotsStore } from '../../store/bots'
 import { useChatLayoutStore } from '../../store/chat-layout'
 import { useChatsStore } from '../../store/chats'
 import { useSettingsStore } from '../../store/settings'
+import { UiMetaBridge } from '../../store/ui-meta-bridge'
 import { BotsController } from '../bots/bots-controller'
 import { ChatController } from './chat-controller'
 
 export interface ChatRuntimeValue {
   controller: ChatController
   bots: BotsController
+  /** ADR-0016's settings sync. Local-only until a gateway takes a write. */
+  uiMeta: UiMetaBridge
+  /** The connection, as the slice everything in here is written against. */
+  gateway: ChatGateway
 }
 
 const ChatRuntimeContext = createContext<ChatRuntimeValue | null>(null)
@@ -64,6 +69,18 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     // the whole gateway process and carries no profile, so the roster attributes
     // a busy session to a bot through the ids its chat is known under.
     const bots = new BotsController({ gateway, store: useBotsStore, cache: chatCache, chats: useChatsStore })
+    // ADR-0016. It is built here rather than in a store because it needs the
+    // live connection and has to die with it: a sync holding a socket that has
+    // been replaced would write this gateway's arrangement to the next one.
+    const uiMeta = new UiMetaBridge({
+      // `ChatGateway.request` is typed against the generated contract, which is
+      // stricter than the two methods `UiMetaSync` names by string. The cast is
+      // at the seam rather than inside the sync, so the sync stays testable with
+      // two hand-written functions.
+      gateway: { request: (method, params) => gateway.request(method as 'profiles.list', params) }
+    })
+    const stopWatching = uiMeta.start()
+
     const controller = new ChatController({
       gateway,
       chats: useChatsStore,
@@ -80,13 +97,14 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     // READY; see below.
     void bots.paintFromCache()
 
-    const next = { controller, bots }
+    const next = { controller, bots, uiMeta, gateway }
     valueRef.current = next
     setValue(next)
 
     return () => {
       controller.stop()
       bots.dispose()
+      stopWatching()
       valueRef.current = null
     }
     // `http` is built with the connection and handed out as a ref, like the
@@ -119,7 +137,29 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
 
     wasReady.current = true
     void value.bots.refresh().catch(() => undefined)
+    // The settings reconcile rides on the same edge, and deliberately AFTER the
+    // roster: `hermie-app` lives on the default profile, and which profile that
+    // is comes out of `profiles.list`.
+    void value.uiMeta.reconcile().catch(() => undefined)
   }, [status, value])
+
+  /**
+   * Reconcile again when the gateway says a profile changed.
+   *
+   * `ui_meta` is on the profile row, so another client writing its own section
+   * is a profile change and nothing else — there is no event that means "the
+   * settings moved". Reading the roster again is cheap and it is the only signal
+   * there is.
+   */
+  useEffect(() => {
+    if (!value) {
+      return
+    }
+
+    return value.gateway.on('sessions.changed', () => {
+      void value.uiMeta.reconcile().catch(() => undefined)
+    })
+  }, [value])
 
   /**
    * The chat side of the app lifecycle, and the one place a Mac differs.

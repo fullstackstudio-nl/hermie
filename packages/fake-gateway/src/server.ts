@@ -979,9 +979,20 @@ function initialState(options: FakeGatewayOptions): FakeGatewayState {
    */
   const hasAvatar = (profile: string): boolean => profile !== 'writer'
 
+  /**
+   * `is_default` marks the profile `hermes serve` is running as.
+   *
+   * It matters to more than a badge in the roster: ADR-0016 puts Hermie's
+   * app-wide section (`hermie-app`) on the default profile, because that is the
+   * one row every client can find without being told which bot to ask. A roster
+   * with no default row is a gateway with nowhere to keep app-wide settings, and
+   * the fake answered exactly that until this round — so the client's
+   * local-only fallback was the only path a test could ever reach.
+   */
   const profileRow = (session: FakeSession, description: string): ProfileRow => ({
     name: session.profile,
     path: `/root/.hermes/profiles/${session.profile}`,
+    is_default: session.profile === researcher.profile,
     description,
     display_name: session.profile[0]?.toUpperCase() + session.profile.slice(1),
     model: 'example-provider/example-model',
