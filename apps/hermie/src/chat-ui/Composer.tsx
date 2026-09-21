@@ -463,7 +463,25 @@ export function Composer({
       return
     }
 
-    submit()
+    /*
+      SEND, not `submit()`.
+
+      `submit()` puts the slash list first, which is right for a Return — the key
+      is ambiguous and the list is what is in front of the caret. A tap on this
+      button is not ambiguous: it is the one control in the composer whose only
+      meaning is "send this".
+
+      It used to call `submit()`, and on a touch device that was a dead end. Type
+      `/model` in full and the list stays open on the exact match, so the button
+      re-accepted a suggestion that was already accepted and the message never
+      went — with no way out, because the only thing that dismisses the popover is
+      Escape and a phone has no Escape. Watched on an iPhone simulator.
+    */
+    if (!canSend) {
+      return
+    }
+
+    onSend(value)
   }
 
   /** Stop, rather than send: a running turn and nothing typed. */
@@ -570,8 +588,22 @@ export function Composer({
    * Shift+Return is what this cannot answer on its own: it inserts the same
    * `"\n"` as Return, so both arrive here identically. `onSubmitEditing` asks the
    * keyboard which one it was — see `insertNewline` above.
+   *
+   * ## And while the slash list is open, on ANY keyboard
+   *
+   * `submit()` has always put the list first — take the highlighted suggestion,
+   * then send — and on a phone it was never reached: `submitBehavior` was
+   * `'newline'`, so Return inserted one and `onKeyPress` declined it, and the
+   * only way to take a suggestion without a hardware keyboard was to tap it.
+   * Watched on an iPhone simulator: `/mo` narrowed to `/model`, Return put a
+   * line break in the field.
+   *
+   * The list is the thing in front of the caret while it is open, which is why
+   * every editor gives it the key. Nothing is taken away from a touch reader:
+   * the list only opens on a leading `/`, Escape dismisses it (registered above)
+   * and the Return after that breaks the line as it always did.
    */
-  const submitBehavior = hardwareKeyboard ? 'submit' : 'newline'
+  const submitBehavior = hardwareKeyboard || showSuggestions ? 'submit' : 'newline'
 
   /**
    * The two entries, in the order this platform wants them.

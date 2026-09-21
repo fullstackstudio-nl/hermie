@@ -33,7 +33,7 @@ const runsOnMac = jest.requireMock('../../src/platform/runs-on-mac') as { RUNS_O
 // ↑, ↓ and Tab reach the composer from the keyboard seam, not from the field: a
 // `TextInput` only reports keys that insert text.
 jest.mock('../../src/platform/desktop-shortcuts', () => ({
-  subscribeToShortcuts: (handler: (action: string) => void) => {
+  subscribeToShortcuts: (handler: (event: { action: string; typing: boolean }) => void) => {
     mockShortcutListeners.add(handler)
 
     return () => mockShortcutListeners.delete(handler)
@@ -62,7 +62,9 @@ beforeEach(() => {
 function pressKey(action: 'suggestionUp' | 'suggestionDown' | 'suggestionAccept') {
   act(() => {
     for (const listener of [...mockShortcutListeners]) {
-      listener(action)
+      // Typing: false — these arrive from the menu bar's own key equivalents, or
+      // from a keyboard with nothing focused. The typing gate has its own tests.
+      listener({ action, typing: false })
     }
   })
 }
