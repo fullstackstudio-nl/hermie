@@ -29,6 +29,7 @@ import {
 import { hasHardwareKeyboard, isShiftDown } from '../platform/keyboard-modifiers'
 import { RUNS_ON_MAC } from '../platform/runs-on-mac'
 import { GlassGroup, GlassSurface } from '../ui/glass'
+import { Appear } from '../ui/Appear'
 import { KEYBOARD_AVOID_BEHAVIOR } from '../ui/keyboard'
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
@@ -628,7 +629,12 @@ export function Composer({
     // Declaring the component conditionally instead would give React a new
     // type on every render and remount the text field under the caret.
     <KeyboardAvoidingView behavior={keyboardAvoiding ? KEYBOARD_AVOID_BEHAVIOR : undefined} testID={testID}>
-      {showSuggestions ? (
+      {/*
+        It drops DOWN onto the field it belongs to — a negative rise — because it
+        is anchored above the composer and a list that rose from below would
+        appear to come out of the wrong control.
+      */}
+      <Appear exit="cut" rise={-8} visible={showSuggestions}>
         <GlassSurface
           contentStyle={{ maxHeight: 220 }}
           radius={theme.radii.card}
@@ -663,7 +669,7 @@ export function Composer({
             ))}
           </ScrollView>
         </GlassSurface>
-      ) : null}
+      </Appear>
 
       {menuVisible ? (
         <View style={{ paddingHorizontal: theme.space.md }}>

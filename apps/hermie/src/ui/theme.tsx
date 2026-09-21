@@ -15,7 +15,6 @@ import {
   OK_SOFT,
   lightPresence,
   lightShadows,
-  motion,
   radii,
   space,
   TINT_SUNK,
@@ -31,6 +30,7 @@ import {
   type Scheme,
   type ShadowScale
 } from './tokens'
+import { motion } from './motion'
 import {
   bubblesFor,
   colorsForFace,

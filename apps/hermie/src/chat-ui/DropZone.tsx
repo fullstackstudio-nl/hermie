@@ -29,6 +29,7 @@ import { useState, type ReactNode } from 'react'
 import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native'
 
 import { nativeDropView, normaliseDroppedFiles, type DroppedFile } from '../platform/file-drop'
+import { Appear } from '../ui/Appear'
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
 import { SCRIM_COLOR } from '../ui/tokens'
@@ -75,13 +76,27 @@ export function DropZone({ children, enabled = true, onFiles, style, testID = 'd
     >
       {children}
 
-      {over ? (
-        <View
-          accessibilityLabel={chatStrings.drop.region}
-          pointerEvents="none"
-          style={[StyleSheet.absoluteFillObject, { padding: theme.space.md }]}
-          testID={`${testID}-overlay`}
-        >
+      {/*
+        It fades IN and cuts OUT, and the asymmetry is the point. It arrives while
+        a file is still in the air over the window, and a layer that snaps on
+        under a moving cursor reads as the drag having already done something — so
+        the arrival is a fade. It leaves because the drag resolved, and an overlay
+        still fading over the reply the drop produced is a surface outliving its
+        reason, which `drop-zone-overlay.test.tsx` already decided once.
+
+        No travel: it covers the whole column, and a full-bleed layer that slides
+        has an edge that arrives late.
+      */}
+      <Appear
+        exit="cut"
+        pointerEvents="none"
+        rise={0}
+        style={[StyleSheet.absoluteFillObject, { padding: theme.space.md }] as never}
+        testID={`${testID}-overlay`}
+        token="row"
+        visible={over}
+      >
+        <View accessibilityLabel={chatStrings.drop.region} pointerEvents="none" style={{ flex: 1 }}>
           {/* The dim is its own layer under the panel, so the panel's own
               border and label stay at full strength over it. */}
           <View
@@ -108,7 +123,7 @@ export function DropZone({ children, enabled = true, onFiles, style, testID = 'd
             </Text>
           </View>
         </View>
-      ) : null}
+      </Appear>
     </Native>
   )
 }

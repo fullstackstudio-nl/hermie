@@ -10,6 +10,7 @@
 import { useEffect, useRef } from 'react'
 import { Animated, Pressable, View } from 'react-native'
 
+import { durationFor, easing } from '../motion'
 import { Text } from '../primitives'
 import { useTheme } from '../theme'
 import { Icon, ICON_SIZE } from '../Icon'
@@ -37,9 +38,22 @@ export function SwitchRow({ label, hint, value, onChange, disabled = false, test
   const theme = useTheme()
   const knob = useRef(new Animated.Value(value ? 1 : 0)).current
 
+  // The knob was the one animation in the app that ignored Reduce Motion, and the
+  // one with no curve — a switch is a value moving between two states while
+  // staying put, which is what `standard` is for. The driver stays on the
+  // JavaScript side: the knob's travel is `left`, not a transform.
   useEffect(() => {
-    Animated.timing(knob, { duration: 140, toValue: value ? 1 : 0, useNativeDriver: false }).start()
-  }, [knob, value])
+    const animation = Animated.timing(knob, {
+      duration: durationFor('control', theme.reduceMotion),
+      easing: easing.standard,
+      toValue: value ? 1 : 0,
+      useNativeDriver: false
+    })
+
+    animation.start()
+
+    return () => animation.stop()
+  }, [knob, theme.reduceMotion, value])
 
   return (
     <Pressable

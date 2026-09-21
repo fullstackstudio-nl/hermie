@@ -74,6 +74,7 @@ import { BotDmOutLine } from './BotDmOutLine'
 import { BotDmRollup, useRollupExpanded } from './BotDmRollup'
 import { CronDeliveryCard } from './CronDeliveryCard'
 import { DateSeparator } from './DateSeparator'
+import { Appear } from '../ui/Appear'
 import { JumpToLatestPill } from './JumpToLatestPill'
 import { NoticePill } from './NoticePill'
 import { SelectTextOverlay } from './SelectTextOverlay'
@@ -1264,6 +1265,16 @@ function TranscriptListBody({
     endJump()
   }, [endJump, releaseHold])
 
+  /*
+    Every scroll this component performs ITSELF is animated, and none of them is
+    under Reduce Motion. That setting is not about durations, it is about a
+    reader for whom a large moving field is unpleasant, and the largest moving
+    field in this app is a transcript flying past a thousand points — so it is
+    precisely the animation that setting means. A reader's own finger is never
+    affected: this only reaches the three places the app moves the list.
+  */
+  const animatedScroll = !theme.reduceMotion
+
   const jump = useCallback(() => {
     if (jumping.current) {
       clearTimeout(jumping.current)
@@ -1273,9 +1284,9 @@ function TranscriptListBody({
       jumping.current = null
     }, JUMP_SETTLE_MS)
 
-    listRef.current?.scrollToOffset({ animated: true, offset: 0 })
+    listRef.current?.scrollToOffset({ animated: animatedScroll, offset: 0 })
     setAway(false)
-  }, [])
+  }, [animatedScroll])
 
   useImperativeHandle(
     forwarded,
@@ -1290,13 +1301,13 @@ function TranscriptListBody({
         // `viewPosition: 0.5` centres the row: a message scrolled to the very edge
         // of the screen reads as "the end of the chat", which is the one thing
         // this is meant to disprove.
-        listRef.current?.scrollToIndex({ animated: true, index, viewPosition: 0.5 })
+        listRef.current?.scrollToIndex({ animated: animatedScroll, index, viewPosition: 0.5 })
 
         return true
       },
       scrollToLatest: jump
     }),
-    [rows, jump]
+    [animatedScroll, rows, jump]
   )
 
   /**
@@ -1305,18 +1316,39 @@ function TranscriptListBody({
    * is to scroll to the best guess, let a frame render, and try once more — not to
    * leave the reader where they were with nothing having moved.
    */
-  const recoverScroll = useCallback((info: { index: number; averageItemLength: number }) => {
-    listRef.current?.scrollToOffset({ animated: false, offset: info.averageItemLength * info.index })
+  const recoverScroll = useCallback(
+    (info: { index: number; averageItemLength: number }) => {
+      listRef.current?.scrollToOffset({ animated: false, offset: info.averageItemLength * info.index })
 
-    setTimeout(() => {
-      listRef.current?.scrollToIndex({ animated: true, index: info.index, viewPosition: 0.5 })
-    }, 80)
-  }, [])
+      setTimeout(() => {
+        listRef.current?.scrollToIndex({ animated: animatedScroll, index: info.index, viewPosition: 0.5 })
+      }, 80)
+    },
+    [animatedScroll]
+  )
 
   const renderItem = useCallback(
     ({ item: entry }: { item: ListRow }) =>
       isQueuedRow(entry) ? (
-        <View style={{ marginTop: BUBBLE_GAP.grouped }} testID={`transcript-queued-${entry.queued.id}`}>
+        /*
+          A queued row rises in. It is the one row in the transcript that appears
+          because of something the READER just did while something else was
+          already running, and a bubble that is simply there afterwards leaves
+          them wondering whether the message went.
+
+          Only the arrival is animated. Leaving is a cut, and honestly so: the row
+          leaves because the message was sent, the list drops the cell, and
+          holding a virtualised cell alive through an exit is a scroll anchor
+          moving under the reader — which is the more expensive bug of the two.
+          The send is not unmarked; the bubble that replaces it is the mark.
+        */
+        <Appear
+          rise={6}
+          style={{ marginTop: BUBBLE_GAP.grouped }}
+          testID={`transcript-queued-${entry.queued.id}`}
+          token="row"
+          visible
+        >
           <QueuedRow
             {...entry.queued}
             {...(handlers.accent ? { accent: handlers.accent } : {})}
@@ -1324,7 +1356,7 @@ function TranscriptListBody({
             {...(onEditQueued && !entry.queued.attachments?.length ? { onEdit: onEditQueued } : {})}
             {...(onSteerQueued ? { onSteer: onSteerQueued } : {})}
           />
-        </View>
+        </Appear>
       ) : isTypingRow(entry) ? (
         /*
           The dots are a turn starting, so they open the same gap above them as
@@ -1487,11 +1519,19 @@ function TranscriptListBody({
           The typing bubble used to be pinned here beside it; it is a cell now —
           see `TYPING_ROW`.
         */}
-        {away ? (
-          <View style={{ alignItems: 'center', bottom: theme.space.md, left: 0, position: 'absolute', right: 0 }}>
-            <JumpToLatestPill count={newMessageCount} onPress={jump} />
-          </View>
-        ) : null}
+        {/*
+          It rises out of the composer it sits above, and sinks back into it. A
+          pill that blinks on is the reader's own scroll being answered by
+          something that was apparently always there.
+        */}
+        <Appear
+          pointerEvents="box-none"
+          rise={10}
+          style={{ alignItems: 'center', bottom: theme.space.md, left: 0, position: 'absolute', right: 0 }}
+          visible={away}
+        >
+          <JumpToLatestPill count={newMessageCount} onPress={jump} />
+        </Appear>
 
         {/*
           Mounted HERE, from the list rather than from the row that opened it: a

@@ -30,19 +30,20 @@
  * and a resizing panel full of list rows is the most expensive thing in the app to
  * animate for the least reader benefit.
  */
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Animated, Easing, Pressable, StyleSheet } from 'react-native'
+import { type ReactNode } from 'react'
+import { Animated, Pressable, StyleSheet } from 'react-native'
 
 import { strings } from '../i18n/strings'
 import { useSafeAreaInsets } from '../platform/safe-area'
 import { GlassSurface } from '../ui/glass'
+import { motion, usePresence } from '../ui/motion'
 import { useTheme } from '../ui/theme'
 import { SCRIM_COLOR, WINDOW_GAP } from '../ui/tokens'
 import { useEscapeKey } from '../ui/useEscapeKey'
 import { useHardwareBack } from '../ui/useHardwareBack'
 
 /** Short enough to read as static, long enough not to read as a jump cut. */
-export const SIDEBAR_OVERLAY_MOTION = 200
+export const SIDEBAR_OVERLAY_MOTION = motion.sidebar
 
 export type SidebarOverlayProps = {
   visible: boolean
@@ -63,41 +64,16 @@ export function SidebarOverlay({ children, onClose, visible, width }: SidebarOve
    * has to line up with.
    */
   const insets = useSafeAreaInsets()
-  const progress = useRef(new Animated.Value(0)).current
-  // Kept mounted for the slide-out, then dropped: a panel that unmounts on the
-  // first frame of its own exit animation just disappears.
-  const [present, setPresent] = useState(visible)
   // Honouring Reduce Motion is not optional: §5 of the token document collapses
-  // every duration in the app to zero under it.
+  // every duration in the app to zero under it, which `usePresence` does.
   const { reduceMotion } = useTheme()
+  const { present, progress } = usePresence(visible, { reduceMotion, token: 'sidebar' })
 
   useEscapeKey(onClose, visible)
   // Android's back button is the same question as Escape, and this is a plain view
   // rather than a `Modal`, so the press would otherwise reach the activity and
   // background the app with the list still open — the bug `OverlayPanel` had.
   useHardwareBack(onClose, visible)
-
-  useEffect(() => {
-    if (visible) {
-      setPresent(true)
-    }
-
-    const animation = Animated.timing(progress, {
-      duration: reduceMotion ? 0 : SIDEBAR_OVERLAY_MOTION,
-      easing: Easing.bezier(0.22, 0.61, 0.36, 1),
-      toValue: visible ? 1 : 0,
-      // `translateX` and `opacity` are both native-driver eligible.
-      useNativeDriver: true
-    })
-
-    animation.start(({ finished }) => {
-      if (finished && !visible) {
-        setPresent(false)
-      }
-    })
-
-    return () => animation.stop()
-  }, [progress, reduceMotion, visible])
 
   if (!present) {
     return null

@@ -680,23 +680,11 @@ export const darkShadows: ShadowScale = {
 /** The dimmed layer an overlay panel or a sheet puts over what it covers. */
 export const SCRIM_COLOR = 'rgba(8,20,44,0.34)'
 
-/**
- * Motion.
- *
- * The rule that matters more than the numbers: **animation is reserved for
- * things that need the reader.** The only presence state that animates is
- * "needs input" — a 2s, low-amplitude amber ring pulse. Working is static; a bot
- * being busy is information, not a request. Under Reduce Motion every duration
- * collapses to zero and the pulse resolves to a static ring.
- */
-export const motion = {
-  micro: 120,
-  fast: 180,
-  base: 260,
-  sheet: 420,
-  /** The "needs input" pulse, the one loop in the app. */
-  pulse: 2000
-} as const
+// Motion is not here. Durations, curves and the one spring are `ui/motion.ts`,
+// because a duration is only half of a movement and the other half — which curve,
+// which driver, what happens under Reduce Motion — cannot live in a table of
+// numbers. This file kept five durations of which two were ever read, and the one
+// named `sheet` belonged to the overlay panel rather than to the sheet.
 
 /** Main controls are 44pt or taller, per the design board's touch-target rule. */
 export const CONTROL_MIN_HEIGHT = 44

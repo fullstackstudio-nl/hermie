@@ -24,10 +24,10 @@
  * parent's is a 1pt bright arc at four corners the day one of them changes — and at
  * the Mac's scaling a 1pt arc is visible.
  */
-import { useEffect, useRef, useState } from 'react'
-import { Animated, Easing, Pressable, StyleSheet } from 'react-native'
+import { Animated, Pressable, StyleSheet } from 'react-native'
 
 import { strings } from '../i18n/strings'
+import { usePresence } from '../ui/motion'
 import { useTheme } from '../ui/theme'
 import { SCRIM_COLOR } from '../ui/tokens'
 
@@ -43,33 +43,11 @@ export type PanelScrimProps = {
 
 export function PanelScrim({ onPress, open, radius, testID }: PanelScrimProps) {
   const theme = useTheme()
-  const progress = useRef(new Animated.Value(0)).current
-  // Kept mounted for the fade-out, then dropped — the same reason the panels
-  // themselves are: a scrim that unmounts on the first frame of its own exit does
-  // not fade, it vanishes, and a panel sliding out over an undimmed list reads as
-  // two unrelated events.
-  const [present, setPresent] = useState(open)
-
-  useEffect(() => {
-    if (open) {
-      setPresent(true)
-    }
-
-    const animation = Animated.timing(progress, {
-      duration: theme.reduceMotion ? 0 : theme.motion.sheet,
-      easing: Easing.bezier(0.22, 0.61, 0.36, 1),
-      toValue: open ? 1 : 0,
-      useNativeDriver: true
-    })
-
-    animation.start(({ finished }) => {
-      if (finished && !open) {
-        setPresent(false)
-      }
-    })
-
-    return () => animation.stop()
-  }, [open, progress, theme.motion.sheet, theme.reduceMotion])
+  // Kept mounted for the fade-out — the same reason the panels themselves are: a
+  // scrim that unmounts on the first frame of its own exit does not fade, it
+  // vanishes, and a panel sliding out over an undimmed list reads as two
+  // unrelated events. It moves at the panel's duration for the same reason.
+  const { present, progress } = usePresence(open, { reduceMotion: theme.reduceMotion, token: 'panel' })
 
   if (!present) {
     return null

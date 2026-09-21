@@ -37,12 +37,13 @@
  * the panel stays; a second Escape closes the panel. Nothing here coordinates
  * that: it falls out of mount order, which is exactly why the stack is a stack.
  */
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Animated, Easing, Pressable, StyleSheet, View } from 'react-native'
+import { type ReactNode } from 'react'
+import { Animated, Pressable, StyleSheet, View } from 'react-native'
 
 import { strings } from '../i18n/strings'
 import { GlassSurface } from '../ui/glass'
 import { Icon, ICON_SIZE } from '../ui/Icon'
+import { usePresence } from '../ui/motion'
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
 import { OVERLAY_MAX_WIDTH, TAP_SLOP, WINDOW_GAP } from '../ui/tokens'
@@ -67,10 +68,8 @@ export type OverlayPanelProps = {
 
 export function OverlayPanel({ children, frame, onClose, title, visible }: OverlayPanelProps) {
   const theme = useTheme()
-  const progress = useRef(new Animated.Value(0)).current
-  // Kept mounted for the slide-out, then dropped: a panel that unmounts on the
-  // first frame of its own exit animation just disappears.
-  const [present, setPresent] = useState(visible)
+  // `present` trails `visible` by one slide-out: see `usePresence`.
+  const { present, progress } = usePresence(visible, { reduceMotion: theme.reduceMotion, token: 'panel' })
 
   useEscapeKey(onClose, visible)
   // Android's back button is the same question as Escape, and this panel is the
@@ -79,29 +78,6 @@ export function OverlayPanel({ children, frame, onClose, title, visible }: Overl
   // press reached the activity and backgrounded the app with the panel still
   // open. Measured on an emulator — back on Settings left for the launcher.
   useHardwareBack(onClose, visible)
-
-  useEffect(() => {
-    if (visible) {
-      setPresent(true)
-    }
-
-    const animation = Animated.timing(progress, {
-      duration: theme.reduceMotion ? 0 : theme.motion.sheet,
-      easing: Easing.bezier(0.22, 0.61, 0.36, 1),
-      toValue: visible ? 1 : 0,
-      // `translateX` and `opacity` are both native-driver eligible, and this is
-      // the largest thing that moves in the app.
-      useNativeDriver: true
-    })
-
-    animation.start(({ finished }) => {
-      if (finished && !visible) {
-        setPresent(false)
-      }
-    })
-
-    return () => animation.stop()
-  }, [progress, theme.motion.sheet, theme.reduceMotion, visible])
 
   if (!present) {
     return null

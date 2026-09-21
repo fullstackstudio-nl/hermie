@@ -21,6 +21,7 @@
 import { useEffect, useRef } from 'react'
 import { Animated, View } from 'react-native'
 
+import { motion } from '../ui/motion'
 import { useTheme } from '../ui/theme'
 import { Bubble } from './primitives/Bubble'
 
@@ -45,10 +46,10 @@ export function TypingDots({ testID = 'typing-dots' }: TypingIndicatorProps) {
     const loops = values.map((value, index) =>
       Animated.loop(
         Animated.sequence([
-          Animated.delay(index * 140),
-          Animated.timing(value, { duration: 340, toValue: 1, useNativeDriver: true }),
-          Animated.timing(value, { duration: 340, toValue: 0.35, useNativeDriver: true }),
-          Animated.delay((DOTS.length - index - 1) * 140)
+          Animated.delay(index * motion.dotStagger),
+          Animated.timing(value, { duration: motion.dot, toValue: 1, useNativeDriver: true }),
+          Animated.timing(value, { duration: motion.dot, toValue: 0.35, useNativeDriver: true }),
+          Animated.delay((DOTS.length - index - 1) * motion.dotStagger)
         ])
       )
     )

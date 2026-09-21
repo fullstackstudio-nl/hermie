@@ -24,7 +24,7 @@
  * plus one presenter per platform. The Mac is the iPad build now (ADR-0011) and
  * has a real `Modal`, so the split is gone.
  */
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useMemo, useRef, type ReactNode } from 'react'
 import {
   Animated,
   KeyboardAvoidingView,
@@ -46,6 +46,7 @@ import { useSafeAreaInsets } from '../platform/safe-area'
 import { GlassSurface } from './glass'
 import { KEYBOARD_AVOID_BEHAVIOR } from './keyboard'
 import { Text } from './primitives'
+import { motion, spring, usePresence } from './motion'
 import { useTheme } from './theme'
 import { Icon, ICON_SIZE } from './Icon'
 import { REGULAR_LAYOUT_MIN_WIDTH, SCRIM_COLOR, SHEET_MAX_WIDTH, SIDEBAR_WIDTH, TAP_SLOP, WINDOW_GAP } from './tokens'
@@ -78,7 +79,7 @@ export interface BottomSheetProps {
   onClosed?: () => void
 }
 
-export const SHEET_ANIMATION_MS = 220
+export const SHEET_ANIMATION_MS = motion.sheet
 
 /** Far enough that a settling finger is not a drag; short enough to feel direct. */
 const DRAG_SLOP = 6
@@ -152,7 +153,7 @@ export interface SheetDrag {
  * with the gesture it means.
  */
 export function sheetDragConfig({ progress, height, atTop, onRequestClose }: SheetDrag) {
-  const springBack = () => Animated.spring(progress, { bounciness: 0, toValue: 1, useNativeDriver: false }).start()
+  const springBack = () => Animated.spring(progress, { ...spring.settle, toValue: 1, useNativeDriver: false }).start()
 
   return {
     /*
@@ -211,10 +212,18 @@ export function sheetDragConfig({ progress, height, atTop, onRequestClose }: She
  * It now always starts at 0 and is animated up, on mount and on every
  * `visible` → true. There is no case that wants the old behaviour: a sheet
  * mounted invisible renders nothing at all, so starting from 0 costs it nothing.
+ * Both of those are `usePresence`'s guarantees now rather than this file's, and
+ * that is the point: three other surfaces were making the same promise in their
+ * own words and one of them was not keeping it.
  *
  * `reduceMotion` collapses the duration rather than skipping the animation, so
  * the completion callback — which is what unmounts a closed sheet — still runs
  * on exactly the same path.
+ *
+ * The sheet gained a CURVE here. It had none: `Animated.timing` with no `easing`
+ * is `Easing.inOut(Easing.ease)`, which is symmetric, and a symmetric curve is
+ * what makes a panel look like it is being scrubbed rather than arriving. In and
+ * out now take the decelerate and accelerate halves respectively.
  *
  * The driver is left on the JavaScript side. `opacity` and `translateY` would
  * both be native-driver eligible, but the closing half has always run this way
@@ -226,34 +235,14 @@ function useSheetPresence(
   reduceMotion: boolean,
   onClosed?: () => void
 ): { mounted: boolean; progress: Animated.Value } {
-  const [mounted, setMounted] = useState(visible)
-  const progress = useRef(new Animated.Value(0)).current
-  const closed = useRef(onClosed)
+  const { present, progress } = usePresence(visible, {
+    onExited: onClosed,
+    reduceMotion,
+    token: 'sheet',
+    useNativeDriver: false
+  })
 
-  closed.current = onClosed
-
-  useEffect(() => {
-    if (visible) {
-      setMounted(true)
-    }
-
-    const animation = Animated.timing(progress, {
-      duration: reduceMotion ? 0 : SHEET_ANIMATION_MS,
-      toValue: visible ? 1 : 0,
-      useNativeDriver: false
-    })
-
-    animation.start(({ finished }) => {
-      if (finished && !visible) {
-        setMounted(false)
-        closed.current?.()
-      }
-    })
-
-    return () => animation.stop()
-  }, [progress, reduceMotion, visible])
-
-  return { mounted, progress }
+  return { mounted: present, progress }
 }
 
 /**
