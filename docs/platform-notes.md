@@ -5659,3 +5659,165 @@ Redialling those fails the same way and erases the explanation.
   dial still fails". If CFNetwork holds a negative answer for a MagicDNS name,
   the ladder now keeps asking — which is the best this layer can do about it —
   but nothing here measured whether it happens.
+
+## Web QA (2026-09-21, last)
+
+A pass over the browser build, driven in a real Chromium against
+`packages/fake-gateway` in cookie mode behind `packages/hermie-web` — the
+`npm run web` pair. Walked signed out and signed in, at 1280, 820 and 390, in
+both colour schemes. What follows is the defect list the pass produced, what was
+fixed, and — at least as important — what it did not get to.
+
+### One note on method, because it cost an hour
+
+**Viewport emulation and screenshots are not the same picture.** The first hour
+was spent reading a screenshot that showed a layout the DOM did not have: a
+narrower sidebar, no tab strip. `innerWidth` said 1280 and `getBoundingClientRect`
+agreed with it, while the image was a render at the pane's own size. Every
+geometric claim below therefore comes from measuring the DOM, and the images are
+used for how a thing LOOKS, never for where it is.
+
+The same care caught two defects that were not defects. A chat row announced
+`Researcher, Online` while its subtitle read `Offline · last seen 17:27` — the
+same `presence` prop feeds both and they cannot disagree; the tree had been read
+mid-transition, before presence arrived. And a bubble reading
+`first linesecond linethird line` looked like newlines being eaten, which would
+have been a serious rendering bug; sending `alpha\nbeta gamma` through the
+composer proves the whole path is intact — Shift+Return inserts, bare Return
+sends, and the bubble keeps the break. That bubble is residue from an earlier
+session that typed three lines into a field one line at a time.
+
+### Fixed
+
+| What                                                                                                                                | Commit    |
+| ----------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| The document said nothing about itself: no manifest, no `theme-color`, no `apple-touch-icon`, no `color-scheme`, no page background | `f39b303` |
+| The browser tab named the route KEY (`Bots` for the screen headed Chats), or nothing at all in the wide layout                      | `e2b12f1` |
+| Sign-in: Return did not submit; no `autoComplete`, so no password manager; accessible names shouted                                 | `d15a4f6` |
+
+Each is described in its own commit message. The two worth repeating here:
+
+- **The white flash.** The bundle is 2.35 MB and the first paint happens before
+  any of it runs. With no background on `html`/`body` that gap was white, which
+  on a dark theme is the most visible thing the build does. The template paints
+  it from `prefers-color-scheme`; `platform/status-bar.web.tsx` — a deliberate
+  no-op until now, whose own header said `theme-color` was the document's problem
+  — corrects both the meta and the page background from the live theme, which is
+  what covers a visitor who has PINNED Light against a dark system, or picked a
+  preset whose background is a third colour again.
+- **`color-scheme` is not cosmetic.** It is what makes the user agent draw its
+  OWN widgets — scrollbars, the caret — in the dark palette. No app-side styling
+  reaches them. macOS hides scrollbars until you scroll, which is why nobody
+  here had seen the light-grey slab every other platform draws.
+
+### Found, not fixed
+
+In rough order of how much they cost a user.
+
+- **A markdown link is a `div`, not an `<a>`.** `markdown/Inline.tsx:305` renders
+  a `Text` with `accessibilityRole="link"`, which react-native-web does not map to
+  an element (its role table has `button` and `list` and no `link`), so what ships
+  is a `role="link"` div with no `href`. The press goes to `Linking.openURL`,
+  which does open a new tab and does pass `noopener`. What is lost is everything
+  a browser gives an anchor for free: no keyboard focus, no middle-click, no
+  cmd-click, no "copy link address", no URL in the status bar — and `noreferrer`
+  is absent, so the full referrer reaches the destination. The fix is RNW's
+  `hrefAttrs`, which is a shared-file change rather than a seam and wants its own
+  round.
+- **Decorative icons stay in the accessibility tree on the web.** `ui/Icon.tsx:96`
+  hides itself with `accessibilityElementsHidden` and
+  `importantForAccessibility` — the iOS and Android props. RNW honours neither;
+  it wants `aria-hidden`. Several controls (the four tabs in `SidebarFooter.tsx:87`,
+  the archived row, the DM rollup, `DisclosureRow`) deliberately carry no
+  `accessibilityLabel` because "the label under the icon is what a screen reader
+  reads". Chrome's own tree does compute a name from the text and the tabs read
+  correctly there; a second reader on the same page returned four tabs with no
+  name at all. So the premise those components were written on is false on this
+  platform even where the symptom does not always show.
+- **`TextField` can emit an empty accessible name.**
+  `ui/primitives/TextField.tsx:49` ends `?? ''`, and `aria-label=""` REMOVES a
+  name rather than falling through to the content. Only reachable when a field
+  has neither label nor placeholder, which is why nothing visibly broke.
+- **Focus rings stop at text fields.** `ui/useFocusRing.ts` draws a proper ring
+  and is used in exactly two places (the composer, the bots search). Buttons and
+  list rows are real `<button>` elements and do get the browser's default ring —
+  drawn tight to the box, in the UA colour, ignoring the row's radius and the
+  glass under it. Markdown links get no focus at all, per the item above.
+- **Day separators are `<h1>`.** A transcript has one per day and the page has no
+  real first-level heading, so a reader navigating by heading gets a list of
+  dates and nothing else.
+- **The gateway's address is Hermie Web's own.** Settings → Gateway → Address and
+  the wizard's Ready step both show `http://127.0.0.1:9120`, which is the app's
+  origin because the proxy makes it so. The sign-in step one screen earlier says
+  `talking to 127.0.0.1:9119`, correctly. Two screens in one flow naming two
+  different things "the gateway" is the defect; `/hermie/config.json` already
+  carries the upstream host that the sign-in step reads.
+- **The welcome copy shows its markup.** "the machine running \`hermes serve\`"
+  renders with the backticks visible: the wizard draws plain text where the
+  transcript would draw a code chip.
+- **The sign-in error is not announced.** "That user name and password were not
+  accepted." appears with no `role="alert"` and no live region, so a screen
+  reader is told nothing happened.
+- **No maskable PWA icon.** A maskable icon needs the backdrop at full bleed and
+  the mark inside a circle of 80% of the canvas; the mark's corners reach 460 of
+  the 409 that allows, so it needs two transforms in one image and
+  `scripts/lib/svg-raster.mjs` composites every shape through one. Android draws
+  the `any` icon on a white circle of its own until the rasteriser can layer.
+- **Two untranslatable literals**, both hard-coded past the string tables:
+  `ui/BottomSheet.tsx:413` (`"Dismiss"`) and `chat-ui/TypingIndicator.tsx:64`
+  (`"Replying"`).
+- **Console noise on every load.** Two `useNativeDriver` warnings from
+  `Animated`, and RNW warns that `selectable` is deprecated on every markdown
+  render in a dev build.
+- **`design/tokens.md` is stale.** It gives the app background as `#F2F2F7` /
+  `#000000`; neither string appears anywhere in `apps/hermie/src`. The live
+  values are per preset in `ui/themes.ts` — blue is `#EAF3FF` / `#070F1D`, which
+  is what the new document template and `app.config.ts`'s splash colours should
+  be read against.
+
+### Measured
+
+Scrolling, on the heaviest transcript this fixture can produce: the Researcher
+chat with the fold expanded, so a code block, a five-row table and three nested
+lists are all live. 2263 px of content in a 793 px viewport, walked top to bottom
+and back twice in 60 px steps, timed with `requestAnimationFrame` deltas and
+`PerformanceObserver` on `longtask`:
+
+| Run             | p50    | p95    | p99     | max   | frames > 16.7 ms | long tasks |
+| --------------- | ------ | ------ | ------- | ----- | ---------------- | ---------- |
+| Unthrottled     | 8.3 ms | 8.5 ms | 13.4 ms | 13 ms | 0 of 100         | 0          |
+| 4× CPU throttle | 8.2 ms | 9.7 ms | 14.6 ms | 15 ms | 0 of 100         | 0          |
+
+A p50 of 8.3 ms is the display's own 120 Hz cadence, so nothing is being dropped
+rather than everything being fast. No long task fired in either run.
+
+**This is not the 400-row measurement that was asked for.** The fake gateway has
+no large-transcript fixture and no flag for one, and building 400 rows means 200
+send-and-reply round trips through the live socket. What the numbers above cover
+is a heavy transcript, not a long one, and the list's own recycling is therefore
+untested here.
+
+### Not covered
+
+Said plainly, because a defect list that implies coverage it does not have is
+worse than a short one.
+
+- **Most of the conversation surface.** Streaming and the fold were watched; tool
+  cards, thoughts, bot-to-bot lines, cron cards, the approval and clarify sheets
+  (backdrop click, Escape, drag), the queued strip with Steer/Edit/Delete, the
+  slash popover, the attach menu, attachments by picker, drag-and-drop and paste,
+  and the jump-to-latest pill were **not** exercised.
+- **The chats list beyond opening a row.** Search, dividers, archive, mouse drag
+  reorder, the right-click context menu and arrow-key navigation were not driven.
+- **⌘K and the rest of the shortcut table.** Only Escape was tested, closing
+  Settings one level.
+- **Crons and Activity**, beyond the fact that the tabs open.
+- **Safari.** It is installed; Firefox is not. Neither was driven, so no
+  cross-browser difference in this list has been observed rather than reasoned
+  about — which matters most for `backdrop-filter`, where the glass lives.
+- **The service worker.** Registering `/hermie-push-sw.js` failed in the browser
+  this pass was driven from, with Chromium's generic "An unknown error occurred
+  when fetching the script." The file is served with `text/javascript` and
+  `127.0.0.1` is a secure context, so the likely cause is the automation
+  environment rather than the app — but it was not reproduced in a stock browser,
+  so push on the web remains exactly as unverified as it was before.
