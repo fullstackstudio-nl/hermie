@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Export a conversation.** The chat's options sheet offers the transcript as a Markdown file or as
+  plain text, handed to the share sheet on the phones and the Mac and downloaded in a browser. Both
+  formats are offered because neither is a default: a `.md` is for somewhere that renders it and a
+  `.txt` is for somewhere that does not. **What is exported is what is on screen** — the verbosity
+  filter, the bot-to-bot toggle and the thinking toggle have already been applied, so a chat set to
+  Quiet exports the quiet conversation rather than handing somebody rows they have not read. Tool
+  calls, notices, permission requests and bot-to-bot lines are written as asides rather than
+  attributed to a speaker; the transient one-liners are left out, because a file of things that are
+  no longer true is not a record. A reply's own Markdown survives into the plain-text file untouched:
+  those are the author's characters, and an export must not quietly edit what it is preserving.
+
 - **How full the context window is, in the chat.** The options sheet gains a read-only row with a
   ring, the percentage and both counts — `82% · 164k / 200k` — and the bot profile's read-only block
   says the same thing in words. It follows the live `session.usage` ticks and the usage on

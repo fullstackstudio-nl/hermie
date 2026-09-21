@@ -17,8 +17,10 @@
  *    ends up answering the wrong one.
  */
 import {
+  exportTranscript,
   findDmCounterpart,
   normalizeAgentTarget,
+  transcriptFileName,
   type ApprovalItem,
   type ClarifyItem,
   type TranscriptItem,
@@ -34,6 +36,7 @@ import {
   ChatHeader,
   chatStrings,
   Composer,
+  formatClock,
   type ComposerAttachment,
   type PickerOption,
   SidebarToggleButton,
@@ -45,6 +48,7 @@ import {
   type TranscriptListHandle
 } from '../../chat-ui'
 import { shareFile } from '../../platform/share-file'
+import { shareText } from '../../platform/share-text'
 import { lastMessageAt, prettyModelName } from '@hermie/transcript'
 import type { ConnectionStatus } from '@hermie/gateway-client'
 import { looksLikeSlashCommand, parseSlashCommand } from '@hermes/shared/slash'
@@ -1385,6 +1389,50 @@ function Conversation({
   const display = byName[botName]?.displayName ?? botName
 
   /**
+   * Write the conversation out and hand it to the platform.
+   *
+   * `chat.items` is what the reader is looking at — the verbosity filter, the
+   * bot-to-bot toggle and the thinking toggle have already been applied — and
+   * that is deliberately what is exported. A chat set to Quiet exports the quiet
+   * conversation; carrying the rows the screen is hiding would hand somebody a
+   * file they have not read.
+   *
+   * Nothing about the serialization is here. `exportTranscript` is a pure
+   * function in `@hermie/transcript` with its own suite; this supplies the two
+   * things the package cannot know — what a clock looks like on this device, and
+   * how a file reaches the rest of the system.
+   */
+  const exportChat = useCallback(
+    (format: 'md' | 'txt') => {
+      const now = Date.now()
+      const { markdown, text } = exportTranscript(
+        chat.items.map(entry => entry.item),
+        {
+          botName: display,
+          exportedAt: Math.floor(now / 1000),
+          // The device's own clock, which is the whole reason the formatter is
+          // passed in: a file saved on this phone should read in this phone's
+          // time, and the transcript package has no business knowing what that
+          // is.
+          formatTime: seconds => `${new Date(seconds * 1000).toLocaleDateString()} ${formatClock(seconds)}`.trim(),
+          selfName: chatStrings.export.self
+        }
+      )
+
+      const name = transcriptFileName(display, format, new Date(now).toISOString().slice(0, 10))
+
+      void shareText(name, format === 'md' ? markdown : text, format === 'md' ? 'text/markdown' : 'text/plain').then(
+        shared => {
+          if (!shared) {
+            setNotice(openFailed(chatStrings.export.failed))
+          }
+        }
+      )
+    },
+    [chat.items, display]
+  )
+
+  /**
    * Stable callbacks for the transcript.
    *
    * `TranscriptRow` is memoized on `(id, version, presentation, receipt,
@@ -1769,6 +1817,7 @@ function Conversation({
           botName: display,
           confirmMessage: pendingModel?.message ?? '',
           contextUsage: chat.contextUsage,
+          onExport: exportChat,
           fast: chat.info?.fast === true,
           model: chat.info?.model ?? '',
           modelOptions,

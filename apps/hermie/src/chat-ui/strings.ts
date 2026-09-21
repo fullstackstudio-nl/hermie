@@ -378,6 +378,27 @@ export const chatStrings = {
     estimated: '(estimated)'
   },
 
+  /** Taking the conversation out of the app as a file. */
+  export: {
+    /** The group's heading in the options sheet. */
+    header: 'EXPORT',
+    /**
+     * Two verbs, because the action really is two things: a phone opens the
+     * share sheet and a browser can only download. The same rule the image
+     * viewer's button already follows.
+     */
+    shareMarkdown: 'Share as Markdown',
+    downloadMarkdown: 'Download as Markdown',
+    shareText: 'Share as plain text',
+    downloadText: 'Download as plain text',
+    /** Under the two rows: what a file will and will not contain. */
+    hint: 'The conversation as it is on screen, with whatever this chat\u2019s view settings hide left out.',
+    /** How the reader's own turns are labelled in the file. */
+    self: 'You',
+    /** The file could not be written or the sheet would not open. */
+    failed: 'The conversation could not be exported.'
+  },
+
   options: {
     eyebrow: 'This chat',
     colourHint: 'Tints this chat\u2019s avatar ring, its row in the list and the messages you send.',

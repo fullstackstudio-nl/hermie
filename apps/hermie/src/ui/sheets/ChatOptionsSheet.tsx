@@ -22,7 +22,8 @@ import { formatMuteUntil, MUTE_DURATIONS, MUTE_FOREVER, muteUntil, type MuteDura
 import { strings } from '../../i18n/strings'
 import { AccentSwatches } from '../AccentSwatches'
 import { BottomSheet, SheetEyebrow, SheetPage } from '../BottomSheet'
-import { Button, InsetGroup, Text, TextField } from '../primitives'
+import { SHARE_FILE_VERB } from '../../platform/share-text'
+import { Button, InsetButtonRow, InsetGroup, Text, TextField } from '../primitives'
 import { useTheme } from '../theme'
 import { TAP_SLOP, type AccentName } from '../tokens'
 import { useEscapeKey } from '../useEscapeKey'
@@ -84,6 +85,16 @@ export interface ChatOptionsSheetProps {
    * is the whole of the capability gate.
    */
   contextUsage?: ContextUsage | null
+
+  /**
+   * Write the conversation out as a file and hand it to the platform.
+   *
+   * The sheet does not build the file: it has the transcript nowhere near it,
+   * and the serializer is a pure function in `@hermie/transcript` that the
+   * screen owns. Absent removes the group, which is what a surface with no
+   * transcript behind it — the developer gallery — gets.
+   */
+  onExport?: (format: 'md' | 'txt') => void
 
   verbosity: Verbosity
   onChangeVerbosity: (value: Verbosity) => void
@@ -534,6 +545,32 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
               value={props.showThinking}
             />
           </InsetGroup>
+
+          {props.onExport ? (
+            <InsetGroup footer={chatStrings.export.hint} header={chatStrings.export.header}>
+              {/*
+                Two formats rather than one, and neither is a default. A
+                Markdown file is for somewhere that renders it and a .txt is for
+                somewhere that does not, and guessing which a reader meant is
+                the same mistake offering only one Copy line would be — which is
+                the argument `message-menu.ts` already makes about exactly this.
+              */}
+              <InsetButtonRow
+                onPress={() => props.onExport?.('md')}
+                testID="option-export-markdown"
+                title={
+                  SHARE_FILE_VERB === 'download'
+                    ? chatStrings.export.downloadMarkdown
+                    : chatStrings.export.shareMarkdown
+                }
+              />
+              <InsetButtonRow
+                onPress={() => props.onExport?.('txt')}
+                testID="option-export-text"
+                title={SHARE_FILE_VERB === 'download' ? chatStrings.export.downloadText : chatStrings.export.shareText}
+              />
+            </InsetGroup>
+          ) : null}
 
           {props.viewOverridden && props.onResetView ? (
             <Button

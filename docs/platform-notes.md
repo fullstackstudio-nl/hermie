@@ -6506,3 +6506,47 @@ the RPC failure ring, because a swallowed error nothing anywhere admits to is th
 - **The row does not animate.** A `session.usage` tick lands several times a second during a turn and
   the ring simply redraws; nothing was measured about whether that reads as motion or as noise on a
   sheet the reader has open while a turn runs.
+
+### An export is a file, not a `message`
+
+`Share.share({ message })` needs no file and no dependency, and it was the wrong answer. A share
+sheet handed a bare string can only reach a destination that TAKES text — Messages, Mail's body, a
+note — and cannot save. Somebody who asked to export a conversation wants to keep it, so the one
+destination that matters most is the one a string cannot reach.
+
+So `platform/share-text.ts` writes into the cache directory with `expo-file-system` and hands the
+resulting `file://` to the existing `shareFile` seam. `expo-file-system` was already in
+`node_modules` as a dependency of `expo` itself, which means it is already in the native build; it
+has been added to `apps/hermie/package.json` explicitly anyway, because a module reached through
+somebody else's dependency edge is a module that disappears the day they drop it.
+
+The cache directory rather than `document`, deliberately: an export is a hand-off, the system copies
+what it needs the moment a destination is picked, and what is left behind is a duplicate of a
+conversation the gateway already has. `document` is backed up and, with file sharing on, visible in
+Files for ever.
+
+The browser half makes a `Blob`, hands its object URL to the same seam, and revokes it on a timer
+rather than in the same tick — revoking immediately races Safari's own read of the blob and lands as
+a download of zero bytes.
+
+### What is exported is what is on screen
+
+`chat.items` has already been through the verbosity filter, the bot-to-bot toggle and the thinking
+toggle, and that list is what the serializer is handed. A chat set to Quiet exports the quiet
+conversation. The alternative — exporting the full state — would hand somebody a file containing
+rows their own settings have been hiding from them, which is a worse surprise than a short file.
+
+The serializer itself is pure and lives in `@hermie/transcript`, so it is vitest rather than jest.
+Two things it deliberately does not do: it does not strip a reply's Markdown for the `.txt` file,
+because those are the author's characters and an export must not edit what it preserves; and it does
+not format a timestamp, because a file saved on this device should read in this device's clock and
+the package has no business knowing what that is — the caller passes a formatter in.
+
+### What is not covered
+
+- **Neither seam has been run on a device or in a browser.** The jest cases drive the rows and the
+  verb; whether an iPad's share sheet accepts a `text/markdown` file from the cache directory, and
+  whether a browser's download honours the name for an object URL, are both unverified here.
+- **There is no entry in the message context menu.** The brief offered "message menu / chat options";
+  the options sheet is where a whole-conversation action belongs, and a per-message row that exported
+  the whole chat would be a menu line about something other than the message it was opened on.
