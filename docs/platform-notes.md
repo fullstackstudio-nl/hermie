@@ -6383,3 +6383,52 @@ was answered, is a second card and not a re-description of the first.
 The contract question under "Worth filing upstream" above is unchanged and is
 still the real fix. `inflight.row_id` would make this whole family impossible to
 hit; `turn_started_at` only makes one more member of it decidable.
+
+### `Show more` on the web needs LESS anchoring, not more
+
+`maintainVisibleContentPosition` is not implemented in react-native-web at all,
+which makes the obvious guess that the web build needs more help holding the
+reader's place than the native one. It needs none, and the hold written for iOS
+is the entire displacement.
+
+An inverted list on the web is `transform: scaleY(-1)` on the scroller plus the
+same flip on every cell (`VirtualizedList`'s `verticallyInverted` and
+`VirtualizedListCellRenderer`'s `cellStyle`), and a browser preserves
+`scrollTop` across a content change. Under that flip a preserved `scrollTop`
+pins every DOM offset that did not move — which is the whole conversation below
+the growth, `Show more` included, because a cell lays its body out at larger DOM
+offsets than its own footer.
+
+Measured on that exact DOM rather than in the app: a 400pt scroller, twelve
+flipped cells, one body grown by 300, at three starting offsets and on the way
+back.
+
+| start | growth | `Show more` moves | with `holdTarget` applied |
+| ----- | ------ | ----------------- | ------------------------- |
+| 200   | +300   | 0                 | +300                      |
+| 0     | +300   | 0                 | +300                      |
+| 600   | +300   | 0                 | +300                      |
+| 500   | −300   | 0                 | −300                      |
+
+The newer rows below it move by the same numbers. So the reader loses their
+place by exactly the amount the fold grew, every time, which is the report.
+
+The seam is `platform/scroll-anchor.ts` / `.web.ts` — `ANCHORS_GROWTH_ITSELF`,
+false on every native platform and true in a browser — and `holdPlace` refuses at
+the tap rather than at either correction site, so nothing downstream has a target
+to aim at. Doing nothing is also what Reduce Motion asks of this path: there is
+no movement left to shorten.
+
+### What is still unverified
+
+- **The web fix has not been seen in the app.** The browser build refuses a
+  token gateway by design ("This gateway cannot be used from a browser"), so
+  `npm run web`'s cookie mode is the only way in and that means typing the
+  fixture password. What WAS checked is that the seam resolves: the exported
+  bundle carries this module as `const t = !0`. The tap itself is covered by
+  jest with the flag mocked on.
+- **The interim resume fix has not been seen against a real gateway.** The fake
+  gateway models no `inflight` at all, so every case here is the reducer's own
+  suite. Whether a real `session.resume` fills `turn_started_at` on the top
+  level, only inside `info`, or not at all decides whether the fix fires — and
+  if it is absent the old behaviour is what happens, not something worse.

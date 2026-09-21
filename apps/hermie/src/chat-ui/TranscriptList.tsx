@@ -63,6 +63,7 @@ import { copyToClipboard } from '../platform/clipboard'
 import { ContextMenuHost } from '../platform/context-menu'
 import { applyDirectTouchPan } from '../platform/pointer-drag'
 import { RUNS_ON_MAC } from '../platform/runs-on-mac'
+import { ANCHORS_GROWTH_ITSELF } from '../platform/scroll-anchor'
 import { PlainScrollEdges } from '../platform/scroll-edges'
 import { GlassSurface } from '../ui/glass'
 import { Button, Text } from '../ui/primitives'
@@ -1270,6 +1271,15 @@ function TranscriptListBody({
    * is how `Show more` used to land the reader at the end of the message.
    */
   const holdPlace = useCallback((_id: string, growth: number) => {
+    // A browser has already done this, and doing it again is the whole of the
+    // web report: `Show more` moves the reader by exactly the fold's growth.
+    // See `platform/scroll-anchor.web.ts` for the measurement. Refused HERE, at
+    // the tap, rather than at either correction site, so nothing downstream has
+    // a target to aim at and the two sites stay one behaviour.
+    if (ANCHORS_GROWTH_ITSELF) {
+      return
+    }
+
     if (holding.current) {
       clearTimeout(holding.current)
     }
