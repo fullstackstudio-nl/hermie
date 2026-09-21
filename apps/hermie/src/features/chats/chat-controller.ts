@@ -41,11 +41,14 @@ import type {
   OpenRequestEntry,
   PendingApproval,
   SessionLiveInfo,
-  SessionResumeResult
+  SessionResumeResult,
+  SlashExecResult
 } from '@hermes/shared/gateway-contract'
 import type { ServerRequest as GatewayServerRequest } from '@hermes/shared/json-rpc-channel'
+import { parseCommandDispatch, parseSlashCommand } from '@hermes/shared/slash'
 
 import type { ChatGateway } from '../../gateway/link'
+import { describeRpcFailure, type RpcFailure } from '../../gateway/rpc-failures'
 import type { ChatCache } from '../../platform/chat-cache'
 import type { Bot, BotCanonicalSession, BotsState } from '../../store/bots'
 import type { ChatsState, QueuedMessage } from '../../store/chats'
@@ -148,6 +151,29 @@ export interface ChatControllerOptions {
   http?: GatewayHttp | null
   cache?: ChatCache | null
   now?: () => number
+  /**
+   * Somewhere to put a gateway refusal this controller decided to absorb.
+   *
+   * Injected rather than imported so the controller keeps knowing nothing about
+   * the app's stores, and so a test can read the failures it recorded.
+   */
+  onRpcFailure?: (failure: RpcFailure) => void
+}
+
+/**
+ * The gateway's way of saying "right command, wrong method".
+ *
+ * Upstream's `slash.exec` answers a skill or a bundle with
+ * `4018 skill command: use command.dispatch for /<name>` rather than running
+ * it. Matched on the method name because that is the part of the sentence that
+ * is a protocol fact; the rest of it is prose upstream is free to reword.
+ */
+const WANTS_DISPATCH_RE = /command\.dispatch/u
+
+/** What a slash command left behind for the surface that ran it. */
+export interface SlashOutcome {
+  /** A `prefill` directive's text: the composer, not the transcript. */
+  prefill?: string
 }
 
 export type ChatOptionKey = 'yolo' | 'fast' | 'reasoning' | 'model'
@@ -172,6 +198,7 @@ export class ChatController {
   private readonly http: GatewayHttp | null
   private readonly cache: ChatCache | null
   private readonly now: () => number
+  private readonly onRpcFailure: ((failure: RpcFailure) => void) | undefined
 
   private unsubscribes: (() => void)[] = []
   /** Approval request ids already acknowledged, so the ack is sent once. */
@@ -208,6 +235,8 @@ export class ChatController {
   private readonly parked = new Map<string, GatewayServerRequest[]>()
   private readonly opening = new Map<string, Promise<void>>()
   private readonly slashCatalogs = new Map<string, CommandsCatalogResult>()
+  /** One catalogue fetch per session, shared by every keystroke that wants it. */
+  private readonly slashCatalogLoads = new Map<string, Promise<void>>()
   private sessionsChangedTimer: ReturnType<typeof setTimeout> | undefined
   private approvalPollTimer: ReturnType<typeof setInterval> | undefined
   private subagentPollTimer: ReturnType<typeof setInterval> | undefined
@@ -223,6 +252,7 @@ export class ChatController {
     this.http = options.http ?? null
     this.cache = options.cache ?? null
     this.now = options.now ?? (() => Date.now())
+    this.onRpcFailure = options.onRpcFailure
   }
 
   // ── lifecycle ──────────────────────────────────────────────────────────────
@@ -255,6 +285,7 @@ export class ChatController {
     this.acknowledged.clear()
     this.opening.clear()
     this.slashCatalogs.clear()
+    this.slashCatalogLoads.clear()
   }
 
   // ── opening a chat ─────────────────────────────────────────────────────────
@@ -1183,7 +1214,12 @@ export class ChatController {
    * so what is painted has to be the REFERENCE the row will carry rather than a
    * display name — see `attachmentReferences`.
    */
-  async send(botName: string, text: string, attachments: AttachmentInput[] = []): Promise<void> {
+  async send(
+    botName: string,
+    text: string,
+    attachments: AttachmentInput[] = [],
+    options: { display?: string } = {}
+  ): Promise<void> {
     const chat = this.chats.getState().chats[botName]
 
     if (!chat?.runtimeSessionId) {
@@ -1207,7 +1243,10 @@ export class ChatController {
       files.map(file => file.path)
     )
 
-    this.chats.getState().beginTurn(botName, body, attachmentReferences(attachments))
+    // `display` exists for one caller: a `send`/`skill` directive, whose `text`
+    // is the expanded skill body the model is meant to read and NOT what the
+    // reader typed. The bubble shows `/docx`; the gateway is sent the expansion.
+    this.chats.getState().beginTurn(botName, options.display ?? body, attachmentReferences(attachments))
 
     try {
       for (const file of images) {
@@ -1662,18 +1701,21 @@ export class ChatController {
    * command and skill this profile has, and it does not change mid-chat. The
    * per-keystroke work is `complete.slash`, which is what the gateway is built
    * to answer quickly.
+   *
+   * Two things here are about the difference between a fake gateway and a real
+   * one. The catalogue fetch is shared by every keystroke that arrives while it
+   * is in the air — typing `/model` is six of them, and against a fake that
+   * answers in the same tick the old `has()` check looked like a cache and was
+   * really six concurrent catalogue builds on the gateway. And a FAILED fetch is
+   * no longer remembered as an empty catalogue: it used to be, which meant one
+   * bad answer left `knowsSlashCommand` saying no for the rest of the session,
+   * so every `/model` after it went out as a prompt.
    */
   async querySlash(botName: string, typed: string): Promise<SlashCompletions> {
     const sessionId = this.requireRuntime(botName)
 
     if (!this.slashCatalogs.has(sessionId)) {
-      try {
-        const catalog = await this.gateway.request('commands.catalog', { session_id: sessionId, profile: botName })
-
-        this.slashCatalogs.set(sessionId, catalog ?? {})
-      } catch {
-        this.slashCatalogs.set(sessionId, {})
-      }
+      await this.fetchSlashCatalog(botName, sessionId)
     }
 
     try {
@@ -1683,12 +1725,50 @@ export class ChatController {
         items: result?.items ?? [],
         // The COLUMN an accepted item replaces from, which is how the same call
         // completes a command name and then its arguments: the gateway says how
-        // much of the line its answer stands for.
+        // much of the line its answer stands for. A real gateway answers 1 for a
+        // bare `/mo` — the slash is kept and the item's own `text` carries no
+        // slash — and `text.rfind(' ') + 1` once there is an argument.
         ...(typeof result?.replace_from === 'number' ? { replaceFrom: result.replace_from } : {})
       }
-    } catch {
+    } catch (error) {
+      this.noteRpcFailure('complete.slash', error)
+
       return { items: [] }
     }
+  }
+
+  /**
+   * Fetch the catalogue once, however many keystrokes ask for it.
+   *
+   * The in-flight promise is the cache until it settles. A refusal leaves
+   * NOTHING cached, so the next keystroke tries again — the alternative, which
+   * is what shipped, was an empty catalogue pinned to the session for as long as
+   * it lived.
+   */
+  private async fetchSlashCatalog(botName: string, sessionId: string): Promise<void> {
+    const inFlight = this.slashCatalogLoads.get(sessionId)
+
+    if (inFlight) {
+      await inFlight
+
+      return
+    }
+
+    const load = this.gateway
+      .request('commands.catalog', { session_id: sessionId, profile: botName })
+      .then(catalog => {
+        this.slashCatalogs.set(sessionId, catalog ?? {})
+      })
+      .catch((error: unknown) => {
+        this.noteRpcFailure('commands.catalog', error)
+      })
+      .finally(() => {
+        this.slashCatalogLoads.delete(sessionId)
+      })
+
+    this.slashCatalogLoads.set(sessionId, load)
+
+    await load
   }
 
   /**
@@ -1696,28 +1776,47 @@ export class ChatController {
    *
    * The catalogue answers it, and the answer decides what Return does with a
    * line that starts with a slash: a name the gateway knows is a COMMAND and
-   * goes to `slash.exec`, and anything else is prose that happens to begin with
+   * goes to the gateway, and anything else is prose that happens to begin with
    * `/` and goes out as an ordinary prompt. Names, aliases and skills all count
-   * — they are all things the gateway will run.
+   * — they are all things the gateway will run, though not all down the same
+   * road; see `slashRouteFor`.
    */
   knowsSlashCommand(botName: string, name: string): boolean {
+    return this.slashRouteFor(botName, name) !== null
+  }
+
+  /**
+   * WHICH gateway method will accept this command.
+   *
+   * `slash.exec` runs worker commands. It refuses a SKILL outright —
+   * `4018 skill command: use command.dispatch for /docx`, measured against
+   * `hermes serve` 0.21.3 on 2026-09-21 — and a real gateway's catalogue lists
+   * fifty-three of them next to the built-ins, every one of which
+   * `knowsSlashCommand` used to wave straight into the method that will not take
+   * it. The fake gateway answered `/docx` with cheerful text, which is exactly
+   * how a suite stays green over a command that cannot work.
+   */
+  slashRouteFor(botName: string, name: string): 'dispatch' | 'exec' | null {
     const catalog = this.slashCatalog(botName)
 
     if (!catalog || !name) {
-      return false
+      return null
     }
 
     const wanted = name.toLowerCase()
-
     const named = (raw: string) => raw.replace(/^\//u, '').toLowerCase() === wanted
 
-    return (
+    if (Object.keys(catalog.skills ?? {}).some(named)) {
+      return 'dispatch'
+    }
+
+    const known =
       Object.keys(catalog.commands ?? {}).some(named) ||
       Object.keys(catalog.canon ?? {}).some(named) ||
-      Object.keys(catalog.skills ?? {}).some(named) ||
       (catalog.pairs ?? []).some(pair => named(pair[0] ?? '')) ||
       (catalog.categories ?? []).some(category => (category.pairs ?? []).some(pair => named(pair[0] ?? '')))
-    )
+
+    return known ? 'exec' : null
   }
 
   /** The catalogue behind `querySlash`, for a picker that wants the whole list. */
@@ -1728,28 +1827,184 @@ export class ChatController {
   }
 
   /**
-   * Run a slash command. The gateway answers with text rather than a turn, so
-   * the result lands in the transcript as a notice rather than as a reply.
+   * Run a slash command and put its answer in the transcript.
+   *
+   * There are two kinds of answer and the gateway does not label which one it is
+   * about to give: plain worker text in `output`, or one of the six
+   * `command.dispatch` DIRECTIVES with a `type` — which `slash.exec` also
+   * returns, because upstream reroutes pending-input built-ins and skill bundles
+   * into `command.dispatch` itself and hands the directive straight back.
+   * `parseCommandDispatch` is the vendored narrowing for exactly that union; it
+   * was vendored and then never called, and this method read
+   * `output ?? message ?? notice` instead — so `/queue list`, which answers
+   * `{type: 'send', message: 'list'}`, put the word `list` in the transcript as
+   * though it were the result and never queued anything.
+   *
+   * `message` is model-facing scaffolding and no surface may render it. A skill
+   * bundle's `message` is the whole expanded skill body; `display` is the line
+   * the reader is meant to see.
    */
-  async runSlash(botName: string, command: string): Promise<void> {
-    const sessionId = this.requireRuntime(botName)
-    const result = await this.gateway.request('slash.exec', { session_id: sessionId, command, profile: botName })
-    const body = (result?.output ?? result?.message ?? result?.notice ?? '').trim()
+  async runSlash(botName: string, command: string): Promise<SlashOutcome> {
+    return await this.dispatchSlash(botName, command, 0)
+  }
 
-    // `notice` carries a single line, so the command and its answer share one.
+  private async dispatchSlash(botName: string, command: string, depth: number): Promise<SlashOutcome> {
+    const sessionId = this.requireRuntime(botName)
+    const { arg, name } = parseSlashCommand(command)
+    const result = await this.callSlash(botName, sessionId, command, name, arg)
+    const directive = parseCommandDispatch(result)
+
+    if (result?.warning) {
+      this.noticeIn(botName, sessionId, `${command} — ${result.warning}`)
+    }
+
+    // No `type`: plain worker or plugin text, which is the common case.
+    if (!directive) {
+      this.slashOutput(botName, sessionId, command, result?.output ?? '')
+
+      return {}
+    }
+
+    switch (directive.type) {
+      case 'exec':
+      case 'plugin':
+        this.slashOutput(botName, sessionId, command, directive.output ?? '')
+
+        return {}
+
+      case 'alias': {
+        // One hop only. An alias that points at an alias that points back would
+        // otherwise pace the socket until something gave out.
+        if (depth > 0 || !directive.target.trim()) {
+          this.noticeIn(botName, sessionId, `${command} — is an alias the gateway could not follow.`)
+
+          return {}
+        }
+
+        const target = directive.target.startsWith('/') ? directive.target : `/${directive.target}`
+
+        return await this.dispatchSlash(botName, arg ? `${target} ${arg}` : target, depth + 1)
+      }
+
+      case 'prefill':
+        if (directive.notice) {
+          this.noticeIn(botName, sessionId, directive.notice)
+        }
+
+        // The caller owns the composer; the controller does not reach into it.
+        return { prefill: directive.message }
+
+      case 'send':
+      case 'skill': {
+        const message = directive.message ?? ''
+        // A skill directive carries no `notice` in the vendored union; a send
+        // does. Read it off the raw result so both shapes reach the reader.
+        const notice = typeof result?.notice === 'string' ? result.notice.trim() : ''
+
+        if (notice) {
+          this.noticeIn(botName, sessionId, notice)
+        }
+
+        if (!message.trim()) {
+          this.noticeIn(botName, sessionId, `${command} — ${directive.display ?? 'nothing to send.'}`)
+
+          return {}
+        }
+
+        // The bubble shows the invocation; the gateway is sent the expansion.
+        await this.send(botName, message, [], { display: directive.display ?? command })
+
+        return {}
+      }
+    }
+  }
+
+  /**
+   * Put the command on the gateway, down whichever road takes it.
+   *
+   * The catalogue decides first, and the gateway's own refusal is the backstop:
+   * a bundle is not in `skills`, and upstream answers it with the same
+   * "use command.dispatch" 4018 that it answers a skill with. Reading that
+   * refusal and retrying is cheaper than keeping a second copy of upstream's
+   * rules here and hoping it stays true.
+   */
+  private async callSlash(
+    botName: string,
+    sessionId: string,
+    command: string,
+    name: string,
+    arg: string
+  ): Promise<SlashExecResult> {
+    const dispatch = async (): Promise<SlashExecResult> =>
+      await this.gateway.request('command.dispatch', {
+        name,
+        arg,
+        session_id: sessionId,
+        profile: botName
+      })
+
+    if (this.slashRouteFor(botName, name) === 'dispatch') {
+      return await dispatch()
+    }
+
+    try {
+      return await this.gateway.request('slash.exec', { session_id: sessionId, command, profile: botName })
+    } catch (error) {
+      if (!WANTS_DISPATCH_RE.test(error instanceof Error ? error.message : String(error))) {
+        throw error
+      }
+
+      this.noteRpcFailure('slash.exec', error)
+
+      return await dispatch()
+    }
+  }
+
+  /**
+   * One command's output as a transcript notice.
+   *
+   * The first line is the title and the REST is the body, which is the whole
+   * point: `/status` answers nine lines and `/help` answers five kilobytes of
+   * ASCII table, and both of those used to be concatenated into a notice title
+   * with an empty body — so `NoticePill` drew them as one untoggleable run of
+   * text. The fake gateway answered every command with a single short line,
+   * which is why no test ever saw it.
+   */
+  private slashOutput(botName: string, sessionId: string, command: string, output: string): void {
+    const text = output.trim()
+
+    if (!text) {
+      this.noticeIn(botName, sessionId, `${command} ran.`)
+
+      return
+    }
+
+    const lines = text.split('\n')
+
+    // One line is a headline. More than one is a REPORT, and its first line is
+    // as likely to be an ASCII border as a summary — `/help` opens with
+    // `+------+` — so the command names the row and the whole answer goes in the
+    // body, where `NoticePill` gives the reader a disclosure to open it with.
+    if (lines.length === 1) {
+      this.noticeIn(botName, sessionId, `${command} — ${text}`)
+
+      return
+    }
+
+    this.noticeIn(botName, sessionId, `${command} — ${lines.length} lines`, text)
+  }
+
+  private noticeIn(botName: string, sessionId: string, message: string, detail = ''): void {
     this.chats.getState().dispatchEvent(botName, {
       type: 'notice',
       session_id: sessionId,
-      payload: { message: body ? `${command} — ${body}` : `${command} ran.` }
+      payload: detail ? { message, detail } : { message }
     })
+  }
 
-    if (result?.warning) {
-      this.chats.getState().dispatchEvent(botName, {
-        type: 'notice',
-        session_id: sessionId,
-        payload: { message: `${command} — ${result.warning}` }
-      })
-    }
+  /** Remember a swallowed gateway refusal so the debug screen can show it. */
+  private noteRpcFailure(method: string, error: unknown): void {
+    this.onRpcFailure?.(describeRpcFailure(method, error, this.now()))
   }
 
   // ── chat options ───────────────────────────────────────────────────────────

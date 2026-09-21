@@ -2,6 +2,7 @@ import type { AuthTimelineSnapshot, ConnectionStatus, GatewayError } from '@herm
 import { create } from 'zustand'
 
 import type { StoredGatewayConfig } from './config'
+import { pushRpcFailure, type RpcFailure } from './rpc-failures'
 
 export interface ConnectionStoreState {
   status: ConnectionStatus
@@ -13,9 +14,19 @@ export interface ConnectionStoreState {
    * the events, the signed-out card reads the reason.
    */
   authTimeline: AuthTimelineSnapshot
+  /**
+   * Gateway calls whose failure a screen decided to absorb, oldest first.
+   *
+   * Separate from `authTimeline` on purpose: that ring's whole design is a
+   * closed set of names with no message text, so it can be pasted into an issue
+   * without a judgement call. This one carries the gateway's words, which is the
+   * only thing that makes a protocol mismatch readable.
+   */
+  rpcFailures: RpcFailure[]
   setStatus: (status: ConnectionStatus, error: GatewayError | null) => void
   setConfig: (config: StoredGatewayConfig | null) => void
   setAuthTimeline: (snapshot: AuthTimelineSnapshot) => void
+  noteRpcFailure: (failure: RpcFailure) => void
   reset: () => void
 }
 
@@ -42,8 +53,10 @@ const INITIAL = {
 export const useConnectionStore = create<ConnectionStoreState>(set => ({
   ...INITIAL,
   authTimeline: { events: [], lastSignOut: null },
+  rpcFailures: [],
   setStatus: (status, error) => set({ status, lastError: error }),
   setConfig: config => set({ config }),
   setAuthTimeline: authTimeline => set({ authTimeline }),
+  noteRpcFailure: failure => set(state => ({ rpcFailures: pushRpcFailure(state.rpcFailures, failure) })),
   reset: () => set(INITIAL)
 }))

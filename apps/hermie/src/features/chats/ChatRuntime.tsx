@@ -12,6 +12,7 @@ import { AppState } from 'react-native'
 import { requestOpenChat } from '../../app/open-chat-bus'
 import { useGateway } from '../../gateway'
 import { chatGatewayFor, type ChatGateway } from '../../gateway/link'
+import { useConnectionStore } from '../../gateway/store'
 import { chatCache } from '../../platform/chat-cache'
 import { RUNS_ON_MAC } from '../../platform/runs-on-mac'
 import { useBotsStore } from '../../store/bots'
@@ -110,7 +111,10 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       // The REST half, for file uploads. It is built with the connection and
       // replaced with it, which is why it is not a dependency of its own.
       http,
-      cache: chatCache
+      cache: chatCache,
+      // Every gateway refusal the controller absorbs goes here, and the debug
+      // screen reads it. The alternative is what shipped: `catch {}`.
+      onRpcFailure: failure => useConnectionStore.getState().noteRpcFailure(failure)
     })
 
     /*

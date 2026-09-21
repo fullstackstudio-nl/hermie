@@ -882,6 +882,119 @@ const AVATAR_PNG_BASE64 =
  * row, an outbound `message_agent` dispatch and the `process_complete` row that
  * carries the teammate's answer back.
  */
+/**
+ * A JSON-RPC error with the gateway's OWN code, not the generic -32603.
+ *
+ * Upstream refuses things with four- and five-digit codes — 4018 for "wrong
+ * method for this command", 5030 for a worker that died — and a client that
+ * branches on which of those it got could not be tested against a server that
+ * only ever sent one.
+ */
+export class RpcFault extends Error {
+  constructor(
+    readonly code: number,
+    message: string
+  ) {
+    super(message)
+    this.name = 'RpcFault'
+  }
+}
+
+/** Catalogue names this server treats as SKILLS: `slash.exec` refuses them. */
+const FAKE_SKILL_COMMANDS = new Set(['release-notes'])
+
+/** Built-ins upstream reroutes into `command.dispatch` from inside `slash.exec`. */
+const FAKE_DISPATCH_COMMANDS = new Set(['queue', 'q', 'undo'])
+
+/**
+ * A worker command's text, shaped like the real thing rather than like one
+ * cheerful line: `/status` answers a block and `/help` answers a table, and the
+ * client has to put a multi-line answer somewhere a reader can fold it away.
+ */
+function slashOutput(name: string, arg: string): string {
+  switch (name) {
+    case 'model':
+      return arg ? `  ✓ Model set to '${arg}' (this session)` : 'Current model: example-provider/example-model'
+
+    case 'reasoning':
+      return arg
+        ? `  ✓ Reasoning effort set to '${arg}' (this session — use --global to persist)`
+        : 'Current reasoning effort: medium'
+
+    case 'yolo':
+      return '  ⚡ YOLO mode ON — all commands auto-approved. Use with caution.'
+
+    case 'status':
+      return [
+        'Hermes TUI Status',
+        '',
+        'Session ID: bot-chat-fake',
+        'Model: example-provider/example-model',
+        'Tokens: 0',
+        'Agent Running: No'
+      ].join('\n')
+
+    case 'help':
+      return [
+        '+-------------------------------------------------------+',
+        '|                   Available Commands                  |',
+        '+-------------------------------------------------------+',
+        '',
+        '  ── Session ──',
+        '    /status         - Show session, model, token, and context info',
+        '',
+        '  ── Configuration ──',
+        '    /model          - Switch model (session-scoped)',
+        '    /reasoning      - Set the reasoning effort',
+        '    /yolo           - Toggle YOLO mode'
+      ].join('\n')
+
+    default:
+      return `${name} is not a real command on a fake gateway, but it ran.`
+  }
+}
+
+/**
+ * `command.dispatch`'s structured answer.
+ *
+ * The union is the point: a client that only reads `output` sees nothing here,
+ * and a client that renders `message` shows the reader model-facing scaffolding
+ * it was never meant to see.
+ */
+function dispatchCommand(name: string, arg: string): Record<string, unknown> {
+  switch (name) {
+    case 'release-notes':
+      return {
+        type: 'skill',
+        name: 'release-notes',
+        display: arg ? `/release-notes ${arg}` : '/release-notes',
+        message: [
+          '[IMPORTANT: The user has invoked the "release-notes" skill, indicating they want you to follow its instructions.]',
+          '',
+          '---',
+          'name: release-notes',
+          'description: Draft release notes.',
+          '---',
+          '',
+          'Read the changelog, group the entries, and write them up.',
+          arg
+        ]
+          .filter(Boolean)
+          .join('\n')
+      }
+
+    case 'q':
+    case 'queue':
+      return { type: 'send', message: arg, notice: arg ? '' : 'Nothing queued.' }
+
+    case 'undo':
+      return { type: 'prefill', message: 'the message being taken back', notice: '↶ rewound one turn' }
+
+    default:
+      return { type: 'exec', output: slashOutput(name, arg) }
+  }
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
 
 /** `_MANAGED_FILE_MAX_BYTES` in `hermes_cli/web_server.py`. */
@@ -2561,7 +2674,13 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
         send(socket, {
           jsonrpc: '2.0',
           id: frame.id,
-          error: { code: -32603, message: error instanceof Error ? error.message : String(error) }
+          // A handler that named a code keeps it: a client telling 4018 ("wrong
+          // method for this command") from 5030 ("the worker died") cannot be
+          // tested against a server that flattens both to -32603.
+          error: {
+            code: error instanceof RpcFault ? error.code : -32603,
+            message: error instanceof Error ? error.message : String(error)
+          }
         })
       }
     }
@@ -2833,38 +2952,149 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
         }
       }
 
+      /*
+        `methods_tools.py::commands.catalog`.
+
+        Every key is written WITH its slash, because that is what the real
+        accumulator does (`cat.commands.update({f"/{key}": …})`), and `skills`
+        maps a slashed key to `{usage, origin}` rather than to a description.
+        `argument_mode` is the three-value enum upstream declares — `options`,
+        `text`, `mixed`, or null — and never `required`/`none`, which this server
+        invented and no client could ever have matched.
+
+        Measured against `hermes serve` 0.21.3 on 2026-09-21.
+      */
       case 'commands.catalog':
         return {
           pairs: [
-            ['/model', 'Switch the model'],
-            ['/reasoning', 'Set the reasoning effort'],
-            ['/status', 'Show the session status']
+            ['/model', 'Switch model (session-scoped; --global to persist) (usage: /model [model])'],
+            ['/reasoning', 'Set the reasoning effort (usage: /reasoning [low|medium|high])'],
+            ['/status', 'Show session, model, token, and context info'],
+            ['/help', 'Show available commands (usage: /help [skills|<filter>])'],
+            ['/yolo', 'Toggle YOLO mode (skip all dangerous command approvals)'],
+            ['/queue', 'Queue a prompt for the next turn (usage: /queue [<prompt>|list])'],
+            ['/release-notes', 'Draft release notes']
           ],
-          commands: {
-            model: { argument_mode: 'required' },
-            reasoning: { argument_mode: 'required' },
-            status: { argument_mode: 'none' }
+          sub: { '/queue': ['list', 'edit', 'rm', 'clear'] },
+          canon: {
+            '/model': '/model',
+            '/reasoning': '/reasoning',
+            '/status': '/status',
+            '/help': '/help',
+            '/yolo': '/yolo',
+            '/queue': '/queue',
+            '/q': '/queue'
           },
-          skills: { 'release-notes': { description: 'Draft release notes' } },
-          skill_count: 1
+          commands: {
+            '/model': { argument_mode: 'mixed', desktop: null },
+            '/reasoning': { argument_mode: 'options', desktop: null },
+            '/status': { argument_mode: null, desktop: null },
+            '/help': { argument_mode: 'text', desktop: null },
+            '/yolo': { argument_mode: null, desktop: null },
+            '/queue': { argument_mode: 'text', desktop: null },
+            '/q': { argument_mode: 'text', desktop: null }
+          },
+          categories: [
+            {
+              name: 'Session',
+              pairs: [['/status', 'Show session, model, token, and context info']]
+            },
+            {
+              name: 'Configuration',
+              pairs: [
+                ['/model', 'Switch model (session-scoped; --global to persist) (usage: /model [model])'],
+                ['/reasoning', 'Set the reasoning effort (usage: /reasoning [low|medium|high])'],
+                ['/yolo', 'Toggle YOLO mode (skip all dangerous command approvals)']
+              ]
+            }
+          ],
+          // Slashed keys, `{usage, origin}` values: `_catalog_skills`.
+          skills: { '/release-notes': { usage: 0, origin: 'bundled' } },
+          skill_count: 1,
+          warning: ''
         }
 
+      /*
+        `methods_complete.py::complete.slash`.
+
+        Three things this used to get wrong, each of which hid a client fault:
+        an item's `text` carries NO slash (only `display` does), `replace_from`
+        is 1 while a command token is under the cursor rather than 0, and it
+        moves to `text.rfind(' ') + 1` as soon as there is an argument. A line
+        that does not start with `/` answers an empty list with no
+        `replace_from` at all.
+      */
       case 'complete.slash': {
         const text = String(params.text ?? '')
-        const all = [
-          { text: '/model', display: '/model', meta: 'Switch the model', kind: 'command' },
-          { text: '/reasoning', display: '/reasoning', meta: 'Set the reasoning effort', kind: 'command' },
-          { text: '/status', display: '/status', meta: 'Show the session status', kind: 'command' },
-          { text: '/release-notes', display: '/release-notes', meta: 'Draft release notes', kind: 'skill' }
-        ]
 
-        return { items: all.filter(item => item.text.startsWith(text)), replace_from: 0 }
+        if (!text.startsWith('/')) {
+          return { items: [] }
+        }
+
+        const all = [
+          {
+            text: 'model',
+            display: '/model',
+            meta: 'Switch model (session-scoped; --global to persist)',
+            kind: 'command'
+          },
+          { text: 'reasoning', display: '/reasoning', meta: 'Set the reasoning effort', kind: 'command' },
+          { text: 'status', display: '/status', meta: 'Show session, model, token, and context info', kind: 'command' },
+          { text: 'help ', display: '/help', meta: 'Show available commands', kind: 'command' },
+          { text: 'yolo', display: '/yolo', meta: 'Toggle YOLO mode', kind: 'command' },
+          { text: 'queue', display: '/queue', meta: 'Queue a prompt for the next turn', kind: 'command' },
+          { text: 'release-notes', display: '/release-notes', meta: 'Draft release notes', kind: 'skill' }
+        ]
+        const typed = text.slice(1).toLowerCase()
+        const replaceFrom = text.includes(' ') ? text.lastIndexOf(' ') + 1 : 1
+
+        return {
+          items: text.includes(' ') ? [] : all.filter(item => item.text.trimEnd().startsWith(typed)),
+          replace_from: replaceFrom
+        }
       }
 
-      case 'slash.exec': {
-        const command = String(params.command ?? '')
+      /*
+        `methods_tools.py::slash.exec`.
 
-        return { output: `${command} is not a real command on a fake gateway, but it ran.` }
+        It does NOT run everything the catalogue lists. A skill is refused with
+        `4018 skill command: use command.dispatch for /<name>` — upstream's
+        `_is_profile_skill_command` guard — and a pending-input built-in is
+        rerouted by upstream into `command.dispatch`, so its answer comes back as
+        a DIRECTIVE with a `type` and no `output` at all. Answering everything
+        with one cheerful line, which is what this did, is why a client that
+        could not run any of the fifty-three skills a real gateway lists had a
+        green suite.
+      */
+      case 'slash.exec': {
+        const command = String(params.command ?? '').trim()
+        const [head = '', ...rest] = command.replace(/^\/+/u, '').split(/\s+/u)
+        const name = head.toLowerCase()
+        const arg = rest.join(' ')
+
+        if (FAKE_SKILL_COMMANDS.has(name)) {
+          throw new RpcFault(4018, `skill command: use command.dispatch for /${name}`)
+        }
+
+        if (FAKE_DISPATCH_COMMANDS.has(name)) {
+          return dispatchCommand(name, arg)
+        }
+
+        return { output: slashOutput(name, arg) }
+      }
+
+      /*
+        `methods_tools.py::command.dispatch` — the structured half. A skill
+        answers `{type: 'skill', message, display, name}`, where `message` is the
+        expanded skill body no surface may render and `display` is the line the
+        reader sees.
+      */
+      case 'command.dispatch': {
+        const name = String(params.name ?? '')
+          .replace(/^\/+/u, '')
+          .toLowerCase()
+
+        return dispatchCommand(name, String(params.arg ?? ''))
       }
 
       case 'config.get': {

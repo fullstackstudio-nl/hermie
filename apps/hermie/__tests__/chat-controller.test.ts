@@ -1,5 +1,6 @@
 import { BotsController } from '../src/features/bots/bots-controller'
 import { ChatController } from '../src/features/chats/chat-controller'
+import type { RpcFailure } from '../src/gateway/rpc-failures'
 import { MemoryChatCache } from '../src/platform/chat-cache'
 import { botFromProfileRow, useBotsStore } from '../src/store/bots'
 import { useChatsStore } from '../src/store/chats'
@@ -25,7 +26,7 @@ const HISTORY = [
 
 const started: ChatController[] = []
 
-function setup(options: { cache?: MemoryChatCache | null } = {}) {
+function setup(options: { cache?: MemoryChatCache | null; onRpcFailure?: (failure: RpcFailure) => void } = {}) {
   const gateway = new FakeChatGateway()
   const cache = options.cache === undefined ? new MemoryChatCache() : options.cache
   const botsController = new BotsController({ gateway, store: useBotsStore, cache })
@@ -34,7 +35,8 @@ function setup(options: { cache?: MemoryChatCache | null } = {}) {
     chats: useChatsStore,
     bots: useBotsStore,
     botsController,
-    cache
+    cache,
+    ...(options.onRpcFailure ? { onRpcFailure: options.onRpcFailure } : {})
   })
 
   gateway
@@ -1135,6 +1137,152 @@ describe('slash commands', () => {
       .find(item => item?.kind === 'notice')
 
     expect(notice).toMatchObject({ title: '/model — model is example-model' })
+  })
+
+  /**
+   * Measured against `hermes serve` 0.21.3 on 2026-09-21: `/status` answers a
+   * ten-line block and `/help` answers two hundred. Both used to be flattened
+   * into the notice TITLE with an empty body, and `NoticePill` only offers a
+   * disclosure when there IS a body — so the whole report was drawn as one
+   * unfoldable run of text. The fake gateway answered every command with a
+   * single short line, which is why no test ever saw it.
+   */
+  it('puts a multi-line command answer in the body, not in the title', async () => {
+    const { gateway, controller } = setup()
+
+    gateway.reply('slash.exec', { output: 'Hermes TUI Status\n\nModel: example-model\nTokens: 0' })
+
+    await controller.openChat(RESEARCHER)
+    await controller.runSlash('researcher', '/status')
+
+    const notice = chatOf()
+      .order.map(id => chatOf().items[id])
+      .find(item => item?.kind === 'notice')
+
+    expect(notice).toMatchObject({ title: '/status — 4 lines' })
+    expect((notice as { body?: string }).body).toContain('Tokens: 0')
+  })
+
+  /**
+   * The refusal that broke the feature on every real gateway. A profile's skills
+   * are in `commands.catalog`, so `knowsSlashCommand` says yes to all of them —
+   * and `slash.exec` answers every one with
+   * `4018 skill command: use command.dispatch for /<name>`.
+   */
+  it('sends a skill command to command.dispatch rather than to slash.exec', async () => {
+    const { gateway, controller } = setup()
+
+    gateway
+      .reply('commands.catalog', { pairs: [['/model', 'Switch the model']], skills: { '/docx': { usage: 0 } } })
+      .reply('complete.slash', { items: [] })
+      .reply('command.dispatch', { type: 'skill', name: 'docx', display: '/docx', message: 'the whole skill body' })
+      .reply('prompt.submit', { status: 'streaming' })
+
+    controller.start()
+    await controller.openChat(RESEARCHER)
+    await controller.querySlash('researcher', '/do')
+
+    expect(controller.slashRouteFor('researcher', 'docx')).toBe('dispatch')
+    expect(controller.slashRouteFor('researcher', 'model')).toBe('exec')
+
+    await controller.runSlash('researcher', '/docx')
+
+    expect(gateway.calls.filter(call => call.method === 'slash.exec')).toHaveLength(0)
+    expect(gateway.lastCall('command.dispatch')).toMatchObject({ name: 'docx', arg: '' })
+    // The expansion is what the gateway is sent; the invocation is what is shown.
+    expect(gateway.lastCall('prompt.submit')).toMatchObject({ text: 'the whole skill body' })
+    // The LAST user row: this chat opens with two rows of history behind it.
+    expect(
+      chatOf()
+        .order.map(id => chatOf().items[id])
+        .filter(item => item?.kind === 'user')
+        .at(-1)
+    ).toMatchObject({ text: '/docx' })
+  })
+
+  /**
+   * `slash.exec` hands a rerouted built-in's directive straight back, so its
+   * result can carry a `type` and no `output`. `/queue <text>` answers
+   * `{type: 'send', message}` on a real gateway; reading `output ?? message`
+   * rendered the message as though it were the answer and queued nothing.
+   */
+  it('acts on a directive rather than rendering the model-facing message', async () => {
+    const { gateway, controller } = setup()
+
+    gateway
+      .reply('slash.exec', { type: 'send', message: 'write it up', notice: 'Queued.' })
+      .reply('prompt.submit', { status: 'streaming' })
+
+    controller.start()
+    await controller.openChat(RESEARCHER)
+    await controller.runSlash('researcher', '/queue write it up')
+
+    expect(gateway.lastCall('prompt.submit')).toMatchObject({ text: 'write it up' })
+    expect(
+      chatOf()
+        .order.map(id => chatOf().items[id])
+        .filter(item => item?.kind === 'notice')
+        .map(item => (item as { title: string }).title)
+    ).toContain('Queued.')
+  })
+
+  it('hands a prefill directive back to the caller instead of to the transcript', async () => {
+    const { gateway, controller } = setup()
+
+    gateway.reply('slash.exec', { type: 'prefill', message: 'the message being taken back', notice: '\u21b6 rewound' })
+
+    await controller.openChat(RESEARCHER)
+
+    expect(await controller.runSlash('researcher', '/undo')).toEqual({ prefill: 'the message being taken back' })
+  })
+
+  /**
+   * One catalogue, however fast the typing. The `has()` check happened before an
+   * await, so against a real gateway typing `/model` fired six concurrent
+   * catalogue builds; against a fake that answers in the same tick it looked
+   * like a cache.
+   */
+  it('shares one catalogue fetch between the keystrokes that arrive during it', async () => {
+    const { gateway, controller } = setup()
+
+    gateway
+      .reply('commands.catalog', { pairs: [['/model', 'Switch the model']] })
+      .reply('complete.slash', { items: [] })
+
+    await controller.openChat(RESEARCHER)
+    await Promise.all(['/m', '/mo', '/mod', '/mode', '/model'].map(typed => controller.querySlash('researcher', typed)))
+
+    expect(gateway.calls.filter(call => call.method === 'commands.catalog')).toHaveLength(1)
+  })
+
+  /**
+   * A refusal used to be cached as an EMPTY catalogue for the life of the
+   * session: one bad answer and `knowsSlashCommand` said no forever, so every
+   * `/model` after it went out as an ordinary prompt. That is half of the bug
+   * report this test exists for.
+   */
+  it('retries a catalogue the gateway refused, and records the refusal', async () => {
+    const failures: RpcFailure[] = []
+    const { gateway, controller } = setup({ onRpcFailure: failure => failures.push(failure) })
+
+    gateway
+      .reply('commands.catalog', () => {
+        throw new Error('{"code":5020,"message":"skill discovery unavailable"}')
+      })
+      .reply('complete.slash', { items: [] })
+
+    await controller.openChat(RESEARCHER)
+    await controller.querySlash('researcher', '/mo')
+
+    expect(controller.slashCatalog('researcher')).toBeUndefined()
+    expect(controller.knowsSlashCommand('researcher', 'model')).toBe(false)
+    expect(failures).toMatchObject([{ method: 'commands.catalog', code: 5020 }])
+
+    gateway.reply('commands.catalog', { pairs: [['/model', 'Switch the model']] })
+    await controller.querySlash('researcher', '/mod')
+
+    expect(controller.knowsSlashCommand('researcher', 'model')).toBe(true)
+    expect(gateway.calls.filter(call => call.method === 'commands.catalog')).toHaveLength(2)
   })
 })
 

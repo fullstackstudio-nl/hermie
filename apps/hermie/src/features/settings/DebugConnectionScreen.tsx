@@ -115,6 +115,52 @@ function AuthTimelineBlock() {
   )
 }
 
+/**
+ * Gateway calls that FAILED and whose failure a screen swallowed.
+ *
+ * The block that would have saved a day: the slash popover queried
+ * `commands.catalog` and `complete.slash` inside `catch {}`, and when a real
+ * gateway refused one there was nothing anywhere to say so. Unlike the auth ring
+ * above, these lines carry the gateway's own words — which is the only thing
+ * that makes `skill command: use command.dispatch for /docx` a diagnosis rather
+ * than a shrug — so they can name a command, a profile or a path.
+ */
+function RpcFailuresBlock() {
+  const theme = useTheme()
+  const failures = useConnectionStore(state => state.rpcFailures)
+
+  return (
+    <View style={{ gap: theme.space.xxs }}>
+      <Text variant="name">Refused gateway calls</Text>
+
+      {failures.length > 0 ? (
+        failures.map(failure => (
+          <Text
+            color="textMuted"
+            key={`${failure.at}-${failure.method}`}
+            selectable
+            testID="debug-rpc-failure"
+            variant="meta"
+          >
+            {[
+              clockOf(failure.at),
+              failure.method,
+              failure.code === undefined ? '' : `code ${failure.code}`,
+              failure.message
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+          </Text>
+        ))
+      ) : (
+        <Text color="textMuted" variant="meta">
+          No refused calls recorded on this connection.
+        </Text>
+      )}
+    </View>
+  )
+}
+
 export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
   const theme = useTheme()
   const chats = useChatsStore(state => state.chats)
@@ -297,6 +343,8 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
         ) : null}
 
         <AuthTimelineBlock />
+
+        <RpcFailuresBlock />
 
         {/*
           What to read when a chat shows something twice. A screenshot of two

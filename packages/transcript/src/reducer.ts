@@ -1029,7 +1029,16 @@ export function applyEvent(state: ChatState, event: TranscriptEvent, now: number
       const message = str(payload.message)
 
       if (message) {
-        pushNotice(next, 'notice', message, '', now)
+        /*
+          `detail` is ours, not the gateway's: upstream's notice event carries a
+          single `message` and nothing else. It exists because a slash command's
+          answer arrives here, and `/status` is nine lines and `/help` is five
+          kilobytes of ASCII table — all of which used to be flattened into the
+          TITLE with an empty body, which `NoticePill` then drew as one run of
+          text with no way to fold it away. An event without it behaves exactly
+          as it did.
+        */
+        pushNotice(next, 'notice', message, str(payload.detail), now)
       }
 
       return next

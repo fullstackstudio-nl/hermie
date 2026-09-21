@@ -314,6 +314,8 @@ function Conversation({
    */
   const [uploaded, setUploaded] = useState<{ id: string; filename: string; path: string }[]>([])
   const [suggestions, setSuggestions] = useState<SlashSuggestion[]>([])
+  /** Which completion query is allowed to paint; see `querySlash` below. */
+  const slashSeq = useRef(0)
   const [models, setModels] = useState<ModelChoice[]>([])
   const [dismissedRequests, setDismissed] = useState<string[]>([])
   const [newCount, setNewCount] = useState(0)
@@ -884,7 +886,14 @@ function Conversation({
       */
       if (looksLikeSlashCommand(body) && chat.knowsSlashCommand(parseSlashCommand(body).name)) {
         try {
-          await chat.runSlash(body)
+          const outcome = await chat.runSlash(body)
+
+          // A `prefill` directive — `/undo`, `/queue edit` — hands back text for
+          // the FIELD rather than for the transcript. The controller does not
+          // reach into the composer; this is the only place that owns it.
+          if (outcome.prefill !== undefined) {
+            chat.setDraft(outcome.prefill)
+          }
         } catch (error) {
           chat.setDraft(body)
           setNotice(messageOf(error))
@@ -1057,9 +1066,24 @@ function Conversation({
    */
   const querySlash = useCallback(
     (typed: string) => {
+      /*
+        Only the NEWEST query may paint.
+
+        Every keystroke fires one and they are answered out of order — a real
+        gateway's `/` is thirty-four rows and its `/model` is seven, so the wide
+        answer regularly lands after the narrow one and the popover fills back up
+        with the list for a prefix that is no longer in the field. Against the
+        fake, which answers within the tick, the race simply never ran.
+      */
+      const seq = (slashSeq.current += 1)
+
       void chat
         .querySlash(typed)
-        .then(({ items, replaceFrom }) =>
+        .then(({ items, replaceFrom }) => {
+          if (seq !== slashSeq.current) {
+            return
+          }
+
           setSuggestions(
             items.slice(0, 6).map(item => {
               const name = (item.display ?? item.text).replace(/^\//u, '')
@@ -1068,8 +1092,12 @@ function Conversation({
               return { name, description: item.meta ?? '', insert }
             })
           )
-        )
-        .catch(() => setSuggestions([]))
+        })
+        .catch(() => {
+          if (seq === slashSeq.current) {
+            setSuggestions([])
+          }
+        })
     },
     [chat]
   )

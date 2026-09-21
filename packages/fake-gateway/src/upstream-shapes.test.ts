@@ -627,3 +627,255 @@ describe('POST /auth/native/refresh — routes.py::auth_native_refresh', () => {
     }
   })
 })
+
+/**
+ * The slash-command trio, pinned against `hermes serve` 0.21.3 as it answered
+ * on 2026-09-21 (`tui_gateway/methods_tools.py` and `methods_complete.py`).
+ *
+ * This block exists because of a bug report, not a hunch. Slash autocomplete
+ * shipped green: every test drove the fake, and the fake answered
+ * `commands.catalog` with unslashed keys, `complete.slash` with slashed item
+ * text and `replace_from: 0`, and `slash.exec` with one cheerful line for
+ * ANYTHING — including the skills a real gateway refuses outright. The owner
+ * typed `/` on a real gateway and saw nothing.
+ *
+ * So each case below names what upstream actually does, and the fake was
+ * changed to match it rather than the other way round.
+ */
+describe('the slash trio over the socket — methods_tools.py + methods_complete.py', () => {
+  let live: FakeGateway
+  let socket: WebSocket
+  let nextId = 0
+
+  const pending = new Map<number, (value: Record<string, unknown>) => void>()
+
+  const call = (method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> => {
+    const id = ++nextId
+
+    return new Promise(resolve => {
+      pending.set(id, resolve)
+      socket.send(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`)
+    })
+  }
+
+  /** The whole frame, because half these cases are about the ERROR half. */
+  const raw = (method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> => {
+    const id = ++nextId
+
+    return new Promise(resolve => {
+      pending.set(id, resolve)
+      socket.send(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`)
+    })
+  }
+
+  beforeAll(async () => {
+    live = await startFakeGateway({ port: 0 })
+    socket = new WebSocket(live.wsUrl, ['hermes-gateway-v1'])
+
+    socket.on('message', data => {
+      for (const line of String(data).split('\n')) {
+        if (!line.trim()) {
+          continue
+        }
+
+        const frame = JSON.parse(line) as Record<string, unknown>
+        const id = typeof frame.id === 'number' ? frame.id : null
+        const waiter = id === null ? undefined : pending.get(id)
+
+        if (waiter && id !== null) {
+          pending.delete(id)
+          // Resolve with the RESULT when there is one and with the whole frame
+          // otherwise, so an error case can read `error.code`.
+          waiter((frame.result ?? frame) as Record<string, unknown>)
+        }
+      }
+    })
+
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', () => resolve())
+      socket.once('error', reject)
+    })
+  })
+
+  afterAll(async () => {
+    socket.close()
+    await live.close()
+  })
+
+  describe('commands.catalog — methods_tools.py::_Catalog', () => {
+    it('keys every map WITH the slash, the way the accumulator writes them', async () => {
+      const catalog = await call('commands.catalog', { session_id: 'bot-chat-writer', profile: 'writer' })
+
+      for (const pair of catalog.pairs as string[][]) {
+        expect(pair[0]).toMatch(/^\//u)
+      }
+
+      for (const key of Object.keys(catalog.canon as Record<string, string>)) {
+        expect(key).toMatch(/^\//u)
+      }
+
+      for (const key of Object.keys(catalog.commands as Record<string, unknown>)) {
+        expect(key).toMatch(/^\//u)
+      }
+
+      // `_catalog_skills` writes `cat.pairs.append([k, …])` with `k` already
+      // slashed, and fills `skills[k]` under the same key.
+      for (const key of Object.keys(catalog.skills as Record<string, unknown>)) {
+        expect(key).toMatch(/^\//u)
+      }
+    })
+
+    it('answers every key the accumulator returns, including the empty warning', () => {
+      return call('commands.catalog', { session_id: 'bot-chat-writer' }).then(catalog => {
+        expect(keysOf(catalog)).toEqual([
+          'canon',
+          'categories',
+          'commands',
+          'pairs',
+          'skill_count',
+          'skills',
+          'sub',
+          'warning'
+        ])
+        // `""` when nothing failed discovery — not absent, and not null.
+        expect(catalog.warning).toBe('')
+      })
+    })
+
+    /**
+     * `skills[k]` is `{usage, origin}` and nothing else: every consumer ranks by
+     * them. The fake used to put a `description` there, which is a field no
+     * gateway sends and nothing could read.
+     */
+    it('describes a skill by usage and origin, not by a description', async () => {
+      const catalog = await call('commands.catalog', {})
+      const skills = catalog.skills as Record<string, Record<string, unknown>>
+
+      for (const entry of Object.values(skills)) {
+        expect(keysOf(entry)).toEqual(['origin', 'usage'])
+      }
+
+      expect(catalog.skill_count).toBe(Object.keys(skills).length)
+    })
+
+    /** `ArgumentMode` is `options | text | mixed` — or null. Never `required`. */
+    it('uses upstream’s three-value argument_mode', async () => {
+      const catalog = await call('commands.catalog', {})
+      const commands = catalog.commands as Record<string, { argument_mode?: unknown }>
+
+      for (const meta of Object.values(commands)) {
+        expect([null, 'options', 'text', 'mixed']).toContain(meta.argument_mode ?? null)
+      }
+    })
+  })
+
+  describe('complete.slash — methods_complete.py', () => {
+    /**
+     * The single most load-bearing shape here. `c.text` is the completion's own
+     * text with NO slash; the slash the reader typed is kept because
+     * `replace_from` is 1 rather than 0. A client that accepted an item by
+     * pasting `text` over the whole line would write `/` + `/model`.
+     */
+    it('answers unslashed text, slashed display, and replace_from 1', async () => {
+      const result = await call('complete.slash', { text: '/mo', session_id: 'bot-chat-writer' })
+      const items = result.items as { text: string; display: string; kind: string }[]
+
+      expect(items.length).toBeGreaterThan(0)
+      expect(result.replace_from).toBe(1)
+
+      for (const item of items) {
+        expect(item.text).not.toMatch(/^\//u)
+        expect(item.display).toMatch(/^\//u)
+        // `kind` rides only on slash completions: command vs skill.
+        expect(['command', 'skill']).toContain(item.kind)
+      }
+    })
+
+    /** Accepting an item has to rebuild the typed line without doubling it. */
+    it('rebuilds the line the way the composer does', async () => {
+      const typed = '/mo'
+      const result = await call('complete.slash', { text: typed, session_id: 'bot-chat-writer' })
+      const first = (result.items as { text: string }[])[0]!
+
+      expect(`${typed.slice(0, result.replace_from as number)}${first.text}`).toBe('/model')
+    })
+
+    /** `text.rfind(" ") + 1` once there is an argument: the command is kept. */
+    it('moves replace_from to the argument once there is one', async () => {
+      const result = await call('complete.slash', { text: '/model ', session_id: 'bot-chat-writer' })
+
+      expect(result.replace_from).toBe(7)
+    })
+
+    /** `if not text.startswith("/"): return {"items": []}` — and no replace_from. */
+    it('answers nothing at all for a line that is not a command', async () => {
+      const result = await call('complete.slash', { text: 'model', session_id: 'bot-chat-writer' })
+
+      expect(result.items).toEqual([])
+      expect(result.replace_from).toBeUndefined()
+    })
+  })
+
+  describe('slash.exec — methods_tools.py::slash.exec', () => {
+    /**
+     * The refusal that broke the feature. Every skill in `commands.catalog`
+     * answers `knowsSlashCommand` yes, and upstream's `_is_profile_skill_command`
+     * guard refuses all of them here with 4018 — measured verbatim on the
+     * reviewer gateway for `/docx`, `/pdf` and `/github`.
+     */
+    it('refuses a skill command and names the method that takes it', async () => {
+      const frame = await raw('slash.exec', { session_id: 'bot-chat-writer', command: '/release-notes' })
+      const error = frame.error as { code: number; message: string }
+
+      expect(error.code).toBe(4018)
+      expect(error.message).toContain('command.dispatch')
+    })
+
+    /**
+     * `slash.exec` hands a rerouted built-in's DIRECTIVE straight back, so its
+     * result can carry a `type` and no `output` at all. `/queue list` answers
+     * `{type: 'send', message: 'list'}` on a real gateway: a client that reads
+     * `output ?? message` renders the word `list` as though it were the result
+     * and never queues anything.
+     */
+    it('can answer with a command.dispatch directive rather than output', async () => {
+      const result = await call('slash.exec', { session_id: 'bot-chat-writer', command: '/queue write it up' })
+
+      expect(result.type).toBe('send')
+      expect(result.message).toBe('write it up')
+      expect(result.output).toBeUndefined()
+    })
+
+    /** A worker command's text is a BLOCK, not a line. It needs somewhere to go. */
+    it('answers a multi-line block for the commands that have one', async () => {
+      const result = await call('slash.exec', { session_id: 'bot-chat-writer', command: '/status' })
+
+      expect(String(result.output).split('\n').length).toBeGreaterThan(3)
+    })
+  })
+
+  describe('command.dispatch — methods_tools.py::command.dispatch', () => {
+    /**
+     * `display` is the line a UI renders; `message` is the expanded skill body,
+     * which is model-facing scaffolding no surface may show.
+     */
+    it('answers a skill as a directive with a display and a message', async () => {
+      const result = await call('command.dispatch', {
+        name: 'release-notes',
+        arg: 'for 1.2',
+        session_id: 'bot-chat-writer'
+      })
+
+      expect(result.type).toBe('skill')
+      expect(result.display).toBe('/release-notes for 1.2')
+      expect(String(result.message).length).toBeGreaterThan(String(result.display).length)
+    })
+
+    it('answers a prefill with the text the composer is meant to take', async () => {
+      const result = await call('command.dispatch', { name: 'undo', session_id: 'bot-chat-writer' })
+
+      expect(result.type).toBe('prefill')
+      expect(typeof result.message).toBe('string')
+    })
+  })
+})

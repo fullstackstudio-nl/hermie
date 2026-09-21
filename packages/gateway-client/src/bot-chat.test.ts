@@ -575,8 +575,11 @@ describe('a Bot Chat end to end', () => {
     })
 
     expect(catalog.pairs?.length).toBeGreaterThan(0)
-    expect(completions.items?.map(item => item.text)).toEqual(['/model'])
-    expect(executed.output).toContain('/status')
+    // No leading slash on `text`: that lives on `display`, and `replace_from`
+    // keeps the one already typed. Pinned in `upstream-shapes.test.ts`.
+    expect(completions.items?.map(item => item.text)).toEqual(['model'])
+    expect(completions.replace_from).toBe(1)
+    expect(executed.output).toContain('Hermes TUI Status')
   }, 20_000)
 
   it('scopes a chat option to the session and reports the new session info', async () => {

@@ -39,7 +39,14 @@ import { strings } from '../../i18n/strings'
 import { type Bot, useBotsStore } from '../../store/bots'
 import { useChatsStore, type QueuedMessage } from '../../store/chats'
 import { useChatView } from '../../store/settings'
-import type { AttachmentInput, ChatOptionKey, ModelChoice, SetOptionResult, SlashCompletions } from './chat-controller'
+import type {
+  AttachmentInput,
+  ChatOptionKey,
+  ModelChoice,
+  SetOptionResult,
+  SlashCompletions,
+  SlashOutcome
+} from './chat-controller'
 import { FileUploadError, type UploadableFile, type UploadedFile } from './file-upload'
 import { type ChatRuntimeValue, useChatRuntime } from './ChatRuntime'
 
@@ -137,7 +144,7 @@ export interface UseChatResult {
   querySlash: (typed: string) => Promise<SlashCompletions>
   /** Is this a command the gateway will run, rather than prose starting with `/`? */
   knowsSlashCommand: (name: string) => boolean
-  runSlash: (command: string) => Promise<void>
+  runSlash: (command: string) => Promise<SlashOutcome>
   setOption: (
     key: ChatOptionKey,
     value: string,
