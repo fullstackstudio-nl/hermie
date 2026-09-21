@@ -27,6 +27,7 @@ export { ReasoningDisclosure, type ReasoningDisclosureProps } from './ReasoningD
 export { StatusRow, type StatusRowProps } from './StatusRow'
 export { SubagentGroupCard, type SubagentGroupCardProps } from './SubagentGroupCard'
 export { ToolCard, type ToolCardProps } from './ToolCard'
+export { shortToolName, TOOL_NAME_MAX } from './tool-label'
 export {
   TranscriptList,
   type TranscriptContext,

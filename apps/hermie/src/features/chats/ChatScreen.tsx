@@ -37,6 +37,7 @@ import {
   type PickerOption,
   SidebarToggleButton,
   type SlashSuggestion,
+  shortToolName,
   QueuedStrip,
   type SubagentTranscript,
   TranscriptList,
@@ -1684,8 +1685,14 @@ function subtitleFor(state: {
       return strings.chat.subtitle.thinking
     case 'typing':
       return strings.chat.subtitle.typing
-    case 'tool':
-      return strings.chat.subtitle.running(state.activity.tool)
+    case 'tool': {
+      // `shortToolName` is what keeps this line inside the pill: an MCP tool's own
+      // spelling is `mcp__terminal__run_in_terminal`, which is wider than the bot's
+      // name and every other status put together.
+      const tool = shortToolName(state.activity.tool)
+
+      return tool === '' ? strings.chat.subtitle.working : strings.chat.subtitle.running(tool)
+    }
     case 'delegating':
       return strings.chat.subtitle.delegating
     case 'working':

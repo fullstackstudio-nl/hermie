@@ -291,6 +291,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   derived from the touch, so a floating header, a sidebar rail or a Mac title bar no longer shifts
   the drop by a row; and an auto-scroll at the edges now keeps the lifted row under the finger
   instead of letting the content slide it away.
+- **The header pill stops resizing while a bot works.** The pill hugged its contents and the
+  widest of them was whichever status line was current, so `Online` → `Thinking…` →
+  `Running mcp__terminal__run_in_terminal…` → `Typing…` moved the avatar and the name sideways
+  several times a second. The bot's name is the only thing in there that does not change while a
+  reader is looking at it, so the name (plus a floor) is now the width, and the status is drawn in
+  a row of its own that is exactly one line tall with the text absolutely positioned inside it —
+  outside the pill's intrinsic width, elided at whatever the name set. An MCP tool is named by its
+  server before it gets there (`mcp__terminal__run_in_terminal` → `Running terminal…`), because
+  eliding a namespace tells a reader nothing. The words cross-fade over 120 ms, instantly under
+  Reduce Motion.
 - **A tap beside a bottom sheet closes it again.** The scrim was a flex sibling ABOVE the panel in a
   column, so it covered only the space over the sheet; on the wide layout, where the panel is capped
   and parked over the content column, most of what reads as backdrop is BESIDE it — and that area

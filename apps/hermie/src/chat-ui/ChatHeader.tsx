@@ -29,15 +29,38 @@
  *
  * The agents bar pins under it (§6.8), which is why the two are siblings in the
  * chat screen rather than one component.
+ *
+ * ## The pill has ONE width, and the bot's name is what decides it
+ *
+ * The status line changes several times a second while a turn runs — `Thinking…`,
+ * `Typing…`, `Running terminal…`, `Online` — and a pill that hugs its content is a
+ * pill that resizes on every one of them, with the avatar and the name sliding
+ * sideways underneath. The name is the only thing in there that does not change
+ * while the reader is looking at it, so the name (and a floor, for a bot called
+ * `Al`) is the measurement.
+ *
+ * The status line is therefore laid out in a row of its own that is exactly one
+ * `meta` line tall, with the text ABSOLUTELY positioned inside it: an absolute
+ * child is outside its parent's intrinsic width, so however long it is it can
+ * neither widen the pill nor be measured by it — it is elided at the width the
+ * name set. The one thing still trimmed before it gets here is an MCP tool's
+ * namespace, which `shortToolName` does, because eliding
+ * `Running mcp__terminal__run_…` tells a reader nothing at all.
+ *
+ * Changing it cross-fades rather than cutting, over `motion.press`, which is short
+ * enough that a reader who is watching the words reads a change and a reader who is
+ * not sees nothing flicker. Reduce Motion collapses it to a swap.
  */
-import { Pressable, View } from 'react-native'
+import { useEffect, useRef, useState } from 'react'
+import { Animated, Pressable, View } from 'react-native'
 
 import { GlassGroup, GlassSurface } from '../ui/glass'
 import { Icon, ICON_SIZE, type IconName } from '../ui/Icon'
+import { durationFor, easing } from '../ui/motion'
 import { PresenceBead } from '../ui/PresenceBead'
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
-import { AVATAR_SIZE, BEAD_SIZE, CONTROL_SIZE, TAP_SLOP, type PresenceState } from '../ui/tokens'
+import { AVATAR_SIZE, BEAD_SIZE, CONTROL_SIZE, TAP_SLOP, type, type PresenceState } from '../ui/tokens'
 import { Avatar } from './primitives/Avatar'
 import { formatClock } from './format'
 import { chatStrings } from './strings'
@@ -163,6 +186,55 @@ export function SidebarToggleButton({ onPress }: { onPress: () => void }) {
   )
 }
 
+/** The pill will not be narrower than this, whatever the bot is called. */
+const PILL_MIN_TEXT_WIDTH = 96
+
+/**
+ * One line of status, faded out and back when the words change.
+ *
+ * The value shown is state rather than the prop, because the swap has to happen at
+ * the bottom of the fade and not when the render arrives. Under Reduce Motion both
+ * halves are zero-length and the completion still runs, so the words still change —
+ * which is the rule `motion.ts` states about a skipped animation being a skipped
+ * callback.
+ */
+function StatusLine({ line, reduceMotion }: { line: string; reduceMotion: boolean }) {
+  const [shown, setShown] = useState(line)
+  const fade = useRef(new Animated.Value(1)).current
+  const latest = useRef(line)
+
+  latest.current = line
+
+  useEffect(() => {
+    if (line === shown) {
+      return
+    }
+
+    const duration = durationFor('press', reduceMotion) / 2
+
+    Animated.timing(fade, { duration, easing: easing.exit, toValue: 0, useNativeDriver: true }).start(() => {
+      setShown(latest.current)
+      Animated.timing(fade, { duration, easing: easing.enter, toValue: 1, useNativeDriver: true }).start()
+    })
+  }, [fade, line, reduceMotion, shown])
+
+  return (
+    /*
+      A row as tall as one `meta` line, holding a text that is absolutely
+      positioned inside it. That is what keeps the status out of the pill's width:
+      an absolutely positioned child does not contribute to its parent's intrinsic
+      size, so the longest tool name in the world cannot widen this.
+    */
+    <View style={{ height: type.meta.lineHeight }} testID="chat-header-status">
+      <Animated.View style={{ left: 0, opacity: fade, position: 'absolute', right: 0, top: 0 }}>
+        <Text color="textFaint" numberOfLines={1} variant="meta">
+          {shown}
+        </Text>
+      </Animated.View>
+    </View>
+  )
+}
+
 export function ChatHeader({
   name,
   handle,
@@ -260,13 +332,15 @@ export function ChatHeader({
             </View>
           </View>
 
-          <View style={{ flexShrink: 1 }}>
+          {/*
+            The name is the only child that contributes a width here, which is the
+            whole of the rule above. `minWidth` is the floor under a short one.
+          */}
+          <View style={{ flexShrink: 1, minWidth: PILL_MIN_TEXT_WIDTH }}>
             <Text numberOfLines={1} variant="chatName">
               {name}
             </Text>
-            <Text color="textFaint" numberOfLines={1} variant="meta">
-              {line}
-            </Text>
+            <StatusLine line={line} reduceMotion={theme.reduceMotion} />
           </View>
         </GlassSurface>
       </View>
