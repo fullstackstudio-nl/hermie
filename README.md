@@ -89,9 +89,20 @@ no third-party network call. The only address Hermie knows is the one you typed.
   animates, and only for the one state that is waiting on a person.
 - **Your list, arranged your way.** Rows reorder, folders group them — and the
   folders reorder too, held by the same grip and dropped among the chats — chats
-  archive, and each one can carry its own colour. None of it is sent to the
-  gateway: the arrangement is yours and it is per gateway, because a different
-  machine's bots are a different list.
+  archive, and each one can carry its own colour. The arrangement is yours and it
+  is per gateway, because a different machine's bots are a different list.
+- **Pin the chats you are actually in.** A pinned chat sits at the top of
+  whatever holds it — its folder, or the list itself — with a small pin on the
+  row. It is a sort rather than a move: unpinning puts the chat back exactly
+  where it was, not wherever the top of the list has drifted to. Dragging still
+  works, and a pinned row stays among the pinned ones.
+- **A conversation can be branched, and it keeps its past.** "Branch from here…"
+  on any message forks the conversation at that point into one of its own; the
+  chat you were in is untouched. Conversations — from a bot's profile or the
+  chat's own menu — lists them all: the current Bot Chat, the branches, and the
+  conversations `/new` has put away, each with its preview, its size and when it
+  was last active. You can read one, rename it, delete it, or make it the Bot
+  Chat again. The one chat a bot is reached by is never offered a Delete.
 
 - **The chat's menu is a popover in the chat.** The (…) opens a floating menu
   under the header rather than a sheet that moves the conversation out of the

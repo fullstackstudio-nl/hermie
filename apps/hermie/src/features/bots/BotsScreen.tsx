@@ -70,6 +70,7 @@ import { type MessageMatch, useMessageSearch } from '../search'
 import { BotRow } from './BotRow'
 import { ConnectionLine } from './ConnectionLine'
 import {
+  clampToPinnedBand,
   committedRowIndex,
   dragAnchors,
   folderRowKey,
@@ -115,6 +116,13 @@ export interface BotsScreenProps {
    * the page that thing lives on.
    */
   onOpenSection?: (section: BotsSection, options?: { create?: boolean }) => void
+  /**
+   * Open one bot's other conversations, from its profile sheet.
+   *
+   * Absent where the shell has nowhere to put the page, which drops the row on
+   * that sheet rather than leaving it pointing at nothing.
+   */
+  onOpenConversations?: (botName: string) => void
   /** Which footer tab reads as current; the wide shell drives this from its overlay. */
   currentTab?: TabKey
   /**
@@ -171,6 +179,7 @@ export function BotsScreen({
   currentTab = 'chats',
   onOpenBot,
   onOpenSection,
+  onOpenConversations,
   onShowList,
   selectedBot,
   variant = 'screen'
@@ -192,6 +201,7 @@ export function BotsScreen({
   const archivedSet = useChatLayoutStore(state => state.archived)
   const accents = useChatLayoutStore(state => state.accents)
   const mutes = useChatLayoutStore(state => state.mutes)
+  const pinned = useChatLayoutStore(state => state.pinned)
   const reconcile = useChatLayoutStore(state => state.reconcile)
 
   const [refreshing, setRefreshing] = useState(false)
@@ -325,6 +335,7 @@ export function BotsScreen({
       archived: archivedSet,
       collapsed,
       mutes,
+      pinned,
       now: Math.floor(Date.now() / 1000),
       countsFor: (name: string) => {
         const counts = unreadFor(name)
@@ -332,7 +343,7 @@ export function BotsScreen({
         return { unread: counts.count, needsInput: presence.get(name)?.state === 'needsInput' }
       }
     }),
-    [arrangement, archivedSet, collapsed, mutes, presence, unreadFor]
+    [arrangement, archivedSet, collapsed, mutes, pinned, presence, unreadFor]
   )
 
   const rows = useMemo(() => folderRows(rowsInput), [rowsInput])
@@ -567,6 +578,19 @@ export function BotsScreen({
     // where there is not. Either way it is not free for the drag to take, so on
     // Android the handle in edit mode is the only way in.
     armEnabled: HAS_NATIVE_CONTEXT_MENU,
+    /*
+      A pinned row stays among the pinned rows, and an unpinned one below them.
+
+      Applied to the SLOT rather than to the commit, which is what keeps the
+      drop line the reader watches and the arrangement they end up with from
+      being two different answers: the sort re-runs on every arrangement change,
+      so a pinned row "dropped" below the band would spring back to the top and
+      the gesture would look undone. See `clampToPinnedBand`.
+    */
+    clampSlot: useCallback(
+      (rowKey: string, slot: number) => clampToPinnedBand(anchors, pinned, rowKey, slot),
+      [anchors, pinned]
+    ),
     // Past the last row is the end of the TOP LEVEL, never the end of whichever
     // folder happened to be last: dragging to the bottom is how a chat gets out
     // of the last folder.
@@ -752,6 +776,11 @@ export function BotsScreen({
 
         case 'accent':
           layout.setAccent(name, action.accent)
+
+          return
+
+        case 'pinToggle':
+          layout.togglePinned(name)
 
           return
 
@@ -1100,6 +1129,7 @@ export function BotsScreen({
                   {...(editing && !item.archived ? { handleHandlers: drag.handleHandlers(item.key) } : {})}
                   menuFolders={menuFolders}
                   mutedUntil={mutedUntilOf(mutes, item.bot.name, Math.floor(Date.now() / 1000))}
+                  pinned={Boolean(pinned[item.bot.name])}
                   onArm={drag.arm}
                   onDisarm={drag.disarm}
                   onMenuSelect={onMenuSelect}
@@ -1160,6 +1190,7 @@ export function BotsScreen({
             displayName: byName[menuFor]?.displayName ?? menuFor,
             movable: !archivedSet[menuFor],
             mutedUntil: mutedUntilOf(mutes, menuFor, Math.floor(Date.now() / 1000)),
+            pinned: Boolean(pinned[menuFor]),
             folders: menuFolders,
             unread: unreadFor(menuFor).unread
           })}
@@ -1183,6 +1214,17 @@ export function BotsScreen({
           gateway={profileGateway}
           gatewayVersion={config?.version ?? ''}
           onClose={() => setProfileFor(null)}
+          {...(onOpenConversations
+            ? {
+                onOpenConversations: () => {
+                  // The sheet closes first: the page it opens is a full screen,
+                  // and leaving a sheet behind it would put the reader back on
+                  // this bot's profile when they press Back.
+                  setProfileFor(null)
+                  onOpenConversations(profileFor)
+                }
+              }
+            : {})}
           onSaved={() => void runtime?.bots.refresh()}
           visible
         />

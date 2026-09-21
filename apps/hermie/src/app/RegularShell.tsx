@@ -5,6 +5,7 @@ import type { DevInitialView } from '../dev'
 import { ActivityScreen } from '../features/activity'
 import { BotsScreen, type BotsSection } from '../features/bots'
 import { ChatScreen, type OpenChatOptions } from '../features/chats'
+import { ConversationsScreen, ConversationViewScreen } from '../features/sessions'
 import { CronScreen } from '../features/cron'
 import { SettingsScreen } from '../features/settings'
 import { strings } from '../i18n/strings'
@@ -103,6 +104,16 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
   const [focusItemId, setFocusItemId] = useState<string | undefined>(undefined)
   /** Words a search hit asked this chat to land on; see `OpenChatOptions.findText`. */
   const [findText, setFindText] = useState<string | undefined>(undefined)
+  /**
+   * The conversations detour, in the CONTENT column.
+   *
+   * Not a panel like Crons and Settings: those are about the whole app and dim
+   * the chat behind them, and this is about the chat itself — a reader looking
+   * at a branch of `researcher` is still looking at `researcher`. So it takes
+   * the content column the same way the chat does and hands it back, which also
+   * means the list beside it never moves.
+   */
+  const [conversations, setConversations] = useState<{ bot: string; id?: string } | null>(null)
   const [cronJobId, setCronJobId] = useState<string | undefined>(undefined)
   /** Set by the chats list's `+`: open the crons screen on a new job. */
   const [cronCreate, setCronCreate] = useState(false)
@@ -128,6 +139,8 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
 
   const openBot = useCallback((name: string, options?: OpenChatOptions) => {
     setSelectedBot(name)
+    // Picking a chat is leaving the detour, whichever way it is picked.
+    setConversations(null)
     // A new focus target every time, even for the same item: the chat screen
     // only scrolls when the id it is handed changes, and following the same DM
     // twice should work twice.
@@ -212,6 +225,7 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
     <BotsScreen
       currentTab={section ?? 'chats'}
       onOpenBot={(bot, options) => openBot(bot.name, options)}
+      onOpenConversations={bot => setConversations({ bot })}
       onOpenSection={openSection}
       selectedBot={section === null ? selectedBot : undefined}
       variant="sidebar"
@@ -260,6 +274,7 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
           <BotsScreen
             currentTab={section ?? 'chats'}
             onOpenBot={(bot, options) => openBot(bot.name, options)}
+            onOpenConversations={bot => setConversations({ bot })}
             onOpenSection={openSection}
             onShowList={showList}
             selectedBot={section === null ? selectedBot : undefined}
@@ -332,14 +347,37 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
               }}
               testID="shell-content-panel"
             >
-              <ChatScreen
-                bot={selectedBot}
-                findText={findText}
-                focusItemId={focusItemId}
-                onOpenBot={openBot}
-                onOpenCron={openCron}
-                onToggleSidebar={collapsed ? undefined : toggleSidebar}
-              />
+              {/*
+                One of the three, and the chat is the default. Early returns
+                rather than a navigator, which is the shape this shell already
+                uses for its panels: both columns stay mounted, so a stack would
+                have to be told twice what "back" means.
+              */}
+              {conversations?.id ? (
+                <ConversationViewScreen
+                  botName={conversations.bot}
+                  onBack={() => setConversations({ bot: conversations.bot })}
+                  onOpenChat={openBot}
+                  storedId={conversations.id}
+                />
+              ) : conversations ? (
+                <ConversationsScreen
+                  botName={conversations.bot}
+                  onBack={() => setConversations(null)}
+                  onOpenConversation={(bot, id) => setConversations({ bot, id })}
+                />
+              ) : (
+                <ChatScreen
+                  bot={selectedBot}
+                  findText={findText}
+                  focusItemId={focusItemId}
+                  onOpenBot={openBot}
+                  onOpenConversation={(bot, id) => setConversations({ bot, id })}
+                  onOpenConversations={bot => setConversations({ bot })}
+                  onOpenCron={openCron}
+                  onToggleSidebar={collapsed ? undefined : toggleSidebar}
+                />
+              )}
             </View>
 
             {/*

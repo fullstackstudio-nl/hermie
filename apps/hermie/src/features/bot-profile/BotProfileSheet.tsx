@@ -88,6 +88,17 @@ export interface BotProfileSheetProps {
    * window size and the row is not drawn — see `contextUsageOf`.
    */
   contextUsage?: ContextUsage | null
+  /**
+   * Open this bot's other conversations — branches, and the ones `/new` put
+   * away.
+   *
+   * ONE row, and it is here rather than in the chat because this sheet is the
+   * page about the BOT: its handle, its model, its session id. Which
+   * conversations that session has had is the same kind of fact. Absent where
+   * the host cannot navigate, which drops the row rather than leaving it
+   * pointing at nothing.
+   */
+  onOpenConversations?: () => void
   /** A save landed: the roster should re-read so the new values reach every surface. */
   onSaved?: () => void
   testID?: string
@@ -102,6 +113,7 @@ export function BotProfileSheet({
   gateway,
   gatewayVersion,
   contextUsage,
+  onOpenConversations,
   onSaved,
   testID = 'bot-profile'
 }: BotProfileSheetProps) {
@@ -311,6 +323,21 @@ export function BotProfileSheet({
             </InsetRow>
           </InsetGroup>
         )}
+
+        {/*
+          Directly above About, because it is the one row on this sheet that
+          GOES somewhere — everything below is read-only description, and a
+          disclosure buried among facts reads as another fact.
+        */}
+        {onOpenConversations ? (
+          <InsetGroup>
+            <InsetButtonRow
+              onPress={onOpenConversations}
+              testID={`${testID}-conversations`}
+              title={chatStrings.sessions.conversations}
+            />
+          </InsetGroup>
+        ) : null}
 
         <InsetGroup header={text.about}>
           {/*

@@ -13,7 +13,9 @@ import { ActivityScreen } from '../features/activity'
 import { BotsScreenOrSignedOut, type BotsSection } from '../features/bots'
 import { ChatScreen } from '../features/chats'
 import { CronScreen } from '../features/cron'
+import { ConversationsScreen, ConversationViewScreen } from '../features/sessions'
 import { SettingsScreen } from '../features/settings'
+import { chatStrings } from '../chat-ui/strings'
 import { strings } from '../i18n/strings'
 import { useHermieLink } from '../platform/deep-link'
 import { usePageTitle } from '../platform/page-title'
@@ -29,6 +31,10 @@ export type CompactStackParamList = {
   Activity: undefined
   Cron: { jobId?: string; create?: boolean } | undefined
   Settings: undefined
+  /** A bot's other conversations: branches and the ones `/new` put away. */
+  Conversations: { bot: string }
+  /** One of them, read-only. `id` is the STORED id a listing hands out. */
+  Conversation: { bot: string; id: string }
 }
 
 const Stack = createNativeStackNavigator<CompactStackParamList>()
@@ -68,6 +74,9 @@ function screenNameOf(route: { name: string; params?: object } | undefined): {
       return { title: strings.tabs.routines }
     case 'Settings':
       return { title: strings.tabs.settings }
+    case 'Conversations':
+    case 'Conversation':
+      return { title: chatStrings.sessions.conversations }
     default:
       return {}
   }
@@ -94,6 +103,7 @@ function BotsRoute() {
             ...(options?.findText ? { findText: options.findText } : {})
           })
         }
+        onOpenConversations={bot => navigation.navigate('Conversations', { bot })}
         onOpenSection={(section, options) =>
           navigation.navigate(SECTION_ROUTES[section] as 'Cron', options?.create ? { create: true } : undefined)
         }
@@ -121,6 +131,10 @@ function ChatRoute({
       // cron's detail. Pushed rather than navigated: Back belongs to the chat the
       // card was in.
       onOpenCron={jobId => navigation.push('Cron', { jobId })}
+      // Both pushed, for the reason the DM path is: a branch is somewhere the
+      // reader went FROM this chat, and Back has to walk it in reverse.
+      onOpenConversation={(bot, id) => navigation.push('Conversation', { bot, id })}
+      onOpenConversations={bot => navigation.push('Conversations', { bot })}
       route={route}
     />
   )
@@ -277,6 +291,42 @@ export function CompactShell({ initial }: { initial?: DevInitialView } = {}) {
           </Stack.Screen>
           <Stack.Screen name="Settings" options={{ title: strings.tabs.settings }}>
             {() => <SettingsScreen {...(initial?.page ? { initialPage: initial.page } : {})} />}
+          </Stack.Screen>
+          {/*
+            Both PUSHED rather than replacing the chat, so Back walks the way
+            the reader came: chat → its conversations → one of them. A branch
+            opened from the chat's own notice skips the middle step, and Back
+            still lands where they were.
+          */}
+          <Stack.Screen name="Conversations" options={{ title: chatStrings.sessions.conversations }}>
+            {({
+              route,
+              navigation
+            }: {
+              route: { params?: { bot?: string } }
+              navigation: NativeStackNavigationProp<CompactStackParamList>
+            }) => (
+              <ConversationsScreen
+                botName={route.params?.bot ?? ''}
+                onOpenConversation={(bot, id) => navigation.push('Conversation', { bot, id })}
+              />
+            )}
+          </Stack.Screen>
+          <Stack.Screen name="Conversation" options={{ title: chatStrings.sessions.conversations }}>
+            {({
+              route,
+              navigation
+            }: {
+              route: { params?: { bot?: string; id?: string } }
+              navigation: NativeStackNavigationProp<CompactStackParamList>
+            }) => (
+              <ConversationViewScreen
+                botName={route.params?.bot ?? ''}
+                onBack={() => navigation.goBack()}
+                onOpenChat={bot => navigation.navigate('Chat', { bot })}
+                storedId={route.params?.id ?? ''}
+              />
+            )}
           </Stack.Screen>
         </Stack.Navigator>
       </NavigationContainer>
