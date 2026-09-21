@@ -126,10 +126,21 @@ describe('"answered, but not like a Hermes gateway"', () => {
     }
   })
 
-  it('says it looks like a landing page when a page is what came back', () => {
-    const hint = notHermesHint('https://hermes.example.com', LANDING)
+  /**
+   * A public name answering with somebody's front page says nothing at all
+   * about a tailnet. It used to be told otherwise, which sent readers to check
+   * a VPN for what was a typo or a proxy's default host.
+   */
+  it('says only what it saw when a public host answered with a page', () => {
+    expect(notHermesHint('https://hermes.example.com', LANDING)).toBe(
+      'This looks like a landing page, not a Hermes gateway.'
+    )
+  })
 
-    expect(hint).toMatch(/^This looks like a landing page\./u)
+  it('adds the network sentence behind it when the host is on a network of its own', () => {
+    const hint = notHermesHint('http://gateway.ts.net', LANDING)
+
+    expect(hint).toMatch(/^This looks like a landing page, not a Hermes gateway\./u)
     expect(hint).toMatch(/private network or tailnet/u)
   })
 

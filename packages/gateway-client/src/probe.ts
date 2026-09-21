@@ -65,25 +65,34 @@ function looksLikeLandingPage(body: string): boolean {
 /**
  * The extra sentence for "answered, but not like a Hermes gateway".
  *
- * That message is true and, on its own, unhelpful in the two cases where it is
- * most often seen: a gateway that is only reachable on a tailnet or a private
- * network, probed from a device that is not on it, and an address whose public
- * DNS answers with somebody's front page. Both look identical from here — a
- * 200 with something that is not a gateway in it — and both have the same first
- * thing to check.
+ * Two facts, and they are separate ones. WHAT came back — a web page where a
+ * JSON object was expected — and WHERE the address points: a host only one
+ * network can resolve or route to.
+ *
+ * They used to share a sentence, and the result was a claim the probe had no
+ * grounds for. A landing page on a PUBLIC host was told "if the gateway is only
+ * reachable on a private network or tailnet, make sure this device is connected
+ * to it", which is a guess dressed as a diagnosis — a public name answering with
+ * somebody's front page says nothing whatsoever about a tailnet, and it sent
+ * readers to check a VPN when what they had was a typo or a proxy default host.
+ *
+ * So the network sentence is now only written for a host `host-privacy.ts` can
+ * actually place on a network of its own, and the landing-page sentence says
+ * only what was seen.
  */
 export function notHermesHint(baseUrl: string, body: string): string {
-  const privacy = classifyHost(baseUrl).privacy
-  const isReachableOnlyThere = privacy !== 'public'
+  const reachableOnlyThere = classifyHost(baseUrl).isPrivate
   const landing = looksLikeLandingPage(body)
+  const seen = landing ? 'This looks like a landing page, not a Hermes gateway.' : ''
 
-  if (!isReachableOnlyThere && !landing) {
-    return ''
+  if (!reachableOnlyThere) {
+    return seen
   }
 
-  const opening = landing ? 'This looks like a landing page. ' : ''
+  const network =
+    'If the gateway is only reachable on that private network or tailnet, make sure this device is connected to it.'
 
-  return `${opening}If the gateway is only reachable on a private network or tailnet, make sure this device is connected to it.`
+  return seen ? `${seen} ${network}` : network
 }
 
 export interface ProbeResult {
