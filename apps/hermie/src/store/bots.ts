@@ -211,5 +211,18 @@ export function isUnread(state: Pick<BotsState, 'byName' | 'lastSeen'>, name: st
   return lastActive > 0 && lastActive > (state.lastSeen[name] ?? 0)
 }
 
+/**
+ * What a bot is CALLED, from the handle the rest of the app passes around.
+ *
+ * A name is the gateway's identifier (`researcher`) and a display name is the
+ * label a person reads (`Researcher`); the two are routinely different in case
+ * alone, which is exactly the difference nobody notices until it is shown
+ * somewhere prominent. Selecting the resolved string rather than the whole map
+ * keeps a caller from re-rendering when an unrelated bot's presence moves.
+ */
+export function useBotDisplayName(name: string | undefined): string | undefined {
+  return useBotsStore(state => (name === undefined ? undefined : (state.byName[name]?.displayName ?? name)))
+}
+
 /** The avatar cache key; exported so the loader and the cache agree on one spelling. */
 export const avatarCacheKey = (name: string, revision: number): string => `${name}:${revision}`

@@ -6,7 +6,7 @@ import {
   type Theme as NavTheme
 } from '@react-navigation/native'
 import { createNativeStackNavigator, type NativeStackNavigationProp } from '@react-navigation/native-stack'
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { DevInitialView } from '../dev'
 import { ActivityScreen } from '../features/activity'
@@ -16,7 +16,9 @@ import { CronScreen } from '../features/cron'
 import { SettingsScreen } from '../features/settings'
 import { strings } from '../i18n/strings'
 import { useHermieLink } from '../platform/deep-link'
+import { usePageTitle } from '../platform/page-title'
 import { onOpenChatRequest } from './open-chat-bus'
+import { useBotDisplayName } from '../store/bots'
 import { GlassSurface, Wallpaper } from '../ui/glass'
 import { useTheme } from '../ui/theme'
 import { useShortcut } from '../ui/useShortcut'
@@ -35,6 +37,40 @@ const SECTION_ROUTES: Record<BotsSection, keyof CompactStackParamList> = {
   activity: 'Activity',
   cron: 'Cron',
   settings: 'Settings'
+}
+
+/**
+ * What a route is CALLED, as opposed to what it is keyed by.
+ *
+ * `Bots` is the key of the screen whose header says Chats, and a browser tab
+ * that says `Bots` is the source leaking into the window.
+ *
+ * The chat route answers with a `bot` rather than a title, because the handle
+ * in its params (`researcher`) is not the label a person reads (`Researcher`)
+ * and resolving one to the other needs the store — which a plain function has
+ * no business reaching into. The caller does that.
+ */
+function screenNameOf(route: { name: string; params?: object } | undefined): {
+  title?: string
+  bot?: string
+} {
+  switch (route?.name) {
+    case 'Bots':
+      return { title: strings.tabs.chats }
+    case 'Chat': {
+      const bot = (route.params as CompactStackParamList['Chat'] | undefined)?.bot
+
+      return bot ? { bot } : { title: strings.tabs.chats }
+    }
+    case 'Activity':
+      return { title: strings.tabs.activity }
+    case 'Cron':
+      return { title: strings.tabs.routines }
+    case 'Settings':
+      return { title: strings.tabs.settings }
+    default:
+      return {}
+  }
 }
 
 function BotsRoute() {
@@ -157,6 +193,14 @@ export function CompactShell({ initial }: { initial?: DevInitialView } = {}) {
   // bus rather than navigating — see `app/open-chat-bus.ts`.
   useEffect(() => onOpenChatRequest(openChat), [openChat])
 
+  // The browser tab's name follows the route that is actually on top. Held as
+  // state rather than read during render because the container only answers
+  // `getCurrentRoute` once it is ready, which is after the first mount.
+  const [screen, setScreen] = useState<{ title?: string; bot?: string }>({})
+  const botLabel = useBotDisplayName(screen.bot)
+
+  usePageTitle(screen.bot ? botLabel : screen.title)
+
   // A navigator paints its own background over everything, including the
   // wallpaper, unless both the container theme and the screen say otherwise.
   const navTheme = useMemo<NavTheme>(
@@ -180,7 +224,17 @@ export function CompactShell({ initial }: { initial?: DevInitialView } = {}) {
   return (
     <Wallpaper style={{ flex: 1 }} testID="wallpaper">
       <NavigationContainer
+        /*
+         * The navigator's own web titling is switched OFF. It runs whether or
+         * not it was asked to and defaults to the route KEY, which is how a tab
+         * came to say `Bots` for the screen headed Chats; `usePageTitle` above
+         * is the one answer instead, and it works in the shell that has no
+         * navigator too.
+         */
+        documentTitle={{ enabled: false }}
         onReady={() => {
+          setScreen(screenNameOf(navigationRef.getCurrentRoute()))
+
           const botName = pendingBot.current
           pendingBot.current = null
 
@@ -188,6 +242,7 @@ export function CompactShell({ initial }: { initial?: DevInitialView } = {}) {
             navigationRef.navigate('Chat', { bot: botName })
           }
         }}
+        onStateChange={() => setScreen(screenNameOf(navigationRef.getCurrentRoute()))}
         ref={navigationRef}
         theme={navTheme}
       >

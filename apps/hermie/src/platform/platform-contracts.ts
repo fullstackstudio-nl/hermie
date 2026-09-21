@@ -100,3 +100,18 @@ export interface WidgetBridge {
   /** Delete every avatar whose bot is not in `keep`. Answers how many went. */
   pruneAvatars(keep: readonly string[]): Promise<number>
 }
+
+/**
+ * The browser tab's name for a screen.
+ *
+ * Shared rather than owned by the web seam because both shells compute the
+ * screen half and only one platform has a tab to put it in — and because a
+ * `.web.ts` seam cannot import a value from the module it replaces.
+ *
+ * `undefined` means "nothing more specific than the app", which is what the
+ * exported document already says, so the app name is returned alone rather than
+ * as a separator with nothing before it.
+ */
+export function formatPageTitle(screen: string | undefined, app = 'Hermie'): string {
+  return screen && screen !== app ? `${screen} · ${app}` : app
+}

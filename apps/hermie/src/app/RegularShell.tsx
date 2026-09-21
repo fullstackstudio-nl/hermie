@@ -9,8 +9,10 @@ import { CronScreen } from '../features/cron'
 import { SettingsScreen } from '../features/settings'
 import { strings } from '../i18n/strings'
 import { useHermieLink } from '../platform/deep-link'
+import { usePageTitle } from '../platform/page-title'
 import { onOpenChatRequest } from './open-chat-bus'
 import { useSafeAreaInsets } from '../platform/safe-area'
+import { useBotDisplayName } from '../store/bots'
 import { useChatLayoutStore } from '../store/chat-layout'
 import { GlassDepthProvider, GlassSurface, Wallpaper } from '../ui/glass'
 import { useTheme } from '../ui/theme'
@@ -83,6 +85,13 @@ import { useSidebarState, useSidebarWidth } from './useLayoutMode'
  * menu bar's Hide/Show Sidebar — the last two arrive as the same `toggleSidebar`
  * action (`platform/desktop-shortcuts`), so there is nothing to keep in step.
  */
+/** What each panel is called, for the browser tab. */
+const SECTION_TITLES: Record<BotsSection, string> = {
+  activity: strings.tabs.activity,
+  cron: strings.tabs.routines,
+  settings: strings.tabs.settings
+}
+
 export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
@@ -101,6 +110,19 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
   // The content panel's own box, for the overlay that has to be exactly it.
   const [contentFrame, setContentFrame] = useState<PanelFrame | undefined>(undefined)
   const overlayOpen = section !== null
+
+  /*
+   * The browser tab's name. This shell has no navigator, so nothing used to
+   * move it off the exported document's `Hermie` — and because the two shells
+   * swap on window width, a narrow window that was widened kept whichever route
+   * KEY the navigator had left behind.
+   *
+   * An open panel wins over the chat behind it, because the panel is what the
+   * reader is looking at. With neither, the tab names the list.
+   */
+  const selectedBotLabel = useBotDisplayName(selectedBot)
+
+  usePageTitle(section ? SECTION_TITLES[section] : (selectedBotLabel ?? strings.tabs.chats))
 
   const openBot = useCallback((name: string, options?: OpenChatOptions) => {
     setSelectedBot(name)
