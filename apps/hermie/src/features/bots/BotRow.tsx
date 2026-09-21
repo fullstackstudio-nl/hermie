@@ -16,6 +16,7 @@ import { unreadBadgeLabel } from '@hermie/transcript'
 import { Avatar, formatListTime, formatPreview } from '../../chat-ui'
 import { strings } from '../../i18n/strings'
 import { ContextMenuHost, HAS_NATIVE_CONTEXT_MENU } from '../../platform/context-menu'
+import { secondaryClick } from '../../platform/secondary-click'
 import type { Bot } from '../../store/bots'
 import { GlassSurface } from '../../ui/glass'
 import { PresenceBead } from '../../ui/PresenceBead'
@@ -244,6 +245,12 @@ export const BotRow = memo(function BotRow({
        * reached through edit mode's handle instead.
        */
       onLongPress={() => (HAS_NATIVE_CONTEXT_MENU ? onArm?.(bot.name) : onOpenMenu(bot.name))}
+      /*
+       * And the desktop gesture for the same menu, where the platform has one.
+       * A long press is what a finger does; a right click is what a mouse does,
+       * and until this the browser build answered it with nothing at all.
+       */
+      {...secondaryClick(() => onOpenMenu(bot.name))}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
       onPress={() => onPress(bot)}
