@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-09-22
+
 ### Added
 
 - **A lock on the app itself.** Settings → Privacy & security → **Require unlock**: off, immediately,
