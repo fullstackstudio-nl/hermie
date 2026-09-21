@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Prefixed, because these names are merged into the APP's resource table and a
+  collision there is a build failure with a message about a duplicate value
+  rather than about a widget.
+
+  Not translated. The app's own strings live in `src/i18n/`, on the JavaScript
+  side, where a widget process cannot reach them — and the two lines below are
+  the whole of what a widget says in its own voice. Everything else it draws is
+  a bot's name or a bot's words.
+-->
+<resources>
+  <string name="hermie_widget_small_label">Hermie chat</string>
+  <string name="hermie_widget_medium_label">Hermie chats</string>
+  <string name="hermie_widget_empty">Open Hermie to fill this in.</string>
+</resources>

@@ -1,0 +1,229 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Up to three conversations, the Android counterpart of systemMedium.
+
+  The three rows are written out three times rather than `include`d, and that is
+  not a preference. `<include>` inflates fine, but every id inside the included
+  layout is the SAME id three times over, and a RemoteViews addresses views by
+  id and nothing else — `setTextViewText(R.id.hermie_row_name, …)` would write
+  all three rows at once, or, worse, only the first. A `RemoteViewsService`
+  collection is the framework's own answer to this and costs a bound Service and
+  an adapter for three rows that are already in a file the provider has read.
+
+  So: three blocks, identical but for the digit in each id. Editing one means
+  editing all three, which is the price of the only shape that works — and the
+  reason the provider writes them through one `bindRow` function rather than
+  three copies of the same Kotlin.
+
+  A row with nothing to show is GONE rather than empty, so two conversations draw
+  as two rows at the top instead of two rows and a hole.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+  android:layout_width="match_parent"
+  android:layout_height="match_parent"
+  android:background="@drawable/hermie_widget_background"
+  android:orientation="vertical"
+  android:padding="14dp">
+
+  <TextView
+    android:id="@+id/hermie_empty"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:gravity="center"
+    android:text="@string/hermie_widget_empty"
+    android:textColor="@color/hermie_widget_muted"
+    android:textSize="13sp"
+    android:visibility="gone" />
+
+  <RelativeLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginBottom="10dp">
+  
+    <ImageView
+      android:id="@+id/hermie_row1_avatar"
+      android:layout_width="30dp"
+      android:layout_height="30dp"
+      android:layout_alignParentStart="true"
+      android:contentDescription="@null" />
+  
+    <ImageView
+      android:id="@+id/hermie_row1_bead"
+      android:layout_width="10dp"
+      android:layout_height="10dp"
+      android:layout_alignBottom="@id/hermie_row1_avatar"
+      android:layout_alignEnd="@id/hermie_row1_avatar"
+      android:contentDescription="@null"
+      android:src="@drawable/hermie_widget_bead" />
+  
+    <TextView
+      android:id="@+id/hermie_row1_badge"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_alignParentEnd="true"
+      android:layout_centerVertical="true"
+      android:background="@drawable/hermie_widget_badge"
+      android:paddingStart="6dp"
+      android:paddingEnd="6dp"
+      android:paddingTop="1dp"
+      android:paddingBottom="1dp"
+      android:textColor="#FFFFFF"
+      android:textSize="11sp"
+      android:textStyle="bold"
+      android:visibility="gone" />
+  
+    <TextView
+      android:id="@+id/hermie_row1_name"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_marginStart="9dp"
+      android:layout_toStartOf="@id/hermie_row1_badge"
+      android:layout_toEndOf="@id/hermie_row1_avatar"
+      android:maxLines="1"
+      android:ellipsize="end"
+      android:textColor="@color/hermie_widget_text"
+      android:textSize="13sp"
+      android:textStyle="bold" />
+  
+    <TextView
+      android:id="@+id/hermie_row1_last_line"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_below="@id/hermie_row1_name"
+      android:layout_marginStart="9dp"
+      android:layout_toStartOf="@id/hermie_row1_badge"
+      android:layout_toEndOf="@id/hermie_row1_avatar"
+      android:maxLines="1"
+      android:ellipsize="end"
+      android:textColor="@color/hermie_widget_muted"
+      android:textSize="12sp" />
+  </RelativeLayout>
+
+  <RelativeLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginBottom="10dp">
+  
+    <ImageView
+      android:id="@+id/hermie_row2_avatar"
+      android:layout_width="30dp"
+      android:layout_height="30dp"
+      android:layout_alignParentStart="true"
+      android:contentDescription="@null" />
+  
+    <ImageView
+      android:id="@+id/hermie_row2_bead"
+      android:layout_width="10dp"
+      android:layout_height="10dp"
+      android:layout_alignBottom="@id/hermie_row2_avatar"
+      android:layout_alignEnd="@id/hermie_row2_avatar"
+      android:contentDescription="@null"
+      android:src="@drawable/hermie_widget_bead" />
+  
+    <TextView
+      android:id="@+id/hermie_row2_badge"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_alignParentEnd="true"
+      android:layout_centerVertical="true"
+      android:background="@drawable/hermie_widget_badge"
+      android:paddingStart="6dp"
+      android:paddingEnd="6dp"
+      android:paddingTop="1dp"
+      android:paddingBottom="1dp"
+      android:textColor="#FFFFFF"
+      android:textSize="11sp"
+      android:textStyle="bold"
+      android:visibility="gone" />
+  
+    <TextView
+      android:id="@+id/hermie_row2_name"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_marginStart="9dp"
+      android:layout_toStartOf="@id/hermie_row2_badge"
+      android:layout_toEndOf="@id/hermie_row2_avatar"
+      android:maxLines="1"
+      android:ellipsize="end"
+      android:textColor="@color/hermie_widget_text"
+      android:textSize="13sp"
+      android:textStyle="bold" />
+  
+    <TextView
+      android:id="@+id/hermie_row2_last_line"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_below="@id/hermie_row2_name"
+      android:layout_marginStart="9dp"
+      android:layout_toStartOf="@id/hermie_row2_badge"
+      android:layout_toEndOf="@id/hermie_row2_avatar"
+      android:maxLines="1"
+      android:ellipsize="end"
+      android:textColor="@color/hermie_widget_muted"
+      android:textSize="12sp" />
+  </RelativeLayout>
+
+  <RelativeLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginBottom="10dp">
+  
+    <ImageView
+      android:id="@+id/hermie_row3_avatar"
+      android:layout_width="30dp"
+      android:layout_height="30dp"
+      android:layout_alignParentStart="true"
+      android:contentDescription="@null" />
+  
+    <ImageView
+      android:id="@+id/hermie_row3_bead"
+      android:layout_width="10dp"
+      android:layout_height="10dp"
+      android:layout_alignBottom="@id/hermie_row3_avatar"
+      android:layout_alignEnd="@id/hermie_row3_avatar"
+      android:contentDescription="@null"
+      android:src="@drawable/hermie_widget_bead" />
+  
+    <TextView
+      android:id="@+id/hermie_row3_badge"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_alignParentEnd="true"
+      android:layout_centerVertical="true"
+      android:background="@drawable/hermie_widget_badge"
+      android:paddingStart="6dp"
+      android:paddingEnd="6dp"
+      android:paddingTop="1dp"
+      android:paddingBottom="1dp"
+      android:textColor="#FFFFFF"
+      android:textSize="11sp"
+      android:textStyle="bold"
+      android:visibility="gone" />
+  
+    <TextView
+      android:id="@+id/hermie_row3_name"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_marginStart="9dp"
+      android:layout_toStartOf="@id/hermie_row3_badge"
+      android:layout_toEndOf="@id/hermie_row3_avatar"
+      android:maxLines="1"
+      android:ellipsize="end"
+      android:textColor="@color/hermie_widget_text"
+      android:textSize="13sp"
+      android:textStyle="bold" />
+  
+    <TextView
+      android:id="@+id/hermie_row3_last_line"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_below="@id/hermie_row3_name"
+      android:layout_marginStart="9dp"
+      android:layout_toStartOf="@id/hermie_row3_badge"
+      android:layout_toEndOf="@id/hermie_row3_avatar"
+      android:maxLines="1"
+      android:ellipsize="end"
+      android:textColor="@color/hermie_widget_muted"
+      android:textSize="12sp" />
+  </RelativeLayout>
+</LinearLayout>

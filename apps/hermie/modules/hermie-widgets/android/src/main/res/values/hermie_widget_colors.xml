@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The app's own colours, quoted from where they came from.
+
+  A widget is drawn by the launcher out of a RemoteViews tree, so nothing in
+  `src/ui/tokens.ts` or `src/ui/themes.ts` reaches it — this file and its
+  `values-night` twin are the Android half of what `HermieWidgetTheme.swift` is
+  on iOS, and the same three rules apply: only the Blue preset, flat and no
+  gradients, and the per-bot colour comes from the snapshot rather than from
+  here.
+-->
+<resources>
+  <!-- themes.ts, BLUE_LIGHT, rung e1 — the rung a chat-list row sits on. -->
+  <color name="hermie_widget_surface">#F4F8FE</color>
+  <!-- tokens.ts, lightColors. -->
+  <color name="hermie_widget_text">#12151C</color>
+  <color name="hermie_widget_muted">#4B5462</color>
+  <color name="hermie_widget_accent">#1668E3</color>
+  <!-- tokens.ts, lightPresence. -->
+  <color name="hermie_widget_online">#20A24B</color>
+  <color name="hermie_widget_working">#1668E3</color>
+  <color name="hermie_widget_needs_input">#E09000</color>
+  <color name="hermie_widget_offline">#8A93A3</color>
+</resources>

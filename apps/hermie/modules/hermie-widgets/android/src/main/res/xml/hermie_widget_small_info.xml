@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The counterpart of iOS's systemSmall: a 2x2 cell, one conversation.
+
+  `updatePeriodMillis` is 0 on purpose and it is the same decision the iOS
+  timeline's `.never` policy is. Everything a widget shows is something only the
+  app can know, and the app already knows the moment each of it changes — so it
+  writes the file and broadcasts an update (`HermieWidgetsModule`). A period here
+  would wake the launcher to re-read a file that has not changed, and Android
+  will not honour anything under 30 minutes anyway.
+
+  `configure` is absent, which is the one place Android is deliberately simpler
+  than iOS: there is no AppWidgetConfigure activity, so a small widget always
+  shows the most recent chat rather than one the reader pinned. A configuration
+  activity is a whole screen in the app for a choice this app has no second
+  surface for yet; the widget can be added twice and both would show the same
+  chat, and that is the honest limitation rather than a half-built picker.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+  android:description="@string/hermie_widget_small_label"
+  android:initialLayout="@layout/hermie_widget_small"
+  android:minWidth="110dp"
+  android:minHeight="110dp"
+  android:previewLayout="@layout/hermie_widget_small"
+  android:resizeMode="none"
+  android:targetCellWidth="2"
+  android:targetCellHeight="2"
+  android:updatePeriodMillis="0"
+  android:widgetCategory="home_screen" />
