@@ -20,6 +20,7 @@
  */
 import type { PushAddress } from '@hermie/gateway-client/push'
 
+import { strings } from '../../i18n/strings'
 import type { PushAddressFailure, PushPermission } from './platform-contract'
 
 /** How much of an address is shown. Enough to match a `ui_meta` row against. */
@@ -140,4 +141,36 @@ export function pushRegistrationState(input: PushStatusInput): PushRegistrationS
  */
 export function pushRetryable(state: PushRegistrationState): boolean {
   return state.kind === 'failed' || state.kind === 'pending'
+}
+
+/**
+ * One line for whatever `pushRegistrationState` decided this device is.
+ *
+ * Here rather than in the settings section because the onboarding step shows
+ * the same row, and a second copy of this mapping is how one of them ends up
+ * saying "asking the platform for an address…" about a request that failed
+ * thirty seconds ago — which is the class of quiet lie this whole module
+ * exists to stop.
+ */
+export function pushStatusText(state: PushRegistrationState): string {
+  const text = strings.settings.notifications
+
+  switch (state.kind) {
+    case 'off':
+      return text.statusOff
+    case 'registered':
+      return text.statusRegistered(state.tail)
+    case 'denied':
+      return text.statusDenied
+    case 'needs-system-settings':
+      return text.statusSystemSettings
+    case 'no-project-id':
+      return text.statusNoProject
+    case 'failed':
+      return text.statusFailed(state.message)
+    case 'pending':
+      return text.statusPending
+    default:
+      return state.detail ? text.statusUnsupported(state.detail) : text.unavailable
+  }
 }

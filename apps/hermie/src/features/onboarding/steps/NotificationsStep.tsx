@@ -36,7 +36,7 @@ import { pushPlatform } from '../../push/platform'
 import { PluginInstall } from '../../push/PluginInstall'
 import { PushSync, type PushEnableOutcome } from '../../push/push-sync'
 import { pushProjectId, pushVapidUrl } from '../../push/where'
-import { pushRegistrationState, pushRetryable } from '../../push/status'
+import { pushRegistrationState, pushRetryable, pushStatusText } from '../../push/status'
 import type { PushPermission } from '../../push/platform-contract'
 import type { OnboardingDraft } from '../draft'
 import { StatusLine } from '../StatusLine'
@@ -116,11 +116,16 @@ export function NotificationsStep({ draft }: NotificationsStepProps) {
           testID="onboarding-push-status"
           tone={registration.kind === 'registered' ? 'ok' : pushRetryable(registration) ? 'checking' : 'error'}
         >
+          {/*
+            The same sentence Settings shows, from the same table. A second
+            mapping here is how one of the two ends up saying "asking the
+            platform for an address…" about a request that failed a minute ago.
+          */}
           {registration.kind === 'registered'
             ? text.enabled
             : registration.kind === 'denied' || outcome === 'denied'
               ? text.denied
-              : strings.settings.notifications.statusPending}
+              : pushStatusText(registration)}
         </StatusLine>
       ) : null}
 
@@ -131,6 +136,12 @@ export function NotificationsStep({ draft }: NotificationsStepProps) {
           onPress={onEnable}
           testID="onboarding-push-enable"
           title={busy ? text.enabling : text.enable}
+          /*
+            Secondary, like the sign-in step's own action. The card's Continue
+            is the accented one, and two full-width blue buttons stacked read as
+            two ways forward rather than as an offer and a gate.
+          */
+          variant="secondary"
         />
       )}
 

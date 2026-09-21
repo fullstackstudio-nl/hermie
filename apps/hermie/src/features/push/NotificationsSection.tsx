@@ -27,31 +27,7 @@ import { SwitchRow } from '../../ui/sheets'
 import type { PushPermission } from './platform-contract'
 import { PluginInstall } from './PluginInstall'
 import type { PushSync } from './push-sync'
-import { pushRegistrationState, pushRetryable, type PushRegistrationState } from './status'
-
-/** One line for whatever `pushRegistrationState` decided this device is. */
-function statusLine(state: PushRegistrationState): string {
-  const text = strings.settings.notifications
-
-  switch (state.kind) {
-    case 'off':
-      return text.statusOff
-    case 'registered':
-      return text.statusRegistered(state.tail)
-    case 'denied':
-      return text.statusDenied
-    case 'no-project-id':
-      return text.statusNoProject
-    case 'failed':
-      return text.statusFailed(state.message)
-    case 'pending':
-      return text.statusPending
-    case 'needs-system-settings':
-      return text.statusSystemSettings
-    default:
-      return state.detail ? text.statusUnsupported(state.detail) : text.unavailable
-  }
-}
+import { pushRegistrationState, pushRetryable, pushStatusText } from './status'
 
 const TYPE_LABELS: Record<PushType, string> = {
   message: strings.settings.notifications.typeMessage,
@@ -202,7 +178,7 @@ export function NotificationsSection({ push, available = true, testID = 'setting
         <InsetGroup header={strings.settings.notifications.status}>
           <InsetRow>
             <Text color="textMuted" testID={`${testID}-status`} variant="body">
-              {statusLine(registration)}
+              {pushStatusText(registration)}
             </Text>
           </InsetRow>
 
