@@ -26,6 +26,7 @@ import type { ApprovalItem, ClarifyItem } from '@hermie/transcript'
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 
 import { AgentsSheet, type AgentsSheetProps } from '../../chat-ui'
+import { BotProfileSheet, type BotProfileSheetProps } from '../bot-profile'
 import { ApprovalSheet, ChatOptionsSheet, ClarifySheet, type ChatOptionsSheetProps } from '../../ui/sheets'
 import { SHEET_ANIMATION_MS } from '../../ui/BottomSheet'
 import { initialSheetHostState, isSheetVisible, sheetHostReducer, targetSheet, type ManualSheet } from './sheet-host'
@@ -67,6 +68,15 @@ export interface ChatSheetHostProps {
 
   agents: Omit<AgentsSheetProps, 'visible' | 'onClose' | 'onClosed'>
   options: Omit<ChatOptionsSheetProps, 'visible' | 'onClose' | 'onClosed'>
+  /**
+   * The bot profile editor, or absent where there is no bot to edit.
+   *
+   * Optional because the roster may not have this chat yet — a deep link opens
+   * a chat before `profiles.list` has answered — and a sheet with no bot would
+   * be a sheet full of blanks. `targetSheet` still routes to it; this renders
+   * nothing until there is something to show.
+   */
+  profile?: Omit<BotProfileSheetProps, 'visible' | 'onClose' | 'onClosed'>
 
   /** Forwarded to the approval sheet; tests pass 0. */
   tapGuardMs?: number
@@ -94,6 +104,7 @@ export function ChatSheetHost({
   onCloseRequest,
   agents,
   options,
+  profile,
   tapGuardMs
 }: ChatSheetHostProps) {
   const [held, setHeld] = useState<string | null>(() => request?.id ?? null)
@@ -213,6 +224,12 @@ export function ChatSheetHost({
 
   if (state.presented === 'options') {
     return <ChatOptionsSheet {...options} onClose={onCloseManual} onClosed={settled} visible={visible} />
+  }
+
+  if (state.presented === 'profile') {
+    return profile ? (
+      <BotProfileSheet {...profile} onClose={onCloseManual} onClosed={settled} visible={visible} />
+    ) : null
   }
 
   return null

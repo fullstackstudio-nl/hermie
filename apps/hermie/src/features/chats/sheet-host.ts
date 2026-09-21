@@ -18,10 +18,10 @@
  */
 
 /** The sheets a chat can present. `request` is an approval or a clarify. */
-export type SheetKind = 'none' | 'options' | 'agents' | 'request'
+export type SheetKind = 'none' | 'options' | 'agents' | 'profile' | 'request'
 
-/** The two a reader opens themselves. */
-export type ManualSheet = 'none' | 'options' | 'agents'
+/** The three a reader opens themselves. */
+export type ManualSheet = 'none' | 'options' | 'agents' | 'profile'
 
 export interface SheetHostState {
   /** The sheet that is mounted right now. */
@@ -38,7 +38,13 @@ export type SheetHostEvent =
 
 export const initialSheetHostState: SheetHostState = { presented: 'none', target: 'none' }
 
-/** Priority: a blocked agent first, then the agents sheet, then the options. */
+/**
+ * Priority: a blocked agent first, then whatever the reader opened.
+ *
+ * The profile sheet needs no rank of its own — it is one of the manual sheets,
+ * and the only ordering that has ever mattered here is that a question the
+ * agent is waiting on outranks all of them.
+ */
 export function targetSheet(manual: ManualSheet, hasRequest: boolean): SheetKind {
   return hasRequest ? 'request' : manual
 }

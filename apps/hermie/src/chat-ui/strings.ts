@@ -266,7 +266,15 @@ export const chatStrings = {
     idle: 'Online',
     needsInput: 'Waiting for you',
     offline: 'Offline',
-    offlineAt: (time: string) => `Offline · last seen ${time}`
+    offlineAt: (time: string) => `Offline · last seen ${time}`,
+    /**
+     * The pill's own action, which is the bot's profile.
+     *
+     * Named after what a tap OPENS rather than after the pill, because the pill
+     * already reads out the bot's name and its state: a button called "Bot pill"
+     * would say the name twice and the useful half not at all.
+     */
+    profile: (name: string) => `${name} — profile`
   },
   approval: {
     eyebrow: (handle: string) => `PERMISSION REQUEST · @${handle.toUpperCase()}`,

@@ -35,6 +35,8 @@ export type RowMenuAction =
   | { kind: 'accent'; accent: AccentName }
   | { kind: 'section'; dividerId: string | null }
   | { kind: 'move'; offset: number }
+  /** Open the bot's profile editor — the same sheet the chat header's pill opens. */
+  | { kind: 'editProfile' }
   /** A toggle, not a value: the menu already says which way round it is. */
   | { kind: 'archiveToggle' }
   | { kind: 'dividerAbove' }
@@ -62,6 +64,11 @@ export function rowMenuItems(model: RowMenuModel): MenuItem[] {
       title: strings.layout.markRead,
       systemImage: 'envelope.open',
       disabled: !model.unread
+    },
+    {
+      id: 'editProfile',
+      title: strings.botProfile.menuItem,
+      systemImage: 'person.crop.circle'
     },
     {
       id: 'colour',
@@ -122,6 +129,9 @@ export function parseRowMenuAction(id: string): RowMenuAction | null {
 
     case 'dividerAbove':
       return { kind: 'dividerAbove' }
+
+    case 'editProfile':
+      return { kind: 'editProfile' }
 
     case 'accent':
       return (ACCENT_ORDER as readonly string[]).includes(tail) ? { kind: 'accent', accent: tail as AccentName } : null

@@ -52,7 +52,7 @@
  * not sees nothing flicker. Reduce Motion collapses it to a swap.
  */
 import { useEffect, useRef, useState } from 'react'
-import { Animated, View } from 'react-native'
+import { Animated, Pressable, View } from 'react-native'
 
 import { GlassGroup, GlassSurface } from '../ui/glass'
 import { durationFor, easing, NATIVE_DRIVER } from '../ui/motion'
@@ -85,6 +85,12 @@ export interface ChatHeaderProps {
   accentFill?: string
   onBack?: () => void
   onOpenOptions: () => void
+  /**
+   * Open this bot's profile. Absent on a surface that has nowhere to put a
+   * sheet — the gallery — and the pill is then inert rather than a button that
+   * does nothing.
+   */
+  onOpenProfile?: () => void
   /**
    * Hide the wide layout's chat list.
    *
@@ -208,6 +214,7 @@ export function ChatHeader({
   accentFill,
   onBack,
   onOpenOptions,
+  onOpenProfile,
   onToggleSidebar,
   testID = 'chat-header'
 }: ChatHeaderProps) {
@@ -266,46 +273,66 @@ export function ChatHeader({
         trailing side so the name is not against the rim.
       */}
       <View pointerEvents="box-none" style={{ alignItems: 'center', flex: 1 }}>
-        <GlassSurface
-          contentStyle={{
-            alignItems: 'center',
-            flexDirection: 'row',
-            gap: theme.space.sm,
-            paddingLeft: theme.space.xs,
-            paddingRight: theme.space.md,
-            paddingVertical: theme.space.xs
-          }}
-          radius={theme.radii.pill}
-          shadow="float"
-          style={{ maxWidth: '100%' }}
-          testID={`${testID}-pill`}
-          variant="control"
-        >
-          {/* The ring is the chat's colour; the bead is the bot's state. Two facts,
-              two marks, so neither has to carry the other. */}
-          <View>
-            <Avatar
-              name={name}
-              size={AVATAR_SIZE.header}
-              style={{ borderColor: ring, borderWidth: 2 }}
-              {...(avatarUri ? { uri: avatarUri } : {})}
-            />
-            <View style={{ bottom: -1, position: 'absolute', right: -1 }}>
-              <PresenceBead ringColor={theme.glass.control.solid} size={BEAD_SIZE.inline} state={presence} />
-            </View>
-          </View>
+        {/*
+          The pill is the way into the bot's profile, which is why the whole of
+          it is the target rather than the avatar alone: the avatar is 38pt, the
+          name beside it is the thing a reader points at, and two adjacent
+          targets that do the same thing is one target drawn twice.
 
-          {/*
+          `Pressable` OUTSIDE the glass rather than an `onPress` through it: the
+          surface draws the blur and the shadow and has no press state of its
+          own, and wrapping is what keeps the pressed opacity on everything the
+          reader sees move.
+        */}
+        <Pressable
+          accessibilityLabel={chatStrings.header.profile(name)}
+          accessibilityRole="button"
+          disabled={!onOpenProfile}
+          onPress={onOpenProfile}
+          style={({ pressed }) => ({ maxWidth: '100%', opacity: pressed ? 0.7 : 1 })}
+          testID={`${testID}-profile`}
+        >
+          <GlassSurface
+            contentStyle={{
+              alignItems: 'center',
+              flexDirection: 'row',
+              gap: theme.space.sm,
+              paddingLeft: theme.space.xs,
+              paddingRight: theme.space.md,
+              paddingVertical: theme.space.xs
+            }}
+            radius={theme.radii.pill}
+            shadow="float"
+            style={{ maxWidth: '100%' }}
+            testID={`${testID}-pill`}
+            variant="control"
+          >
+            {/* The ring is the chat's colour; the bead is the bot's state. Two facts,
+              two marks, so neither has to carry the other. */}
+            <View>
+              <Avatar
+                name={name}
+                size={AVATAR_SIZE.header}
+                style={{ borderColor: ring, borderWidth: 2 }}
+                {...(avatarUri ? { uri: avatarUri } : {})}
+              />
+              <View style={{ bottom: -1, position: 'absolute', right: -1 }}>
+                <PresenceBead ringColor={theme.glass.control.solid} size={BEAD_SIZE.inline} state={presence} />
+              </View>
+            </View>
+
+            {/*
             The name is the only child that contributes a width here, which is the
             whole of the rule above. `minWidth` is the floor under a short one.
           */}
-          <View style={{ flexShrink: 1, minWidth: PILL_MIN_TEXT_WIDTH }}>
-            <Text accessibilityRole="header" aria-level={1} numberOfLines={1} variant="chatName">
-              {name}
-            </Text>
-            <StatusLine line={line} reduceMotion={theme.reduceMotion} />
-          </View>
-        </GlassSurface>
+            <View style={{ flexShrink: 1, minWidth: PILL_MIN_TEXT_WIDTH }}>
+              <Text accessibilityRole="header" aria-level={1} numberOfLines={1} variant="chatName">
+                {name}
+              </Text>
+              <StatusLine line={line} reduceMotion={theme.reduceMotion} />
+            </View>
+          </GlassSurface>
+        </Pressable>
       </View>
 
       <GlassGroup spacing={theme.space.sm} style={{ flexDirection: 'row', gap: theme.space.sm }}>
