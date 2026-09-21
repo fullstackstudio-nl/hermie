@@ -116,20 +116,30 @@ export function resetShortcutScopes(): void {
   modalDepth = 0
 }
 
-function deliver(event: ShortcutEvent): void {
+/**
+ * Deliver one action, and say whether anything took it.
+ *
+ * The answer is the browser seam's: it decides `preventDefault` from it, so a
+ * bare Tab still moves focus while no suggestion list is open and ⌘K still
+ * reaches the address bar on a screen with no search. On the Mac nothing reads
+ * it — by the time this runs, the responder chain and GameController have both
+ * already had the keystroke.
+ */
+function deliver(event: ShortcutEvent): boolean {
   if (!shortcutIsDeliverable(event.action, { modalDepth, typing: event.typing })) {
-    return
+    return false
   }
 
   if (event.action === 'close') {
-    closeTopmost()
-
-    return
+    return closeTopmost()
   }
 
   const stack = stacks.get(event.action)
+  const top = stack?.[stack.length - 1]
 
-  stack?.[stack.length - 1]?.fire()
+  top?.fire()
+
+  return Boolean(top)
 }
 
 /**
