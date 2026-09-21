@@ -13,11 +13,11 @@ import { Pressable, View, type ViewStyle } from 'react-native'
 
 import { Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
-import type { ColorRole } from '../../ui/tokens'
+import type { TextColorRole } from '../../ui/tokens'
 
 export interface ChipProps {
   label: string
-  tone?: ColorRole
+  tone?: TextColorRole
   leading?: ReactNode
   onPress?: () => void
   /** Centres the chip in the transcript, the way a system notice sits. */

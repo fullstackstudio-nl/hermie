@@ -21,11 +21,11 @@ import {
   OK_SOFT,
   TINT_SUNK,
   type BubbleVariant,
-  type ColorRole,
   type ColorScale,
   type ElevationScale,
   type GlassVariant,
-  type Scheme
+  type Scheme,
+  type TextColorRole
 } from './tokens'
 
 export const AA_TEXT = 4.5
@@ -44,7 +44,7 @@ export type Rgb = [number, number, number]
  * read that role, so a preset whose accent ink is unreadable on its own glass
  * fails here instead of in a screenshot.
  */
-export const TEXT_ROLES: readonly ColorRole[] = [
+export const TEXT_ROLES = [
   'text',
   'textMuted',
   'textFaint',
@@ -52,10 +52,24 @@ export const TEXT_ROLES: readonly ColorRole[] = [
   'dangerText',
   'okText',
   'warnText'
-]
+] as const satisfies readonly TextColorRole[]
+
+/**
+ * Every ink a `Text` can be given is either measured on every surface below or is
+ * `onAccent`, which has a row of its own against the bubble it is drawn on.
+ *
+ * A type rather than a note. `TextColorRole` is what `Text` accepts; adding a
+ * role to it without adding it to `TEXT_ROLES` makes this line fail to compile,
+ * which is the difference between a table that is complete and a table that
+ * happens to be complete today. The owner's Graphite report was the other half of
+ * the same hole — a FILL reaching a `Text` — and that half is closed by the type.
+ */
+type UnmeasuredTextRole = Exclude<TextColorRole, (typeof TEXT_ROLES)[number] | 'onAccent'>
+
+export const EVERY_TEXT_ROLE_IS_MEASURED: [UnmeasuredTextRole] extends [never] ? true : false = true
 
 /** Inks that only have to be SEEN: today that is the cron status dot's fill. */
-export const MARK_ROLES: readonly ColorRole[] = ['ok']
+export const MARK_ROLES = ['ok'] as const
 
 export function parseColor(color: string): { rgb: Rgb; alpha: number } {
   const rgba = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)$/u.exec(color)
@@ -106,6 +120,15 @@ export interface Surface {
   name: string
   /** The composited background this surface's ink actually sits on. */
   background: Rgb
+  /**
+   * The inks drawn on this surface, where that is narrower than "any of them".
+   *
+   * A panel carries whatever a screen puts on it, so it has no list. A CONTROL
+   * carries exactly one label and is sized to it, so holding it to every ink in
+   * the scale would rule out a colour on the strength of a combination that
+   * cannot occur. Only `e4` has one; see `surfacesFor`.
+   */
+  roles?: readonly TextColorRole[]
 }
 
 /**
@@ -135,6 +158,33 @@ export function surfacesFor(scheme: Scheme, elevation: ElevationScale, backgroun
   out.push({ name: 'sunk tint', background: over(TINT_SUNK[scheme], over(glass.panel.fill, floor)) })
 
   /*
+    The OPAQUE rungs, which are not glass and were not in this table.
+
+    `elevation.e3c` is the inset card every Settings row sits on, the tool card,
+    the error card and the licence list; `e1` and `e2` are the navigator's own
+    background and a pressed row. None of them composite a wash over a wallpaper —
+    they are a flat colour — so nothing in the glass loop reaches them, and a role
+    could be unreadable on an entire screen with every row here green. That is the
+    surface the owner's Graphite report was actually about.
+
+    `e0` is the wallpaper rung and is deliberately absent: `Screen` paints it only
+    where there is no panel, and the ink on it comes off the panel above.
+  */
+  for (const rung of ['e1', 'e2', 'e3', 'e3c'] as const) {
+    out.push({ name: `elevation ${rung}`, background: over(elevation[rung], floor) })
+  }
+
+  /*
+    `e4` is the ladder's top rung and the one surface on it that is not a panel:
+    the SELECTED segment of a segmented control (`ui/sheets/controls.tsx`), which
+    is a pill the width of its own label. The only ink on it is `text` — an
+    unselected segment is transparent and reads off the sunk tint above — so that
+    is the only ink measured. Putting another one there without widening this is
+    the one gap left, and it is a single call site wide.
+  */
+  out.push({ name: 'elevation e4', background: over(elevation.e4, floor), roles: ['text'] })
+
+  /*
     The two soft fills, on the surface they are actually used on: a `Deny` button,
     a scheduler-down banner, a locked-answer chip. Each is a low-alpha wash over a
     SHEET with `dangerText` / `okText` on it, and the wash shifts the sheet toward
@@ -161,7 +211,9 @@ export function measureFace(theme: string, scheme: Scheme, face: ResolvedThemeFa
   const rows: ContrastRow[] = []
 
   for (const surface of surfacesFor(scheme, face.elevation, face.background)) {
-    for (const role of [...TEXT_ROLES, ...MARK_ROLES]) {
+    const inks = surface.roles ?? [...TEXT_ROLES, ...MARK_ROLES]
+
+    for (const role of inks) {
       rows.push({
         theme,
         scheme,
@@ -260,7 +312,9 @@ export function judgeThemeColour(
   let worst = Number.POSITIVE_INFINITY
 
   for (const surface of surfacesFor(scheme, face.elevation, colour)) {
-    for (const role of TEXT_ROLES) {
+    // The same narrowing the table uses, for the same reason: a control that
+    // carries one label must not be judged on an ink it never draws.
+    for (const role of surface.roles ?? TEXT_ROLES) {
       worst = Math.min(worst, contrastRatio(colors[role], surface.background))
     }
   }

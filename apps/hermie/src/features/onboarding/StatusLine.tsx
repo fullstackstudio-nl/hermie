@@ -15,11 +15,11 @@ import { View } from 'react-native'
 
 import { Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
-import type { ColorRole } from '../../ui/tokens'
+import type { TextColorRole } from '../../ui/tokens'
 
 export type StatusTone = 'pending' | 'checking' | 'ok' | 'error'
 
-const INK: Record<StatusTone, ColorRole> = {
+const INK: Record<StatusTone, TextColorRole> = {
   pending: 'textMuted',
   checking: 'textMuted',
   ok: 'okText',

@@ -25,7 +25,7 @@ import { GlassSurface } from '../../ui/glass'
 import { Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { Icon, ICON_SIZE } from '../../ui/Icon'
-import { TAP_SLOP, type ColorRole } from '../../ui/tokens'
+import { TAP_SLOP, type TextColorRole } from '../../ui/tokens'
 import { useLedgerWidth } from './Bubble'
 
 export interface LedgerRowProps {
@@ -48,10 +48,10 @@ export interface LedgerRowProps {
   testID?: string
 }
 
-const TONE_INK: Record<NonNullable<LedgerRowProps['tone']>, ColorRole> = {
+const TONE_INK: Record<NonNullable<LedgerRowProps['tone']>, TextColorRole> = {
   neutral: 'textMuted',
   danger: 'dangerText',
-  ok: 'ok',
+  ok: 'okText',
   accent: 'accentText'
 }
 

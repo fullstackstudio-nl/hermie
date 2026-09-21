@@ -2,7 +2,7 @@ import { Children, createContext, isValidElement, useContext, type ReactNode } f
 import { Pressable, type PressableProps, View, type ViewProps } from 'react-native'
 
 import { useTheme } from '../theme'
-import { CONTROL_MIN_HEIGHT } from '../tokens'
+import { CONTROL_MIN_HEIGHT, type TextColorRole } from '../tokens'
 import { Text } from './Text'
 
 export type InsetGroupProps = ViewProps & {
@@ -106,8 +106,34 @@ export function InsetRow({ compact = false, style, ...rest }: InsetRowProps) {
 export type InsetButtonRowProps = Omit<PressableProps, 'children'> & {
   title: string
   /** Destructive rows are red, the way iOS marks "Sign out" and "Delete". */
-  tone?: 'accent' | 'danger' | 'text'
+  tone?: InsetRowTone
   detail?: string
+}
+
+export type InsetRowTone = 'accent' | 'danger' | 'text'
+
+/**
+ * The INK a row's tone is drawn in.
+ *
+ * A tone names an intention — "this row acts", "this row destroys" — and the
+ * intention is not a colour. `accent` and `danger` are fills, with no contrast
+ * floor of their own; `accentText` and `dangerText` are the floored siblings that
+ * `scripts/check-contrast.ts` measures on every surface of every theme.
+ *
+ * This is the whole of the owner's Graphite report: the title was painted in the
+ * accent SWATCH, which on Graphite is a grey barely off the grey card under it,
+ * and the check could not fail because a swatch is not an ink. Exported so the
+ * mapping is testable on its own — the bug was in this one line.
+ */
+export function toneInk(tone: InsetRowTone): TextColorRole {
+  switch (tone) {
+    case 'accent':
+      return 'accentText'
+    case 'danger':
+      return 'dangerText'
+    default:
+      return 'text'
+  }
 }
 
 /** A tappable row: the inset-group equivalent of a link. */
@@ -134,7 +160,7 @@ export function InsetButtonRow({ title, tone = 'accent', detail, disabled, style
             opacity: disabled ? 0.4 : 1
           }}
         >
-          <Text variant="body" color={tone}>
+          <Text variant="body" color={toneInk(tone)}>
             {title}
           </Text>
           {detail ? (

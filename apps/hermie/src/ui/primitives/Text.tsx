@@ -1,11 +1,12 @@
 import { Text as RNText, type TextProps as RNTextProps, type TextStyle } from 'react-native'
 
 import { useTheme } from '../theme'
-import type { ColorRole, TypeToken } from '../tokens'
+import type { TextColorRole, TypeToken } from '../tokens'
 
 export type TextProps = RNTextProps & {
   variant?: TypeToken
-  color?: ColorRole
+  /** Inks only. A fill role — `accent`, `danger`, `ok` — has no contrast floor; see `TextColorRole`. */
+  color?: TextColorRole
 }
 
 export function Text({ variant = 'body', color = 'text', style, ...rest }: TextProps) {

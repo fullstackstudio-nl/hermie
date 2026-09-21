@@ -25,7 +25,7 @@ import { Markdown } from '../markdown'
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
 import { Icon, ICON_SIZE } from '../ui/Icon'
-import { TAP_SLOP, type ColorRole } from '../ui/tokens'
+import { TAP_SLOP, type TextColorRole } from '../ui/tokens'
 import { GlassSurface } from '../ui/glass'
 import { hasReply } from './dm-rollup'
 import { useExpanded } from './expanded'
@@ -61,7 +61,7 @@ export interface BotDmOutLineProps {
   testID?: string
 }
 
-type Marker = { label: string; tone: ColorRole; hollow: boolean }
+type Marker = { label: string; tone: TextColorRole; hollow: boolean }
 
 /**
  * The reply indicator, which is never absent.

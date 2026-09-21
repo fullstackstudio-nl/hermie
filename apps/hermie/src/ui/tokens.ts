@@ -42,6 +42,22 @@ export type ColorRole =
 
 export type ColorScale = Record<ColorRole, string>
 
+/**
+ * The subset a `Text` may be given.
+ *
+ * `accent`, `danger` and `ok` are FILLS — a send button, a status dot, a
+ * destructive border — and they have no contrast floor of their own: the
+ * Graphite accent sits at 1.55 : 1 on its own dark panel, which is correct for a
+ * swatch and unreadable as a word. Every one of them has a floored `…Text`
+ * sibling, and that sibling is what `scripts/check-contrast.ts` measures.
+ *
+ * This type is the whole of the guarantee. The Settings rows that the owner
+ * reported as unreadable in Graphite — Sign out, Advanced, Licences — were
+ * `<Text color="accent">`, which the check could not see because `accent` is not
+ * an ink. Naming one here is now a type error rather than a screenshot.
+ */
+export type TextColorRole = Exclude<ColorRole, 'accent' | 'danger' | 'ok'>
+
 export const lightColors: ColorScale = {
   text: '#12151C',
   textMuted: '#4B5462',
