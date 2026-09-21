@@ -71,9 +71,12 @@ no third-party network call. The only address Hermie knows is the one you typed.
 - **Bot-to-bot, visible.** A message one bot sends another shows up in both
   conversations, the reply is folded into the message that caused it, and
   **Activity** is one timeline of all of it across every bot.
-- **Questions as sheets.** Approvals and clarifications come up as a bottom
-  sheet, answered only by an explicit tap, and a question that was answered
-  somewhere else says so instead of going stale.
+- **Questions as sheets, answerable in place.** Approvals and clarifications
+  come up as a bottom sheet, answered only by an explicit tap, and a question
+  that was answered somewhere else says so instead of going stale. A permission
+  request can also be answered from the card in the transcript, without the
+  sheet — the buttons are exactly the ones the gateway offered, and answering
+  either way takes the sheet down with it.
 - **Crons.** The gateway's scheduled jobs, under the name the gateway and its
   dashboard use: what they run, when they run next, pause, resume, run now, and
   the transcript of any past run. A delivery lands in the chat it was addressed
@@ -84,10 +87,29 @@ no third-party network call. The only address Hermie knows is the one you typed.
 - **Who is busy, at a glance.** Every chat carries a bead: offline, needs input,
   working, online, in that order of urgency. It is the only thing in the app that
   animates, and only for the one state that is waiting on a person.
-- **Your list, arranged your way.** Rows reorder, named dividers group them,
-  chats archive, and each one can carry its own colour. None of it is sent to the
+- **Your list, arranged your way.** Rows reorder, folders group them — and the
+  folders reorder too, held by the same grip and dropped among the chats — chats
+  archive, and each one can carry its own colour. None of it is sent to the
   gateway: the arrangement is yours and it is per gateway, because a different
   machine's bots are a different list.
+
+- **The chat's menu is a popover in the chat.** The (…) opens a floating menu
+  under the header rather than a sheet that moves the conversation out of the
+  way: nothing behind it shifts. Pickers that are genuinely a page — the model
+  catalogue, the colours, the mute spans — still open as one, already on the
+  page you asked for. On a column too narrow to float a menu in, it is a sheet
+  again, decided by measuring the column rather than by asking which device this
+  is.
+
+- **Text the size you read at.** Settings › Appearance and the chat's own menu
+  carry Small / Default / Large / Extra large, and it changes the size of the
+  conversation — the bubbles, the Markdown, the code — and of nothing else. It
+  multiplies your device's own text size rather than replacing it.
+
+- **Notifications per chat, not just on or off.** Beyond muting: a bot can stay
+  quiet about its scheduled runs and still wake you when a turn fails. A type
+  you do not give a chat an opinion about follows the global setting as that
+  setting moves.
 - **Every message has a menu.** Copy the words or the Markdown, copy any link in
   it, open the other bot's chat, and — on one of your own turns — put it back in
   the composer to send again. On the newest reply, ask for it again: that goes

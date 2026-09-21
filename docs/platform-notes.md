@@ -7231,3 +7231,182 @@ The assertion now spells out the whole message; the new suite uses regexes.
 - **The landing-page detector is unchanged and still crude**: `<!doctype html`
   or `<html` in the first 2000 characters. A proxy that answers with an error
   page that opens with a comment or a BOM is not detected, and never was.
+
+## Round R4: the chat's menu, the pill, the drag, approvals, notifications, text size
+
+Seven things were asked for. Six landed; the seventh is partly done and the rest
+of it is written down at the bottom rather than half-wired.
+
+### The (…) menu was a sheet, and a sheet moves the chat
+
+The owner's report was four words long — _"nu schuift alles"_ — and the cause
+was not a bug. `ChatOptionsSheet` is a `BottomSheet`, a `BottomSheet` is a
+`Modal`, and on the compact shell it dims the window, takes the keyboard and
+pushes the transcript up to make room for itself. Every one of those is the
+screen moving because somebody asked what their options were.
+
+The first level is now a floating glass surface laid out ABSOLUTELY beside the
+transcript rather than above it, which is why nothing behind it shifts. That is
+asserted rather than eyeballed: `chat-options-popover.test.tsx` compares the
+transcript's `contentContainerStyle` before and after opening, because every
+other assertion in that file would still pass if the list quietly re-padded
+itself.
+
+**Popover or sheet is decided by measuring the chat column**, never by
+`Platform.OS`. A Mac window dragged narrow and a phone are the same problem, and
+only one of them is a platform. A column that has not laid out yet reports `0`,
+which is "not known" rather than "too narrow", so the very first open before
+layout takes the sheet instead of guessing.
+
+The deeper pages still open the sheet, and open it ON the page asked for.
+`initialPane` was a development-only lever for photographing a page on a
+simulator this machine can only launch; it is now also the hand-over, and its
+doc comment says so.
+
+### The header pill: the width stopped being derived
+
+The status line had already been taken out of the pill's intrinsic width — it is
+an absolutely positioned child, which Yoga leaves out of its parent's measure —
+and the owner still reported the pill changing size while a bot thinks.
+
+Rather than re-argue the box model, the width stopped being a question anything
+can answer. A **ruler** — the name at the same type token, laid out with nothing
+around it and nothing to shrink against — reports the name's own width once, and
+the column is given that number as an explicit `width`. The only thing that can
+move the pill now is the bot being renamed, and the ruler is keyed on the name so
+that case re-measures.
+
+**Why this rather than reserving the widest status:** the owner's parenthetical
+offered both. Reserving the widest of the four state labels would make the pill
+as wide as `Offline · last seen 09:12` on every chat, which is wider than most
+bot names and would change the whole header's composition. Pinning to the name
+keeps the pill the size it already is and removes the failure mode.
+
+### The drag was keyed by bot name, end to end
+
+`folder-rows.ts` has described the chat list in row KEYS — `bot:<name>` and
+`folder:<id>` — since it was written. `use-row-drag.ts` took bot names and
+rebuilt `` `bot:${name}` `` in two places, so the one kind of row whose key it
+did not speak was the one kind it could not pick up: `anchors.findIndex` for a
+folder could only ever miss, which put the lift's origin at anchor 0 and moved
+every neighbour the wrong way.
+
+The hook now takes and reports keys and nothing else, and `onCommit` hands the
+key back for the screen to make sense of. The folder row gets the identical
+lift, shadow, neighbour shift and settle rather than a second implementation
+standing beside the first.
+
+One rule is the folder's own and is stated in ADR-0019's amendment: **a folder
+only ever lands at the top level, because folders do not nest.** A drop target
+inside some other folder has no meaning for a folder, so `topLevelIndexOf` turns
+it into the position that folder occupies — "next to that one", which is the
+only reading a reader can predict. Dropping a CHAT onto a folder still puts it
+inside; that anchor is untouched.
+
+### Approvals: the sheet is how a question arrives, not the only way to answer
+
+ADR-0010 stands and its amendment says why. The sheet's argument is about
+ARRIVAL — a question that holds the agent's turn has to reach a reader who may
+be a thousand rows away — and it says nothing about the reader who has already
+scrolled to the call and decided.
+
+**The gateway gap:** an approval carries a tool NAME and no tool-call id. So
+nothing in the transcript can say with certainty which card a question belongs
+to, and `ToolCard` therefore takes the question as a PROP and never looks one
+up. The host matches on the name and on the card not having finished. Two
+concurrent calls to the same tool would draw the question twice — the same
+question, not the wrong one, and answering either answers it. Working around it
+in the app rather than asking upstream is the standing rule.
+
+### Per-chat notification types: why the schema is NOT bumped
+
+The brief asked for a schema bump with tolerance. It is deliberately not bumped,
+and this is the one place the round went against the instruction on purpose.
+
+`PUSH_SECTION_VERSION` is checked **per row** by the notifier, and a row whose
+`v` it does not understand is **dropped**. Bumping would therefore not protect
+`perBot` from an older plugin — it would unregister the device and make the
+phone go quiet. The field is additive instead, in exactly the shape `folders`
+and `botNameOrder` already use in the same section: a notifier that has not
+learned it keeps honouring the global types, which is what it did before the
+field existed. `chat-notification-types.test.tsx` pins the version so that this
+decision has to be taken again deliberately rather than by accident.
+
+**The plugin-side key**, for the plugin round: `hermie-app` → `push` → `perBot`
+→ `<bot name>` → `<push type>` → boolean. It sits BESIDE `registrations` and
+`seen` rather than inside a device's row, because it is a decision about the
+reader rather than about a device — the same argument `mutes` makes. It is
+PARTIAL: a type a chat does not mention follows the global switch. The merge
+rule is `effectivePushTypes(global, overrides)` in
+`packages/gateway-client/src/push.ts`, exported so both sides read one rule
+rather than two that happen to agree.
+
+### Text size scales the transcript and not the chrome
+
+A provider around the transcript supplies a theme whose `type` tokens are
+multiplied; everything under it — `Text`, the Markdown blocks, the code blocks,
+the bubbles — already reads `theme.type`, so a component added tomorrow follows
+without being told to. A prop would have to be threaded through every row, and
+the first one somebody forgot would stay 17pt while the rest of the conversation
+grew.
+
+A scale of exactly 1 provides the OUTER theme object unchanged rather than a
+copy, so the default costs nothing — not even a context value that differs by
+identity from the one above it, which the transcript's row memoisation would
+otherwise notice.
+
+### What could not be verified
+
+- **Nothing in this round has been seen on a device or against a real gateway.**
+  There is no gateway running here and no simulator this machine can drive, so
+  every assertion is a test-renderer assertion.
+- **The popover's measurement.** The popover-or-sheet decision reads a width
+  from `onLayout`; in the tests that width is handed in. What an iPad in Split
+  View, a Mac window being dragged, or a phone in landscape actually reports has
+  not been looked at, and neither has whether 400pt is the right threshold on
+  any of them.
+- **The header pill's ruler.** The test renderer has no layout engine, so the
+  ruler's own `onLayout` is invoked with a number rather than measured. That the
+  ruler genuinely reports the name's INTRINSIC width — and not a width
+  constrained by the centring column it sits in — is reasoned from the fact that
+  it is absolutely positioned with only `left` and `top` set, and has not been
+  measured.
+- **The drag gesture itself**, as ADR-0019 already said: a `PanResponder` needs
+  a touch and the boxes it reads come from a real layout pass. The folder drag
+  is exercised as arithmetic plus "the grip carries a responder".
+- **Two concurrent calls to the same tool** drawing one approval twice. It needs
+  a gateway that will do that.
+- **Anything the notifier does with `perBot`.** The app writes the key and the
+  merge rule is tested; no plugin reads it yet. That is the plugin round's.
+- **`onboarding-probe-hints.test.tsx` flaked once** in a full run ("clears the
+  actions once the address answers") and passed on its own and on every rerun.
+  It is untouched by this round; noting it because it was seen.
+
+### Item 3 (sessions) is only partly done
+
+**Delivered:** `Refresh` in the chat's menu — re-read the roster, which is where
+a canonical session id comes from, then re-open the chat, which resumes and
+replays. That is the gateway-restart case, and a pull gesture cannot express it
+because on an inverted transcript a pull already means "older messages".
+
+**Not delivered, and not started:** `session.branch` and the Branches section,
+`Pin`, and the "Past conversations" page with rename and `session.delete` for
+non-canonical sessions. None of it is stubbed and none of it is half-wired —
+there is no dead code to clean up. What it needs, in the order it would be
+built:
+
+1. controller methods over `session.branch`, `session.list` (per profile,
+   `include_hidden`) and `session.delete`, with the fake gateway extended and
+   `upstream-shapes.test.ts` kept honest against the vendored contract;
+2. a model for a session that is NOT the canonical one — branches and retired
+   `Bot Chat · <date>` conversations are ordinary visible sessions, and the
+   one-canonical-chat rule (ADR-0007) means the chat list must never offer to
+   delete or hide the canonical one, so the model has to make that a type
+   distinction rather than a check somebody can forget;
+3. the surfaces: a Branches group under the bot in the chat list, a Past
+   conversations page opened from the bot profile sheet, and the row menu items.
+
+`Pin` is independent of all of that — it is a `Record<string, true>` in the
+chat-layout store, synced in the app-wide section like the mutes, and a sort
+inside `folderRows`. It was left out because it changes the order the drag
+arithmetic reads, and this round had already changed that arithmetic once.
