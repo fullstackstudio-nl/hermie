@@ -18,7 +18,7 @@ import {
   replyFromDeliveryOutput
 } from './bot-dm'
 import { parseCronDelivery } from './cron-delivery'
-import { type InjectedRow, parseInjectedRow } from './injected'
+import { type InjectedRow, parseInjectedRow, stripSteerWrapper } from './injected'
 import {
   type AssistantItem,
   type BotDmInItem,
@@ -546,18 +546,24 @@ export function rowsToItems(rows: readonly TranscriptRow[], shape: RowShape, opt
       return
     }
 
-    const stripped = stripUserText(content)
+    // A steer IS the user speaking, so it keeps its bubble — but the wrapper the
+    // gateway delivers it in is addressed to the model, not to the reader.
+    const unwrapped = role === 'user' ? stripSteerWrapper(content) : null
+    const stripped = stripUserText(unwrapped ?? content)
 
     if (!stripped.text && !stripped.attachments?.length) {
       return
     }
+
+    const speechKind =
+      displayKind === 'skill_invocation' || displayKind === 'steer' ? displayKind : unwrapped !== null ? 'steer' : ''
 
     push<UserItem>({
       id: fallbackId,
       kind: 'user',
       text: stripped.text,
       ...(stripped.attachments ? { attachments: stripped.attachments } : {}),
-      ...(displayKind === 'skill_invocation' || displayKind === 'steer' ? { displayKind } : {}),
+      ...(speechKind ? { displayKind: speechKind } : {}),
       ...base
     })
   })

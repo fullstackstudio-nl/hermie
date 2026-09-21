@@ -15,9 +15,10 @@ import {
   kanbanNotificationText,
   plainProcessText,
   priorContextText,
+  steerWrapperBody,
   steerWrapperText
 } from './__fixtures__/rows'
-import { isInjectedRow, parseInjectedRow } from './injected'
+import { isInjectedRow, parseInjectedRow, stripSteerWrapper } from './injected'
 
 describe('the headers the gateway injects', () => {
   it('reads a fan-out report as delegation work that finished', () => {
@@ -106,5 +107,29 @@ describe('what stays a message', () => {
     expect(parseInjectedRow(undefined)).toBeNull()
     expect(parseInjectedRow(42)).toBeNull()
     expect(parseInjectedRow({ text: '[ASYNC DELEGATION BATCH COMPLETE — x]\nbody' })).toBeNull()
+  })
+})
+
+describe('the steer wrapper', () => {
+  it('gives back only the words the user typed', () => {
+    expect(stripSteerWrapper(steerWrapperText)).toBe(steerWrapperBody)
+  })
+
+  it('keeps a multi-line steer whole', () => {
+    const body = 'first line\n\nsecond line'
+    const wrapped = steerWrapperText.replace(steerWrapperBody, body)
+
+    expect(stripSteerWrapper(wrapped)).toBe(body)
+  })
+
+  it('does not fire on half a wrapper, or on prose quoting one', () => {
+    expect(stripSteerWrapper(steerWrapperText.split('\n').slice(0, 2).join('\n'))).toBeNull()
+    expect(stripSteerWrapper(`I saw this: ${steerWrapperText}`)).toBeNull()
+    expect(stripSteerWrapper('lees over shared memory skill')).toBeNull()
+  })
+
+  it('survives anything that is not a string', () => {
+    expect(stripSteerWrapper(null)).toBeNull()
+    expect(stripSteerWrapper(7)).toBeNull()
   })
 })

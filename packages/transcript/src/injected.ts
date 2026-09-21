@@ -55,8 +55,8 @@
  *   nothing under it is a label somebody typed, not a header;
  * - `[OUT-OF-BAND USER MESSAGE …]` is excluded by name. It is the one bracketed
  *   shout that IS the user speaking: the wrapper a mid-turn steer is delivered
- *   in (`agent/prompt_builder.py::STEER_MARKER_OPEN`, line 535), and the words
- *   inside it stay a bubble.
+ *   in (`agent/prompt_builder.py::STEER_MARKER_OPEN`, line 535).
+ *   `stripSteerWrapper` takes it off and the words stay a bubble.
  *
  * A cron delivery and a teammate's DM are recognised before this module runs and
  * keep their own item kinds; neither header shouts, so neither would reach here
@@ -111,6 +111,35 @@ const PROCESS_HEADER_RE = /^IMPORTANT:/u
  * behind it is what keeps this off a message that merely opens with a tick.
  */
 const KANBAN_NOTIFICATION_RE = /^[✔⏸✖⏱🔄] (?:\[[^\]\r\n]+\] )?(?:@\S+ )?Kanban \S+/u
+
+/**
+ * A steer as the gateway delivers it (`agent/prompt_builder.py`, lines 535–538):
+ * the marker open on its own line, the user's words, the marker close last.
+ *
+ * The descriptive clause inside the opening marker is NOT matched word for word,
+ * which is where this differs from the cron headers in `cron-delivery.ts`. It
+ * does not need to be: the marker is a PAIR, and a row that both opens and
+ * closes with the same bracketed tag is already unambiguous in a way a lone
+ * header never is.
+ */
+const STEER_WRAPPER_RE =
+  /^\s*\[OUT-OF-BAND USER MESSAGE(?: — [^\r\n]*)?\]\r?\n([\s\S]*)\r?\n\[\/OUT-OF-BAND USER MESSAGE\]\s*$/u
+
+/**
+ * The user's own words, taken out of the steer wrapper, or `null` when the text
+ * is not a wrapped steer.
+ *
+ * The wrapper is addressed to the model — it tells it whose words these are and
+ * that a replay is not a new delivery — and none of that is the message. A chat
+ * loaded from history showed all three lines in the bubble.
+ */
+export function stripSteerWrapper(text: unknown): string | null {
+  if (typeof text !== 'string' || !text) {
+    return null
+  }
+
+  return STEER_WRAPPER_RE.exec(text)?.[1] ?? null
+}
 
 /**
  * Read a transcript row's text as a gateway-injected notice, or `null` when it

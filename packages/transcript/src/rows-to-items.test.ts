@@ -21,7 +21,9 @@ import {
   plainProcessText,
   priorContextText,
   restHistoryRows,
-  rpcHistoryRows
+  rpcHistoryRows,
+  steerWrapperBody,
+  steerWrapperText
 } from './__fixtures__/rows'
 import type {
   AssistantItem,
@@ -445,5 +447,34 @@ describe('an injected row with no display_kind', () => {
   it('still leaves a message that merely opens with a bracket a user turn', () => {
     expect(kinds([{ role: 'user', row_id: 43, text: '[ok] done' }])).toEqual(['user'])
     expect(kinds([{ role: 'user', row_id: 44, text: '[1] first item\n[2] second item' }])).toEqual(['user'])
+  })
+})
+
+/**
+ * The wrapper a mid-turn steer is delivered in.
+ *
+ * `agent/prompt_builder.py::format_steer_marker` writes it, and every word of it
+ * is addressed to the model: whose words these are, and that a replay is not a
+ * new delivery. A chat loaded from history showed all three lines in the bubble.
+ */
+describe('a persisted steer row', () => {
+  const row = (extra: Partial<TranscriptRow> = {}) =>
+    rowsToItems(
+      [{ role: 'user', row_id: 50, text: steerWrapperText, display_kind: 'steer', ...extra }],
+      'rpc'
+    )[0] as UserItem
+
+  it('shows only the words the user typed', () => {
+    expect(row()).toMatchObject({ kind: 'user', text: steerWrapperBody, displayKind: 'steer' })
+  })
+
+  it('is a steer even on a gateway that did not label it', () => {
+    expect(row({ display_kind: null })).toMatchObject({ kind: 'user', text: steerWrapperBody, displayKind: 'steer' })
+  })
+
+  it('pairs with the optimistic bubble, which never saw the wrapper', () => {
+    const [persisted] = rowsToItems([{ role: 'user', row_id: 51, text: steerWrapperText }], 'rpc') as [UserItem]
+
+    expect(normalizedItemText(persisted)).toBe(steerWrapperBody)
   })
 })

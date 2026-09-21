@@ -102,6 +102,8 @@ export const steerWrapperText = [
   '[/OUT-OF-BAND USER MESSAGE]'
 ].join('\n')
 
+export const steerWrapperBody = 'lees over shared memory skill'
+
 /** A full canonical Bot Chat as `session.history` projects it. */
 export const rpcHistoryRows: TranscriptRow[] = [
   { role: 'user', text: 'Summarise the release notes.', timestamp: 1_700_000_000, row_id: 1 },

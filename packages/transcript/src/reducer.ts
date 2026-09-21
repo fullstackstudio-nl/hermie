@@ -12,7 +12,7 @@ import {
   replyFromDeliveryOutput
 } from './bot-dm'
 import { parseCronDelivery } from './cron-delivery'
-import { type InjectedRow, isInjectedNotice, parseInjectedRow } from './injected'
+import { type InjectedRow, isInjectedNotice, parseInjectedRow, stripSteerWrapper } from './injected'
 import { attachmentsMatchKey, normalizedItemText, normalizeMatchText, stripUserText } from './rows-to-items'
 import { subagentIdOf, TERMINAL_SUBAGENT_STATUS, toSubagent } from './subagent-progress'
 import type { ErrorSurface, SessionLiveInfo, Usage } from '@hermes/shared/gateway-events'
@@ -1463,8 +1463,9 @@ function readInflightPrompt(userText: string): InflightPrompt {
 
   // `stripUserText` is what the persisted row goes through, directives and
   // attached-context block included, so the optimistic and inflight projections
-  // of one prompt agree.
-  const stripped = stripUserText(userText)
+  // of one prompt agree — and the steer wrapper comes off here for that same
+  // reason.
+  const stripped = stripUserText(stripSteerWrapper(userText) ?? userText)
 
   return {
     raw: userText,
@@ -1601,7 +1602,7 @@ export function applyResumeSnapshot(state: ChatState, snapshot: ResumeSnapshot, 
             : {
                 id: `i:${next.turn.nextSeq}`,
                 kind: 'user',
-                text: stripUserText(userText).text,
+                text: stripUserText(stripSteerWrapper(userText) ?? userText).text,
                 // The references too, for the same reason the projection lifts them
                 // out of the text: without them a prompt that was nothing but a
                 // file resumes as an empty bubble, and the row that lands for it has
