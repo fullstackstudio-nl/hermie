@@ -26,10 +26,22 @@ import { useConnectionStore } from './store'
  */
 export type GatewayPhase = 'loading' | 'onboarding' | 'connected'
 
+/**
+ * What the wizard should open on when `phase` is `onboarding`.
+ *
+ * `fresh` is a first run, `signin` is a sign-out with the address still stored,
+ * and `address` is the way off a gateway that cannot be used: setup reopens on
+ * its address step with the stored address filled in, nothing on disk has been
+ * touched, and the trip can therefore be cancelled.
+ */
+export type OnboardingIntent = 'fresh' | 'signin' | 'address'
+
 export interface GatewayContextValue {
   phase: GatewayPhase
   /** Set when the user signed out: the address survives, the credentials do not. */
   resumeConfig: StoredGatewayConfig | null
+  /** Which step the wizard opens on, and whether it can be backed out of. */
+  resumeIntent: OnboardingIntent
   connection: GatewayConnection | null
   status: ConnectionStatus
   lastError: GatewayError | null
@@ -58,8 +70,13 @@ export interface GatewayContextValue {
   adoptTokens: (tokens: TokenSet) => Promise<void>
   /** Re-read the configuration from disk and connect; the wizard calls this when it finishes. */
   reload: () => Promise<void>
+  /** Dial now: reset the ladder, or restart a loop that has stopped. See below. */
+  retryNow: () => void
   signOut: () => Promise<void>
+  /** Reopen setup on the address step; nothing stored is dropped until a different gateway is applied. */
   changeGateway: () => Promise<void>
+  /** Forget the address and the credentials, and start setup empty. */
+  forgetGateway: () => Promise<void>
 }
 
 const GatewayContext = createContext<GatewayContextValue | null>(null)
@@ -85,6 +102,7 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
   const [phase, setPhase] = useState<GatewayPhase>('loading')
   const [setup, setSetup] = useState<GatewaySetup | null>(null)
   const [resumeConfig, setResumeConfig] = useState<StoredGatewayConfig | null>(null)
+  const [resumeIntent, setResumeIntent] = useState<OnboardingIntent>('fresh')
 
   const connectionRef = useRef<GatewayConnection | null>(null)
   const coordinatorRef = useRef<TokenCoordinator | null>(null)
@@ -137,6 +155,7 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
       setStoredConfig(loaded.config)
       setSetup(loaded)
       setResumeConfig(null)
+      setResumeIntent('fresh')
       setPhase('connected')
       connection.start()
     },
@@ -167,6 +186,7 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
       teardown()
       setSetup(loaded)
       setResumeConfig(loaded?.config ?? null)
+      setResumeIntent(loaded ? 'signin' : 'fresh')
       setPhase('onboarding')
 
       return
@@ -189,6 +209,32 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  /**
+   * Dial now — the Re-check button, and the one thing the stopped screen can do
+   * about a stopped connection.
+   *
+   * Two calls rather than one because `retryNow()` on the connection is
+   * deliberately inert while the loop has stopped: redialling a `needs_signin`
+   * or a refused address fails the same way and erases the explanation, so the
+   * chat's Retry never has to ask what kind of failure it is looking at. The
+   * stopped screen is the one caller that HAS asked — the reader pressed a
+   * button that says Re-check on a card that says why — and `resume()` is what
+   * restarts a stopped loop. Each is a no-op in the other's case, so the pair
+   * reads as "dial now, whatever state this is in".
+   */
+  const retryNow = useCallback(() => {
+    const connection = connectionRef.current
+
+    if (!connection) {
+      void reload()
+
+      return
+    }
+
+    connection.resume()
+    connection.retryNow()
+  }, [reload])
+
   const signOut = useCallback(async () => {
     const keep = setup?.config ?? null
 
@@ -207,10 +253,32 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
     await clearCredentials()
     setSetup(null)
     setResumeConfig(keep)
+    setResumeIntent('signin')
     setPhase('onboarding')
   }, [setup, teardown])
 
+  /**
+   * Back to the address step, with everything still on disk.
+   *
+   * Nothing is cleared and nothing is retired here, on purpose. The reader may
+   * be checking a stored address against the one the gateway publishes rather
+   * than moving to another gateway, and a wizard that signed them out on the
+   * way in would charge them a sign-in for looking — which is exactly the trap
+   * the inherited-address report was stuck in, one step further along. The
+   * wizard does the leaving when a different address is actually saved; see
+   * `OnboardingNavigator`.
+   */
   const changeGateway = useCallback(async () => {
+    const keep = setup?.config ?? resumeConfig
+
+    teardown()
+    setSetup(null)
+    setResumeConfig(keep)
+    setResumeIntent('address')
+    setPhase('onboarding')
+  }, [resumeConfig, setup, teardown])
+
+  const forgetGateway = useCallback(async () => {
     // As in `signOut`, and for the same reason with more force: the next gateway
     // must not inherit a row that names this one's devices.
     await retirePushRegistration()
@@ -223,6 +291,7 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
     await clearGateway()
     setSetup(null)
     setResumeConfig(null)
+    setResumeIntent('fresh')
     setPhase('onboarding')
   }, [setup, teardown])
 
@@ -259,6 +328,7 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
     () => ({
       phase,
       resumeConfig,
+      resumeIntent,
       connection: connectionRef.current,
       status,
       lastError,
@@ -270,10 +340,27 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
       request,
       adoptTokens,
       reload,
+      retryNow,
       signOut,
-      changeGateway
+      changeGateway,
+      forgetGateway
     }),
-    [adoptTokens, changeGateway, lastError, phase, recordAuth, reload, request, resumeConfig, setup, signOut, status]
+    [
+      adoptTokens,
+      changeGateway,
+      forgetGateway,
+      lastError,
+      phase,
+      recordAuth,
+      reload,
+      request,
+      resumeConfig,
+      resumeIntent,
+      retryNow,
+      setup,
+      signOut,
+      status
+    ]
   )
 
   return <GatewayContext.Provider value={value}>{children}</GatewayContext.Provider>

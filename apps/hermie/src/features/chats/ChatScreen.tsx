@@ -50,8 +50,9 @@ import type { ConnectionStatus } from '@hermie/gateway-client'
 import { looksLikeSlashCommand, parseSlashCommand } from '@hermes/shared/slash'
 
 import { useGateway } from '../../gateway'
+import { gatewayStop } from '../../gateway/gateway-stop'
+import { GatewayStoppedPanel } from '../../gateway/GatewayStoppedPanel'
 import { chatGatewayFor } from '../../gateway/link'
-import { SignedOutPanel } from '../../gateway/SignedOutPanel'
 import { strings } from '../../i18n/strings'
 import { haptic } from '../../platform/haptics'
 import { presenceOf } from '../bots/presence'
@@ -196,22 +197,30 @@ export function ChatScreen({
   onOpenCron,
   onToggleSidebar
 }: ChatScreenProps) {
-  const { status } = useGateway()
+  // The classifier is a plain function of the three things this screen already
+  // has from the provider, so deciding what to show costs no extra context and
+  // no state: `lastError` survives the statuses a re-dial passes through, which
+  // is what keeps the card up while Re-check runs.
+  const { config, lastError, status } = useGateway()
+  const stop = gatewayStop({ config, error: lastError, status })
   const botName = bot ?? route?.params?.bot ?? ''
   const focus = focusItemId ?? route?.params?.focusItemId
   const find = findText ?? route?.params?.findText
 
   /**
-   * A dead session takes the whole screen, inside a chat as well as beside one.
+   * A gateway that has stopped takes the whole screen, inside a chat as well as
+   * beside one.
    *
    * On the wide layout the shell did this and the phone did not, so a reader
    * who was already inside a conversation when the token expired saw a transcript
    * that had simply stopped, plus whatever error the next send produced. Neither
-   * says "sign in", which is the only thing that helps. It is checked before the
-   * bot name because a signed-out gateway has no roster to have picked from.
+   * says "sign in", which is the only thing that helps. The same is true of every
+   * other stop: an address the gateway refuses leaves a transcript that will
+   * never fill and no account of why. It is checked before the bot name because
+   * a stopped gateway has no roster to have picked from.
    */
-  if (status === 'needs_signin') {
-    return <SignedOutPanel />
+  if (stop) {
+    return <GatewayStoppedPanel />
   }
 
   if (!botName) {
@@ -985,8 +994,13 @@ function Conversation({
   const bannerNotice = opening ? openFailed(opening) : notice
 
   const waitingMs = useWaitingMs(status)
+  // A gateway that has stopped has its own screen — `GatewayStoppedPanel`, which
+  // this component's own parent returns instead of the chat. Standing the
+  // notice down as well keeps that true for any arrangement where both could be
+  // mounted: two notices about one connection is how a screen stops being read.
+  const gatewayStopped = gatewayStop({ config, error: lastError, status }) !== null
   const connectionState = connectionNotice({
-    blocked: chat.connectionError !== null,
+    blocked: chat.connectionError !== null || gatewayStopped,
     hasTranscript: chat.items.length > 0,
     lastError: lastError ?? null,
     status,

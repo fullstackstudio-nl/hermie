@@ -254,10 +254,18 @@ step — abandoning it halfway leaves no credential behind.
 5. **Done.** Now the credentials go to the system secret store and the rest to
    the app's preferences, and the connection starts.
 
-Afterwards, Settings shows the gateway and the live connection status. **Sign
-out** clears the credentials and keeps the address. **Change gateway** forgets
-everything for that gateway and starts over. If a session expires while you are
-using the app, a banner offers to sign in again where you are.
+Afterwards, Settings shows the gateway — address, host, scheme, port, provider,
+version and the live connection status. **Sign out** clears the credentials and
+keeps the address. **Change gateway** reopens setup with the address filled in
+and keeps everything stored until a different gateway is applied. **Forget this
+gateway** deletes both and starts over.
+
+When the connection stops for a reason waiting cannot fix — an expired session,
+a gateway that does not trust the address, a rejected certificate, a version
+that is too old — the app says so on a card that names the stored address and
+offers the ways out: re-check, change gateway, sign out, and a sign-in that
+happens where you are. In a browser, where Hermie Web fixes the gateway, it says
+that instead of offering setup.
 
 ## How it works
 

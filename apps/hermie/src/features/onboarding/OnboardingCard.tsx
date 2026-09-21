@@ -61,6 +61,13 @@ export type OnboardingCardProps = {
   onBack?: (() => void) | undefined
   /** Back stays visible but inert while the last step is writing to disk. */
   backDisabled?: boolean
+  /**
+   * A way out of the wizard entirely, offered only when there is something to
+   * go back TO: "Change gateway" opens setup over a gateway that is still
+   * configured, and a reader who only wanted to read the address must not have
+   * to finish a setup to get their app back.
+   */
+  onCancel?: (() => void) | undefined
   testID?: string
 }
 
@@ -77,6 +84,7 @@ export function OnboardingCard({
   primaryBusy = false,
   onBack,
   backDisabled = false,
+  onCancel,
   testID
 }: OnboardingCardProps) {
   const theme = useTheme()
@@ -174,6 +182,25 @@ export function OnboardingCard({
                 >
                   <Text color="accentText" variant="preview">
                     {strings.common.back}
+                  </Text>
+                </Pressable>
+              ) : null}
+              {onCancel ? (
+                <Pressable
+                  accessibilityRole="button"
+                  aria-disabled={backDisabled}
+                  disabled={backDisabled}
+                  hitSlop={12}
+                  onPress={onCancel}
+                  style={({ pressed }) => ({
+                    alignSelf: 'center',
+                    opacity: backDisabled ? 0.4 : pressed ? 0.6 : 1,
+                    padding: theme.space.sm
+                  })}
+                  testID="onboarding-cancel"
+                >
+                  <Text color="textMuted" variant="preview">
+                    {strings.common.cancel}
                   </Text>
                 </Pressable>
               ) : null}

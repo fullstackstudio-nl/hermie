@@ -46,7 +46,7 @@ export default function App() {
  * credentials are still there: the startup read, the wizard, and the app.
  */
 function Root() {
-  const { phase, resumeConfig, reload } = useGateway()
+  const { phase, resumeConfig, resumeIntent, reload } = useGateway()
   const devOpen = DEV_LAUNCH_INTENT?.open
 
   // Before the phase check on purpose: the component kit takes no gateway, so a
@@ -60,7 +60,16 @@ function Root() {
   }
 
   if (phase === 'onboarding') {
-    return <OnboardingNavigator resumeConfig={resumeConfig} onComplete={reload} />
+    return (
+      <OnboardingNavigator
+        onComplete={reload}
+        resumeConfig={resumeConfig}
+        // Coming from "Change gateway" the stored gateway is untouched, so the
+        // wizard opens on the address step and closing it puts the app back
+        // exactly as it was.
+        {...(resumeIntent === 'address' ? { initialStep: 'address' as const, onCancel: reload } : {})}
+      />
+    )
   }
 
   // The chat runtime sits inside the `connected` branch on purpose: it owns the

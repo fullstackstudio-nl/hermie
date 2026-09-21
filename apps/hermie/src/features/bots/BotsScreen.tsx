@@ -41,8 +41,9 @@ import { snippetSegments, tidySnippet } from '@hermie/gateway-client'
 import { hasOpenRequest, unreadBadgeLabel, unreadCountSince } from '@hermie/transcript'
 
 import { useGateway } from '../../gateway'
+import { gatewayStop } from '../../gateway/gateway-stop'
+import { GatewayStoppedPanel } from '../../gateway/GatewayStoppedPanel'
 import { chatGatewayFor } from '../../gateway/link'
-import { SignedOutPanel } from '../../gateway/SignedOutPanel'
 import { strings } from '../../i18n/strings'
 import { ContextMenuHost, HAS_NATIVE_CONTEXT_MENU } from '../../platform/context-menu'
 import { setMenuBar } from '../../platform/desktop-shortcuts'
@@ -1105,11 +1106,14 @@ export function BotsScreen({
   )
 }
 
-/** The compact shell's Chats screen shows the signed-out card in place of the list. */
+/** The compact shell's Chats screen shows the stopped-gateway card in place of the list. */
 export function BotsScreenOrSignedOut(props: BotsScreenProps) {
-  const { status } = useGateway()
+  const { config, lastError, status } = useGateway()
 
-  return status === 'needs_signin' ? <SignedOutPanel /> : <BotsScreen {...props} />
+  // Every stop, not only a signed-out one: a gateway that refuses this address
+  // has no roster to list either, and the list's "showing the last saved list"
+  // reads as a delay rather than as a dead end.
+  return gatewayStop({ config, error: lastError, status }) ? <GatewayStoppedPanel /> : <BotsScreen {...props} />
 }
 
 function Head({
