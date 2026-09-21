@@ -49,6 +49,19 @@ export class FakeChatGateway implements ChatGateway {
     return [...this.calls].reverse().find(call => call.method === method)?.params
   }
 
+  /**
+   * Every call to `method`, oldest first.
+   *
+   * `lastCall` answers "what did it end up asking for" and `methodOrder`
+   * answers "in what order did the methods go out". Neither can answer "which
+   * session did the FIRST of the two renames address", which is the whole
+   * question for a swap that has to happen in a particular order and roll back
+   * when it cannot.
+   */
+  callsOf(method: string): Record<string, unknown>[] {
+    return this.calls.filter(call => call.method === method).map(call => call.params)
+  }
+
   methodOrder(): string[] {
     return this.calls.map(call => call.method)
   }

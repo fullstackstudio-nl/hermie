@@ -420,6 +420,17 @@ export const strings = {
     // time is on the row's accessibility actions and in its menu instead.
     dragHint: 'Hold to drag',
     dragging: (name: string) => `Moving ${name}`,
+    /**
+     * Pin and Unpin, as one line that says what pressing it will do.
+     *
+     * Deliberately NOT "Pinned" / "Not pinned": every other line in this menu is
+     * an instruction, and one that reported a state instead would be the only
+     * row a reader has to stop and reason about.
+     */
+    pin: 'Pin',
+    unpin: 'Unpin',
+    /** Read out after the row's name, so a pinned chat says so without a glyph. */
+    pinnedRow: 'Pinned',
     archive: 'Archive',
     unarchive: 'Unarchive',
     archived: (count: number) => `Archived (${count})`,

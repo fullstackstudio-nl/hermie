@@ -50,6 +50,15 @@ export type BotRowProps = {
    */
   mutedUntil: number | null
   /**
+   * Held at the top of its container.
+   *
+   * A glyph rather than a different row treatment: a pinned chat is the same
+   * chat and its POSITION is what the reader changed, so the row says so in one
+   * mark and is otherwise untouched. Position alone would not be enough — the
+   * top of a list is also just the top of a list.
+   */
+  pinned?: boolean
+  /**
    * Every folder the row can move to, `null` first for the loose top level.
    * Must be a stable array — it is part of the memo's key, and a fresh one per
    * render re-renders forty rows because one of them changed.
@@ -90,6 +99,7 @@ export const BotRow = memo(function BotRow({
   handleHandlers,
   menuFolders,
   mutedUntil,
+  pinned = false,
   onArm,
   onDisarm,
   onMenuSelect,
@@ -312,6 +322,16 @@ export const BotRow = memo(function BotRow({
       */}
       {pendingShares > 0 ? (
         <Icon color={swatch.text} name="queue" size={ICON_SIZE.marker} testID={`bot-share-pending-${bot.name}`} />
+      ) : null}
+
+      {/*
+        And the pin, after the bell and still before the unread pill, for the
+        same reason the bell is: the marks describe the ROW and the pill
+        describes what arrived in it, so the pill stays nearest the edge where
+        the eye already looks for a count.
+      */}
+      {pinned ? (
+        <Icon color={theme.colors.textFaint} name="pin" size={ICON_SIZE.marker} testID={`bot-pinned-${bot.name}`} />
       ) : null}
 
       {unread || unreadCount > 0 ? <UnreadBadge accent={swatch.fill} count={unreadCount} /> : null}

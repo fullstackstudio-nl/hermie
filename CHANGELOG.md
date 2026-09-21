@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A conversation can be branched from any message.** "Branch from here…" on a turn or a reply
+  forks the conversation at that point into an ordinary, visible session of its own, named
+  `Branch · <first words>` of the row it was taken from. The chat it came out of is untouched —
+  `session.branch` copies the history so far into a new stored child rather than moving anything —
+  so what happens on screen is a line saying the branch exists and offering to open it. One caveat
+  belongs in the changelog rather than only in the code: **`session.branch` takes no row id.** Its
+  parameters are `{session_id, name, count}`, and the app reads `count` as "how many of the parent's
+  messages the child starts with", counted from the start over the gateway's own `row_id`s. That
+  reading is not verified against a running gateway and `docs/platform-notes.md` says so.
+
+- **Conversations: every conversation one bot has, on one page.** Reached from the bot's profile
+  sheet or the chat's (…) menu. Three groups — the current Bot Chat, the branches, and the
+  conversations `/new` has put away — each row with its preview, its message count and when it was
+  last active. A non-canonical row can be opened (read-only, under a banner saying which
+  conversation it is and how to get back), renamed, deleted after a confirm, or made the Bot Chat.
+  That last one is a swap and not a promotion: the title is the gateway's registry key, so the
+  current chat is retired through the very machinery `/new` retires with before the incoming one
+  takes the name, and every step rolls back towards "nothing happened" — because a bot left with no
+  canonical chat mints a third one on its next open. **The current Bot Chat carries no actions at
+  all**, and that is a type rather than a check: `conversationActions` answers an empty list for it,
+  so no surface can offer to delete the one chat a bot is reached by (ADR-0007).
+
+- **Pin a chat.** From the row's context menu or the chat's own menu. A pinned chat sorts to the top
+  of whatever container holds it — its folder, or the top level above the folders — and wears a
+  small pin. It is a display SORT and never a move: the arrangement underneath is untouched, so
+  unpinning drops the row straight back into the gap it left rather than wherever the top of the
+  list has drifted to. The drag reads the displayed order and a dragged row is held inside its own
+  band: a pinned row lands among the pinned ones, an unpinned row below them, and a row dragged past
+  the boundary rests at the boundary rather than snapping across it. **The `ui_meta` section version
+  is deliberately not bumped for this**, for the second time and for the reason round four declined
+  it for `push.perBot`: a reader that meets a `v` it does not know treats the whole app-wide section
+  as unreadable and re-seeds it from its own copy, so bumping would not protect the pins — it would
+  hand every older build the power to delete the folders, the order and the mutes. The field is
+  additive, exactly as `folders`, `botNameOrder` and `textSize` already are. ADR-0016 and ADR-0019
+  carry the amendment.
+
 - **A map of a bot's memory.** A **Graph** tab beside the entries draws what the plugin's `graph`
   answer holds: the bot at the centre, an entry per memory, and the topics they share — a
   capitalised phrase, an `@handle`, a `#hashtag`, a date — with a line wherever two entries mention

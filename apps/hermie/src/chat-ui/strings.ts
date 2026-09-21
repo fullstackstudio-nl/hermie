@@ -526,6 +526,21 @@ export const chatStrings = {
     branchTitle: 'Branch',
     branchFailed: 'This conversation could not be branched.',
     branches: 'Branches',
+    /** The page, and the row in the bot profile sheet that opens it. */
+    conversations: 'Conversations',
+    /** What a branch's chat screen says at the top, so nobody loses the way back. */
+    branchOf: (title: string) => `Branch of ${title}`,
+    backToMain: 'back to main chat',
+    /** Offered once a branch exists, so the reader can go and read it. */
+    openNow: 'Open now',
+    branchMade: (title: string) => `Branched into ${title}.`,
+    /** "Make this the Bot Chat" — the swap, in the words ADR-0007 uses. */
+    adopt: 'Make this the Bot Chat',
+    adoptFailed: 'The gateway would not make this the Bot Chat.',
+    renameFailed: 'This conversation could not be renamed.',
+    /** The Conversations page's own empty state, before anything has loaded. */
+    loading: 'Reading this bot’s conversations…',
+    loadFailed: 'This bot’s conversations could not be read.',
     pin: 'Pin',
     unpin: 'Unpin',
     refresh: 'Refresh',

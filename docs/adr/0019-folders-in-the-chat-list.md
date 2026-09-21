@@ -205,3 +205,74 @@ among the top-level rows.
 
 **Not verified by a test:** the gesture itself. A `PanResponder` needs a touch and the boxes it reads
 come from a real layout pass, so the drag is exercised as arithmetic and confirmed by hand.
+
+## Amendment (2026-09-22): pinned chats, and the band a drag may not leave
+
+A chat can be pinned. A pinned chat sorts to the top of whatever container holds it — its folder, or
+the top level — and the rule is one line: **a stable partition, pinned first.** Nothing is reordered
+within either half, so pinning three chats brings them up in the order they already had, and
+unpinning one drops it back into the gap it left.
+
+**It is a display sort and never a move.** `Arrangement` is untouched by a pin. That is the whole
+reason it is a separate key rather than `moveBotTo(0)`: a pin that moved the row would have nowhere
+to put it back, and "unpin" would mean "leave it wherever the top of the list has drifted to".
+
+**At the top level a pinned chat rises above the FOLDERS too.** "First within the top level" is what
+was asked for, and a band that stopped at the first folder would not be the top of anything a reader
+can see. A folder has no pinned-ness of its own and is never pinned.
+
+### The drag now reads the displayed order
+
+This is the part that had to be got right, and it is the part round four's handover warned about.
+
+An anchor pairs a row's place ON SCREEN with the arrangement position a drop on it commits to, and
+pinning makes those two orders different. So `dragAnchors` **walks the displayed sequence** — the
+geometry is measured down the screen, and anchors in a different order from the rows would put every
+drop line where the finger is not — while each anchor's `target` stays an index into the **untouched
+arrangement**, which is the space `moveBotTo` and `moveFolderTo` read.
+
+**The clamp, stated as a rule:** a pinned row may only be dropped among the pinned rows, and an
+unpinned row only among the unpinned ones. It is applied to the SLOT, before the slot becomes a drop
+line — so what the reader watches and what they get are the same answer. A clamp on the commit alone
+would draw a line somewhere the row then refused to go, and because the sort re-runs on every
+arrangement change, a pinned row "dropped" below the band would spring back to the top and the
+gesture would look undone.
+
+Three details the rule needs:
+
+- a row dragged past the boundary **rests at the boundary** rather than snapping to the far end of
+  its band, for the reason `nextFocus` clamps rather than wrapping;
+- a folder is clamped to the unpinned band, which is "pinned chats sort first" seen from the
+  dragging end;
+- `folderIn:` and `folderEmpty:` mean "the top of that folder" and are legal for **either** band, so
+  pinning has made no chat undraggable into a folder — **but only when the reader aimed at one.**
+  Without that second half, a pinned row dragged to the bottom of the list walked back up looking
+  for somewhere legal, met a folder's header first, and was filed inside the folder. Landing a chat
+  somewhere nobody pointed is worse than the thing the clamp exists to prevent, and a test now
+  covers it.
+
+### Where a pin is stored, and why the version is not bumped
+
+In the arrangement slice of the app-wide `ui_meta` section (ADR-0016), beside the order and the
+folders, as `pinned: string[]` — a decision about where the reader keeps a chat, which is what that
+whole section is about.
+
+**The section version is deliberately NOT bumped**, which is the second time that instruction has
+been declined for this section. `readSection` answers `null` for any section whose `v` is greater
+than the reader's own, and a build that meets one re-seeds the whole app-wide section from its local
+copy. Bumping to 2 would therefore not protect `pinned` from an older build — it would hand every
+older build the power to delete the folders, the order and the mutes, for everyone, the first time
+one of them wrote. The field is additive, in exactly the shape `folders`, `botNameOrder` and
+`textSize` already use; a build that has not learned it leaves this reader's pins alone until it
+writes the section itself, which costs the pins and nothing else.
+
+### What is verified
+
+`apps/hermie/__tests__/pinned-chats.test.ts`: the partition at the top level and inside a folder,
+that pinning reorders nothing within either half, that unpinning restores the list exactly, that the
+anchors are emitted in display order while their targets stay arrangement indices, every case of the
+clamp including the folder-filing regression above, the disk round trip, and the `ui_meta`
+projection — including that the version is still 1, that the key is sent even when empty, and that
+an absent key leaves local pins alone.
+
+**Not verified:** the gesture itself, for the reason this ADR already gives.

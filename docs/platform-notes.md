@@ -8121,3 +8121,161 @@ True)` and answers `{installed: true, name}`, which is what the fake does — bu
   device, and the wide shell's overlay panel holds Settings without a navigator — so whether a
   sub-page inside an overlay behaves the way the compact shell's does is asserted by construction
   (it is the existing pattern) rather than by having looked.
+
+## Round R4b: branching, pinning, and a parameter that does not exist (2026-09-22)
+
+The three things round four left unbuilt, in the order its own handover said to build them. All
+three landed. What follows is what was found on the way, and one of the findings is large enough
+that it should be read before anybody trusts the feature against a real gateway.
+
+### `session.branch` has no row id, and `count` is a guess
+
+The brief said to read "the exact params: session id, row index/id, title" off the method. **Two of
+those three exist.** The vendored contract is:
+
+```ts
+export interface SessionBranchParams {
+  session_id: string
+  profile?: string | null
+  name?: string | null
+  count?: number | null
+}
+```
+
+and the method's one-line description is "Fork a live session into a new stored child that shares
+the parent's history so far". There is **no row index and no row id**, and nothing anywhere says
+what `count` counts. That is the whole of what is known: the contract is generated from upstream's
+`tui_gateway/contracts` and carries no further prose for this method.
+
+So "branch from THIS message" is not something the method takes literally, and the app is built on a
+reading rather than on a fact:
+
+> **`count` is how many of the parent's messages the child starts with**, counted from the start.
+
+Three consequences, all deliberate:
+
+1. **It is written down in three places that must agree** — `ChatController.branchFrom`, the fake
+   gateway's `session.branch` handler, and an assertion in
+   `packages/fake-gateway/src/upstream-shapes.test.ts` that says in its own name that it is an
+   assumption. If a real gateway ever says otherwise, those are the three edits and the tests will
+   say whether anything else moved.
+2. **The other plausible reading is "the last `count` messages."** It was not chosen because the
+   result carries `parent` and `message_count` and the description says "the history SO FAR", which
+   reads as a prefix rather than a suffix. That is an argument from wording, not evidence.
+3. **A transcript ITEM is not a gateway MESSAGE**, which is a second step and could be wrong on its
+   own. `rowsToItems` projects one persisted row onto several items — a reply and its reasoning, a
+   DM and the card announcing it — and a live item has no row at all. So the count is taken over
+   DISTINCT `rowId`s (`branchCountFor`), which is the gateway's own `row_id`. That makes no
+   assumption about row ids being 1-based or contiguous, only that they ascend in transcript order.
+   Counting items instead would have branched several messages early in any chat with thinking
+   blocks in it, and the visible list would have been wrong again in Quiet, where the view settings
+   have already removed rows.
+
+**The fake gateway implements the same reading and says so in its handler.** It deliberately does
+NOT invent a canonical guard on `session.delete`: upstream documents none, the rule that the
+canonical chat is never deleted is the app's, and a fake that catches the app's own mistakes is a
+fake that lies.
+
+### A second chat per bot, without a second chat per bot
+
+`store/chats.ts` is keyed by BOT NAME, because until now a bot had exactly one chat. A branch is a
+second transcript belonging to the same bot, so it is held under `conversationKey(bot, storedId)` —
+`researcher#stored-abc123`. The `#` is the whole of the collision argument: a profile name is a
+directory name upstream and never contains one.
+
+`hydrate` was generalised to take that key rather than being copied. Three steps of the open path
+are skipped for a non-canonical conversation and each is a decision:
+
+- **the transcript cache**, which is keyed by BOT and already holds the canonical conversation.
+  Writing a branch into it would make the canonical chat paint the branch on its next cold open;
+- **`markSeen`**, because the unread badge counts what arrived in the Bot Chat and reading a branch
+  is not reading that;
+- **`resolveCanonical`**, obviously — the stored id is handed in.
+
+**There is no composer on a branch**, and that is ADR-0007 still being enforced rather than an
+omission. A second composer is exactly how an app grows a second chat per bot: two places to talk to
+one bot, two unread counts, two notification streams, and a reader who cannot answer "where did I
+say that". To carry on inside a branch the reader makes it the Bot Chat, which SWAPS the two.
+
+### Two ids that are the opposite way round, one method apart
+
+Worth stating plainly because it is the mistake a green suite would not catch:
+
+- **`session.title` takes a RUNTIME id.** It is `_with_db(session_scoped=True)` over `_sess_nowait`
+  upstream, a plain lookup in the live `_sessions` map. A stored id — which is the only id a listing
+  hands out — comes back 4001.
+- **`session.delete` takes a STORED id.** `SessionDeleteParams`'s own doc comment says so in one
+  line.
+
+So renaming a conversation nothing is running costs a `session.resume` first, to get a runtime id.
+That is not a workaround; resuming is what opening it would do anyway, and the alternative is asking
+a reader to open a conversation before they are allowed to name it. `runtimeIdFor` prefers an id the
+app already holds, because a resume of a live session costs a round trip and a rebuild.
+
+### "Make this the Bot Chat" is `/new`'s machinery, run backwards
+
+The title is the gateway's registry key, so two rows cannot wear `Bot Chat` at once — upstream
+refuses the second with "Title 'Bot Chat' is already in use by session …". The swap therefore has
+the same load-bearing order `/new` has:
+
+1. un-hide the current chat (upstream refuses to rename a HIDDEN `Bot Chat` off its name);
+2. rename it to `Bot Chat · <date time>`;
+3. rename the incoming conversation to `Bot Chat`;
+4. hide it;
+5. point the roster at it and re-open.
+
+**Step 3's failure is the one that matters**, and it is tested. If it is refused, the outgoing chat
+is already sitting under a retired name with NOTHING holding the canonical title — which is exactly
+the state that makes the next open mint a third chat beside the two that exist. So its name and its
+hidden flag go back before the error is allowed out.
+
+### The pin changed the space the drag arithmetic works in
+
+Round four's handover predicted this: "it changes the order the drag arithmetic reads, and this
+round had already changed that arithmetic once."
+
+An anchor pairs a row's place ON SCREEN with the arrangement position a drop commits to. Pinning
+makes those two orders different for the first time, so `dragAnchors` now **walks the displayed
+sequence** while each anchor's `target` stays an index into the **untouched arrangement**. The loop
+counter stopped being usable as the index the moment the walk stopped being the arrangement's own,
+which is why it is now `entries.indexOf(entry)`.
+
+The clamp (`clampToPinnedBand`) is applied to the SLOT rather than to the commit, so the drop line
+the reader watches and the arrangement they get cannot disagree. **Writing the test found a real
+bug**: a pinned row dragged to the bottom of the list walked back up looking for a legal slot, met a
+folder's header anchor (`folderIn:`, which is legal for either band because it means "the top of
+that folder"), and was filed INSIDE the folder. Filing a chat somewhere nobody pointed is worse than
+the boundary the clamp exists to draw, so a synthetic anchor is now legal only when the reader aimed
+at it directly, never as a fallback the search lands on.
+
+### The schema bump that was declined again
+
+The brief asked for "a schema bump with tolerance" on the `ui_meta` app section for `pinned`. It is
+additive and `v` stays 1, for the same reason round four declined the same instruction for
+`push.perBot`: `readSection` answers `null` for a `v` greater than the reader's own, so a bump hands
+every older build the power to delete the order, the folders and the mutes rather than protecting
+the new key from them. ADR-0016 now carries this as a general rule rather than as two exceptions.
+
+### What could not be verified
+
+- **Nothing in this round has been seen on a device or against a real gateway.** There is no gateway
+  running here and no simulator this machine can drive, so every assertion is a test-renderer or
+  fake-gateway assertion — including every one about `session.branch`.
+- **`session.branch`'s `count`, both halves of it.** That it counts from the start, and that
+  counting distinct `row_id`s is the right projection of a transcript row onto it. Both are reasoned
+  from wording and from the shapes of the surrounding types. This is the single biggest thing in the
+  round that a real gateway could contradict.
+- **`session.delete` against upstream.** The fake answers `{deleted}` and 4001s an unknown id
+  because that is what the contract's types allow; whether upstream also refuses for some reason the
+  contract does not carry (a session with children, a running one) is unknown.
+- **Whether a branch's `parent` is readable back.** `SessionListRow` has no parent field, so the
+  Branches group is derived from the title prefix this app writes. A conversation renamed out of its
+  prefix moves to Past conversations. That is a design consequence rather than an unknown, but it
+  has not been watched happening to a reader.
+- **The Conversations page and the read-only viewer on a real screen.** Both are asserted through
+  the controller and the model; neither has been laid out on anything.
+- **The drag with a pin in the list**, as a gesture. The arithmetic, the anchors and the clamp are
+  pure and covered; a `PanResponder` still needs a touch and a real layout pass, as ADR-0019 says.
+- **What `session.branch` does to a session with a pending approval or a running turn.** The app
+  does not block branching on a running turn — branching takes nothing from the parent — but that
+  reasoning has not been tested against a gateway that was mid-turn.

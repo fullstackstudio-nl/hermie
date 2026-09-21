@@ -42,6 +42,7 @@ import { strings } from '../../i18n/strings'
 import { type Bot, useBotsStore } from '../../store/bots'
 import { useChatsStore, type QueuedMessage } from '../../store/chats'
 import { useChatView } from '../../store/settings'
+import { branchCountFor, branchTitle, type Conversation } from '../sessions/session-model'
 import type {
   AttachmentInput,
   ChatOptionKey,
@@ -172,6 +173,15 @@ export interface UseChatResult {
   /** The gateway's model inventory; empty when it cannot answer. */
   modelOptions: () => Promise<ModelChoice[]>
   reload: () => Promise<void>
+  /**
+   * Fork this conversation at one row, into a branch of its own.
+   *
+   * Takes the row's ID rather than a position, because the number
+   * `session.branch` wants is a count of the gateway's MESSAGES and the visible
+   * list is neither all of them nor one item per row. The count is taken here,
+   * off the full ordered transcript, by `branchCountFor`.
+   */
+  branchFrom: (itemId: string, text: string) => Promise<Conversation>
 }
 
 export function useChat(botName: string): UseChatResult {
@@ -411,7 +421,34 @@ export function useChat(botName: string): UseChatResult {
       await controller?.refreshOptions(botName)
     }, [botName, controller]),
     modelOptions: useCallback(() => (controller ? controller.modelOptions() : Promise.resolve([])), [controller]),
-    reload: open
+    reload: open,
+    /*
+      Read off the store rather than off `items`.
+
+      `items` is the VISIBLE list — the view settings have already taken the
+      thinking blocks and, in Quiet, the tool cards out of it — and a count taken
+      over it would tell the gateway to branch at a row several messages earlier
+      than the one the reader pressed. What `branchCountFor` needs is the whole
+      ordered transcript, which only the store has.
+    */
+    branchFrom: useCallback(
+      (itemId: string, text: string) => {
+        if (!controller) {
+          return notReady()
+        }
+
+        const state = useChatsStore.getState().chats[botName]
+        const ordered = (state?.order ?? [])
+          .map(id => state?.items[id])
+          .filter((item): item is TranscriptItem => Boolean(item))
+
+        return controller.branchFrom(botName, {
+          messageCount: branchCountFor(ordered, itemId),
+          title: branchTitle(text)
+        })
+      },
+      [botName, controller, notReady]
+    )
   }
 }
 

@@ -86,6 +86,7 @@ import {
 } from '../../ui/sheets'
 import { CONTROL_MIN_HEIGHT, TAP_SLOP } from '../../ui/tokens'
 import { DropZone } from '../../chat-ui/DropZone'
+import { messageText } from '../../chat-ui/message-menu'
 import type { DroppedFile } from '../../platform/file-drop'
 import { openAppSettings, pickAttachment, type PickedAttachment } from './attachments'
 import { droppedFile, pickFile, type PickedFile } from './file-attachments'
@@ -147,6 +148,15 @@ export type ChatScreenProps = {
    * and a cron card in the transcript then offers no `Open cron` at all.
    */
   onOpenCron?: (jobId: string) => void
+  /**
+   * Open one of this bot's OTHER conversations — a branch, or one `/new` put
+   * away. Absent means the shell cannot get there, which drops the branch
+   * notice's "Open now" and the popover's Conversations row rather than leaving
+   * either pointing at nothing.
+   */
+  onOpenConversation?: (botName: string, storedId: string) => void
+  /** Open the page that lists them. Present exactly where the one above is. */
+  onOpenConversations?: (botName: string) => void
   /**
    * Hide or show the wide layout's chat list. Absent on the compact shell, where
    * there is no second pane and the header's leading slot is Back's.
@@ -219,6 +229,8 @@ export function ChatScreen({
   focusItemId,
   onBack,
   onOpenBot,
+  onOpenConversation,
+  onOpenConversations,
   onOpenCron,
   onToggleSidebar
 }: ChatScreenProps) {
@@ -263,6 +275,8 @@ export function ChatScreen({
       key={botName}
       onBack={onBack}
       onOpenBot={onOpenBot}
+      onOpenConversation={onOpenConversation}
+      onOpenConversations={onOpenConversations}
       onOpenCron={onOpenCron}
       onToggleSidebar={onToggleSidebar}
     />
@@ -331,6 +345,8 @@ function Conversation({
   focusItemId,
   onBack,
   onOpenBot,
+  onOpenConversation,
+  onOpenConversations,
   onOpenCron,
   onToggleSidebar
 }: {
@@ -339,6 +355,8 @@ function Conversation({
   focusItemId?: string
   onBack?: () => void
   onOpenBot?: (botName: string, options?: OpenChatOptions) => void
+  onOpenConversation?: (botName: string, storedId: string) => void
+  onOpenConversations?: (botName: string) => void
   onOpenCron?: (jobId: string) => void
   onToggleSidebar?: () => void
 }) {
@@ -347,6 +365,7 @@ function Conversation({
   const cronJobs = useCronStore(state => state.jobs)
   const { config, connection, http, lastError, status } = useGateway()
   const view = useChatView(botName)
+  const pinned = useChatLayoutStore(state => Boolean(state.pinned[botName]))
   const avatar = useBotsStore(state => state.avatars[botName])
   const byName = useBotsStore(state => state.byName)
   const overridden = useSettingsStore(state => hasChatViewOverride(state, botName))
@@ -1755,6 +1774,46 @@ function Conversation({
     void runtime?.bots.refresh()
     void chat.reload().catch(error => setNotice(openFailed(messageOf(error))))
   }, [chat, runtime])
+
+  /**
+   * Fork the conversation at one row.
+   *
+   * The canonical chat does not move and is not reloaded — `session.branch`
+   * copies the history into a new stored child and leaves the parent exactly as
+   * it was — so what happens on screen is a NOTICE and nothing else. The notice
+   * carries the way in: a reader who branched on purpose wants to go and read
+   * it, and one who branched to keep a thought for later does not.
+   *
+   * The popover closes first where the branch came from there, for the same
+   * reason Refresh does: what the reader is looking at is the transcript.
+   */
+  const branchHere = useCallback(
+    (itemId: string, text: string) => {
+      setOptionsPopover(false)
+      void chat
+        .branchFrom(itemId, text)
+        .then(branch => {
+          setNotice({
+            kind: 'branch',
+            text: chatStrings.sessions.branchMade(branch.title),
+            onOpen: () => onOpenConversation?.(botName, branch.id)
+          })
+        })
+        .catch(error => setNotice(openFailed(`${chatStrings.sessions.branchFailed} ${messageOf(error)}`)))
+    },
+    [botName, chat, onOpenConversation]
+  )
+
+  /** The same fork, from the popover, taken at the newest row in the chat. */
+  const branchNewest = useCallback(() => {
+    const newest = chat.items[chat.items.length - 1]?.item
+
+    if (!newest) {
+      return
+    }
+
+    branchHere(newest.id, messageText(newest))
+  }, [branchHere, chat.items])
   const openProfile = useCallback(() => {
     void refreshUsage()
     setSheet('profile')
@@ -1996,6 +2055,7 @@ function Conversation({
                 {...(lastAssistantId ? { lastAssistantId } : {})}
                 onEditResend={editResend}
                 onRegenerate={regenerate}
+                {...(runtime ? { onBranch: branchHere } : {})}
                 turnRunning={chat.turnActive}
                 {...(readAloud.available ? { onReadAloud: readAloud.toggle } : {})}
                 readingItemIds={readAloud.readingIds}
@@ -2125,6 +2185,20 @@ function Conversation({
               onClose={closeOptionsPopover}
               onOpenPage={openOptionsPage}
               onRefresh={refreshChat}
+              {...(runtime && onOpenConversation ? { onBranch: branchNewest } : {})}
+              {...(onOpenConversations
+                ? {
+                    onOpenConversations: () => {
+                      setOptionsPopover(false)
+                      onOpenConversations(botName)
+                    }
+                  }
+                : {})}
+              onTogglePin={() => {
+                setOptionsPopover(false)
+                useChatLayoutStore.getState().togglePinned(botName)
+              }}
+              pinned={pinned}
               onResetView={() => useSettingsStore.getState().resetChatView(botName)}
               reasoningEffort={chat.info?.reasoning_effort ?? ''}
               reasoningLabel={optionRowLabel(REASONING_OPTIONS, chat.info?.reasoning_effort ?? '')}
@@ -2422,7 +2496,18 @@ function messageOf(error: unknown): string {
  * refusing a single setting says nothing about the conversation, which is open,
  * readable and still streaming while the bar claims it could not be opened.
  */
-type ChatNotice = { kind: 'open' | 'setting'; text: string }
+type ChatNotice =
+  | { kind: 'open' | 'setting'; text: string }
+  /**
+   * A branch was made, and here is the way into it.
+   *
+   * The third kind, and the first one that is not a failure — which is why it
+   * carries its own `onOpen` rather than reusing Retry. Branching changes
+   * NOTHING on the screen the reader is looking at (the parent is untouched by
+   * construction), so without a line saying so the gesture would appear to have
+   * done nothing at all.
+   */
+  | { kind: 'branch'; text: string; onOpen: () => void }
 
 /** This conversation could not be opened. */
 const openFailed = (text: string): ChatNotice => ({ kind: 'open', text })
@@ -2573,10 +2658,32 @@ function Banner({
   if (notice) {
     return (
       <View style={{ backgroundColor: theme.elevation.e3c, gap: theme.space.xs, padding: theme.space.md }}>
-        <Text color="dangerText" testID="chat-notice" variant="preview">
-          {notice.kind === 'setting' ? strings.chat.settingRefused(notice.text) : strings.chat.failed(notice.text)}
+        {/*
+          A branch is the one notice here that is not a failure, so it is not
+          drawn in the danger colour and its text is not wrapped in "could not".
+          Everything below it — the row of actions, Done — is the same bar.
+        */}
+        <Text color={notice.kind === 'branch' ? 'text' : 'dangerText'} testID="chat-notice" variant="preview">
+          {notice.kind === 'branch'
+            ? notice.text
+            : notice.kind === 'setting'
+              ? strings.chat.settingRefused(notice.text)
+              : strings.chat.failed(notice.text)}
         </Text>
         <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.lg }}>
+          {notice.kind === 'branch' ? (
+            <Pressable
+              accessibilityRole="button"
+              hitSlop={TAP_SLOP}
+              onPress={notice.onOpen}
+              style={{ justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT }}
+              testID="chat-branch-open"
+            >
+              <Text color="accentText" variant="preview">
+                {chatStrings.sessions.openNow}
+              </Text>
+            </Pressable>
+          ) : null}
           {/*
             Reload is the answer to a chat that would not open, and it is no
             answer at all to a setting the gateway refused: the conversation is

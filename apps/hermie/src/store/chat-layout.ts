@@ -70,6 +70,14 @@ export interface PersistedLayout {
    */
   collapsed?: string[]
   archived: string[]
+  /**
+   * Chats held at the top of whatever container they sit in.
+   *
+   * A list rather than a map, like `archived` beside it and for the same reason:
+   * the value is always "yes", so a map would be a set of keys pointing at
+   * `true` and cost a byte a chat to say nothing.
+   */
+  pinned?: string[]
   accents: Record<string, AccentName>
   /** Bot name -> the second its silence lapses, or 0 for forever. */
   mutes?: Mutes
@@ -99,6 +107,20 @@ export interface ChatLayoutState {
   /** Folder ids closed on this device. Never synced; see `PersistedLayout`. */
   collapsed: Record<string, true>
   archived: Record<string, true>
+  /**
+   * Which chats are held at the top of their container.
+   *
+   * In the ARRANGEMENT slice rather than on each bot's own profile, beside the
+   * order and the folders it belongs with: a pin does not describe the bot, it
+   * describes where the reader keeps it — which is the same thing `entries` and
+   * `folders` describe, and the same reason they are all in one section.
+   *
+   * It is a display SORT and never a move. The arrangement underneath is
+   * untouched, so unpinning a chat puts it back exactly where it was rather than
+   * wherever the top of the list has drifted to since. That is the whole reason
+   * this is a separate key instead of `moveBotTo(0)`.
+   */
+  pinned: Record<string, true>
   accents: Record<string, AccentName>
   /**
    * Which chats are silent, and until when.
@@ -148,6 +170,10 @@ export interface ChatLayoutState {
   /** Open or close a folder on this device. */
   setFolderOpen: (id: string, open: boolean) => void
   setArchived: (botName: string, archived: boolean) => void
+  /** Hold this chat at the top of its container, or let it go. */
+  setPinned: (botName: string, pinned: boolean) => void
+  /** The row menu's and the popover's one-press form of the above. */
+  togglePinned: (botName: string) => void
   setAccent: (botName: string, accent: AccentName) => void
   /** Silence one chat until `until` seconds, `0` for forever, `null` to stop. */
   setMute: (botName: string, until: number | null) => void
@@ -178,6 +204,7 @@ export interface ChatLayoutState {
   applyRemote: (patch: {
     arrangement?: Arrangement
     archived?: string[]
+    pinned?: string[]
     accents?: Record<string, AccentName>
     mutes?: Mutes
   }) => void
@@ -190,6 +217,7 @@ const INITIAL = {
   folders: [] as Folder[],
   collapsed: {} as Record<string, true>,
   archived: {} as Record<string, true>,
+  pinned: {} as Record<string, true>,
   accents: {} as Record<string, AccentName>,
   mutes: {} as Mutes,
   sidebarCollapsed: undefined as boolean | undefined,
@@ -242,6 +270,9 @@ function asLayout(value: unknown): PersistedLayout {
     archived: (Array.isArray(raw.archived) ? raw.archived : []).filter(
       (name): name is string => typeof name === 'string' && name.length > 0
     ),
+    pinned: (Array.isArray(raw.pinned) ? raw.pinned : []).filter(
+      (name): name is string => typeof name === 'string' && name.length > 0
+    ),
     accents,
     mutes: mutesOf(raw.mutes),
     // Only a real boolean counts. Anything else — a missing key, a string an
@@ -286,7 +317,7 @@ function looseToEntryIndex(arrangement: Arrangement, loose: number, from: number
 
 export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
   const save = (): void => {
-    const { gatewayKey, entries, folders, collapsed, archived, accents, mutes, sidebarCollapsed } = get()
+    const { gatewayKey, entries, folders, collapsed, archived, pinned, accents, mutes, sidebarCollapsed } = get()
 
     if (gatewayKey) {
       persist(gatewayKey, {
@@ -294,6 +325,7 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
         folders,
         collapsed: Object.keys(collapsed),
         archived: Object.keys(archived),
+        pinned: Object.keys(pinned),
         accents,
         mutes,
         // Omitted while nobody has chosen, so that "never chosen" survives a
@@ -330,12 +362,19 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
         collapsed[id] = true
       }
 
+      const pinned: Record<string, true> = {}
+
+      for (const name of stored.pinned ?? []) {
+        pinned[name] = true
+      }
+
       set({
         gatewayKey,
         entries: stored.entries,
         folders: stored.folders ?? [],
         collapsed,
         archived,
+        pinned,
         accents: stored.accents,
         mutes: stored.mutes ?? {},
         sidebarCollapsed: stored.sidebarCollapsed,
@@ -523,6 +562,25 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
       save()
     },
 
+    setPinned(botName, pinned) {
+      const next = { ...get().pinned }
+
+      if (pinned) {
+        next[botName] = true
+      } else {
+        delete next[botName]
+      }
+
+      set({ pinned: next })
+      save()
+    },
+
+    togglePinned(botName) {
+      const { pinned, setPinned } = get()
+
+      setPinned(botName, !pinned[botName])
+    },
+
     setAccent(botName, accent) {
       const accents = { ...get().accents }
 
@@ -578,9 +636,19 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
         archived[name] = true
       }
 
+      const pinned: Record<string, true> = {}
+
+      for (const name of patch.pinned ?? []) {
+        pinned[name] = true
+      }
+
       set({
         ...(patch.arrangement ? { entries: patch.arrangement.entries, folders: patch.arrangement.folders } : {}),
         ...(patch.archived ? { archived } : {}),
+        // Absent is not empty: a section written by a build that predates the
+        // field says nothing about pins, and reading that as "none" would
+        // unpin every chat the moment an older device wrote the section.
+        ...(patch.pinned ? { pinned } : {}),
         ...(patch.accents ? { accents: patch.accents } : {}),
         ...(patch.mutes ? { mutes: patch.mutes } : {})
       })
@@ -616,6 +684,11 @@ export function useChatMuted(botName: string): boolean {
   const mutes = useChatLayoutStore(state => state.mutes)
 
   return isMuted(mutes, botName, Math.floor(Date.now() / 1000))
+}
+
+/** Is this chat held at the top of its container? */
+export function useChatPinned(botName: string): boolean {
+  return useChatLayoutStore(state => Boolean(state.pinned[botName]))
 }
 
 /** One chat's colour. Part 2's header and outgoing bubble read this too. */

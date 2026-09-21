@@ -4696,7 +4696,18 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
             resolved_id: session.storedId,
             title: session.title,
             preview: session.messages[session.messages.length - 1]?.text ?? '',
-            message_count: session.messages.length
+            message_count: session.messages.length,
+            /*
+              `_session_row_summary` reports one, and until a caller needed to
+              SORT by it the fake got away with leaving it out. Derived from the
+              transcript rather than stored, so it is the same number for the
+              same session on every run and a test can assert on it; a session
+              nothing has been said in has no timestamp to report, which is the
+              `undefined` the contract already allows for.
+            */
+            ...(typeof session.messages[0]?.timestamp === 'number'
+              ? { started_at: session.messages[0]?.timestamp }
+              : {})
           }))
 
         return { sessions: rows }
@@ -4794,6 +4805,105 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
         session.hidden = params.hidden === undefined ? true : params.hidden === true
 
         return { hidden: session.hidden, session_key: session.storedId }
+      }
+
+      /**
+       * `methods_session.py::session.branch` — "Fork a live session into a new
+       * stored child that shares the parent's history so far."
+       *
+       * That sentence is the contract's own one-line description of the method
+       * and it is, together with the four parameter names, the WHOLE of what is
+       * known here. It is worth being blunt about the gap, because a reader will
+       * come to this handler looking for the answer:
+       *
+       *  - `SessionBranchParams` is `{session_id, profile?, name?, count?}`.
+       *    There is **no row index and no row id**, so "branch from THIS
+       *    message" is not a thing the method takes literally. `count` is the
+       *    only lever that can mean a position at all, and the reading modelled
+       *    here is the one the word and the result's `message_count` together
+       *    support: **`count` is how many of the parent's messages the child
+       *    starts with.** Branching from the row at index `i` therefore sends
+       *    `i + 1`.
+       *  - That reading has **not been checked against a running gateway** —
+       *    there is none here — so it is written down in `docs/platform-notes.md`
+       *    as an assumption rather than as a fact. If upstream turns out to mean
+       *    "the last `count` messages", the app's arithmetic is the one line
+       *    that changes (`ChatController.branchFrom`) and this handler is the
+       *    other.
+       *  - `session_id` is a LIVE runtime id: the description says "fork a live
+       *    session", and every other session-scoped method upstream resolves
+       *    through `_sess_nowait`. `requireLiveSession` is what holds a client
+       *    to that, exactly as it does for `session.title`.
+       *
+       * The child is an ordinary VISIBLE session. Nothing in the parameters can
+       * ask for a hidden one, and a branch that arrived hidden would be a
+       * conversation the reader could not find — which is also why the app's
+       * Branches group can list it without asking for `include_hidden`.
+       */
+      case 'session.branch': {
+        const parent = requireLiveSession(String(params.session_id ?? ''))
+        const asked = typeof params.name === 'string' ? params.name.trim() : ''
+        /*
+          A name already worn does not land, and the branch is still created.
+
+          The same shape `session.create` models above, and for the same reason:
+          `_set_session_title` refuses a duplicate, and a client that assumes
+          otherwise would go looking for its branch under a name nothing holds.
+        */
+        const title = asked && !titleHolder(asked) ? asked : ''
+        const child = makeSession(parent.profile, title)
+        const count =
+          typeof params.count === 'number' && Number.isFinite(params.count)
+            ? Math.max(0, Math.min(Math.floor(params.count), parent.messages.length))
+            : parent.messages.length
+
+        // "Shares the parent's history so far": a COPY, not a reference. The two
+        // conversations diverge from here, which is the whole point of a branch,
+        // and a fake that aliased the array would show every later turn in both.
+        child.messages = parent.messages.slice(0, count).map(row => ({ ...row }))
+        child.hidden = false
+        child.parentSessionId = parent.storedId
+
+        state.sessions.set(child.storedId, child)
+
+        return {
+          session_id: child.id,
+          stored_session_id: child.storedId,
+          title: child.title,
+          parent: parent.storedId,
+          message_count: child.messages.length,
+          messages: child.messages,
+          info: sessionInfo(child)
+        }
+      }
+
+      /**
+       * `methods_session.py::session.delete` — the STORED id, says the contract.
+       *
+       * `SessionDeleteParams`'s own doc comment is the one-line "``session_id``
+       * is the STORED id", which is the opposite of `session.title` next door,
+       * so the fake accepts a stored id and nothing else. A client that reaches
+       * for the runtime id it happens to be holding gets 4001 here rather than
+       * finding out against somebody's real gateway.
+       *
+       * **No canonical guard is modelled, because upstream documents none.** It
+       * would be easy to make this refuse a hidden `Bot Chat` and comforting to
+       * have the fake catch the mistake — and it would be a fake that lies. The
+       * rule that the canonical chat is never deleted is the APP's
+       * (`conversationActions` in `features/sessions/session-model.ts` answers an
+       * empty action list for it), and the test that it holds belongs there.
+       */
+      case 'session.delete': {
+        const wanted = String(params.session_id ?? '')
+        const session = state.sessions.get(wanted)
+
+        if (!session) {
+          throw new RpcFault(4001, 'session not found')
+        }
+
+        state.sessions.delete(wanted)
+
+        return { deleted: session.storedId }
       }
 
       /**

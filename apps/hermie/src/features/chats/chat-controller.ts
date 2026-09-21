@@ -40,6 +40,7 @@ import type {
   CorrectionStatus,
   OpenRequestEntry,
   PendingApproval,
+  SessionListRow,
   SessionLiveInfo,
   SessionResumeResult,
   SlashExecResult,
@@ -54,7 +55,18 @@ import type { ChatCache } from '../../platform/chat-cache'
 import type { Bot, BotCanonicalSession, BotsState } from '../../store/bots'
 import type { ChatsState, QueuedMessage } from '../../store/chats'
 import { liveChatNames } from '../../store/chats'
-import { type BotsController, CANONICAL_CHAT_TITLE, createCanonicalSession } from '../bots/bots-controller'
+import {
+  type BotsController,
+  CANONICAL_CHAT_TITLE,
+  createCanonicalSession,
+  PROFILE_SESSION_LIST_LIMIT
+} from '../bots/bots-controller'
+import {
+  classifyConversations,
+  conversationKey,
+  type Conversation,
+  type ConversationGroups
+} from '../sessions/session-model'
 import {
   fileReferenceFor,
   FileUploadError,
@@ -381,17 +393,74 @@ export class ChatController {
     }
   }
 
-  private async hydrate(bot: Bot): Promise<void> {
-    const chats = this.chats.getState()
-    const canonical = await this.botsController.resolveCanonical(bot)
+  /**
+   * Open one of a bot's OTHER conversations — a branch, or one `/new` put away.
+   *
+   * The same machinery, under a different key. `store/chats.ts` is keyed by bot
+   * name because until now a bot had exactly one chat; a branch is a second
+   * transcript belonging to the same bot, so it is held under
+   * `conversationKey(bot, storedId)` — see `features/sessions/session-model.ts`
+   * for why a `#` cannot collide with a profile name. Everything downstream of
+   * the key (the reducer, the event routing through `runtimeToBot`, the
+   * composer, the approvals) goes on working because all of it was already
+   * written against a string.
+   *
+   * Three things the canonical path does that this one deliberately does not:
+   *
+   *  - **the transcript cache**, which is keyed by BOT and therefore already
+   *    holds the canonical conversation. Writing a branch into it would make the
+   *    canonical chat paint the branch on its next cold open;
+   *  - **`markSeen`**, which is about the bot's unread badge. Reading a branch
+   *    is not reading what arrived in the Bot Chat;
+   *  - **`resolveCanonical`**, obviously: the stored id is handed in, and
+   *    resolving would find the one conversation this is not.
+   */
+  openConversation(bot: Bot, storedId: string): Promise<void> {
+    const key = conversationKey(bot.name, storedId)
+    const existing = this.opening.get(key)
 
-    chats.ensure(bot.name, { storedSessionId: canonical.id, resolvedSessionId: canonical.resolvedId })
+    if (existing) {
+      return existing
+    }
+
+    const run = this.hydrate(bot, {
+      key,
+      canonical: { id: storedId, resolvedId: storedId, preview: '', lastActive: 0, messageCount: 0 }
+    }).finally(() => {
+      this.opening.delete(key)
+    })
+
+    this.opening.set(key, run)
+
+    return run
+  }
+
+  /**
+   * Bring one conversation on screen, canonical or not.
+   *
+   * `options` is absent for the canonical chat, which is the case every existing
+   * caller is in: the key is the bot's name and the session is whatever
+   * `resolveCanonical` answers. A branch hands both in, and the two paths differ
+   * in nothing else — which is the point, because a second hydration written
+   * specially for branches is a second place for the transcript machinery to
+   * drift.
+   */
+  private async hydrate(bot: Bot, options?: { key: string; canonical: BotCanonicalSession }): Promise<void> {
+    const chats = this.chats.getState()
+    const canonical = options?.canonical ?? (await this.botsController.resolveCanonical(bot))
+    const key = options?.key ?? bot.name
+    const isCanonical = key === bot.name
+
+    chats.ensure(key, { storedSessionId: canonical.id, resolvedSessionId: canonical.resolvedId })
 
     // 1. The cache paints first, so the thread is on screen before the socket
-    //    has answered. Reconciliation below keeps the item ids it painted.
-    await this.paintFromCache(bot.name, canonical.id, canonical.resolvedId)
+    //    has answered. Reconciliation below keeps the item ids it painted. Only
+    //    for the canonical chat: the cache is keyed by bot and already holds it.
+    if (isCanonical) {
+      await this.paintFromCache(key, canonical.id, canonical.resolvedId)
+    }
 
-    this.chats.getState().setHydration(bot.name, 'hydrating')
+    this.chats.getState().setHydration(key, 'hydrating')
 
     let resume: SessionResumeResult
 
@@ -404,7 +473,7 @@ export class ChatController {
         cols: RESUME_COLS
       })
     } catch (error) {
-      this.chats.getState().setHydration(bot.name, 'error')
+      this.chats.getState().setHydration(key, 'error')
 
       throw error
     }
@@ -421,16 +490,16 @@ export class ChatController {
       // Every event and every server request is addressed by this id. Binding
       // an empty one routes the whole session to nobody, which reads as a chat
       // that opened fine and then never said anything again.
-      this.chats.getState().setHydration(bot.name, 'error')
+      this.chats.getState().setHydration(key, 'error')
 
       throw new Error(`The gateway resumed ${bot.name}'s chat without a session id.`)
     }
 
     const resolvedId = resume.stored_session_id || canonical.resolvedId
 
-    this.chats.getState().ensure(bot.name, { storedSessionId: canonical.id, resolvedSessionId: resolvedId })
-    this.bindRuntime(bot.name, runtimeId)
-    this.chats.getState().markLive(bot.name)
+    this.chats.getState().ensure(key, { storedSessionId: canonical.id, resolvedSessionId: resolvedId })
+    this.bindRuntime(key, runtimeId)
+    this.chats.getState().markLive(key)
 
     // The resume's own `info` — the gateway's view of this session: its model,
     // its flags, and its working directory. It was being read once for the
@@ -440,7 +509,7 @@ export class ChatController {
     // the resume reported", and a file upload needs `cwd` to know where a file
     // may legally go.
     if (resume.info) {
-      this.chats.getState().dispatchEvent(bot.name, {
+      this.chats.getState().dispatchEvent(key, {
         type: 'session.info',
         session_id: runtimeId,
         payload: resume.info as unknown as Record<string, unknown>
@@ -453,7 +522,7 @@ export class ChatController {
     const history = await this.loadHistory(runtimeId, resolvedId, bot.name, messageCount)
 
     if (history.rows.length) {
-      this.chats.getState().applyHistory(bot.name, rowsToItems(history.rows, history.shape))
+      this.chats.getState().applyHistory(key, rowsToItems(history.rows, history.shape))
     }
 
     /*
@@ -464,26 +533,31 @@ export class ChatController {
       The RPC transport reaches the start by definition — `session.history` is
       unpaginated, so what came back IS the conversation.
     */
-    this.windows.set(bot.name, {
+    this.windows.set(key, {
       rows: history.rows.length,
       reachedStart: history.shape === 'rpc' || history.rows.length < REST_HISTORY_LIMIT
     })
 
     // 4. The in-flight tail the persisted rows do not contain yet.
-    this.chats.getState().applySnapshot(bot.name, resumeSnapshotOf(resume))
-    this.registerOpenRequests(bot.name, resume.open_requests ?? null)
+    this.chats.getState().applySnapshot(key, resumeSnapshotOf(resume))
+    this.registerOpenRequests(key, resume.open_requests ?? null)
 
     // 5. Anything that happened between the history read and now.
-    await this.replaySince(bot.name, runtimeId)
+    await this.replaySince(key, runtimeId)
 
-    this.chats.getState().setHydration(bot.name, 'live')
-    // Seen as of NOW, not as of the roster's `last_active`: the roster row can
-    // be a minute old, and a chat the user is looking at is read.
-    this.bots.getState().markSeen(bot.name, Math.floor(this.now() / 1000))
+    this.chats.getState().setHydration(key, 'live')
+
+    if (isCanonical) {
+      // Seen as of NOW, not as of the roster's `last_active`: the roster row can
+      // be a minute old, and a chat the user is looking at is read. A branch is
+      // not the Bot Chat, so reading one clears nothing.
+      this.bots.getState().markSeen(bot.name, Math.floor(this.now() / 1000))
+    }
+
     this.syncApprovalPoll()
 
     // A chat opened mid-delegation never saw its children start.
-    await this.reconcileSubagents(bot.name)
+    await this.reconcileSubagents(key)
     this.syncSubagentPoll()
   }
 
@@ -2299,6 +2373,257 @@ export class ChatController {
     } catch (error) {
       this.noteRpcFailure('session.set_hidden', error)
     }
+  }
+
+  // ── the conversations beside the canonical chat ────────────────────────────
+
+  /**
+   * Fork this chat into a branch, from one row of its transcript.
+   *
+   * **Read `SessionBranchParams` before changing anything here.** It is
+   * `{session_id, profile?, name?, count?}` — there is no row index and no row
+   * id, so "branch from THIS message" is not something the method takes
+   * literally. `count` is the only parameter that can express a position, and
+   * the reading this app is built on is that it is **how many of the parent's
+   * messages the child starts with**. `branchCountFor` turns a transcript row
+   * into that number, and the fake gateway's handler implements the same
+   * reading.
+   *
+   * That reading is an ASSUMPTION. It has not been checked against a running
+   * gateway, because there is none here; `docs/platform-notes.md` says so in as
+   * many words. If upstream means "the last `count` messages" instead, this call
+   * and that handler are the two places that change.
+   *
+   * The runtime id, not the stored one: the contract's description is "fork a
+   * LIVE session", and every session-scoped method upstream resolves through
+   * `_sess_nowait`. A stored id would come back 4001.
+   *
+   * The branch is an ordinary VISIBLE session of the same profile — nothing in
+   * the parameters can ask for a hidden one — so the canonical chat this was
+   * taken from is untouched by construction rather than by care.
+   */
+  async branchFrom(botName: string, options: { messageCount: number; title: string }): Promise<Conversation> {
+    const sessionId = this.requireRuntime(botName)
+    const result = await this.gateway.request('session.branch', {
+      session_id: sessionId,
+      profile: botName,
+      name: options.title,
+      // Never zero: a branch of no messages is a branch of nothing, and a
+      // gateway that took it literally would hand back an empty conversation
+      // with a name that promised otherwise.
+      count: Math.max(1, Math.floor(options.messageCount))
+    })
+
+    const storedId = typeof result?.stored_session_id === 'string' ? result.stored_session_id : ''
+
+    if (!storedId) {
+      throw new Error(`The gateway branched ${botName}'s chat without returning its id.`)
+    }
+
+    return {
+      id: storedId,
+      resolvedId: storedId,
+      // The title the gateway SETTLED on, not the one that was asked for: a name
+      // already worn is refused upstream and the branch keeps whatever it ended
+      // up with, so a list drawn from the asked-for name would not find it.
+      title: typeof result?.title === 'string' && result.title ? result.title : options.title,
+      preview: '',
+      messageCount: typeof result?.message_count === 'number' ? result.message_count : 0,
+      lastActive: Math.floor(this.now() / 1000),
+      kind: 'branch'
+    }
+  }
+
+  /**
+   * Every conversation this profile has, grouped.
+   *
+   * `include_hidden` is on, and it has to be: the canonical chat is hidden by
+   * definition (ADR-0007), so a listing without it is a listing with the one row
+   * the reader is actually in missing from it.
+   *
+   * The roster's canonical id is passed through rather than re-derived from the
+   * titles, because an id cannot be typed by hand into the wrong row — see
+   * `classifyConversations`.
+   */
+  async listConversations(botName: string): Promise<ConversationGroups> {
+    const result = await this.gateway.request('session.list', {
+      profile: botName,
+      include_hidden: true,
+      limit: PROFILE_SESSION_LIST_LIMIT
+    })
+
+    const canonical = this.bots.getState().byName[botName]?.canonical
+
+    return classifyConversations({
+      rows: (result?.sessions ?? []) as SessionListRow[],
+      ...(canonical?.id ? { canonicalId: canonical.id } : {}),
+      ...(canonical?.resolvedId ? { canonicalResolvedId: canonical.resolvedId } : {})
+    })
+  }
+
+  /**
+   * Rename one conversation that is not the canonical chat.
+   *
+   * There is a round trip here that a reader will wonder about: the STORED id is
+   * what a listing hands out, and `session.title` takes a RUNTIME one
+   * (`_with_db(session_scoped=True)` over `_sess_nowait`). So a conversation
+   * nothing is running has to be resumed before it can be renamed. Resuming is
+   * cheap and idempotent — it is what opening the conversation would do anyway —
+   * and the alternative is asking the reader to open a conversation before they
+   * are allowed to name it.
+   *
+   * The refusals travel: `_set_session_title` raises on an empty title, on a
+   * title another session already holds, and on renaming a hidden `Bot Chat`
+   * away from its name. All three are the caller's to show, so nothing is
+   * swallowed here.
+   */
+  async renameConversation(botName: string, storedId: string, title: string): Promise<string> {
+    const runtimeId = await this.runtimeIdFor(botName, storedId)
+    const result = await this.gateway.request('session.title', {
+      session_id: runtimeId,
+      profile: botName,
+      title
+    })
+
+    return typeof result?.title === 'string' ? result.title : title
+  }
+
+  /**
+   * Delete one conversation.
+   *
+   * The STORED id, which is what `SessionDeleteParams` documents and the
+   * opposite of `session.title` above.
+   *
+   * **This method does not check whether the conversation is canonical, on
+   * purpose.** The guard is a type rather than a check —
+   * `features/sessions/session-model.ts`'s `conversationActions` answers an
+   * empty action list for the canonical row, so no surface can offer Delete on
+   * it. Repeating the check here would make it look as though the surfaces were
+   * allowed to be careless.
+   */
+  async deleteConversation(botName: string, storedId: string): Promise<void> {
+    await this.gateway.request('session.delete', { session_id: storedId, profile: botName })
+  }
+
+  /**
+   * Make one of the past conversations this bot's Bot Chat again.
+   *
+   * A SWAP, and the order is the same load-bearing one `/new` uses and for the
+   * same reason: the title is the registry key, so while the outgoing chat still
+   * wears `Bot Chat` the incoming one cannot take it. Upstream refuses a
+   * duplicate outright — "Title 'Bot Chat' is already in use by session …".
+   *
+   * So: retire the current one through the very machinery `/new` retires with
+   * (unhide, then rename to `Bot Chat · <date time>`), then rename the incoming
+   * one and hide it, then switch. Every step that can fail rolls back towards
+   * "nothing happened", because a bot left with no canonical chat is worse than
+   * a swap that did not happen — the next open would mint a third one beside the
+   * two that are already there.
+   *
+   * The refusal path is the one worth testing and it is real: a gateway that
+   * will not let the incoming conversation be called `Bot Chat` leaves the
+   * outgoing one retired and nameless, so the rollback puts its name back.
+   */
+  async adoptAsCanonical(botName: string, storedId: string): Promise<void> {
+    const bot = this.bots.getState().byName[botName]
+
+    if (!bot) {
+      throw new Error(`${botName} is not on the roster.`)
+    }
+
+    const current = this.chats.getState().chats[botName]?.runtimeSessionId
+    const incoming = await this.runtimeIdFor(botName, storedId)
+    const retired = `${CANONICAL_CHAT_TITLE} · ${localStamp(this.now())}`
+
+    if (current) {
+      await this.unhideForRetire(botName, current)
+
+      try {
+        await this.renameSession(botName, current, retired)
+      } catch (error) {
+        // Nothing has moved yet, so putting the hidden flag back is the whole of
+        // the undo.
+        await this.undoRetire(botName, current, false)
+
+        throw error
+      }
+    }
+
+    try {
+      await this.renameSession(botName, incoming, CANONICAL_CHAT_TITLE)
+    } catch (error) {
+      // The title did not move. The outgoing chat is sitting under a retired
+      // name with nothing holding the canonical title, which is precisely the
+      // state that makes the next open mint a third chat — so its name goes
+      // back before this throws.
+      if (current) {
+        await this.undoRetire(botName, current, true)
+      }
+
+      throw error
+    }
+
+    /*
+      Hidden, because that is what makes it canonical to everything that looks
+      for one: `_canonical_session_row` resolves by title, and the roster's own
+      lookup sends `include_hidden`. Best effort — the title has already moved,
+      so the swap has happened either way, and a visible `Bot Chat` still
+      resolves.
+    */
+    try {
+      await this.gateway.request('session.set_hidden', {
+        session_id: incoming,
+        profile: botName,
+        hidden: true
+      })
+    } catch (error) {
+      this.noteRpcFailure('session.set_hidden', error)
+    }
+
+    await this.switchCanonical(bot, {
+      id: storedId,
+      resolvedId: storedId,
+      preview: '',
+      lastActive: Math.floor(this.now() / 1000),
+      messageCount: 0
+    })
+  }
+
+  /**
+   * A runtime id for a stored one, resuming the session if nothing is running.
+   *
+   * The live id is preferred where the app already holds one — resuming a
+   * session that is already up mints nothing new but does cost a round trip and
+   * a rebuild of its runtime state.
+   */
+  private async runtimeIdFor(botName: string, storedId: string): Promise<string> {
+    const key = conversationKey(botName, storedId)
+    const open = this.chats.getState().chats[key]?.runtimeSessionId
+    const canonicalChat = this.chats.getState().chats[botName]
+
+    if (open) {
+      return open
+    }
+
+    if (canonicalChat?.storedSessionId === storedId && canonicalChat.runtimeSessionId) {
+      return canonicalChat.runtimeSessionId
+    }
+
+    const resume = await this.gateway.request('session.resume', {
+      session_id: storedId,
+      profile: botName,
+      omit_messages: true,
+      source: 'hermie',
+      cols: RESUME_COLS
+    })
+
+    const runtimeId = typeof resume?.session_id === 'string' ? resume.session_id : ''
+
+    if (!runtimeId) {
+      throw new Error(`The gateway resumed a conversation of ${botName}'s without a session id.`)
+    }
+
+    return runtimeId
   }
 
   /**

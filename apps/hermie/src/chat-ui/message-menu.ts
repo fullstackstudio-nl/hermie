@@ -76,6 +76,15 @@ export type MessageMenuAction =
    * stripper a dependency of the menu.
    */
   | { kind: 'readAloud'; text: string }
+  /**
+   * Fork the conversation at this row.
+   *
+   * The TEXT travels and the position does not, which is the same split
+   * `regenerate` makes: the menu sees one item and has no idea where it sits in
+   * the list, so the host — which does — supplies the index and this supplies
+   * the words the branch is named after (`branchTitle`).
+   */
+  | { kind: 'branch'; text: string }
 
 /** `[text](href)` and `<https://…>`; the two forms a model actually writes. */
 const LINK_RE = /\[[^\]]*\]\(([^()\s]+)(?:\s+"[^"]*")?\)|<((?:https?|mailto):[^>\s]+)>/gu
@@ -221,9 +230,20 @@ export interface MessageMenuModel {
    * host can answer it — the menu sees one item and knows nothing about a queue.
    */
   reading?: boolean
+  /**
+   * Whether this host can fork the conversation at all.
+   *
+   * A capability, not a preference: the developer gallery has no gateway to fork
+   * against, and a branch of a conversation that is already a branch is a thing
+   * this app does not yet draw a place for. Either way the line is DROPPED
+   * rather than disabled — unlike the two turn-starting lines, "not now" is not
+   * what its absence means and there is no later in which it appears.
+   */
+  canBranch?: boolean
 }
 
 export function messageMenuItems({
+  canBranch = false,
   canEditResend = false,
   canOpenBot,
   canReadAloud = false,
@@ -299,6 +319,29 @@ export function messageMenuItems({
         systemImage: 'arrow.clockwise',
         disabled: turnRunning
       },
+    /*
+      Directly under the two lines that start a turn, because it belongs to the
+      same family — "do something else from here" — and above the links, which
+      are about something the message merely contains.
+
+      On a turn and on a reply, and on nothing else. Those two are the rows a
+      reader thinks of as a POINT in the conversation: "what if I had asked
+      something different here", "what if it had gone the other way from here".
+      A tool card, a delegation and a cron delivery are structure rather than
+      forks in the road, and offering to branch from one would ask the reader to
+      count rows in their head to find out what they would get.
+
+      Not disabled while a turn runs, unlike the two above it: branching does not
+      start a turn on this session or touch it at all — `session.branch` forks
+      the history so far into a new stored child — so there is nothing for a
+      running turn to collide with.
+    */
+    canBranch &&
+      (item.kind === 'user' || item.kind === 'assistant') && {
+        id: 'branch',
+        title: chatStrings.sessions.branch,
+        systemImage: 'arrow.triangle.branch'
+      },
     links.length > 0 && {
       id: 'links',
       title: chatStrings.menu.copyLink,
@@ -362,6 +405,16 @@ export function parseMessageMenuAction(id: string, item: TranscriptItem): Messag
 
   if (id === 'regenerate') {
     return item.kind === 'assistant' ? { kind: 'regenerate' } : null
+  }
+
+  /*
+    Read off the item again, exactly as the copies are: a reply can still be
+    growing while its menu is open, and the words this carries are what the
+    branch gets NAMED after. A title taken from the version the menu was built
+    from would name a branch after half a sentence.
+  */
+  if (id === 'branch') {
+    return item.kind === 'user' || item.kind === 'assistant' ? { kind: 'branch', text } : null
   }
 
   /*

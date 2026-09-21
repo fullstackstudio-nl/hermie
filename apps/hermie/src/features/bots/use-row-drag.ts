@@ -147,6 +147,16 @@ export interface RowDragOptions {
   measureList: () => void
   /** Scroll the list by a delta while the finger sits near an edge. */
   onAutoScroll: (delta: number) => void
+  /**
+   * Narrow a drop slot before it becomes a drop line.
+   *
+   * Absent is "anywhere is fine", which is what the list did before pinning.
+   * `BotsScreen` passes `clampToPinnedBand`, and it is applied HERE rather than
+   * at the commit so that the line the reader watches and the arrangement they
+   * get are the same answer — a clamp on the commit alone would draw a drop
+   * line somewhere the row then refused to go.
+   */
+  clampSlot?: (rowKey: string, slot: number) => number
   /** Long-press arming; off where a long press already means something else. */
   armEnabled: boolean
   /** Every duration collapses to zero. Read from the theme by the caller. */
@@ -199,6 +209,7 @@ export interface RowDrag {
 export function useRowDrag({
   anchors,
   armEnabled,
+  clampSlot,
   fallbackTarget,
   measureList,
   onAutoScroll,
@@ -234,9 +245,9 @@ export function useRowDrag({
   const trackAgain = useRef<(moveY: number, dy: number) => void>(() => undefined)
   const edgeTimer = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const latest = useRef({ anchors, fallbackTarget, measureList, onAutoScroll, onCommit, reduceMotion })
+  const latest = useRef({ anchors, clampSlot, fallbackTarget, measureList, onAutoScroll, onCommit, reduceMotion })
 
-  latest.current = { anchors, fallbackTarget, measureList, onAutoScroll, onCommit, reduceMotion }
+  latest.current = { anchors, clampSlot, fallbackTarget, measureList, onAutoScroll, onCommit, reduceMotion }
 
   /**
    * One value per anchor, created on demand and kept for the life of the screen.
@@ -395,11 +406,15 @@ export function useRowDrag({
       // `anchorBoxes` adds the synthetic half-rows: a folder's own header
       // carries a second anchor over its bottom half, which is what makes
       // "drop onto the folder" a gesture rather than a wish.
-      const next = dropSlot(
+      // The clamp sits between the geometry and the drop line, which is the one
+      // place it can be applied without the two disagreeing: what the reader
+      // watches IS what the commit uses.
+      const raw = dropSlot(
         latest.current.anchors,
         anchorBoxes(latest.current.anchors, boxes.current),
         pointerContentY(moveY)
       )
+      const next = active.current ? (latest.current.clampSlot?.(active.current, raw) ?? raw) : raw
 
       if (next !== slot.current) {
         const first = slot.current === null

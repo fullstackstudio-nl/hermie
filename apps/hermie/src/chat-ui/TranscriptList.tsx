@@ -212,6 +212,20 @@ export interface TranscriptContext {
    */
   onRegenerate?: () => void
   /**
+   * Fork the conversation at this row.
+   *
+   * The row's ID travels, not a position. `session.branch` needs a count of the
+   * parent's MESSAGES and a transcript item is not a message — one persisted row
+   * projects onto several items — so turning "this row" into a number is a
+   * question about the gateway's `row_id`s, which is `branchCountFor`'s job and
+   * not this list's. The text goes with it so the branch can be named after the
+   * row; see `branchTitle`.
+   *
+   * Absent where there is no gateway to fork against, which drops the menu line
+   * rather than disabling it.
+   */
+  onBranch?: (itemId: string, text: string) => void
+  /**
    * The id of the newest assistant reply, or absent.
    *
    * Computed once by the list rather than by each row: a row is one item and has
@@ -826,6 +840,7 @@ function useMessageMenu(
         // Both halves of the question, answered by the only thing that can:
         // the host can regenerate at all, and this row is the newest reply.
         canRegenerate: Boolean(context.onRegenerate) && context.lastAssistantId === item.id,
+        canBranch: Boolean(context.onBranch),
         // A capability, not a preference: the host passes a handler only where
         // the platform has a synthesiser at all.
         canReadAloud: Boolean(context.onReadAloud),
@@ -844,6 +859,7 @@ function useMessageMenu(
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       context.lastAssistantId,
+      context.onBranch,
       context.onEditResend,
       context.onOpenBot,
       context.onReadAloud,
@@ -903,6 +919,20 @@ function useMessageMenu(
           if (!context.turnRunning) {
             context.onRegenerate?.()
           }
+
+          return
+
+        /*
+          No turn guard, and the menu does not draw this one disabled either.
+
+          Branching takes nothing from the session it forks: `session.branch`
+          copies the history so far into a new stored child and leaves the parent
+          running. So unlike the two above it there is nothing in flight for it
+          to collide with, and a reader who has just watched a reply go the wrong
+          way should not have to wait for it to finish to fork before it.
+        */
+        case 'branch':
+          context.onBranch?.(item.id, action.text)
 
           return
 
