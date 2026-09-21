@@ -39,7 +39,17 @@ export const strings = {
     done: 'Done',
     add: 'Add',
     remove: 'Remove',
-    openInBrowser: 'Open in browser instead'
+    openInBrowser: 'Open in browser instead',
+    /**
+     * The accessible name of a sheet's backdrop — the layer a tap anywhere
+     * outside the panel lands on.
+     *
+     * In `common` rather than in the sheet kit because every sheet in the app
+     * shares one backdrop, and because it was the string that proved the
+     * tables were not the only place names come from: it was a literal in
+     * `ui/BottomSheet.tsx`.
+     */
+    dismiss: 'Dismiss'
   },
 
   onboarding: {

@@ -24,6 +24,7 @@ import { Animated, View } from 'react-native'
 import { motion } from '../ui/motion'
 import { useTheme } from '../ui/theme'
 import { Bubble } from './primitives/Bubble'
+import { chatStrings } from './strings'
 
 export interface TypingIndicatorProps {
   testID?: string
@@ -61,7 +62,7 @@ export function TypingDots({ testID = 'typing-dots' }: TypingIndicatorProps) {
 
   return (
     <View
-      accessibilityLabel="Replying"
+      accessibilityLabel={chatStrings.replying}
       accessibilityRole="progressbar"
       style={{ alignItems: 'center', flexDirection: 'row', gap: 5, paddingVertical: 3 }}
       testID={testID}

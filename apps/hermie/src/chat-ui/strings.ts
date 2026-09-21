@@ -6,6 +6,11 @@
  * copy next to it means a component and its wording move together.
  */
 export const chatStrings = {
+  /**
+   * The typing indicator's accessible name. Three dots say "replying" to
+   * everyone who can see them and nothing at all to anyone who cannot.
+   */
+  replying: 'Replying',
   receipt: {
     sending: 'Sending…',
     sent: 'Sent',

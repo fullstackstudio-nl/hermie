@@ -42,6 +42,7 @@ import {
   type ViewStyle
 } from 'react-native'
 
+import { strings } from '../i18n/strings'
 import { directTouchPanRef } from '../platform/pointer-drag'
 import { useSafeAreaInsets } from '../platform/safe-area'
 import { GlassSurface } from './glass'
@@ -413,7 +414,7 @@ export function BottomSheet({
         */}
         <Animated.View style={[StyleSheet.absoluteFill, { opacity: progress }]}>
           <Pressable
-            accessibilityLabel="Dismiss"
+            accessibilityLabel={strings.common.dismiss}
             accessibilityRole="button"
             onPress={onRequestClose}
             style={[StyleSheet.absoluteFill, { backgroundColor: SCRIM_COLOR }]}
