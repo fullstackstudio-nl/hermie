@@ -112,6 +112,17 @@ export const strings = {
       leavingForProvider: 'Taking you to the sign-in page…',
       passwordUser: 'USER NAME',
       passwordSecret: 'PASSWORD',
+      /*
+       * The same two fields, said quietly, for the accessible name.
+       *
+       * Section headers in this app are written in capitals and the sign-in
+       * form follows them, which is right on screen and wrong in an ear: a
+       * screen reader given a control named `USER NAME` either shouts it or
+       * spells it out a letter at a time. These are what the fields are CALLED;
+       * the pair above is what is drawn.
+       */
+      passwordUserLabel: 'User name',
+      passwordSecretLabel: 'Password',
       passwordSubmit: 'Sign in',
       showPassword: 'Show password',
       hidePassword: 'Hide password',

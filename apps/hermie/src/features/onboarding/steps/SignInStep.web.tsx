@@ -139,6 +139,22 @@ export function SignInStep({ draft, update }: SignInStepProps) {
     }
   }
 
+  /**
+   * Return, from either field.
+   *
+   * It asks the same question the button's `disabled` asks, because a key that
+   * submits a form the button refuses to submit is the two disagreeing about
+   * what is filled in. A half-typed form swallows the key rather than posting
+   * an empty password and painting the error for it.
+   */
+  const canSubmit = !submitting && username !== '' && password !== ''
+
+  const submitFromKeyboard = () => {
+    if (canSubmit && selected?.supportsPassword) {
+      void submitPassword(selected)
+    }
+  }
+
   return (
     <View style={{ gap: theme.space.lg }}>
       <Text color="textFaint" variant="meta">
@@ -200,10 +216,25 @@ export function SignInStep({ draft, update }: SignInStepProps) {
                   {strings.onboarding.signIn.passwordUser}
                 </Text>
                 <TextField
-                  accessibilityLabel={strings.onboarding.signIn.passwordUser}
+                  /*
+                   * The visible label SHOUTS, as every section header in the app
+                   * does, and a screen reader reading a control called
+                   * `USER NAME` either spells it or shouts it back. The quiet
+                   * spelling is the accessible name; the loud one stays on
+                   * screen.
+                   */
+                  accessibilityLabel={strings.onboarding.signIn.passwordUserLabel}
+                  /*
+                   * What lets a password manager fill this, and offer to save it
+                   * afterwards. Without the pair a browser falls back to
+                   * guessing from the field order, and a manager that guesses
+                   * wrong on a sign-in form guesses wrong every time.
+                   */
+                  autoComplete="username"
                   autoCapitalize="none"
                   autoCorrect={false}
                   onChangeText={setUsername}
+                  onSubmitEditing={submitFromKeyboard}
                   testID="cookie-username"
                   value={username}
                 />
@@ -211,11 +242,19 @@ export function SignInStep({ draft, update }: SignInStepProps) {
                   {strings.onboarding.signIn.passwordSecret}
                 </Text>
                 <SecretField
-                  accessibilityLabel={strings.onboarding.signIn.passwordSecret}
+                  accessibilityLabel={strings.onboarding.signIn.passwordSecretLabel}
+                  autoComplete="current-password"
                   autoCapitalize="none"
                   autoCorrect={false}
                   concealLabel={strings.onboarding.signIn.hidePassword}
                   onChangeText={setPassword}
+                  /*
+                   * A sign-in form on a desktop is filled with the keyboard and
+                   * submitted with Return, and until this it was filled with the
+                   * keyboard and submitted with the mouse: the key did nothing
+                   * at all.
+                   */
+                  onSubmitEditing={submitFromKeyboard}
                   returnKeyType="done"
                   revealLabel={strings.onboarding.signIn.showPassword}
                   testID="cookie-password"
@@ -223,7 +262,7 @@ export function SignInStep({ draft, update }: SignInStepProps) {
                 />
                 <Button
                   busy={submitting}
-                  disabled={submitting || !username || !password}
+                  disabled={!canSubmit}
                   onPress={() => void submitPassword(selected)}
                   testID="cookie-password-submit"
                   title={strings.onboarding.signIn.passwordSubmit}
