@@ -133,6 +133,47 @@ describe('opening a chat', () => {
     await expect(controller.openChat(RESEARCHER)).rejects.toThrow(/desktop contract 5/)
   })
 
+  // A bot that has never spoken has a live session with no stored row, and the
+  // gateway resumes it as `{model, lazy: true, profile_name}` — no contract.
+  it('opens a bot that has never spoken, whose lazy resume carries no contract', async () => {
+    const { gateway, controller } = setup()
+
+    gateway.reply('session.resume', {
+      session_id: 'runtime-1',
+      stored_session_id: '',
+      message_count: 0,
+      messages: [],
+      info: { model: 'x', lazy: true, profile_name: 'researcher' }
+    })
+
+    await controller.openChat(RESEARCHER)
+
+    expect(chatOf().hydration).toBe('live')
+    expect(chatOf().runtimeSessionId).toBe('runtime-1')
+  })
+
+  it('holds a lazy resume to the contract this gateway reported earlier', async () => {
+    const { gateway, controller } = setup()
+
+    // A spoken chat first: the gateway says contract 6 there.
+    gateway.reply('session.resume', {
+      session_id: 'runtime-1',
+      message_count: 0,
+      messages: [],
+      info: { desktop_contract: 6 }
+    })
+    await expect(controller.openChat(RESEARCHER)).rejects.toThrow(/desktop contract 6/)
+
+    // The lazy resume of a new bot on the same gateway is refused on that memory.
+    gateway.reply('session.resume', {
+      session_id: 'runtime-2',
+      message_count: 0,
+      messages: [],
+      info: { model: 'x', lazy: true }
+    })
+    await expect(controller.openChat(RESEARCHER)).rejects.toThrow(/desktop contract 6/)
+  })
+
   it('reads the REST transcript instead of a full history when the chat is long', async () => {
     const { gateway, controller } = setup()
 

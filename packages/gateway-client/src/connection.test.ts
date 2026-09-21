@@ -811,4 +811,25 @@ describe('assertDesktopContract', () => {
     expect(() => assertDesktopContract({})).toThrow(/does not report a desktop contract/)
     expect(() => assertDesktopContract(null)).toThrow(/does not report a desktop contract/)
   })
+
+  // A bot that has never spoken has a live session without a stored row, and
+  // Hermes ≤ 0.21.3 resumes it as `{model, lazy: true, profile_name}` with no
+  // contract at all. That is a new bot, not an old gateway.
+  it('lets a lazy resume through on the contract this gateway reported before', () => {
+    expect(assertDesktopContract({ lazy: true, model: 'x' }, 7)).toBe(7)
+    expect(assertDesktopContract({ lazy: true, model: 'x' }, 9)).toBe(9)
+  })
+
+  it('lets a lazy resume through on trust when nothing is known yet', () => {
+    expect(assertDesktopContract({ lazy: true, model: 'x' })).toBeNull()
+    expect(assertDesktopContract({ lazy: true, model: 'x' }, null)).toBeNull()
+  })
+
+  it('still refuses a lazy resume when the contract seen before was too old', () => {
+    expect(() => assertDesktopContract({ lazy: true, model: 'x' }, 6)).toThrow(/needs at least 7/)
+  })
+
+  it('does not let `lazy` excuse a resume that carries an old contract', () => {
+    expect(() => assertDesktopContract({ lazy: true, desktop_contract: 5 }, 7)).toThrow(/desktop contract 5/)
+  })
 })

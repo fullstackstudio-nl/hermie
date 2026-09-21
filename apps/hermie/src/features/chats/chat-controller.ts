@@ -122,7 +122,15 @@ export const ACTIVITY_TAIL_LIMIT = 50
  * the session at the gateway's 80-column default, which rewraps everything the
  * chat has already shown.
  */
-export const RESUME_COLS = 96
+export /** The contract number a `session.info` payload carries, if any. */
+function contractIn(info: SessionLiveInfo | undefined): number | null {
+  const raw = info?.desktop_contract
+  const contract = typeof raw === 'string' ? Number.parseInt(raw, 10) : raw
+
+  return typeof contract === 'number' && !Number.isNaN(contract) ? contract : null
+}
+
+const RESUME_COLS = 96
 
 /**
  * Server requests held for a session that is not bound yet, per session.
@@ -243,6 +251,12 @@ export class ChatController {
   private foregrounded = true
   private sawReady = false
   private started = false
+  /**
+   * The desktop contract this gateway last reported, from any resume or
+   * `session.info`. A bot that has never spoken resumes without one (see
+   * `assertDesktopContract`), and this is what stands in for it.
+   */
+  private knownContract: number | null = null
 
   constructor(options: ChatControllerOptions) {
     this.gateway = options.gateway
@@ -312,6 +326,12 @@ export class ChatController {
     return run
   }
 
+  private rememberContract(contract: number | null): void {
+    if (typeof contract === 'number' && !Number.isNaN(contract)) {
+      this.knownContract = contract
+    }
+  }
+
   private async hydrate(bot: Bot): Promise<void> {
     const chats = this.chats.getState()
     const canonical = await this.botsController.resolveCanonical(bot)
@@ -341,8 +361,10 @@ export class ChatController {
     }
 
     // 2. Refuse a gateway too old to send the events this transcript is made of,
-    //    before anything half-renders.
-    assertDesktopContract(resume.info as SessionLiveInfo | undefined)
+    //    before anything half-renders. A never-spoken bot resumes without the
+    //    number; the one this gateway reported before stands in for it.
+    this.rememberContract(contractIn(resume.info as SessionLiveInfo | undefined))
+    assertDesktopContract(resume.info as SessionLiveInfo | undefined, this.knownContract)
 
     const runtimeId = typeof resume.session_id === 'string' ? resume.session_id : ''
 
@@ -588,6 +610,10 @@ export class ChatController {
 
     if (!botName) {
       return
+    }
+
+    if (event.type === 'session.info') {
+      this.rememberContract(contractIn(event.payload as SessionLiveInfo | undefined))
     }
 
     if (event.type === 'session.reclaimed') {

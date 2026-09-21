@@ -767,16 +767,41 @@ export class GatewayConnection {
  * Version gate. `SessionLiveInfo.desktop_contract` is the gateway's promise about
  * the shape of the session surface; below 7 the events this client reduces are
  * not all there, so refusing up front beats half-rendering a transcript.
+ *
+ * One resume shape leaves the field out on a gateway that otherwise speaks it:
+ * a bot that has never said a word has a live session with no stored row yet,
+ * and Hermes up to 0.21.3 answers `session.resume` for that session with
+ * `{model, lazy: true, profile_name}` and nothing else. Every other path —
+ * `session.create`, a resume of a spoken chat, `session.info` — carries the
+ * number. So a `lazy` resume without it is not "old gateway"; it is "new bot".
+ * The caller passes the contract it last saw from this gateway (`known`) and
+ * that stands in. With nothing seen yet the resume is let through, because
+ * the first chat someone opens on a fresh install is very often exactly such
+ * a bot, and the next `session.info` brings the number for real.
+ *
+ * Returns the contract that was checked, or null when a lazy resume was let
+ * through on trust.
  */
-export function assertDesktopContract(info: SessionLiveInfo | null | undefined): number {
+export function assertDesktopContract(
+  info: SessionLiveInfo | null | undefined,
+  known: number | null | undefined = null
+): number | null {
   const raw = info?.desktop_contract
-  const contract = typeof raw === 'string' ? Number.parseInt(raw, 10) : raw
+  let contract = typeof raw === 'string' ? Number.parseInt(raw, 10) : raw
 
   if (typeof contract !== 'number' || Number.isNaN(contract)) {
-    throw new GatewayError(
-      'incompatible',
-      'This gateway does not report a desktop contract version, so it predates the session surface Hermie needs. Update Hermes on the gateway.'
-    )
+    if (info?.lazy !== true) {
+      throw new GatewayError(
+        'incompatible',
+        'This gateway does not report a desktop contract version, so it predates the session surface Hermie needs. Update Hermes on the gateway.'
+      )
+    }
+
+    if (typeof known !== 'number' || Number.isNaN(known)) {
+      return null
+    }
+
+    contract = known
   }
 
   if (contract < MIN_DESKTOP_CONTRACT) {
