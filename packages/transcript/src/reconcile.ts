@@ -58,9 +58,16 @@ const isEphemeral = (item: TranscriptItem): boolean => item.kind === 'approval' 
  * background process's completion is written on the `user` role and the gateway
  * runs a turn on it. Without this the placeholder had nothing to become and
  * stayed on screen as an empty bubble beside the card.
+ *
+ * A STEER does not count, although it is a `user` row. It is handed to the turn
+ * already running and starts none of its own, so letting it fill a placeholder
+ * would draw a mid-turn correction as the prompt of somebody else's turn.
  */
 const isAuthoredRow = (item: TranscriptItem): boolean =>
-  item.kind === 'user' || item.kind === 'bot_dm_in' || item.kind === 'cron_delivery' || isInjectedNotice(item)
+  (item.kind === 'user' && item.displayKind !== 'steer') ||
+  item.kind === 'bot_dm_in' ||
+  item.kind === 'cron_delivery' ||
+  isInjectedNotice(item)
 
 /** Merge live knowledge onto a hydrated row: history is thinner than the stream. */
 function mergeWithLive(fresh: TranscriptItem, current: TranscriptItem): TranscriptItem {

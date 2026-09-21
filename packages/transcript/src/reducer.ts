@@ -1340,6 +1340,15 @@ function isForeignPlaceholder(item: TranscriptItem | undefined): boolean {
  * card beside the first. A placeholder must neither count as the shown prompt
  * nor hide the item that really is it; skipping it is both halves of that.
  *
+ * A STEER is walked past for the same reason and a second one of its own.
+ * `session.steer` hands words to the turn already running; it starts no turn,
+ * and the gateway's `inflight.user` for that turn goes on being the ORIGINAL
+ * prompt. So a steer is never a turn's prompt — and while it was the newest
+ * authored item, every resume compared the original prompt against the steer's
+ * words, missed, and projected the prompt a second time. On the device: the
+ * prompt at 21:21, the steer at 21:24, and the same prompt again at 21:24, with
+ * exactly one row for it in the gateway's database.
+ *
  * A gateway-injected notice IS returned. A fan-out's report or a background
  * process's completion arrives on the `user` role and the gateway runs a turn on
  * it, so it opens a turn exactly as a cron delivery does — and, like a cron
@@ -1358,7 +1367,7 @@ function shownTurn(state: ChatState): { authored?: string; carried?: string; set
       continue
     }
 
-    if (isForeignPlaceholder(item)) {
+    if (isForeignPlaceholder(item) || (item?.kind === 'user' && item.displayKind === 'steer')) {
       continue
     }
 

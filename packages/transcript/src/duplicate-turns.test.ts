@@ -15,9 +15,10 @@
 import { describe, expect, it } from 'vitest'
 
 import { reconcile, reconcileTail } from './reconcile'
-import { applyEvent, applyResumeSnapshot, beginLocalTurn, confirmSubmit, markInterrupted } from './reducer'
+import { applyEvent, applyResumeSnapshot, beginLocalTurn, beginSteer, confirmSubmit, markInterrupted } from './reducer'
 import { rowsToItems, type TranscriptRow } from './rows-to-items'
 import { type ChatState, createChatState, type TranscriptItem, type UserItem } from './types'
+import { steerWrapperBody, steerWrapperText } from './__fixtures__/rows'
 
 const NOW = 1_700_000_000_000
 /** A minute later, which is how far apart the two bubbles in the report were. */
@@ -588,5 +589,120 @@ describe.each([
         expect(shape(routes[second]!(routes[first]!(conversation.streamed())))).toEqual(clean())
       }
     }
+  })
+})
+
+/**
+ * The prompt that came back a second time because a steer stood in front of it.
+ *
+ * Reported from the device: the prompt at 21:21, a steer at 21:24, and the same
+ * prompt again at 21:24 — with exactly one row for it in the gateway's database,
+ * so nothing was sent twice and nothing was persisted twice. Only the screen was
+ * wrong.
+ *
+ * `session.steer` folds words into the turn already running. It starts no turn,
+ * and the gateway's `inflight.user` for that turn goes on naming the ORIGINAL
+ * prompt. But the steer's bubble was the newest authored item, so every resume
+ * compared the original prompt against the steer's words, found no match, and
+ * projected the prompt again. A steer belongs to the turn it steered; it is
+ * never that turn's prompt.
+ */
+describe('a resume after a steer', () => {
+  const PROMPT = 'Summarise the release notes.'
+  const STEER = 'lees over shared memory skill'
+
+  /** Prompt sent, turn running, and a steer folded into it. */
+  const steeredTurn = () => {
+    let state = confirmSubmit(beginLocalTurn(fresh(), PROMPT, undefined, NOW), { status: 'streaming' }, NOW)
+
+    state = applyEvent(state, { type: 'message.start', seq: 1 }, NOW)
+
+    return confirmSubmit(beginLocalTurn(state, STEER, undefined, LATER), { status: 'steered' }, LATER)
+  }
+
+  it('does not paint the prompt again behind the steer', () => {
+    const state = applyResumeSnapshot(
+      steeredTurn(),
+      { inflight: { user: PROMPT, assistant: 'Reading them', streaming: true }, running: true },
+      LATER
+    )
+
+    expect(texts(state)).toEqual([`user:${PROMPT}`, `user:${STEER}`, 'assistant:Reading them'])
+    expect(users(state)).toHaveLength(2)
+  })
+
+  it('holds through a second resume inside the same turn', () => {
+    let state = applyResumeSnapshot(
+      steeredTurn(),
+      { inflight: { user: PROMPT, assistant: 'Reading', streaming: true }, running: true },
+      LATER
+    )
+
+    state = applyResumeSnapshot(
+      state,
+      { inflight: { user: PROMPT, assistant: 'Reading them now', streaming: true }, running: true },
+      LATER + 1_000
+    )
+
+    expect(users(state)).toHaveLength(2)
+    expect(assistants(state)).toHaveLength(1)
+  })
+
+  it('still gives a genuinely new turn its own bubble after a steer', () => {
+    // The guard must not swallow a real second send of the same words: a durable
+    // reply between the two says the first turn is over.
+    let state = steeredTurn()
+
+    state = reconcileTail(
+      state,
+      rowsToItems(
+        [
+          { role: 'user', row_id: 1, text: PROMPT },
+          { role: 'user', row_id: 2, text: steerWrapperText, display_kind: 'steer' },
+          { role: 'assistant', row_id: 3, text: 'Three fixes and one feature.' }
+        ],
+        'rest'
+      )
+    )
+
+    state = applyResumeSnapshot(
+      state,
+      { inflight: { user: PROMPT, assistant: '', streaming: true }, running: true },
+      LATER + 2_000
+    )
+
+    expect(users(state)).toHaveLength(3)
+  })
+
+  it('pairs the persisted steer row with the bubble, wrapper and all', () => {
+    // The gateway persists a steer inside a marker addressed to the model. The
+    // bubble on screen never saw it, so only stripping it makes the two one row.
+    const state = reconcileTail(
+      steeredTurn(),
+      rowsToItems(
+        [
+          { role: 'user', row_id: 1, text: PROMPT },
+          { role: 'user', row_id: 2, text: steerWrapperText, display_kind: 'steer' }
+        ],
+        'rest'
+      )
+    )
+
+    expect(users(state)).toHaveLength(2)
+    expect(users(state)[1]).toMatchObject({ rowId: 2, text: steerWrapperBody, displayKind: 'steer' })
+  })
+
+  it('does not let a persisted steer stand in for another author’s prompt', () => {
+    // A foreign `message.start` is waiting to be told who spoke. A steer is not
+    // an answer to that question: it opened no turn.
+    let state = applyEvent(beginSteer(fresh(), STEER, undefined, NOW), { type: 'message.start', seq: 1 }, LATER)
+
+    state = reconcileTail(
+      state,
+      rowsToItems([{ role: 'user', row_id: 2, text: steerWrapperText, display_kind: 'steer' }], 'rest')
+    )
+
+    expect(users(state).filter(item => item.unknownAuthor)).toHaveLength(1)
+    expect(state.turn.foreignReconcilePending).toBe(true)
   })
 })
