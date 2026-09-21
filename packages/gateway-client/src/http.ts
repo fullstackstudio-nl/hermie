@@ -65,6 +65,20 @@ export class GatewayHttp {
     return this.send<T>('PUT', path, body, options)
   }
 
+  /**
+   * `PATCH`, which the profile rename route is the first caller of.
+   *
+   * Hermes spells that one `PATCH /api/profiles/{name}` and not
+   * `POST …/rename`, so the verb has to exist here rather than being worked
+   * around at the call site: everything that makes this class worth using —
+   * the base URL, the extra headers, the credential provider and the single
+   * 401 retry — lives inside `send`, and a hand-rolled `fetch` beside it would
+   * have none of them.
+   */
+  patch<T = unknown>(path: string, body?: unknown, options?: RequestOptions): Promise<T> {
+    return this.send<T>('PATCH', path, body, options)
+  }
+
   delete<T = unknown>(path: string, body?: unknown, options?: RequestOptions): Promise<T> {
     return this.send<T>('DELETE', path, body, options)
   }

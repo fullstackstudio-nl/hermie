@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A map of a bot's memory.** A **Graph** tab beside the entries draws what the plugin's `graph`
+  answer holds: the bot at the centre, an entry per memory, and the topics they share — a
+  capitalised phrase, an `@handle`, a `#hashtag`, a date — with a line wherever two entries mention
+  the same one. It is laid out in the app rather than fetched as a picture, with a spring-and-repel
+  pass that always starts from the same seed, so the same memory draws the same map every time it
+  is opened and after every edit. Drag to pan, zoom with the buttons or, in a browser, the wheel,
+  and tap a node for a card with the entry's full text, the topics it mentions and a way into the
+  list at that entry. It is drawn with the app's own SVG — no web view, nothing to sandbox — and
+  under Reduce Motion it arrives with no animation at all. A page that hit one of the plugin's caps
+  says so rather than showing a partial map in silence.
+
+- **A memory browser.** Bot profile → **Memory**, and Settings → **Memory** for any bot: both of a
+  profile's memory files — `MEMORY.md`, what the bot learned about its work, and `USER.md`, what it
+  learned about you — as two lists with the char usage each one is actually spending. Search runs on
+  the gateway rather than filtering what is on screen, so it means the same thing here as it does to
+  the bot's own `/memory` command: every word of the query has to appear in the entry, in any order,
+  as plain text. Entries can be added, edited in place and removed, and a removal asks first because
+  Hermes keeps no history of a memory file. A write is addressed by the entry's TEXT and never by
+  its position, so an entry that moved between the read and the tap cannot be overwritten by
+  mistake. Whatever the store refuses — a char limit, an entry that is no longer there — is shown in
+  Hermes' own words rather than paraphrased. A gateway whose plugin allows reading and not writing
+  gets the list with the composers gone and a line saying so; a gateway with no memory routes at all
+  gets the install command and a link to the guide instead of an empty page. External memory
+  providers are listed by name as **not browsable**, because they offer no call that returns what
+  they hold.
+
+- **Rename a bot from the app.** The bot profile sheet's name is a field now rather than a fact with
+  the sentence "Set on the gateway, in this profile." beside it. Which name it edits depends on the
+  profile, and the sheet says so instead of hiding it: the **default** profile takes a display name
+  and keeps its own id, and every other profile is genuinely RENAMED — so there the field is
+  labelled *Profile name* and carries the line "Renaming changes the profile name other tools use",
+  because that handle is what `@`-mentions, crons, DM lines and the gateway's own logs address. A
+  real rename also moves the name everywhere this app holds a bot under it: the open chat and its
+  queue, the roster, the unread watermark, the arrangement, the folder, the colour, the archive
+  flag, the mute, the per-bot context note and the cached transcript. If part of that cannot be
+  moved, the sheet says which part rather than leaving the reader to find out at the next cold
+  start. A refusal from the gateway — a name over 64 characters, a name already taken, a profile
+  that does not exist — is shown beside the field and nothing local moves.
+
 ### Fixed
 
 - **The header pill keeps its width while the bot thinks.** The owner reported it still changing

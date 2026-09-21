@@ -17,10 +17,10 @@
  */
 import { createHash, randomBytes } from 'node:crypto'
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
 
-import { startFakeGateway, type FakeGateway } from './server'
+import { PLUGIN_ADVERT, startFakeGateway, type FakeGateway } from './server'
 
 const base64url = (value: Buffer): string =>
   value.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
@@ -82,6 +82,280 @@ describe('GET /api/profiles — profiles.py::_list_profiles', () => {
 
     expect(Array.isArray(body)).toBe(false)
     expect(Array.isArray(body.profiles)).toBe(true)
+  })
+})
+
+describe('/api/plugins/hermie/memory — the plugin’s dashboard/plugin_api.py', () => {
+  /*
+    Pinned against the PLUGIN's own tests (`tests/test_memory.py`,
+    `tests/test_memory_routes.py`) rather than against what a browser would find
+    convenient. Everything asserted here is a decision that file made and
+    documented, and the three that reach into the app are:
+
+      - an id is POSITIONAL (`memory:3`), because a memory file is `"\n§\n"`-
+        joined text with no ids, so a write is addressed by TEXT;
+      - both targets are always named, even when one is empty;
+      - an external provider carries `enumerable: false`, because
+        `MemoryProvider` has `prefetch(query)` and no call that returns entries.
+
+    Own gateway per test: `edit` mutates the files.
+  */
+  let own: FakeGateway
+
+  beforeEach(async () => {
+    own = await startFakeGateway({ port: 0 })
+  })
+
+  afterEach(async () => {
+    await own.close()
+  })
+
+  const route = '/api/plugins/hermie/memory'
+
+  const read = async (path: string): Promise<Record<string, unknown>> =>
+    fetch(`${own.url}${route}${path}`).then(response => response.json() as Promise<Record<string, unknown>>)
+
+  const edit = async (body: Record<string, unknown>) =>
+    fetch(`${own.url}${route}/edit`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+
+  it('names both targets on list, even when one of them is empty', async () => {
+    const body = await read('/list?profile=writer')
+    const targets = body.targets as Record<string, unknown>[]
+
+    expect(targets.map(row => row.target)).toEqual(['memory', 'user'])
+    expect((targets[1] as { entries: unknown[] }).entries).toEqual([])
+  })
+
+  it('mints a POSITIONAL id and reports what each entry costs', async () => {
+    const body = await read('/list?profile=researcher')
+    const memory = (body.targets as Record<string, unknown>[])[0] as { entries: Record<string, unknown>[] }
+
+    expect(memory.entries.map(row => row.id)).toEqual(['memory:0', 'memory:1', 'memory:2'])
+    expect(keysOf(memory.entries[0])).toEqual(['chars', 'id', 'index', 'target', 'text', 'topics'])
+  })
+
+  /**
+   * The count is the store's: entries joined by the delimiter, not summed. A
+   * listing that disagreed with the store about how full a file is would have
+   * somebody deleting entries to fix a number that was never true.
+   */
+  it('counts usage the way the store spends it, delimiter included', async () => {
+    const body = await read('/list?profile=researcher')
+    const memory = (body.targets as Record<string, unknown>[])[0] as {
+      entries: { text: string }[]
+      chars: number
+      limit: number
+    }
+    const summed = memory.entries.reduce((total, row) => total + row.text.length, 0)
+
+    expect(memory.chars).toBe(summed + '\n§\n'.length * (memory.entries.length - 1))
+    expect(memory.limit).toBe(2200)
+  })
+
+  it('names an external provider and says it cannot be enumerated', async () => {
+    const providers = (await read('/list?profile=researcher')).providers as Record<string, unknown>[]
+
+    expect(providers.find(row => row.name === 'builtin')?.enumerable).toBe(true)
+    expect(providers.filter(row => row.name !== 'builtin').every(row => row.enumerable === false)).toBe(true)
+  })
+
+  /** `memory/browse.py::matches` — every word, any order, plain text. */
+  it('searches across both targets, matching every word in any order', async () => {
+    const hit = await read('/search?profile=researcher&q=tailnet%20address')
+    const miss = await read('/search?profile=researcher&q=tailnet%20invoices')
+
+    expect(hit.count).toBe(1)
+    expect((hit.results as { target: string }[])[0]?.target).toBe('memory')
+    expect(miss.count).toBe(0)
+  })
+
+  /** A query that looks like a regular expression is read as text. */
+  it('does not treat a query as a pattern', async () => {
+    expect((await read('/search?profile=researcher&q=.*')).count).toBe(0)
+  })
+
+  it('refuses a search with no query', async () => {
+    expect((await fetch(`${own.url}${route}/search?profile=researcher`)).status).toBe(400)
+  })
+
+  /** `memory/__init__.py::_clean_profile` rejects rather than sanitises. */
+  it('refuses a profile that is really a path, and one that is missing', async () => {
+    for (const profile of ['../../etc', 'a/b', '..', '', 'a%5Cb']) {
+      expect((await fetch(`${own.url}${route}/list?profile=${profile}`)).status).toBe(400)
+    }
+  })
+
+  it('answers the store’s own result dict on a write, rather than a translation', async () => {
+    const added = (await (
+      await edit({ profile: 'writer', target: 'user', op: 'add', content: 'Likes semicolons.' })
+    ).json()) as Record<string, unknown>
+
+    expect(added).toEqual({ success: true, target: 'user' })
+
+    const replaced = (await (
+      await edit({
+        profile: 'writer',
+        target: 'user',
+        op: 'replace',
+        old_text: 'Likes semicolons.',
+        content: 'Likes em dashes.'
+      })
+    ).json()) as Record<string, unknown>
+
+    expect(replaced).toEqual({ success: true, replaced_entry: 'Likes semicolons.' })
+
+    const removed = (await (
+      await edit({ profile: 'writer', target: 'user', op: 'remove', index: 0 })
+    ).json()) as Record<string, unknown>
+
+    expect(removed).toEqual({ success: true })
+    expect(((await read('/list?profile=writer')).targets as { entries: unknown[] }[])[1]?.entries).toEqual([])
+  })
+
+  /**
+   * A stale index names nothing rather than its neighbour, and the refusal
+   * carries the target as the store re-read it.
+   */
+  it('refuses an entry that is no longer there and hands back what is', async () => {
+    const body = (await (await edit({ profile: 'writer', target: 'memory', op: 'remove', index: 9 })).json()) as Record<
+      string,
+      unknown
+    >
+
+    expect(body.success).toBe(false)
+    expect(Array.isArray(body.current_entries)).toBe(true)
+  })
+
+  it('accepts only the two real targets and the three real operations', async () => {
+    expect((await edit({ profile: 'writer', target: 'notes', op: 'add', content: 'x' })).status).toBe(400)
+    expect((await edit({ profile: 'writer', target: 'memory', op: 'drop', content: 'x' })).status).toBe(400)
+  })
+
+  it('has no routes at all on a gateway with no plugin', async () => {
+    const bare = await startFakeGateway({ port: 0, plugin: false })
+
+    try {
+      expect((await fetch(`${bare.url}${route}/list?profile=researcher`)).status).toBe(404)
+    } finally {
+      await bare.close()
+    }
+  })
+
+  /**
+   * Browsing and editing switch off per profile, through that profile's own
+   * config, and the route says so with a 403 rather than an empty answer.
+   */
+  it('answers 403 when the half being asked for is switched off', async () => {
+    const readOnly = await startFakeGateway({
+      port: 0,
+      plugin: { ...PLUGIN_ADVERT, capabilities: ['memory.browse'] }
+    })
+
+    try {
+      expect((await fetch(`${readOnly.url}${route}/list?profile=researcher`)).status).toBe(200)
+      expect(
+        (
+          await fetch(`${readOnly.url}${route}/edit`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ profile: 'researcher', target: 'memory', op: 'add', content: 'x' })
+          })
+        ).status
+      ).toBe(403)
+    } finally {
+      await readOnly.close()
+    }
+  })
+})
+
+describe('PATCH /api/profiles/{name} — profiles.py::_rename_profile', () => {
+  /*
+    Its own gateway, and a fresh one per test: these cases MUTATE the profile
+    list, and the module-wide gateway above is read by every other `describe`
+    here, which would then be asserting against a roster somebody renamed.
+
+    Read out of Hermes 0.21.3. The route is `PATCH`, not `POST …/rename`, and
+    `new_name` is the only body key (`ProfileRename` in
+    `hermes_cli/web_models.py`). There is no WebSocket method that does this —
+    `groups.rename` renames a room, `pet.rename` a mascot, `session.title` a
+    session — which is why the app's only profile write that leaves the socket
+    is this one.
+  */
+  let own: FakeGateway
+
+  beforeEach(async () => {
+    own = await startFakeGateway({ port: 0 })
+  })
+
+  afterEach(async () => {
+    await own.close()
+  })
+
+  const rename = async (name: string, newName: string) =>
+    fetch(`${own.url}/api/profiles/${encodeURIComponent(name)}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ new_name: newName })
+    })
+
+  /**
+   * The `default` profile's home IS the installation root, so it cannot be
+   * renamed. Hermes turns the call into a presentation-only display name and
+   * says so by answering WITH `display_name` and an unchanged `name`.
+   */
+  it('answers the default profile with a display_name and its id unchanged', async () => {
+    const body = (await (await rename('researcher', 'Jurist')).json()) as Record<string, unknown>
+
+    expect(body.ok).toBe(true)
+    expect(body.name).toBe('researcher')
+    expect(body.display_name).toBe('Jurist')
+    expect(typeof body.path).toBe('string')
+  })
+
+  /**
+   * Any other profile is REALLY renamed — directory, wrapper script, service,
+   * active-profile pointer — and the answer carries no `display_name` at all.
+   * The app reads that absence as "the handle moved", so it is the difference
+   * between rekeying every store and rekeying none.
+   */
+  it('answers any other profile with the new id and NO display_name', async () => {
+    const body = (await (await rename('writer', 'scribe')).json()) as Record<string, unknown>
+
+    expect(body).not.toHaveProperty('display_name')
+    expect(body.name).toBe('scribe')
+    expect(body.path).toContain('scribe')
+
+    const listed = (await fetch(`${own.url}/api/profiles`).then(response => response.json())) as {
+      profiles: Record<string, unknown>[]
+    }
+
+    expect(listed.profiles.map(row => row.name)).toContain('scribe')
+    expect(listed.profiles.map(row => row.name)).not.toContain('writer')
+  })
+
+  /** `FileNotFoundError` -> 404. Not a 400, and not a silent creation. */
+  it('refuses a profile that does not exist with 404', async () => {
+    expect((await rename('nobody', 'somebody')).status).toBe(404)
+  })
+
+  /**
+   * `rename_profile` refuses an empty new name for `default` before the setter
+   * sees it, so clearing THAT one is not reachable over this route — even
+   * though `set_profile_display_name` itself treats an empty string as "remove
+   * the key".
+   */
+  it('refuses an empty name on the default profile with 400', async () => {
+    expect((await rename('researcher', '   ')).status).toBe(400)
+  })
+
+  /** `ValueError` / `FileExistsError` -> 400: over 64 characters, or a name in use. */
+  it('refuses a name over 64 characters, and one that is already taken, with 400', async () => {
+    expect((await rename('writer', 'x'.repeat(65))).status).toBe(400)
+    expect((await rename('writer', 'researcher')).status).toBe(400)
   })
 })
 

@@ -5,6 +5,7 @@ import { ScrollView, View } from 'react-native'
 
 import { chatStrings } from '../../chat-ui'
 import { useChatRuntime } from '../chats/ChatRuntime'
+import { MemoryBotsScreen, memoryStrings } from '../memory'
 import { NotificationsSection } from '../push/NotificationsSection'
 import { pushPlatform } from '../push/platform'
 import { useGateway } from '../../gateway'
@@ -61,6 +62,7 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
   const [showGallery, setShowGallery] = useState(initialPage === 'gallery')
   const [showLicences, setShowLicences] = useState(initialPage === 'licences')
   const [showThemes, setShowThemes] = useState(initialPage === 'themes')
+  const [showMemory, setShowMemory] = useState(false)
   const [confirmingChange, setConfirmingChange] = useState(false)
 
   // Escape goes back ONE level: out of a screen Settings opened and into
@@ -71,8 +73,9 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
       setShowGallery(false)
       setShowLicences(false)
       setShowThemes(false)
+      setShowMemory(false)
     },
-    showConnectionTest || showGallery || showLicences || showThemes
+    showConnectionTest || showGallery || showLicences || showThemes || showMemory
   )
 
   // The same one level for Android's back button, which is not Escape and has
@@ -86,8 +89,9 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
       setShowGallery(false)
       setShowLicences(false)
       setShowThemes(false)
+      setShowMemory(false)
     },
-    showConnectionTest || showGallery || showLicences || showThemes
+    showConnectionTest || showGallery || showLicences || showThemes || showMemory
   )
 
   // A screen opened from here REPLACES Settings rather than pushing onto a
@@ -108,6 +112,10 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
 
   if (showThemes) {
     return <ThemesScreen onClose={() => setShowThemes(false)} />
+  }
+
+  if (showMemory) {
+    return <MemoryBotsScreen onClose={() => setShowMemory(false)} />
   }
 
   const token = config?.authMode === 'session_token'
@@ -274,6 +282,17 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
         {/* The app lock. Per device, and never carried to another one by
             ADR-0016's sync. */}
         <PrivacySection />
+
+        {/* One row, into the feature's own two-deep stack: bots, then one
+            bot's two memory files. */}
+        <InsetGroup header={memoryStrings.botsTitle}>
+          <InsetButtonRow
+            detail={memoryStrings.botsHint}
+            onPress={() => setShowMemory(true)}
+            testID="settings-memory"
+            title={memoryStrings.rowTitle}
+          />
+        </InsetGroup>
 
         <AppearanceSection onOpenAdvanced={() => setShowThemes(true)} />
 

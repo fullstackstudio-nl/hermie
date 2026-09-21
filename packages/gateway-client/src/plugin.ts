@@ -68,7 +68,19 @@ export const PLUGIN_CAPABILITIES = {
   /** The heartbeat may say WHICH chat is on screen, not merely that one is. */
   pushSeenPerChat: 'push.seen.per_chat',
   /** A muted chat is not notified about. Without it, mute is app-side only. */
-  pushMute: 'push.mute'
+  pushMute: 'push.mute',
+  /**
+   * The memory browser's two halves, which are the only capabilities on this
+   * list that name an HTTP surface rather than a hook.
+   *
+   * They are separate because a gateway may offer one and not the other, and
+   * they are not independent: the plugin refuses to advertise `memory.edit`
+   * without `memory.browse`, since an app that cannot list an entry cannot name
+   * one to replace. So a page tests `memoryBrowse` to decide whether to exist
+   * and `memoryEdit` to decide whether to be writable.
+   */
+  memoryBrowse: 'memory.browse',
+  memoryEdit: 'memory.edit'
 } as const
 
 export type PluginCapability = (typeof PLUGIN_CAPABILITIES)[keyof typeof PLUGIN_CAPABILITIES]

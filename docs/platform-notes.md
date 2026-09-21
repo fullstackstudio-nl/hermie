@@ -7577,3 +7577,241 @@ the platform APIs; what a device check has to cover:
   chosen rather than measured.
 - **Dictation on the web.** The Chrome and Safari path is written from the API's documented
   behaviour; neither has been driven in a browser here.
+
+## Renaming a profile, which is two routes wearing one URL (2026-09-22)
+
+`PATCH /api/profiles/{name}` is one endpoint with two behaviours, and every
+awkward thing about the field in front of it comes from that.
+
+### The answer is the only honest way to tell them apart
+
+On `default` the profile's home IS the installation root, so it cannot move.
+Hermes turns the call into a presentation-only display name, keeps the canonical
+id, and answers with `display_name` beside an unchanged `name`. On any other
+profile it really renames — directory, wrapper script, service, active-profile
+pointer — and answers with the NEW `name` and no `display_name` key at all.
+
+The app could have decided which of the two it was about to get from
+`bot.isDefault` on its own roster row. It does not, and the reason is that the
+roster's `is_default` and the gateway's idea of which profile is the launch
+profile are two different facts that a multi-profile gateway can disagree about.
+Reading the ABSENCE of `display_name` in the answer is a fact about the call
+that was actually made. `renamed` in `rename-controller.ts` is that reading, and
+it is what decides whether a single key or fourteen of them move.
+
+### A bot's name is this app's primary key, and nothing said so before
+
+| Held under the bot's name                    | Where                           |
+| -------------------------------------------- | ------------------------------- |
+| the transcript, its queue, its liveness      | `store/chats`                   |
+| the roster row, avatar, unread watermark     | `store/bots`                    |
+| list position, folder, colour, archive, mute | `store/chat-layout`             |
+| the per-bot system-prompt note               | `store/device-context`          |
+| the cached conversation                      | `platform/chat-cache`, a column |
+
+None of that follows a rename by itself. `profiles.list` replaces the roster
+wholesale, so a renamed bot arrives as a NEW bot and the old rows are simply
+dropped — the colour, the folder and the cached transcript go quietly, which is
+the worst kind of data loss because nothing reports it. `renameBot` is the
+migration, and it builds every store's next state before writing any of them so
+that the only thing that can fail before the first write is a pure function.
+
+The cache is deliberately outside that: it is async, it is SQLite or IndexedDB,
+and `FallbackChatCache` is allowed to downgrade to memory. Its failure is
+reported as a warning rather than rolled back, because the cost of a cache miss
+is one conversation re-fetched and the cost of unwinding four stores to avoid it
+is a bug nobody will ever reproduce.
+
+### The arrangement is persisted through `setAccent`, on purpose
+
+`chat-layout`'s writer is private and every public action funnels through it.
+Rather than add an action to a store three other rounds are editing, the
+migration rekeys the arrangement with `setState` and then calls the one public
+setter that always persists — which is also the setter that has to run anyway,
+because the colour is keyed on the bot's name like everything else. It is a
+seam, and it is written down here because it reads as incidental and is not.
+
+### What is unverified here
+
+- **No real gateway has renamed anything for this.** Everything is the fake's
+  route, which was written from `docs/DESIGN.md` §8 in the plugin repository —
+  itself read out of Hermes 0.21.3 — and from the status table there. What a
+  real `rename_profile` does to a RUNNING profile's service and to an attached
+  session has not been seen, and the app's assumption that the next
+  `profiles.list` simply reports the new name is exactly that.
+- **The rename is not atomic with the description and the picture.** The sheet
+  sends those first, under the old name, and renames last. A failure between the
+  two leaves a saved description on a profile that kept its name, which is the
+  benign half of the two orders; the other order fails the description against a
+  profile that no longer exists.
+- **Nothing tells the other clients.** There is no `profiles.changed` event on
+  this gateway, so a TUI or a dashboard open beside the app keeps the old name
+  until it re-reads for its own reasons.
+
+## The memory browser, and the three states before a page exists (2026-09-22)
+
+The memory routes are a PLUGIN's, not core's, so "the gateway is connected" does
+not answer whether there is anything to draw. The capability advert does, and it
+answers one of three things rather than two.
+
+| Advert                            | What the page draws               |
+| --------------------------------- | --------------------------------- |
+| no roster read yet                | one quiet line, and nothing else  |
+| no `memory.browse`                | the install command and the guide |
+| `memory.browse`, no `memory.edit` | the list, with no composers       |
+| both                              | the whole page                    |
+
+The first row is the one that is easy to drop. "We have not looked yet" drawn as
+"not installed" tells somebody to install a plugin they already have, and
+`store/plugin.ts` already distinguishes the two — the page just has to use it.
+The second row is a capability and not a plugin: a gateway can have an older
+Hermie plugin installed, enabled and happily sending notifications and still
+have no memory routes, which is why the copy names a version.
+
+### A write is addressed by text, and the id on screen is not a handle
+
+A memory file is plain UTF-8 with entries joined by `"\n§\n"`. No ids, no
+timestamps, no structure. So the plugin mints `memory:3` positionally — "the
+fourth entry as it reads right now" — and that stops being true the moment an
+entry above it is removed, by this app or by the bot itself mid-turn.
+
+Every write therefore sends `old_text`, which is what Hermes' own `MemoryStore`
+matches on. The index travels too, as the plugin's documented fallback, but the
+text is what decides. The failure this prevents is not theoretical: a bot that
+tidies its own memory during a turn shifts every id under an open page, and a
+replace-by-index would then rewrite the neighbour.
+
+For the same reason a successful write is followed by a re-read rather than by a
+local patch. The ids have all moved, and the usage count has changed by the
+delimiter as well as by the text — a page that recomputed it would be holding a
+second opinion about how full a file is.
+
+### What the usage bar must not do
+
+It reads `chars` off the answer. Summing the entries it just drew is off by one
+delimiter per entry, so a file shown as comfortable would refuse the next write,
+and the reader would delete something to make room that was never missing.
+
+### External providers are named and never opened
+
+`MemoryProvider` has `prefetch(query)`, which returns opaque formatted text for
+one turn, and no call that returns entries; mem0's own surface is
+`search(query, top_k)` with no `get_all`. So a provider's memories cannot be
+shown even read-only without inventing an API Hermes does not have. The row
+exists anyway, because a page that silently showed two files while a mem0 store
+held most of what the bot remembers would be lying by omission.
+
+### What is unverified here
+
+- **No real plugin on a live gateway has answered any of this.** Every shape is
+  the fake's, and the fake was written from the plugin's `memory/browse.py` and
+  its tests — including the topic extraction, ported character for character so
+  the graph clusters the way a real one would. What has never been exercised is
+  the plugin itself: the profile scoping through
+  `hermes_constants.set_hermes_home_override`, Hermes' own file lock, the
+  external-drift backup, and what `load_on_disk_store` does when a bot is
+  writing to the same file in the same second.
+- **The 403s are staged from the advert, not from a profile's config.** The real
+  switches are `plugins.entries.hermie.settings.memory.{browse,edit}` in a
+  profile's own `config.yaml`, read per request. The fake derives them from the
+  advert instead, which is the same answer for the app and a different mechanism
+  underneath — in particular, a gateway whose advert and whose per-profile
+  config disagree is a state this has never seen.
+- **Nothing has been tried against a memory file at its char limit.** The
+  refusal is the store's sentence, shown verbatim, and the wording of that
+  sentence is the fake's guess at Hermes'.
+- **Concurrency is untested.** Two clients editing one profile's memory, or a
+  bot writing while the page is open, both end in "the re-read wins" — which is
+  the design, and which nobody has watched happen.
+
+## A force-directed layout that has to draw the same picture twice (2026-09-22)
+
+The memory graph is the second drawing in this app computed in JavaScript and
+handed to `react-native-svg` rather than to a library in a web view. The first
+was the Mermaid renderer, and ADR-0020 has the argument in full: a `WebView`
+learns its content's height after the page has laid out, and a picture that
+resizes after layout moves the reader by exactly the correction.
+
+### Determinism is the requirement, not the polish
+
+A Fruchterman-Reingold layout is iterative and is normally seeded from
+`Math.random`. That would draw the same memory differently on every open — and,
+because a write refetches, differently after every edit. Somebody who has
+learned that their `FullStack Studio` cluster sits bottom-left would have to
+find it again each time, which is the sort of cost that does not show up in a
+screenshot.
+
+Three things make it reproducible and each of them is load-bearing:
+
+- **`mulberry32`, not `Math.random`.** Pure 32-bit integer arithmetic, so the
+  sequence does not depend on which JavaScript engine is running — otherwise a
+  test that pins coordinates would pass under jest and be meaningless in a
+  browser.
+- **A fixed iteration count**, not a convergence threshold. "Stop when it stops
+  moving" makes the result depend on floating-point accumulation.
+- **Coordinates rounded to two decimals** at the end, so a last pass that
+  differed in the twelfth decimal cannot move a circle.
+
+The node ORDER is not pinned here and does not need to be: the plugin emits
+nodes in a stable order — the profile, then entries in file order, then each
+topic the first time an entry needs it — so the _n_-th node takes the _n_-th
+place on the seeding ring whatever the memory contains.
+
+### The profile node is pinned, and that is a drawing decision
+
+It is connected to every entry. Left free, it drifts to wherever the mass
+happens to be and the picture stops reading as "this bot's memory" and starts
+reading as an arbitrary blob. Pinning it at the centre costs nothing and is what
+makes the hub legible.
+
+### Entry nodes carry no label
+
+The plugin's excerpt is up to 120 characters. A hundred of those drawn at once
+is a grey field, not a graph. Only the hub and the topics are labelled; the
+entry's text is one tap away in the card, which is what the card is for.
+
+### Two kinds of "there is more", said separately
+
+The plugin pages over ENTRIES and reports `truncated` when its own node or edge
+cap bit. The layout has a node ceiling of its own and reports `dropped`. Rolling
+those into one sentence would tell somebody their memory is too big when what
+they actually have is a second page.
+
+### Pan without a gesture library, and zoom without a pinch
+
+`react-native-gesture-handler` is not a dependency of this app — `BottomSheet`
+says so and uses one `PanResponder`, and this does the same. The responder
+claims the gesture only after the finger has passed a slop, so a tap still
+reaches the node under it.
+
+Zoom is two buttons, and on the web also the wheel. The buttons are not a
+fallback for a pinch: a pinch is unavailable on a pointer, on a keyboard and
+under a switch control, and a picture whose only way in is a two-finger gesture
+is a picture some readers cannot use at all. They are worded rather than `+` and
+`−` marks, because this app has no minus icon and `ui/Icon.tsx` is emphatic
+about why a typed glyph is not one.
+
+### What is unverified here
+
+- **The wheel has never fired.** `onWheel` is set only on the web build and is
+  passed through to the DOM node by react-native-web; whether RNW forwards it on
+  a `View` in this version has not been observed. If it does not, zooming still
+  works through the buttons, which is why it is written that way round.
+- **Nothing has been drawn on a device.** The suite renders the SVG tree and
+  asserts nodes and taps; how a hundred-node graph performs on a phone, whether
+  the pan feels direct, and what the picture looks like at all have not been
+  seen. The standing acceptance bar for scroll and jank has not been measured
+  against this screen.
+- **The pinch that is not there.** A two-finger zoom is the gesture a reader
+  will try first on a phone and there is none. Adding it means either a gesture
+  library the app does not depend on or a second `PanResponder` tracking two
+  touches, and neither was in scope this round.
+- **No graph has come from a real plugin.** The fixture and the fake both come
+  from `memory/browse.py`, including its topic extraction ported character for
+  character. What a real profile's memory clusters into — whether the cheap
+  topics produce anything a person recognises — is the open question the feature
+  exists to answer and cannot answer from here.
+- **Large pages are untested in practice.** The layout is O(n²) per pass over
+  240 passes; at the plugin's 400-node cap that is around 19 million distance
+  computations on the JavaScript thread, synchronously, while the tab opens. It
+  has been run against six nodes.
