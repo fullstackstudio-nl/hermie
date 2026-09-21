@@ -23,8 +23,14 @@ import { pushSectionFor, pushStampOf } from '@hermie/gateway-client/push'
 import type { PushAddress } from '@hermie/gateway-client/push'
 
 import { pushTapOf, resolvePushTap, type OpenApproval } from '../src/features/push/actions'
-import type { PushPermission, PushPlatform, PushResponse } from '../src/features/push/platform-contract'
-import { PUSH_HEARTBEAT_MS, PushSync, type PushSyncPorts } from '../src/features/push/push-sync'
+import type {
+  PushAddressFailure,
+  PushPermission,
+  PushPlatform,
+  PushResponse
+} from '../src/features/push/platform-contract'
+import { PUSH_ADDRESS_METHOD, PUSH_HEARTBEAT_MS, PushSync, type PushSyncPorts } from '../src/features/push/push-sync'
+import type { RpcFailure } from '../src/gateway/rpc-failures'
 import { keyValueStore } from '../src/platform/key-value-store'
 import { ownRegistration, PUSH_KEY, usePushStore } from '../src/store/push'
 import { snapshotFromStores, type HermieAppShape } from '../src/store/ui-meta-bridge'
@@ -38,7 +44,10 @@ interface FakePlatform extends PushPlatform {
   responses: ((response: PushResponse) => void)[]
   dropped: number
   permissionValue: PushPermission
+  /** What the platform will hand over, or `null` with `failureValue` as its reason. */
   addressValue: PushAddress | null
+  /** Why there is no address, when `addressValue` is null. */
+  failureValue: PushAddressFailure
   initial: PushResponse | null
 }
 
@@ -50,11 +59,13 @@ function fakePlatform(patch: Partial<FakePlatform> = {}): FakePlatform {
     dropped: 0,
     permissionValue: 'granted',
     addressValue: TOKEN,
+    failureValue: { reason: 'failed', message: 'no valid aps-environment entitlement' },
     initial: null,
     prepare: async () => undefined,
     permission: async () => platform.permissionValue,
     requestPermission: async () => platform.permissionValue,
-    obtainAddress: async () => platform.addressValue,
+    obtainAddress: async () =>
+      platform.addressValue ? { address: platform.addressValue } : { address: null, failure: platform.failureValue },
     dropAddress: async () => {
       platform.dropped += 1
     },
@@ -167,6 +178,119 @@ describe('the switch', () => {
     expect((snapshotFromStores().app as HermieAppShape).push).toBeUndefined()
 
     sync.stop()
+  })
+
+  /**
+   * The report: `hermie-app.push` on the owner's gateway had a live heartbeat
+   * and `registrations: {}`.
+   *
+   * The app had been switched on and had never obtained a token, and there was
+   * nothing on screen or in the ring to say so — `obtainAddress` answered `null`
+   * for five unrelated reasons and `enable` turned all of them into
+   * `'unavailable'`. These pin the two places a refusal now has to land.
+   */
+  describe('a refused address says which refusal it was', () => {
+    it('keeps the reason in the store, where Settings reads it', async () => {
+      const platform = fakePlatform({
+        addressValue: null,
+        failureValue: { reason: 'failed', message: 'no valid aps-environment entitlement' }
+      })
+      const sync = syncFor(platform, fakePorts())
+
+      sync.start()
+      await settled()
+      await sync.enable()
+
+      expect(usePushStore.getState().addressFailure).toEqual({
+        reason: 'failed',
+        message: 'no valid aps-environment entitlement'
+      })
+
+      sync.stop()
+    })
+
+    it('puts it in the failure ring, so it outlives the screen', async () => {
+      const ring: RpcFailure[] = []
+      const platform = fakePlatform({ addressValue: null, failureValue: { reason: 'no-project-id' } })
+      const sync = new PushSync({
+        platform,
+        ports: fakePorts(),
+        projectId: null,
+        now: () => NOW_MS,
+        onFailure: failure => ring.push(failure)
+      })
+
+      sync.start()
+      await settled()
+      await sync.enable()
+
+      expect(ring).toEqual([{ at: NOW_MS, method: PUSH_ADDRESS_METHOD, message: 'no EAS project id in this build' }])
+
+      sync.stop()
+    })
+
+    it('survives a platform that throws instead of answering', async () => {
+      // A platform that rejects out of `obtainAddress` is the same outcome with
+      // worse manners, and it must not take `enable` down with it.
+      const ring: RpcFailure[] = []
+      const platform = fakePlatform({
+        obtainAddress: async () => {
+          throw new Error('the notifications module is not linked')
+        }
+      })
+      const sync = new PushSync({
+        platform,
+        ports: fakePorts(),
+        projectId: 'project',
+        now: () => NOW_MS,
+        onFailure: failure => ring.push(failure)
+      })
+
+      sync.start()
+      await settled()
+
+      expect(await sync.enable()).toBe('unavailable')
+      expect(usePushStore.getState().addressFailure).toEqual({
+        reason: 'failed',
+        message: 'the notifications module is not linked'
+      })
+      expect(ring[0]?.message).toBe('the notifications module is not linked')
+
+      sync.stop()
+    })
+
+    it('clears the reason and registers when Retry finds a platform that will', async () => {
+      const platform = fakePlatform({ addressValue: null })
+      const sync = syncFor(platform, fakePorts())
+
+      sync.start()
+      await settled()
+      await sync.enable()
+
+      expect(usePushStore.getState().addressFailure).not.toBeNull()
+
+      platform.addressValue = TOKEN
+
+      expect(await sync.retry()).toBe('enabled')
+      expect(usePushStore.getState().addressFailure).toBeNull()
+      expect((snapshotFromStores().app as HermieAppShape).push?.registrations).not.toEqual({})
+
+      sync.stop()
+    })
+
+    it('forgets the reason when the switch goes off', async () => {
+      const platform = fakePlatform({ addressValue: null })
+      const sync = syncFor(platform, fakePorts())
+
+      sync.start()
+      await settled()
+      await sync.enable()
+      await sync.disable()
+
+      expect(usePushStore.getState().addressFailure).toBeNull()
+
+      sync.stop()
+    })
   })
 
   it('carries the other devices’ rows through its own write', async () => {

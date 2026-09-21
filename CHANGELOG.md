@@ -280,6 +280,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Settings says whether this device is actually registered for notifications.** On the owner's
+  gateway `hermie-app.push` held a live heartbeat and `registrations: {}` — a device that is on from
+  the inside and absent from the outside — because `obtainAddress` answered a bare `null` for five
+  unrelated reasons and nothing above it could tell them apart. It now answers WHICH, Settings →
+  Notifications carries a Registration row that names it (`Registered · …token tail`, `Token request
+  failed: …`, a build with no EAS project id, permission denied), the refusal is written to the same
+  failure ring the debug screen reads, and a Retry button re-runs the flow where re-running it could
+  change the answer.
 - **Steering a queued message no longer makes it disappear.** Pressing Steer took the message out of
   the queue strip and painted nothing anywhere, so the words left the only place they were visible
   and arrived nowhere. The correction is now painted as the user turn it is, marked `Steered`,

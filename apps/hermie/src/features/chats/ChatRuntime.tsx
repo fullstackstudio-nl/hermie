@@ -130,6 +130,10 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       platform: pushPlatform,
       projectId: pushProjectId(),
       vapidUrl: pushVapidUrl(),
+      // A registration that never happened lands in the same ring the
+      // controller's absorbed gateway refusals do, so it outlives the settings
+      // screen and the debug screen can read it.
+      onFailure: failure => useConnectionStore.getState().noteRpcFailure(failure),
       ports: {
         showChat: async name => {
           requestOpenChat(name)

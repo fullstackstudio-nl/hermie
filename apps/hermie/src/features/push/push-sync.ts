@@ -29,9 +29,10 @@
  */
 import { pushStampOf } from '@hermie/gateway-client/push'
 
+import type { RpcFailure } from '../../gateway/rpc-failures'
 import { usePushStore, type PushState } from '../../store/push'
 import { pushTapOf, resolvePushTap, type OpenApproval } from './actions'
-import type { PushPermission, PushPlatform, PushResponse } from './platform-contract'
+import type { PushAddressFailure, PushPermission, PushPlatform, PushResponse } from './platform-contract'
 
 /**
  * How often `seen` is re-stamped while a chat is on screen.
@@ -44,6 +45,30 @@ import type { PushPermission, PushPlatform, PushResponse } from './platform-cont
 export const PUSH_HEARTBEAT_MS = 60_000
 
 export type PushEnableOutcome = 'enabled' | 'denied' | 'unavailable'
+
+/**
+ * The ring entry a refused address becomes.
+ *
+ * It rides the `rpc-failures` ring rather than a ring of its own even though no
+ * JSON-RPC call was made, and the reason is that the ring is what the debug
+ * screen reads: a second ring would be a second screen nobody opens. `method`
+ * is a pseudo-method so the row still says what was being attempted, which is
+ * the shape every other entry has.
+ */
+export const PUSH_ADDRESS_METHOD = 'push.obtainAddress'
+
+export function pushFailureEntry(failure: PushAddressFailure, at: number): RpcFailure {
+  const message =
+    failure.reason === 'no-project-id'
+      ? 'no EAS project id in this build'
+      : failure.reason === 'empty'
+        ? 'the platform returned no address'
+        : failure.reason === 'unsupported'
+          ? (failure.message ?? 'this platform cannot mint an address')
+          : failure.message
+
+  return { at, method: PUSH_ADDRESS_METHOD, message }
+}
 
 /** The three things a tap needs from the rest of the app. */
 export interface PushSyncPorts {
@@ -70,6 +95,15 @@ export interface PushSyncOptions {
   store?: { getState: () => PushState }
   now?: () => number
   heartbeatMs?: number
+  /**
+   * Where a refused address goes besides the store.
+   *
+   * The same sink the chat controller's absorbed gateway refusals use. A
+   * registration that never happened is exactly the class of silent failure
+   * that ring exists for — see `rpc-failures.ts` — and the owner's
+   * `registrations: {}` is what happens without it.
+   */
+  onFailure?: (failure: RpcFailure) => void
 }
 
 export class PushSync {
@@ -80,6 +114,7 @@ export class PushSync {
   private readonly store: { getState: () => PushState }
   private readonly now: () => number
   private readonly heartbeatMs: number
+  private readonly onFailure: ((failure: RpcFailure) => void) | undefined
 
   private timer: ReturnType<typeof setInterval> | undefined
   private stopResponses: (() => void) | undefined
@@ -97,6 +132,7 @@ export class PushSync {
     this.store = options.store ?? usePushStore
     this.now = options.now ?? (() => Date.now())
     this.heartbeatMs = options.heartbeatMs ?? PUSH_HEARTBEAT_MS
+    this.onFailure = options.onFailure
   }
 
   /**
@@ -193,6 +229,20 @@ export class PushSync {
     return (await this.obtain()) ? 'enabled' : 'unavailable'
   }
 
+  /**
+   * Run the whole flow again, for the Retry button in Settings.
+   *
+   * It is `enable` rather than `obtain` deliberately: a reader pressing Retry
+   * after "token request failed" may also have granted permission in system
+   * settings in between, and re-asking is free where it was already granted.
+   * The switch is already on, so nothing moves under the finger.
+   */
+  retry(): Promise<PushEnableOutcome> {
+    this.store.getState().setAddressFailure(null)
+
+    return this.enable()
+  }
+
   /** Turn them off, and take the row out of the section on the next flush. */
   async disable(): Promise<void> {
     this.store.getState().setEnabled(false)
@@ -230,16 +280,43 @@ export class PushSync {
     await this.obtain()
   }
 
+  /**
+   * Ask the platform for an address, and keep whichever answer came back.
+   *
+   * Both halves matter. A refusal is written to the store so Settings can name
+   * it, and pushed to the failure ring so it survives the screen being closed —
+   * `obtainAddress` swallowing every error into a `null` is the whole of why a
+   * gateway held a heartbeat and no registration.
+   */
   private async obtain(): Promise<boolean> {
-    const address = await this.platform.obtainAddress({ projectId: this.projectId, vapidUrl: this.vapidUrl })
+    let result
 
-    if (!address) {
+    try {
+      result = await this.platform.obtainAddress({ projectId: this.projectId, vapidUrl: this.vapidUrl })
+    } catch (error) {
+      // A platform that throws out of `obtainAddress` rather than answering is
+      // the same outcome with worse manners, and it must not take `enable` down
+      // with it.
+      result = {
+        address: null,
+        failure: { reason: 'failed' as const, message: error instanceof Error ? error.message : String(error ?? '') }
+      }
+    }
+
+    if (!result.address) {
+      this.noteFailure(result.failure)
+
       return false
     }
 
-    this.store.getState().setAddress(address, pushStampOf(this.now()))
+    this.store.getState().setAddress(result.address, pushStampOf(this.now()))
 
     return true
+  }
+
+  private noteFailure(failure: PushAddressFailure): void {
+    this.store.getState().setAddressFailure(failure)
+    this.onFailure?.(pushFailureEntry(failure, this.now()))
   }
 
   /**

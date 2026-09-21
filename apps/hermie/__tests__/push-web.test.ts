@@ -83,9 +83,13 @@ describe('the gate', () => {
   it('asks for nothing and answers denied while it is unavailable', async () => {
     await expect(pushPlatform.permission()).resolves.toBe('denied')
     await expect(pushPlatform.requestPermission()).resolves.toBe('denied')
-    await expect(
-      pushPlatform.obtainAddress({ projectId: null, vapidUrl: '/push/vapid-public-key' })
-    ).resolves.toBeNull()
+    // It answers WHY rather than a bare null: a browser with no worker and a
+    // daemon with no VAPID route are different deployments, and Settings says
+    // which.
+    await expect(pushPlatform.obtainAddress({ projectId: null, vapidUrl: '/push/vapid-public-key' })).resolves.toEqual({
+      address: null,
+      failure: { reason: 'unsupported', message: 'no service worker' }
+    })
     expect(pushPlatform.onResponse(() => undefined)).toBeInstanceOf(Function)
   })
 })

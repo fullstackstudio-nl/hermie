@@ -21,10 +21,33 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { strings } from '../../i18n/strings'
 import { usePushStore } from '../../store/push'
-import { InsetGroup } from '../../ui/primitives'
+import { InsetButtonRow, InsetGroup, InsetRow, Text } from '../../ui/primitives'
 import { SwitchRow } from '../../ui/sheets'
 import type { PushPermission } from './platform-contract'
 import type { PushSync } from './push-sync'
+import { pushRegistrationState, pushRetryable, type PushRegistrationState } from './status'
+
+/** One line for whatever `pushRegistrationState` decided this device is. */
+function statusLine(state: PushRegistrationState): string {
+  const text = strings.settings.notifications
+
+  switch (state.kind) {
+    case 'off':
+      return text.statusOff
+    case 'registered':
+      return text.statusRegistered(state.tail)
+    case 'denied':
+      return text.statusDenied
+    case 'no-project-id':
+      return text.statusNoProject
+    case 'failed':
+      return text.statusFailed(state.message)
+    case 'pending':
+      return text.statusPending
+    default:
+      return state.detail ? text.statusUnsupported(state.detail) : text.unavailable
+  }
+}
 
 const TYPE_LABELS: Record<PushType, string> = {
   message: strings.settings.notifications.typeMessage,
@@ -47,6 +70,8 @@ export function NotificationsSection({ push, available = true, testID = 'setting
   const preview = usePushStore(state => state.preview)
   const setType = usePushStore(state => state.setType)
   const setPreview = usePushStore(state => state.setPreview)
+  const address = usePushStore(state => state.address)
+  const addressFailure = usePushStore(state => state.addressFailure)
   const [permission, setPermission] = useState<PushPermission>('undetermined')
   const [busy, setBusy] = useState(false)
 
@@ -66,6 +91,21 @@ export function NotificationsSection({ push, available = true, testID = 'setting
       live = false
     }
   }, [enabled, push])
+
+  const onRetry = useCallback(() => {
+    if (!push || busy) {
+      return
+    }
+
+    setBusy(true)
+
+    const settle = (): void => {
+      setBusy(false)
+      void push.permission().then(setPermission)
+    }
+
+    void push.retry().then(settle).catch(settle)
+  }, [busy, push])
 
   const onToggle = useCallback(
     (next: boolean) => {
@@ -106,6 +146,14 @@ export function NotificationsSection({ push, available = true, testID = 'setting
       ? strings.settings.notifications.denied
       : strings.settings.notifications.enabledHint
 
+  /*
+    The registration row is shown whenever the switch is ON, including when it
+    says "Registered". A row that appears only on failure is a row nobody can
+    check BEFORE something goes wrong, and "is this phone actually registered?"
+    is the question the owner could not answer from inside the app.
+  */
+  const registration = pushRegistrationState({ available, enabled, permission, address, failure: addressFailure })
+
   return (
     <>
       <InsetGroup footer={footer} header={strings.settings.notifications.header}>
@@ -117,6 +165,26 @@ export function NotificationsSection({ push, available = true, testID = 'setting
           value={enabled}
         />
       </InsetGroup>
+
+      {enabled ? (
+        <InsetGroup header={strings.settings.notifications.status}>
+          <InsetRow>
+            <Text color="textMuted" testID={`${testID}-status`} variant="body">
+              {statusLine(registration)}
+            </Text>
+          </InsetRow>
+
+          {pushRetryable(registration) ? (
+            <InsetButtonRow
+              detail={strings.settings.notifications.retryHint}
+              disabled={busy}
+              onPress={onRetry}
+              testID={`${testID}-retry`}
+              title={strings.settings.notifications.retry}
+            />
+          ) : null}
+        </InsetGroup>
+      ) : null}
 
       {enabled ? (
         <InsetGroup footer={strings.settings.notifications.typesHint} header={strings.settings.notifications.types}>

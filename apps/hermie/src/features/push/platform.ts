@@ -19,7 +19,6 @@
  * delivery share `default`. Splitting further would give somebody four sliders
  * to discover and three of them would always be set the same way.
  */
-import type { PushAddress } from '@hermie/gateway-client/push'
 import Constants from 'expo-constants'
 import * as Notifications from 'expo-notifications'
 import { Platform } from 'react-native'
@@ -31,6 +30,8 @@ import {
   PUSH_CHANNEL_NEEDS_INPUT,
   PUSH_REQUEST_CATEGORY,
   pushDataOf,
+  pushFailureMessageOf,
+  type PushAddressResult,
   type PushPermission,
   type PushPlatform,
   type PushResponse
@@ -155,21 +156,33 @@ export const pushPlatform: PushPlatform = {
     return permissionOf(next.status, next.canAskAgain)
   },
 
-  async obtainAddress(request): Promise<PushAddress | null> {
+  /**
+   * Mint an Expo token, or say precisely why not.
+   *
+   * Every branch here used to answer a bare `null`, and the three reasons are
+   * three different jobs for whoever reads it: a build with no EAS project can
+   * never register and needs a rebuild; a throw is usually an entitlement or a
+   * network and is worth retrying; an empty `data` is Expo answering something
+   * nobody expected. The owner's gateway held a heartbeat and no registration
+   * at all because all three looked identical from up here.
+   */
+  async obtainAddress(request): Promise<PushAddressResult> {
     if (!request.projectId) {
       // No EAS project is a build that cannot mint a token. It is a
       // configuration fact, not a failure at runtime — see app.config.ts.
-      return null
+      return { address: null, failure: { reason: 'no-project-id' } }
     }
 
     try {
       const token = await Notifications.getExpoPushTokenAsync({ projectId: request.projectId })
 
-      return token.data ? { transport: 'expo', token: token.data } : null
-    } catch {
-      // No network, a simulator with no APNs registration, a project id that
-      // does not resolve: all of them mean "no address today".
-      return null
+      return token.data
+        ? { address: { transport: 'expo', token: token.data } }
+        : { address: null, failure: { reason: 'empty' } }
+    } catch (error) {
+      // No network, a device with no APNs entitlement, a project id that does
+      // not resolve. The platform's own words are the whole diagnosis.
+      return { address: null, failure: { reason: 'failed', message: pushFailureMessageOf(error) } }
     }
   },
 

@@ -51,6 +51,48 @@ export interface PushAddressRequest {
   vapidUrl: string | null
 }
 
+/**
+ * Why this device has no push address.
+ *
+ * It exists because of a silence. `obtainAddress` answered `null` for five
+ * unrelated reasons — no EAS project id, a `getExpoPushTokenAsync` that threw,
+ * a token with no `data`, a browser with no service worker, a daemon serving no
+ * VAPID key — and the caller could not tell them apart, so Settings said
+ * nothing and the owner's gateway held a `hermie-app.push` with a live
+ * heartbeat and `registrations: {}`. That is a device that looks registered
+ * from the inside and is not, which is the one state this feature must not be
+ * able to reach quietly.
+ *
+ * `message` is the platform's own words, kept verbatim and truncated. It is the
+ * whole diagnosis on this path: "no valid 'aps-environment' entitlement" and
+ * "Invalid uuid" are different problems with the same shape.
+ */
+export type PushAddressFailure =
+  | { reason: 'no-project-id' }
+  /** The platform cannot mint one here at all: no worker, no VAPID key served. */
+  | { reason: 'unsupported'; message?: string }
+  /** The call came back, with nothing in it. */
+  | { reason: 'empty' }
+  | { reason: 'failed'; message: string }
+
+/**
+ * What `obtainAddress` answers.
+ *
+ * `address` OR `failure`, never neither: a `null` address with no reason is
+ * exactly the silence this type replaces.
+ */
+export type PushAddressResult =
+  { address: PushAddress; failure?: never } | { address: null; failure: PushAddressFailure }
+
+/** The platform's own message, trimmed to something a settings row can hold. */
+export const MAX_PUSH_FAILURE_MESSAGE = 200
+
+export function pushFailureMessageOf(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error ?? '')
+
+  return raw.replace(/\s+/gu, ' ').trim().slice(0, MAX_PUSH_FAILURE_MESSAGE) || 'no message'
+}
+
 /** The category an approval notification is posted under, so it grows buttons. */
 export const PUSH_REQUEST_CATEGORY = 'hermie.request'
 
@@ -81,8 +123,8 @@ export interface PushPlatform {
   permission(): Promise<PushPermission>
   /** Ask, if the platform still allows asking. Returns the settled answer. */
   requestPermission(): Promise<PushPermission>
-  /** The address to register, or `null` if the platform would not give one. */
-  obtainAddress(request: PushAddressRequest): Promise<PushAddress | null>
+  /** The address to register, or the concrete reason there is not one. */
+  obtainAddress(request: PushAddressRequest): Promise<PushAddressResult>
   /** Let the platform go: unsubscribe a browser, forget a token natively. */
   dropAddress(): Promise<void>
   /** Every tap while the app is running. Returns its own teardown. */

@@ -1891,6 +1891,24 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       return
     }
 
+    if (path === '/__fake/push' && method === 'GET') {
+      /*
+        Read the section back, for the one question a device cannot answer
+        about itself: did my registration actually land?
+
+        It was added because of the owner's report — a `hermie-app.push` with a
+        live heartbeat and `registrations: {}` — and the only way to tell that
+        state from a working one is to look at the gateway's own copy while the
+        app is running against it.
+      */
+      const profile = state.profiles.find(row => row.is_default) ?? state.profiles[0]
+      const app = (profile?.ui_meta?.['hermie-app'] ?? {}) as Record<string, unknown>
+
+      json(res, 200, (app.push ?? { registrations: {}, seen: {} }) as Record<string, unknown>)
+
+      return
+    }
+
     if (path === '/__fake/push' && method === 'POST') {
       // The other half of the control surface: who is registered for push, and
       // which of the four events ADR-0017 names just happened. Never part of

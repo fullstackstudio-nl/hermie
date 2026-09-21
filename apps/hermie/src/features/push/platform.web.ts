@@ -22,7 +22,14 @@
  */
 import type { PushAddress } from '@hermie/gateway-client/push'
 
-import { pushDataOf, type PushPermission, type PushPlatform, type PushResponse } from './platform-contract'
+import {
+  pushDataOf,
+  pushFailureMessageOf,
+  type PushAddressResult,
+  type PushPermission,
+  type PushPlatform,
+  type PushResponse
+} from './platform-contract'
 
 /** Where the worker lives once `expo export --platform web` has copied it. */
 export const PUSH_SERVICE_WORKER_URL = '/hermie-push-sw.js'
@@ -136,11 +143,24 @@ export const pushPlatform: PushPlatform = {
     return permissionOf(await Notification.requestPermission())
   },
 
-  async obtainAddress(request): Promise<PushAddress | null> {
+  /**
+   * Subscribe, or name which of the four conditions was not met.
+   *
+   * The four are genuinely different deployments: no worker is an export that
+   * did not copy `hermie-push-sw.js`; no VAPID URL or a route that does not
+   * answer is a Hermie Web running without `--push`; a `subscribe` that throws
+   * is usually a key the browser will not accept. Answering `null` to all of
+   * them left the reader with a switch that flipped back and no sentence.
+   */
+  async obtainAddress(request): Promise<PushAddressResult> {
     const worker = await ensureWorker()
 
-    if (!worker || !request.vapidUrl) {
-      return null
+    if (!worker) {
+      return { address: null, failure: { reason: 'unsupported', message: 'no service worker' } }
+    }
+
+    if (!request.vapidUrl) {
+      return { address: null, failure: { reason: 'unsupported', message: 'no VAPID key URL' } }
     }
 
     // A subscription this browser already holds is reused: subscribing again
@@ -149,7 +169,7 @@ export const pushPlatform: PushPlatform = {
     const existing = addressOfSubscription(await worker.pushManager.getSubscription())
 
     if (existing) {
-      return existing
+      return { address: existing }
     }
 
     let key: string
@@ -158,20 +178,20 @@ export const pushPlatform: PushPlatform = {
       const response = await fetch(request.vapidUrl, { credentials: 'same-origin' })
 
       if (!response.ok) {
-        return null
+        return { address: null, failure: { reason: 'failed', message: `${request.vapidUrl}: HTTP ${response.status}` } }
       }
 
       const body = (await response.json()) as { key?: unknown; publicKey?: unknown }
 
       key = typeof body.key === 'string' ? body.key : typeof body.publicKey === 'string' ? body.publicKey : ''
-    } catch {
+    } catch (error) {
       // No daemon, no route, no key: push is not available on this deployment,
       // which is a thing Settings says rather than an error.
-      return null
+      return { address: null, failure: { reason: 'failed', message: pushFailureMessageOf(error) } }
     }
 
     if (!key) {
-      return null
+      return { address: null, failure: { reason: 'unsupported', message: 'the VAPID route served no key' } }
     }
 
     try {
@@ -181,10 +201,11 @@ export const pushPlatform: PushPlatform = {
         userVisibleOnly: true,
         applicationServerKey: decodeVapidKey(key)
       })
+      const address = addressOfSubscription(subscription)
 
-      return addressOfSubscription(subscription)
-    } catch {
-      return null
+      return address ? { address } : { address: null, failure: { reason: 'empty' } }
+    } catch (error) {
+      return { address: null, failure: { reason: 'failed', message: pushFailureMessageOf(error) } }
     }
   },
 

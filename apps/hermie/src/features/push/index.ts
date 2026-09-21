@@ -17,14 +17,27 @@ export {
   PUSH_REQUEST_CATEGORY,
   PUSH_TYPES_WITH_ACTIONS,
   pushDataOf,
+  pushFailureMessageOf,
+  type PushAddressFailure,
   type PushAddressRequest,
+  type PushAddressResult,
   type PushPayloadData,
   type PushPermission,
   type PushPlatform,
   type PushResponse
 } from './platform-contract'
 export {
+  PUSH_ADDRESS_TAIL,
+  pushAddressTail,
+  pushRegistrationState,
+  pushRetryable,
+  type PushRegistrationState,
+  type PushStatusInput
+} from './status'
+export {
+  PUSH_ADDRESS_METHOD,
   PUSH_HEARTBEAT_MS,
+  pushFailureEntry,
   PushSync,
   type PushEnableOutcome,
   type PushSyncOptions,

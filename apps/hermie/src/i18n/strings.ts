@@ -593,7 +593,26 @@ export const strings = {
       typesHint: 'A bot answering, a bot asking permission, a message from another bot, and a routine’s delivery.',
       preview: 'Show a preview',
       previewHint:
-        'Off, a notification says which bot and what happened. On, it carries the message as well — and a lock screen is where it will be read.'
+        'Off, a notification says which bot and what happened. On, it carries the message as well — and a lock screen is where it will be read.',
+
+      /**
+       * What this device's registration actually IS, in one row.
+       *
+       * The owner's gateway held a push section with a live heartbeat and no
+       * registrations at all, and the app said nothing, because every way of
+       * failing to obtain a token looked the same from above. Each line below
+       * names one of them, and the ones worth trying again get the button.
+       */
+      status: 'Registration',
+      statusOff: 'Off. This device is not registered.',
+      statusPending: 'Asking the platform for an address…',
+      statusRegistered: (tail: string) => `Registered · …${tail}`,
+      statusDenied: 'Permission denied. Turn notifications on for Hermie in your device settings.',
+      statusNoProject: 'This build has no EAS project id, so it cannot be given a push token. It needs rebuilding.',
+      statusFailed: (message: string) => `Token request failed: ${message}`,
+      statusUnsupported: (detail: string) => `This device cannot register: ${detail}`,
+      retry: 'Retry',
+      retryHint: 'Asks for permission again and re-requests a push token.'
     },
 
     account: 'ACCOUNT',

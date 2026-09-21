@@ -37,6 +37,7 @@ import {
 } from '@hermie/gateway-client/push'
 import { create } from 'zustand'
 
+import type { PushAddressFailure } from '../features/push/platform-contract'
 import { keyValueStore } from '../platform/key-value-store'
 import { randomBytes } from '../platform/random'
 
@@ -79,6 +80,14 @@ export interface PushState {
   seen: Record<string, number>
   /** False until the first disk read finishes; nothing is projected before it. */
   loaded: boolean
+  /**
+   * Why there is no address, when there should be one.
+   *
+   * Deliberately NOT persisted: it describes this launch's attempt, and a
+   * reason carried over from a previous one would be shown beside a switch
+   * whose flow has not run yet. Cleared by an address arriving.
+   */
+  addressFailure: PushAddressFailure | null
 
   hydrate: () => Promise<void>
   /** Turn the whole section on or off. The address is set separately. */
@@ -87,6 +96,8 @@ export interface PushState {
   setPreview: (preview: boolean) => void
   /** Record the address the platform handed over, and stamp the row. */
   setAddress: (address: PushAddress | null, stamp: number) => void
+  /** Record — or clear, with `null` — why the platform would not give one. */
+  setAddressFailure: (failure: PushAddressFailure | null) => void
   /** Re-stamp without changing anything else, so a refresh is visible upstream. */
   touch: (stamp: number) => void
   /** Note that a chat is on screen on THIS device, at `stamp` (epoch seconds). */
@@ -137,6 +148,7 @@ export const usePushStore = create<PushState>((set, get) => {
     others: {},
     seen: {},
     loaded: false,
+    addressFailure: null,
 
     async hydrate() {
       if (get().loaded) {
@@ -168,7 +180,11 @@ export const usePushStore = create<PushState>((set, get) => {
       // back with the switch unless the reader has already chosen.
       const types = enabled && Object.values(get().types).every(on => !on) ? { ...DEFAULT_PUSH_TYPES } : get().types
 
-      set({ enabled, types, ...(enabled ? {} : { address: null }) })
+      // The reason goes with the switch either way: turning it off retires the
+      // question, and turning it on is a fresh attempt whose answer is not in
+      // yet. A stale reason under a switch that has just moved is a lie about
+      // what was tried.
+      set({ enabled, types, addressFailure: null, ...(enabled ? {} : { address: null }) })
       save()
     },
 
@@ -183,7 +199,11 @@ export const usePushStore = create<PushState>((set, get) => {
     },
 
     setAddress(address, stamp) {
-      set({ address, updatedAt: address ? stamp : 0 })
+      set({ address, updatedAt: address ? stamp : 0, ...(address ? { addressFailure: null } : {}) })
+    },
+
+    setAddressFailure(failure) {
+      set({ addressFailure: failure })
     },
 
     touch(stamp) {
@@ -217,7 +237,7 @@ export const usePushStore = create<PushState>((set, get) => {
     retire() {
       // The id survives. A sign-out is not a new installation, and keeping it
       // means signing back in re-registers the same row rather than adding one.
-      set({ enabled: false, address: null, updatedAt: 0, others: {}, seen: {} })
+      set({ enabled: false, address: null, updatedAt: 0, others: {}, seen: {}, addressFailure: null })
       save()
     },
 
@@ -230,7 +250,8 @@ export const usePushStore = create<PushState>((set, get) => {
         updatedAt: 0,
         others: {},
         seen: {},
-        loaded: false
+        loaded: false,
+        addressFailure: null
       })
     }
   }
