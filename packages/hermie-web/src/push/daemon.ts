@@ -18,7 +18,7 @@ import { type PushCredentials, resolveCredentials } from './credentials'
 import { GatewayLink, type LinkEvent, type LinkServerRequest } from './link'
 import { createSender, pollExpoReceipts, RECEIPT_POLL_INTERVAL_MS } from './senders'
 import { loadPushState, prunePushState, type PushState, savePushState } from './state'
-import { AVAILABILITY_TTL_SECONDS, PushWatcher, type PushSender } from './watcher'
+import { AVAILABILITY_TTL_SECONDS, PushWatcher, type PushSender, type WatcherOptions } from './watcher'
 import { generateVapidKeys, vapidKeysUsable } from './web-push'
 
 export interface PushDaemonOptions {
@@ -49,6 +49,11 @@ export interface PushDaemonOptions {
   watch?: boolean
   /** Off in the tests, which have no use for a quarter-hourly timer. */
   pollReceipts?: boolean
+  /** The watcher's clocks, so a test does not have to wait out the real ones. */
+  tuning?: Pick<
+    WatcherOptions,
+    'attachedWindowSeconds' | 'availabilityTtlSeconds' | 'openingGraceMs' | 'rateLimit' | 'registrationTtlMs'
+  >
 }
 
 export interface PushDaemon {
@@ -146,7 +151,8 @@ export async function startPushDaemon(options: PushDaemonOptions): Promise<PushD
         endpoint: PUSH_PUBLIC_KEY_PATH,
         vapidPublicKey: vapid.keys.publicKey,
         version: options.version ?? '0.0.0'
-      })
+      }),
+      ...(options.tuning ?? {})
     })
   }
 

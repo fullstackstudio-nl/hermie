@@ -119,6 +119,16 @@ export class PushWatcher {
     return this.roster.bots
   }
 
+  /**
+   * The sessions actually resumed, which is what subscribes this connection to
+   * their events. Distinct from `watched` on purpose: the roster is read before
+   * the resumes are made, so a caller that has to know the daemon is LISTENING
+   * — a test, a log line — has to ask about this and not about that.
+   */
+  get resumed(): string[] {
+    return [...new Set([...this.byId.values()].map(session => session.sessionId))]
+  }
+
   /** What the last roster read said about registrations. */
   get registrations(): PushRegistration[] {
     return this.roster.push.registrations
