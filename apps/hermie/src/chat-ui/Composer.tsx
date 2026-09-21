@@ -792,6 +792,9 @@ export function Composer({
       {menuVisible ? (
         <Pressable
           accessibilityElementsHidden
+          // `aria-hidden` is the web's spelling of the two props around it; react-native-web
+          // honours neither of those. See `ui/Icon.tsx`.
+          aria-hidden
           importantForAccessibility="no-hide-descendants"
           onPress={() => setMenuOpen(false)}
           style={{ bottom: rowHeight, height: MENU_BACKDROP_REACH, left: 0, position: 'absolute', right: 0 }}

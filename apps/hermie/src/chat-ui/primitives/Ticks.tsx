@@ -32,6 +32,9 @@ export function Ticks({ receipt, color, size = 14 }: TicksProps) {
       // The ticks repeat what the label beside them already says, so they carry
       // no accessibility value of their own.
       accessibilityElementsHidden
+      // `aria-hidden` is the web's spelling of the two props around it; react-native-web
+      // honours neither of those. See `ui/Icon.tsx`.
+      aria-hidden
       height={size}
       importantForAccessibility="no-hide-descendants"
       viewBox={`0 0 ${double ? 13 : 10} 10`}

@@ -90,6 +90,9 @@ export function AgentsBar({ count, startedAtMs, elapsedSeconds, onPress, testID 
       >
         <View
           accessibilityElementsHidden
+          // `aria-hidden` is the web's spelling of the two props around it; react-native-web
+          // honours neither of those. See `ui/Icon.tsx`.
+          aria-hidden
           importantForAccessibility="no-hide-descendants"
           style={{ flexDirection: 'row', gap: 3 }}
         >

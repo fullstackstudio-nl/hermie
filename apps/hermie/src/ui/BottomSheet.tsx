@@ -367,6 +367,9 @@ export function BottomSheet({
   const grip = (
     <View
       accessibilityElementsHidden
+      // `aria-hidden` is the web's spelling of the two props around it; react-native-web
+      // honours neither of those. See `ui/Icon.tsx`.
+      aria-hidden
       importantForAccessibility="no-hide-descendants"
       style={{ alignItems: 'center', paddingBottom: theme.space.xs, paddingTop: theme.space.md }}
       testID="sheet-grip"

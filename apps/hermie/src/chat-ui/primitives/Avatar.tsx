@@ -69,6 +69,9 @@ export function Avatar({ name, size = 40, style, uri }: AvatarProps) {
     return (
       <Image
         accessibilityElementsHidden
+        // `aria-hidden` is the web's spelling of the two props around it; react-native-web
+        // honours neither of those. See `ui/Icon.tsx`.
+        aria-hidden
         importantForAccessibility="no-hide-descendants"
         onError={() => setBroken(true)}
         source={{ uri }}
@@ -83,6 +86,9 @@ export function Avatar({ name, size = 40, style, uri }: AvatarProps) {
   return (
     <View
       accessibilityElementsHidden
+      // `aria-hidden` is the web's spelling of the two props around it; react-native-web
+      // honours neither of those. See `ui/Icon.tsx`.
+      aria-hidden
       importantForAccessibility="no-hide-descendants"
       style={[
         {

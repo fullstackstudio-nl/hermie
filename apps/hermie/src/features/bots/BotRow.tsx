@@ -331,6 +331,9 @@ function UnreadBadge({ accent, count }: { accent: string; count: number }) {
     return (
       <View
         accessibilityElementsHidden
+        // `aria-hidden` is the web's spelling of the two props around it; react-native-web
+        // honours neither of those. See `ui/Icon.tsx`.
+        aria-hidden
         importantForAccessibility="no-hide-descendants"
         style={{ backgroundColor: accent, borderRadius: 5, height: 10, width: 10 }}
         testID="bot-unread"
@@ -341,6 +344,9 @@ function UnreadBadge({ accent, count }: { accent: string; count: number }) {
   return (
     <View
       accessibilityElementsHidden
+      // `aria-hidden` is the web's spelling of the two props around it; react-native-web
+      // honours neither of those. See `ui/Icon.tsx`.
+      aria-hidden
       importantForAccessibility="no-hide-descendants"
       style={{
         alignItems: 'center',

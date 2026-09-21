@@ -198,6 +198,9 @@ function StepRail({ current, total }: { current: number; total: number }) {
   return (
     <View
       accessibilityElementsHidden
+      // `aria-hidden` is the web's spelling of the two props around it; react-native-web
+      // honours neither of those. See `ui/Icon.tsx`.
+      aria-hidden
       importantForAccessibility="no-hide-descendants"
       pointerEvents="none"
       style={{ flexDirection: 'row', gap: theme.space.xs }}

@@ -94,6 +94,13 @@ export function Icon({ color, name, size = ICON_SIZE.control, slot, strokeWidth,
   return (
     <View
       accessibilityElementsHidden
+      // The third spelling, and the only one the web hears. `accessibilityElementsHidden`
+      // is iOS and `importantForAccessibility` is Android; react-native-web honours
+      // neither, so every mark in the app was a node in the accessibility tree —
+      // which is what made a tab whose label is its own text (`SidebarFooter`, the
+      // archived row, the DM rollup, `DisclosureRow`) read as unnamed to one screen
+      // reader while Chrome's own tree computed a name for it anyway.
+      aria-hidden
       importantForAccessibility="no-hide-descendants"
       style={[{ alignItems: 'center', height: box, justifyContent: 'center', width: box }, style]}
       // The slot and the mark are two different numbers, and a test that checks a

@@ -197,6 +197,9 @@ function Tail({ side, color }: { side: 'own' | 'other'; color: string }) {
       // Decorative: the shape is the bubble's silhouette, not an object of its
       // own, so it is hidden from assistive technology entirely.
       accessibilityElementsHidden
+      // `aria-hidden` is the web's spelling of the two props around it; react-native-web
+      // honours neither of those. See `ui/Icon.tsx`.
+      aria-hidden
       importantForAccessibility="no-hide-descendants"
       pointerEvents="none"
       style={{
