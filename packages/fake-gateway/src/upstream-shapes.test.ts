@@ -1281,3 +1281,100 @@ describe('profiles.configure description — tui_gateway/contracts::ProfilesConf
     expect(await descriptionOf('researcher')).toBe('Finds the sources.')
   })
 })
+
+describe('session.usage over the socket — server.py::_get_usage + agent/context_breakdown.py', () => {
+  let live: FakeGateway
+  let socket: WebSocket
+  let nextId = 0
+
+  const pending = new Map<number, (value: Record<string, unknown>) => void>()
+
+  const call = (method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> => {
+    const id = ++nextId
+
+    return new Promise(resolve => {
+      pending.set(id, resolve)
+      socket.send(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`)
+    })
+  }
+
+  beforeAll(async () => {
+    live = await startFakeGateway({ port: 0 })
+    socket = new WebSocket(live.wsUrl, ['hermes-gateway-v1'])
+
+    socket.on('message', data => {
+      for (const line of String(data).split('\n')) {
+        if (!line.trim()) {
+          continue
+        }
+
+        const frame = JSON.parse(line) as Record<string, unknown>
+        const id = typeof frame.id === 'number' ? frame.id : null
+        const waiter = id === null ? undefined : pending.get(id)
+
+        if (waiter && id !== null) {
+          pending.delete(id)
+          // The RESULT where there is one and the whole frame otherwise, so the
+          // refusal case below can read `error`.
+          waiter((frame.result ?? frame) as Record<string, unknown>)
+        }
+      }
+    })
+
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', () => resolve())
+      socket.once('error', reject)
+    })
+  })
+
+  afterAll(async () => {
+    socket.close()
+    await live.close()
+  })
+
+  const storedId = async (): Promise<string> => {
+    const profiles = (await call('profiles.list', { include_sessions: true })).profiles as Record<string, unknown>[]
+    const researcher = profiles.find(row => row.name === 'researcher')
+
+    return String((researcher?.canonical_session as Record<string, unknown> | undefined)?.id ?? '')
+  }
+
+  /**
+   * The two fields the app will not draw a ring without.
+   *
+   * `SessionUsageResult` in the contract marks every field optional, which is
+   * true of the wire and useless as a guarantee — so this pins that the fake
+   * sends the PAIR rather than only the token counts. A fake that answered
+   * `{total}` alone would make every test of that surface a test of the empty
+   * case, and the surface would look covered.
+   */
+  it('reports the window beside the token counts', async () => {
+    const stored = await storedId()
+
+    expect(stored).not.toBe('')
+
+    const usage = await call('session.usage', { session_id: stored })
+
+    expect(typeof usage.context_used).toBe('number')
+    expect(typeof usage.context_max).toBe('number')
+    expect(usage.context_max as number).toBeGreaterThan(usage.context_used as number)
+    expect(typeof usage.total).toBe('number')
+  })
+
+  /** A resume carries the same reading inside `info`, which is the cold-open path. */
+  it('puts the same reading on the resume snapshot', async () => {
+    const stored = await storedId()
+    const resumed = await call('session.resume', { session_id: stored })
+    const info = resumed.info as Record<string, unknown>
+    const usage = info.usage as Record<string, unknown>
+
+    expect(typeof usage?.context_max).toBe('number')
+    expect(usage?.context_used).toBe((await call('session.usage', { session_id: stored })).context_used)
+  })
+
+  it('refuses a session it does not have, rather than answering zero', async () => {
+    const frame = await call('session.usage', { session_id: 'no-such-session' })
+
+    expect(frame.error).toBeTruthy()
+  })
+})

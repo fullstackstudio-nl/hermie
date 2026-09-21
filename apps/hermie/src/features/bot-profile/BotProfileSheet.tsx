@@ -44,13 +44,15 @@
  * accepting it here settles it there.
  */
 import { CONTEXT_LIMITS } from '@hermie/gateway-client/context'
-import { prettyModelName } from '@hermie/transcript'
+import { prettyModelName, type ContextUsage } from '@hermie/transcript'
 import { useCallback, useEffect, useState } from 'react'
 import { View } from 'react-native'
 
 import type { ChatGateway } from '../../gateway/link'
 import { strings } from '../../i18n/strings'
+import { contextSummary } from '../../chat-ui/ContextMeter'
 import { Avatar } from '../../chat-ui/primitives/Avatar'
+import { chatStrings } from '../../chat-ui/strings'
 import { useChatLayoutStore } from '../../store/chat-layout'
 import { effectiveDisplayName, needsSharingNotice, useDeviceContextStore } from '../../store/device-context'
 import type { Bot } from '../../store/bots'
@@ -76,6 +78,15 @@ export interface BotProfileSheetProps {
   gateway: ChatGateway | null
   /** What the gateway reported about itself when it was configured. */
   gatewayVersion?: string
+  /**
+   * How full this bot's canonical session is, or nothing.
+   *
+   * Read-only here, like everything else in the About group: the profile sheet
+   * describes the bot, and a context window is a fact about the conversation
+   * rather than a setting on it. Absent means the gateway did not report a
+   * window size and the row is not drawn — see `contextUsageOf`.
+   */
+  contextUsage?: ContextUsage | null
   /** A save landed: the roster should re-read so the new values reach every surface. */
   onSaved?: () => void
   testID?: string
@@ -89,6 +100,7 @@ export function BotProfileSheet({
   avatarUri,
   gateway,
   gatewayVersion,
+  contextUsage,
   onSaved,
   testID = 'bot-profile'
 }: BotProfileSheetProps) {
@@ -311,6 +323,14 @@ export function BotProfileSheet({
           <InsetValueRow label={text.provider} value={bot.provider || text.unknown} />
           <InsetValueRow label={text.session} mono value={bot.canonical?.id ?? text.unknown} />
           <InsetValueRow label={text.gatewayVersion} value={gatewayVersion || text.unknown} />
+          {/*
+            The same words the options sheet's ring says, without the ring: this
+            group is a column of label-and-value rows and one drawing in the
+            middle of it would read as a control rather than as a fact.
+          */}
+          {contextUsage ? (
+            <InsetValueRow label={chatStrings.context.label} mono={false} value={contextSummary(contextUsage)} />
+          ) : null}
         </InsetGroup>
 
         {error ? (

@@ -702,6 +702,15 @@ const TICKET_TTL_SECONDS = 30
 const FRAMES_PER_CHILD = 6
 
 /**
+ * The context window every fake session reports.
+ *
+ * A round number on purpose: the app derives the percentage it draws by
+ * dividing, so a window a reader can divide in their head is a window they can
+ * check the ring against.
+ */
+const FAKE_CONTEXT_MAX = 200_000
+
+/**
  * A reply long enough to fold, cut in half by a tool call.
  *
  * The transcript's own bug — the column jumping while a reply streams — needs a
@@ -3224,6 +3233,24 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
         return { count: session.messages.length, messages: session.messages }
       }
 
+      /*
+        `tui_gateway/server.py::_get_usage` + `agent/context_breakdown.py`.
+
+        Derived from the message count rather than stored, so it is the same
+        answer for the same session on every run and a test can assert on it.
+        The window is a round 200k, which is what makes the percentage the app
+        draws readable at a glance rather than a number nobody can check.
+      */
+      case 'session.usage': {
+        const session = resolveSession(String(params.session_id ?? ''))
+
+        if (!session) {
+          throw new Error(`Unknown session: ${String(params.session_id)}`)
+        }
+
+        return sessionUsage(session)
+      }
+
       case 'session.events.since': {
         const sessionId = String(params.session_id ?? '')
         const lastSeen = typeof params.last_seen === 'number' ? params.last_seen : 0
@@ -3844,6 +3871,36 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     }
   }
 
+  /**
+   * The gateway's context-window accounting for one session.
+   *
+   * Upstream reports `context_used` / `context_max` beside the token counts, and
+   * the app draws the ring from exactly those two — see `context-usage.ts`,
+   * which refuses to draw anything without the second. So the fake has to carry
+   * both, or every test of that surface would be a test of the empty case.
+   */
+  function sessionUsage(session: FakeSession): Record<string, unknown> {
+    const config = state.sessionConfig.get(session.storedId) ?? {}
+    const turns = session.messages.length
+    // A prompt and its reply are a few hundred tokens and the system prompt is
+    // a fixed cost, which is close enough to a real transcript's shape for the
+    // ring to move the way a reader would expect as a conversation grows.
+    const contextUsed = 1_800 + turns * 420
+
+    return {
+      model: config.model ?? 'example-provider/example-model',
+      input: turns * 260,
+      output: turns * 160,
+      total: turns * 420,
+      calls: turns,
+      context_used: contextUsed,
+      context_max: FAKE_CONTEXT_MAX,
+      context_percent: Math.round((contextUsed / FAKE_CONTEXT_MAX) * 1000) / 10,
+      context_source: 'model catalog',
+      context_estimated: false
+    }
+  }
+
   function sessionInfo(session: FakeSession): Record<string, unknown> {
     const config = state.sessionConfig.get(session.storedId) ?? {}
 
@@ -3876,6 +3933,10 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       cwd: `/root/projects/${session.profile}`,
       desktop_contract: 7,
       version,
+      // A resume answers with the usage inside `info`, which is where the app
+      // reads it from on a cold open — before any `session.usage` tick has been
+      // published and before the reader has sent anything.
+      usage: sessionUsage(session),
       running: state.runningSessions.has(session.storedId)
     }
   }

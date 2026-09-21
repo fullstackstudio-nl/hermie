@@ -360,6 +360,24 @@ export const chatStrings = {
     previous: 'Back',
     multiSelectHint: 'Choose as many as apply'
   },
+  /**
+   * The context-window reading, wherever it is shown.
+   *
+   * Its own group rather than a corner of `options`, because two surfaces draw
+   * it — the chat's options sheet and the bot profile's read-only block — and a
+   * string that lives under one of them would read as belonging to that one.
+   */
+  context: {
+    /** The row's label in a sheet. */
+    label: 'Context used',
+    /** Under the label: what the number is actually measuring. */
+    hint: 'How much of this session\u2019s context window the conversation fills.',
+    percent: (percent: number) => `${percent}%`,
+    counts: (used: string, limit: string) => `${used} / ${limit}`,
+    /** Appended when the gateway flagged its own count as approximate. */
+    estimated: '(estimated)'
+  },
+
   options: {
     eyebrow: 'This chat',
     colourHint: 'Tints this chat\u2019s avatar ring, its row in the list and the messages you send.',

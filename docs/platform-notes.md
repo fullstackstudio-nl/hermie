@@ -6472,3 +6472,37 @@ no equivalent problem. A label is characters in a `Text`.
   chosen from the same character-advance estimate the tables use and have not been photographed on a
   phone. What that can be wrong about is spacing, not stability: the numbers are wrong in the same
   direction on every frame.
+
+### The context ring has no table of model context sizes behind it
+
+The brief for this round said `CONTEXT_LIMITS` in `@hermie/gateway-client/context` "already knows
+model context sizes". It does not: that constant is the per-field character caps for the `ui_meta`
+context section the gateway plugin renders into a system prompt — `displayName: 80`, `about: 600` —
+and it has nothing to do with a model's window. Nothing else in the tree knows a window size either.
+
+That turned out to be the right shape rather than a gap to fill. The only two numbers a ring can
+honestly be drawn from are `usage.context_used` and `usage.context_max`, both of which the gateway
+already sends, and **without the second there is no ring**. A local table keyed off `usage.model`
+would be a promise about somebody else's product: it is right until a provider ships a longer window
+or a gateway reserves part of one, and when it is wrong it is wrong in the direction that tells a
+reader they have room they do not have. `contextUsageOf` answers `null` and every surface hides.
+
+`usage.context_percent` is ignored for a smaller version of the same reason. The contract does not
+say whether it is a fraction or a hundredth, and the two cannot be told apart for any session under
+one per cent — which is every session for its first few turns. The percentage is derived from the
+same division that draws the arc, so the label and the ring cannot disagree.
+
+The capability gate is the gateway's own refusal rather than a version test: one `session.usage`
+call per connection, and a failure turns it off for the life of that connection. It is recorded in
+the RPC failure ring, because a swallowed error nothing anywhere admits to is the defect
+`rpc-failures.ts` was written for.
+
+### What is not covered
+
+- **Not seen against a real gateway.** Every case is the fake, which now answers `session.usage` and
+  carries the same reading inside `session.resume`'s `info`. Whether a real `hermes serve` fills
+  `context_max` for every provider, or only for the ones whose catalogue it has, decides how often
+  the row appears — and if it never does, the behaviour is the absent row rather than anything worse.
+- **The row does not animate.** A `session.usage` tick lands several times a second during a turn and
+  the ring simply redraws; nothing was measured about whether that reads as motion or as noise on a
+  sheet the reader has open while a turn runs.

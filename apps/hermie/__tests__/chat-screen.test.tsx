@@ -92,6 +92,7 @@ function makeController() {
     runSlash: jest.fn(async () => undefined),
     setOption: jest.fn(async () => ({})),
     refreshOptions: jest.fn(async () => null),
+    refreshUsage: jest.fn(async () => null),
     modelOptions: jest.fn(async () => [{ id: 'example-provider/other', label: 'other', provider: 'Example' }])
   }
 }

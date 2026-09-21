@@ -13,8 +13,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Pressable, View } from 'react-native'
 
-import { prettyModelName } from '@hermie/transcript'
+import { prettyModelName, type ContextUsage } from '@hermie/transcript'
 
+import { ContextMeter } from '../../chat-ui/ContextMeter'
 import { chatStrings } from '../../chat-ui/strings'
 import type { PickerOption, Verbosity } from '../../chat-ui/types'
 import { formatMuteUntil, MUTE_DURATIONS, MUTE_FOREVER, muteUntil, type MuteDuration } from '../../store/mute'
@@ -73,6 +74,16 @@ export interface ChatOptionsSheetProps {
   mutedUntil: number | null
   /** `null` unmutes; a number is the second the silence lapses, `0` for never. */
   onChangeMute: (until: number | null) => void
+
+  /**
+   * How full this session's context window is, or nothing.
+   *
+   * Absent means the gateway did not report a window size, and the row is then
+   * not drawn at all — not drawn empty, and never drawn as an error. A gateway
+   * without `session.usage` is a gateway with one fewer row in this sheet, which
+   * is the whole of the capability gate.
+   */
+  contextUsage?: ContextUsage | null
 
   verbosity: Verbosity
   onChangeVerbosity: (value: Verbosity) => void
@@ -218,6 +229,42 @@ function PickerPane({
         ))}
       </InsetGroup>
     </Page>
+  )
+}
+
+/**
+ * The context-window row.
+ *
+ * Not a `DisclosureRow` and not pressable: there is nowhere for it to go. A row
+ * that looks like the four above it and does nothing when tapped is worse than a
+ * row that plainly does not invite one, so it carries no chevron and no press
+ * state.
+ */
+function ContextRow({ usage }: { usage: ContextUsage }) {
+  const theme = useTheme()
+
+  return (
+    <View
+      style={{
+        alignItems: 'center',
+        flexDirection: 'row',
+        gap: theme.space.sm,
+        minHeight: 44,
+        paddingHorizontal: theme.space.lg,
+        paddingVertical: theme.space.sm
+      }}
+      testID="option-context"
+    >
+      <View style={{ flex: 1 }}>
+        <Text>{chatStrings.context.label}</Text>
+        {usage.estimated ? (
+          <Text color="textMuted" variant="meta">
+            {chatStrings.context.estimated}
+          </Text>
+        ) : null}
+      </View>
+      <ContextMeter detail usage={usage} />
+    </View>
   )
 }
 
@@ -444,6 +491,13 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
               testID="option-mute"
               value={muteLabel}
             />
+            {/*
+              Read-only, and the only row here that is. Everything else in this
+              group is a decision the reader makes; this is a fact they check one
+              of those decisions against — whether there is room for another long
+              turn before the session has to compact.
+            */}
+            {props.contextUsage ? <ContextRow usage={props.contextUsage} /> : null}
           </InsetGroup>
 
           {/*

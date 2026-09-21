@@ -1397,8 +1397,29 @@ function Conversation({
   }, [])
 
   const openAgents = useCallback(() => setSheet('agents'), [])
-  const openOptions = useCallback(() => setSheet('options'), [])
-  const openProfile = useCallback(() => setSheet('profile'), [])
+  /*
+    Opening either sheet asks the gateway for the context reading once.
+
+    Nearly always a no-op: the reducer already follows the live `session.usage`
+    ticks and the usage on `message.complete`, so a chat that has run a turn
+    since it was opened is current. It covers the chat that was resumed and not
+    yet spoken to, whose `session.resume` answered without `info.usage` — which
+    is the first thing a reader sees after a cold start, and the one moment the
+    row would otherwise be missing for no reason the reader can act on.
+
+    Fire and forget, deliberately: the sheet opens now. A gateway without the
+    method answers nothing and the row stays absent, which is what
+    `refreshUsage` promises.
+  */
+  const refreshUsage = chat.refreshUsage
+  const openOptions = useCallback(() => {
+    void refreshUsage()
+    setSheet('options')
+  }, [refreshUsage])
+  const openProfile = useCallback(() => {
+    void refreshUsage()
+    setSheet('profile')
+  }, [refreshUsage])
 
   /*
     The profile sheet's own connection.
@@ -1727,6 +1748,7 @@ function Conversation({
               profile: {
                 avatarUri: avatar,
                 bot: byName[botName],
+                contextUsage: chat.contextUsage,
                 gateway: profileGateway,
                 gatewayVersion: config?.version ?? '',
                 // A saved description or picture only reaches the header, the
@@ -1746,6 +1768,7 @@ function Conversation({
           accent,
           botName: display,
           confirmMessage: pendingModel?.message ?? '',
+          contextUsage: chat.contextUsage,
           fast: chat.info?.fast === true,
           model: chat.info?.model ?? '',
           modelOptions,

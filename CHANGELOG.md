@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **How full the context window is, in the chat.** The options sheet gains a read-only row with a
+  ring, the percentage and both counts — `82% · 164k / 200k` — and the bot profile's read-only block
+  says the same thing in words. It follows the live `session.usage` ticks and the usage on
+  `message.complete`, so it is current after every turn without anything polling, and opening either
+  sheet asks the gateway once for the chat that resumed and has not been spoken to yet.
+  **A gateway that does not report a window size gets one fewer row and nothing else** — no error, no
+  ring at zero, and one refused call per connection rather than one per conversation. There is
+  deliberately no table of model context sizes behind the figure: a table like that is a promise
+  about somebody else's product, and when it goes stale it tells a reader they have room they do not
+  have.
+
 - **Diagrams and mathematics are drawn, not printed.** A ```` ```mermaid ```` fence is a picture in
   the bubble and `$…$` / `$$…$$` is set as mathematics, on every platform, with no web view and no
   downloaded fonts — which is the whole of the decision rather than an implementation note. A

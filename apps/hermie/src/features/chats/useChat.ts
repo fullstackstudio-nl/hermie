@@ -17,6 +17,8 @@
  * race, and which covers every reconnect for free.
  */
 import {
+  chatContextUsage,
+  type ContextUsage,
   isBusy,
   itemsVersion,
   hasOpenRequest,
@@ -97,6 +99,24 @@ export interface UseChatResult {
   deleteQueued: (id: string) => void
   /** The gateway's view of this session: yolo, fast, reasoning effort, model. */
   info: SessionLiveInfo | undefined
+  /**
+   * How full this session's context window is, or `null`.
+   *
+   * `null` is the capability gate and the whole of it: a gateway that does not
+   * report a window size has nothing to draw, and the surfaces hide the control
+   * rather than showing a ring at zero or an error. See `context-usage.ts` for
+   * why there is no table of model context sizes behind this.
+   */
+  contextUsage: ContextUsage | null
+  /**
+   * Ask the gateway for the reading again.
+   *
+   * Rarely needed — the reducer already follows the live ticks and the usage on
+   * `message.complete` — and it exists for the one case those do not cover: a
+   * chat resumed and not yet spoken to. Resolves either way; a gateway without
+   * the method is not an error.
+   */
+  refreshUsage: () => Promise<void>
   /**
    * A failure that happened WHILE connected — the only kind worth a banner with
    * a retry on it. A chat that has not been opened because the socket is not up
@@ -311,6 +331,10 @@ export function useChat(botName: string): UseChatResult {
     ),
     deleteQueued: useCallback((id: string) => controller?.deleteQueued(botName, id), [botName, controller]),
     info: chat?.info,
+    contextUsage: chatContextUsage(chat),
+    refreshUsage: useCallback(async () => {
+      await controller?.refreshUsage(botName)
+    }, [botName, controller]),
     // A stale message from a previous connection must not outlive it: the retry
     // it offers is the reconnect that already happened.
     error: ready ? error : null,
