@@ -93,6 +93,29 @@ describe('resuming the wizard after a sign-out', () => {
 })
 
 describe('a gateway that is not gated at all', () => {
+  it('is told what the actual limit is, rather than shown a dead Continue', async () => {
+    probe.mockResolvedValue({
+      version: '0.21.3-fake',
+      authRequired: false,
+      authFlows: [],
+      providers: [],
+      supportsNativePkce: false
+    })
+
+    renderScreen(
+      <SignInStep
+        draft={draftFromConfig({ baseUrl: 'http://127.0.0.1:9220', authMode: 'session_token' })}
+        update={jest.fn()}
+      />
+    )
+
+    // This build keeps no bearer token — there is no keychain in a browser —
+    // so there is nothing for the step to collect and the wizard cannot go on.
+    // It used to render nothing at all: a Continue that could never be pressed,
+    // with no reason anywhere on the screen.
+    await waitFor(() => expect(screen.getByText(/cannot be used from a browser/)).toBeTruthy())
+  })
+
   it('is not accused of being too old for browser sign-in', async () => {
     // `authModeOf` answers `session_token` here, and the blocked notice tested
     // `!== 'cookie'` — so an ungated gateway was told it requires a sign-in it
@@ -113,7 +136,7 @@ describe('a gateway that is not gated at all', () => {
     )
 
     await waitFor(() => expect(probe).toHaveBeenCalled())
-    expect(screen.queryByTestId('signin-blocked')).toBeNull()
+    expect(screen.queryByText(/too old for browser sign-in/)).toBeNull()
   })
 
   it('still says so when the gateway is gated and has no cookie flow', async () => {

@@ -139,6 +139,19 @@ export const strings = {
       cookieBlockedTitle: 'This gateway is too old for browser sign-in',
       cookieBlockedBody:
         'It requires a sign-in but does not advertise the cookie flow, which is the only one a browser tab can complete. Update Hermes on the gateway.',
+      /**
+       * Browser build only, and a dead end rather than a fault.
+       *
+       * A session-token gateway is perfectly current and the native apps sign
+       * in to it happily. A browser tab cannot: there is no keychain, and
+       * anything a page can write a page can read — which is why this build
+       * carries no bearer token at all and authenticates with the gateway's own
+       * cookie instead. Until this said so, the wizard simply showed a Continue
+       * that could never be pressed, with nothing on the screen to do.
+       */
+      tokenBlockedTitle: 'This gateway cannot be used from a browser',
+      tokenBlockedBody:
+        'It authenticates with a session token, and a browser tab has nowhere safe to keep one — anything running in the page could read it. Use the Hermie app, or put the gateway behind an identity provider so it can issue a browser session.',
       signOutOfSession: 'Sign out',
 
       webview: {

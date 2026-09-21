@@ -218,6 +218,25 @@ export function SignInStep({ draft, update }: SignInStepProps) {
         </View>
       ) : null}
 
+      {/*
+        The other dead end, and the one that looked like a bug rather than a
+        limit: a gateway that authenticates with a session token. The native
+        apps sign in to it happily; this build keeps no bearer token at all —
+        `platform/secret-store.web.ts` says why at length — so there is nothing
+        for this screen to collect. It used to render nothing, which left a
+        Continue that could never be pressed and no reason on the screen.
+      */}
+      {phase === 'ready' && probe && authModeOf(probe) === 'session_token' ? (
+        <View style={{ gap: theme.space.xs }}>
+          <StatusLine testID="signin-blocked" tone="error">
+            {strings.onboarding.signIn.tokenBlockedTitle}
+          </StatusLine>
+          <Text color="textMuted" variant="preview">
+            {strings.onboarding.signIn.tokenBlockedBody}
+          </Text>
+        </View>
+      ) : null}
+
       {draft.cookieIdentity ? (
         <StatusLine testID="signin-result" tone="ok">
           {strings.onboarding.signIn.signedInAs(draft.cookieIdentity.displayName)}
