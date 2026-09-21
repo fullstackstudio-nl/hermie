@@ -23,7 +23,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { View } from 'react-native'
 
 import { describeProbeError, describeSignInError } from '../../../gateway/errors'
-import { loadHermieWebConfig } from '../../../gateway/web-config'
+import { loadHermieWebConfig, probeFromWebConfig } from '../../../gateway/web-config'
 import { strings } from '../../../i18n/strings'
 import { Button, InsetGroup, InsetRow, SecretField, Text, TextField } from '../../../ui/primitives'
 import { useTheme } from '../../../ui/theme'
@@ -59,8 +59,26 @@ export function SignInStep({ draft, update }: SignInStepProps) {
     void loadHermieWebConfig().then(config => setHost(config?.gatewayHost ?? ''))
   }, [])
 
+  /*
+    The module caches one promise for the whole page, so asking here and in the
+    effect above is one request, not two.
+  */
+
   /**
-   * Probe, then ask who we are — in that order and only once.
+   * Learn what the gateway takes, then ask who we are — in that order and only
+   * once.
+   *
+   * ## Why the gateway is usually not probed at all any more
+   *
+   * Hermie Web has already read `/api/status` and `/api/auth/providers` to
+   * answer `/hermie/config.json`, and it holds the answer for a minute
+   * ([ADR-0024](../../../../../docs/adr/0024-hermie-web-is-a-service-layer.md)).
+   * Asking again from the page would be the same two requests, through the
+   * proxy, for an answer that is already on its way — and it is the request
+   * this screen waits on before it can draw anything, so it is the one worth
+   * not making. `probeFromWebConfig` answers `null` when the server could not
+   * read the gateway or is too old to report it, and then the probe runs
+   * exactly as it did before.
    *
    * The identity check is not skipped when the probe says the gateway is
    * ungated: `authModeOf` answers `session_token` there, and this component is
@@ -92,7 +110,7 @@ export function SignInStep({ draft, update }: SignInStepProps) {
     setPhase('probing')
 
     try {
-      const probe = await probeGateway(baseUrl)
+      const probe = probeFromWebConfig(await loadHermieWebConfig()) ?? (await probeGateway(baseUrl))
       update({ probe })
       setPhase('checking')
 

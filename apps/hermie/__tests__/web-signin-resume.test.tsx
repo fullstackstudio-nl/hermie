@@ -36,11 +36,26 @@ jest.mock('@hermie/gateway-client', () => ({
 // platform — so the whole branch this file is about would render nothing.
 jest.mock('../src/platform/runs-in-browser', () => ({ RUNS_IN_BROWSER: true }))
 
+/*
+  A Hermie Web that answers, and says nothing about the gateway.
+
+  `probeFromWebConfig` is kept REAL — the step asks it first now (ADR-0024), and
+  a stubbed-away one would make this suite prove nothing about the path it is
+  written for. `authKinds: null` is the honest older-server answer, and it is
+  what sends the step to the live probe this file is about.
+*/
 jest.mock('../src/gateway/web-config', () => ({
+  ...jest.requireActual('../src/gateway/web-config'),
   loadHermieWebConfig: jest.fn().mockResolvedValue({
     gatewayHost: '127.0.0.1:9119',
+    gatewayOrigin: 'http://127.0.0.1:9119',
     loginReturn: '/',
-    version: '0.1.0'
+    version: '0.1.0',
+    setupRequired: false,
+    authRequired: null,
+    authKinds: null,
+    providers: null,
+    service: { login: false, push: false, cache: false }
   })
 }))
 

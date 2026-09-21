@@ -22,16 +22,25 @@ import { RUNS_IN_BROWSER } from '../../platform/runs-in-browser'
 export type OnboardingStep = 'welcome' | 'address' | 'signin' | 'test' | 'notifications' | 'done'
 
 /**
- * The wizard's order, which is one step shorter in a browser.
+ * The wizard's order, which in a browser is not really a wizard at all.
  *
  * Hermie Web serves the app and proxies the gateway onto the SAME origin, so
  * the gateway address is not a question — it is `window.location.origin`, and
  * any other answer would be wrong. Asking for it would be asking the user to
- * retype the address bar. The server's own host is shown instead, read from
- * `/hermie/config.json`.
+ * retype the address bar.
+ *
+ * [ADR-0024](../../../../docs/adr/0024-hermie-web-is-a-service-layer.md) takes
+ * the rest of the same reasoning to its end. Hermie Web is a SERVICE: the
+ * operator sets the gateway up once, through `/setup`, and everybody who opens
+ * the page afterwards is a reader, not an installer. A welcome cover explaining
+ * what they are about to configure, and a "step 1 of 4" over a flow whose first
+ * three answers were decided by somebody else, are both addressed to a person
+ * who is not there. So the browser build opens **on the sign-in step** and
+ * keeps only what is genuinely the reader's: signing in, the connection test
+ * that proves it worked, and the notification offer.
  */
 export const ONBOARDING_ORDER: OnboardingStep[] = RUNS_IN_BROWSER
-  ? ['welcome', 'signin', 'test', 'notifications', 'done']
+  ? ['signin', 'test', 'notifications', 'done']
   : ['welcome', 'address', 'signin', 'test', 'notifications', 'done']
 
 /** The steps that carry a "step N of M" counter; Welcome is the cover, not a step. */

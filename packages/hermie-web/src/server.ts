@@ -12,9 +12,12 @@
  * Routing, in the order it is decided:
  *
  *  1. `/healthz`, `/hermie/config.json`, `/hermie/update` — answered here.
- *  2. `/api/*`, `/auth/*`, `/login*`, `/logout*` — proxied to the gateway.
- *  3. Anything that names a file in the static build — served from disk.
- *  4. Everything else — `index.html`, so a deep link into the SPA works.
+ *  2. `/setup` and `/hermie/setup/*` — answered here while no gateway is
+ *     configured, and 404 for ever once one is
+ *     ([ADR-0024](../../../docs/adr/0024-hermie-web-is-a-service-layer.md)).
+ *  3. `/api/*`, `/auth/*`, `/login*`, `/logout*` — proxied to the gateway.
+ *  4. Anything that names a file in the static build — served from disk.
+ *  5. Everything else — `index.html`, so a deep link into the SPA works.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -28,7 +31,21 @@ import {
   type ResolveOptionsInput
 } from './options'
 import { type PushDaemon, startPushDaemon } from './push/daemon'
+import { buildAuthorizeUrl, createPkce, exchangeCode, type Pkce } from './push/login'
+import { sameGateway } from './push/credentials'
+import { loadPushState, savePushState } from './push/state'
 import { proxyHttp, proxyUpgrade } from './proxy'
+import {
+  normalizeGatewayInput,
+  ownOrigin,
+  probeGateway,
+  readSetup,
+  SETUP_CALLBACK_PATH,
+  setupCallbackPage,
+  setupPage,
+  type SetupProbe,
+  writeSetup
+} from './setup'
 import { serveIndex, serveStatic } from './static-files'
 import {
   applyUpdate,
@@ -56,6 +73,8 @@ export interface StartOptions extends ResolveOptionsInput {
   restart?: () => void
   /** Injected by the tests so `--push` never dials a real gateway. */
   socketFactory?: (url: string, protocols?: string[]) => WebSocket
+  /** Injected by the tests so a probe and a code exchange can be watched. */
+  fetchImpl?: typeof fetch
 }
 
 function json(response: ServerResponse, status: number, body: unknown): void {
@@ -69,11 +88,81 @@ function json(response: ServerResponse, status: number, body: unknown): void {
   response.end(payload)
 }
 
+function html(response: ServerResponse, status: number, body: string): void {
+  response.writeHead(status, {
+    'content-type': 'text/html; charset=utf-8',
+    'content-length': String(Buffer.byteLength(body)),
+    'cache-control': 'no-store'
+  })
+  response.end(body)
+}
+
+/** At most 64 KiB of JSON off a request body; more than that is not a setup form. */
+const MAX_BODY_BYTES = 64 * 1024
+
+async function readJsonBody(request: IncomingMessage): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = []
+  let size = 0
+
+  for await (const chunk of request) {
+    const buffer = chunk as Buffer
+    size += buffer.length
+
+    if (size > MAX_BODY_BYTES) {
+      throw new Error('the request body is too large')
+    }
+
+    chunks.push(buffer)
+  }
+
+  if (!chunks.length) {
+    return {}
+  }
+
+  const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown
+
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {}
+}
+
+/**
+ * How long the gateway's public surface is held before it is read again.
+ *
+ * The app asks for it on every load, and it changes when somebody restarts the
+ * gateway with another provider — which is minutes apart at worst, never
+ * seconds. A minute keeps a tab refresh free and still notices a change while
+ * the operator is still looking at the terminal they made it in.
+ */
+const PROBE_TTL_MS = 60_000
+
 export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWebServer> {
-  const options = resolveOptions(input)
+  const first = resolveOptions(input)
+  /*
+    A gateway the operator SAVED is a gateway the operator chose, so it is read
+    before anything else and makes this a configured start. It is only consulted
+    when no flag and no environment variable already answered: a `--gateway` on
+    the command line beats a file every time, or an operator could not override
+    their own deployment without deleting state.
+  */
+  const saved = first.gatewayConfigured ? null : await readSetup(first.stateDir)
+  const options = saved
+    ? resolveOptions({
+        ...input,
+        gatewayUrl: saved.gatewayUrl,
+        gatewayConfigured: true,
+        ...(saved.publicUrl ? { publicUrl: saved.publicUrl } : {})
+      })
+    : first
+  const fetchImpl = input.fetchImpl ?? fetch
   const releases = input.releaseCache ?? new ReleaseCache()
   const shape = detectInstallShape({ selfUpdate: options.selfUpdate, installRoot: options.installRoot })
+  // Mutable, and mutated in exactly one place: the single unconfigured →
+  // configured transition in `handleSetup`. Nothing else in this process can
+  // move it, and once moved there is no route back.
   const target = { gatewayUrl: options.gatewayUrl, publicUrl: options.publicUrl }
+  let configured = options.gatewayConfigured
+  /** The operator's in-flight service sign-in, minted by `/hermie/setup/login`. */
+  let pendingLogin: (Pkce & { gatewayUrl: string; redirectUri: string }) | null = null
+  let probeCache: { at: number; probe: SetupProbe } | null = null
   let updating = false
   // Assigned once the listener is up; the handler reads it, so it is declared
   // here rather than beside the `await` that fills it.
@@ -108,17 +197,38 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
     }
 
     if (url.pathname === '/hermie/config.json') {
-      json(response, 200, {
-        gatewayHost: new URL(options.publicUrl).host,
-        loginReturn: options.loginReturn,
-        version: options.version
-      })
+      await handleConfig(response)
 
       return
     }
 
     if (url.pathname === '/hermie/update') {
       await handleUpdate(request, response, method, url)
+
+      return
+    }
+
+    if (url.pathname === '/setup' || url.pathname.startsWith('/hermie/setup/')) {
+      await handleSetup(request, response, method, url)
+
+      return
+    }
+
+    /*
+      Nothing to proxy TO yet.
+
+      Without this the default gateway — the port `hermes serve` usually takes —
+      would be dialled by an install that has never been told about a gateway at
+      all, and the browser would read the connection failure as "your gateway is
+      down" rather than as "nobody has set this up". The status code is the one
+      the app already treats as "the gateway is not answering", and the body
+      names the page that fixes it.
+    */
+    if (!configured && isGatewayPath(url.pathname)) {
+      json(response, 503, {
+        error: 'setup_required',
+        detail: 'This Hermie Web has no gateway yet. Open /setup.'
+      })
 
       return
     }
@@ -153,6 +263,15 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
       return
     }
 
+    // The app cannot render anything useful against a gateway that does not
+    // exist, so the root is the setup page until there is one.
+    if (!configured && url.pathname === '/') {
+      response.writeHead(302, { location: '/setup', 'cache-control': 'no-store' })
+      response.end()
+
+      return
+    }
+
     if (await serveStatic({ root: options.staticDir, pathname: url.pathname, method, response })) {
       return
     }
@@ -165,6 +284,261 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
       error: 'no_web_build',
       detail: `There is no web build at ${options.staticDir}. Run \`npm run web:build\`, or pass --static.`
     })
+  }
+
+  /**
+   * What the gateway's public surface says today, at most once a minute.
+   *
+   * A failure is cached as "nothing known" rather than retried on every load:
+   * the app falls back to probing the gateway itself, which is what the browser
+   * build did before this endpoint existed, so a gateway that is briefly down
+   * costs a slower sign-in screen and never a stuck one.
+   */
+  async function gatewayProbe(): Promise<SetupProbe | null> {
+    if (!configured) {
+      return null
+    }
+
+    if (probeCache && Date.now() - probeCache.at < PROBE_TTL_MS) {
+      return probeCache.probe
+    }
+
+    try {
+      const probe = await probeGateway(target.gatewayUrl, fetchImpl)
+      probeCache = { at: Date.now(), probe }
+
+      return probe
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * The bootstrap the browser build reads before it renders anything
+   * (ADR-0024): where the gateway is, what it takes to sign in to it, what this
+   * service is running, and which Hermie Web this is.
+   *
+   * Everything here is either public or about this process. Nothing in it
+   * depends on who is asking, which is why it is answered without a session —
+   * the sign-in screen has to be able to draw itself before there is one.
+   */
+  async function handleConfig(response: ServerResponse): Promise<void> {
+    const probe = await gatewayProbe()
+
+    json(response, 200, {
+      gatewayHost: new URL(target.publicUrl).host,
+      gatewayOrigin: new URL(target.publicUrl).origin,
+      loginReturn: options.loginReturn,
+      version: options.version,
+      setupRequired: !configured,
+      // `null` and `[]` are different answers and the app reads them as such:
+      // an empty list is a gateway that asks for nothing, `null` is a gateway
+      // we could not read, and only the second means "probe it yourself".
+      authRequired: probe ? probe.authRequired : null,
+      authKinds: probe ? probe.authFlows : null,
+      providers: probe ? probe.providers : null,
+      service: {
+        /** A stored service sign-in, which is what push and the cache are spent on. */
+        login: Boolean(push?.credentials.mode === 'oidc' || options.gatewayToken),
+        push: Boolean(push),
+        cache: false
+      }
+    })
+  }
+
+  /**
+   * The operator setup page and its three calls, alive only while no gateway is
+   * configured.
+   *
+   * The 404 is deliberate rather than a 403: once this deployment is set up,
+   * these paths do not exist, and a page that says "forbidden" invites somebody
+   * to go looking for the way in.
+   */
+  async function handleSetup(
+    request: IncomingMessage,
+    response: ServerResponse,
+    method: string,
+    url: URL
+  ): Promise<void> {
+    if (configured) {
+      json(response, 404, { error: 'not_found' })
+
+      return
+    }
+
+    if (url.pathname === '/setup') {
+      if (method !== 'GET' && method !== 'HEAD') {
+        json(response, 405, { error: 'method_not_allowed' })
+
+        return
+      }
+
+      html(response, 200, setupPage({ version: options.version, defaultGateway: options.gatewayUrl }))
+
+      return
+    }
+
+    if (url.pathname === SETUP_CALLBACK_PATH) {
+      await handleSetupCallback(response, url)
+
+      return
+    }
+
+    if (method !== 'POST') {
+      json(response, 405, { error: 'method_not_allowed' })
+
+      return
+    }
+
+    let body: Record<string, unknown>
+
+    try {
+      body = await readJsonBody(request)
+    } catch (error) {
+      json(response, 400, { error: 'bad_request', detail: String(error) })
+
+      return
+    }
+
+    let gatewayUrl: string
+
+    try {
+      gatewayUrl = normalizeGatewayInput(typeof body.gateway === 'string' ? body.gateway : '')
+    } catch (error) {
+      json(response, 400, { error: 'bad_gateway_address', detail: (error as Error).message })
+
+      return
+    }
+
+    if (url.pathname === '/hermie/setup/probe') {
+      try {
+        json(response, 200, { gateway: gatewayUrl, probe: await probeGateway(gatewayUrl, fetchImpl) })
+      } catch (error) {
+        json(response, 400, { error: 'probe_failed', detail: (error as Error).message })
+      }
+
+      return
+    }
+
+    if (url.pathname === '/hermie/setup/login') {
+      const pkce = createPkce()
+      const redirectUri = `${ownOrigin(request)}${SETUP_CALLBACK_PATH}`
+      pendingLogin = { ...pkce, gatewayUrl, redirectUri }
+
+      json(response, 200, {
+        authorizeUrl: buildAuthorizeUrl(gatewayUrl, {
+          challenge: pkce.challenge,
+          state: pkce.state,
+          redirectUri,
+          ...(typeof body.provider === 'string' && body.provider ? { provider: body.provider } : {})
+        })
+      })
+
+      return
+    }
+
+    if (url.pathname === '/hermie/setup/save') {
+      await writeSetup(options.stateDir, {
+        gatewayUrl,
+        publicUrl: typeof body.publicUrl === 'string' ? body.publicUrl : '',
+        savedAt: Math.floor(Date.now() / 1000)
+      })
+
+      // The single transition. `publicUrl` is recomputed from the gateway the
+      // same way `resolveOptions` would have, because the operator gave one or
+      // they did not and the derivation is the same either way.
+      target.gatewayUrl = new URL(gatewayUrl).toString()
+      target.publicUrl =
+        typeof body.publicUrl === 'string' && body.publicUrl
+          ? new URL(body.publicUrl).origin
+          : new URL(gatewayUrl).origin
+      configured = true
+      probeCache = null
+
+      console.warn(`hermie-web: gateway set to ${target.gatewayUrl} through /setup; /setup is now closed.`)
+      // Push and the cache hold a connection that was not started, because at
+      // startup there was nothing to connect to. Said plainly rather than left
+      // for the operator to notice from an absence.
+      json(response, 200, { ok: true, gateway: target.gatewayUrl, restartFor: options.push ? ['push'] : [] })
+
+      return
+    }
+
+    json(response, 404, { error: 'not_found' })
+  }
+
+  /**
+   * The end of the service sign-in, run in the operator's browser instead of on
+   * a loopback port.
+   *
+   * `push/login.ts` is the specification: the same PKCE pair, the same one-time
+   * code, and the same refusal when the provider issues no refresh token — an
+   * hour-long credential is not a credential a daemon can hold, and storing one
+   * would mean push stopping in the night with nothing to say why.
+   */
+  async function handleSetupCallback(response: ServerResponse, url: URL): Promise<void> {
+    const pending = pendingLogin
+    pendingLogin = null
+
+    if (!pending) {
+      html(response, 400, setupCallbackPage('Nothing was waiting', 'Start the service sign-in from the setup page.'))
+
+      return
+    }
+
+    const failure = url.searchParams.get('error')
+
+    if (failure) {
+      html(
+        response,
+        400,
+        setupCallbackPage('Sign-in failed', `${failure}: ${url.searchParams.get('error_description') ?? ''}`)
+      )
+
+      return
+    }
+
+    const code = url.searchParams.get('code')
+
+    if (!code || url.searchParams.get('state') !== pending.state) {
+      // Either the redirect carried no code, or somebody else's redirect landed
+      // here. Neither is a sign-in, and nothing is stored for either.
+      html(
+        response,
+        400,
+        setupCallbackPage('Sign-in failed', 'That redirect did not carry the code this server was waiting for.')
+      )
+
+      return
+    }
+
+    try {
+      const tokens = await exchangeCode(pending.gatewayUrl, { code, verifier: pending.verifier }, fetchImpl)
+      const state = await loadPushState(options.stateDir)
+
+      if (state.oidc && !sameGateway(state.oidc.gateway, pending.gatewayUrl)) {
+        // A credential is only meaningful for the gateway it was made on, and
+        // so is everything else in that file.
+        state.seq = {}
+        state.sent = {}
+        state.invalid = {}
+        state.tickets = []
+      }
+
+      state.oidc = { refreshToken: tokens.refreshToken, provider: tokens.provider, gateway: pending.gatewayUrl }
+      await savePushState(options.stateDir, state)
+
+      html(
+        response,
+        200,
+        setupCallbackPage(
+          'The service is signed in',
+          'Hermie Web stored the sign-in it uses for push and for the message cache.'
+        )
+      )
+    } catch (error) {
+      html(response, 400, setupCallbackPage('Sign-in failed', (error as Error).message))
+    }
   }
 
   async function handleUpdate(
@@ -196,7 +570,7 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
       return
     }
 
-    if (!(await hasGatewaySession({ gatewayUrl: options.gatewayUrl, cookie: request.headers.cookie }))) {
+    if (!(await hasGatewaySession({ gatewayUrl: target.gatewayUrl, cookie: request.headers.cookie }))) {
       json(response, 401, { error: 'unauthorized', detail: 'Sign in to the gateway before updating Hermie Web.' })
 
       return
@@ -263,22 +637,29 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
     not writable yet — none of those should mean the browser build stops being
     served, because serving it is the thing this process does that nothing else
     can do for it.
-  */
-  push = options.push
-    ? await startPushDaemon({
-        gatewayUrl: options.gatewayUrl,
-        gatewayToken: options.gatewayToken,
-        stateDir: options.stateDir,
-        vapidSubject: options.vapidSubject,
-        version: options.version,
-        serverRequests: options.pushServerRequests,
-        ...(input.socketFactory ? { socketFactory: input.socketFactory } : {})
-      }).catch((error: unknown) => {
-        console.error(`hermie-web: push did not start — ${String(error)}`)
 
-        return null
-      })
-    : null
+    It is also not started on an UNCONFIGURED process, because there is nothing
+    to watch: the gateway is a default nobody chose, and a daemon dialling it
+    would fill the log with failures about an address the operator has not named
+    yet. `/setup` says so when it saves, rather than leaving it to be noticed
+    from an absence.
+  */
+  push =
+    options.push && configured
+      ? await startPushDaemon({
+          gatewayUrl: target.gatewayUrl,
+          gatewayToken: options.gatewayToken,
+          stateDir: options.stateDir,
+          vapidSubject: options.vapidSubject,
+          version: options.version,
+          serverRequests: options.pushServerRequests,
+          ...(input.socketFactory ? { socketFactory: input.socketFactory } : {})
+        }).catch((error: unknown) => {
+          console.error(`hermie-web: push did not start — ${String(error)}`)
+
+          return null
+        })
+      : null
 
   return {
     url: `http://${options.host.includes(':') ? `[${options.host}]` : options.host}:${port}`,

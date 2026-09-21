@@ -140,7 +140,15 @@ async function main(): Promise<void> {
   })
 
   console.warn(`hermie-web ${options.version} on http://${describeHost(options.host)}:${server.port}`)
-  console.warn(`  gateway    ${options.gatewayUrl}`)
+
+  // ADR-0024: a process nobody has given a gateway to serves the operator setup
+  // page instead of the app, and says so here rather than printing a default
+  // address as though it were a decision.
+  if (!server.options.gatewayConfigured) {
+    console.warn('  gateway    NOT SET — open /setup to choose one. Push stays off until it is.')
+  }
+
+  console.warn(`  gateway    ${server.options.gatewayUrl}${server.options.gatewayConfigured ? '' : ' (default)'}`)
   console.warn(`  public url ${options.publicUrl} (sent as Host and Origin)`)
   console.warn(`  static     ${options.staticDir}`)
   console.warn(`  login ret  ${options.loginReturn} (the app’s next= on /auth/login)`)

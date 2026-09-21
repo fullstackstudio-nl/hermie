@@ -16,6 +16,21 @@ import { defaultStateDir } from './push/state'
 export interface HermieWebOptions {
   /** The gateway to proxy to. Fixed for the life of the process. */
   gatewayUrl: string
+  /**
+   * Did anybody actually CHOOSE that gateway?
+   *
+   * `gatewayUrl` always has a value, because the default is the port
+   * `hermes serve` listens on — which is right often enough to be the default
+   * and is still a guess. This is the difference between the guess and a
+   * decision: a flag, an environment variable, or a setup an operator saved
+   * through `/setup`.
+   *
+   * It decides one thing only: whether the operator setup page of
+   * [ADR-0024](../../../docs/adr/0024-hermie-web-is-a-service-layer.md) is
+   * served or answers 404. The gateway is still fixed at process start — there
+   * is one transition, from unconfigured to configured, and no route back.
+   */
+  gatewayConfigured: boolean
   port: number
   host: string
   /**
@@ -184,6 +199,8 @@ export function normalizeLoginReturn(raw: string): string {
 
 export interface ResolveOptionsInput {
   gatewayUrl?: string | undefined
+  /** Overrides the "was it chosen or defaulted" reading; `startHermieWeb` sets it from the saved setup. */
+  gatewayConfigured?: boolean | undefined
   port?: string | number | undefined
   host?: string | undefined
   publicUrl?: string | undefined
@@ -219,6 +236,9 @@ export function resolveOptions(input: ResolveOptionsInput = {}): HermieWebOption
 
   return {
     gatewayUrl,
+    // A flag or an environment variable is a decision; the default is not. A
+    // caller that has read a saved setup says so outright.
+    gatewayConfigured: input.gatewayConfigured ?? (input.gatewayUrl ?? env.HERMIE_GATEWAY_URL) !== undefined,
     port,
     host: input.host ?? env.HERMIE_HOST ?? DEFAULT_HOST,
     publicUrl: normalizePublicUrl(input.publicUrl ?? env.HERMIE_PUBLIC_URL ?? '', gatewayUrl),

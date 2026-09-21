@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Hermie Web sets its gateway up once, and everybody else just signs in.** Start `hermie-web` with
+  no `--gateway` and it serves an operator setup page at `/setup`: the gateway address, a probe of
+  it, and the service login that push and the message cache are spent on — the same sign-in
+  `hermie-web login` does from a terminal, run in a browser for the machine that has no shell open.
+  Saving writes it to the service's state directory and closes the page for good, so the next person
+  to open the address sees a sign-in and nothing else. The browser build reads the rest from the
+  server rather than asking: which gateway is behind the proxy, and what signing in to it takes. The
+  wizard there has no address step, no probe to wait for and no welcome cover — it opens on the
+  sign-in — and "Change gateway" stays hidden, because on the web the gateway is not the reader's to
+  change. A Hermie Web that is too old to answer, or one that could not read its gateway, costs
+  nothing: the app probes for itself exactly as it did before. Everything this page can do, it can
+  only do while no gateway is set; afterwards those addresses do not exist.
+
 - **A map of a bot's memory.** A **Graph** tab beside the entries draws what the plugin's `graph`
   answer holds: the bot at the centre, an entry per memory, and the topics they share — a
   capitalised phrase, an `@handle`, a `#hashtag`, a date — with a line wherever two entries mention
