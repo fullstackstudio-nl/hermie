@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and a cron delivery or cron error. There is no hosted service, no account and **no inbound
   endpoint** — a device registers by writing into the gateway's own `ui_meta`, so the only way into
   the path is an authenticated write to the gateway, and the app never talks to the daemon at all.
+  An open approval is found in the snapshot a resume answers with and in a 30-second
+  `approval.pending` poll — the daemon deliberately does **not** ask the gateway to route questions to
+  it, because it would never answer one and a gateway that routes to a single peer would then have
+  taken the question away from the owner; `--push-server-requests` opts into the live route for
+  operators who know their gateway fans them out.
   A notification carries a bot name and an event type; the message text travels only to a device
   whose owner turned preview on, because a lock screen is not private. An approval's Allow and Deny
   answer nothing by themselves: the app opens, re-reads the gateway's open requests, and responds

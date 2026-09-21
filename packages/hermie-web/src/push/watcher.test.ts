@@ -38,20 +38,30 @@ interface Fixture {
   sent: Sent[]
   state: PushState
   calls: { method: string; params: Record<string, unknown> }[]
+  tailCalls: { sessionId: string; limit: number }[]
   setSeen: (seen: Record<string, number>) => void
   setRegistrations: (rows: Record<string, unknown>) => void
   setHistory: (text: string) => void
+  setTail: (rows: Record<string, unknown>[] | null) => void
+  setPendingApprovals: (rows: Record<string, unknown>[]) => void
+  setResumeSnapshot: (snapshot: Record<string, unknown>) => void
 }
 
 const NOW = 1_800_000_000
 
-function fixture(options: { registrations?: Record<string, unknown>; seen?: Record<string, number> } = {}): Fixture {
+function fixture(
+  options: { registrations?: Record<string, unknown>; seen?: Record<string, number>; withTail?: boolean } = {}
+): Fixture {
   const sent: Sent[] = []
   const calls: { method: string; params: Record<string, unknown> }[] = []
+  const tailCalls: { sessionId: string; limit: number }[] = []
   const state: PushState = { v: PUSH_STATE_VERSION, seq: {}, sent: {}, invalid: {}, tickets: [] }
   let registrations: Record<string, unknown> = options.registrations ?? { 'dev-1': registrationRow() }
   let seen: Record<string, number> = options.seen ?? {}
   let historyText = 'What is the weather?'
+  let tailRows: Record<string, unknown>[] | null = null
+  let pendingApprovals: Record<string, unknown>[] = []
+  let resumeSnapshot: Record<string, unknown> = {}
 
   const link: WatcherLink = {
     async request<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
@@ -78,7 +88,17 @@ function fixture(options: { registrations?: Record<string, unknown>; seen?: Reco
       }
 
       if (method === 'session.resume') {
-        return { session_id: String(params.session_id), stored_session_id: 'stored' } as T
+        // The snapshot belongs to `researcher`'s chat only, so a test can tell
+        // one notification from one that was sent per watched chat.
+        return {
+          session_id: String(params.session_id),
+          stored_session_id: 'stored',
+          ...(params.session_id === 'live-r' ? resumeSnapshot : {})
+        } as T
+      }
+
+      if (method === 'approval.pending') {
+        return { approvals: params.session_id === 'live-r' ? pendingApprovals : [] } as T
       }
 
       if (method === 'session.history') {
@@ -108,7 +128,16 @@ function fixture(options: { registrations?: Record<string, unknown>; seen?: Reco
     now: () => NOW,
     sleep: async () => undefined,
     log: () => undefined,
-    registrationTtlMs: 0
+    registrationTtlMs: 0,
+    ...(options.withTail
+      ? {
+          fetchTail: async (sessionId: string, limit: number) => {
+            tailCalls.push({ sessionId, limit })
+
+            return tailRows
+          }
+        }
+      : {})
   })
 
   return {
@@ -116,6 +145,7 @@ function fixture(options: { registrations?: Record<string, unknown>; seen?: Reco
     sent,
     state,
     calls,
+    tailCalls,
     setSeen: value => {
       seen = value
     },
@@ -124,6 +154,15 @@ function fixture(options: { registrations?: Record<string, unknown>; seen?: Reco
     },
     setHistory: text => {
       historyText = text
+    },
+    setTail: rows => {
+      tailRows = rows
+    },
+    setPendingApprovals: rows => {
+      pendingApprovals = rows
+    },
+    setResumeSnapshot: snapshot => {
+      resumeSnapshot = snapshot
     }
   }
 }
@@ -328,6 +367,103 @@ describe('a request opening', () => {
     await f.watcher.settle()
 
     expect(f.sent).toHaveLength(0)
+  })
+})
+
+describe('classifying a finished turn', () => {
+  it('prefers five rows of the REST tail to the unpaginated transcript', async () => {
+    const tailed = fixture({ withTail: true })
+    await tailed.watcher.resumeAll()
+    tailed.setTail([
+      { role: 'user', content: `${CRON_HEADER}\n\nAll clear.` },
+      { role: 'assistant', content: 'read it' }
+    ])
+    tailed.watcher.onEvent(turn('live-r', 7))
+    await tailed.watcher.settle()
+
+    expect(tailed.tailCalls).toEqual([{ sessionId: 'live-r', limit: 5 }])
+    // `session.history` returns the WHOLE chat; on a long one that is the
+    // transcript downloaded to read its last row, once per turn.
+    expect(tailed.calls.some(call => call.method === 'session.history')).toBe(false)
+    expect(tailed.sent[0]?.message.data.type).toBe('cron')
+  })
+
+  it('falls back to session.history for a gateway with no REST surface', async () => {
+    const tailed = fixture({ withTail: true })
+    await tailed.watcher.resumeAll()
+    // `null`, which is what the app's own `fetchMessages` answers there.
+    tailed.setTail(null)
+    tailed.setHistory(`${CRON_HEADER}\n\nAll clear.`)
+    tailed.watcher.onEvent(turn('live-r', 7))
+    await tailed.watcher.settle()
+
+    expect(tailed.calls.some(call => call.method === 'session.history')).toBe(true)
+    expect(tailed.sent[0]?.message.data.type).toBe('cron')
+  })
+})
+
+describe('open questions, without asking to receive them', () => {
+  it('takes the approval a resume already knew about', async () => {
+    const resumed = fixture()
+    resumed.setResumeSnapshot({ pending_approval: { request_id: 'appr-7', command: 'rm -rf ./build' } })
+    await resumed.watcher.resumeAll()
+    await resumed.watcher.settle()
+
+    expect(resumed.sent).toHaveLength(1)
+    expect(resumed.sent[0]?.message.body).toBe('is waiting for your approval')
+    expect(resumed.sent[0]?.message.data.request).toBe('appr-7')
+  })
+
+  it('takes one the poll finds', async () => {
+    f.setPendingApprovals([{ request_id: 'appr-9', command: 'rm -rf ./build' }])
+    await f.watcher.pollApprovals()
+    await f.watcher.settle()
+
+    expect(f.sent).toHaveLength(1)
+    expect(f.sent[0]?.message.data.request).toBe('appr-9')
+  })
+
+  it('buzzes once however many routes carry the same question', async () => {
+    // A live frame, a resume's `open_requests` and the poll all name the same
+    // queue entry under three different envelopes.
+    f.setPendingApprovals([{ request_id: 'appr-9', command: 'rm -rf ./build' }])
+    f.watcher.onServerRequest({
+      id: 'srq-1',
+      method: 'approval',
+      params: { session_id: 'live-r', request_id: 'appr-9' },
+      replayed: false
+    })
+    await f.watcher.settle()
+    f.watcher.onServerRequest({
+      id: 'srq-2',
+      method: 'approval',
+      params: { session_id: 'live-r', request_id: 'appr-9' },
+      replayed: true
+    })
+    await f.watcher.settle()
+    await f.watcher.pollApprovals()
+    await f.watcher.settle()
+
+    expect(f.sent).toHaveLength(1)
+  })
+
+  it('does not poll while nobody is registered', async () => {
+    f.setRegistrations({})
+    f.setPendingApprovals([{ request_id: 'appr-9' }])
+    await f.watcher.resumeAll()
+    const before = f.calls.length
+    await f.watcher.pollApprovals()
+
+    // A poll that would notify nobody is load on somebody's gateway for nothing.
+    expect(f.calls.length).toBe(before)
+    expect(f.sent).toHaveLength(0)
+  })
+
+  it('survives a gateway with no approval queue to read', async () => {
+    const broken = fixture()
+    await broken.watcher.resumeAll()
+    broken.setPendingApprovals([])
+    await expect(broken.watcher.pollApprovals()).resolves.toBeUndefined()
   })
 })
 

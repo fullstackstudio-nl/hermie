@@ -189,6 +189,28 @@ Four things, and nothing else:
 | A bot-to-bot DM                | No.                                                               |
 | A cron delivery or cron error  | No.                                                               |
 
+### How it learns that a question is open
+
+By default the daemon does **not** ask the gateway to route approval and clarify requests to it. That
+sounds like a detail and it is the one decision here that could cost somebody an answer.
+
+Asking — `client.capabilities {server_requests: true}` — is what makes a backend send them to this
+connection, and the daemon will never answer one: an approval belongs to the owner. Whether holding
+it open is harmless depends on something upstream has not promised. If a session's transport fans a
+request out to **every** peer, the app gets it too and answers it, and nothing is lost. If a backend
+routes to **one** peer, the daemon receiving the question has taken it away from the person it was
+for.
+
+So the safe behaviour is the default, and it is not a downgrade: open questions are read from the
+snapshot a `session.resume` answers with (`open_requests`, and `pending_approval` for a question that
+opened before the daemon connected) and from an `approval.pending` poll — the same RPC and the same
+30-second cadence the app itself uses, and only while at least one device is registered. One question
+that arrives by two or three of those routes still buzzes once, because the queue's own request id is
+what identifies it.
+
+`--push-server-requests` (or `HERMIE_PUSH_SERVER_REQUESTS=1`) turns the live route on. Use it only if
+you know your gateway fans server requests out to every peer of a session.
+
 "Somebody is reading" cannot be asked of the gateway: `session.active_list` answers about the calling
 connection and nobody else's. So the app writes a stamp into `push.seen` while a chat is on screen
 and the daemon reads it, after a few seconds' pause so an app that is opening can claim the chat
@@ -256,9 +278,15 @@ service forwards ciphertext it cannot read.
 
 A watcher that resumes every Bot Chat keeps every Bot Chat resident on the gateway, because upstream
 never evicts a session whose transport is alive. On a gateway with `max_live_sessions` set, the
-daemon's resumed chats count against that cap. Classifying a finished turn also costs one
-`session.history` per turn in a watched chat, because a cron delivery and a bot-to-bot DM have no
-wire marker and the only place the answer exists is the inbound row.
+daemon's resumed chats count against that cap. There is also one small read per finished turn and one
+`approval.pending` per watched chat every 30 seconds, and both stop entirely when nobody is
+registered.
+
+Classifying a finished turn reads **five rows** off the gateway's REST transcript
+(`GET /api/sessions/{id}/messages?limit=5&order=latest`, the same route the app's own tail reconcile
+uses), and falls back to the unpaginated `session.history` only on a gateway that has no REST
+surface. That fallback is the expensive one — it returns the whole chat to look at its last row — so
+on a long transcript it is worth knowing which of the two your gateway is giving you.
 
 And the plainest consequence of all: **a daemon that is not running sends nothing**, and nothing on
 the device will say so beyond the liveness stamp Settings reads. Notifications are best effort and

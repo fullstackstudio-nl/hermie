@@ -267,6 +267,7 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
         stateDir: options.stateDir,
         vapidSubject: options.vapidSubject,
         version: options.version,
+        serverRequests: options.pushServerRequests,
         ...(input.socketFactory ? { socketFactory: input.socketFactory } : {})
       }).catch((error: unknown) => {
         console.error(`hermie-web: push did not start — ${String(error)}`)

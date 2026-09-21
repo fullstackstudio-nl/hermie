@@ -56,6 +56,18 @@ export interface HermieWebOptions {
    * should put their own address here.
    */
   vapidSubject: string
+  /**
+   * Ask the gateway to route server→client requests to the push connection.
+   *
+   * Off by default, and it should stay off unless the operator knows their
+   * gateway fans a request out to EVERY peer of a session. On one that routes
+   * to a single peer, a daemon that receives an approval and holds it open —
+   * which is the only thing it will ever do with one — has taken the question
+   * away from the person it was for. Without it, open questions are learnt from
+   * a resume's snapshot and from the `approval.pending` poll, which is what the
+   * app does too.
+   */
+  pushServerRequests: boolean
 }
 
 export const DEFAULT_GATEWAY_URL = 'http://127.0.0.1:9119'
@@ -131,6 +143,7 @@ export interface ResolveOptionsInput {
   gatewayToken?: string | undefined
   stateDir?: string | undefined
   vapidSubject?: string | undefined
+  pushServerRequests?: boolean | undefined
   env?: NodeJS.ProcessEnv
   /** Where `dist/web` sits when `--static` is not given. */
   packageRoot?: string
@@ -166,7 +179,10 @@ export function resolveOptions(input: ResolveOptionsInput = {}): HermieWebOption
     // forgot its VAPID key after an update would orphan every browser
     // subscription it had ever handed out.
     stateDir: path.resolve(input.stateDir ?? defaultStateDir(env)),
-    vapidSubject: input.vapidSubject ?? env.HERMIE_VAPID_SUBJECT ?? DEFAULT_VAPID_SUBJECT
+    vapidSubject: input.vapidSubject ?? env.HERMIE_VAPID_SUBJECT ?? DEFAULT_VAPID_SUBJECT,
+    pushServerRequests:
+      input.pushServerRequests ??
+      (env.HERMIE_PUSH_SERVER_REQUESTS === '1' || env.HERMIE_PUSH_SERVER_REQUESTS === 'true')
   }
 }
 

@@ -22,6 +22,14 @@
  * Requests, DMs and cron deliveries are deliberately NOT suppressed by the
  * heartbeat: a question with a countdown on it is worth a buzz even if the chat
  * is open on a tablet in another room.
+ *
+ * **Open questions are polled, not subscribed to.** `link.ts` explains why the
+ * daemon does not ask a backend to route server→client requests to it by
+ * default. What is left is the snapshot a resume answers with and
+ * `approval.pending` — the same RPC and the same 30 s cadence the app's own
+ * chat controller uses. The poll runs only while at least one device is
+ * registered, because a poll that notifies nobody is load on a gateway for
+ * nothing.
  */
 import { announceAvailability, availabilityIsCurrent, type PushAvailability, withAvailability } from './announce'
 import type { PushMessage } from './expo'
@@ -55,6 +63,18 @@ export interface WatcherLink {
   request<T>(method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<T>
 }
 
+/**
+ * The REST transcript, newest rows last, or `null` when this gateway has no
+ * REST surface.
+ *
+ * It exists for one reason: `session.history` is unpaginated, so classifying a
+ * finished turn on a chat with thousands of rows would re-download all of them
+ * to read the last one. The app's `fetchMessages` has the same signature and the
+ * same `null` contract — a gateway without the route is a supported gateway,
+ * not a broken one.
+ */
+export type FetchTail = (sessionId: string, limit: number) => Promise<Record<string, unknown>[] | null>
+
 export interface PushSender {
   /** Deliver to these registrations. Answers with the installations whose address is finished. */
   send(registrations: readonly PushRegistration[], message: PushMessage): Promise<{ dead: string[] }>
@@ -62,6 +82,19 @@ export interface PushSender {
 
 /** How long the availability stamp is allowed to stand before it is rewritten. */
 export const AVAILABILITY_TTL_SECONDS = 300
+
+/**
+ * How often the approval queue is read.
+ *
+ * The same 30 s the app's `APPROVAL_POLL_MS` uses, restated here for the reason
+ * `link.ts` gives for restating anything: this package cannot import from the
+ * app. If the two ever have to differ, the app's is the one that matters to a
+ * person watching a screen and this one can be slower.
+ */
+export const APPROVAL_POLL_MS = 30_000
+
+/** Rows read from the REST tail when classifying a finished turn. */
+export const TAIL_ROW_LIMIT = 5
 
 export interface WatcherOptions {
   link: WatcherLink
@@ -81,6 +114,10 @@ export interface WatcherOptions {
    */
   availability?: () => Omit<PushAvailability, 'at'>
   availabilityTtlSeconds?: number
+  /** The REST tail. Absent means every classification falls back to `session.history`. */
+  fetchTail?: FetchTail
+  /** How often the approval queue is read; 0 turns the poll off. */
+  approvalPollMs?: number
 }
 
 interface WatchedSession extends WatchedBot {
@@ -186,6 +223,8 @@ export class PushWatcher {
         const result = await this.options.link.request<{
           session_id?: unknown
           stored_session_id?: unknown
+          open_requests?: unknown
+          pending_approval?: unknown
         }>('session.resume', { session_id: bot.sessionId, omit_messages: true })
 
         const aliases = [
@@ -199,6 +238,8 @@ export class PushWatcher {
         for (const alias of session.aliases) {
           this.byId.set(alias, session)
         }
+
+        this.readResumeSnapshot(session, result)
       } catch (error) {
         // One bot that cannot be resumed costs that bot. A gateway mid-restart
         // would otherwise take the whole watch down with it.
@@ -319,6 +360,20 @@ export class PushWatcher {
       return
     }
 
+    /*
+      The QUEUE id is the identity, not the JSON-RPC id.
+
+      One question reaches this method under up to three different envelopes: a
+      live frame (`srq-7`), a resume's `open_requests` entry (the same `srq-7`,
+      but a new one after a reconnect), and the `pending_approval` snapshot or
+      the `approval.pending` poll (`pending:<request_id>`). Keying on the
+      envelope would buzz once per route and once per reconnect; keying on
+      `params.request_id` is what makes them one question. A clarify has no queue
+      id, so it falls back to the JSON-RPC id — which is stable for as long as
+      the request is.
+    */
+    const queueId = typeof request.params.request_id === 'string' ? request.params.request_id : ''
+
     this.track(
       this.notify(
         {
@@ -326,16 +381,103 @@ export class PushWatcher {
           bot: session.name,
           botLabel: session.label,
           sessionId: session.sessionId,
-          requestId: request.id,
+          requestId: queueId || request.id,
           requestMethod: request.method,
           preview: previewOfRequest(request.params)
         },
-        // The request id is the identity: a resume re-delivers the same id, so
-        // an unanswered question does not buzz again on every reconnect.
-        `${session.sessionId}:req:${request.id}`,
+        `${session.sessionId}:req:${queueId || request.id}`,
         { suppressWhenAttached: false }
       ).catch(() => undefined)
     )
+  }
+
+  /**
+   * The open questions a resume answers with.
+   *
+   * Read HERE rather than through the link's own delivery of the same fields,
+   * for an ordering reason that is easy to miss: the link hands them over while
+   * the `session.resume` call is still settling, which is before this watcher
+   * knows which bot that session belongs to. Reading them once the mapping
+   * exists is the difference between a notification and a dropped one. The
+   * link's delivery still happens and is deduped away.
+   *
+   * `pending_approval` is the queue entry, which is the only trace of a question
+   * that opened before this connection existed.
+   */
+  private readResumeSnapshot(
+    session: WatchedSession,
+    result: { open_requests?: unknown; pending_approval?: unknown }
+  ): void {
+    for (const entry of Array.isArray(result?.open_requests)
+      ? (result.open_requests as Record<string, unknown>[])
+      : []) {
+      if (typeof entry?.id === 'string' && typeof entry.method === 'string') {
+        const params = (entry.params ?? {}) as Record<string, unknown>
+        this.onServerRequest({
+          id: entry.id,
+          method: entry.method,
+          params: { ...params, session_id: session.sessionId },
+          replayed: true
+        })
+      }
+    }
+
+    const pending = result?.pending_approval
+
+    if (pending && typeof pending === 'object') {
+      const row = pending as Record<string, unknown>
+      const requestId = typeof row.request_id === 'string' ? row.request_id : ''
+
+      this.onServerRequest({
+        id: `pending:${requestId || 'approval'}`,
+        method: 'approval',
+        params: { ...row, session_id: session.sessionId },
+        replayed: true
+      })
+    }
+  }
+
+  /**
+   * Read the approval queue of every watched chat.
+   *
+   * The safe default's primary source for a question that opened while nothing
+   * was attached. Skipped entirely when nobody is registered: a poll that would
+   * notify no one is load on somebody's gateway for nothing.
+   *
+   * A queue entry is not a live request and this never answers one — it is
+   * reported under `pending:<request_id>`, exactly as the app's own poll
+   * synthesizes it, and the dedupe in `onServerRequest` folds it onto whatever
+   * envelope arrived first.
+   */
+  async pollApprovals(): Promise<void> {
+    if (!this.roster.push.registrations.length) {
+      return
+    }
+
+    for (const session of new Set(this.byId.values())) {
+      let result: { approvals?: unknown }
+
+      try {
+        result = await this.options.link.request('approval.pending', {
+          session_id: session.sessionId,
+          profile: session.name
+        })
+      } catch {
+        // Best effort by construction; the next poll asks again.
+        continue
+      }
+
+      for (const approval of Array.isArray(result?.approvals) ? (result.approvals as Record<string, unknown>[]) : []) {
+        const requestId = typeof approval?.request_id === 'string' ? approval.request_id : ''
+
+        this.onServerRequest({
+          id: `pending:${requestId || 'approval'}`,
+          method: 'approval',
+          params: { ...approval, session_id: session.sessionId },
+          replayed: true
+        })
+      }
+    }
   }
 
   private track(promise: Promise<void>): void {
@@ -379,14 +521,33 @@ export class PushWatcher {
    * What started this turn.
    *
    * Hermes has no wire marker for a cron delivery or a DM, so the only place the
-   * answer exists is the inbound row, and the only way to read that row is
-   * `session.history` — which has no tail parameter and therefore returns the
-   * whole transcript. That is the daemon's one costly call. It is made once per
-   * finished turn in a watched chat, and only when somebody is registered at
-   * all; a failure degrades to "the owner typed", which produces an ordinary
-   * message notification rather than none.
+   * answer exists is the inbound row that the turn ran on. Reading it used to
+   * cost a `session.history`, which is UNPAGINATED — on a chat with thousands of
+   * rows that is the whole transcript downloaded to look at the last one, once
+   * per finished turn.
+   *
+   * So the REST tail comes first: five rows, newest last, the same route and the
+   * same shape the app's own tail reconcile uses. `session.history` stays as the
+   * fallback for a gateway that has no REST surface, which is a supported
+   * gateway rather than a broken one. Both failing degrades to "the owner
+   * typed", which produces an ordinary message notification rather than none.
    */
   private async classifyTurn(session: WatchedSession): Promise<ReturnType<typeof lastInboundRow>> {
+    const tail = this.options.fetchTail
+
+    if (tail) {
+      try {
+        const rows = await tail(session.sessionId, TAIL_ROW_LIMIT)
+
+        if (rows) {
+          return lastInboundRow(rows)
+        }
+      } catch {
+        // Treated as "no REST surface" rather than as "no answer": the RPC
+        // below can still say what started this turn.
+      }
+    }
+
     try {
       const history = await this.options.link.request<{ messages?: unknown }>('session.history', {
         session_id: session.sessionId

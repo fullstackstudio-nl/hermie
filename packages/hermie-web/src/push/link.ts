@@ -20,14 +20,22 @@
  *    changes a setting. The one write it makes is `ui_meta`, and
  *    `profiles.configure` is refused here unless `ui_meta` is the only thing it
  *    carries.
- *  - **It never answers a server→client request.** An approval belongs to the
- *    owner, not to a daemon. The link advertises that it can RECEIVE them — a
- *    backend that hears nothing treats a client as one that predates server
- *    requests and routes none to it — and then does nothing but report them, so
- *    the request stays open for the app the notification is about to send the
- *    owner to. Upstream treats a session's transport as a fan-out of its peers
- *    (quoted in ADR-0017), so the app attached to the same session receives the
- *    same request and is the one that answers it.
+ *  - **It never answers a server→client request, and by default it does not ask
+ *    to receive one.** An approval belongs to the owner, not to a daemon.
+ *    Advertising `client.capabilities {server_requests: true}` is what makes a
+ *    backend route them to this connection, and whether that is SAFE depends on
+ *    something upstream has not promised: if a session's transport fans a
+ *    request out to every peer, the app receives it too and answers it, and the
+ *    daemon holding it open costs nothing. If a real backend picks ONE peer
+ *    instead, a daemon that holds the request open has taken the owner's
+ *    question away from them.
+ *
+ *    So the default is not to ask. Open requests are learnt from the snapshot a
+ *    `session.resume` answers with (`open_requests`, `pending_approval`) and
+ *    from the watcher's `approval.pending` poll — the same method and the same
+ *    30 s cadence the app already uses. `advertiseServerRequests` turns the live
+ *    route back on for an operator who knows their gateway fans out; the flag is
+ *    `--push-server-requests` and the documentation says what it risks.
  *
  * The transport is Node's own global `WebSocket`, for the same reason as above:
  * `ws` is a devDependency of this package and the shipped artefact installs
@@ -53,6 +61,9 @@ export interface LinkServerRequest {
 
 /** Everything this process is allowed to ask its gateway for. */
 export const ALLOWED_METHODS: ReadonlySet<string> = new Set([
+  // Reading the approval QUEUE, never answering one. `approval.respond` is not
+  // on this list and must never be.
+  'approval.pending',
   'client.capabilities',
   'gateway.ping',
   'profiles.configure',
@@ -94,6 +105,13 @@ export interface GatewayLinkOptions {
   /** Full-jitter ladder, as `packages/hermes-shared/src/reconnect-backoff.ts` computes it. */
   backoffBaseMs?: number
   backoffCapMs?: number
+  /**
+   * Ask the backend to route server→client requests here.
+   *
+   * Off by default, and the reason is at the top of this file: it is only safe
+   * on a gateway that fans a request out to every peer of a session.
+   */
+  advertiseServerRequests?: boolean
   /** Injected by the tests; defaults to Node's global `WebSocket`. */
   socketFactory?: (url: string, protocols?: string[]) => WebSocket
   /** Injected by the tests so a reconnect does not cost real seconds. */
@@ -304,9 +322,13 @@ export class GatewayLink {
 
     this.log('push: connected to the gateway')
     this.startHeartbeat(socket)
-    // Tell the backend we can receive server→client requests. We answer none of
-    // them; see the note at the top of this file.
-    void this.request('client.capabilities', { server_requests: true }).catch(() => undefined)
+
+    if (this.options.advertiseServerRequests) {
+      // Opt-in only. We answer none of them either way; see the top of this file
+      // for why asking to receive them is the part that carries a risk.
+      void this.request('client.capabilities', { server_requests: true }).catch(() => undefined)
+    }
+
     await this.options.onOpen?.()
     await this.replay()
   }
@@ -533,21 +555,45 @@ export class GatewayLink {
    * about a question that was already open when it connected.
    */
   private deliverOpenRequests(result: unknown): void {
-    const open = (result as { open_requests?: unknown } | null)?.open_requests
+    const snapshot = (result ?? {}) as { open_requests?: unknown; pending_approval?: unknown; session_id?: unknown }
+    const open = snapshot.open_requests
 
-    if (!Array.isArray(open)) {
-      return
+    if (Array.isArray(open)) {
+      for (const entry of open as { id?: unknown; method?: unknown; params?: unknown }[]) {
+        if (typeof entry?.id === 'string' && typeof entry.method === 'string') {
+          this.options.onServerRequest?.({
+            id: entry.id,
+            method: entry.method,
+            params: (entry.params ?? {}) as Record<string, unknown>,
+            replayed: true
+          })
+        }
+      }
     }
 
-    for (const entry of open as { id?: unknown; method?: unknown; params?: unknown }[]) {
-      if (typeof entry?.id === 'string' && typeof entry.method === 'string') {
-        this.options.onServerRequest?.({
-          id: entry.id,
-          method: entry.method,
-          params: (entry.params ?? {}) as Record<string, unknown>,
-          replayed: true
-        })
-      }
+    /*
+      `pending_approval` is the QUEUE entry, not a live JSON-RPC request: an
+      approval raised before this connection existed has no `open_requests` row
+      to carry it, because there is no inbound call here to answer. Without
+      reading it, a daemon that started while a bot was already blocked on a
+      question would say nothing until the next poll — and on the safe default
+      the poll is the only other source there is.
+    */
+    const pending = snapshot.pending_approval
+
+    if (pending && typeof pending === 'object') {
+      const row = pending as Record<string, unknown>
+      const requestId = typeof row.request_id === 'string' ? row.request_id : ''
+      const sessionId = typeof snapshot.session_id === 'string' ? snapshot.session_id : ''
+
+      this.options.onServerRequest?.({
+        // `pending:` marks a card with no live reply behind it, the same prefix
+        // the app's own snapshot and poll synthesize.
+        id: `pending:${requestId || 'approval'}`,
+        method: 'approval',
+        params: { ...row, ...(sessionId ? { session_id: sessionId } : {}) },
+        replayed: true
+      })
     }
   }
 

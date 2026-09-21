@@ -91,6 +91,16 @@ describe('the service connection', () => {
     expect(daemon.link.watermarkOf(gateway.state.sessions.get(sessionId)?.id ?? '')).toBeGreaterThan(0)
   })
 
+  it('does not ask the gateway to route server requests to it', async () => {
+    // The default, and the reason is the one thing about this daemon that could
+    // cost somebody their approval: on a gateway that routes a request to ONE
+    // peer, a daemon that received it and held it open has taken the question
+    // away from the person it was for.
+    await new Promise(resolve => setTimeout(resolve, 100))
+
+    expect(gateway.state.methodLog).not.toContain('client.capabilities')
+  })
+
   it('never answers a server request, so the question stays the owner’s', async () => {
     const session = [...gateway.state.sessions.values()][0]
 
@@ -138,6 +148,49 @@ describe('the service connection', () => {
     // Exactly once: the replay hands back everything after the watermark, and
     // the watermark is what stops the first event arriving a second time.
     expect(events.filter(event => (event.payload as { text?: string } | undefined)?.text === 'first')).toHaveLength(1)
+  })
+})
+
+describe('opting in to server requests', () => {
+  it('advertises the capability only when asked to', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'hermie-push-state-'))
+    const opted = await startPushDaemon({
+      gatewayUrl: gateway.url,
+      stateDir: dir,
+      watch: false,
+      serverRequests: true,
+      log: () => undefined,
+      sleep: () => Promise.resolve(),
+      random: () => 0
+    })
+
+    try {
+      await waitFor(() => gateway.state.methodLog.includes('client.capabilities'), 'the advertisement')
+    } finally {
+      await opted.stop()
+    }
+  })
+})
+
+describe('the resume snapshot', () => {
+  it('carries a question that was already open, as the queue entry it is', async () => {
+    const session = [...gateway.state.sessions.values()][0]
+
+    if (!session) {
+      throw new Error('the fake gateway has no sessions')
+    }
+
+    await gateway.raiseApprovalOn({ queueOnly: true })
+    requests.length = 0
+    await daemon.link.request('session.resume', { session_id: session.storedId, omit_messages: true })
+
+    // No live frame was ever sent: `pending_approval` on the resume is the only
+    // trace of it, which is exactly the case the safe default has to cover.
+    const pending = requests.find(request => request.id.startsWith('pending:'))
+
+    expect(pending?.method).toBe('approval')
+    expect(pending?.replayed).toBe(true)
+    expect(pending?.params.request_id).toMatch(/^appr-/)
   })
 })
 

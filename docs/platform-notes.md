@@ -4745,26 +4745,61 @@ better home.
 ADR-0017 says the daemon "is a reader: it never submits a prompt, answers a question, or changes a
 setting." A sentence in a document that nothing enforces is a sentence, so `GatewayLink.request`
 checks an allowlist and refuses `profiles.configure` unless `ui_meta` is all it carries. Both are
-pinned by tests against the fake gateway.
+pinned by tests against the fake gateway. `approval.pending` is on that allowlist and
+`approval.respond` is not, which is the difference between reading a queue and answering for somebody.
 
-The harder one is server→client requests. The link **advertises** `client.capabilities
-{server_requests: true}` — a backend that hears nothing treats a client as one that predates server
-requests and routes none to it, so without this the daemon could never learn that an approval had
-opened — and then never answers one. This rests on upstream treating a session's transport as a
-fan-out of its peers, which ADR-0017 quotes from the reaper's comments and which the fake gateway
-reproduces. **It is not verified against `hermes serve`.** If a real backend routes a server request
-to one peer rather than all of them, a daemon that holds it open would be stealing the owner's
-question, and the fix would be to stop advertising and learn about requests only from the
-`open_requests` a resume returns.
+### The unverifiable assumption was made opt-in instead of default
 
-### Classifying a turn costs a transcript read, and there was no cheaper way
+The first cut of this advertised `client.capabilities {server_requests: true}` so approvals would
+arrive live, and then never answered one — which is safe **only** if a session's transport fans a
+request out to every peer, so the app receives the same question and answers it. ADR-0017 quotes that
+fan-out from upstream's reaper comments and the fake gateway reproduces it, but it has never been put
+to a real `hermes serve`. On a backend that routes to one peer instead, the daemon receiving an
+approval and holding it open takes the question away from the person it was for — the worst failure
+this feature could have, and one nobody would diagnose from the app.
+
+So the default is not to ask. Open questions now come from two places that cost the gateway nothing
+it was not already doing:
+
+- **`session.resume`'s snapshot** — `open_requests`, and `pending_approval`, which is the queue entry
+  and therefore the only trace of a question raised before this connection existed. The fake gateway
+  grew both: `raiseApprovalOn({ queueOnly: true })` stages exactly that case, and `session.resume`
+  now answers `pending_approval` from the queue the way the contract says it does.
+- **An `approval.pending` poll**, the same RPC and the same 30 s the app's `APPROVAL_POLL_MS` uses,
+  and only while at least one device is registered.
+
+`--push-server-requests` turns the live route back on for an operator who knows their gateway. The
+cost of the default is up to thirty seconds of latency on an approval notification; the cost of the
+flag on the wrong gateway is the approval.
+
+One thing this exposed: the same question reaches the watcher under up to three envelopes — a live
+`srq-N`, a resume's `open_requests` (a NEW `srq-N` after each reconnect) and `pending:<request_id>`
+from the snapshot or the poll. Keying dedupe on the envelope buzzes once per route and once per
+reconnect. The queue's own `request_id` is the identity, and a clarify — which has none — falls back
+to the JSON-RPC id.
+
+And an ordering trap worth recording: the link hands a resume's snapshot to its callback while the
+`session.resume` call is still settling, which is **before** the watcher knows which bot that session
+belongs to, so those notifications were silently dropped. The watcher now reads `open_requests` and
+`pending_approval` off the resume result itself, once the mapping exists.
+
+### Classifying a turn is five rows, not a transcript
 
 A cron delivery and a bot-to-bot DM arrive as an ordinary `role: "user"` row with a header spliced in
 front — no event, no `display_kind`, no metadata ([ADR-0013](adr/0013-cron-deliveries-in-the-transcript.md)).
-The only place the answer lives is that row, and `session.history` has no tail parameter, so it
-returns the whole transcript. The guard is that it only runs when somebody is registered at all, and
-a failure degrades to "the owner typed" rather than to silence. Worth revisiting if upstream ever
-grows a limit on `session.history`, or a marker on the row.
+The only place the answer lives is that row.
+
+The first cut read it with `session.history`, which is unpaginated: on a long chat that is the whole
+transcript downloaded to look at its last row, once per finished turn. It now reads
+`GET /api/sessions/{id}/messages?limit=5&order=latest` — the same route, the same `null` contract and
+the same "newest rows last" ordering as the app's own `reconcileTailFor`, so `lastInboundRow` scans
+from the end either way. `session.history` stays as the fallback for a gateway with no REST surface,
+which is a supported gateway rather than a broken one. The guards are unchanged: it runs only when
+somebody is registered, and both routes failing degrades to "the owner typed" rather than to silence.
+
+The REST rows spell the body `content` rather than `text`, which the classifier already handled; the
+integration test lets those requests through to the real fake gateway rather than stubbing them, so
+what is exercised is the route and not a fixture.
 
 ### What the integration suite actually proved
 
@@ -4774,7 +4809,14 @@ Against `@hermie/fake-gateway` over a real socket, with only the two push servic
   bot's display name, bodied `cron “…” reported`, carrying no part of the report;
 - a staged bot-to-bot delivery is read as a DM and names the sender;
 - an approval produces a notification carrying the request id and the `hermie.approval` category,
-  with the command left on the gateway;
+  with the command left on the gateway — including when it was raised BEFORE the daemon started
+  (resume snapshot) and when it was raised with no live frame at all (poll);
+- one question carried by a live frame, a resume snapshot and a poll at once buzzes exactly once,
+  across a reconnect;
+- nothing is polled while no device is registered, and `client.capabilities` is never sent unless
+  `--push-server-requests` asked for it;
+- a finished turn is classified from five REST rows, with `session.history` never called — and from
+  `session.history` when the REST route answers 404;
 - a `push.seen` stamp a few seconds old silences an ordinary message and a ten-minute-old one does
   not — and neither silences the approval;
 - dropping the socket after a send, reconnecting and replaying the same turn out of the gateway's
@@ -4792,9 +4834,12 @@ no session yet. `PushWatcher.resumed` now exists so a caller can wait for the se
 
 - **Anything on a device.** No phone, no browser, no service worker. Nothing has actually buzzed.
 - **A real `hermes serve`.** Every gateway interaction here is against the fake. The `ui_meta`
-  compare-and-swap it reproduces was probed against 0.21.3 for ADR-0016, but
-  `client.capabilities`, the fan-out of server requests, `session.resume` on a canonical chat from a
-  second connection, and the LRU pinning the ADR warns about were not.
+  compare-and-swap it reproduces was probed against 0.21.3 for ADR-0016, but `pending_approval` on a
+  resume, the shape `approval.pending` answers with, the REST messages route's ordering, and the LRU
+  pinning the ADR warns about were not.
+- **The fan-out of server requests**, which is now the thing `--push-server-requests` is gated on
+  rather than something the default relies on. Whether a real backend sends a request to every peer
+  or to one is still unknown; the point of the change is that nobody finds out the hard way.
 - **A real Expo or push-service round trip.** Both senders are exercised against stubs. Ticket and
   receipt shapes come from Expo's documentation; a 201 from a push service is assumed rather than
   seen.

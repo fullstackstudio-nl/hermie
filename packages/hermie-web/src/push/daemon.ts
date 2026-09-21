@@ -18,7 +18,14 @@ import { type PushCredentials, resolveCredentials } from './credentials'
 import { GatewayLink, type LinkEvent, type LinkServerRequest } from './link'
 import { createSender, pollExpoReceipts, RECEIPT_POLL_INTERVAL_MS } from './senders'
 import { loadPushState, prunePushState, type PushState, savePushState } from './state'
-import { AVAILABILITY_TTL_SECONDS, PushWatcher, type PushSender, type WatcherOptions } from './watcher'
+import { gatewayApiUrl } from './credentials'
+import {
+  APPROVAL_POLL_MS,
+  AVAILABILITY_TTL_SECONDS,
+  PushWatcher,
+  type PushSender,
+  type WatcherOptions
+} from './watcher'
 import { generateVapidKeys, vapidKeysUsable } from './web-push'
 
 export interface PushDaemonOptions {
@@ -41,6 +48,14 @@ export interface PushDaemonOptions {
   /** The `sub` claim of the VAPID token: a `mailto:` or `https:` contact. */
   vapidSubject?: string
   /**
+   * Ask the gateway to route server→client requests to this connection.
+   *
+   * Off by default. See `link.ts`: it is only safe on a backend that fans a
+   * request out to every peer of a session, and on one that does not, a daemon
+   * holding a question open has taken it from the owner.
+   */
+  serverRequests?: boolean
+  /**
    * Replace the transports. The default sends through Expo and Web Push; the
    * tests hand in a recorder.
    */
@@ -52,7 +67,12 @@ export interface PushDaemonOptions {
   /** The watcher's clocks, so a test does not have to wait out the real ones. */
   tuning?: Pick<
     WatcherOptions,
-    'attachedWindowSeconds' | 'availabilityTtlSeconds' | 'openingGraceMs' | 'rateLimit' | 'registrationTtlMs'
+    | 'approvalPollMs'
+    | 'attachedWindowSeconds'
+    | 'availabilityTtlSeconds'
+    | 'openingGraceMs'
+    | 'rateLimit'
+    | 'registrationTtlMs'
   >
 }
 
@@ -112,6 +132,33 @@ export async function startPushDaemon(options: PushDaemonOptions): Promise<PushD
 
   let watcher: PushWatcher | null = null
 
+  /**
+   * Five rows off the REST transcript, or `null` for a gateway that has no REST
+   * surface. The same route and the same `null` contract as the app's
+   * `fetchMessages`; the watcher falls back to `session.history` on `null`.
+   */
+  const fetchTail = async (sessionId: string, limit: number): Promise<Record<string, unknown>[] | null> => {
+    const url = gatewayApiUrl(
+      options.gatewayUrl,
+      `/api/sessions/${encodeURIComponent(sessionId)}/messages?limit=${String(limit)}&order=latest`
+    )
+
+    try {
+      const response = await (options.fetchImpl ?? fetch)(url, { headers: await credentials.httpHeaders() })
+
+      if (!response.ok) {
+        return null
+      }
+
+      const body = (await response.json()) as { messages?: unknown; rows?: unknown }
+      const rows = body?.messages ?? body?.rows
+
+      return Array.isArray(rows) ? (rows as Record<string, unknown>[]) : []
+    } catch {
+      return null
+    }
+  }
+
   link = new GatewayLink({
     dial: () => credentials.dial(),
     onEvent: event => {
@@ -129,6 +176,7 @@ export async function startPushDaemon(options: PushDaemonOptions): Promise<PushD
       await options.onOpen?.(link as GatewayLink)
     },
     log,
+    advertiseServerRequests: options.serverRequests === true,
     ...(options.socketFactory ? { socketFactory: options.socketFactory } : {}),
     ...(options.sleep ? { sleep: options.sleep } : {}),
     ...(options.random ? { random: options.random } : {})
@@ -152,6 +200,7 @@ export async function startPushDaemon(options: PushDaemonOptions): Promise<PushD
         vapidPublicKey: vapid.keys.publicKey,
         version: options.version ?? '0.0.0'
       }),
+      fetchTail,
       ...(options.tuning ?? {})
     })
   }
@@ -196,6 +245,24 @@ export async function startPushDaemon(options: PushDaemonOptions): Promise<PushD
 
   heartbeat?.unref()
 
+  /*
+    The approval queue, on the app's own cadence.
+
+    Without advertising `client.capabilities {server_requests: true}` — which is
+    opt-in for the reason `link.ts` gives — a question that opens while nothing
+    is attached reaches the daemon only through a resume snapshot or through
+    this. The watcher skips the work entirely while nobody is registered.
+  */
+  const approvalPollMs = options.tuning?.approvalPollMs ?? APPROVAL_POLL_MS
+  const approvals =
+    !watcher || approvalPollMs <= 0
+      ? null
+      : setInterval(() => {
+          void watcher?.pollApprovals().catch(() => undefined)
+        }, approvalPollMs)
+
+  approvals?.unref()
+
   // A restart must not replay everything the gateway still has in its ring.
   for (const [sessionId, seq] of Object.entries(state.seq)) {
     link.seedWatermark(sessionId, seq)
@@ -219,6 +286,10 @@ export async function startPushDaemon(options: PushDaemonOptions): Promise<PushD
 
       if (heartbeat) {
         clearInterval(heartbeat)
+      }
+
+      if (approvals) {
+        clearInterval(approvals)
       }
 
       await link?.stop()

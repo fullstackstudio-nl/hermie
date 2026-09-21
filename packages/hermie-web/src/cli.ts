@@ -31,6 +31,12 @@ const HELP = [
   '  --gateway-token <t>  the session token an ungated gateway takes (env HERMIE_GATEWAY_TOKEN)',
   '  --state-dir <dir>    watch state, VAPID keys and any stored sign-in (env HERMIE_STATE_DIR)',
   '  --vapid-subject <u>  mailto: or https: contact in the VAPID token (env HERMIE_VAPID_SUBJECT)',
+  '  --push-server-requests',
+  '                       ask the gateway to route approval/clarify requests to the daemon.',
+  '                       ONLY if your gateway fans server requests out to every peer: on one',
+  '                       that picks a single peer, the daemon receiving a question and holding',
+  '                       it open takes it away from you. Off by default; open questions are',
+  '                       read from the resume snapshot and an approval.pending poll instead.',
   '',
   '  hermie-web login [--provider <name>] [--redirect-port <n>]',
   '                       sign in to an OIDC-gated gateway once, for --push. Prints the',
@@ -56,6 +62,7 @@ async function main(): Promise<void> {
       'gateway-token': { type: 'string' },
       'state-dir': { type: 'string' },
       'vapid-subject': { type: 'string' },
+      'push-server-requests': { type: 'boolean', default: false },
       provider: { type: 'string' },
       'redirect-port': { type: 'string' },
       help: { type: 'boolean', default: false }
@@ -80,6 +87,7 @@ async function main(): Promise<void> {
     stateDir: values['state-dir'],
     vapidSubject: values['vapid-subject'],
     ...(values.push ? { push: true } : {}),
+    ...(values['push-server-requests'] ? { pushServerRequests: true } : {}),
     ...(values['no-self-update'] ? { selfUpdate: false } : {})
   })
 
@@ -120,7 +128,8 @@ async function main(): Promise<void> {
     push: options.push,
     gatewayToken: options.gatewayToken,
     stateDir: options.stateDir,
-    vapidSubject: options.vapidSubject
+    vapidSubject: options.vapidSubject,
+    pushServerRequests: options.pushServerRequests
   })
 
   console.warn(`hermie-web ${options.version} on http://${describeHost(options.host)}:${server.port}`)
@@ -130,6 +139,11 @@ async function main(): Promise<void> {
 
   if (options.push) {
     console.warn(`  push       on, state in ${options.stateDir}`)
+    console.warn(
+      options.pushServerRequests
+        ? '             server requests routed here (--push-server-requests)'
+        : '             open questions read from resume snapshots and approval.pending'
+    )
   }
 
   const stop = () => {

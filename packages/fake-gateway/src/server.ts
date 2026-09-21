@@ -556,8 +556,16 @@ export interface FakeGateway {
   deliverCron(options?: { profile?: string; job?: string; report?: string; reply?: string; failed?: boolean }): void
   /** The same for a bot-to-bot delivery, which is recognised the same way. */
   deliverBotDm(options?: { profile?: string; from?: string; handle?: string; body?: string; reply?: string }): void
-  /** Raise an approval on a profile's canonical chat. Resolves with the client's answer, if any. */
-  raiseApprovalOn(options?: { profile?: string; command?: string }): Promise<unknown>
+  /**
+   * Raise an approval on a profile's canonical chat.
+   *
+   * `queueOnly` stages the case a push daemon on its safe default has to cope
+   * with: a question that opened while nothing was attached, so there is no live
+   * server→client frame to receive and the only trace of it is the approval
+   * queue — which `session.resume` reports as `pending_approval` and
+   * `approval.pending` lists.
+   */
+  raiseApprovalOn(options?: { profile?: string; command?: string; queueOnly?: boolean }): Promise<unknown>
   close(): Promise<void>
 }
 
@@ -1813,14 +1821,9 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       if (action === 'approval') {
         // Deliberately not awaited: an approval nobody answers is exactly the
         // state a notification is supposed to be raised about.
-        void requestServerSide('approval', {
-          session_id: session.id,
-          request_id: `appr-${randomUUID().slice(0, 8)}`,
-          command: String(body.command ?? 'rm -rf ./build'),
-          description: 'Remove the build directory',
-          tool_name: 'run_command',
-          choices: ['once', 'session', 'always', 'deny']
-        }).catch(() => undefined)
+        void queueApproval(session, String(body.command ?? 'rm -rf ./build'), body.queueOnly === true).catch(
+          () => undefined
+        )
         json(res, 200, { ok: true, session_id: session.id })
 
         return
@@ -2693,6 +2696,12 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
 
         const omit = params.omit_messages === true
 
+        // `pending_approval` is the QUEUE entry, not a live request: an approval
+        // raised before this connection existed has no `open_requests` row to
+        // carry it, and a client that never asked to receive server requests
+        // has no other way to learn it is there.
+        const pending = [...state.pendingApprovals.values()].find(entry => entry.session_id === session.storedId)
+
         return {
           session_id: session.id,
           stored_session_id: session.storedId,
@@ -2700,7 +2709,8 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
           messages: omit ? [] : session.messages,
           messages_omitted: omit,
           info: sessionInfo(session),
-          open_requests: openRequestsFor(session.id)
+          open_requests: openRequestsFor(session.id),
+          ...(pending ? { pending_approval: pending.payload } : {})
         }
       }
 
@@ -3705,6 +3715,39 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     return [...state.sessions.values()].find(entry => entry.profile === profile && entry.title === 'Bot Chat')
   }
 
+  /**
+   * Put one approval on the queue, and — unless `queueOnly` — send the
+   * server→client request too.
+   *
+   * Both, because a real gateway does both: `tools/approval.py` enqueues the
+   * entry that `approval.pending` and `session.resume`'s `pending_approval`
+   * report, and the transport separately asks a client. A fake that only did
+   * the second made the queue unreachable, and the queue is the only route a
+   * client that has not asked for server requests has.
+   */
+  function queueApproval(session: FakeSession, command: string, queueOnly: boolean): Promise<unknown> {
+    const requestId = `appr-${randomUUID().slice(0, 8)}`
+    const payload = {
+      request_id: requestId,
+      command,
+      description: 'Remove the build directory',
+      tool_name: 'run_command',
+      choices: ['once', 'session', 'always', 'deny'],
+      allow_permanent: true,
+      allow_session: true
+    }
+
+    state.pendingApprovals.set(requestId, { session_id: session.storedId, payload })
+
+    if (queueOnly) {
+      return Promise.resolve(undefined)
+    }
+
+    return requestServerSide('approval', { session_id: session.id, ...payload }).finally(() => {
+      state.pendingApprovals.delete(requestId)
+    })
+  }
+
   function setPushSection(registrations: Record<string, unknown>, seen: Record<string, number>): void {
     const profile = state.profiles.find(row => row.is_default) ?? state.profiles[0]
 
@@ -3835,14 +3878,7 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
         throw new Error(`No Bot Chat for profile ${profile}`)
       }
 
-      return requestServerSide('approval', {
-        session_id: session.id,
-        request_id: `appr-${randomUUID().slice(0, 8)}`,
-        command: approvalOptions.command ?? 'rm -rf ./build',
-        description: 'Remove the build directory',
-        tool_name: 'run_command',
-        choices: ['once', 'session', 'always', 'deny']
-      })
+      return queueApproval(session, approvalOptions.command ?? 'rm -rf ./build', approvalOptions.queueOnly === true)
     },
     async close() {
       for (const timer of timers) {
