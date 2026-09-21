@@ -47,7 +47,7 @@ import { FlatList } from 'react-native'
 
 import { TranscriptList } from '../../src/chat-ui'
 import { assistantItem, subagentMap, userItem } from '../../src/chat-ui/fixtures'
-import { holdCorrection, holdTarget } from '../../src/chat-ui/TranscriptList'
+import { anchorFor, holdCorrection, holdTarget } from '../../src/chat-ui/TranscriptList'
 import type { AssistantItem, VisibleItem } from '../../src/chat-ui/types'
 import { markdownLeading } from '../../src/markdown'
 import { FOLD_LINES, type as typeScale } from '../../src/ui/tokens'
@@ -123,6 +123,57 @@ describe('the list’s anchor', () => {
 
     scrollTo(0)
     expect(anchorProp()).toBeUndefined()
+  })
+
+  /**
+   * The report this pair exists for: an expanded reply, no fold left to open,
+   * and the paragraph the reader is on walking down the screen token by token.
+   *
+   * On an inverted list cell 0 is the newest row AND it is laid out at content
+   * y = 0, so its origin is the one origin a growing cell 0 does not move.
+   * Anchored there, the native loop measures no delta, corrects nothing, and
+   * every later row — the history, which is what is on screen above — slides by
+   * the growth. The anchor has to name a row that is standing still.
+   */
+  it('anchors past the streaming row, which is the one that is growing', () => {
+    const view = renderScreen(
+      <TranscriptList
+        items={[...visible([userItem]), { item: thinking, presentation: 'full' }]}
+        subagents={subagentMap}
+      />
+    )
+
+    scrollTo(400)
+    expect(anchorProp()).toEqual({ minIndexForVisible: 1 })
+
+    // The turn ends: row 0 stops growing and is a perfectly good anchor again.
+    view.rerender(
+      withProviders(
+        <TranscriptList
+          items={[...visible([userItem]), { item: { ...moreText, streaming: false }, presentation: 'full' }]}
+          subagents={subagentMap}
+        />
+      )
+    )
+    scrollTo(400)
+    expect(anchorProp()).toEqual({ minIndexForVisible: 0 })
+  })
+
+  it('counts the rows parked in front of the transcript when it names that row', () => {
+    renderScreen(
+      <TranscriptList
+        items={[...visible([userItem]), { item: thinking, presentation: 'full' }]}
+        queued={[
+          { id: 'q-1', text: 'first' },
+          { id: 'q-2', text: 'second' }
+        ]}
+        subagents={subagentMap}
+      />
+    )
+
+    // Two parked messages sit at 0 and 1, the streaming reply at 2.
+    scrollTo(400)
+    expect(anchorProp()).toEqual({ minIndexForVisible: 3 })
   })
 
   it('never carries an autoscroll threshold, which is what animated the jump back', () => {
@@ -363,6 +414,52 @@ describe('opening a disclosure', () => {
     }
   })
 
+  it('holds the top for a reader who has not scrolled the chat at all', () => {
+    /*
+     * The fourth report of the same sentence, and the one the three cases above
+     * could not catch: each of them scrolls first, and a scroll event is what
+     * used to be the only thing that wrote the content height down.
+     *
+     * A reader who opens a chat and presses `Show more` on its last message has
+     * produced no scroll event. Offset 0 was right — it is the bottom of an
+     * inverted list — and the content height on record was 0, so the measured
+     * growth came out as the whole transcript and the hold aimed at a place
+     * nobody had ever been. What the reader saw was the fold's own behaviour,
+     * uncorrected: the end of the message they had just asked to read.
+     */
+    const scrollToOffset = jest.spyOn(FlatList.prototype, 'scrollToOffset').mockImplementation(() => {})
+    const onScrolledAwayFromBottom = jest.fn()
+
+    try {
+      renderScreen(
+        <TranscriptList
+          items={visible([userItem, long])}
+          onScrolledAwayFromBottom={onScrolledAwayFromBottom}
+          subagents={subagentMap}
+        />
+      )
+
+      // The list measuring itself on mount. No scroll, no drag, no pill.
+      grewTo(2000)
+      expect(onScrolledAwayFromBottom).not.toHaveBeenCalledWith(true)
+
+      press()
+      scrollToOffset.mockClear()
+      grewTo(2000 + growth)
+
+      expect(scrollToOffset).toHaveBeenCalledWith({ animated: false, offset: growth })
+      expect(scrollToOffset).not.toHaveBeenCalledWith({ animated: false, offset: 2000 + growth })
+
+      // And that offset is what takes the reader off the bottom: the message
+      // opens downward, they are free to read it, and the pill comes up behind
+      // them. Real scroll views report the offset they were moved to.
+      scrollTo(growth)
+      expect(onScrolledAwayFromBottom).toHaveBeenCalledWith(true)
+    } finally {
+      scrollToOffset.mockRestore()
+    }
+  })
+
   it('follows a row that grows in two stages, not just the one it predicted', () => {
     // The owner's third report: `Show more` on a message containing a TABLE still
     // moved the text up by about 212pt. `Fold` measures its own unclipped body
@@ -465,5 +562,26 @@ describe('opening a disclosure', () => {
     } finally {
       scrollToOffset.mockRestore()
     }
+  })
+})
+
+/**
+ * The arithmetic on its own, because the render cases above can only show two
+ * of its values and identity is not visible from them at all.
+ */
+describe('anchorFor', () => {
+  it('holds row 0 when nothing at row 0 is growing', () => {
+    expect(anchorFor(0, false)).toEqual({ minIndexForVisible: 0 })
+    expect(anchorFor(3, false)).toEqual({ minIndexForVisible: 0 })
+  })
+
+  it('holds the row after the streaming one, parked rows included', () => {
+    expect(anchorFor(0, true)).toEqual({ minIndexForVisible: 1 })
+    expect(anchorFor(2, true)).toEqual({ minIndexForVisible: 3 })
+  })
+
+  it('answers the same object twice, so the scroll view sees no new prop', () => {
+    expect(anchorFor(1, true)).toBe(anchorFor(1, true))
+    expect(anchorFor(0, false)).toBe(anchorFor(9, false))
   })
 })

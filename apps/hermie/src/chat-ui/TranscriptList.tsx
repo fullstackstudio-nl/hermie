@@ -746,6 +746,46 @@ const DISMISS_DRAG = 24
  */
 const AWAY_ANCHOR = { minIndexForVisible: 0 } as const
 
+/** The same, for a turn whose last row is growing under the reader. */
+const AWAY_ANCHOR_PAST_TAIL: Record<number, { minIndexForVisible: number }> = {}
+
+/**
+ * Which row the scroll view is allowed to anchor on.
+ *
+ * `maintainVisibleContentPosition` holds a VIEW still. On an inverted list the
+ * newest row is cell 0, and cell 0 is laid out at content y = 0 — so its origin
+ * is the one origin in the list that a growing cell 0 does **not** move.
+ * Anchoring there while a reply streams therefore corrects for nothing, and
+ * every row after it — which on screen is everything ABOVE, the history the
+ * reader is actually reading — slides by the growth instead. That is the report:
+ * an expanded reply, no fold left to open, and the paragraph under the reader's
+ * eyes walking down the screen token by token.
+ *
+ * So the anchor has to be the first row that is NOT growing, which while a tail
+ * is streaming is the row after it. The prepended rows — parked messages, the
+ * typing dots — sit before the transcript in `rows`, so the streaming tail is at
+ * `leading` and the first still row is the one after that.
+ *
+ * Anchoring past a row does not stop that row being corrected FOR: the native
+ * loop takes the first subview at or after this index whose bottom edge is past
+ * the offset, and a row inserted before the anchor still moves the anchor's
+ * origin by its own height. All that changes is which view is believed to be
+ * standing still.
+ */
+export function anchorFor(leading: number, streamingTail: boolean): { minIndexForVisible: number } {
+  if (!streamingTail) {
+    return AWAY_ANCHOR
+  }
+
+  const index = leading + 1
+
+  // Memoized per index for the same reason `AWAY_ANCHOR` is a constant: a fresh
+  // object every render is a new prop identity on the scroll view.
+  AWAY_ANCHOR_PAST_TAIL[index] ??= { minIndexForVisible: index }
+
+  return AWAY_ANCHOR_PAST_TAIL[index] as { minIndexForVisible: number }
+}
+
 /**
  * Has this drag gone far enough towards the history to put the keyboard away?
  *
@@ -1052,6 +1092,13 @@ function TranscriptListBody({
   }, [data, queued, showTyping])
 
   /**
+   * How many rows sit between index 0 and the transcript's newest item — the
+   * parked messages and the dots. `anchorFor` needs it to name the row after the
+   * streaming one.
+   */
+  const leadingRows = queued.length + (showTyping ? 1 : 0)
+
+  /**
    * A jump the LIST started, not the reader.
    *
    * `scrollToOffset({ animated: true })` emits a scroll event per frame on the way
@@ -1183,8 +1230,26 @@ function TranscriptListBody({
   const settleHold = useCallback((_width: number, height: number) => {
     const from = holdingFrom.current
 
-    if (from && height > 0) {
+    /*
+     * Recorded on EVERY content change, not only while a place is held, and
+     * that is the fourth `Show more` report.
+     *
+     * `contentNow` used to be written in two places — the scroll handler, and
+     * the branch below. A reader who has opened a chat and not scrolled it has
+     * produced no scroll event, so on an inverted list, sitting at the bottom
+     * where offset really is 0, the content height this had on record was 0 as
+     * well. `holdTarget` then read the growth as `height - 0` — the whole
+     * transcript — and the hold aimed at a place the reader had never been.
+     *
+     * The height arrives here whether anything is holding or not, so there is
+     * no reason for the record to depend on a hold existing. It is the state
+     * every hold starts from.
+     */
+    if (height > 0) {
       contentNow.current = height
+    }
+
+    if (from && height > 0) {
       // Measured, not predicted. `holdTarget` is where the difference between
       // the two is the whole of the second `Show more` report.
       holdingTo.current = holdTarget(from, height)
@@ -1519,7 +1584,7 @@ function TranscriptListBody({
              * gone with it: it only ever fires within `AWAY_THRESHOLD` of the bottom,
              * which is where this is now off.
              */
-            maintainVisibleContentPosition={away ? AWAY_ANCHOR : undefined}
+            maintainVisibleContentPosition={away ? anchorFor(leadingRows, streamingTail) : undefined}
             onContentSizeChange={settleHold}
             onEndReached={onEndReached}
             onEndReachedThreshold={0.4}
