@@ -14,6 +14,7 @@
     "./native-auth": "./src/native-auth.ts",
     "./pkce": "./src/pkce.ts",
     "./probe": "./src/probe.ts",
+    "./push": "./src/push.ts",
     "./socket-factory": "./src/socket-factory.ts",
     "./types": "./src/types.ts",
     "./ui-meta": "./src/ui-meta.ts",

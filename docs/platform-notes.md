@@ -5090,3 +5090,104 @@ it should look different, and nothing did.
 - **Frame drops under a streaming reply.** The trace above is one flick through a
   settled transcript. The interesting case is a reply arriving while the reader
   scrolls, which needs the fake gateway's `--stream-delay` and a longer sitting.
+
+## Push, on a simulator (2026-09-21)
+
+The app half of [ADR-0017](adr/0017-push-through-hermie-web.md), measured on an
+**iPhone 17 Pro (iOS 26.5)** and an **iPad Pro 13" (M5)** running the Debug build
+against `packages/fake-gateway`. What made this verifiable at all is that a
+registration is not an API call to anything: it is a section of `ui_meta`, so the
+whole round trip can be read back with one HTTP request to the fake gateway's
+`/api/profiles`.
+
+### A simulator does mint a real Expo push token
+
+This was the open question, because a simulator has no APNs device token in the
+sense a phone does. It works: `getExpoPushTokenAsync({ projectId })` answered
+`ExponentPushToken[…]` and the row landed on the default profile exactly as
+`packages/hermie-web/src/push/registrations.ts` reads it —
+
+```json
+{
+  "registrations": {
+    "i…": {
+      "v": 1,
+      "platform": "ios",
+      "types": { "message": true, "request": true, "dm": true, "cron": true },
+      "preview": false,
+      "updatedAt": 1789965204,
+      "transport": "expo",
+      "token": "ExponentPushToken[…]"
+    }
+  },
+  "seen": {}
+}
+```
+
+`preview: false` and all four types on is the default the switch writes, and the
+token is a send ADDRESS rather than a credential — which is why it is in `ui_meta`
+and not the secret store.
+
+### The heartbeat had a race, and only a device showed it
+
+`seen` stayed `{}` with a chat open for well over a period, while the
+registration beside it updated twice. The cause: the store's installation id is
+the key a beat is written under, and a chat that comes on screen before the disk
+read finishes beats into nothing — then nothing asks again until the interval
+comes round a minute later. Launching straight onto a chat
+(`--hermieOpen chat:researcher`) loses that race every time, which is why the
+unit tests did not: they hydrate first because they await it.
+
+`PushSync.boot` now re-runs `syncHeartbeat` after `hydrate`, and
+`syncHeartbeat` beats once for a timer whose first beat stamped nothing.
+Re-measured: `"seen": { "i…": 1789965425 }` within seconds of the chat opening.
+`push-sync.test.ts` pins it as "beats once the store has hydrated, for a chat
+that opened before it did".
+
+Worth writing down beside it: the ADR's heading calls this "last seen **per
+chat**", and the daemon's reader keys `seen` by INSTALLATION id with no chat in
+it. The app writes what the reader reads. The consequence is that a tablet with
+any chat open suppresses a message notification about any chat on that device;
+`ChatScreen` says so where the beat is driven.
+
+### `simctl push` reaches the app, and the Allow/Deny category is real
+
+`xcrun simctl push <udid> dev.hermie.app <file>.apns` delivers to the installed
+build with no Expo round trip. Two payloads were used; both put the app's own
+data under `body`, which is the key `expo-notifications` reads `content.data`
+from:
+
+```json
+{
+  "Simulator Target Bundle": "dev.hermie.app",
+  "aps": { "alert": { "title": "Researcher", "body": "needs your input" }, "category": "hermie.request" },
+  "body": { "bot": "researcher", "type": "request", "requestId": "…" }
+}
+```
+
+- A plain `message` payload posted a banner reading "Researcher / sent a
+  message"; tapping it opened that chat.
+- A `request` payload posted under `hermie.request` and, expanded, showed the
+  **Allow** and **Deny** buttons the category registers.
+
+### The forged Allow does what the threat model says
+
+The decisive one. With the app sitting in **Writer's** chat, a `request` payload
+naming `requestId: "rm -rf /"` was pushed and **Allow** tapped. The app came to
+the front, navigated to **Researcher's** chat, and sent nothing: no
+`approval.respond`, and no answered-approval chip in the transcript. That is
+ADR-0017's rule — "a notification is a hint that something happened, never an
+instruction" — behaving as written, on a device rather than in a test.
+
+### What this did NOT verify
+
+- **A real Expo delivery.** Everything above is `simctl push`, which hands the
+  payload to the device directly. The Expo Push API, its receipts and the
+  `DeviceNotRegistered` retirement are the daemon's half and were not exercised.
+- **Android.** No notification was delivered to an emulator this round. The two
+  channels (`default`, `needs-input`) are registered from the same `prepare()`
+  the simulator ran, but their importance is unobserved — and a stock AVD's
+  notification settings are their own subject.
+- **A revoked permission mid-session.** The "turned it off in system settings"
+  path is covered by a test against a fake platform; `simctl privacy` has no
+  verb for notifications, so it was not reproduced.

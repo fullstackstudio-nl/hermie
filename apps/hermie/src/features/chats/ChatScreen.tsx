@@ -265,6 +265,26 @@ function Conversation({
   // gradient. One lookup per screen rather than one per row.
   const accent = useChatAccent(botName)
 
+  /*
+    ADR-0017's heartbeat, driven from the one place that knows a chat is on
+    screen. It is a chat being MOUNTED rather than a message arriving: the
+    daemon's question is "is anybody looking", and the answer stops being yes
+    when this screen goes away or the app leaves the foreground — which
+    `ChatRuntimeProvider` reports separately.
+
+    Worth saying plainly, because the ADR's heading is "last seen per chat" and
+    what the daemon actually reads is one stamp per INSTALLATION: `seen` is keyed
+    by installation id (`packages/hermie-web/src/push/registrations.ts`), so a
+    tablet with a chat open suppresses a message notification about any chat on
+    that device. That is the schema the reader on the other side implements, and
+    writing a per-chat map it does not look at would be a section nobody reads.
+  */
+  useEffect(() => {
+    runtime?.push.setOpenChat(botName)
+
+    return () => runtime?.push.setOpenChat(null)
+  }, [botName, runtime])
+
   const [sheet, setSheet] = useState<ManualSheet>('none')
   const [attachments, setAttachments] = useState<PickedAttachment[]>([])
   /**

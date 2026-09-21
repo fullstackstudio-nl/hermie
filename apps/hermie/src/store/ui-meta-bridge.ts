@@ -21,6 +21,13 @@
  * where ADR-0012 put it.
  */
 import {
+  foreignPushRows,
+  pushSectionFor,
+  pushSeenOf,
+  pushStampOf,
+  type PushSectionShape
+} from '@hermie/gateway-client/push'
+import {
   HERMIE_APP_SECTION_VERSION,
   HERMIE_SECTION_VERSION,
   UiMetaSync,
@@ -29,9 +36,11 @@ import {
   type UiMetaGateway,
   type UiMetaSnapshot
 } from '@hermie/gateway-client/ui-meta'
+import { Platform } from 'react-native'
 
 import { ACCENTS, type AccentName } from '../ui/tokens'
 import { useChatLayoutStore, type LayoutEntry } from './chat-layout'
+import { ownRegistration, usePushStore } from './push'
 import { asThemeChoice, asUserThemes, DEFAULT_CHAT_VIEW, useSettingsStore, type ChatViewSettings } from './settings'
 
 /** How long the reader has to stop moving before their arrangement goes out. */
@@ -45,7 +54,18 @@ export interface HermieAppShape extends HermieAppSection {
   defaults?: ChatViewSettings
   themeChoice?: unknown
   themes?: unknown
+  /** ADR-0017: every device that asked to be told, and who was last looking. */
+  push?: PushSectionShape
 }
+
+/**
+ * What the daemon calls this device.
+ *
+ * `ios`, `android` or `web`, and `macos` for the Designed-for-iPad build, which
+ * reports itself honestly rather than as an iPhone. The daemon does not route on
+ * it — the transport does — so it is a label for whoever reads the section.
+ */
+export const pushPlatformName = (): string => Platform.OS
 
 /** Everything ADR-0016 syncs, read out of the two stores as they are now. */
 export function snapshotFromStores(): UiMetaSnapshot {
@@ -61,12 +81,28 @@ export function snapshotFromStores(): UiMetaSnapshot {
     bots[name] = { ...(bots[name] ?? { v: HERMIE_SECTION_VERSION }), colour: accent }
   }
 
+  const push = usePushStore.getState()
+  /*
+    The whole section, not this device's row: ADR-0016 replaces a key WHOLE, so a
+    snapshot that named only our own registration would unregister every other
+    device on this gateway the moment anything here changed.
+  */
+  const pushSection = pushSectionFor({
+    others: push.others,
+    own: ownRegistration(push, pushPlatformName()),
+    seen: push.seen,
+    now: pushStampOf(Date.now())
+  })
+
   const app: HermieAppShape = {
     v: HERMIE_APP_SECTION_VERSION,
     entries: layout.entries,
     defaults: settings.defaults,
     themeChoice: settings.themeChoice,
-    themes: settings.userThemes
+    themes: settings.userThemes,
+    // Omitted rather than empty while nobody has ever registered; see
+    // `pushSectionFor`.
+    ...(pushSection ? { push: pushSection } : {})
   }
 
   return { app, bots }
@@ -151,6 +187,16 @@ export function applySnapshot(snapshot: UiMetaSnapshot): void {
     accents
   })
 
+  /*
+    Ours is replaced, theirs is taken. A row written by another installation is
+    carried forward unread — see `foreignPushRows` — and the stamps come back so
+    that a write from this device does not erase somebody else's heartbeat.
+  */
+  usePushStore.getState().applyRemote({
+    others: foreignPushRows(app, usePushStore.getState().installationId),
+    seen: pushSeenOf(app)
+  })
+
   useSettingsStore.getState().applyAppSettings({
     ...(chatViewOf(app?.defaults) ? { defaults: chatViewOf(app?.defaults) as ChatViewSettings } : {}),
     ...(asThemeChoice(app?.themeChoice) ? { themeChoice: asThemeChoice(app?.themeChoice)! } : {}),
@@ -203,7 +249,11 @@ export class UiMetaBridge {
 
     const watch = (): void => this.onStoreChanged()
 
-    this.unsubscribe = [useChatLayoutStore.subscribe(watch), useSettingsStore.subscribe(watch)]
+    this.unsubscribe = [
+      useChatLayoutStore.subscribe(watch),
+      useSettingsStore.subscribe(watch),
+      usePushStore.subscribe(watch)
+    ]
 
     return () => this.stop()
   }

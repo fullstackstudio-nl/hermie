@@ -9,6 +9,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AppState } from 'react-native'
 
+import { requestOpenChat } from '../../app/open-chat-bus'
 import { useGateway } from '../../gateway'
 import { chatGatewayFor, type ChatGateway } from '../../gateway/link'
 import { chatCache } from '../../platform/chat-cache'
@@ -16,9 +17,14 @@ import { RUNS_ON_MAC } from '../../platform/runs-on-mac'
 import { useBotsStore } from '../../store/bots'
 import { useChatLayoutStore } from '../../store/chat-layout'
 import { useChatsStore } from '../../store/chats'
+import { usePushStore } from '../../store/push'
 import { useSettingsStore } from '../../store/settings'
 import { UiMetaBridge } from '../../store/ui-meta-bridge'
 import { BotsController } from '../bots/bots-controller'
+import { pushPlatform } from '../push/platform'
+import { PushSync } from '../push/push-sync'
+import { setPushRetire } from '../push/runtime'
+import { pushProjectId, pushVapidUrl } from '../push/where'
 import { WidgetSync } from '../widgets'
 import { ChatController } from './chat-controller'
 
@@ -29,6 +35,8 @@ export interface ChatRuntimeValue {
   uiMeta: UiMetaBridge
   /** Writes the file the home-screen widgets read. No-op where there is none. */
   widgets: WidgetSync
+  /** ADR-0017: the registration, the heartbeat, and what a tap is allowed to do. */
+  push: PushSync
   /** The connection, as the slice everything in here is written against. */
   gateway: ChatGateway
 }
@@ -43,6 +51,9 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void useSettingsStore.getState().hydrate()
     void useBotsStore.getState().hydrateLastSeen()
+    // Before any gateway exists, because the installation id it mints is what
+    // every later write of the push section is addressed by.
+    void usePushStore.getState().hydrate()
   }, [])
 
   // The list's arrangement is stored per gateway, so it is read when the
@@ -102,12 +113,52 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       cache: chatCache
     })
 
+    /*
+      ADR-0017's three ports, all of them resolved against the gateway rather
+      than against anything the notification said. `showChat` deliberately does
+      BOTH halves: the controller resumes the session — which is what gives
+      `approval.pending` a `session_id` to ask about — and the bus tells
+      whichever shell is mounted to navigate. A bot the roster does not have is
+      not an error; the navigation still happens and the shell says what it
+      finds.
+    */
+    const push = new PushSync({
+      platform: pushPlatform,
+      projectId: pushProjectId(),
+      vapidUrl: pushVapidUrl(),
+      ports: {
+        showChat: async name => {
+          requestOpenChat(name)
+
+          const bot = useBotsStore.getState().byName[name]
+
+          if (bot) {
+            await controller.openChat(bot).catch(() => undefined)
+          }
+        },
+        openApprovals: name => controller.openApprovals(name),
+        respondApproval: (name, requestId, choice) => controller.respondApproval(name, requestId, choice)
+      }
+    })
+    const stopPush = push.start()
+
+    /*
+      The one thing that has to happen BEFORE this connection goes away. See
+      `features/push/runtime.ts`: `GatewayProvider` tears the socket down first
+      and this component is unmounted by the same change, so the removal is
+      registered as a callback the provider can await rather than run from here.
+    */
+    setPushRetire(async () => {
+      await push.retire()
+      await uiMeta.sync.flush()
+    })
+
     controller.start()
     // Only the cache here. The roster itself is read once the connection is
     // READY; see below.
     void bots.paintFromCache()
 
-    const next = { controller, bots, uiMeta, widgets, gateway }
+    const next = { controller, bots, uiMeta, widgets, push, gateway }
     valueRef.current = next
     setValue(next)
 
@@ -116,6 +167,8 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       bots.dispose()
       stopWatching()
       stopWidgets()
+      stopPush()
+      setPushRetire(null)
       valueRef.current = null
     }
     // `http` is built with the connection and handed out as a ref, like the
@@ -213,6 +266,11 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
         // The reader has just come back from the home screen they were looking
         // at, so the next thing worth doing is making what they saw there true.
         runtime.widgets.resume()
+        // ADR-0017's freshness pass, and the heartbeat's other half: a token
+        // that changed while the app was away is re-read here, and `seen` only
+        // means anything while somebody is actually looking.
+        runtime.push.setForeground(true)
+        void runtime.push.refresh().catch(() => undefined)
       } else if (state === 'background') {
         // FIRST in this branch, before anything that could tear a socket down:
         // this writes the widget file while the gateway is still the
@@ -223,6 +281,10 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
         if (!RUNS_ON_MAC) {
           runtime.controller.onBackground()
         }
+
+        // Unconditionally, Mac included: `seen` says "somebody is reading this
+        // right now", and a window behind another window is not that.
+        runtime.push.setForeground(false)
 
         void runtime.controller.persistAll()
       }

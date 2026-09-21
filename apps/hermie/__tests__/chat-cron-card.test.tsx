@@ -33,7 +33,11 @@ const mockHttpGet = jest.fn()
 const mockRequest = jest.fn()
 
 // `mock`-prefixed so the factory below may close over it (Jest's hoisting rule).
-let mockRuntime: { controller: Record<string, jest.Mock>; bots: Record<string, jest.Mock> }
+let mockRuntime: {
+  controller: Record<string, jest.Mock>
+  bots: Record<string, jest.Mock>
+  push: { setOpenChat: jest.Mock }
+}
 
 // One frozen gateway object, the way `GatewayProvider` hands one out: a fresh
 // object per render would rebuild the cron controller on every paint.
@@ -199,7 +203,11 @@ function expandCard() {
 }
 
 beforeEach(() => {
-  mockRuntime = { bots: { watchRunning: jest.fn(() => () => undefined) }, controller: makeController() }
+  mockRuntime = {
+    bots: { watchRunning: jest.fn(() => () => undefined) },
+    controller: makeController(),
+    push: { setOpenChat: jest.fn() }
+  }
   mockHttpGet.mockReset()
   mockRequest.mockReset()
   mockRequest.mockResolvedValue({ gateway_running: true, jobs: [], success: true })

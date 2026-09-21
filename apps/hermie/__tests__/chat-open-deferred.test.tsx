@@ -23,7 +23,11 @@ import { useChatsStore } from '../src/store/chats'
 import { useSettingsStore } from '../src/store/settings'
 
 let mockController: Record<string, jest.Mock>
-let mockRuntime: { controller: Record<string, jest.Mock>; bots: Record<string, never> }
+let mockRuntime: {
+  controller: Record<string, jest.Mock>
+  bots: Record<string, never>
+  push: { setOpenChat: jest.Mock }
+}
 let mockStatus: ConnectionStatus
 let mockLastError: GatewayError | null
 
@@ -127,7 +131,7 @@ beforeEach(() => {
   useSettingsStore.getState().reset()
   useBotsStore.getState().setBots([BOT])
   mockController = makeController()
-  mockRuntime = { controller: mockController, bots: {} }
+  mockRuntime = { controller: mockController, bots: {}, push: { setOpenChat: jest.fn() } }
   mockStatus = 'connecting'
   mockLastError = null
 })

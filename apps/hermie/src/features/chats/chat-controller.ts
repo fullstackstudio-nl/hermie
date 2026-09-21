@@ -39,6 +39,7 @@ import type {
   CompletionItem,
   CorrectionStatus,
   OpenRequestEntry,
+  PendingApproval,
   SessionLiveInfo,
   SessionResumeResult
 } from '@hermes/shared/gateway-contract'
@@ -1024,6 +1025,37 @@ export class ChatController {
     } catch {
       // The ack is a courtesy to the queue's timeout, never a precondition for
       // answering; a failed one must not keep the sheet off the screen.
+    }
+  }
+
+  /**
+   * What the GATEWAY says is still open for this bot, right now.
+   *
+   * Read straight off `approval.pending` rather than out of the store, and that
+   * is the whole point of it: its one caller is ADR-0017's notification action,
+   * where nothing the device already believes counts as evidence. A tap on
+   * "Allow" is a hint that something happened, so the request it names is looked
+   * up again here before anything is sent.
+   *
+   * Answers `[]` for a chat with no live session and for a call that failed,
+   * which both resolve to "open the chat and let the reader see".
+   */
+  async openApprovals(botName: string): Promise<PendingApproval[]> {
+    const chat = this.chats.getState().chats[botName]
+
+    if (!chat?.runtimeSessionId) {
+      return []
+    }
+
+    try {
+      const result = await this.gateway.request('approval.pending', {
+        session_id: chat.runtimeSessionId,
+        profile: botName
+      })
+
+      return Array.isArray(result?.approvals) ? result.approvals : []
+    } catch {
+      return []
     }
   }
 

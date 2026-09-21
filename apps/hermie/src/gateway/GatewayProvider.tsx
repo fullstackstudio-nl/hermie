@@ -12,6 +12,7 @@ import type {
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { seedDevGateway } from '../dev/seed-gateway'
+import { retirePushRegistration } from '../features/push/runtime'
 import { createPersistentAuthTimeline } from './auth-timeline'
 import { attachLifecycle, createGatewayConnection, createTokenCoordinator } from './client'
 import { clearCredentials, clearGateway, type GatewaySetup, loadGatewaySetup, type StoredGatewayConfig } from './config'
@@ -190,6 +191,13 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     const keep = setup?.config ?? null
+
+    // FIRST, and awaited: ADR-0017's registration is only meaningful for the
+    // gateway it was made on, and removing it is a `ui_meta` write that needs
+    // the socket `teardown()` is about to close. See `features/push/runtime.ts`
+    // for why this is a slot rather than a call on something in scope.
+    await retirePushRegistration()
+
     teardown()
     await clearCredentials()
     setSetup(null)
@@ -198,6 +206,10 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
   }, [setup, teardown])
 
   const changeGateway = useCallback(async () => {
+    // As in `signOut`, and for the same reason with more force: the next gateway
+    // must not inherit a row that names this one's devices.
+    await retirePushRegistration()
+
     teardown()
     await clearGateway()
     setSetup(null)

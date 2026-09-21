@@ -6,7 +6,7 @@ import {
   type Theme as NavTheme
 } from '@react-navigation/native'
 import { createNativeStackNavigator, type NativeStackNavigationProp } from '@react-navigation/native-stack'
-import { useCallback, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 
 import type { DevInitialView } from '../dev'
 import { ActivityScreen } from '../features/activity'
@@ -16,6 +16,7 @@ import { CronScreen } from '../features/cron'
 import { SettingsScreen } from '../features/settings'
 import { strings } from '../i18n/strings'
 import { useHermieLink } from '../platform/deep-link'
+import { onOpenChatRequest } from './open-chat-bus'
 import { GlassSurface, Wallpaper } from '../ui/glass'
 import { useTheme } from '../ui/theme'
 import { useShortcut } from '../ui/useShortcut'
@@ -150,6 +151,11 @@ export function CompactShell({ initial }: { initial?: DevInitialView } = {}) {
   )
 
   useHermieLink(link => openChat(link.bot))
+
+  // The same destination from a notification. `PushSync` sits beside the chat
+  // controller and cannot know which shell is mounted, so it asks through the
+  // bus rather than navigating — see `app/open-chat-bus.ts`.
+  useEffect(() => onOpenChatRequest(openChat), [openChat])
 
   // A navigator paints its own background over everything, including the
   // wallpaper, unless both the container theme and the screen say otherwise.

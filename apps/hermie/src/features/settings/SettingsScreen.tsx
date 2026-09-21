@@ -4,6 +4,9 @@ import { useState } from 'react'
 import { ScrollView, View } from 'react-native'
 
 import { chatStrings } from '../../chat-ui'
+import { useChatRuntime } from '../chats/ChatRuntime'
+import { NotificationsSection } from '../push/NotificationsSection'
+import { pushPlatform } from '../push/platform'
 import { useGateway } from '../../gateway'
 import { RefreshNotice } from '../../gateway/RefreshNotice'
 import { TransportNotice } from '../../gateway/TransportNotice'
@@ -43,6 +46,7 @@ export interface SettingsScreenProps {
 export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
   const theme = useTheme()
   const { canRefresh, config, status, signOut, changeGateway } = useGateway()
+  const runtime = useChatRuntime()
   const defaults = useSettingsStore(state => state.defaults)
   const setDefaults = useSettingsStore(state => state.setDefaults)
   const [showConnectionTest, setShowConnectionTest] = useState(initialPage === 'connection')
@@ -205,6 +209,10 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
             value={defaults.showThinking}
           />
         </InsetGroup>
+
+        {/* ADR-0017, and off until the reader says otherwise: nothing here asks
+            for permission or mints a token on mount. */}
+        <NotificationsSection available={pushPlatform.available} push={runtime?.push ?? null} />
 
         <AppearanceSection onOpenAdvanced={() => setShowThemes(true)} />
 

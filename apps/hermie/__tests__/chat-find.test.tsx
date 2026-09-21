@@ -17,7 +17,11 @@ import { useSettingsStore } from '../src/store/settings'
 import { renderScreen } from './support/render'
 
 let mockController: Record<string, jest.Mock>
-let mockRuntime: { controller: Record<string, jest.Mock>; bots: Record<string, never> }
+let mockRuntime: {
+  controller: Record<string, jest.Mock>
+  bots: Record<string, never>
+  push: { setOpenChat: jest.Mock }
+}
 
 jest.mock('../src/gateway', () => ({
   useGateway: () => ({ config: { baseUrl: 'https://gateway.example.com' }, http: null, status: 'ready' })
@@ -76,7 +80,7 @@ beforeEach(() => {
     setOption: jest.fn(async () => ({})),
     modelOptions: jest.fn(async () => [])
   }
-  mockRuntime = { bots: {}, controller: mockController }
+  mockRuntime = { bots: {}, controller: mockController, push: { setOpenChat: jest.fn() } }
 })
 
 describe('opening a chat on a search hit', () => {

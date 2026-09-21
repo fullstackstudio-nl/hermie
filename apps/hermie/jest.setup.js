@@ -70,3 +70,26 @@ jest.mock('react-native-webview', () => {
     WebView: props => React.createElement('RNCWebView', props)
   }
 })
+
+/**
+ * `expo-notifications`, which reaches for a native module the moment it is
+ * imported — `src/features/push/platform.ts` calls `setNotificationHandler` at
+ * module scope, so every screen that can show Settings would pull it in.
+ *
+ * The stand-in answers "nothing is permitted and nothing is registered", which
+ * is the state a device the reader has never answered the dialog on is actually
+ * in. A test that wants the other answer hands `PushSync` its own platform
+ * object instead: the whole point of `PushPlatform` is that nothing above it has
+ * to know this module exists.
+ */
+jest.mock('expo-notifications', () => ({
+  AndroidImportance: { DEFAULT: 3, MAX: 5 },
+  setNotificationHandler: jest.fn(),
+  setNotificationCategoryAsync: jest.fn(async () => undefined),
+  setNotificationChannelAsync: jest.fn(async () => undefined),
+  getPermissionsAsync: jest.fn(async () => ({ status: 'undetermined', canAskAgain: true })),
+  requestPermissionsAsync: jest.fn(async () => ({ status: 'undetermined', canAskAgain: true })),
+  getExpoPushTokenAsync: jest.fn(async () => ({ data: '' })),
+  addNotificationResponseReceivedListener: jest.fn(() => ({ remove: jest.fn() })),
+  getLastNotificationResponseAsync: jest.fn(async () => null)
+}))

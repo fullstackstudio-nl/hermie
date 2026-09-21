@@ -557,6 +557,31 @@ export const strings = {
       restartTimedOut: 'Hermie Web did not come back within a minute. Check its logs.'
     },
     status: 'Status',
+
+    /**
+     * ADR-0017. The wording is doing a job: a reader has to be able to tell,
+     * from this screen alone, that the notification will say a bot's NAME and
+     * nothing else unless they say otherwise.
+     */
+    notifications: {
+      header: 'NOTIFICATIONS',
+      enabled: 'Notifications',
+      enabledHint:
+        'Hermie Web watches your bots and sends a notification when one has news. It has to be running with --push.',
+      denied: 'Notifications are turned off for Hermie in your device settings. Turn them on there first.',
+      unavailable: 'This device cannot register for notifications. Nothing has been sent.',
+      webInsecure: 'The browser only offers notifications when Hermie Web is served over https.',
+      types: 'TELL ME ABOUT',
+      typeMessage: 'New message',
+      typeRequest: 'Needs input',
+      typeDm: 'Bot-to-bot',
+      typeCron: 'Routines',
+      typesHint: 'A bot answering, a bot asking permission, a message from another bot, and a routine’s delivery.',
+      preview: 'Show a preview',
+      previewHint:
+        'Off, a notification says which bot and what happened. On, it carries the message as well — and a lock screen is where it will be read.'
+    },
+
     account: 'ACCOUNT',
     signOut: 'Sign out',
     signOutHint: 'Clears the stored credentials and keeps the gateway address.',

@@ -24,7 +24,11 @@ let mockController: Record<string, jest.Mock>
 // One runtime object per test, not one per render: `useChat` re-opens the chat
 // whenever the runtime's identity changes, and a factory that built a fresh
 // object every render re-ran `openChat` on every single re-render.
-let mockRuntime: { controller: Record<string, jest.Mock>; bots: Record<string, never> }
+let mockRuntime: {
+  controller: Record<string, jest.Mock>
+  bots: Record<string, never>
+  push: { setOpenChat: jest.Mock }
+}
 
 jest.mock('../src/gateway', () => ({
   useGateway: () => ({ config: { baseUrl: 'https://gateway.example.com' }, http: null, status: 'ready' })
@@ -113,7 +117,7 @@ const renderChat = () => renderScreen(<ChatScreen bot="researcher" />)
 
 beforeEach(() => {
   mockController = makeController()
-  mockRuntime = { bots: {}, controller: mockController }
+  mockRuntime = { bots: {}, controller: mockController, push: { setOpenChat: jest.fn() } }
   attachments.openAppSettings.mockClear()
   attachments.pickAttachment.mockReset().mockResolvedValue(null)
   seedChat()

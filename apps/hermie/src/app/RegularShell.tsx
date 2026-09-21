@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 
 import type { DevInitialView } from '../dev'
@@ -9,6 +9,7 @@ import { CronScreen } from '../features/cron'
 import { SettingsScreen } from '../features/settings'
 import { strings } from '../i18n/strings'
 import { useHermieLink } from '../platform/deep-link'
+import { onOpenChatRequest } from './open-chat-bus'
 import { useSafeAreaInsets } from '../platform/safe-area'
 import { useChatLayoutStore } from '../store/chat-layout'
 import { GlassDepthProvider, GlassSurface, Wallpaper } from '../ui/glass'
@@ -117,6 +118,10 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
   // shell uses, landing on the same `openBot` a tap on a row lands on — so a
   // link cannot reach a state a finger could not.
   useHermieLink(link => openBot(link.bot))
+
+  // And the same from a notification, through the bus, for the reason
+  // `app/open-chat-bus.ts` gives.
+  useEffect(() => onOpenChatRequest(openBot), [openBot])
 
   // A cron card in the transcript opens the crons panel ON that cron. Opening
   // the panel any other way clears the target, so the next visit lands on the
