@@ -544,6 +544,22 @@ export const strings = {
      * and stopped there, without ever saying which endpoint.
      */
     stopped: {
+      /**
+       * Stepping across to another configured gateway, from the card that says
+       * this one cannot be used.
+       *
+       * Offered on every stop rather than only on the one that named it: a
+       * reader looking at a dead machine is a reader for whom "use the other
+       * one" is the fastest true answer, whatever killed this one. The rows
+       * name the gateway rather than describing the act, because the reader is
+       * choosing between machines and not between verbs.
+       */
+      others: 'OTHER GATEWAYS',
+      othersHint: 'Hermie talks to one gateway at a time. This one keeps its conversations.',
+      switchTo: (name: string) => `Connect to ${name}`,
+      /** Above the title, when the device knows more than one gateway. */
+      onGateway: (name: string) => name,
+
       titles: {
         auth: 'Signed out',
         config: 'This gateway refused the connection',

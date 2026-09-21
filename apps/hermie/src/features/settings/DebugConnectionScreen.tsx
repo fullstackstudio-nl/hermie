@@ -9,7 +9,7 @@ import { formatTranscriptDiagnostics } from '@hermie/transcript'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Platform, Pressable, ScrollView, View } from 'react-native'
 
-import { createGatewayConnection } from '../../gateway'
+import { createGatewayConnection, useGateway } from '../../gateway'
 // Straight from the store rather than the barrel: the barrel pulls in the whole
 // provider, and a screen test that stubs it should not have to stub the store too.
 import { useConnectionStore } from '../../gateway/store'
@@ -88,6 +88,16 @@ export function formatAuthEvent(event: AuthEvent): string {
 function AuthTimelineBlock() {
   const theme = useTheme()
   const timeline = useConnectionStore(state => state.authTimeline)
+  /*
+    Which gateway's ring this is.
+
+    There is one ring per gateway now, and the events it holds — a refused
+    refresh, a 4401, a token that was not there — are sentences about one
+    machine. A screen that prints them without saying which one offers a
+    diagnosis that could belong to either, which on a device with two is worse
+    than offering none.
+  */
+  const gateway = useGateway().gateway
   const reason = timeline.lastSignOut
   /*
     Whether a front door is configured, and nothing else about it.
@@ -103,6 +113,12 @@ function AuthTimelineBlock() {
   return (
     <View style={{ gap: theme.space.xxs }}>
       <Text variant="name">Auth timeline</Text>
+
+      {gateway ? (
+        <Text color="textMuted" testID="debug-auth-gateway" variant="meta">
+          {`gateway: ${gateway.name} · ${gateway.address}`}
+        </Text>
+      ) : null}
 
       {frontDoor ? (
         <Text color="textMuted" testID="debug-front-door" variant="meta">
