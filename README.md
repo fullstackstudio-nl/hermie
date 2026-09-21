@@ -106,6 +106,10 @@ no third-party network call. The only address Hermie knows is the one you typed.
   other — nothing is sent until you send it. On iPhone, iPad, Android and the Mac
   the transcription happens on the device; a browser's speech API does not offer
   that guarantee, and one without the API shows no microphone at all.
+- **Voice mode.** Hands-free: it listens, sends what you said, reads the answer
+  aloud and listens again. It shows what it heard for a second before sending,
+  with a cancel, and it never sends an empty message. Tap to interrupt a reply,
+  swipe down or press Escape to leave.
 - **Take the conversation with you.** Export a chat as Markdown or plain text,
   into the share sheet on a phone or the Mac and as a download in a browser. What
   you get is what is on screen: a chat you have set to Quiet exports the quiet

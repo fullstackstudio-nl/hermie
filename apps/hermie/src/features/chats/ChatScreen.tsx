@@ -88,6 +88,8 @@ import { countsAsRead, readWatermark } from './read-watermark'
 import { regenerateLastTurn } from './regenerate'
 import { useComposerDictation } from '../voice/useComposerDictation'
 import { useDictationLanguages } from '../voice/useDictationLanguages'
+import { useVoiceMode } from '../voice/useVoiceMode'
+import { VoiceOverlay } from '../voice/VoiceOverlay'
 import { useReadAloud } from '../voice/useReadAloud'
 import { useVoiceSettingsStore } from '../voice/voice-settings'
 import { ChatConnectingState, ReconnectPill } from './ConnectionState'
@@ -1475,10 +1477,26 @@ function Conversation({
    * only it has (which chat, and what is visible in it) and hands the result to
    * the transcript's menu and to the options sheet.
    */
-  const readAloud = useReadAloud({ botName, items: chat.items, turnRunning: chat.turnActive })
+  /**
+   * Voice mode: the hands-free loop, and the overlay it draws.
+   *
+   * Declared before `useReadAloud` because that one is SUSPENDED while this is
+   * active — voice mode reads every reply by design, and a chat with "Read
+   * replies aloud" switched on would otherwise read the same reply again
+   * underneath it, on the one speaker the device has.
+   */
+  const voiceMode = useVoiceMode({ items: chat.items, send, turnRunning: chat.turnActive })
+
+  const readAloud = useReadAloud({
+    botName,
+    items: chat.items,
+    suspended: voiceMode.active,
+    turnRunning: chat.turnActive
+  })
   const autoRead = useVoiceSettingsStore(state => state.autoReadByChat[botName] === true)
   const voiceRate = useVoiceSettingsStore(state => state.rate)
   const voiceLanguage = useVoiceSettingsStore(state => state.dictationLanguage)
+  const voiceConfirm = useVoiceSettingsStore(state => state.confirmBeforeSending)
 
   /**
    * The composer's microphone.
@@ -1488,7 +1506,11 @@ function Conversation({
    * survives navigating away, it is what the store persists, and it can be
    * edited before it is sent. Dictation never sends anything.
    */
-  const dictation = useComposerDictation({ onChangeText: chat.setDraft, value: chat.draft })
+  const dictation = useComposerDictation({
+    onChangeText: chat.setDraft,
+    value: chat.draft,
+    ...(voiceMode.available ? { onOpenVoiceMode: voiceMode.open } : {})
+  })
   const dictationLanguages = useDictationLanguages()
 
   /**
@@ -2019,7 +2041,21 @@ function Conversation({
                     is only drawn while there is something to stop.
                   */
                   onChangeAutoRead: (value: boolean) => useVoiceSettingsStore.getState().setAutoRead(botName, value),
+                  onChangeConfirmBeforeSending: (value: boolean) =>
+                    useVoiceSettingsStore.getState().setConfirmBeforeSending(value),
                   onChangeRate: (value: number) => useVoiceSettingsStore.getState().setRate(value),
+                  confirmBeforeSending: voiceConfirm,
+                  ...(voiceMode.available
+                    ? {
+                        onOpenVoiceMode: () => {
+                          // The sheet goes first: an overlay opening over an
+                          // open sheet is two modals deep, which is where a
+                          // `Modal` stops behaving the same on all four targets.
+                          closeManualSheet()
+                          voiceMode.open()
+                        }
+                      }
+                    : {}),
                   onStopReading: readAloud.stop,
                   rate: voiceRate,
                   reading: readAloud.reading,
@@ -2049,6 +2085,25 @@ function Conversation({
           yolo: chat.info?.yolo === true
         }}
         {...(request ? { request } : {})}
+      />
+
+      {/*
+        Voice mode, over everything.
+
+        A `Modal` of its own rather than a fifth case in `ChatSheetHost`: that
+        host owns the four BOTTOM SHEETS and closes one before opening the next,
+        and this is not a sheet — it is full screen, it has no page stack, and it
+        stays up across a whole conversation. What it does share is the rule that
+        only one of them is on screen at a time, which is why opening it from the
+        options sheet closes that sheet first.
+      */}
+      <VoiceOverlay
+        botName={display}
+        onCancel={voiceMode.cancel}
+        onInterrupt={voiceMode.interrupt}
+        onLeave={voiceMode.leave}
+        state={voiceMode.state}
+        visible={voiceMode.active}
       />
     </Screen>
   )

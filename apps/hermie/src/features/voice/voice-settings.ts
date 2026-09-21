@@ -44,6 +44,15 @@ export interface VoiceSettingsState {
    * in are routinely different, and the reply's is guessed per message anyway.
    */
   dictationLanguage: string
+  /**
+   * Show the transcript for a moment before voice mode sends it.
+   *
+   * On by default, and that default is the interesting half: voice mode SENDS
+   * what it heard, and a recognizer that mishears turns a hands-free loop into
+   * a machine that says things on the reader's behalf. A second to cancel is
+   * cheap; an un-sendable message is not.
+   */
+  confirmBeforeSending: boolean
   /** Stop reading when the app goes to the background. */
   stopOnBackground: boolean
   /** Per chat: read each completed reply without being asked. Off unless present. */
@@ -52,6 +61,7 @@ export interface VoiceSettingsState {
   hydrate: () => Promise<void>
   setRate: (rate: number) => void
   setDictationLanguage: (language: string) => void
+  setConfirmBeforeSending: (value: boolean) => void
   setStopOnBackground: (value: boolean) => void
   setAutoRead: (botName: string, value: boolean) => void
   reset: () => void
@@ -60,6 +70,7 @@ export interface VoiceSettingsState {
 interface PersistedVoice {
   rate?: number
   dictationLanguage?: string
+  confirmBeforeSending?: boolean
   stopOnBackground?: boolean
   autoReadByChat?: Record<string, boolean>
 }
@@ -113,14 +124,15 @@ function persist(state: PersistedVoice): void {
 
 export const useVoiceSettingsStore = create<VoiceSettingsState>((set, get) => {
   const save = (): void => {
-    const { autoReadByChat, dictationLanguage, rate, stopOnBackground } = get()
+    const { autoReadByChat, confirmBeforeSending, dictationLanguage, rate, stopOnBackground } = get()
 
-    persist({ autoReadByChat, dictationLanguage, rate, stopOnBackground })
+    persist({ autoReadByChat, confirmBeforeSending, dictationLanguage, rate, stopOnBackground })
   }
 
   return {
     rate: DEFAULT_RATE,
     dictationLanguage: DICTATION_AUTO,
+    confirmBeforeSending: true,
     stopOnBackground: true,
     autoReadByChat: {},
     loaded: false,
@@ -131,6 +143,7 @@ export const useVoiceSettingsStore = create<VoiceSettingsState>((set, get) => {
       set({
         rate: asRate(stored?.rate) ?? DEFAULT_RATE,
         dictationLanguage: asLanguage(stored?.dictationLanguage) ?? DICTATION_AUTO,
+        confirmBeforeSending: stored?.confirmBeforeSending !== false,
         stopOnBackground: stored?.stopOnBackground !== false,
         autoReadByChat: asAutoRead(stored?.autoReadByChat),
         loaded: true
@@ -144,6 +157,11 @@ export const useVoiceSettingsStore = create<VoiceSettingsState>((set, get) => {
 
     setDictationLanguage(language) {
       set({ dictationLanguage: asLanguage(language) ?? DICTATION_AUTO })
+      save()
+    },
+
+    setConfirmBeforeSending(confirmBeforeSending) {
+      set({ confirmBeforeSending })
       save()
     },
 
@@ -169,6 +187,7 @@ export const useVoiceSettingsStore = create<VoiceSettingsState>((set, get) => {
       set({
         rate: DEFAULT_RATE,
         dictationLanguage: DICTATION_AUTO,
+        confirmBeforeSending: true,
         stopOnBackground: true,
         autoReadByChat: {},
         loaded: false

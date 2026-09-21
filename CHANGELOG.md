@@ -41,6 +41,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The dictation language follows the device by default, and the picker offers the languages the
   device reports it has installed offline.
 
+- **Voice mode.** A full-screen overlay that runs the conversation hands-free: listen, send, read the
+  reply aloud, listen again. It is reached from the chat's options sheet, and from the composer's
+  microphone as an accessibility action — deliberately **not** from a long press on that button,
+  because a long press is how you hold the mic to talk and a menu there would take the gesture away
+  from the feature the button exists for. One ring shows what is happening: it grows with your voice
+  while the microphone is open and breathes slowly while a reply is being written or read. Under
+  Reduce Motion it does not move at all.
+
+  Four rules make it usable rather than alarming. **It never sends an empty transcript** — a pause
+  that produced nothing goes round again instead of asking the bot to answer silence. **It shows
+  what it heard for a second before sending**, with a cancel under it, and that is on by default:
+  voice mode speaks for you, and a recognizer that mishears should not be able to put words on a
+  conversation with no moment to stop it. **A silence ends the utterance** — the recognizer's own
+  final result where it gives one, and 1.5 s after the last thing heard where it does not, with the
+  timer armed only once something HAS been heard so a slow start is not cut off. And **leaving stops
+  everything**: swipe down or press Escape, from any phase. A tap does not leave — it interrupts the
+  reply being read, which is the commonest thing you want in a conversation. While voice mode is
+  running, "Read replies aloud" stands down, so one device with one speaker never reads the same
+  reply twice.
+
 - **Edit and resend, and Regenerate.** A message's own menu gains two lines that start a turn: on one
   of your own turns, **Edit and resend** puts the text back in the composer with the attachment
   references it carried — the turn already in the conversation stays exactly where it is, which is

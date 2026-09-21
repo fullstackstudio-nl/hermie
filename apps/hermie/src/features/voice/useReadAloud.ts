@@ -33,6 +33,17 @@ export interface UseReadAloudOptions {
   /** The VISIBLE transcript — already through the view filters. */
   items: readonly ReadableEntry[]
   turnRunning: boolean
+  /**
+   * Something else owns the speaker — voice mode is running.
+   *
+   * The automatic read keeps BOOKKEEPING while suspended and simply does not
+   * speak: every reply that arrives is marked as offered, so leaving voice mode
+   * does not set the chat reading aloud everything it answered while the reader
+   * was talking to it. Two speakers on one device is the failure this prevents,
+   * and it is not hypothetical — voice mode reads every reply by design, and a
+   * chat with "Read replies aloud" on would read the same one again underneath.
+   */
+  suspended?: boolean
   /** Swappable for tests; the default is the platform seam. */
   engine?: SpeechEngine
 }
@@ -81,6 +92,7 @@ export function useReadAloud({
   botName,
   engine = speechEngine,
   items,
+  suspended = false,
   turnRunning
 }: UseReadAloudOptions): UseReadAloudResult {
   const [state, setState] = useState<ReaderState>(IDLE)
@@ -150,9 +162,25 @@ export function useReadAloud({
 
     for (const candidate of autoReadCandidates(items, offered.current, turnRunning)) {
       offered.current.add(candidate.id)
-      reader.enqueue(utteranceFor(candidate.id, candidate.text))
+
+      if (!suspended) {
+        reader.enqueue(utteranceFor(candidate.id, candidate.text))
+      }
     }
-  }, [autoRead, botName, items, reader, turnRunning])
+  }, [autoRead, botName, items, reader, suspended, turnRunning])
+
+  /*
+    Anything already in flight goes when voice mode takes over.
+
+    The bookkeeping above stops the NEXT reply; this stops the one that was
+    being read when the reader opened the overlay, which would otherwise carry
+    on talking underneath it.
+  */
+  useEffect(() => {
+    if (suspended) {
+      reader.stop()
+    }
+  }, [reader, suspended])
 
   const toggle = useCallback(
     (id: string, markdown: string) => {

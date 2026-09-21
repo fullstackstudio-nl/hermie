@@ -120,6 +120,18 @@ export interface ChatOptionsSheetProps {
     reading: boolean
     onStopReading: () => void
     /**
+     * Voice mode: the hands-free loop, where the platform can do both halves.
+     *
+     * This sheet is the primary way in, and deliberately so. The composer's mic
+     * cannot carry it on a long press — a long press is how you hold the mic to
+     * talk — so a row here and an accessibility action on the button are the two
+     * doors. Absent where the platform can speak but not listen, or the reverse.
+     */
+    onOpenVoiceMode?: () => void
+    /** Show what was heard for a moment before voice mode sends it. */
+    confirmBeforeSending: boolean
+    onChangeConfirmBeforeSending: (value: boolean) => void
+    /**
      * The dictation half, or nothing where the platform cannot listen.
      *
      * Separate from the speaking half because the two capabilities really are
@@ -698,6 +710,27 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
                       : languageLabel(props.voice.dictation.language)
                   }
                 />
+              ) : null}
+              {/*
+                Under the two settings it depends on, not above them: a reader
+                who has just turned the confirmation off should see the row it
+                affects rather than having already passed it.
+              */}
+              {props.voice.onOpenVoiceMode ? (
+                <>
+                  <SwitchRow
+                    hint={chatStrings.voice.confirmBeforeSendingHint}
+                    label={chatStrings.voice.confirmBeforeSending}
+                    onChange={props.voice.onChangeConfirmBeforeSending}
+                    testID="option-voice-confirm"
+                    value={props.voice.confirmBeforeSending}
+                  />
+                  <InsetButtonRow
+                    onPress={props.voice.onOpenVoiceMode}
+                    testID="option-voice-mode"
+                    title={chatStrings.voice.modeStart}
+                  />
+                </>
               ) : null}
               {props.voice.reading ? (
                 <InsetButtonRow
