@@ -1,6 +1,8 @@
 /**
- * The one place `marked` is imported from, because on Hermes one of its rules
- * does not do what it says.
+ * The one place `marked` is imported from, because two of its inline rules have
+ * to be rewritten before any lexer reads them.
+ *
+ * ## 1. `blockSkip`, which on Hermes does not do what it says
  *
  * `blockSkip` is the rule marked uses to MASK inline code, links and tags out of
  * a line before it looks for the closing half of an emphasis run. The mask has
@@ -32,6 +34,11 @@
  * marked upgrade changes the pattern's shape.
  *
  * Worth filing upstream against Hermes; marked is doing nothing wrong.
+ *
+ * ## 2. Strikethrough, which GFM opens on a SINGLE tilde
+ *
+ * That one is marked being faithful to GFM, and GFM being wrong for a chat app.
+ * See `restrictStrikethroughToDoubleTilde` below.
  */
 import { Lexer, marked } from 'marked'
 
@@ -104,7 +111,68 @@ export function patchBackreferencedCodeRuns(): void {
   }
 }
 
+/**
+ * GFM's optional second tilde: the one character that makes `~x~` a deletion.
+ *
+ * It appears in all three strikethrough rules and nowhere else in the inline
+ * rule set — `del` (the whole construct), `delLDelim` (the opening run) and
+ * `delRDelim` (six capturing copies of the closing run). The tokenizer counts
+ * the tildes it found on the left and demands the same count on the right, so
+ * rewriting every copy to a fixed pair says one thing: two tildes open, two
+ * close, and a lone `~` is a character.
+ */
+const OPTIONAL_SECOND_TILDE = /~~\?/g
+
+/** `~~` where marked wrote `~~?`, or the pattern back unchanged. */
+export function withoutSingleTildeStrikethrough(pattern: string): string {
+  return pattern.replace(OPTIONAL_SECOND_TILDE, '~~')
+}
+
+/**
+ * Make `~~text~~` the only strikethrough, on every rule set a lexer can pick.
+ *
+ * GFM says a single `~` pair deletes, and marked implements exactly that. In
+ * prose that is nearly always right and in a chat with an agent it is nearly
+ * always wrong, because the text people paste is shell:
+ *
+ * ```text
+ * root@hermes:~# stat -c '%u:%g %n' /usr/bin/sudo
+ * 0:0 /usr/bin/sudo
+ * root@hermes:~#
+ * ```
+ *
+ * Two prompts, two tildes, and everything between them renders struck through
+ * with both tildes eaten — the reader loses the marker AND the text is crossed
+ * out as if the agent had retracted it. A path like `~/dir` in a sentence pairs
+ * with the next `~` just as happily.
+ *
+ * Nothing real is lost. A model that means strikethrough writes `~~`; a person
+ * who types one tilde means a tilde. The rewrite is in the lexer rather than in
+ * `preprocess`, so it holds for every surface at once — bubbles, the selectable
+ * flattening in `attributed.ts` and the block splitter — and for what the user
+ * typed exactly as much as for what the agent replied.
+ *
+ * In place, and idempotent, for the same reasons as the rewrite above: `~~` no
+ * longer matches the construct that selects it.
+ */
+export function restrictStrikethroughToDoubleTilde(): void {
+  for (const rules of Object.values(Lexer.rules.inline) as Record<string, RegExp>[]) {
+    for (const [name, pattern] of Object.entries(rules)) {
+      if (!(pattern instanceof RegExp)) {
+        continue
+      }
+
+      const rewritten = withoutSingleTildeStrikethrough(pattern.source)
+
+      if (rewritten !== pattern.source) {
+        rules[name] = new RegExp(rewritten, pattern.flags)
+      }
+    }
+  }
+}
+
 patchBackreferencedCodeRuns()
+restrictStrikethroughToDoubleTilde()
 
 export { marked }
 export type { Token, Tokens } from 'marked'

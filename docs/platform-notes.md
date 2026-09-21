@@ -6311,3 +6311,39 @@ this pass spent its room on the two items above.
   a synchronous dispatch loop reads the transform before `Animated` has
   committed a frame.
 - **Web Push**, still, and for the reason the second pass demonstrated.
+
+## Three reports from Hermie Web 0.1.1 (2026-09-21, last)
+
+One screenshot carried two of them: a `stat` run the owner had pasted, drawn
+struck through, and the same paste standing in the chat twice after a refresh.
+The third was the one the QA passes above kept deferring — `Show more` moving
+the page.
+
+### A single tilde is not a deletion, whatever GFM says
+
+GFM opens strikethrough on ONE `~` pair, and `marked` implements exactly that.
+In prose it is nearly always right; in a chat with an agent it is nearly always
+wrong, because the text people paste is shell. Two prompts:
+
+```text
+root@hermes:~# stat -c '%u:%g %n' /usr/bin/sudo
+0:0 /usr/bin/sudo
+root@hermes:~#
+```
+
+is one `del` token from the first `~` to the last, so the reader loses both
+tildes AND sees the output crossed out as though the agent had retracted it.
+`~/dir` in a sentence pairs with the next `~` just as happily.
+
+The rewrite is in `marked-compat.ts`, beside the `blockSkip` one, and it is one
+character: marked spells the optional second tilde `~~?` and it appears in
+exactly three inline rules — `del`, `delLDelim`, `delRDelim` — and nowhere else
+in the rule set. The tokenizer counts the tildes it found on the left and
+demands the same count on the right, so rewriting every copy to a fixed pair
+says one thing: two open, two close, a lone `~` is a character. `~~gone~~` is
+untouched, `~~cd ~/old~~` still strikes across the tilde inside it, and because
+the change is in the lexer it holds for the owner's own bubble as much as for a
+reply — which is where this one landed.
+
+`plain-text.ts`, the notification-preview stripper, already required `~{2}`. It
+has been right about this the whole time.

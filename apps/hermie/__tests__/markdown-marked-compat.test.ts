@@ -1,16 +1,23 @@
 /**
- * The rule rewrite that makes emphasis-around-code work on Hermes.
+ * The two inline rules this app rewrites before a lexer reads them.
  *
- * Node's regex engine gets marked's original pattern right, so no test running
- * here can fail the way the device failed — which is exactly the trap that let
- * `**\`x\` y**` print its asterisks on a phone through two green rounds. What a
- * Node test CAN hold still is the claim the rewrite makes: that it masks the
- * same spans marked's own rule masks. If a marked upgrade moves the pattern,
- * the rewrite silently stops applying and the equivalence below is what says so.
+ * The first makes emphasis-around-code work on Hermes. Node's regex engine gets
+ * marked's original pattern right, so no test running here can fail the way the
+ * device failed — which is exactly the trap that let `**\`x\` y**` print its
+ * asterisks on a phone through two green rounds. What a Node test CAN hold
+ * still is the claim the rewrite makes: that it masks the same spans marked's
+ * own rule masks. If a marked upgrade moves the pattern, the rewrite silently
+ * stops applying and the equivalence below is what says so.
+ *
+ * The second narrows strikethrough to `~~`. That one DOES fail here when it
+ * regresses, and it is tested on the rendered screen as well
+ * (`chat-ui/markdown-strikethrough.test.tsx`); what belongs here is the same
+ * upgrade tripwire — a rule set where the optional tilde survived is a rule set
+ * where the rewrite stopped selecting the pattern.
  */
 import { Lexer } from 'marked'
 
-import { withoutAmbiguousCodeRuns } from '../src/markdown/marked-compat'
+import { withoutAmbiguousCodeRuns, withoutSingleTildeStrikethrough } from '../src/markdown/marked-compat'
 
 /** marked's own rule, as published, before this app touches it. */
 const ORIGINAL =
@@ -92,5 +99,39 @@ describe('the rule marked will actually use', () => {
     for (const rules of Object.values(Lexer.rules.inline) as Record<string, RegExp>[]) {
       expect(rules.blockSkip?.source).not.toContain('\\k<')
     }
+  })
+
+  /**
+   * The strikethrough rules are three — the whole construct, the opening run
+   * and the six copies of the closing run — and the optional tilde has to be
+   * gone from all of them. One survivor is enough to delete a terminal paste
+   * again, because the tokenizer only demands that the two ends agree.
+   */
+  it('opens strikethrough on nothing shorter than two tildes', () => {
+    let rewritten = 0
+
+    for (const rules of Object.values(Lexer.rules.inline) as Record<string, RegExp>[]) {
+      for (const [name, pattern] of Object.entries(rules)) {
+        // Not every entry is a pattern: marked parks a `{ exec: () => null }`
+        // stub where a rule set has no rule of that name.
+        if (!(pattern instanceof RegExp)) {
+          continue
+        }
+
+        expect(pattern.source).not.toContain('~~?')
+
+        if (/^del/.test(name)) {
+          rewritten += 1
+        }
+      }
+    }
+
+    // Two rule sets carry strikethrough — `gfm` and `breaks` — and three rules
+    // each. A count of zero would pass every assertion above by finding nothing.
+    expect(rewritten).toBe(6)
+  })
+
+  it('gives a pattern with no optional tilde back unchanged', () => {
+    expect(withoutSingleTildeStrikethrough('^~~(?=[^\\s~])')).toBe('^~~(?=[^\\s~])')
   })
 })
