@@ -1861,9 +1861,29 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       }
 
       const limit = Number.parseInt(url.searchParams.get('limit') ?? '200', 10)
-      const offset = Number.parseInt(url.searchParams.get('offset') ?? '0', 10)
-      const order = url.searchParams.get('order') ?? 'latest'
-      const rows = order === 'latest' ? session.messages.slice(-limit) : session.messages.slice(0, limit)
+      const offset = Math.max(0, Number.parseInt(url.searchParams.get('offset') ?? '0', 10) || 0)
+      // `order` defaults to `oldest` upstream, not `latest`. The fake said
+      // `latest`, which nothing noticed because every caller sends the parameter.
+      const order = url.searchParams.get('order') ?? 'oldest'
+      /*
+        `offset` used to be parsed, echoed in `pagination` and then ignored —
+        a fake advertising paging it did not do, which is the one kind of
+        infidelity that cannot be caught by a test written against the fake.
+
+        It skips from the end `order` names: from the NEWEST row for `latest`,
+        from the oldest otherwise. Either way the page comes back oldest first.
+        Measured against a real gateway on 2026-09-21: on a six-row session,
+        `?limit=2&order=latest&offset=2` answers the third and fourth rows, in
+        that order, and an offset past the end answers an empty list rather than
+        an error.
+      */
+      const rows =
+        order === 'latest'
+          ? session.messages.slice(
+              Math.max(0, session.messages.length - offset - limit),
+              Math.max(0, session.messages.length - offset)
+            )
+          : session.messages.slice(offset, offset + limit)
       // `sessions.py::_get_session_messages` — the envelope names the session it
       // read and pages with `pagination`. It has no `count`, which is what the
       // fake used to send and what nothing on either side ever read.

@@ -146,6 +146,16 @@ export const chatStrings = {
     jumpToLatest: 'Jump to latest',
     newMessages: (count: number) => `${count} new`,
     empty: 'No messages yet',
+    /**
+     * The row at the far end while a page of older history is in the air.
+     *
+     * It is a row rather than a spinner over the list because it is at the TOP
+     * of an inverted list, where a floating overlay would sit on the oldest
+     * message the reader is currently reading. The ellipsis is the point: this
+     * appears when the reader has scrolled to the end of what is loaded, and it
+     * says the end is not the beginning.
+     */
+    loadingEarlier: 'Loading earlier…',
     answer: 'Answer',
     answered: 'answered'
   },

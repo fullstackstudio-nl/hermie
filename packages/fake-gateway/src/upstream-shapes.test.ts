@@ -250,6 +250,41 @@ describe('GET /api/sessions/{id}/messages — sessions.py::_get_session_messages
       expect(row.row_id).toBeUndefined()
     }
   })
+
+  /**
+   * `offset` skips from the end `order` names, and the page comes back oldest
+   * first either way.
+   *
+   * Measured against a real gateway (0.21.3) on 2026-09-21, because this route
+   * is not vendored here and the fake used to parse this parameter, echo it in
+   * `pagination` and then ignore it — a fake advertising paging it did not do,
+   * which is the one kind of infidelity a test written against the fake cannot
+   * catch. The app's older-history paging rests on exactly this.
+   */
+  it('pages from the end `order` names, and answers oldest first', async () => {
+    const session = await chat()
+    const all = (await get(`/api/sessions/${encodeURIComponent(session)}/messages?limit=500&order=oldest`)) as {
+      messages: { content: string }[]
+    }
+
+    expect(all.messages.length).toBeGreaterThan(2)
+
+    const page = async (query: string) =>
+      (
+        (await get(`/api/sessions/${encodeURIComponent(session)}/messages?${query}`)) as {
+          messages: { content: string }[]
+        }
+      ).messages.map(row => row.content)
+
+    const contents = all.messages.map(row => row.content)
+
+    expect(await page('limit=1&order=latest')).toEqual(contents.slice(-1))
+    expect(await page('limit=1&order=latest&offset=1')).toEqual(contents.slice(-2, -1))
+    expect(await page('limit=2&order=latest&offset=1')).toEqual(contents.slice(-3, -1))
+    expect(await page('limit=1&order=oldest&offset=1')).toEqual(contents.slice(1, 2))
+    // Past the end is an empty list, not an error.
+    expect(await page('limit=5&order=latest&offset=9999')).toEqual([])
+  })
 })
 
 describe('GET /api/sessions/search — sessions.py::search_sessions', () => {

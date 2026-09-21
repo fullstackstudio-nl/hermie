@@ -300,9 +300,11 @@ function Conversation({
   const [away, setAway] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [highlightId, setHighlightId] = useState<string | undefined>(undefined)
-  /** The query this screen has already answered, and the one it has already expanded for. */
+  /** The query this screen has already answered, and how far it has paged back for one. */
   const searchedFor = useRef<string | undefined>(undefined)
-  const expandedFor = useRef<string | undefined>(undefined)
+  const expandedFor = useRef<{ query: string | undefined; pages: number }>({ query: undefined, pages: 0 })
+  /** A page of older history is in the air: the list draws a row that says so. */
+  const [loadingOlder, setLoadingOlder] = useState(false)
   const [pendingModel, setPendingModel] = useState<{ value: string; message?: string } | null>(null)
   const [transcript, setTranscript] = useState<SubagentTranscript | null>(null)
   const [agentsNotice, setAgentsNotice] = useState<string | null>(null)
@@ -488,13 +490,23 @@ function Conversation({
    * thing to tell the reader:
    *
    *  - found: scroll to it and light it up for a moment;
-   *  - not found and there is more history to read: read it (once) and look
-   *    again, which is the only paging this app has — see
-   *    `ChatController.expandHistory`;
-   *  - not found and there is nothing more: say so. Scrolling to the bottom
-   *    with no explanation is how a working search reads as a broken one.
+   *  - not found and there is more history to read: read one page further back
+   *    and look again. The effect re-runs when the transcript grows, so that is
+   *    a loop without being written as one, and it walks back a page at a time
+   *    until the row turns up;
+   *  - not found and there is nothing more, or the walk has gone far enough:
+   *    say so. Scrolling to the bottom with no explanation is how a working
+   *    search reads as a broken one.
    *
-   * Both refs are keyed on the QUERY rather than being booleans, so opening the
+   * The walk is BOUNDED, and the bound is not timidity. The gateway's index is
+   * built over the JSON-encoded message and this searches the projected item, so
+   * a hit on a tool's arguments can never be found here however far back it
+   * reads — an unbounded loop on that query would page to the start of a
+   * thousand-turn conversation and then apologise anyway. `findExhausted` is the
+   * sentence for both ways of stopping, because they are the same fact to the
+   * reader.
+   *
+   * The refs are keyed on the QUERY rather than being booleans, so opening the
    * same chat from a second search starts the whole sequence again.
    */
   useEffect(() => {
@@ -518,24 +530,31 @@ function Conversation({
       return
     }
 
-    if (expandedFor.current !== findText) {
-      expandedFor.current = findText
+    const walked = expandedFor.current.query === findText ? expandedFor.current.pages : 0
 
-      void runtime?.controller
-        .expandHistory(botName)
-        .then(grew => {
-          if (!grew && searchedFor.current !== findText) {
-            searchedFor.current = findText
-            setNotice(strings.chat.findMissed(findText))
-          }
-        })
-        .catch(() => undefined)
+    if (walked >= FIND_PAGE_LIMIT) {
+      searchedFor.current = findText
+      setNotice(strings.chat.findExhausted(findText))
 
       return
     }
 
-    searchedFor.current = findText
-    setNotice(strings.chat.findMissed(findText))
+    expandedFor.current = { query: findText, pages: walked + 1 }
+
+    void runtime?.controller
+      .loadOlder(botName)
+      .then(outcome => {
+        if (outcome === 'grew' || searchedFor.current === findText) {
+          // It grew: this effect runs again on the new items and looks again.
+          return
+        }
+
+        searchedFor.current = findText
+        // `start` and `unavailable` are the same sentence to a reader: this is
+        // everything there is, and the words are not in it.
+        setNotice(walked ? strings.chat.findExhausted(findText) : strings.chat.findMissed(findText))
+      })
+      .catch(() => undefined)
   }, [botName, chat.hydration, chat.items, findText, runtime])
 
   // The highlight is a moment, not a state: it says "here", and a row that
@@ -579,6 +598,28 @@ function Conversation({
    * (`findDmCounterpart`). It refuses rather than guesses, and a refusal just
    * means the chat opens at the bottom the way it always did.
    */
+  /**
+   * The reader reached the far end: read one page further back.
+   *
+   * The list fires this more than once while a page is in the air — that is what
+   * `onEndReachedThreshold` does — and the controller refuses the second call
+   * rather than fetching the same offset twice, so this is free to be eager.
+   * `loadingOlder` is only the ROW: it says a page is coming, and it is set
+   * before the request and cleared after it whatever the answer was, because a
+   * spinner that outlives its request is worse than no spinner.
+   */
+  const loadOlder = useCallback(() => {
+    if (!runtime?.controller) {
+      return
+    }
+
+    setLoadingOlder(true)
+    void runtime.controller
+      .loadOlder(botName)
+      .catch(() => undefined)
+      .finally(() => setLoadingOlder(false))
+  }, [botName, runtime])
+
   const openBot = useCallback(
     (handle: string, from?: { kind: 'bot_dm_in' | 'bot_dm_out'; at?: number; text?: string }) => {
       const names = Object.keys(useBotsStore.getState().byName)
@@ -1233,7 +1274,8 @@ function Conversation({
             images={images}
             items={chat.items}
             newMessageCount={newCount}
-            onEndReached={noop}
+            loadingOlder={loadingOlder}
+            onEndReached={loadOlder}
             onOpenBot={openBot}
             onOpenCron={openCron}
             onOpenRequest={reopenRequest}
@@ -1374,8 +1416,16 @@ function Conversation({
 /** What the jump-to-latest pill counts: messages, not rows. */
 const MESSAGE_KINDS = new Set<string>(['assistant', 'bot_dm_in', 'bot_dm_out', 'user'])
 
-/** `onEndReached`: the controller has no older-history page to fetch (yet). */
-const noop = () => undefined
+/**
+ * How many pages back a search will walk before it gives up.
+ *
+ * Two hundred rows a page, so this is forty thousand rows — further than any
+ * reader would scroll and far enough that a query which stops here almost
+ * certainly matched something this side cannot see at all: the gateway indexes
+ * the JSON-encoded message and `findMatchingItem` searches the rendered item, so
+ * a hit on a tool's arguments is unreachable however long the walk.
+ */
+const FIND_PAGE_LIMIT = 200
 
 /** A stable empty map, so a chat without children does not churn the memo. */
 const EMPTY_SUBAGENTS: Record<string, never> = {}

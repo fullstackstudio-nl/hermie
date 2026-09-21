@@ -28,6 +28,7 @@ import {
   createChatState,
   markInterrupted,
   type ResumeSnapshot,
+  prependHistory,
   reconcile,
   reconcileTail,
   type ServerRequest,
@@ -87,6 +88,8 @@ export interface ChatsState {
 
   applySnapshot: (botName: string, snapshot: ResumeSnapshot) => void
   applyHistory: (botName: string, items: readonly TranscriptItem[]) => void
+  /** A page of rows older than everything held, placed at the front. */
+  prependHistory: (botName: string, items: readonly TranscriptItem[]) => void
   applyTail: (botName: string, items: readonly TranscriptItem[]) => void
 
   /** `attachments` are `@file:` / `@image:` references — see `UserItem.attachments`. */
@@ -189,6 +192,10 @@ export const useChatsStore = create<ChatsState>((set, get) => {
 
     applyHistory(botName, items) {
       patch(botName, state => reconcile(state, items))
+    },
+
+    prependHistory(botName, items) {
+      patch(botName, state => prependHistory(state, items))
     },
 
     applyTail(botName, items) {

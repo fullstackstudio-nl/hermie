@@ -332,6 +332,61 @@ export function reconcile(state: ChatState, freshItems: readonly TranscriptItem[
 }
 
 /**
+ * Put a page of OLDER rows in front of the transcript.
+ *
+ * This is the other direction from `reconcile`, and it is a different operation
+ * rather than the same one with a longer list. `reconcile` is a re-hydration: it
+ * is handed what the server says the transcript IS, matches it against what is
+ * on screen and keeps the live tail. Handing it a page that only covers rows
+ * 400–600 would be telling it the conversation is those rows, and everything
+ * newer that is not "live" would be dropped on the floor.
+ *
+ * So a page arrives as what it is: rows strictly older than everything held,
+ * placed at the front, with nothing in the existing list touched. The only
+ * merging it does is a refusal — a row whose `rowId` is already in the list is
+ * dropped rather than added twice, which is what makes a page that overlaps the
+ * one before it harmless. Overlap is not hypothetical: the offset a page is
+ * fetched at counts rows, and a turn that lands between two pages shifts every
+ * older row by one.
+ *
+ * Ordering is the server's. The route answers oldest-first whichever end it
+ * counted from — measured against a real gateway, 2026-09-21 — so the page is
+ * already in the order it belongs in.
+ *
+ * Nothing about hydration changes. A transcript that was `live` is still live
+ * with more of itself loaded, and one that was `stale` did not become fresh
+ * because its far end grew.
+ */
+export function prependHistory(state: ChatState, olderItems: readonly TranscriptItem[]): ChatState {
+  const known = new Set<number>()
+
+  for (const id of state.order) {
+    const rowId = state.items[id]?.rowId
+
+    if (rowId !== undefined) {
+      known.add(rowId)
+    }
+  }
+
+  const older = olderItems.filter(item => item.rowId === undefined || !known.has(item.rowId))
+
+  if (!older.length) {
+    return state
+  }
+
+  const current = state.order.map(id => state.items[id]).filter((item): item is TranscriptItem => Boolean(item))
+
+  /*
+    `rebuild` frees a colliding id rather than letting `order` hold it twice, and
+    that guard is load-bearing here rather than theoretical. A REST row with no
+    `id` falls back to a POSITIONAL item id (`user:0`), and position is per page,
+    so two pages can both produce `user:0`. Every row this route returns has an
+    id in practice; the fallback is what happens when one does not.
+  */
+  return rebuild(state, [...older, ...current])
+}
+
+/**
  * Fold a short tail fetch into the existing transcript: fill the placeholder a
  * foreign `message.start` left behind, join DM replies onto their dispatch, and
  * append rows we had not seen. Nothing live is ever dropped — a tail fetch that

@@ -67,13 +67,28 @@ export const REST_HISTORY_THRESHOLD = 400
 export const REST_HISTORY_LIMIT = 200
 
 /**
- * The biggest window the REST transcript will serve.
+ * The biggest window the REST transcript will serve in one request.
  *
  * `_get_session_messages` clamps every limit to 500, so this is a ceiling and
  * not a preference: asking for more answers with 500 and no indication that it
- * did. It is what `expandHistory` reaches for.
+ * did. It stopped being a floor on how far back the reader can get when paging
+ * arrived — `loadOlder` walks back a page at a time — and it is kept as the
+ * statement of what one request can carry.
  */
 export const REST_HISTORY_MAX = 500
+
+/**
+ * How far back one chat has loaded, and whether there is anything before it.
+ *
+ * Rows, not items: one row projects to several items, a live item has no row,
+ * and the route pages in rows. Held here rather than in the transcript state
+ * because it is a fact about this client's reading of the conversation, not
+ * about the conversation.
+ */
+interface HistoryWindow {
+  rows: number
+  reachedStart: boolean
+}
 
 /** Rows a tail reconcile asks for. Enough to cover one foreign turn. */
 export const TAIL_ROW_LIMIT = 30
@@ -185,6 +200,10 @@ export class ChatController {
    * and WITHDRAWS the approval, so the question the agent is parked on simply
    * disappears. They wait here instead and go in on `bindRuntime`.
    */
+  /** How far back each chat has read, and whether the start is in sight. */
+  private readonly windows = new Map<string, HistoryWindow>()
+  /** Chats with a page of older history in the air, so the list cannot ask twice. */
+  private readonly loadingOlder = new Set<string>()
   private readonly parked = new Map<string, GatewayServerRequest[]>()
   private readonly opening = new Map<string, Promise<void>>()
   private readonly slashCatalogs = new Map<string, CommandsCatalogResult>()
@@ -333,6 +352,19 @@ export class ChatController {
     if (history.rows.length) {
       this.chats.getState().applyHistory(bot.name, rowsToItems(history.rows, history.shape))
     }
+
+    /*
+      Where the far end of the loaded window is, so `loadOlder` knows what to ask
+      for next. It is a count of ROWS, not of items: one row can project to
+      several items, a live item has no row at all, and the route pages in rows.
+
+      The RPC transport reaches the start by definition — `session.history` is
+      unpaginated, so what came back IS the conversation.
+    */
+    this.windows.set(bot.name, {
+      rows: history.rows.length,
+      reachedStart: history.shape === 'rpc' || history.rows.length < REST_HISTORY_LIMIT
+    })
 
     // 4. The in-flight tail the persisted rows do not contain yet.
     this.chats.getState().applySnapshot(bot.name, resumeSnapshotOf(resume))
@@ -622,45 +654,93 @@ export class ChatController {
   }
 
   /**
-   * Load a bigger window of this chat's history, once.
+   * One page further back.
    *
-   * There is no older-history PAGING in this app: the transcript is a tail that
-   * reconciles, not a scrollback that grows at the far end, and `onEndReached`
-   * on the list is deliberately a no-op. What this does instead is re-read the
-   * same conversation at the REST route's maximum window and fold it in through
-   * the same `applyHistory` a hydration uses — so every id the screen is already
-   * painting survives, and the only change is that older rows appear above.
+   * The transcript used to be a tail that reconciles and nothing else: there was
+   * no scrollback, `onEndReached` was a no-op, and the one thing that could load
+   * more re-read the SAME conversation at the route's maximum window and folded
+   * it in with `applyHistory`. That is a bigger tail, not a page — it can be
+   * done once, it stops at 500 rows for good, and a conversation longer than
+   * that had a floor nobody could get under.
    *
-   * It exists for one caller: a search hit names a conversation and never a row
-   * (see `features/search`), so the row has to be found on this side, and the
-   * loaded tail may not reach back far enough to contain it. Answering whether
-   * the transcript actually GREW is the whole contract — a caller that cannot
-   * tell the difference between "nothing more to load" and "loaded, still not
-   * there" has nothing honest to say to the reader.
+   * This is paging. `offset` counts rows back from the newest end, so the next
+   * page is the one before everything held, and it goes in at the FRONT through
+   * `prependHistory` rather than through a re-hydration. Nothing already on
+   * screen is rebuilt from the server's version of it, which is what keeps the
+   * reader's place: `maintainVisibleContentPosition` holds an anchor through a
+   * prepend on an inverted list, and it can only do that if the rows below the
+   * anchor are the same rows.
    *
-   * A gateway with no REST transcript answers false without pretending: the RPC
-   * fallback is unpaginated, so it has already handed over everything there is.
+   * The answer is three-valued on purpose. A caller that cannot tell "there is
+   * nothing older" from "loaded, still not what you wanted" from "this gateway
+   * cannot do this" has nothing honest to say to the reader, and all three of
+   * those happen.
+   *
+   * A gateway with no REST transcript answers `unavailable`, and that is not a
+   * failure: the RPC fallback is unpaginated, so it already handed over
+   * everything there is, and `reachedStart` was set at hydration.
    */
-  async expandHistory(botName: string): Promise<boolean> {
+  async loadOlder(botName: string): Promise<'grew' | 'start' | 'unavailable'> {
     const chat = this.chats.getState().chats[botName]
 
     if (!chat?.resolvedSessionId) {
-      return false
+      return 'unavailable'
     }
 
-    const before = chat.order.length
-    const rows = await this.gateway.fetchMessages(chat.resolvedSessionId, {
-      limit: REST_HISTORY_MAX,
-      order: 'latest'
-    })
+    const window = this.windows.get(botName)
 
-    if (!rows?.length) {
-      return false
+    if (window?.reachedStart) {
+      return 'start'
     }
 
-    this.chats.getState().applyHistory(botName, rowsToItems(rows, 'rest'))
+    if (this.loadingOlder.has(botName)) {
+      // The list fires `onEndReached` more than once while one page is in the
+      // air, and two pages fetched at the same offset are the same page twice.
+      return 'grew'
+    }
 
-    return (this.chats.getState().chats[botName]?.order.length ?? 0) > before
+    this.loadingOlder.add(botName)
+
+    try {
+      const rows = await this.gateway.fetchMessages(chat.resolvedSessionId, {
+        limit: REST_HISTORY_LIMIT,
+        offset: window?.rows ?? chat.order.length,
+        order: 'latest'
+      })
+
+      if (rows === null) {
+        this.windows.set(botName, { rows: window?.rows ?? 0, reachedStart: true })
+
+        return 'unavailable'
+      }
+
+      const loaded = (window?.rows ?? 0) + rows.length
+
+      /*
+        A short page is the start. The route has no `has_more` and no total — the
+        envelope carries `limit`, `offset`, `order` and `returned` and nothing
+        else — so "it gave me fewer than I asked for" is the only signal there
+        is, and an empty page past the end is what it answers rather than an
+        error. Measured, 2026-09-21.
+      */
+      this.windows.set(botName, { rows: loaded, reachedStart: rows.length < REST_HISTORY_LIMIT })
+
+      if (!rows.length) {
+        return 'start'
+      }
+
+      const before = this.chats.getState().chats[botName]?.order.length ?? 0
+
+      this.chats.getState().prependHistory(botName, rowsToItems(rows, 'rest'))
+
+      const after = this.chats.getState().chats[botName]?.order.length ?? 0
+
+      // A page that was entirely rows we already hold is not growth. It happens
+      // when a turn lands between two pages and shifts every older row by one.
+      return after > before ? 'grew' : rows.length < REST_HISTORY_LIMIT ? 'start' : 'grew'
+    } finally {
+      this.loadingOlder.delete(botName)
+    }
   }
 
   /** Fetch the newest rows and fold them in: fills foreign placeholders, joins DM replies. */

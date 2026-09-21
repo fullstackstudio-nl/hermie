@@ -1193,3 +1193,118 @@ async function flushFakeTimers(): Promise<void> {
     await Promise.resolve()
   }
 }
+
+/**
+ * Older history, one page at a time.
+ *
+ * The transcript used to be a tail that reconciles and nothing else: one call
+ * could re-read the same conversation at the route's 500-row maximum, and that
+ * was the floor on how far back anybody could get. These pin the three things
+ * paging has to be true of, and the third is the one a bigger window could never
+ * satisfy.
+ */
+describe('reading further back', () => {
+  /** A conversation of `count` rows, oldest first, the way the route answers. */
+  const conversation = (count: number) =>
+    Array.from({ length: count }, (_, at) => ({
+      id: at + 1,
+      role: at % 2 === 0 ? 'user' : 'assistant',
+      content: `row ${at + 1}`,
+      timestamp: 1_700_000_000 + at
+    }))
+
+  async function openDeepChat(rows: number) {
+    const parts = setup()
+
+    parts.gateway.restPages = conversation(rows)
+    parts.gateway.reply('session.resume', {
+      session_id: 'runtime-1',
+      stored_session_id: 'tip-researcher',
+      // Past `REST_HISTORY_THRESHOLD`, so the REST transcript is what loads.
+      message_count: rows,
+      messages: [],
+      messages_omitted: true,
+      info: { desktop_contract: 7 },
+      open_requests: []
+    })
+
+    await parts.controller.openChat(RESEARCHER)
+
+    return parts
+  }
+
+  it('asks for the page BEFORE the one it holds, and puts it at the front', async () => {
+    const { controller, gateway } = await openDeepChat(650)
+
+    const first = chatOf().order.length
+    const oldestBefore = chatOf().items[chatOf().order[0] as string]?.rowId
+
+    expect(await controller.loadOlder('researcher')).toBe('grew')
+
+    const paged = gateway.restCalls.filter(call => call.offset !== undefined)
+
+    expect(paged).toHaveLength(1)
+    expect(paged[0]).toMatchObject({ limit: 200, offset: 200, order: 'latest' })
+    expect(chatOf().order.length).toBeGreaterThan(first)
+
+    // The front of the list moved BACKWARDS. That is the whole difference
+    // between a prepend and a re-hydration: nothing below it changed.
+    const oldestAfter = chatOf().items[chatOf().order[0] as string]?.rowId
+
+    expect(oldestAfter).toBeLessThan(oldestBefore as number)
+    expect(oldestAfter).toBe(251)
+  })
+
+  it('walks all the way back, and then says so instead of asking again', async () => {
+    const { controller, gateway } = await openDeepChat(650)
+
+    expect(await controller.loadOlder('researcher')).toBe('grew')
+    expect(await controller.loadOlder('researcher')).toBe('grew')
+    // 200 + 200 + 200 = 600, and the last 50 rows are a short page: the route
+    // has no `has_more` and no total, so a page shorter than the limit is the
+    // only signal that the start has arrived.
+    expect(await controller.loadOlder('researcher')).toBe('grew')
+    expect(chatOf().items[chatOf().order[0] as string]?.rowId).toBe(1)
+
+    const calls = gateway.restCalls.filter(call => call.offset !== undefined).length
+
+    expect(await controller.loadOlder('researcher')).toBe('start')
+    // It did not ask. Knowing there is nothing older is the point of keeping the
+    // window, and a list that keeps firing `onEndReached` at the top must not
+    // turn into a request per frame.
+    expect(gateway.restCalls.filter(call => call.offset !== undefined)).toHaveLength(calls)
+  })
+
+  it('never pages a chat whose history came over the RPC', async () => {
+    // `session.history` is unpaginated: what came back IS the conversation, so
+    // there is nothing to page and the honest answer is that this cannot grow.
+    const { controller, gateway } = setup()
+
+    await controller.openChat(RESEARCHER)
+
+    expect(await controller.loadOlder('researcher')).toBe('start')
+    expect(gateway.restCalls.filter(call => call.offset !== undefined)).toHaveLength(0)
+  })
+
+  it('refuses a second page while one is in the air', async () => {
+    const { controller, gateway } = await openDeepChat(650)
+
+    const both = await Promise.all([controller.loadOlder('researcher'), controller.loadOlder('researcher')])
+
+    expect(both).toEqual(['grew', 'grew'])
+    // Two calls at the same offset are the same page twice, and `onEndReached`
+    // fires more than once while a page is being fetched.
+    expect(gateway.restCalls.filter(call => call.offset !== undefined)).toHaveLength(1)
+  })
+
+  it('drops rows it already holds rather than drawing them twice', async () => {
+    const { controller } = await openDeepChat(650)
+
+    await controller.loadOlder('researcher')
+
+    const after = chatOf()
+    const rowIds = after.order.map(id => after.items[id]?.rowId).filter(rowId => rowId !== undefined)
+
+    expect(new Set(rowIds).size).toBe(rowIds.length)
+  })
+})

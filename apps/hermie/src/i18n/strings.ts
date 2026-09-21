@@ -445,6 +445,18 @@ export const strings = {
      * message is further back than the transcript has, and the reader can scroll.
      */
     findMissed: (query: string) => `“${query}” is in this chat, further back than it has loaded.`,
+    /**
+     * The same miss, after paging back as far as this is willing to go.
+     *
+     * A different sentence from `findMissed` because it is a different fact. The
+     * transcript now reaches the start of the conversation, or the search walked
+     * back further than any reader would have, and in both cases the honest
+     * thing is that the words the gateway matched are not in the projection this
+     * app searches — a hit on a tool's arguments, for instance, which the FTS
+     * index carries and the rendered item does not.
+     */
+    findExhausted: (query: string) =>
+      `“${query}” was matched by the gateway, but it is not in the visible text of this chat.`,
     unknownAuthor: 'Someone else started a turn…',
     thinking: 'Thinking',
     toolRunning: 'running',

@@ -69,7 +69,7 @@ beforeEach(() => {
   mockController = {
     openChat: jest.fn(async () => undefined),
     closeChat: jest.fn(async () => undefined),
-    expandHistory: jest.fn(async () => false),
+    loadOlder: jest.fn(async () => 'start' as const),
     refreshOptions: jest.fn(async () => null),
     knowsSlashCommand: jest.fn(() => false),
     querySlash: jest.fn(async () => ({ items: [] })),
@@ -101,7 +101,7 @@ describe('opening a chat on a search hit', () => {
     seedChat(['nothing here'])
     renderScreen(<ChatScreen bot="researcher" findText="invoice" />)
 
-    await waitFor(() => expect(mockController.expandHistory).toHaveBeenCalledWith('researcher'))
+    await waitFor(() => expect(mockController.loadOlder).toHaveBeenCalledWith('researcher'))
   })
 
   it('says the row is further back rather than sitting at the bottom in silence', async () => {
@@ -121,7 +121,7 @@ describe('opening a chat on a search hit', () => {
       await waitFor(() => expect(screen.getByTestId('chat-header')).toBeTruthy())
 
       expect(scrollToIndex).not.toHaveBeenCalled()
-      expect(mockController.expandHistory).not.toHaveBeenCalled()
+      expect(mockController.loadOlder).not.toHaveBeenCalled()
     } finally {
       scrollToIndex.mockRestore()
     }

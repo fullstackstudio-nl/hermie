@@ -199,6 +199,8 @@ export interface TranscriptListProps extends Omit<TranscriptContext, 'onSelectTe
   onScrolledAwayFromBottom?: (away: boolean) => void
   /** Older history: fired at the far (visually top) end. */
   onEndReached?: () => void
+  /** A page of older history is in the air: draw the row that says so. */
+  loadingOlder?: boolean
   /** Receipt on the last own bubble's metadata line. */
   receipt?: Receipt
   contentStyle?: ViewStyle
@@ -920,6 +922,7 @@ function TranscriptListBody({
   newMessageCount = 0,
   onScrolledAwayFromBottom,
   onEndReached,
+  loadingOlder = false,
   receipt,
   contentStyle,
   testID = 'transcript-list',
@@ -1431,6 +1434,26 @@ function TranscriptListBody({
         */}
         <PlainScrollEdges style={{ flex: 1 }}>
           <FlatList
+            /*
+              The far end of an INVERTED list is its footer, and that is the whole
+              reason this is a footer rather than a header. `VirtualizedList` adds
+              one to `minIndexForVisible` whenever a header exists, so a header
+              here would take the anchor away from row 0 and undo the thing that
+              makes a prepend hold its place — see the note on the anchor below.
+              A footer costs the anchor nothing.
+            */
+            ListFooterComponent={
+              loadingOlder ? (
+                <View
+                  style={{ alignItems: 'center', paddingBottom: theme.space.sm, paddingTop: theme.space.md }}
+                  testID="transcript-loading-earlier"
+                >
+                  <Text color="textFaint" variant="meta">
+                    {chatStrings.transcript.loadingEarlier}
+                  </Text>
+                </View>
+              ) : null
+            }
             ListEmptyComponent={
               <Text color="textMuted" style={{ padding: theme.space.lg, textAlign: 'center' }}>
                 {chatStrings.transcript.empty}
