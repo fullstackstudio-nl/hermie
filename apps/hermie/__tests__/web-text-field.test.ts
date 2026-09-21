@@ -18,6 +18,7 @@ import { hasHardwareKeyboard, isShiftDown, subscribeToEscape } from '../src/plat
 import {
   growToContent,
   HAS_USER_AGENT_FOCUS_RING,
+  INVALID_FIELD,
   NO_USER_AGENT_FOCUS_RING,
   ONE_ROW
 } from '../src/platform/text-field-web.web'
@@ -35,6 +36,12 @@ describe('what a browser does that a phone does not', () => {
     // would type-check and do nothing.
     expect(HAS_USER_AGENT_FOCUS_RING).toBe(true)
     expect(NO_USER_AGENT_FOCUS_RING).toEqual({ outlineStyle: 'none' })
+  })
+
+  it('says a rejected field is invalid, rather than only colouring it', () => {
+    // The hairline turning red is the whole of the old message, and it is not a
+    // message at all for a reader who cannot see the colour.
+    expect(INVALID_FIELD).toEqual({ 'aria-invalid': true })
   })
 
   describe('growing a textarea to its content', () => {

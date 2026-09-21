@@ -38,6 +38,15 @@ export const NO_USER_AGENT_FOCUS_RING: TextStyle = {}
 export const ONE_ROW: Partial<TextInputProps> = {}
 
 /**
+ * What to spread onto a field whose value has been rejected.
+ *
+ * Empty natively: neither platform has a "this control is invalid" flag a
+ * screen reader reads, and the error text under the field is a sibling a reader
+ * reaches by moving forward. The web does have one — see the `.web.ts` sibling.
+ */
+export const INVALID_FIELD: Partial<TextInputProps> = {}
+
+/**
  * Resize a multiline field to its content, capped.
  *
  * A native `TextInput` does this by itself, so this is deliberately a no-op

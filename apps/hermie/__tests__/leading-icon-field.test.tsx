@@ -20,13 +20,15 @@
  * field — is asserted to still have no leading icon, so the day it grows one this
  * test is where the rule is waiting.
  */
-import { screen } from '@testing-library/react-native'
+import { render, screen } from '@testing-library/react-native'
 import { StyleSheet, type TextStyle } from 'react-native'
 
 import { BotsScreen } from '../src/features/bots'
 import { type Bot, useBotsStore } from '../src/store/bots'
 import { useChatLayoutStore } from '../src/store/chat-layout'
 import { useChatsStore } from '../src/store/chats'
+import { TextField } from '../src/ui/primitives'
+import { ThemeProvider } from '../src/ui/theme'
 import { CONTROL_MIN_HEIGHT, type as typeScale } from '../src/ui/tokens'
 import { renderScreen } from './support/render'
 
@@ -118,6 +120,36 @@ describe('the search field', () => {
   it('keeps the 44pt tap target, on the row', () => {
     expect(flat('bots-search-field').minHeight).toBe(CONTROL_MIN_HEIGHT)
     expect(flat('bots-search-field').alignItems).toBe('center')
+  })
+})
+
+describe('what a field calls itself', () => {
+  const name = (element: { props: Record<string, unknown> }) => element.props.accessibilityLabel
+
+  it('is the label, the given name or the placeholder, in that order', () => {
+    render(
+      <ThemeProvider>
+        <TextField placeholder="Every 15 minutes" testID="only-placeholder" />
+        <TextField label="Name" placeholder="Source scan" testID="label-wins" />
+      </ThemeProvider>
+    )
+
+    expect(name(screen.getByTestId('only-placeholder'))).toBe('Every 15 minutes')
+    expect(name(screen.getByTestId('label-wins'))).toBe('Name')
+  })
+
+  it('is absent rather than empty when there is none of the three', () => {
+    // The chain used to end `?? ''`, and an `aria-label=""` REMOVES a name
+    // instead of falling through to whatever the browser would have computed.
+    // Nothing visibly broke, because it is only reachable with no label and no
+    // placeholder — which is exactly the field that needed the fallback.
+    render(
+      <ThemeProvider>
+        <TextField testID="anonymous" />
+      </ThemeProvider>
+    )
+
+    expect(name(screen.getByTestId('anonymous'))).toBeUndefined()
   })
 })
 

@@ -37,6 +37,17 @@ export const NO_USER_AGENT_FOCUS_RING = { outlineStyle: 'none' } as unknown as T
 export const ONE_ROW = { rows: 1 } as unknown as Partial<TextInputProps>
 
 /**
+ * `aria-invalid`, which is the whole of it.
+ *
+ * A field the gateway rejected was marked by turning its hairline the danger
+ * colour, and that is the entire message: someone who cannot tell the red from
+ * the grey is told nothing at all. The attribute is not in React Native's
+ * `TextInputProps` — the property exists only on this platform — hence the
+ * cast, next to the reason, as `ONE_ROW` does it for `rows`.
+ */
+export const INVALID_FIELD = { 'aria-invalid': true } as unknown as Partial<TextInputProps>
+
+/**
  * Grow a `<textarea>` to its content, up to `maxHeight`.
  *
  * `scrollHeight` only reports the content when the box is not already big

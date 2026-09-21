@@ -1,6 +1,7 @@
 import { forwardRef } from 'react'
 import { TextInput, type TextInputProps, View } from 'react-native'
 
+import { INVALID_FIELD } from '../../platform/text-field-web'
 import { useTheme } from '../theme'
 import { CONTROL_MIN_HEIGHT } from '../tokens'
 import { useInsetRow } from './InsetGroup'
@@ -9,7 +10,13 @@ import { Text } from './Text'
 export type TextFieldProps = TextInputProps & {
   /** Quiet label above the input, inside the row. */
   label?: string
-  /** Shown under the input in the danger colour; also marks the input invalid. */
+  /**
+   * Shown under the input in the danger colour, and marks the input invalid.
+   *
+   * The colour is not the whole message: `INVALID_FIELD` puts `aria-invalid` on
+   * the control where the platform has such a thing, so a reader is told the
+   * field is wrong rather than being shown a red line it cannot see.
+   */
   error?: string | null
 }
 
@@ -46,7 +53,13 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
       ) : null}
       <TextInput
         ref={ref}
-        accessibilityLabel={label ?? rest.accessibilityLabel ?? rest.placeholder ?? ''}
+        /*
+         * No `?? ''` at the end of this chain. An `aria-label=""` REMOVES a
+         * name rather than falling through to whatever the browser would have
+         * computed, so a field with neither label nor placeholder shipped with
+         * its name deliberately erased. `undefined` leaves the attribute off.
+         */
+        accessibilityLabel={label ?? rest.accessibilityLabel ?? rest.placeholder}
         placeholderTextColor={theme.colors.textMuted}
         style={[
           {
@@ -69,6 +82,7 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
               },
           style
         ]}
+        {...(error ? INVALID_FIELD : null)}
         {...rest}
       />
       {error ? (
