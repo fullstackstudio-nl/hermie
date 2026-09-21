@@ -4992,3 +4992,101 @@ The gateway was left clean: every session created was closed and deleted, every
 uploaded file removed, and the directories the probes made — including the one in
 `/` that the bug produced — deleted. The two canonical Bot Chats on that box were
 resumed read-only to read `info.cwd` and closed again without a prompt.
+
+## Motion, measured on a simulator (2026-09-21, last)
+
+One motion table, four surfaces that used to blink into existence, and a
+recording to say whether any of it reads as native. The numbers below are from an
+**iPhone 17 Pro (iOS 26.5)** running the Debug build against the fake gateway,
+with `--hermieTraceScroll`.
+
+### Reading the trace at all took three attempts, and that is worth writing down
+
+`--hermieTraceScroll` writes with `console.log`, and in a dev client that goes to
+**Metro's terminal** and nowhere else. Two channels that look like they should
+carry it do not:
+
+- **`xcrun simctl spawn <udid> log show|stream`** never sees it. Hermes'
+  `console.log` does not reach `os_log` in this configuration, so no predicate
+  finds it — a filter on `[scroll]` over the whole system log answers nothing at
+  all.
+- **`npx expo start` redirected to a file** prints the banner and then nothing.
+  Device logs are an interactive-terminal feature of the CLI, and `CI=1`, which
+  does make it non-interactive on purpose, disables reloads without turning them
+  on.
+
+What works from a script is Metro's own inspector: `http://localhost:8081/json/list`
+lists a CDP target per connected app and `Runtime.consoleAPICalled` over that
+socket carries every line. That is the route to use next time the trace has to be
+read without a person at a keyboard.
+
+One trap cost most of the attempts, and it is not about logging. **The bundle
+installed on these simulators was the Release one.** A Release build defines no
+`devLaunchArguments`, so every development argument is inert: `--hermiePreset`
+changed nothing, `--hermieTraceScroll` produced no trace, and the app rendered
+its last cached transcript so convincingly that it looked connected. Nothing says
+so on screen. Installing
+`ios/build/SimDerivedData/Build/Products/Debug-iphonesimulator/Hermie.app` and
+launching again fixed all of it at once — and the tell, in hindsight, was that
+Metro had served no bundle and the fake gateway had logged no request.
+
+### The scroll itself
+
+One flick through the fixture transcript, from the trace:
+
+| What                                | Measured             |
+| ----------------------------------- | -------------------- |
+| Scroll events in one flick          | 59                   |
+| Median interval                     | **17 ms** (~59 fps)  |
+| Intervals over 34 ms (a lost frame) | **1**, at the settle |
+| `content` height during the scroll  | **926.0, unchanged** |
+| Blank cells (`[blank]`)             | **0**                |
+
+The single long interval is 51 ms across the last four events, where the offset
+is moving by 0.3 pt a frame — the list coming to rest, not a stutter. The content
+height never moving is the more important row: no row re-measured mid-scroll, so
+nothing shifted under the reader.
+
+Two height changes recorded on 2026-09-20 are **still there**, both at mount and
+neither touched by this round:
+
+```
+[row] +201 user-r:1     h=112.0 (new)    →  +251 h=95.0  (-17.0)
+[row] +200 assistant-r:6 h=1652.7 (new)  →  +250 h=299.0 (-1353.7)
+```
+
+The first is `Bubble.tsx` measuring its inline clock on a line of its own for one
+frame, once per mount. The second is a long reply mounting unfolded and folding
+on the next frame. Both are one-frame flickers on a cold open rather than
+anything the reader's finger can provoke, and both are still worth fixing.
+
+### What was watched rather than measured
+
+On the iPhone, in the Lime preset, with the app connected to the fake gateway:
+the native-stack push into a chat and the swipe back are the platform's own and
+were not touched; the jump-to-latest pill now rises out of the composer instead
+of appearing over it; the chat opens with the transcript pinned to the newest row.
+
+On the **iPad Pro 13" (M5)**, the wide two-pane shell, the sidebar's selected-row
+tint and the overlay panel behave as before — the panel's timing moved from a
+token called `sheet` to one called `panel` at the same 420 ms, so nothing about
+it should look different, and nothing did.
+
+### What this did NOT verify
+
+- **The prepend anchor, on a device.** `maintainVisibleContentPosition` holding
+  its place through `prependHistory` is covered by the controller's tests and by
+  the prop's own contract, and it was not watched on a simulator: the fake
+  gateway's fixture chat is seven rows, so `loadOlder` answers `start` on the
+  first ask. A long scenario is what that needs.
+- **Reduce Motion.** Still no way to turn it on from `simctl` — `simctl ui`
+  offers appearance, contrast and content size and nothing else — so the zero
+  durations are covered by tests and unwatched. A stock Android AVD reports it as
+  ON, which makes the emulator useless for the opposite reason.
+- **Haptics.** A simulator has no Taptic engine, so the calls are unobservable
+  there, and the one behaviour this round changed — nothing fires in a Mac
+  window — is a decision about `RUNS_ON_MAC` rather than something a simulator
+  can show. A test pins it.
+- **Frame drops under a streaming reply.** The trace above is one flick through a
+  settled transcript. The interesting case is a reply arriving while the reader
+  scrolls, which needs the fake gateway's `--stream-delay` and a longer sitting.
