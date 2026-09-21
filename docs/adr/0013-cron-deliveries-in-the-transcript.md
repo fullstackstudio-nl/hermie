@@ -1,6 +1,7 @@
 # 0013. A cron delivery is its own item kind, detected from its header
 
-- Status: Accepted, amended 2026-09-21 (the `quiet` exemption covers work the owner dispatched)
+- Status: Accepted, amended 2026-09-21 (the `quiet` exemption covers work the owner dispatched, and what
+  the owner typed)
 - Date: 2026-09-19
 
 ## Context
@@ -113,3 +114,37 @@ compaction handoff and a roster refresh land — plus `model_switch`, `personali
 `auto_continue` stay hidden, because nobody asked for those. The rule lives in `selectors.ts` with a
 test per kind, and the cost is unchanged: a chat with a busy fan-out shows more at `quiet` than a
 strict reading of "quiet" would suggest, which is the trade this record already made once.
+
+## Amendment, 2026-09-21: a command's answer is the strongest case the rule has
+
+The amendment above restates the exemption as **`quiet` keeps a row the owner asked for, and drops
+the machine narrating itself**, and admits `cron_delivery`, `async_delegation_complete` and
+`process_complete` on that basis. A slash command's answer belongs in the same family and is a
+stronger case than any of them, because the asking and the answering are seconds apart: the owner
+typed `/status`, and `/status` is the whole of what they are looking at the screen for.
+
+It was not in the family. `slashOutput` emitted an ordinary `notice`, so `quiet` — the level the app
+ships on, and the one nobody changes — dropped it. The owner's report: "command response altijd
+zichtbaar; nu alleen zichtbaar als thinking aan staat". The answer existed only for a reader who had
+already turned verbosity up for an unrelated reason.
+
+So `command` is its own `NoticeKind`, and it goes one step further than the three kinds above. They
+survive `quiet` FOLDED, because they report back minutes or hours later and a reader scrolling past
+is entitled to skim them. A command's answer is `full` at every level and **opens itself**, like an
+`error` and for a related reason: a disclosure the reader has to notice and tap is, from where they
+are sitting, a command that did nothing. The fold stays — `useExpanded`'s `defaultOpen` is a starting
+position and not a rule, and a reader who closes a five-kilobyte `/help` finds it closed again when
+the list scrolls it back.
+
+Two consequences worth writing down:
+
+- **The kind is this client's, not the gateway's.** `reducer.ts` accepts `noticeKind` off a `notice`
+  event for the single value `command` and maps everything else — including kinds it knows — onto a
+  plain `notice`. The privilege is "the owner typed the thing this answers", and only the surface
+  that saw them type it can assert that. A gateway that started sending the field could otherwise
+  promote its own narration into the one family `quiet` cannot drop.
+- **One shape, whatever the length.** Title is the command as typed, body is the whole answer, always.
+  It used to depend on the length — one line went in the title with an empty body, which `NoticePill`
+  then drew with no disclosure at all, while a longer one was titled `/help — 214 lines`. Two shapes
+  meant a reader had to work out which one they had before they could read it, and the short one
+  could not be folded away at all.

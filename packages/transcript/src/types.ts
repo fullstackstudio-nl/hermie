@@ -230,6 +230,15 @@ export interface StatusItem extends ItemBase {
 }
 
 export type NoticeKind =
+  /**
+   * The answer to a slash command the owner typed.
+   *
+   * Not the machine narrating itself: it is the PAYLOAD of something somebody
+   * asked for, which is why `selectors.ts` keeps it at every verbosity level and
+   * `NoticePill` opens it without being asked. Live-only — command output is
+   * never persisted, so no history row ever projects onto this kind.
+   */
+  | 'command'
   | 'model_switch'
   | 'personality_switch'
   | 'auto_continue'

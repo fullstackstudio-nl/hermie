@@ -6432,3 +6432,56 @@ no movement left to shorten.
   suite. Whether a real `session.resume` fills `turn_started_at` on the top
   level, only inside `info`, or not at all decides whether the fix fires — and
   if it is absent the old behaviour is what happens, not something worse.
+
+## A slash command's answer, and the command that answered for nothing (2026-09-21, last)
+
+Two reports from the running app, both about a slash command and neither about
+the same thing. This section is the first: every command's answer was invisible
+at the level the app ships on. The second, `/new`, is below it.
+
+### A command's answer was dropped at `quiet`, and folded everywhere else
+
+`slashOutput` emitted a plain `notice`, and `selectors.ts` drops every non-error
+notice at `quiet` — which is the default (`store/settings.ts`), and the setting
+nobody changes. At `normal` and `verbose` what it drew was a folded `LedgerRow`:
+a chevron, a title, and the answer behind a tap the reader had no reason to
+expect. Both halves of the owner's sentence, in one cause: "command response
+altijd zichtbaar; nu alleen zichtbaar als thinking aan staat; standaard
+uitgeklapt."
+
+The fix is a `NoticeKind` of its own, `command`, which is `full` at every level
+and opens itself. The reasoning is in the amendment to
+[ADR-0013](adr/0013-cron-deliveries-in-the-transcript.md); three mechanical notes
+belong here.
+
+**The kind is this client's, not the gateway's.** The reducer accepts
+`noticeKind` off a `notice` event for the single value `command` and maps
+everything else — including kinds it knows — onto a plain `notice`. The privilege
+behind the kind is "the owner typed the thing this answers", and only the surface
+that watched them type it can assert that. A gateway that started sending the
+field could otherwise promote its own narration into the one family `quiet`
+cannot drop.
+
+**Open-by-default lives in the expanded PROVIDER, not in the row.** A row that
+opened itself by branching on its own props would re-open every time
+virtualisation scrolled it back into the window, so a reader who closed a
+five-kilobyte `/help` would find it open again a moment later — the exact bug
+`expanded.tsx` was written to prevent, arriving from the other direction. The
+provider went from a set of open ids to a map of explicit CHOICES: an absent key
+means untouched, so the row's own default applies, and a present key is what the
+reader last did.
+
+**One shape, whatever the length.** Title is the command as typed, body is the
+whole answer, always. It used to depend on the length — one line went into the
+title with an empty body, which `NoticePill` then drew with no disclosure at all,
+while a longer one was titled `/help — 214 lines`. Two shapes meant a reader had
+to work out which one they had before they could read it, and the short one could
+not be folded away at all.
+
+#### What is unverified here
+
+- **It has not been seen in the app.** There is no signed-in gateway available
+  from here. What exists is the selector's own suite, a jest test that drives the
+  row through the unmount virtualisation causes, and a controller test that the
+  kind is on the event. What a `quiet` transcript with a two-hundred-line `/help`
+  open in it actually looks like on a phone has not been looked at.

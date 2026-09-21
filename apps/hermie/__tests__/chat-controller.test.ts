@@ -1238,7 +1238,18 @@ describe('slash commands', () => {
     expect(gateway.lastCall('complete.slash')).toMatchObject({ text: '/model exa' })
   })
 
-  it('lands a slash result in the transcript as a notice', async () => {
+  /**
+   * One shape for every answer: the command typed is the title, the answer is
+   * the body, and the kind is `command`.
+   *
+   * The kind is what carries the two fixes the owner asked for — the row
+   * survives `quiet`, which is the level the app ships on, and it opens itself
+   * (`selectors.ts`, `NoticePill`). A one-line answer used to go into the TITLE
+   * with an empty body, which `NoticePill` then drew with no disclosure at all,
+   * so the same command answered in two different shapes depending on how much
+   * it had to say.
+   */
+  it('lands a slash result as a command row: the command titles it, the answer is the body', async () => {
     const { gateway, controller } = setup()
 
     gateway.reply('slash.exec', { output: 'model is example-model' })
@@ -1250,7 +1261,7 @@ describe('slash commands', () => {
       .order.map(id => chatOf().items[id])
       .find(item => item?.kind === 'notice')
 
-    expect(notice).toMatchObject({ title: '/model — model is example-model' })
+    expect(notice).toMatchObject({ noticeKind: 'command', title: '/model', body: 'model is example-model' })
   })
 
   /**
@@ -1273,7 +1284,7 @@ describe('slash commands', () => {
       .order.map(id => chatOf().items[id])
       .find(item => item?.kind === 'notice')
 
-    expect(notice).toMatchObject({ title: '/status — 4 lines' })
+    expect(notice).toMatchObject({ noticeKind: 'command', title: '/status' })
     expect((notice as { body?: string }).body).toContain('Tokens: 0')
   })
 
@@ -1332,12 +1343,14 @@ describe('slash commands', () => {
     await controller.runSlash('researcher', '/queue write it up')
 
     expect(gateway.lastCall('prompt.submit')).toMatchObject({ text: 'write it up' })
+    // The gateway's own notice is the command's answer too, so it is titled by
+    // the command and not by itself.
     expect(
       chatOf()
         .order.map(id => chatOf().items[id])
         .filter(item => item?.kind === 'notice')
-        .map(item => (item as { title: string }).title)
-    ).toContain('Queued.')
+        .map(item => [(item as { title: string }).title, (item as { body?: string }).body])
+    ).toContainEqual(['/queue write it up', 'Queued.'])
   })
 
   it('hands a prefill directive back to the caller instead of to the transcript', async () => {

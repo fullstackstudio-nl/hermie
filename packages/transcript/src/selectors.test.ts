@@ -84,6 +84,26 @@ describe('visibleItems levels', () => {
     expect(notices(only, { level: 'quiet' })).toEqual([])
   })
 
+  /**
+   * A slash command's answer, at every level there is.
+   *
+   * It is the payload of a line the owner TYPED, which is the same argument the
+   * two tests above make for a fan-out and a process — but one step stronger,
+   * because those report back minutes later and this one answers a question
+   * asked a second ago. `quiet` is the default view, so a folded answer there
+   * would already be a command that appeared to do nothing; a dropped one
+   * certainly is.
+   */
+  it.each([['quiet'], ['normal'], ['verbose']] as const)('shows a command answer in full at %s', level => {
+    const answered = applyEvent(
+      fresh(),
+      { type: 'notice', payload: { message: '/help', detail: 'usage: …', noticeKind: 'command' } },
+      NOW
+    )
+
+    expect(notices(answered, { level })).toEqual([['command', 'full']])
+  })
+
   it('collapses tool cards and notices at normal', () => {
     expect(shown(state)).toContainEqual(['tool', 'collapsed'])
     expect(shown(state)).toContainEqual(['notice', 'collapsed'])

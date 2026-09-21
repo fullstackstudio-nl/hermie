@@ -1905,7 +1905,7 @@ export class ChatController {
     const directive = parseCommandDispatch(result)
 
     if (result?.warning) {
-      this.noticeIn(botName, sessionId, `${command} — ${result.warning}`)
+      this.commandRow(botName, sessionId, command, String(result.warning))
     }
 
     // No `type`: plain worker or plugin text, which is the common case.
@@ -1926,7 +1926,7 @@ export class ChatController {
         // One hop only. An alias that points at an alias that points back would
         // otherwise pace the socket until something gave out.
         if (depth > 0 || !directive.target.trim()) {
-          this.noticeIn(botName, sessionId, `${command} — is an alias the gateway could not follow.`)
+          this.commandRow(botName, sessionId, command, 'That is an alias the gateway could not follow.')
 
           return {}
         }
@@ -1938,7 +1938,7 @@ export class ChatController {
 
       case 'prefill':
         if (directive.notice) {
-          this.noticeIn(botName, sessionId, directive.notice)
+          this.commandRow(botName, sessionId, command, directive.notice)
         }
 
         // The caller owns the composer; the controller does not reach into it.
@@ -1952,11 +1952,11 @@ export class ChatController {
         const notice = typeof result?.notice === 'string' ? result.notice.trim() : ''
 
         if (notice) {
-          this.noticeIn(botName, sessionId, notice)
+          this.commandRow(botName, sessionId, command, notice)
         }
 
         if (!message.trim()) {
-          this.noticeIn(botName, sessionId, `${command} — ${directive.display ?? 'nothing to send.'}`)
+          this.commandRow(botName, sessionId, command, directive.display ?? 'Nothing to send.')
 
           return {}
         }
@@ -2010,45 +2010,33 @@ export class ChatController {
     }
   }
 
-  /**
-   * One command's output as a transcript notice.
-   *
-   * The first line is the title and the REST is the body, which is the whole
-   * point: `/status` answers nine lines and `/help` answers five kilobytes of
-   * ASCII table, and both of those used to be concatenated into a notice title
-   * with an empty body — so `NoticePill` drew them as one untoggleable run of
-   * text. The fake gateway answered every command with a single short line,
-   * which is why no test ever saw it.
-   */
+  /** One command's output, as the row kind a reader cannot miss. */
   private slashOutput(botName: string, sessionId: string, command: string, output: string): void {
-    const text = output.trim()
-
-    if (!text) {
-      this.noticeIn(botName, sessionId, `${command} ran.`)
-
-      return
-    }
-
-    const lines = text.split('\n')
-
-    // One line is a headline. More than one is a REPORT, and its first line is
-    // as likely to be an ASCII border as a summary — `/help` opens with
-    // `+------+` — so the command names the row and the whole answer goes in the
-    // body, where `NoticePill` gives the reader a disclosure to open it with.
-    if (lines.length === 1) {
-      this.noticeIn(botName, sessionId, `${command} — ${text}`)
-
-      return
-    }
-
-    this.noticeIn(botName, sessionId, `${command} — ${lines.length} lines`, text)
+    this.commandRow(botName, sessionId, command, output.trim() || 'Ran, with no output.')
   }
 
-  private noticeIn(botName: string, sessionId: string, message: string, detail = ''): void {
+  /**
+   * A slash command's answer, in the ONE shape every command's answer has.
+   *
+   * Title is the line the owner typed and body is the whole answer — a warning,
+   * a refusal, five kilobytes of `/help` ASCII table, or a single word. It used
+   * to depend on the length: one line went into the TITLE and nothing into the
+   * body, so `NoticePill` drew it with no disclosure at all, while a longer one
+   * was titled `/help — 214 lines`. Two shapes meant the reader had to work out
+   * which one they had before they could read it, and the short one could not be
+   * folded at all.
+   *
+   * `noticeKind: 'command'` is what keeps the row on screen at `quiet` — the
+   * default view, where every other notice is dropped — and what opens it
+   * without a tap. The reducer accepts that kind from this event and no other
+   * (`reducer.ts`, `case 'notice'`), so it is this client saying "the owner
+   * asked for this", never the gateway promoting its own narration.
+   */
+  private commandRow(botName: string, sessionId: string, command: string, body: string): void {
     this.chats.getState().dispatchEvent(botName, {
       type: 'notice',
       session_id: sessionId,
-      payload: detail ? { message, detail } : { message }
+      payload: { message: command.trim() || '/', detail: body, noticeKind: 'command' }
     })
   }
 

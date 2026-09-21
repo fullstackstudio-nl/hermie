@@ -449,6 +449,11 @@ function clearTurn(next: ChatState): void {
   next.compacting = false
 }
 
+/** The one `noticeKind` a `notice` event may name; see the `case 'notice'` comment. */
+function commandKind(value: unknown): NoticeKind {
+  return value === 'command' ? 'command' : 'notice'
+}
+
 function pushNotice(next: ChatState, noticeKind: NoticeKind, title: string, body: string, now: number): NoticeItem {
   return addItem<NoticeItem>(next, {
     id: `n:${next.turn.nextSeq}`,
@@ -1038,8 +1043,15 @@ export function applyEvent(state: ChatState, event: TranscriptEvent, now: number
           TITLE with an empty body, which `NoticePill` then drew as one run of
           text with no way to fold it away. An event without it behaves exactly
           as it did.
+
+          `noticeKind` is ours too, and exactly ONE value is accepted from it:
+          `command`, the answer to a slash command the owner typed. Everything
+          else — including a kind this client has never heard of — lands as a
+          plain `notice`, so a gateway that starts sending the field cannot
+          promote its own narration into the family that survives `quiet` and
+          opens itself.
         */
-        pushNotice(next, 'notice', message, str(payload.detail), now)
+        pushNotice(next, commandKind(payload.noticeKind), message, str(payload.detail), now)
       }
 
       return next

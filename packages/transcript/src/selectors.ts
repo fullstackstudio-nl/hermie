@@ -182,7 +182,18 @@ export function visibleItems(state: ChatState, options: VisibilityOptions): Visi
         break
 
       case 'notice':
-        if (item.noticeKind === 'error') {
+        /*
+          An error and a command answer are the two kinds no level may fold or
+          drop.
+
+          An error because a reader must not skim past it. A command answer
+          because the owner TYPED the thing it answers: it is the payload of a
+          request, in the same sense as the cron card below and the fan-out
+          report further down (ADR-0013, amended), and a request whose answer is
+          invisible at the level people leave the app on reads as a command that
+          did nothing. `full` at every level, including `quiet`.
+        */
+        if (item.noticeKind === 'error' || item.noticeKind === 'command') {
           out.push({ item, presentation: 'full' })
           break
         }

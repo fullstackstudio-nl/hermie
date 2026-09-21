@@ -701,6 +701,34 @@ describe('session-level events', () => {
     expect(list(state)[0]).toMatchObject({ kind: 'notice', noticeKind: 'notice', title: 'capabilities refreshed' })
   })
 
+  it('takes `command` from a notice event, for a slash command this client ran', () => {
+    const state = applyEvent(
+      fresh(),
+      { type: 'notice', seq: 1, payload: { message: '/help', detail: 'usage: …', noticeKind: 'command' } },
+      NOW
+    )
+
+    expect(list(state)[0]).toMatchObject({ noticeKind: 'command', title: '/help', body: 'usage: …' })
+  })
+
+  /**
+   * `command` is the ONLY kind the field may name.
+   *
+   * The privilege behind it is real — that kind survives `quiet` and opens
+   * itself — and the event is a wire shape, so a gateway that started sending
+   * `noticeKind` could otherwise promote its own narration into it. An
+   * unrecognised value is a plain notice, which is what the event meant before
+   * the field existed.
+   */
+  it.each([['error'], ['process_complete'], ['internal_notification'], ['banana']])(
+    'refuses `%s` as a notice kind and leaves the row a plain notice',
+    kind => {
+      const state = applyEvent(fresh(), { type: 'notice', seq: 1, payload: { message: 'hi', noticeKind: kind } }, NOW)
+
+      expect(list(state)[0]).toMatchObject({ noticeKind: 'notice', title: 'hi' })
+    }
+  )
+
   it('surfaces a side-question answer', () => {
     const state = applyEvent(
       fresh(),
