@@ -16,16 +16,25 @@
 import { act, render } from '@testing-library/react-native'
 import { Text } from 'react-native'
 
-import type { ShortcutAction } from '../src/platform/desktop-shortcuts'
+import type { ShortcutAction, ShortcutEvent } from '../src/platform/desktop-shortcuts'
+import { BottomSheet } from '../src/ui/BottomSheet'
 import { useEscapeKey } from '../src/ui/useEscapeKey'
-import { useNumberedShortcuts, useShortcut, type RegistrableShortcut } from '../src/ui/useShortcut'
+import {
+  resetShortcutScopes,
+  shortcutIsDeliverable,
+  useNumberedShortcuts,
+  useShortcut,
+  useShortcutScope,
+  type RegistrableShortcut
+} from '../src/ui/useShortcut'
+import { withProviders } from './support/render'
 
 // `mock`-prefixed, which is the only way a `jest.mock` factory may reach out of scope.
-const mockListeners = new Set<(action: string) => void>()
+const mockListeners = new Set<(event: ShortcutEvent) => void>()
 let mockSubscriptions = 0
 
 jest.mock('../src/platform/desktop-shortcuts', () => ({
-  subscribeToShortcuts: (handler: (action: string) => void) => {
+  subscribeToShortcuts: (handler: (event: ShortcutEvent) => void) => {
     mockSubscriptions += 1
     mockListeners.add(handler)
 
@@ -44,17 +53,21 @@ jest.mock('../src/platform/keyboard-modifiers', () => ({
   subscribeToEscape: () => () => {}
 }))
 
-function press(action: ShortcutAction) {
+function press(action: ShortcutAction, typing = false) {
   act(() => {
     for (const listener of [...mockListeners]) {
-      listener(action)
+      listener({ action, typing })
     }
   })
 }
 
+/** The same keystroke, arriving from the menu bar instead of from the HID handler. */
+const pressFromMenuBar = (action: ShortcutAction) => press(action, false)
+
 beforeEach(() => {
   mockListeners.clear()
   mockSubscriptions = 0
+  resetShortcutScopes()
 })
 
 function Taker({
@@ -202,5 +215,148 @@ describe('⌘W', () => {
     // the standard Close item is removed from the Mac's menu bar, so this really is
     // where the keystroke ends.
     expect(() => press('close')).not.toThrow()
+  })
+})
+
+/**
+ * The two gates in front of the stacks.
+ *
+ * `shortcutIsDeliverable` is pure and is asked directly, because the three things
+ * it decides between — a bare list key, an app-wide chord, and a chord that
+ * switches surface — are exactly what cannot be produced from a test renderer
+ * with no keyboard in it.
+ */
+describe('shortcutIsDeliverable', () => {
+  const idle = { modalDepth: 0, typing: false }
+
+  it('delivers everything on an idle chat list', () => {
+    for (const action of ['search', 'settings', 'close', 'nextChat', 'chat1', 'suggestionUp'] as ShortcutAction[]) {
+      expect(shortcutIsDeliverable(action, idle)).toBe(true)
+    }
+  })
+
+  it('drops an app-wide shortcut while a text input has the caret', () => {
+    for (const action of ['search', 'settings', 'toggleSidebar', 'nextChat', 'chat1'] as ShortcutAction[]) {
+      expect(shortcutIsDeliverable(action, { ...idle, typing: true })).toBe(false)
+    }
+  })
+
+  it('still delivers the composer’s own list keys while typing, because that is what they are for', () => {
+    for (const action of ['suggestionUp', 'suggestionDown', 'suggestionAccept'] as ShortcutAction[]) {
+      expect(shortcutIsDeliverable(action, { ...idle, typing: true })).toBe(true)
+    }
+  })
+
+  it('still delivers ⌘W while typing: leaving is not switching', () => {
+    expect(shortcutIsDeliverable('close', { ...idle, typing: true })).toBe(true)
+  })
+
+  it('drops a surface switch while something modal is open', () => {
+    for (const action of ['search', 'toggleSidebar', 'nextChat', 'previousChat', 'chat5'] as ShortcutAction[]) {
+      expect(shortcutIsDeliverable(action, { ...idle, modalDepth: 1 })).toBe(false)
+    }
+  })
+
+  it('leaves ⌘, and ⌘W alone under a modal: neither goes to the surface underneath', () => {
+    expect(shortcutIsDeliverable('settings', { ...idle, modalDepth: 1 })).toBe(true)
+    expect(shortcutIsDeliverable('close', { ...idle, modalDepth: 2 })).toBe(true)
+  })
+})
+
+describe('the typing gate, through the dispatcher', () => {
+  it('is the owner’s report: the chat list does not take a keystroke aimed at a field', () => {
+    const focusSearch = jest.fn()
+
+    render(<Taker action="search" onFire={focusSearch} />)
+    press('search', true)
+
+    expect(focusSearch).not.toHaveBeenCalled()
+  })
+
+  it('lets the same shortcut through from the menu bar, which the responder chain already arbitrated', () => {
+    const focusSearch = jest.fn()
+
+    render(<Taker action="search" onFire={focusSearch} />)
+    pressFromMenuBar('search')
+
+    expect(focusSearch).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('the modal-scope gate', () => {
+  function Scope({ open = true }: { open?: boolean }) {
+    useShortcutScope(open)
+
+    return <Text>scope</Text>
+  }
+
+  it('takes ⌘K away from the list underneath an open panel', () => {
+    const focusSearch = jest.fn()
+
+    render(
+      <>
+        <Taker action="search" onFire={focusSearch} />
+        <Scope />
+      </>
+    )
+
+    press('search')
+
+    expect(focusSearch).not.toHaveBeenCalled()
+  })
+
+  it('gives it back when the panel closes', () => {
+    const focusSearch = jest.fn()
+    const view = render(
+      <>
+        <Taker action="search" onFire={focusSearch} />
+        <Scope />
+      </>
+    )
+
+    view.rerender(<Taker action="search" onFire={focusSearch} />)
+    press('search')
+
+    expect(focusSearch).toHaveBeenCalledTimes(1)
+  })
+
+  it('counts, so a sheet over a panel does not reopen the gate when the panel goes', () => {
+    const focusSearch = jest.fn()
+    const view = render(
+      <>
+        <Taker action="search" onFire={focusSearch} />
+        <Scope />
+        <Scope />
+      </>
+    )
+
+    view.rerender(
+      <>
+        <Taker action="search" onFire={focusSearch} />
+        <Scope />
+      </>
+    )
+    press('search')
+
+    expect(focusSearch).not.toHaveBeenCalled()
+  })
+
+  it('is opened by a real bottom sheet, not only by the hook', () => {
+    const focusSearch = jest.fn()
+
+    render(
+      withProviders(
+        <>
+          <Taker action="search" onFire={focusSearch} />
+          <BottomSheet onRequestClose={jest.fn()} visible>
+            <Text>a sheet</Text>
+          </BottomSheet>
+        </>
+      )
+    )
+
+    press('search')
+
+    expect(focusSearch).not.toHaveBeenCalled()
   })
 })

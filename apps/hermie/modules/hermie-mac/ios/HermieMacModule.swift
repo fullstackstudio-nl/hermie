@@ -32,6 +32,19 @@ import UIKit
  and a shortcut that stops working while a sheet is open is a shortcut nobody trusts. The menu bar's
  own items reach the same place — see `HermieMenuBar`.
 
+ Two things were added to it after the owner reported, on build 163, that typing `k` into the theme
+ editor moved the caret to the chat list's search field:
+
+ - **A modifier is not believed unless this process watched it go down.** `isPressed` is HID state
+   and does not care which app is in front, so a Command released over another window stays down
+   here for ever — and then every bare `k` is a ⌘K. That is the same failure the Shift latch was
+   written for, one modifier over; it is now one mechanism for every modifier (`heldModifiers`).
+ - **The event says whether a text input has the caret** (`typing`). This handler sits below the
+   responder chain by design, which is what makes it survive a presented `Modal` — and also what
+   means it cannot tell a shortcut from a keystroke. It does not decide: it reports, and
+   `src/ui/useShortcut.ts` decides. The menu bar's own path reports `typing: false`, because a
+   `UIKeyCommand` IS in the responder chain and the focused view has already declined it.
+
  **`devLaunchArguments`** is the fifth thing, and the only one that is not about keyboards. It is
  this process's own `ProcessInfo.processInfo.arguments`, which is how `xcrun simctl launch` can tell a
  running app to open on a particular screen — see `src/dev/launch-intent.ts` and the "Driving a
@@ -45,27 +58,42 @@ public class HermieMacModule: Module {
   private var activationObservers: [NSObjectProtocol] = []
 
   /**
-   Whether a Shift key has been pressed and not yet released, as THIS process saw it.
+   Every modifier this process has watched go DOWN and not yet watched come up.
 
    The polled HID state is not enough on its own, and the owner's report is what it looks like when
-   it is trusted: Return starts inserting a newline instead of sending, and pressing Shift once
-   fixes it. GameController delivers key changes to the app that is in front, so a Shift held while
-   the window loses focus — ⇧-clicking something else, a Cmd+Tab with Shift down — has its key-UP
-   delivered somewhere else, and `isPressed` stays true until the next Shift press corrects it.
-   Nothing in the app can distinguish that from a Shift genuinely being held.
+   it is trusted twice over. The first report was Return: it starts inserting a newline instead of
+   sending, and pressing Shift once fixes it. The second was `k`: typed into a text field, it moved
+   the focus to the chat list's search field, because Command was believed to be held.
+
+   Both are the same fact. GameController delivers key changes to the app that is in front, so a
+   modifier held while the window loses focus — ⇧-clicking something else, a ⌘-Tab away — has its
+   key-UP delivered somewhere else, and `isPressed` stays true until the next press of that key
+   corrects it. Nothing in the app can distinguish that from a modifier genuinely being held.
 
    So the answer is the AND of two sources that fail in different directions: the polled state,
-   which can stick ON, and this latch, which is cleared whenever the window becomes active again.
-   Both must agree before a Return is treated as Shift+Return. A stuck latch is impossible because
-   activation clears it; a stuck poll no longer reaches JavaScript because the latch is false until
-   a Shift is pressed with this window in front.
+   which can stick ON, and this set, which is cleared whenever the window becomes active again.
+   Both must agree. A stale entry is impossible because activation clears it; a stale poll no
+   longer reaches JavaScript because the set is empty until a modifier is pressed with this window
+   in front.
+
+   It was one `Bool` for Shift until build 163. Making it a set is not a generalisation for its own
+   sake: Command was the one that shipped the bug, and a second copy of this reasoning for a second
+   modifier is how the first one got missed.
 
    `UIKey.modifierFlags` in `pressesBegan` would be authoritative per event and was NOT used: the
    first responder while typing is React Native's own `RCTUITextView`, so reading the flag off the
-   Return would mean subclassing or swizzling a renderer-owned class, and the failure this is about
-   is the latch going stale rather than the poll being wrong in principle.
+   keystroke would mean subclassing or swizzling a renderer-owned class, and the failure this is
+   about is the latch going stale rather than the poll being wrong in principle.
    */
-  private var shiftLatch = false
+  private var heldModifiers: Set<GCKeyCode> = []
+
+  /** Every key this latch tracks. Anything outside it is not a modifier and is not latched. */
+  private static let modifierKeys: Set<GCKeyCode> = [
+    .leftShift, .rightShift,
+    .leftControl, .rightControl,
+    .leftGUI, .rightGUI,
+    .leftAlt, .rightAlt
+  ]
 
   public func definition() -> ModuleDefinition {
     Name("HermieMac")
@@ -89,8 +117,12 @@ public class HermieMacModule: Module {
 
       // The menu bar's items and the keyboard's shortcuts are the same actions, so they land on the
       // same event. `install()` is a no-op anywhere but a Mac, where the menu bar exists.
+      // `typing: false`, whatever has the caret. A menu item's key equivalent is a `UIKeyCommand`
+      // in the responder chain: the focused text view was offered this keystroke first and did not
+      // take it, so the arbitration the keyboard path has to ask JavaScript for has already
+      // happened here. See the class comment and `src/platform/desktop-shortcuts.ts`.
       HermieMenuBar.onCommand = { [weak self] action in
-        self?.sendEvent("onShortcut", ["action": action])
+        self?.sendEvent("onShortcut", ["action": action, "typing": false])
       }
       HermieMenuBar.install()
     }
@@ -244,14 +276,13 @@ public class HermieMacModule: Module {
      phone and the reason this needs no platform check of its own.
      */
     Function("isShiftDown") { () -> Bool in
-      // Both sources have to agree; see `shiftLatch` for why one of them alone is a bug the owner
-      // can feel — Return stops sending until Shift is tapped once.
-      guard self.shiftLatch, let input = GCKeyboard.coalesced?.keyboardInput else {
+      // Both sources have to agree; see `heldModifiers` for why one of them alone is a bug the
+      // owner can feel — Return stops sending until Shift is tapped once.
+      guard let input = GCKeyboard.coalesced?.keyboardInput else {
         return false
       }
 
-      return input.button(forKeyCode: .leftShift)?.isPressed == true
-        || input.button(forKeyCode: .rightShift)?.isPressed == true
+      return self.modifierIsDown(.leftShift, .rightShift, input: input)
     }
 
     /** Whether a hardware keyboard is attached at all. Reported on the developer screen. */
@@ -322,6 +353,53 @@ public class HermieMacModule: Module {
   }
 
   /**
+   Is a modifier REALLY down?
+
+   The poll and the latch have to agree; see `heldModifiers` for the two ways each one lies. Either
+   side of a pair satisfies it, because no shortcut on the table distinguishes left from right.
+   */
+  private func modifierIsDown(_ codes: GCKeyCode..., input: GCKeyboardInput) -> Bool {
+    codes.contains { heldModifiers.contains($0) && input.button(forKeyCode: $0)?.isPressed == true }
+  }
+
+  /**
+   Does a text view or a text field hold the caret right now?
+
+   Walked from the key window's root rather than asked of UIKit, which has no public accessor for
+   the first responder. `UITextInput` rather than the two concrete classes: React Native's own
+   `RCTUITextView` is a `UITextView` and a `UISearchBar`'s field is neither, and what the question
+   is really about is "would this keystroke have gone into something the reader is typing in".
+
+   A read of the view hierarchy, so it runs on the main queue — which `keyChangedHandler` already
+   does (`keyboard.handlerQueue = .main`).
+   */
+  private static func isTextInputFocused() -> Bool {
+    guard let window = UIApplication.shared.connectedScenes
+      .compactMap({ $0 as? UIWindowScene })
+      .flatMap({ $0.windows })
+      .first(where: { $0.isKeyWindow })
+    else {
+      return false
+    }
+
+    return firstResponder(in: window) is UITextInput
+  }
+
+  private static func firstResponder(in view: UIView) -> UIResponder? {
+    if view.isFirstResponder {
+      return view
+    }
+
+    for subview in view.subviews {
+      if let found = firstResponder(in: subview) {
+        return found
+      }
+    }
+
+    return nil
+  }
+
+  /**
    A keyboard can arrive after launch — an iPad in a case, a Mac waking a Bluetooth keyboard — and the
    handler belongs to the keyboard rather than to the app, so it has to be reinstalled when one
    connects. All keyboards coalesce into a single object, so this fires once rather than per device.
@@ -334,7 +412,7 @@ public class HermieMacModule: Module {
     ) { [weak self] _ in
       // A keyboard that has just arrived cannot be holding a key this process watched go down, and
       // the state it reports for one is not this app's to trust.
-      self?.shiftLatch = false
+      self?.heldModifiers = []
       self?.installEscapeHandler()
     }
 
@@ -355,7 +433,7 @@ public class HermieMacModule: Module {
     for name in [UIScene.didActivateNotification, UIApplication.didBecomeActiveNotification] {
       let observer = NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) {
         [weak self] _ in
-        self?.shiftLatch = false
+        self?.heldModifiers = []
       }
 
       activationObservers.append(observer)
@@ -373,10 +451,14 @@ public class HermieMacModule: Module {
 
     input.keyChangedHandler = { [weak self] keyboardInput, _, keyCode, pressed in
       // Tracked for BOTH directions and before the guards below, because a release is exactly the
-      // half the polled state can miss. Only while this app is in front: a Shift pressed for
-      // another window is not a Shift this composer should honour.
-      if keyCode == .leftShift || keyCode == .rightShift {
-        self?.shiftLatch = pressed && UIApplication.shared.applicationState == .active
+      // half the polled state can miss. Only while this app is in front: a modifier pressed for
+      // another window is not a modifier this app should honour.
+      if Self.modifierKeys.contains(keyCode) {
+        if pressed, UIApplication.shared.applicationState == .active {
+          self?.heldModifiers.insert(keyCode)
+        } else {
+          self?.heldModifiers.remove(keyCode)
+        }
       }
 
       guard pressed else {
@@ -395,8 +477,11 @@ public class HermieMacModule: Module {
         return
       }
 
-      if let action = Self.shortcut(for: keyCode, input: keyboardInput) {
-        self?.sendEvent("onShortcut", ["action": action])
+      if let action = self?.shortcut(for: keyCode, input: keyboardInput) {
+        // Reported, not acted on. This handler is below the responder chain — which is what makes
+        // it survive a presented `Modal` — so it cannot tell a shortcut from a keystroke meant for
+        // the field the caret is in. `src/ui/useShortcut.ts` decides; see the type's comment.
+        self?.sendEvent("onShortcut", ["action": action, "typing": Self.isTextInputFocused()])
       }
     }
   }
@@ -416,15 +501,15 @@ public class HermieMacModule: Module {
 
    ⌃Tab is the one non-Command entry, because that is what it is on every platform, and ⌃⇧S is
    accepted alongside ⌘⇧S because an iPad with a PC keyboard in a case has no Command key to press.
-   */
-  private static func shortcut(for keyCode: GCKeyCode, input: GCKeyboardInput) -> String? {
-    func down(_ codes: GCKeyCode...) -> Bool {
-      codes.contains { input.button(forKeyCode: $0)?.isPressed == true }
-    }
 
-    let shift = down(.leftShift, .rightShift)
-    let control = down(.leftControl, .rightControl)
-    let command = down(.leftGUI, .rightGUI)
+   An instance method since build 163, because a modifier is only believed when the poll and
+   `heldModifiers` agree — and an allow-list that trusts the poll alone turns every bare letter on
+   the table into its own chord the first time a Command is released over another window.
+   */
+  private func shortcut(for keyCode: GCKeyCode, input: GCKeyboardInput) -> String? {
+    let shift = modifierIsDown(.leftShift, .rightShift, input: input)
+    let control = modifierIsDown(.leftControl, .rightControl, input: input)
+    let command = modifierIsDown(.leftGUI, .rightGUI, input: input)
 
     if keyCode == .keyS, shift, command || control {
       return "toggleSidebar"

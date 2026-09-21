@@ -14,14 +14,87 @@
  * **`close` is not registrable.** ⌘W is defined as "one level, like Escape", so it
  * is delivered to the Escape stack and nothing else. Two stacks that both claim to
  * mean "close one level" would be two stacks to keep in agreement.
+ *
+ * ## Two gates in front of the stacks
+ *
+ * The stacks answer "which screen", and the owner's report from build 163 is that
+ * some shortcuts should not have been delivered to ANY screen: a `k` typed into
+ * the theme editor, with Settings open over the chat list, moved the caret to the
+ * chat list's search field. Three things were wrong at once and only the first is
+ * a key table:
+ *
+ *  1. the modifier was believed to be held when it was not (`HermieMacModule`);
+ *  2. the keystroke belonged to the field the caret was in;
+ *  3. the surface it switched to was underneath a panel the reader had open.
+ *
+ * `shortcutIsDeliverable` is (2) and (3), and it is a pure function so that both
+ * can be asked without a keyboard. The typing gate is CLOSED by default and the
+ * allow-list is short on purpose — the composer's own list keys, which carry no
+ * text, and `close`, which has to work from inside a sheet's own text field.
+ * Everything else comes back through the menu bar's key equivalents on a Mac and
+ * on an iPad, where the responder chain has already arbitrated it.
  */
 import { useEffect, useRef } from 'react'
 
-import { subscribeToShortcuts, type ShortcutAction } from '../platform/desktop-shortcuts'
+import { subscribeToShortcuts, type ShortcutAction, type ShortcutEvent } from '../platform/desktop-shortcuts'
 import { closeTopmost } from './useEscapeKey'
 
 /** Everything a screen may claim. `close` is handled by the Escape stack instead. */
 export type RegistrableShortcut = Exclude<ShortcutAction, 'close'>
+
+/**
+ * Delivered even while a text input holds the caret.
+ *
+ * The three list keys are the composer's own — they are bare ↑, ↓ and Tab, they
+ * exist FOR a focused field, and they are ignored unless a suggestion list is
+ * open. `close` is here because ⌘W means "one level" and the level a reader wants
+ * to leave is often the sheet whose field they are typing in.
+ */
+const DELIVERED_WHILE_TYPING: readonly ShortcutAction[] = [
+  'suggestionUp',
+  'suggestionDown',
+  'suggestionAccept',
+  'close'
+]
+
+/**
+ * Shortcuts that move the reader to a DIFFERENT surface.
+ *
+ * Suppressed while an overlay, a sheet or Settings is open, because the surface
+ * they move to is the one underneath it — the reader would be typing into a field
+ * they can no longer see. `close` is not one of them: it is how you leave.
+ */
+const SWITCHES_SURFACE: readonly ShortcutAction[] = [
+  'search',
+  'toggleSidebar',
+  'nextChat',
+  'previousChat',
+  'chat1',
+  'chat2',
+  'chat3',
+  'chat4',
+  'chat5',
+  'chat6',
+  'chat7',
+  'chat8',
+  'chat9'
+]
+
+export interface ShortcutContext {
+  /** A text input holds the caret. */
+  typing: boolean
+  /** How many overlays, sheets and panels are open over the surface underneath. */
+  modalDepth: number
+}
+
+/** Should this shortcut reach a screen at all? The two gates, as one answer. */
+export function shortcutIsDeliverable(action: ShortcutAction, { typing, modalDepth }: ShortcutContext): boolean {
+  if (typing && !DELIVERED_WHILE_TYPING.includes(action)) {
+    return false
+  }
+
+  return !(modalDepth > 0 && SWITCHES_SURFACE.includes(action))
+}
 
 type Entry = { fire: () => void }
 
@@ -29,16 +102,57 @@ const stacks = new Map<RegistrableShortcut, Entry[]>()
 let detach: (() => void) | null = null
 let registrations = 0
 
-function deliver(action: ShortcutAction): void {
-  if (action === 'close') {
+/**
+ * How many modal scopes are open.
+ *
+ * A count rather than a boolean: a sheet over a panel is two, and the panel
+ * closing under a sheet — which `ChatSheetHost` does — must not reopen the gate
+ * while the sheet is still up.
+ */
+let modalDepth = 0
+
+/** For a test that needs to start from a known surface. Not used by the app. */
+export function resetShortcutScopes(): void {
+  modalDepth = 0
+}
+
+function deliver(event: ShortcutEvent): void {
+  if (!shortcutIsDeliverable(event.action, { modalDepth, typing: event.typing })) {
+    return
+  }
+
+  if (event.action === 'close') {
     closeTopmost()
 
     return
   }
 
-  const stack = stacks.get(action)
+  const stack = stacks.get(event.action)
 
   stack?.[stack.length - 1]?.fire()
+}
+
+/**
+ * Declare that something modal is open while `enabled`.
+ *
+ * Deliberately NOT the Escape stack, although every caller registers on both. The
+ * Escape stack is about WHO takes a key; this is about whether a whole class of
+ * key means anything right now, and a handler at the top of a stack cannot
+ * express "and nothing under me either" without every screen under it knowing
+ * that it exists.
+ */
+export function useShortcutScope(enabled = true): void {
+  useEffect(() => {
+    if (!enabled) {
+      return
+    }
+
+    modalDepth += 1
+
+    return () => {
+      modalDepth = Math.max(0, modalDepth - 1)
+    }
+  }, [enabled])
 }
 
 /**

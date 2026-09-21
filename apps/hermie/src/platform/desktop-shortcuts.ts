@@ -17,6 +17,24 @@
  * field. A letter has no path to JavaScript through here; an arrow key carries
  * nothing to leak.
  *
+ * ## Why an event and not a bare action
+ *
+ * The allow-list is a table of KEYS, and "is this keystroke meant for the app or
+ * for the field the caret is in" is not a question a key code can answer. The
+ * owner's report from build 163 is what it looks like when nobody asks it: a `k`
+ * typed into the theme editor moved the focus to the chat list's search field.
+ * The proximate cause was a modifier the poll believed was still held (see
+ * `HermieMacModule.swift`), but a table that only ever emits under a modifier is
+ * one guess away from that every time, so the answer travels WITH the event:
+ *
+ *  - **`typing`** — a text view or a text field is the first responder. The
+ *    keyboard path is below the responder chain and has no arbitration of its
+ *    own, so it says so and `useShortcut` decides.
+ *  - The MENU BAR path reports `typing: false` whatever is focused, and that is
+ *    not an oversight. A menu item's key equivalent is a `UIKeyCommand` in the
+ *    responder chain: the focused text view has already had its chance to claim
+ *    the keystroke and did not, so the arbitration has happened.
+ *
  * ⌘⇧S is the one entry that WANTS Shift, and the native table had to be opened for
  * it: everything else is disqualified by Shift on purpose, so that ⌘⇧K cannot be
  * mistaken for ⌘K. It is matched on the full combination rather than by relaxing
@@ -98,8 +116,24 @@ export interface MenuBarTitles {
   toggleSidebar: string
 }
 
+/**
+ * One shortcut, and what the app was doing when it arrived.
+ *
+ * `typing` defaults to false for a build whose native side predates it — an
+ * older binary under a newer bundle — which keeps that combination behaving
+ * exactly as it did rather than silently swallowing every shortcut.
+ */
+export interface ShortcutEvent {
+  action: ShortcutAction
+  /** A `UITextView` or `UITextField` holds the caret right now. */
+  typing: boolean
+}
+
 type ShortcutModule = {
-  addListener?: (event: string, listener: (payload: { action?: string }) => void) => { remove: () => void }
+  addListener?: (
+    event: string,
+    listener: (payload: { action?: string; typing?: boolean }) => void
+  ) => { remove: () => void }
   setMenuBar?: (titles: Record<string, string>, chats: string[]) => Promise<void>
   isMenuBarInstalled?: () => boolean
 }
@@ -125,10 +159,10 @@ function isAction(value: unknown): value is ShortcutAction {
  * Callers should go through `useShortcut`, which keeps one native subscription and
  * decides which of several registered screens an action belongs to.
  */
-export function subscribeToShortcuts(handler: (action: ShortcutAction) => void): () => void {
+export function subscribeToShortcuts(handler: (event: ShortcutEvent) => void): () => void {
   const subscription = mac?.addListener?.('onShortcut', payload => {
     if (isAction(payload?.action)) {
-      handler(payload.action)
+      handler({ action: payload.action, typing: payload?.typing === true })
     }
   })
 

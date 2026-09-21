@@ -70,6 +70,15 @@ export function SidebarOverlay({ children, onClose, visible, width }: SidebarOve
   const { present, progress } = usePresence(visible, { reduceMotion, token: 'sidebar' })
 
   useEscapeKey(onClose, visible)
+  /*
+    NOT a `useShortcutScope`, although it looks like every other overlay.
+
+    A modal scope means "the surface these shortcuts switch to is underneath
+    something". This overlay IS that surface: it is the chat list, arrived over
+    the chat because the window is too narrow to hold both. ⌘K has a field to
+    land in here and ⌘1…9 have rows to open, so switching them off would take
+    the shortcuts away at exactly the width that most needs them.
+  */
   // Android's back button is the same question as Escape, and this is a plain view
   // rather than a `Modal`, so the press would otherwise reach the activity and
   // background the app with the list still open — the bug `OverlayPanel` had.

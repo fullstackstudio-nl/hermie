@@ -73,7 +73,7 @@ jest.mock('../src/platform/runs-on-mac', () => ({ RUNS_ON_MAC: false }))
 const mockShortcutListeners = new Set<(action: string) => void>()
 
 jest.mock('../src/platform/desktop-shortcuts', () => ({
-  subscribeToShortcuts: (handler: (action: string) => void) => {
+  subscribeToShortcuts: (handler: (event: { action: string; typing: boolean }) => void) => {
     mockShortcutListeners.add(handler)
 
     return () => mockShortcutListeners.delete(handler)
@@ -115,7 +115,9 @@ const sidebarWidthOf = () =>
 const press = (action: string) => {
   act(() => {
     for (const listener of [...mockShortcutListeners]) {
-      listener(action)
+      // Typing: false — these arrive from the menu bar's own key equivalents, or
+      // from a keyboard with nothing focused. The typing gate has its own tests.
+      listener({ action, typing: false })
     }
   })
 }

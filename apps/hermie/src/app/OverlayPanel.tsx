@@ -49,6 +49,7 @@ import { useTheme } from '../ui/theme'
 import { OVERLAY_MAX_WIDTH, TAP_SLOP, WINDOW_GAP } from '../ui/tokens'
 import { useEscapeKey } from '../ui/useEscapeKey'
 import { useHardwareBack } from '../ui/useHardwareBack'
+import { useShortcutScope } from '../ui/useShortcut'
 
 /** A measured box, in the coordinates of the container the panel is placed in. */
 export type PanelFrame = { x: number; y: number; width: number; height: number }
@@ -72,6 +73,9 @@ export function OverlayPanel({ children, frame, onClose, title, visible }: Overl
   const { present, progress } = usePresence(visible, { reduceMotion: theme.reduceMotion, token: 'panel' })
 
   useEscapeKey(onClose, visible)
+  // Open over another surface: a shortcut that switches to that surface is off
+  // while it is. See `useShortcutScope`.
+  useShortcutScope(visible)
   // Android's back button is the same question as Escape, and this panel is the
   // one surface that never heard either: a sheet is a `Modal`, which consumes
   // the press and answers `onRequestClose`, but this is a plain view, so the
