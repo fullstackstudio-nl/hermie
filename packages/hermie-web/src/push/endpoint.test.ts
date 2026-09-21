@@ -73,6 +73,34 @@ describe('the VAPID public key', () => {
     expect(second.publicKey).toBe(first.publicKey)
   })
 
+  it('leaves the availability stamp on the gateway without touching its neighbours', async () => {
+    web = await start(true)
+
+    const profile = () => gateway.state.profiles.find(row => row.is_default)
+    const stamped = async (): Promise<Record<string, unknown> | undefined> => {
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        const app = profile()?.ui_meta?.['hermie-app'] as Record<string, unknown> | undefined
+        const push = app?.push as Record<string, unknown> | undefined
+
+        if (push?.vapidPublicKey) {
+          return push
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 10))
+      }
+
+      throw new Error('the daemon never left an availability stamp')
+    }
+
+    const push = await stamped()
+
+    expect(push?.endpoint).toBe('/push/vapid-public-key')
+    expect(push?.version).toBe('9.9.9')
+    // The marker another tool owns is a sibling KEY, and ADR-0016's write is
+    // per key. A daemon that wiped it would un-bot the profile it stamped.
+    expect(profile()?.ui_meta?.['hermes-bots']).toEqual({})
+  })
+
   it('says push is not running rather than inventing a key', async () => {
     web = await start(false)
     const response = await fetch(`${web.url}/push/vapid-public-key`)

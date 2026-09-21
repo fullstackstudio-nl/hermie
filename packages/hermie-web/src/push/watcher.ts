@@ -23,6 +23,7 @@
  * heartbeat: a question with a countdown on it is worth a buzz even if the chat
  * is open on a tablet in another room.
  */
+import { announceAvailability, availabilityIsCurrent, type PushAvailability, withAvailability } from './announce'
 import type { PushMessage } from './expo'
 import { lastInboundRow } from './inbound'
 import type { LinkEvent, LinkServerRequest } from './link'
@@ -59,6 +60,9 @@ export interface PushSender {
   send(registrations: readonly PushRegistration[], message: PushMessage): Promise<{ dead: string[] }>
 }
 
+/** How long the availability stamp is allowed to stand before it is rewritten. */
+export const AVAILABILITY_TTL_SECONDS = 300
+
 export interface WatcherOptions {
   link: WatcherLink
   state: PushState
@@ -71,6 +75,12 @@ export interface WatcherOptions {
   openingGraceMs?: number
   registrationTtlMs?: number
   rateLimit?: { burst: number; windowSeconds: number }
+  /**
+   * What to put in `hermie-app.push` so Settings can say push is available.
+   * Absent means say nothing, which is what a test without a daemon wants.
+   */
+  availability?: () => Omit<PushAvailability, 'at'>
+  availabilityTtlSeconds?: number
 }
 
 interface WatchedSession extends WatchedBot {
@@ -199,6 +209,51 @@ export class PushWatcher {
     this.log(
       `push: watching ${String(roster.bots.length)} chat(s), ${String(roster.push.registrations.length)} registration(s)`
     )
+    await this.announce()
+  }
+
+  /**
+   * Leave the liveness stamp, when there is something to say and it is stale.
+   *
+   * Skipped when the bag already says exactly this: the write is a
+   * compare-and-swap against a key devices are heartbeating into, and rewriting
+   * an unchanged value would be a round trip that can only lose a race.
+   */
+  async announce(): Promise<void> {
+    const describe = this.options.availability
+
+    if (!describe) {
+      return
+    }
+
+    const availability: PushAvailability = { ...describe(), at: this.now }
+    const ttl = this.options.availabilityTtlSeconds ?? AVAILABILITY_TTL_SECONDS
+
+    if (availabilityIsCurrent(this.roster.appSection, availability, ttl)) {
+      return
+    }
+
+    try {
+      const result = await announceAvailability(this.options.link, this.roster, availability)
+
+      if (result.written) {
+        // Keep the local copy in step, through the same function that built the
+        // write: the next sweep must compare against what was STORED and not
+        // against what was last read.
+        this.roster = {
+          ...this.roster,
+          appRevision: result.revision,
+          appSection: withAvailability(this.roster.appSection, availability)
+        }
+      }
+    } catch (error) {
+      // Saying "push is available" is not what push is for. A gateway too old
+      // for `profiles.configure`, or one that refuses the write, costs a line
+      // in Settings and nothing else.
+      this.log(
+        `push: could not leave the availability stamp — ${error instanceof Error ? error.message : String(error)}`
+      )
+    }
   }
 
   /** Re-read the roster when it is older than the TTL, or when told to. */

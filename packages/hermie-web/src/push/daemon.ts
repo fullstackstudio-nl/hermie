@@ -13,15 +13,18 @@
  * reach a device is `expo.ts` and `web-push.ts`, and who asked to be told is
  * `registrations.ts`.
  */
+import { PUSH_PUBLIC_KEY_PATH } from '../options'
 import { type PushCredentials, resolveCredentials } from './credentials'
 import { GatewayLink, type LinkEvent, type LinkServerRequest } from './link'
 import { createSender, pollExpoReceipts, RECEIPT_POLL_INTERVAL_MS } from './senders'
 import { loadPushState, prunePushState, type PushState, savePushState } from './state'
-import { PushWatcher, type PushSender } from './watcher'
+import { AVAILABILITY_TTL_SECONDS, PushWatcher, type PushSender } from './watcher'
 import { generateVapidKeys, vapidKeysUsable } from './web-push'
 
 export interface PushDaemonOptions {
   gatewayUrl: string
+  /** Hermie Web's own version, written into the availability stamp. */
+  version?: string
   /** The session token an ungated gateway takes; empty on a gated one. */
   gatewayToken?: string
   stateDir: string
@@ -131,7 +134,20 @@ export async function startPushDaemon(options: PushDaemonOptions): Promise<PushD
     createSender({ state, vapid, log, ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}) })
 
   if (options.watch !== false) {
-    watcher = new PushWatcher({ link, state, save, sender, log })
+    watcher = new PushWatcher({
+      link,
+      state,
+      save,
+      sender,
+      log,
+      // Informational only. ADR-0017: the app never dials this; it reads the
+      // stamp so Settings can say whether push is available at all.
+      availability: () => ({
+        endpoint: PUSH_PUBLIC_KEY_PATH,
+        vapidPublicKey: vapid.keys.publicKey,
+        version: options.version ?? '0.0.0'
+      })
+    })
   }
 
   /*
@@ -156,6 +172,24 @@ export async function startPushDaemon(options: PushDaemonOptions): Promise<PushD
 
   receipts?.unref()
 
+  /*
+    The liveness stamp has to keep moving on a quiet gateway too. Settings reads
+    it to say whether push is available, and "available" is a claim about NOW —
+    a stamp that only advanced when a chat did would say the daemon had stopped
+    every time nobody talked to a bot overnight.
+  */
+  const heartbeat =
+    options.pollReceipts === false || !watcher
+      ? null
+      : setInterval(
+          () => {
+            void watcher?.announce().catch(() => undefined)
+          },
+          (AVAILABILITY_TTL_SECONDS / 2) * 1000
+        )
+
+  heartbeat?.unref()
+
   // A restart must not replay everything the gateway still has in its ring.
   for (const [sessionId, seq] of Object.entries(state.seq)) {
     link.seedWatermark(sessionId, seq)
@@ -175,6 +209,10 @@ export async function startPushDaemon(options: PushDaemonOptions): Promise<PushD
     async stop() {
       if (receipts) {
         clearInterval(receipts)
+      }
+
+      if (heartbeat) {
+        clearInterval(heartbeat)
       }
 
       await link?.stop()
