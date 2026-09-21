@@ -1,24 +1,25 @@
 /**
- * Where a dragged row lands, as arithmetic.
+ * Where a dragged row lands, as arithmetic — the half that is only geometry.
  *
- * The chat list is a FLAT array of positions in which dividers and chats are the
- * same kind of thing (`store/chat-layout.ts`), and it is rendered as a FILTERED,
- * derived list — sections, empty-section rows, an archive drawer. A drag happens in
- * the second space and has to commit in the first, and that translation is the only
- * hard part of dragging a row. It is pure, so it is tested rather than watched.
+ * A drag happens in the space of RENDERED ROWS and has to commit in the space of
+ * the arrangement, and that translation is the only hard part of dragging a row.
+ * It is now split in two, because folders made one half of it stop being
+ * arithmetic at all:
  *
- * Three ideas:
+ *  - `features/bots/folder-rows.ts` knows what the rows ARE and what position
+ *    each one stands for. With folders a position is a container and an index
+ *    inside it, which is a question about the arrangement.
+ *  - this file knows only about boxes on a screen: which gap the finger is over,
+ *    which way the other rows move, and how far. It never asks what an anchor
+ *    means, which is why it needs nothing from the store.
  *
- *  - an **anchor** is a visible row that stands for a position in the entry list;
- *  - a **slot** is the gap between two anchors, which is what a drop line draws;
- *  - the **entry index** of slot `n` is anchor `n`'s own index, because dropping
- *    into a gap means "immediately before the row below the line".
+ * Two ideas survive from the divider version:
  *
- * The empty-section row is an anchor too, and that is the one non-obvious entry in
- * the table: without it a named section with no chats left in it would have no gap
- * of its own, and there would be nowhere to drag a chat back INTO.
+ *  - an **anchor** is a visible row that stands for a position;
+ *  - a **slot** is the gap between two anchors, which is what a drop line draws.
+ *
+ * Pure, so it is tested rather than watched.
  */
-import type { LayoutEntry } from '../../store/chat-layout'
 
 /** One row's box, as the list measured it, in content coordinates. */
 export interface RowBox {
@@ -26,76 +27,15 @@ export interface RowBox {
   height: number
 }
 
-/** A visible row and the entry-list position it stands for. */
-export interface DragAnchor {
-  key: string
-  entryIndex: number
-}
-
-/** The minimal shape of a rendered row that this module needs. */
-export interface AnchorCandidate {
-  key: string
-  kind: string
-  archived?: boolean
-}
-
 /**
- * The entry index every row key stands for.
+ * All this file needs of an anchor: something to look its box up by.
  *
- * Keys are the list's own (`bot:name`, `archived:name`, `divider:id`,
- * `empty:id`) so the caller does not have to build a parallel identity scheme.
+ * Structural on purpose. `folder-rows.ts` hangs a drop target off the same
+ * object, and keeping that out of the type here is what stops the geometry
+ * knowing anything about folders.
  */
-export function entryIndexByKey(entries: readonly LayoutEntry[]): Record<string, number> {
-  const byKey: Record<string, number> = {}
-
-  entries.forEach((entry, index) => {
-    if (entry.kind === 'divider') {
-      byKey[`divider:${entry.id}`] = index
-      // A chat dropped into an empty section goes immediately AFTER its heading,
-      // which is the position the heading's own index plus one.
-      byKey[`empty:${entry.id}`] = index + 1
-
-      return
-    }
-
-    byKey[`bot:${entry.name}`] = index
-    byKey[`archived:${entry.name}`] = index
-  })
-
-  return byKey
-}
-
-/**
- * The rows a drop line may sit above, in visual order.
- *
- * Archived rows and the archive header are excluded: archiving is what takes a
- * chat out of the arrangement's reading order, so dropping one back in by dragging
- * would say two contradictory things at once. The drawer keeps its explicit
- * Unarchive instead.
- */
-export function dragAnchors(
-  items: readonly AnchorCandidate[],
-  entryIndexes: Readonly<Record<string, number>>
-): DragAnchor[] {
-  const anchors: DragAnchor[] = []
-
-  for (const item of items) {
-    if (item.archived === true) {
-      continue
-    }
-
-    if (item.kind !== 'bot' && item.kind !== 'divider' && item.kind !== 'sectionEmpty') {
-      continue
-    }
-
-    const entryIndex = entryIndexes[item.key]
-
-    if (entryIndex !== undefined) {
-      anchors.push({ key: item.key, entryIndex })
-    }
-  }
-
-  return anchors
+export interface AnchorKey {
+  key: string
 }
 
 /**
@@ -110,7 +50,7 @@ export function dragAnchors(
  * would put the line somewhere nothing is drawn.
  */
 export function dropSlot(
-  anchors: readonly DragAnchor[],
+  anchors: readonly AnchorKey[],
   boxes: Readonly<Record<string, RowBox>>,
   pointerY: number
 ): number {
@@ -128,19 +68,6 @@ export function dropSlot(
   }
 
   return anchors.length
-}
-
-/**
- * The entry index a drop in `slot` commits to.
- *
- * Past the last anchor is the end of the arrangement, which is `entryCount`. An
- * archived chat keeps its position in the entry list while being drawn in the
- * drawer, so a row dropped at the very bottom can land after one of those — which
- * is invisible and harmless: unarchiving it later puts it where it has always been,
- * and the alternative is a special case for rows nobody can see.
- */
-export function dropEntryIndex(anchors: readonly DragAnchor[], slot: number, entryCount: number): number {
-  return anchors[slot]?.entryIndex ?? entryCount
 }
 
 /**
@@ -190,7 +117,7 @@ export function rowShift(anchor: number, from: number, slot: number): -1 | 0 | 1
  * `slot === null` is the end of a gesture: every row goes home.
  */
 export function neighbourOffsets(
-  anchors: readonly DragAnchor[],
+  anchors: readonly AnchorKey[],
   boxes: Readonly<Record<string, RowBox>>,
   from: number,
   slot: number | null

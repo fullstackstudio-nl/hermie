@@ -121,7 +121,7 @@ describe('the row menu', () => {
     botName: 'writer',
     displayName: 'Writer',
     now: NOON,
-    sections: [],
+    folders: [],
     unread: false
   }
 

@@ -47,11 +47,11 @@ export type BotRowProps = {
    */
   mutedUntil: number | null
   /**
-   * Every section the row can move to, `null` first for the unsectioned top
-   * group. Must be a stable array — it is part of the memo's key, and a fresh one
-   * per render re-renders forty rows because one of them changed.
+   * Every folder the row can move to, `null` first for the loose top level.
+   * Must be a stable array — it is part of the memo's key, and a fresh one per
+   * render re-renders forty rows because one of them changed.
    */
-  menuSections: readonly { id: string | null; name: string }[]
+  menuFolders: readonly { id: string | null; name: string }[]
   /**
    * Every callback takes what it acts on rather than closing over it. That is
    * what lets the list hand down ONE identity per handler, which is the only
@@ -85,7 +85,7 @@ export const BotRow = memo(function BotRow({
   compact,
   editing,
   handleHandlers,
-  menuSections,
+  menuFolders,
   mutedUntil,
   onArm,
   onDisarm,
@@ -116,10 +116,10 @@ export const BotRow = memo(function BotRow({
         displayName: bot.displayName,
         movable: !archived,
         mutedUntil,
-        sections: menuSections,
+        folders: menuFolders,
         unread
       }),
-    [accent, archived, bot.displayName, bot.name, menuSections, mutedUntil, unread]
+    [accent, archived, bot.displayName, bot.name, menuFolders, mutedUntil, unread]
   )
 
   // Offline replaces the preview with when the bot was last heard from: a stale

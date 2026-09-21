@@ -210,14 +210,14 @@ describe('BotsScreen', () => {
 describe('edit mode', () => {
   beforeEach(seedRoster)
 
-  it('reveals the move controls and the divider action, and hides them again', () => {
+  it('reveals the move controls and the folder action, and hides them again', () => {
     renderScreen(<BotsScreen />)
 
     expect(screen.queryByTestId('bot-move-up-writer')).toBeNull()
 
     fireEvent.press(screen.getByTestId('bots-edit'))
     expect(screen.getByTestId('bot-move-up-writer')).toBeTruthy()
-    expect(screen.getByTestId('add-divider')).toBeTruthy()
+    expect(screen.getByTestId('add-folder')).toBeTruthy()
 
     fireEvent.press(screen.getByTestId('bots-edit'))
     expect(screen.queryByTestId('bot-move-up-writer')).toBeNull()
@@ -240,46 +240,46 @@ describe('edit mode', () => {
     ])
   })
 
-  it('adds a divider and keeps it on screen while it is still empty', () => {
+  it('adds a folder and keeps it on screen while it is still empty', () => {
     renderScreen(<BotsScreen />)
     fireEvent.press(screen.getByTestId('bots-edit'))
-    fireEvent.press(screen.getByTestId('add-divider'))
+    fireEvent.press(screen.getByTestId('add-folder'))
 
-    const divider = useChatLayoutStore.getState().entries.find(entry => entry.kind === 'divider')
+    const folder = useChatLayoutStore.getState().entries.find(entry => entry.kind === 'folder')
 
     // Named by typing, not by editing a seeded word: a pre-filled name means
     // the first thing typed lands after it.
-    expect(divider).toEqual({ kind: 'divider', id: expect.any(String), name: '' })
+    expect(folder).toEqual({ kind: 'folder', id: expect.any(String) })
     // Empty, but visible: there has to be something to move a row into.
-    expect(screen.getByTestId(`divider-${(divider as { id: string }).id}`)).toBeTruthy()
+    expect(screen.getByTestId(`folder-${(folder as { id: string }).id}`)).toBeTruthy()
   })
 
-  it('opens the new divider focused, empty, with a placeholder that is not a name', () => {
+  it('opens the new folder focused, empty, with a placeholder that is not a name', () => {
     // The owner's device still carries a section called "New sectionFinance",
     // from a build that seeded the field with "New section". The placeholder has
     // to say what the field is FOR without ever becoming its value.
     renderScreen(<BotsScreen />)
     fireEvent.press(screen.getByTestId('bots-edit'))
-    fireEvent.press(screen.getByTestId('add-divider'))
+    fireEvent.press(screen.getByTestId('add-folder'))
 
-    const id = (useChatLayoutStore.getState().entries.find(entry => entry.kind === 'divider') as { id: string }).id
-    const field = screen.getByTestId(`divider-name-${id}`)
+    const id = (useChatLayoutStore.getState().entries.find(entry => entry.kind === 'folder') as { id: string }).id
+    const field = screen.getByTestId(`folder-name-${id}`)
 
     expect(field.props.value).toBe('')
-    expect(field.props.placeholder).toBe('Section name')
+    expect(field.props.placeholder).toBe('Folder name')
     expect(field.props.autoFocus).toBe(true)
   })
 
-  it('offers Remove on an empty section', () => {
+  it('offers Remove on an empty folder', () => {
     renderScreen(<BotsScreen />)
     fireEvent.press(screen.getByTestId('bots-edit'))
-    fireEvent.press(screen.getByTestId('add-divider'))
+    fireEvent.press(screen.getByTestId('add-folder'))
 
-    const id = (useChatLayoutStore.getState().entries.find(entry => entry.kind === 'divider') as { id: string }).id
+    const id = (useChatLayoutStore.getState().entries.find(entry => entry.kind === 'folder') as { id: string }).id
 
-    fireEvent.press(screen.getByTestId(`divider-remove-${id}`))
+    fireEvent.press(screen.getByTestId(`folder-remove-${id}`))
 
-    expect(useChatLayoutStore.getState().entries.some(entry => entry.kind === 'divider')).toBe(false)
+    expect(useChatLayoutStore.getState().entries.some(entry => entry.kind === 'folder')).toBe(false)
   })
 })
 
@@ -293,54 +293,54 @@ describe('edit mode', () => {
  * between them and read as one run-on line — which is how "NEW SECTIONFINANCE"
  * got onto the screen and then into the stored arrangement as a single name.
  */
-describe('a section with nothing in it', () => {
+describe('a folder with nothing in it', () => {
   beforeEach(seedRoster)
 
   /** Two named sections, the second holding every bot, the first holding none. */
-  function twoSections() {
-    // The roster has to be folded in first: `moveToSection` moves an entry that
-    // is already in the arrangement, and the screen's own reconcile has not run
-    // at this point.
+  function twoFolders() {
+    // The roster has to be folded in first: `moveToFolder` moves a bot that is
+    // already in the arrangement, and the screen's own reconcile has not run at
+    // this point.
     useChatLayoutStore.getState().reconcile(['researcher', 'writer'])
 
-    const empty = useChatLayoutStore.getState().addDivider('Work')
-    const full = useChatLayoutStore.getState().addDivider('Finance')
+    const empty = useChatLayoutStore.getState().addFolder('Work')
+    const full = useChatLayoutStore.getState().addFolder('Finance')
 
-    useChatLayoutStore.getState().moveToSection('researcher', full)
-    useChatLayoutStore.getState().moveToSection('writer', full)
+    useChatLayoutStore.getState().moveToFolder('researcher', full)
+    useChatLayoutStore.getState().moveToFolder('writer', full)
 
     return { empty, full }
   }
 
-  it('keeps its heading and gets a row of its own, outside edit mode too', () => {
-    const { empty } = twoSections()
+  it('keeps its header and gets a row of its own, outside edit mode too', () => {
+    const { empty } = twoFolders()
 
     renderScreen(<BotsScreen />)
 
-    expect(screen.getByTestId(`divider-${empty}`)).toBeTruthy()
-    expect(screen.getByTestId(`section-empty-${empty}`)).toBeTruthy()
+    expect(screen.getByTestId(`folder-${empty}`)).toBeTruthy()
+    expect(screen.getByTestId(`folder-empty-${empty}`)).toBeTruthy()
   })
 
-  it('puts a row between two headings rather than letting them meet', () => {
-    const { empty, full } = twoSections()
+  it('puts a row between two headers rather than letting them meet', () => {
+    const { empty, full } = twoFolders()
 
     renderScreen(<BotsScreen />)
 
-    const ids = screen.getAllByTestId(/^(divider|section-empty)-/).map(node => node.props.testID as string)
+    const ids = screen.getAllByTestId(/^(folder|folder-empty)-/).map(node => node.props.testID as string)
 
-    // The empty heading, its own row, then the next heading. Never two
-    // headings adjacent.
-    expect(ids).toEqual([`divider-${empty}`, `section-empty-${empty}`, `divider-${full}`])
+    // The empty folder, its own row, then the next folder. Never two headers
+    // adjacent.
+    expect(ids).toEqual([`folder-${empty}`, `folder-empty-${empty}`, `folder-${full}`])
   })
 
   it('stays out of the way of a search, which narrows the list on purpose', () => {
-    const { empty } = twoSections()
+    const { empty } = twoFolders()
 
     renderScreen(<BotsScreen />)
     fireEvent.changeText(screen.getByTestId('bots-search'), 'writer')
 
-    expect(screen.queryByTestId(`divider-${empty}`)).toBeNull()
-    expect(screen.queryByTestId(`section-empty-${empty}`)).toBeNull()
+    expect(screen.queryByTestId(`folder-${empty}`)).toBeNull()
+    expect(screen.queryByTestId(`folder-empty-${empty}`)).toBeNull()
   })
 })
 
@@ -388,18 +388,19 @@ describe('the row context menu', () => {
     expect(useChatLayoutStore.getState().accents).toEqual({})
   })
 
-  it('moves a bot into a named section', () => {
+  it('moves a bot into a folder', () => {
     useChatLayoutStore.getState().reconcile(['researcher', 'writer'])
-    const id = useChatLayoutStore.getState().addDivider('Finance')
+    const id = useChatLayoutStore.getState().addFolder('Finance')
 
     renderScreen(<BotsScreen />)
     fireEvent(screen.getByTestId('bot-row-researcher'), 'longPress')
-    fireEvent.press(screen.getByTestId('row-menu-section'))
-    fireEvent.press(screen.getByTestId(`row-menu-section-${id}`))
+    fireEvent.press(screen.getByTestId('row-menu-folder'))
+    fireEvent.press(screen.getByTestId(`row-menu-folder-${id}`))
 
-    const entries = useChatLayoutStore.getState().entries
-
-    expect(entries[entries.length - 1]).toEqual({ kind: 'chat', name: 'researcher' })
+    // Inside the folder, and out of the top level: a bot is in exactly one
+    // place, which is the invariant a move has to respect.
+    expect(useChatLayoutStore.getState().folders[0]?.bots).toEqual(['researcher'])
+    expect(useChatLayoutStore.getState().entries).not.toContainEqual({ kind: 'chat', name: 'researcher' })
   })
 
   /*
@@ -417,7 +418,7 @@ describe('the row context menu', () => {
     renderScreen(<BotsScreen />)
     fireEvent(screen.getByTestId('bot-row-writer'), 'longPress')
 
-    for (const id of ['row-menu-open', 'row-menu-markRead', 'row-menu-dividerAbove', 'row-menu-archive']) {
+    for (const id of ['row-menu-open', 'row-menu-markRead', 'row-menu-newFolder', 'row-menu-archive']) {
       expect(screen.getByTestId(id)).toBeTruthy()
     }
 

@@ -81,7 +81,7 @@ function harness(bridgeOverrides: Partial<WidgetBridge> = {}) {
   const fake = fakeBridge(bridgeOverrides)
   const bots = fakeStore({ bots: [bot('researcher')], running: {}, lastSeen: {}, avatars: {} })
   const chats = fakeStore({ chats: {} })
-  const layout = fakeStore({ accents: {}, archived: {} })
+  const layout = fakeStore({ accents: {}, archived: {}, mutes: {} })
 
   const sync = new WidgetSync({
     bridge: fake.bridge,
@@ -135,7 +135,7 @@ describe('WidgetSync', () => {
     snapshots.length = 0
 
     // A notification with no change behind it — which is most of them.
-    layout.set({ accents: {} })
+    layout.set({ accents: {}, archived: {}, mutes: {} })
     await settle()
     stop()
 

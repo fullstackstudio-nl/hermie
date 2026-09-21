@@ -18,8 +18,8 @@ const model: RowMenuModel = {
   archived: false,
   botName: 'researcher',
   displayName: 'Researcher',
-  sections: [
-    { id: null, name: 'No section' },
+  folders: [
+    { id: null, name: 'No folder' },
     { id: 'd1', name: 'Finance' }
   ],
   unread: true
@@ -71,9 +71,9 @@ describe('a chat row’s menu', () => {
     expect(parseRowMenuAction('accent:chartreuse')).toBeNull()
   })
 
-  it('reads the unsectioned top group back as null rather than as a divider called top', () => {
-    expect(parseRowMenuAction('section:top')).toEqual({ kind: 'section', dividerId: null })
-    expect(parseRowMenuAction('section:d1')).toEqual({ kind: 'section', dividerId: 'd1' })
+  it('reads the loose top level back as null rather than as a folder called top', () => {
+    expect(parseRowMenuAction('folder:top')).toEqual({ kind: 'folder', folderId: null })
+    expect(parseRowMenuAction('folder:d1')).toEqual({ kind: 'folder', folderId: 'd1' })
   })
 
   it('says Archive or Unarchive, never both, and reports a toggle either way', () => {
@@ -96,13 +96,13 @@ describe('a chat row’s menu', () => {
     const ids = rowMenuItems({ ...model, archived: true, movable: false }).map(item => item.id)
 
     expect(ids).not.toContain('move')
-    expect(ids).not.toContain('dividerAbove')
+    expect(ids).not.toContain('newFolder')
     expect(ids).toContain('archive')
   })
 
   it('never reports a submenu’s own id as an action', () => {
     expect(parseRowMenuAction('colour')).toBeNull()
-    expect(parseRowMenuAction('section')).toBeNull()
+    expect(parseRowMenuAction('folder')).toBeNull()
     expect(parseRowMenuAction('move')).toBeNull()
   })
 })

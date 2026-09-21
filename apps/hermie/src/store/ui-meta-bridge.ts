@@ -46,7 +46,8 @@ import {
 import { Platform } from 'react-native'
 
 import { ACCENTS, type AccentName } from '../ui/tokens'
-import { useChatLayoutStore, type LayoutEntry } from './chat-layout'
+import { useChatLayoutStore } from './chat-layout'
+import { readArrangement, type Folder, type LayoutEntry } from './folders'
 import { ownContextRow, useDeviceContextStore } from './device-context'
 import { mutesOf, type Mutes } from './mute'
 import { usePluginStore } from './plugin'
@@ -59,8 +60,20 @@ export const UI_META_DEBOUNCE_MS = 600
 /** The app-wide section, as this build writes it. */
 export interface HermieAppShape extends HermieAppSection {
   v: number
-  /** Order AND dividers: one list, because that is what the store holds. */
+  /** The TOP LEVEL in order: folders by id, and loose chats. */
   entries?: LayoutEntry[]
+  /**
+   * Each folder's name, colour and contents.
+   *
+   * An ADDITIVE field, and the section version is deliberately not bumped for
+   * it. A reader that meets a `v` it does not know treats the whole section as
+   * unreadable and then re-seeds it from its own local copy, so bumping would
+   * not protect the folders from an older build — it would hand that build the
+   * power to delete them. A field it simply does not mention costs it its
+   * folders on its own next write, which is the same last-writer-wins trade
+   * ADR-0016 already made for the order.
+   */
+  folders?: Folder[]
   /**
    * Which chats are silent, and until when.
    *
@@ -141,6 +154,7 @@ export function snapshotFromStores(): UiMetaSnapshot {
   const app: HermieAppShape = {
     v: HERMIE_APP_SECTION_VERSION,
     entries: layout.entries,
+    folders: layout.folders,
     // Always sent, empty included: a reader who unmutes their last chat has to
     // be able to say so, and an omitted key reads as "this device knows
     // nothing about mutes" rather than as "there are none".
@@ -160,36 +174,6 @@ export function snapshotFromStores(): UiMetaSnapshot {
 /** Read one bot section defensively: it came off a wire another build wrote. */
 function accentOf(section: HermieBotSection): AccentName | undefined {
   return typeof section.colour === 'string' && section.colour in ACCENTS ? (section.colour as AccentName) : undefined
-}
-
-/** Read the entry list defensively, for the same reason. */
-function entriesOf(value: unknown): LayoutEntry[] | undefined {
-  if (!Array.isArray(value)) {
-    return undefined
-  }
-
-  const entries: LayoutEntry[] = []
-  const seen = new Set<string>()
-
-  for (const raw of value) {
-    if (!raw || typeof raw !== 'object') {
-      continue
-    }
-
-    const entry = raw as Record<string, unknown>
-
-    if (entry.kind === 'divider' && typeof entry.id === 'string' && entry.id) {
-      entries.push({ kind: 'divider', id: entry.id, name: typeof entry.name === 'string' ? entry.name : '' })
-      continue
-    }
-
-    if (entry.kind === 'chat' && typeof entry.name === 'string' && entry.name && !seen.has(entry.name)) {
-      seen.add(entry.name)
-      entries.push({ kind: 'chat', name: entry.name })
-    }
-  }
-
-  return entries
 }
 
 function chatViewOf(value: unknown): ChatViewSettings | undefined {
@@ -225,7 +209,16 @@ export function applySnapshot(snapshot: UiMetaSnapshot): void {
   }
 
   const app = snapshot.app as HermieAppShape | null
-  const entries = entriesOf(app?.entries)
+  /*
+    `readArrangement` reads defensively AND migrates: a section written before
+    folders carries `divider` entries inline, and each one becomes a folder
+    holding the chats below it up to the next divider. An absent list is not an
+    empty one, so the arrangement is applied only when the section actually
+    carried entries — a gateway that has never been written to has no
+    arrangement, and taking that as "no rows anywhere" would empty a list the
+    reader spent an afternoon on.
+  */
+  const arrangement = Array.isArray(app?.entries) ? readArrangement(app.entries, app.folders) : undefined
   /*
     The per-device and per-person MAPS come from the gateway's own copy, never
     from the merged one. `app` is this device's local section whenever it is
@@ -238,10 +231,7 @@ export function applySnapshot(snapshot: UiMetaSnapshot): void {
   const neighbours = (snapshot.remote ?? app) as HermieAppShape | null
 
   useChatLayoutStore.getState().applyRemote({
-    // An absent list is not an empty one. A gateway that has never been written
-    // to has no arrangement, and taking that as "no rows anywhere" would empty a
-    // list the reader spent an afternoon on.
-    ...(entries ? { entries } : {}),
+    ...(arrangement ? { arrangement } : {}),
     // The same distinction, which is why the projection above always sends the
     // key: a section written by a build that knows about mutes says what they
     // are even when there are none, and one written before them says nothing.

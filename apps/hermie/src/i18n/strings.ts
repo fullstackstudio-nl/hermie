@@ -311,30 +311,28 @@ export const strings = {
   layout: {
     edit: 'Edit',
     done: 'Done',
-    editHint: 'Reorder rows and move them between sections.',
-    addDivider: 'Add divider',
-    // Never seeded INTO the field — only ever the placeholder, and only ever the
-    // heading a divider nobody has named yet shows. An older build pre-filled
+    editHint: 'Reorder rows and move them between folders.',
+    // Never seeded INTO the field — only ever the placeholder, and only ever
+    // the heading a folder nobody has named yet shows. An older build pre-filled
     // the field with "New section", so the first thing typed was appended to it
-    // and the owner's device still carries a section literally called
+    // and the owner's device still carries a group literally called
     // "New sectionFinance".
-    unnamedSection: 'Untitled section',
+    unnamedFolder: 'Untitled folder',
     rename: 'Rename',
     remove: 'Remove',
-    removeSection: (name: string) => `Remove the ${name || 'untitled'} section`,
-    dividerName: 'Section name',
-    editDividerHint: 'Type to rename this section.',
-    sectionEmpty: 'No chats in this section',
+    removeFolder: (name: string) => `Delete the ${name || 'untitled'} folder`,
+    folderName: 'Folder name',
+    editFolderHint: 'Type to rename this folder.',
+    folderEmpty: 'No chats in this folder',
     moveUp: 'Move up',
     moveDown: 'Move down',
-    topGroup: 'No section',
-    moveToSection: (section: string) => `Move to ${section}`,
-    // The submenu's own heading, so its lines can be bare section names. The
+    topGroup: 'No folder',
+    moveToFolder: (folder: string) => `Move to ${folder}`,
+    // The submenu's own heading, so its lines can be bare folder names. The
     // sentence form above is still what the fallback sheet's flat rows say.
-    moveToSectionMenu: 'Move to section',
+    moveToFolderMenu: 'Move to folder',
     openChat: 'Open',
     markRead: 'Mark as read',
-    addDividerAbove: 'Add divider above',
     dragHint: 'Hold and drag to reorder.',
     dragging: (name: string) => `Moving ${name}`,
     archive: 'Archive',
@@ -370,6 +368,30 @@ export const strings = {
     showSidebar: 'Show sidebar',
     /** The rail's own name, for the reader who lands on it with VoiceOver. */
     sidebarRail: 'Sidebar, hidden',
+
+    /**
+     * Folders, which replaced the named dividers ADR-0012 put in the list.
+     *
+     * A divider was a heading with nothing inside it: there was nothing to
+     * close, nothing to count while it was closed and nowhere to drop a row
+     * onto. These words are about a container, and the difference shows in
+     * every one of them — a folder is deleted rather than removed, it holds
+     * chats rather than standing above them, and it can be muted as a group
+     * because the group is a thing.
+     */
+    newFolder: 'New folder',
+    deleteFolder: 'Delete folder',
+    folderActions: (name: string) => `Actions for the ${name || 'untitled'} folder`,
+    folderColour: 'Folder colour',
+    /** The disclosure control, which says what the tap will DO. */
+    expandFolder: (name: string) => `Show the chats in ${name || 'this folder'}`,
+    collapseFolder: (name: string) => `Hide the chats in ${name || 'this folder'}`,
+    /** What a closed folder's aggregate badge says to a screen reader. */
+    folderUnread: (count: number) => `${count} unread`,
+    folderNeedsInput: 'Waiting for you',
+    /** Mute is per bot; a folder mutes every chat inside it at once. */
+    muteFolder: 'Mute folder',
+    unmuteFolder: 'Unmute folder',
 
     /**
      * Silencing one chat.

@@ -961,7 +961,7 @@ function Conversation({
 
   // Every question the agent is still blocked on, including one the reader put
   // aside with "Later". The header must not go quiet while the agent waits.
-  const needsInput = chat.requests.length > 0
+  const needsInput = chat.needsInput
   const subtitle = subtitleFor({
     status,
     hydration: chat.hydration,

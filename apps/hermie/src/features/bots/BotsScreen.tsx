@@ -38,7 +38,7 @@ import {
 } from 'react-native'
 
 import { snippetSegments, tidySnippet } from '@hermie/gateway-client'
-import { unreadCountSince } from '@hermie/transcript'
+import { hasOpenRequest, unreadBadgeLabel, unreadCountSince } from '@hermie/transcript'
 
 import { useGateway } from '../../gateway'
 import { SignedOutPanel } from '../../gateway/SignedOutPanel'
@@ -48,8 +48,9 @@ import { setMenuBar } from '../../platform/desktop-shortcuts'
 import { directTouchPanRef } from '../../platform/pointer-drag'
 import { useSafeAreaInsets } from '../../platform/safe-area'
 import { isUnread, useBotsStore, type Bot } from '../../store/bots'
-import { archivedOf, dividersOf, sectionsOf, useChatLayoutStore } from '../../store/chat-layout'
-import { isMuted, muteUntil, mutedUntil as mutedUntilOf } from '../../store/mute'
+import { archivedOf, foldersOf, useChatLayoutStore } from '../../store/chat-layout'
+import type { Folder } from '../../store/folders'
+import { isMuted, MUTE_FOREVER, muteUntil, mutedUntil as mutedUntilOf, type Mutes } from '../../store/mute'
 import { useChatsStore } from '../../store/chats'
 import { GlassSurface } from '../../ui/glass'
 import { Icon, ICON_SIZE } from '../../ui/Icon'
@@ -64,9 +65,17 @@ import { useChatRuntime } from '../chats/ChatRuntime'
 import { type MessageMatch, useMessageSearch } from '../search'
 import { BotRow } from './BotRow'
 import { ConnectionLine } from './ConnectionLine'
-import { dragAnchors, entryIndexByKey } from './drag-order'
+import {
+  committedIndex,
+  dragAnchors,
+  folderRows,
+  isSamePlace,
+  type DropTarget,
+  type FolderCounts,
+  type RowsInput
+} from './folder-rows'
 import { presenceOf, type Presence } from './presence'
-import { parseRowMenuAction, rowMenuItems } from './row-menu-items'
+import { folderMenuItems, parseFolderMenuAction, parseRowMenuAction, rowMenuItems } from './row-menu-items'
 import { RowMenu } from './RowMenu'
 import { SidebarFooter, type BotsSection, type TabKey } from './SidebarFooter'
 import { SidebarRail } from './SidebarRail'
@@ -124,8 +133,8 @@ export interface BotsScreenProps {
 const ARCHIVED_PRESENCE: Presence = { state: 'offline' }
 
 type ListItem =
-  | { key: string; kind: 'divider'; id: string | null; name: string }
-  | { key: string; kind: 'sectionEmpty'; id: string }
+  | { key: string; kind: 'folder'; folder: Folder; open: boolean; counts: FolderCounts }
+  | { key: string; kind: 'folderEmpty'; id: string }
   | { key: string; kind: 'bot'; bot: Bot; archived: boolean }
   | { key: string; kind: 'archiveHeader'; count: number }
   | { key: string; kind: 'noNameMatch'; query: string }
@@ -185,7 +194,7 @@ export function BotsScreen({
   // Which divider was added by the button, so that one — and only that one —
   // opens with the keyboard in it. Cleared when edit mode ends, so leaving and
   // coming back does not steal focus for a section that already has a name.
-  const [addedDividerId, setAddedDividerId] = useState<string | null>(null)
+  const [addedFolderId, setAddedFolderId] = useState<string | null>(null)
   const [archiveOpen, setArchiveOpen] = useState(false)
   const [menuFor, setMenuFor] = useState<string | null>(null)
 
@@ -251,13 +260,7 @@ export function BotsScreen({
 
     for (const bot of bots) {
       const chat = chats[bot.name]
-      const needsInput = chat
-        ? chat.order.some(id => {
-            const item = chat.items[id]
-
-            return (item?.kind === 'approval' || item?.kind === 'clarify') && item.state === 'open'
-          })
-        : false
+      const needsInput = chat ? hasOpenRequest(chat) : false
 
       map.set(
         bot.name,
@@ -284,9 +287,37 @@ export function BotsScreen({
     [byName, chats, lastSeen]
   )
 
-  const sections = useMemo(() => sectionsOf(entries, archivedSet), [entries, archivedSet])
-  const archivedNames = useMemo(() => archivedOf(entries, archivedSet), [entries, archivedSet])
-  const dividers = useMemo(() => dividersOf(entries), [entries])
+  const folders = useChatLayoutStore(state => state.folders)
+  const collapsed = useChatLayoutStore(state => state.collapsed)
+  const arrangement = useMemo(() => ({ entries, folders }), [entries, folders])
+  const archivedNames = useMemo(() => archivedOf(arrangement, archivedSet), [arrangement, archivedSet])
+  const folderList = useMemo(() => foldersOf(arrangement), [arrangement])
+
+  /**
+   * Everything the rows and the anchors are derived from, in one object.
+   *
+   * Built here rather than inside each memo because `folderRows` and
+   * `dragAnchors` have to be looking at the SAME arrangement: rows the reader
+   * can see and positions a drop can land on that disagreed by one folder would
+   * be a drag that lands a row somewhere nobody pointed at.
+   */
+  const rowsInput = useMemo<RowsInput>(
+    () => ({
+      arrangement,
+      archived: archivedSet,
+      collapsed,
+      mutes,
+      now: Math.floor(Date.now() / 1000),
+      countsFor: (name: string) => {
+        const counts = unreadFor(name)
+
+        return { unread: counts.count, needsInput: presence.get(name)?.state === 'needsInput' }
+      }
+    }),
+    [arrangement, archivedSet, collapsed, mutes, presence, unreadFor]
+  )
+
+  const rows = useMemo(() => folderRows(rowsInput), [rowsInput])
 
   /**
    * The list, flattened.
@@ -309,40 +340,59 @@ export function BotsScreen({
   const items = useMemo<ListItem[]>(() => {
     const out: ListItem[] = []
     const narrowed = Boolean(query.trim())
+    const shown = (name: string): Bot | null => {
+      const bot = byName[name]
 
-    for (const section of sections) {
-      const visible = section.bots
-        .map(name => byName[name])
-        .filter((bot): bot is Bot => Boolean(bot))
-        .filter(bot => matches(bot, query))
+      return bot && matches(bot, query) ? bot : null
+    }
 
-      // The unsectioned top group has no heading, so an empty one is nothing.
-      if (!section.divider) {
-        for (const bot of visible) {
-          out.push({ archived: false, bot, key: `bot:${bot.name}`, kind: 'bot' })
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index]
+
+      if (!row) {
+        continue
+      }
+
+      if (row.kind === 'bot') {
+        const bot = shown(row.name)
+
+        if (bot) {
+          out.push({ archived: false, bot, key: row.key, kind: 'bot' })
         }
 
         continue
       }
 
-      if (!visible.length && narrowed && !editing) {
+      if (row.kind === 'folderEmpty') {
+        out.push({ id: row.folderId, key: row.key, kind: 'folderEmpty' })
         continue
       }
 
-      out.push({
-        id: section.divider.id,
-        key: `divider:${section.divider.id}`,
-        kind: 'divider',
-        name: section.divider.name
-      })
-
-      if (!visible.length) {
-        out.push({ id: section.divider.id, key: `empty:${section.divider.id}`, kind: 'sectionEmpty' })
+      if (row.kind !== 'folder') {
+        continue
       }
 
-      for (const bot of visible) {
-        out.push({ archived: false, bot, key: `bot:${bot.name}`, kind: 'bot' })
+      /*
+        A search narrows the list on purpose, so a folder with nothing matching
+        in it goes away rather than saying "no matches" once per folder and
+        burying the matches. Edit mode is the exception: that is when somebody
+        is arranging, and a folder that vanished while they were moving rows
+        into it would be a folder they could not aim at.
+      */
+      const hits = row.open
+        ? row.folder.bots.filter(name => !archivedSet[name] && shown(name))
+        : row.folder.bots.filter(name => !archivedSet[name] && shown(name))
+
+      if (narrowed && !editing && !hits.length) {
+        // Skip the folder AND the rows it owns, which are the ones that follow.
+        while (index + 1 < rows.length && rows[index + 1]?.kind !== 'folder') {
+          index += 1
+        }
+
+        continue
       }
+
+      out.push({ counts: row.counts, folder: row.folder, key: row.key, kind: 'folder', open: row.open })
     }
 
     if (archivedNames.length) {
@@ -401,7 +451,7 @@ export function BotsScreen({
     }
 
     return out
-  }, [archiveOpen, archivedNames, byName, editing, messageSearch, query, sections])
+  }, [archiveOpen, archivedNames, archivedSet, byName, editing, messageSearch, query, rows])
 
   const hasRows = items.some(item => item.kind === 'bot')
 
@@ -441,10 +491,13 @@ export function BotsScreen({
     [mutes, unreadFor, visibleBots]
   )
 
-  /** One stable array for every row's menu; see `BotRow.menuSections`. */
-  const menuSections = useMemo(
-    () => [{ id: null, name: strings.layout.topGroup }, ...dividers.map(d => ({ id: d.id, name: d.name }))],
-    [dividers]
+  /** One stable array for every row's menu; see `BotRow.menuFolders`. */
+  const menuFolders = useMemo(
+    () => [
+      { id: null, name: strings.layout.topGroup },
+      ...folderList.map(folder => ({ id: folder.id, name: folder.name || strings.layout.unnamedFolder }))
+    ],
+    [folderList]
   )
 
   const listRef = useRef<FlatList<ListItem>>(null)
@@ -479,8 +532,16 @@ export function BotsScreen({
     })
   }, [])
 
-  const entryIndexes = useMemo(() => entryIndexByKey(entries), [entries])
-  const anchors = useMemo(() => dragAnchors(items, entryIndexes), [entryIndexes, items])
+  /*
+    Anchors come from the ARRANGEMENT rather than from the rendered items, and
+    that is the one thing to be careful about here. With dividers the two were
+    the same list filtered; with folders a position is a container and an index
+    inside it, and the rendered list has rows that stand for no position at all
+    (a folder's own header stands for two) and hides rows that still have one (a
+    collapsed folder's children). Deriving the drop targets from what is drawn
+    would put a row into whichever folder happened to be above the gap.
+  */
+  const anchors = useMemo(() => dragAnchors(rowsInput), [rowsInput])
 
   const drag = useRowDrag({
     anchors,
@@ -488,16 +549,30 @@ export function BotsScreen({
     // where there is not. Either way it is not free for the drag to take, so on
     // Android the handle in edit mode is the only way in.
     armEnabled: HAS_NATIVE_CONTEXT_MENU,
-    entryCount: entries.length,
+    // Past the last row is the end of the TOP LEVEL, never the end of whichever
+    // folder happened to be last: dragging to the bottom is how a chat gets out
+    // of the last folder.
+    fallbackTarget: useMemo<DropTarget>(() => ({ folderId: null, index: entries.length }), [entries.length]),
     measureList: measureListTop,
     onAutoScroll: useCallback((delta: number) => {
       const next = Math.max(0, scrollOffset.current + delta)
 
       listRef.current?.scrollToOffset({ animated: false, offset: next })
     }, []),
-    onCommit: useCallback((name: string, index: number) => {
-      useChatLayoutStore.getState().moveToIndex(name, index)
-    }, []),
+    onCommit: useCallback(
+      (name: string, target: DropTarget) => {
+        // Dropping a row immediately before or immediately after itself is the
+        // same arrangement, and committing it would churn the disk and the
+        // gateway for nothing. The comparison is per CONTAINER: index 2 of the
+        // top level and index 2 of a folder are different places.
+        if (isSamePlace(arrangement, name, target)) {
+          return
+        }
+
+        useChatLayoutStore.getState().dropBot(name, target.folderId, committedIndex(arrangement, name, target))
+      },
+      [arrangement]
+    ),
     reduceMotion: theme.reduceMotion
   })
 
@@ -563,9 +638,9 @@ export function BotsScreen({
   }, [])
 
   /** Rename from a divider's own menu: edit mode on, and the caret in that field. */
-  const renameDivider = useCallback((id: string) => {
+  const renameFolder = useCallback((id: string) => {
     setEditing(true)
-    setAddedDividerId(id)
+    setAddedFolderId(id)
   }, [])
 
   const onListScroll = useCallback(
@@ -626,8 +701,8 @@ export function BotsScreen({
 
           return
 
-        case 'section':
-          layout.moveToSection(name, action.dividerId)
+        case 'folder':
+          layout.moveToFolder(name, action.folderId)
 
           return
 
@@ -651,14 +726,14 @@ export function BotsScreen({
 
           return
 
-        case 'dividerAbove': {
-          const id = layout.addDividerAbove(name, '')
+        case 'newFolder': {
+          const id = layout.addFolderAround(name, '')
 
-          // Straight into the field, and into edit mode to show it: a section that
+          // Straight into the field, and into edit mode to show it: a folder that
           // stays untitled is what put two headings next to each other.
           if (id) {
             setEditing(true)
-            setAddedDividerId(id)
+            setAddedFolderId(id)
           }
 
           return
@@ -670,6 +745,68 @@ export function BotsScreen({
     },
     [byName, openBot]
   )
+
+  /** Open or close a folder. Local to this device; see `PersistedLayout`. */
+  const toggleFolder = useCallback((id: string, open: boolean) => {
+    useChatLayoutStore.getState().setFolderOpen(id, open)
+  }, [])
+
+  /**
+   * A folder's own menu, which is the row menu's alphabet one level up.
+   *
+   * Mute is the one line that fans out: a folder has no mute of its own, it
+   * just applies the chosen span to every chat inside it at once. Storing a
+   * mute on the folder would be a second place a chat can be silent from, and
+   * then a chat dragged out of a muted folder would be carrying a mute nobody
+   * could see or lift.
+   */
+  const onFolderMenuSelect = useCallback((folderId: string, id: string) => {
+    const action = parseFolderMenuAction(id)
+    const layout = useChatLayoutStore.getState()
+    const folder = layout.folders.find(entry => entry.id === folderId)
+
+    if (!action || !folder) {
+      return
+    }
+
+    switch (action.kind) {
+      case 'colour':
+        layout.setFolderColour(folderId, action.accent)
+
+        return
+
+      case 'delete':
+        layout.removeFolder(folderId)
+
+        return
+
+      case 'newFolder':
+        setAddedFolderId(layout.addFolder(''))
+        setEditing(true)
+
+        return
+
+      case 'mute': {
+        const until = muteUntil(action.duration, Math.floor(Date.now() / 1000))
+
+        for (const name of folder.bots) {
+          layout.setMute(name, until)
+        }
+
+        return
+      }
+
+      case 'unmute':
+        for (const name of folder.bots) {
+          layout.setMute(name, null)
+        }
+
+        return
+
+      default:
+        return
+    }
+  }, [])
 
   // A chat-level failure must not compete with the signed-out card: a dead
   // session is not a roster problem and showing both makes neither readable.
@@ -702,7 +839,7 @@ export function BotsScreen({
         editing={editing}
         onToggleEdit={() => {
           setEditing(current => !current)
-          setAddedDividerId(null)
+          setAddedFolderId(null)
         }}
         sidebar={sidebar}
         {...(onOpenSection ? { onNewCron: () => onOpenSection('cron', { create: true }) } : {})}
@@ -788,24 +925,27 @@ export function BotsScreen({
               )
             }
 
-            if (item.kind === 'divider') {
+            if (item.kind === 'folder') {
               return (
                 <Animated.View style={{ transform: [{ translateY: drag.offsetFor(item.key) }] }}>
-                  <Divider
-                    autoFocus={item.id === addedDividerId}
+                  <FolderHeader
+                    autoFocus={item.folder.id === addedFolderId}
+                    counts={item.counts}
                     editing={editing}
-                    id={item.id}
-                    name={item.name}
-                    onRename={renameDivider}
+                    folder={item.folder}
+                    onMenuSelect={onFolderMenuSelect}
+                    onRename={renameFolder}
+                    onToggle={toggleFolder}
+                    open={item.open}
                   />
                 </Animated.View>
               )
             }
 
-            if (item.kind === 'sectionEmpty') {
+            if (item.kind === 'folderEmpty') {
               return (
                 <Animated.View style={{ transform: [{ translateY: drag.offsetFor(item.key) }] }}>
-                  <SectionEmpty id={item.id} />
+                  <FolderEmpty id={item.id} />
                 </Animated.View>
               )
             }
@@ -863,7 +1003,7 @@ export function BotsScreen({
                   compact={!sidebar}
                   editing={editing && !item.archived}
                   {...(editing && !item.archived ? { handleHandlers: drag.handleHandlers(item.bot.name) } : {})}
-                  menuSections={menuSections}
+                  menuFolders={menuFolders}
                   mutedUntil={mutedUntilOf(mutes, item.bot.name, Math.floor(Date.now() / 1000))}
                   onArm={drag.arm}
                   onDisarm={drag.disarm}
@@ -895,7 +1035,7 @@ export function BotsScreen({
         </Text>
       ) : null}
 
-      {editing ? <EditBar onAddDivider={setAddedDividerId} /> : null}
+      {editing ? <EditBar onAddFolder={setAddedFolderId} /> : null}
 
       {onOpenSection ? <SidebarFooter current={currentTab} onOpenSection={onOpenSection} /> : null}
 
@@ -918,7 +1058,7 @@ export function BotsScreen({
             displayName: byName[menuFor]?.displayName ?? menuFor,
             movable: !archivedSet[menuFor],
             mutedUntil: mutedUntilOf(mutes, menuFor, Math.floor(Date.now() / 1000)),
-            sections: menuSections,
+            folders: menuFolders,
             unread: unreadFor(menuFor).unread
           })}
           onClose={() => setMenuFor(null)}
@@ -1136,70 +1276,106 @@ function SearchField({
  * dialog: the field is already the thing being renamed, and a dialog would be a
  * second modal on a screen that already has one for the row menu.
  */
-function Divider({
-  editing,
-  id,
-  name,
+/**
+ * A folder's own row: a disclosure control, a name, and what is inside it.
+ *
+ * It replaces the named divider ADR-0012 drew, and it is a different KIND of
+ * thing rather than the same thing restyled. A divider was a heading — it stood
+ * above its rows and had no inside, so there was nothing to close, nothing to
+ * count while it was closed and nowhere to drop a row onto. This row owns what
+ * follows it: tapping it folds those rows away, and folded away they still have
+ * to be accounted for, which is what the badge is.
+ *
+ * The badge appears ONLY while the folder is closed. Open, every row inside is
+ * on screen carrying its own count, and a total above them would be the same
+ * information twice.
+ */
+function FolderHeader({
   autoFocus,
-  onRename
+  counts,
+  editing,
+  folder,
+  onMenuSelect,
+  onRename,
+  onToggle,
+  open
 }: {
-  editing: boolean
-  id: string | null
-  name: string
   autoFocus?: boolean
-  /** Turns edit mode on with this heading's field focused; the menu's Rename. */
+  counts: FolderCounts
+  editing: boolean
+  folder: Folder
+  onMenuSelect: (folderId: string, id: string) => void
+  /** Turns edit mode on with this folder's field focused; the menu's Rename. */
   onRename?: (id: string) => void
+  onToggle: (id: string, open: boolean) => void
+  open: boolean
 }) {
   const theme = useTheme()
+  const hover = useHover()
+  const mutes = useChatLayoutStore(state => state.mutes)
+  const swatch = theme.accent(folder.colour ?? 'default')
 
   const menu = useMemo(
     () =>
-      id
-        ? [
-            { id: 'rename', title: strings.layout.rename, systemImage: 'pencil' },
-            { id: 'remove', title: strings.layout.remove, systemImage: 'trash', destructive: true }
-          ]
-        : [],
-    [id]
+      folderMenuItems({
+        colour: folder.colour ?? 'default',
+        mutedUntil: folderMuteState(folder, mutes, Math.floor(Date.now() / 1000)),
+        name: folder.name
+      }),
+    [folder, mutes]
   )
 
-  if (!id) {
-    return null
-  }
+  const label = [
+    folder.name || strings.layout.unnamedFolder,
+    open || counts.unread === 0 ? '' : strings.layout.folderUnread(counts.unread),
+    open || !counts.needsInput ? '' : strings.layout.folderNeedsInput
+  ]
+    .filter(Boolean)
+    .join(', ')
 
   const heading = (
-    <View
+    <Pressable
+      accessibilityHint={open ? strings.layout.collapseFolder(folder.name) : strings.layout.expandFolder(folder.name)}
+      accessibilityLabel={label}
+      accessibilityRole="button"
+      aria-expanded={open}
+      onPress={() => onToggle(folder.id, !open)}
       style={{
         alignItems: 'center',
+        backgroundColor: hover.hovered ? theme.glass.row.solid : 'transparent',
+        borderRadius: theme.radii.card,
+        cursor: 'pointer',
         flexDirection: 'row',
         gap: theme.space.sm,
-        paddingBottom: 6,
-        paddingHorizontal: theme.space.lg,
-        paddingTop: theme.space.lg
+        marginHorizontal: theme.space.sm,
+        marginTop: theme.space.sm,
+        paddingHorizontal: theme.space.md,
+        paddingVertical: theme.space.md
       }}
-      testID={`divider-${id}`}
+      testID={`folder-${folder.id}`}
+      {...hover.props}
     >
+      {/* Decorative: the row's own expanded state is what a screen reader reads,
+          and `Icon` keeps itself out of the tree so it cannot say it twice. */}
+      <Icon color={swatch.fill} name={open ? 'chevronDown' : 'chevronRight'} size={ICON_SIZE.marker} />
+
       {editing ? (
         <TextInput
-          accessibilityHint={strings.layout.editDividerHint}
-          accessibilityLabel={strings.layout.dividerName}
-          // A divider that has just been added is focused straight into: the
-          // whole reason it exists is that it needs a name, and a section that
-          // stays untitled is what put two headings next to each other.
+          accessibilityHint={strings.layout.editFolderHint}
+          accessibilityLabel={strings.layout.folderName}
+          // A folder that has just been added is focused straight into: the
+          // whole reason it exists is that it needs a name.
           autoFocus={autoFocus === true}
           autoCapitalize="words"
-          onChangeText={next => useChatLayoutStore.getState().renameDivider(id, next)}
+          onChangeText={next => useChatLayoutStore.getState().renameFolder(folder.id, next)}
           // The PLACEHOLDER, never the value. Seeding the field is what left
           // "New sectionFinance" on a real device.
-          placeholder={strings.layout.dividerName}
+          placeholder={strings.layout.folderName}
           placeholderTextColor={theme.colors.textFaint}
           returnKeyType="done"
           selectTextOnFocus
           style={{
             backgroundColor: theme.tintSunk,
-            // A hairline is what says "this is a field": a sunk tint alone is
-            // nearly invisible on the light panel, so the one editable thing in
-            // edit mode did not look editable.
             borderColor: theme.hairline,
             borderRadius: theme.radii.inset,
             borderWidth: 1,
@@ -1210,29 +1386,54 @@ function Divider({
             paddingHorizontal: theme.space.sm,
             paddingVertical: 6
           }}
-          testID={`divider-name-${id}`}
-          value={name}
+          testID={`folder-name-${folder.id}`}
+          value={folder.name}
         />
       ) : (
-        <>
-          <Text color="textFaint" variant="micro">
-            {(name || strings.layout.unnamedSection).toUpperCase()}
-          </Text>
-          <View style={{ backgroundColor: theme.hairlineSoft, flex: 1, height: 1 }} />
-        </>
+        <Text color="text" style={{ flex: 1, fontWeight: '600' }} variant="preview">
+          {folder.name || strings.layout.unnamedFolder}
+        </Text>
       )}
+
+      {/* Closed only. Open, every row inside says its own number. */}
+      {!open && counts.needsInput ? (
+        <View
+          style={{
+            backgroundColor: theme.presence.needsInput,
+            borderRadius: 5,
+            height: 10,
+            width: 10
+          }}
+          testID={`folder-needs-input-${folder.id}`}
+        />
+      ) : null}
+
+      {!open && counts.unread > 0 ? (
+        <View
+          style={{
+            alignItems: 'center',
+            backgroundColor: swatch.fill,
+            borderRadius: 11,
+            minWidth: 22,
+            paddingHorizontal: 6,
+            paddingVertical: 2
+          }}
+          testID={`folder-unread-${folder.id}`}
+        >
+          <Text color="onAccent" variant="meta">
+            {unreadBadgeLabel(counts.unread)}
+          </Text>
+        </View>
+      ) : null}
 
       {editing ? (
         <Pressable
-          accessibilityLabel={strings.layout.removeSection(name)}
+          accessibilityLabel={strings.layout.removeFolder(folder.name)}
           accessibilityRole="button"
           hitSlop={TAP_SLOP}
-          onPress={() => useChatLayoutStore.getState().removeDivider(id)}
+          onPress={() => useChatLayoutStore.getState().removeFolder(folder.id)}
           style={({ pressed }) => ({
             cursor: 'pointer',
-            // A bordered chip rather than a bare word: Remove sat as plain text
-            // beside a field that also looked like plain text, so neither of the
-            // two things edit mode is FOR looked like a control.
             borderColor: theme.hairline,
             borderRadius: theme.radii.pill,
             borderWidth: 1,
@@ -1240,30 +1441,30 @@ function Divider({
             paddingHorizontal: theme.space.md,
             paddingVertical: 6
           })}
-          testID={`divider-remove-${id}`}
+          testID={`folder-remove-${folder.id}`}
         >
           <Text color="dangerText" variant="meta">
             {strings.layout.remove}
           </Text>
         </Pressable>
       ) : null}
-    </View>
+    </Pressable>
   )
 
   return (
     <ContextMenuHost
       items={menu}
-      menuTitle={name || strings.layout.unnamedSection}
+      menuTitle={folder.name || strings.layout.unnamedFolder}
       onSelect={selected => {
         if (selected === 'rename') {
-          onRename?.(id)
+          onRename?.(folder.id)
 
           return
         }
 
-        useChatLayoutStore.getState().removeDivider(id)
+        onMenuSelect(folder.id, selected)
       }}
-      testID={`divider-menu-${id}`}
+      testID={`folder-menu-${folder.id}`}
     >
       {heading}
     </ContextMenuHost>
@@ -1271,13 +1472,13 @@ function Divider({
 }
 
 /**
- * A named section with nothing in it.
+ * An open folder with nothing in it.
  *
- * It exists so the heading above it has a body, however empty: two headings
- * whose rows have all moved away would otherwise meet with nothing between
- * them, and read as one line.
+ * It exists so a folder somebody has just emptied still has a body to drop a
+ * chat back into — without it there is no gap of its own between the header and
+ * whatever follows, and a folder becomes a one-way trip.
  */
-function SectionEmpty({ id }: { id: string }) {
+function FolderEmpty({ id }: { id: string }) {
   const theme = useTheme()
 
   return (
@@ -1288,13 +1489,48 @@ function SectionEmpty({ id }: { id: string }) {
         paddingBottom: theme.space.sm,
         paddingHorizontal: theme.space.lg
       }}
-      testID={`section-empty-${id}`}
+      testID={`folder-empty-${id}`}
     >
       <Text color="textFaint" variant="meta">
-        {strings.layout.sectionEmpty}
+        {strings.layout.folderEmpty}
       </Text>
     </View>
   )
+}
+
+/**
+ * When a whole folder is silent until, or `null` when any chat in it is not.
+ *
+ * The menu asks one question — should this offer Mute or Unmute — and a folder
+ * that is half muted has to answer "not muted", because the useful action there
+ * is to silence the rest rather than to un-silence the few. `MUTE_FOREVER`
+ * wins over a deadline for the same reason a deadline wins over nothing: the
+ * label has to describe the state a reader would still be in.
+ */
+function folderMuteState(folder: Folder, mutes: Mutes, now: number): number | null {
+  if (!folder.bots.length) {
+    return null
+  }
+
+  let soonest: number | null = null
+
+  for (const name of folder.bots) {
+    if (!isMuted(mutes, name, now)) {
+      return null
+    }
+
+    const until = mutes[name] as number
+
+    if (until === MUTE_FOREVER) {
+      continue
+    }
+
+    soonest = soonest === null || until < soonest ? until : soonest
+  }
+
+  // Every chat is muted; `null` here would mean "not muted", so a folder that is
+  // muted forever reports the deadline that never comes.
+  return soonest ?? MUTE_FOREVER
 }
 
 function ArchiveHeader({ count, onToggle, open }: { count: number; onToggle: () => void; open: boolean }) {
@@ -1331,7 +1567,7 @@ function ArchiveHeader({ count, onToggle, open }: { count: number; onToggle: () 
   )
 }
 
-function EditBar({ onAddDivider }: { onAddDivider: (id: string) => void }) {
+function EditBar({ onAddFolder }: { onAddFolder: (id: string) => void }) {
   const theme = useTheme()
 
   return (
@@ -1361,12 +1597,12 @@ function EditBar({ onAddDivider }: { onAddDivider: (id: string) => void }) {
         // Empty rather than pre-filled with "New section": the field is focused
         // straight into, and a seeded name means the first thing typed is
         // APPENDED to a word nobody asked for.
-        onPress={() => onAddDivider(useChatLayoutStore.getState().addDivider(''))}
+        onPress={() => onAddFolder(useChatLayoutStore.getState().addFolder(''))}
         style={{ cursor: 'pointer' }}
-        testID="add-divider"
+        testID="add-folder"
       >
         <Text color="accentText" style={{ fontWeight: '600' }} variant="meta">
-          {strings.layout.addDivider}
+          {strings.layout.newFolder}
         </Text>
       </Pressable>
     </View>

@@ -19,6 +19,7 @@
 import {
   isBusy,
   itemsVersion,
+  hasOpenRequest,
   openRequests,
   runningSubagents,
   type Subagent,
@@ -75,6 +76,8 @@ export interface UseChatResult {
   hydration: 'cold' | 'cached' | 'hydrating' | 'live' | 'stale' | 'error'
   /** Approval and clarify cards still waiting on the user. */
   requests: TranscriptItem[]
+  /** A question is waiting on a person. The header's bead reads this. */
+  needsInput: boolean
   subagents: Subagent[]
   /** The same children as a tree, for the agents sheet. */
   subagentTree: SubagentNode[]
@@ -241,6 +244,18 @@ export function useChat(botName: string): UseChatResult {
     [version, chat?.botName]
   )
 
+  /*
+    The same predicate the chat list's bead and the widget file answer with,
+    rather than `requests.length > 0` spelled out again here. They have to
+    agree: a header that says Online above a row that says Needs input is two
+    bugs that look like one.
+  */
+  const needsInput = useMemo(
+    () => (chat ? hasOpenRequest(chat) : false),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [version, chat?.botName]
+  )
+
   const subagents = useMemo(
     () => (chat ? runningSubagents(chat) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -280,6 +295,7 @@ export function useChat(botName: string): UseChatResult {
     turnActive: chat?.turn.active ?? false,
     activity,
     hydration: chat?.hydration ?? 'cold',
+    needsInput,
     requests,
     subagents,
     subagentTree: tree,

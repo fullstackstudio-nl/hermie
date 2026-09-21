@@ -31,7 +31,7 @@ beforeEach(async () => {
 
 describe('the projection', () => {
   it('puts a bot’s own settings in the bot key and the rest in the app key', () => {
-    useChatLayoutStore.getState().addDivider('Finance')
+    useChatLayoutStore.getState().addFolder('Finance')
     useChatLayoutStore.getState().setArchived('writer', true)
     useChatLayoutStore.getState().setAccent('researcher', 'lime')
     useSettingsStore.getState().setDefaults({ level: 'verbose' })
@@ -46,7 +46,9 @@ describe('the projection', () => {
     })
     expect(app.defaults?.level).toBe('verbose')
     expect(app.themeChoice).toEqual({ kind: 'preset', name: 'graphite' })
-    expect(app.entries?.some(entry => entry.kind === 'divider' && entry.name === 'Finance')).toBe(true)
+    // The top level names a folder by id; the folder itself carries the name.
+    expect(app.entries?.some(entry => entry.kind === 'folder')).toBe(true)
+    expect(app.folders?.some(folder => folder.name === 'Finance')).toBe(true)
   })
 
   it('leaves the sidebar out of it', () => {
@@ -80,7 +82,7 @@ describe('the projection', () => {
   it('does not read an absent arrangement as an empty one', () => {
     // A gateway nobody has written to has no arrangement. Taking that as "no
     // rows anywhere" would empty a list somebody spent an afternoon on.
-    useChatLayoutStore.getState().addDivider('Finance')
+    useChatLayoutStore.getState().addFolder('Finance')
 
     applySnapshot({ app: { v: 1 }, bots: {} })
 

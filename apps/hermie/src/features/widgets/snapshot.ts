@@ -30,7 +30,7 @@
  *    not know draws its empty state rather than half a row.
  */
 import { formatPreview, initialFor } from '../../chat-ui'
-import { unreadCountSince } from '@hermie/transcript'
+import { hasOpenRequest, unreadCountSince } from '@hermie/transcript'
 import type { ChatState } from '@hermie/transcript'
 import type { Bot } from '../../store/bots'
 import { isMuted, type Mutes } from '../../store/mute'
@@ -106,11 +106,13 @@ export interface WidgetSnapshotInput {
    * treatment than archiving, which removes the row outright, and a stronger
    * one than the chat list, which still shows the count on the row itself.
    *
-   * Optional, and absent reads as "no mutes". A caller that knows nothing about
-   * them is a caller that has none, which is the only reading that lets the
-   * widget projection go on being callable from a test that is about colours.
+   * Required, deliberately. It was optional for one commit so that fixtures
+   * about colours did not have to mention it, and an optional field on a
+   * projection input is a caller that silently loses the feature by forgetting
+   * a line. There is one production caller; the compiler is a better reminder
+   * than a code review.
    */
-  mutes?: Mutes
+  mutes: Mutes
   /** Whether the gateway socket is up and usable (`status === 'ready'`). */
   gatewayReady: boolean
   /** name → true for every avatar PNG the writer has actually put in the container. */
@@ -155,13 +157,7 @@ export function projectWidgetSnapshot(input: WidgetSnapshotInput): WidgetSnapsho
 
 function projectBot(bot: Bot, input: WidgetSnapshotInput): WidgetBot {
   const chat = input.chats[bot.name]
-  const needsInput = chat
-    ? chat.order.some(id => {
-        const item = chat.items[id]
-
-        return (item?.kind === 'approval' || item?.kind === 'clarify') && item.state === 'open'
-      })
-    : false
+  const needsInput = chat ? hasOpenRequest(chat) : false
 
   const presence = presenceOf({
     gatewayReady: input.gatewayReady,
@@ -174,7 +170,7 @@ function projectBot(bot: Bot, input: WidgetSnapshotInput): WidgetBot {
   const accent = input.accents[bot.name] ?? 'default'
   // Seconds here, because that is what a mute deadline is; `input.now` is
   // `Date.now()` because that is what the snapshot stamps itself with.
-  const muted = isMuted(input.mutes ?? {}, bot.name, Math.floor(input.now / 1000))
+  const muted = isMuted(input.mutes, bot.name, Math.floor(input.now / 1000))
 
   return {
     name: bot.name,

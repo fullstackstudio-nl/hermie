@@ -173,8 +173,9 @@ reads — and `owner` on a session-token gateway, where there are no accounts an
 name. An ungated gateway therefore lands on `hermie-app:owner` and keeps one arrangement, which is
 the right answer for a gateway with one person on it.
 
-Everything that is **arrangement or preference** lives there: the chat order, the named groups, the
-theme (preset and user themes), the per-bot settings, the mutes, and the device-context section.
+Everything that is **arrangement or preference** lives there: the chat order, the folders
+([ADR-0018](0018-folders-in-the-chat-list.md)), the theme (preset and user themes), the per-bot
+settings, the mutes, and the device-context section.
 Push registrations stay keyed per installation inside it, as they already were.
 
 The per-bot key `hermie` is **unchanged**. Archived and colour are about the bot, not about who is
