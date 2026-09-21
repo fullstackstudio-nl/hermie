@@ -212,8 +212,16 @@ gateway first.
 - **Anything outside the app that reads `hermie-app` has to learn the new shape.** In this repo that
   is `packages/hermie-web`'s push watcher, which now pools the registrations of every
   `hermie-app:*` key — deduplicated by installation id, newest row winning — and falls back to the
-  bare key only while nobody has one of their own. The gateway-side `hermie` plugin is updated in
-  the same round to read `hermie-app:<user_id>` first and `hermie-app` second, for one version.
+  bare key only while nobody has one of their own. The gateway-side `hermie` plugin reads
+  `hermie-app:<user_id>` first and `hermie-app` second, for one version, and says so with the
+  capability string `ui_meta.per_user`.
+- **The push half waits to be told, and only the push half.** The arrangement moves to the
+  per-person key the moment this app ships, because nothing but this app reads it. The
+  registrations do not: one written where the notifier is not looking is a phone that has silently
+  stopped buzzing, and nobody discovers that except by not being woken up. So on a gateway whose
+  advert lacks `ui_meta.per_user`, the app writes the arrangement to `hermie-app:<user_id>` and the
+  registrations to the bare `hermie-app`, as a read-modify-write that changes nothing else in it.
+  Both keys go out in one `profiles.configure`, whose sections are independent.
 - **The per-key compare-and-swap now guards more keys.** Two people writing at once contend on
   nothing, which is a straight improvement; the cost is that a profile's `ui_meta` grows a key per
   person who has ever used the gateway.
