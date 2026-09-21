@@ -427,20 +427,106 @@ describe('GatewayConnection against the fake gateway', () => {
     expect(gateway.state.connections).toBe(2)
   })
 
-  it('goes offline without dialling and comes back when the network does', async () => {
-    const { connection, gateway, waitFor } = await harness({ auth: 'token' })
+  it('says offline when the device does, and keeps dialling anyway', async () => {
+    const { connection, gateway, statuses, waitFor, waitUntil } = await harness({
+      auth: 'token',
+      offlineGraceMs: 10
+    })
+
+    connection.start()
+    await waitFor('ready')
+
+    // The report is wrong — this gateway is reachable — which is the whole
+    // reason it is not allowed to stop the loop.
+    connection.setOnline(false)
+    await waitUntil('the socket to be rebuilt', () => gateway.state.connections === 2)
+    await waitFor('ready')
+
+    // Said out loud on the way past, so a reader is told which of the two it is.
+    expect(statuses).toContain('offline')
+  })
+
+  /**
+   * The state the owner could only leave by relaunching the app: a tailnet
+   * interface goes away, the connectivity API reports "no network", and then
+   * never reports anything again because the Wi-Fi it is watching never moved.
+   *
+   * Every dial in this test would have succeeded. None of them used to happen.
+   */
+  it('recovers from a connectivity report that never comes back', async () => {
+    const { connection, gateway, waitFor, waitUntil } = await harness({ auth: 'token', offlineGraceMs: 10 })
+
+    connection.start()
+    await waitFor('ready')
+
+    const socketsBefore = gateway.state.connections
+    connection.setOnline(false)
+
+    await waitUntil('a dial the report was supposed to have stopped', () => gateway.state.connections > socketsBefore)
+    await waitFor('ready')
+
+    expect(await connection.request('profiles.list', {})).toBeTruthy()
+  })
+
+  /**
+   * The second unrecoverable one, and the more dangerous of the two because the
+   * header kept saying the connection was up.
+   *
+   * Offline arrives while the socket is live, so the grace starts. The socket
+   * then dies for real — and the close was thrown away, because the radio was
+   * believed to be down. Online arrives inside the grace, the flap rule says
+   * "the socket never came down, nothing to redial", and the connection sits on
+   * `ready` over a dead socket until the process is killed.
+   */
+  it('redials when the socket dies inside the offline grace and the report flaps back', async () => {
+    const { connection, gateway, waitFor, waitUntil } = await harness({ auth: 'token', offlineGraceMs: 400 })
 
     connection.start()
     await waitFor('ready')
 
     connection.setOnline(false)
-    await waitFor('offline')
-    await settle(150)
-    expect(gateway.state.connections).toBe(1)
-
+    await settle(20)
+    gateway.dropSockets()
+    await settle(60)
     connection.setOnline(true)
+
+    await waitUntil('the redial', () => gateway.state.connections > 1)
     await waitFor('ready')
-    expect(gateway.state.connections).toBe(2)
+    // Not the status: it stayed `ready` throughout, which is precisely why it
+    // proves nothing here. A round trip is what the dead socket actually costs.
+    expect(await connection.request('profiles.list', {})).toBeTruthy()
+  })
+
+  it('retryNow() skips the pending backoff, and leaves a stopped connection stopped', async () => {
+    const delays: number[] = []
+    const { connection, gateway, waitFor, waitUntil } = await harness({
+      auth: 'token',
+      backoffDelayMs: attempt => {
+        delays.push(attempt)
+
+        return 30_000
+      }
+    })
+
+    connection.start()
+    await waitFor('ready')
+
+    const port = gateway.port
+    const token = gateway.state.token
+    await gateway.close()
+    await waitFor('reconnecting')
+    expect(delays.length).toBe(1)
+
+    // Half a minute of backoff is pending; "Try now" must not wait it out.
+    const restarted = await startFakeGateway({ auth: 'token', port, token })
+    live.push({ gateway: restarted })
+    connection.retryNow()
+    await waitUntil('the redial to land', () => connection.status === 'ready', 3000)
+
+    connection.stop()
+    connection.retryNow()
+    await settle(60)
+    expect(connection.status).toBe('disconnected')
   })
 
   it('keeps a terminal status when the app goes to the background', async () => {

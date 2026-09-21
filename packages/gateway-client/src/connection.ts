@@ -30,6 +30,9 @@ export const RECONNECT_CAP_MS = 15_000
  * coming up, walking past a lift. Each flap used to tear the connection down
  * and redial with `attempt = 0`, which mints a fresh ticket and rebuilds every
  * session — for a gap the socket would have ridden out untouched.
+ *
+ * What the grace does NOT do any more is decide whether to dial. See
+ * `setOnline`: connectivity is a hint about timing, never a gate.
  */
 export const OFFLINE_GRACE_MS = 2_500
 
@@ -215,12 +218,8 @@ export class GatewayConnection {
     this.consecutiveAuthFailures = 0
     this.consecutiveTicketRejections = 0
 
-    if (!this.online) {
-      this.setStatus('offline')
-
-      return
-    }
-
+    // Dialled even when NetInfo says there is no network: its answer is a hint,
+    // and a cold start that believed a wrong one would never dial at all.
     void this.runDial()
   }
 
@@ -267,22 +266,53 @@ export class GatewayConnection {
     this.consecutiveTicketRejections = 0
     this.clearOfflineTimer()
 
-    if (!this.online) {
-      this.setStatus('offline')
+    void this.runDial()
+  }
 
+  /**
+   * Dial now, skipping whatever backoff is pending — the "Try now" button, and
+   * the one thing NetInfo is allowed to do to the loop.
+   *
+   * It is deliberately harmless to call at any time: a connection that has
+   * stopped for a reason it can explain (`needs_signin`, a refused certificate,
+   * a gateway that rejects this address) is not restarted by it, because
+   * redialling those fails the same way and erases the explanation.
+   */
+  retryNow(): void {
+    if (!this.running || this.paused) {
       return
     }
 
+    this.attempt = 0
+    this.consecutiveAuthFailures = 0
+    this.consecutiveTicketRejections = 0
     void this.runDial()
   }
 
   /**
    * NetInfo says the device has (no) connectivity.
    *
-   * Offline is acted on after a grace period rather than immediately: the
-   * reports flap, and a socket that is actually fine must not be rebuilt for a
-   * gap shorter than the rebuild itself. Coming back online inside the grace
-   * cancels the whole thing, so the connection never notices.
+   * **This is advice about timing, not permission to dial.** It used to be the
+   * latter, and that is what made a connection unrecoverable without a relaunch:
+   * a report of "no network" stopped the loop, and nothing but another report
+   * started it again. Two ways that ends badly, both reproduced against the fake
+   * gateway in `connection.test.ts`:
+   *
+   * - **A report that never comes back.** A tailnet interface going away and
+   *   returning is exactly the transition a connectivity API is worst at, and
+   *   the gateway on the other end of it was reachable the whole time.
+   * - **A flap around a real drop.** Offline while the socket is up starts the
+   *   grace; the socket then dies for real; online arrives inside the grace and
+   *   the flap rule says "nothing to redial". The close was swallowed because
+   *   the radio was believed to be down, so the connection stayed `ready` with
+   *   a dead socket under it, for ever.
+   *
+   * So the ladder now runs regardless. What a connectivity report still does is
+   * worth keeping, and it is only ever a speed-up: offline labels the status,
+   * so a reader gets "Offline" rather than "Reconnecting…", and delays the
+   * teardown of a live socket by `offlineGraceMs` so a handover does not rebuild
+   * every session. Online collapses the pending backoff when the last dial did
+   * not fail — a socket that was healthy a moment ago should come straight back.
    */
   setOnline(online: boolean): void {
     // True while the grace is still running, which means the socket is still up
@@ -301,36 +331,40 @@ export class GatewayConnection {
 
     if (!online) {
       if (this.currentStatus !== 'ready') {
-        // Nothing established to protect: a dial in progress or a ladder
-        // waiting out its backoff is pure battery while the radio is down.
-        this.teardown()
-        this.setStatus('offline', null)
+        // No live socket to protect. The ladder keeps its timer; all that
+        // changes is the word the header shows while it climbs.
+        if (this.running && !this.paused) {
+          this.setStatus('offline')
+        }
 
         return
       }
 
       this.offlineTimer = setTimeout(() => {
         this.offlineTimer = undefined
-        this.teardown()
-        this.setStatus('offline', null)
+        this.teardownSocket()
+        this.scheduleReconnect(new GatewayError('network', 'This device reports no network connection.'))
       }, this.offlineGraceMs)
 
       return
     }
 
-    if (withinGrace || !this.running || this.paused) {
+    if (withinGrace || !this.running || this.paused || this.currentStatus === 'ready') {
       // The flap ended before the socket came down; there is nothing to redial.
       return
     }
 
     // A dial that failed moments ago means the gateway, not the radio, is what
-    // is unreachable. Resetting the ladder there would hammer it once per flap,
-    // so the backoff it had earned is kept.
-    if (this.lastDialFailureAt === null || this.now() - this.lastDialFailureAt > DIAL_FAILURE_RECENT_MS) {
-      this.attempt = 0
+    // is unreachable. Collapsing the backoff there would hammer it once per
+    // flap, so the ladder it had earned is left to climb — and it is capped, so
+    // recovery is at most one interval away either way.
+    if (this.lastDialFailureAt !== null && this.now() - this.lastDialFailureAt <= DIAL_FAILURE_RECENT_MS) {
+      this.setStatus('reconnecting')
+
+      return
     }
 
-    void this.runDial()
+    this.retryNow()
   }
 
   /**
@@ -382,7 +416,9 @@ export class GatewayConnection {
 
   private async runDial(): Promise<void> {
     const token = ++this.dialToken
-    const alive = () => token === this.dialToken && this.running && !this.paused && this.online
+    // Deliberately without `online`: a connectivity report is not allowed to
+    // abandon a dial in flight, because the dial is the better evidence.
+    const alive = () => token === this.dialToken && this.running && !this.paused
 
     this.clearRetryTimer()
     this.lastCloseCode = null
@@ -486,7 +522,7 @@ export class GatewayConnection {
   }
 
   private onTransportClosed(): void {
-    if (!this.running || this.paused || !this.online) {
+    if (!this.running || this.paused) {
       return
     }
 
@@ -586,7 +622,7 @@ export class GatewayConnection {
     if (this.consecutiveTicketRejections === 1) {
       this.teardownSocket()
 
-      if (!this.running || this.paused || !this.online) {
+      if (!this.running || this.paused) {
         return
       }
 
@@ -630,7 +666,7 @@ export class GatewayConnection {
       return
     }
 
-    if (!this.running || this.paused || !this.online) {
+    if (!this.running || this.paused) {
       return
     }
 
@@ -667,13 +703,15 @@ export class GatewayConnection {
     this.consecutiveAuthFailures = 0
     this.consecutiveTicketRejections = 0
 
-    if (!this.running || this.paused || !this.online) {
+    if (!this.running || this.paused) {
       return
     }
 
     const delay = this.backoff(this.attempt)
     this.attempt += 1
-    this.setStatus('reconnecting', error)
+    // The ladder climbs either way; `offline` is only the word for it while the
+    // device says there is no network to climb over. See `setOnline`.
+    this.setStatus(this.online ? 'reconnecting' : 'offline', error)
     this.clearRetryTimer()
     this.retryTimer = setTimeout(() => {
       this.retryTimer = undefined

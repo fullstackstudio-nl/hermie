@@ -5572,3 +5572,90 @@ own colour with no seam and no darker notch where the two meet. The fix holds.
   arithmetic, not off a trace.
 - **Android.** The fallback row menu is the path Android actually uses, and it was
   exercised in Jest and on neither an emulator nor a device.
+
+## The reconnect that never recovered (2026-09-21, later still)
+
+Reported from the Mac build: Tailscale off gave "Reconnecting…", Tailscale back
+on left it saying "Reconnecting…" until the app was relaunched. The dial ladder
+looked healthy in the code — full jitter, a 15 s cap, a redial on every close —
+and it was. What was not healthy is that **a connectivity report could stop the
+ladder, and only another connectivity report could start it again.**
+
+`GatewayConnection` kept an `online` flag from
+`@react-native-community/netinfo` and put it in four places: `alive()` in the
+dial loop, the early return in `onTransportClosed`, the early return in
+`scheduleReconnect`, and both branches of `setOnline`. Each one reads as a
+sensible battery saving on its own. Together they are a state with no exit that
+does not come from outside.
+
+Two ways in, and both are reproduced against the fake gateway in
+`packages/gateway-client/src/connection.test.ts`:
+
+- **A report that never comes back.** `setOnline(false)` tore everything down —
+  socket, retry timer, dial token — and set `offline`. Nothing in the object
+  ever dials again; `scheduleReconnect` returns before it arms a timer, and
+  `runDial`'s `alive()` is false before it does anything. The only wake-up is a
+  later `setOnline(true)`. A tailnet interface going away and coming back is
+  exactly the transition a connectivity API is worst at, and the gateway on the
+  other end of it was reachable the whole time. The test
+  _recovers from a connectivity report that never comes back_ stages it: every
+  dial it now makes would have succeeded, and none of them used to happen.
+- **A flap around a real drop**, which is the worse of the two because the
+  header kept saying the connection was up. Offline arrives while the socket is
+  live, so the 2.5 s grace starts and the socket is deliberately left alone. The
+  socket then dies for real — and `onTransportClosed` threw the close away,
+  because `!this.online`. Online arrives inside the grace, the flap rule says
+  "the socket never came down, there is nothing to redial", and the connection
+  sits on `ready` over a dead socket for ever. The probe that found this asserts
+  a round trip rather than a status, because the status is the part that lies:
+  _redials when the socket dies inside the offline grace and the report flaps
+  back_.
+
+Which of the two the owner hit is **not established**. Both end in a connection
+that only a relaunch fixes, and neither can be told from the other by looking at
+the app. The label in the report ("Reconnecting…" rather than "Offline") fits
+neither exactly — `offline` is its own word in `strings.chat.subtitle` — so
+either NetInfo reported something in between, or the header was showing the last
+status before a stall the second path explains. It is recorded here as unproven
+rather than tidied up into a story.
+
+### What connectivity is allowed to do now
+
+Advice about timing, never permission to dial. `online` survives in exactly
+three places, all of them cosmetic or an acceleration:
+
+- it picks the **word** in `scheduleReconnect` — `offline` instead of
+  `reconnecting` — so a reader still gets told which it is;
+- it delays the teardown of a **live** socket by `OFFLINE_GRACE_MS`, which is
+  the original and still-good reason the grace exists: a Wi-Fi/cellular handover
+  should not rebuild every session;
+- coming back online **collapses a pending backoff** through `retryNow()`, but
+  only when the last dial did not fail. A dial that failed inside
+  `DIAL_FAILURE_RECENT_MS` means the gateway rather than the radio is
+  unreachable, and the ladder it earned is left to climb — it is capped, so
+  recovery is at most one interval away either way.
+
+The ladder itself now runs whatever NetInfo says. That costs battery in a
+genuine outage — a capped ladder is four dials a minute for as long as the app
+is in the foreground — and it is a deliberate trade against a connection that
+cannot be recovered without a relaunch. A dial with no radio fails in
+milliseconds; a phone in a pocket is `paused`, which still stops everything.
+
+`retryNow()` is new on `GatewayConnection`: reset the ladder to the bottom and
+dial now. It is deliberately harmless to call at any time, and deliberately does
+**not** restart a connection that stopped for a reason it can explain —
+`needs_signin`, a refused certificate, a gateway that rejects this address.
+Redialling those fails the same way and erases the explanation.
+
+### What this did NOT verify
+
+- **Anything on a Mac, or on any device.** Every sequence above is driven
+  against `packages/fake-gateway` in Node. No Tailscale interface was taken down
+  and put back while the app watched.
+- **What NetInfo actually reports** when a tailnet interface appears and
+  disappears, on a Mac or on iOS. The fix is written so that the answer does not
+  matter, which is the point, but it also means the answer is still unknown.
+- **A negative DNS cache**, the other suspect for "the gateway is back and the
+  dial still fails". If CFNetwork holds a negative answer for a MagicDNS name,
+  the ladder now keeps asking — which is the best this layer can do about it —
+  but nothing here measured whether it happens.
