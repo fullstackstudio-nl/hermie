@@ -30,6 +30,7 @@ import { ActivityIndicator, Pressable, View } from 'react-native'
 
 import {
   AgentsBar,
+  attachmentName,
   ChatHeader,
   chatStrings,
   Composer,
@@ -43,6 +44,7 @@ import {
   TranscriptList,
   type TranscriptListHandle
 } from '../../chat-ui'
+import { shareFile } from '../../platform/share-file'
 import { lastMessageAt, prettyModelName } from '@hermie/transcript'
 import type { ConnectionStatus } from '@hermie/gateway-client'
 import { looksLikeSlashCommand, parseSlashCommand } from '@hermes/shared/slash'
@@ -340,6 +342,25 @@ function Conversation({
   const [sheet, setSheet] = useState<ManualSheet>('none')
   const [attachments, setAttachments] = useState<PickedAttachment[]>([])
   /**
+   * Local URIs for images sent from THIS device, this session, by filename.
+   *
+   * A sent attachment survives in the transcript as a reference — `@image:` and
+   * a path on the gateway's disk — and no endpoint serves one back, so an image
+   * in a bubble can only be drawn from bytes the app still has. Those exist for
+   * exactly one set: the pictures just picked here.
+   *
+   * Keyed by FILENAME rather than by the reference, because the reference
+   * changes underneath: the optimistic bubble carries `@image:shot.png` (the
+   * name is all a client is told) and the row the gateway echoes back carries
+   * `@image:/srv/…/shot.png`. The name is the part that survives, which is also
+   * what `attachmentsMatchKey` pairs the two on.
+   *
+   * It is deliberately NOT persisted. A `file://` URI from a picker does not
+   * outlive the app, so a cache of them would come back after a restart as a
+   * screenful of broken images — a chip is the honest thing to show then.
+   */
+  const [sentImages, setSentImages] = useState<Record<string, string>>({})
+  /**
    * Files whose upload is in flight or has failed.
    *
    * Separate from `uploaded` on purpose: only a file the gateway acknowledged may
@@ -482,6 +503,29 @@ function Conversation({
       cancelled = true
     }
   }, [http])
+
+  /**
+   * What a bubble can actually draw for one attachment reference.
+   *
+   * Only images this device sent itself resolve; everything else answers
+   * `undefined` and draws as a chip, which is the truthful state for a file on
+   * a machine the app cannot read.
+   */
+  const attachmentUri = useCallback((reference: string) => sentImages[attachmentName(reference)], [sentImages])
+
+  /**
+   * A non-picture attachment, opened.
+   *
+   * The share sheet on a phone or a Mac, a download in a browser — the verb is
+   * the platform's, and `share-file.ts` picks it. A reference with no local URI
+   * has nothing to hand over, so the tap does nothing rather than opening an
+   * empty sheet.
+   */
+  const openAttachment = useCallback((attachment: { name: string; uri?: string }) => {
+    if (attachment.uri) {
+      void shareFile(attachment.uri, attachment.name)
+    }
+  }, [])
 
   const images = useMemo(
     () => ({
@@ -1042,6 +1086,25 @@ function Conversation({
       */
       listRef.current?.scrollToLatest()
 
+      // Recorded BEFORE the send, so the optimistic bubble already has them:
+      // that bubble is painted synchronously and would otherwise show chips
+      // for a second and then swap to pictures.
+      const pictures = attachments.filter(file => file.uri)
+
+      if (pictures.length) {
+        setSentImages(current => {
+          const next = { ...current }
+
+          for (const file of pictures) {
+            if (file.uri) {
+              next[file.filename] = file.uri
+            }
+          }
+
+          return next
+        })
+      }
+
       try {
         await chat.send(body, files)
 
@@ -1467,7 +1530,9 @@ function Conversation({
                 ) : null
               }
               {...(highlightId ? { highlightItemId: highlightId } : {})}
+              attachmentUri={attachmentUri}
               images={images}
+              onOpenAttachment={openAttachment}
               items={chat.items}
               newMessageCount={newCount}
               loadingOlder={loadingOlder}

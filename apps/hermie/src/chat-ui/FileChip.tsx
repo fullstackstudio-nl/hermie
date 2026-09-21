@@ -27,6 +27,12 @@ export interface FileChipProps {
   progress?: number
   error?: string
   onRemove?: () => void
+  /**
+   * Open the file: the share sheet on a phone or a Mac, a download in a
+   * browser. Absent on a chip that is still staged in the composer — there is
+   * nowhere to send a file that has not been uploaded yet.
+   */
+  onPress?: () => void
   /** Inside an outgoing bubble the ink is white and the tint is the accent's. */
   onAccent?: boolean
   testID?: string
@@ -86,13 +92,23 @@ function Ring({ color, progress }: { color: string; progress?: number }) {
   )
 }
 
-export function FileChip({ name, size, status, progress, error, onRemove, onAccent = false, testID }: FileChipProps) {
+export function FileChip({
+  name,
+  size,
+  status,
+  progress,
+  error,
+  onRemove,
+  onPress,
+  onAccent = false,
+  testID
+}: FileChipProps) {
   const theme = useTheme()
   const failed = status === 'error' || Boolean(error)
   const ink = failed ? theme.colors.dangerText : onAccent ? theme.colors.onAccent : theme.colors.text
   const meta = failed ? theme.colors.dangerText : onAccent ? theme.colors.onAccent : theme.colors.textFaint
 
-  return (
+  const body = (
     <View
       style={{
         alignItems: 'center',
@@ -140,5 +156,29 @@ export function FileChip({ name, size, status, progress, error, onRemove, onAcce
         </Pressable>
       ) : null}
     </View>
+  )
+
+  if (!onPress) {
+    return body
+  }
+
+  /*
+    The chip becomes the button, and the `×` inside it stays its own.
+
+    A nested `Pressable` wins the touch it is under, so removing a staged file
+    does not also open it — which is the only overlap the two actions have, and
+    the reason the remove control was never made part of the chip's own surface.
+  */
+  return (
+    <Pressable
+      accessibilityHint={chatStrings.viewer.openHint}
+      accessibilityLabel={name}
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => ({ opacity: pressed ? 0.75 : 1 })}
+      testID={testID ? `${testID}-open` : undefined}
+    >
+      {body}
+    </Pressable>
   )
 }

@@ -903,63 +903,96 @@ export function Composer({
               says "Too large · 100 MB max" instead of vanishing.
             */}
             {attachments.length ? (
-              <ScrollView
-                // No horizontal padding of its own: the field's inset already places
-                // it, and a second one would step the thumbnails in from the caret
-                // below them.
-                contentContainerStyle={{ alignItems: 'flex-end', gap: theme.space.sm }}
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                // A horizontal ScrollView defaults to `flexGrow: 1`, which inside a
-                // column makes it as tall as the viewport. Learned on the gallery.
-                style={{ flexGrow: 0, marginBottom: theme.space.xs, maxHeight: 76 }}
-                testID="composer-attachments"
-              >
-                {attachments.map(attachment =>
-                  attachment.kind === 'image' && attachment.uri ? (
-                    <View key={attachment.id} style={{ height: 64, width: 64 }}>
-                      <Image
-                        source={{ uri: attachment.uri }}
-                        style={{ borderRadius: theme.radii.thumb, height: 64, width: 64 }}
-                      />
+              /*
+                "Not sent yet".
 
-                      <Pressable
-                        accessibilityLabel={chatStrings.composer.removeAttachment}
-                        accessibilityRole="button"
-                        hitSlop={TAP_SLOP}
-                        onPress={() => onRemoveAttachment?.(attachment.id)}
-                        style={{
-                          alignItems: 'center',
-                          backgroundColor: 'rgba(8,20,44,0.62)',
-                          borderRadius: 11,
-                          height: 22,
-                          justifyContent: 'center',
-                          position: 'absolute',
-                          right: 2,
-                          top: 2,
-                          width: 22
-                        }}
-                        testID={`composer-attachment-remove-${attachment.id}`}
-                      >
-                        <Text color="onAccent" style={{ fontSize: 14, lineHeight: 16 }}>
-                          {'×'}
-                        </Text>
-                      </Pressable>
-                    </View>
-                  ) : (
-                    <FileChip
-                      key={attachment.id}
-                      name={attachment.name}
-                      {...(attachment.error ? { error: attachment.error } : {})}
-                      onRemove={() => onRemoveAttachment?.(attachment.id)}
-                      {...(attachment.progress !== undefined ? { progress: attachment.progress } : {})}
-                      {...(attachment.size !== undefined ? { size: attachment.size } : {})}
-                      {...(attachment.status ? { status: attachment.status } : {})}
-                      testID={`composer-attachment-${attachment.id}`}
-                    />
-                  )
-                )}
-              </ScrollView>
+                The tray's cards are deliberately the SAME cards a sent message
+                shows, which is what made the state ambiguous: the owner could
+                not tell an attached file from one already on its way. So the
+                tray says which it is, in words, and carries an accent rule down
+                its left edge — a state marker, not a container. It stays inside
+                the field: the tray belongs to the message being written, and
+                lifting it back out into a strip of its own is the shape this
+                composer deliberately moved away from.
+              */
+              <View
+                style={{
+                  borderLeftColor: theme.colors.accentText,
+                  borderLeftWidth: 2,
+                  gap: theme.space.xs,
+                  marginBottom: theme.space.xs,
+                  paddingLeft: theme.space.sm
+                }}
+                testID="composer-attachments-pending"
+              >
+                <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.xs }}>
+                  <Text style={{ color: theme.colors.accentText, fontSize: 12, lineHeight: 14 }}>{'📎'}</Text>
+                  <Text style={{ color: theme.colors.accentText, fontWeight: '600' }} variant="micro">
+                    {chatStrings.composer.notSentYet}
+                  </Text>
+                  <Text color="textFaint" variant="micro">
+                    {`· ${chatStrings.composer.pendingCount(attachments.length)}`}
+                  </Text>
+                </View>
+
+                <ScrollView
+                  // No horizontal padding of its own: the field's inset already places
+                  // it, and a second one would step the thumbnails in from the caret
+                  // below them.
+                  contentContainerStyle={{ alignItems: 'flex-end', gap: theme.space.sm }}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  // A horizontal ScrollView defaults to `flexGrow: 1`, which inside a
+                  // column makes it as tall as the viewport. Learned on the gallery.
+                  style={{ flexGrow: 0, maxHeight: 76 }}
+                  testID="composer-attachments"
+                >
+                  {attachments.map(attachment =>
+                    attachment.kind === 'image' && attachment.uri ? (
+                      <View key={attachment.id} style={{ height: 64, width: 64 }}>
+                        <Image
+                          source={{ uri: attachment.uri }}
+                          style={{ borderRadius: theme.radii.thumb, height: 64, width: 64 }}
+                        />
+
+                        <Pressable
+                          accessibilityLabel={chatStrings.composer.removeAttachment}
+                          accessibilityRole="button"
+                          hitSlop={TAP_SLOP}
+                          onPress={() => onRemoveAttachment?.(attachment.id)}
+                          style={{
+                            alignItems: 'center',
+                            backgroundColor: 'rgba(8,20,44,0.62)',
+                            borderRadius: 11,
+                            height: 22,
+                            justifyContent: 'center',
+                            position: 'absolute',
+                            right: 2,
+                            top: 2,
+                            width: 22
+                          }}
+                          testID={`composer-attachment-remove-${attachment.id}`}
+                        >
+                          <Text color="onAccent" style={{ fontSize: 14, lineHeight: 16 }}>
+                            {'×'}
+                          </Text>
+                        </Pressable>
+                      </View>
+                    ) : (
+                      <FileChip
+                        key={attachment.id}
+                        name={attachment.name}
+                        {...(attachment.error ? { error: attachment.error } : {})}
+                        onRemove={() => onRemoveAttachment?.(attachment.id)}
+                        {...(attachment.progress !== undefined ? { progress: attachment.progress } : {})}
+                        {...(attachment.size !== undefined ? { size: attachment.size } : {})}
+                        {...(attachment.status ? { status: attachment.status } : {})}
+                        testID={`composer-attachment-${attachment.id}`}
+                      />
+                    )
+                  )}
+                </ScrollView>
+              </View>
             ) : null}
 
             <View style={{ alignItems: 'flex-end', flexDirection: 'row' }}>
@@ -1048,16 +1081,51 @@ export function Composer({
               <View style={{ backgroundColor: theme.colors.onAccent, borderRadius: 2, height: 12, width: 12 }} />
             </Pressable>
           ) : (
-            <RoundIconButton
-              color={theme.accent().bubble}
-              disabled={!running && !canSend}
-              fill="solid"
-              icon="arrowUp"
-              label={chatStrings.composer.send}
-              onPress={press}
-              size={round}
-              testID="composer-send"
-            />
+            <View>
+              <RoundIconButton
+                color={theme.accent().bubble}
+                disabled={!running && !canSend}
+                fill="solid"
+                icon="arrowUp"
+                // The label names the attachments, because this button is the
+                // last thing between a staged file and a sent one, and a screen
+                // reader has no other way to hear it is carrying anything.
+                label={
+                  attachments.length
+                    ? chatStrings.composer.sendWithAttachments(attachments.length)
+                    : chatStrings.composer.send
+                }
+                onPress={press}
+                size={round}
+                testID="composer-send"
+              />
+
+              {/* A count on the button as well as in the tray. The tray scrolls
+                  out of reach on a short screen with the keyboard up; the
+                  button never does, and it is the control about to send them. */}
+              {attachments.length ? (
+                <View
+                  pointerEvents="none"
+                  style={{
+                    alignItems: 'center',
+                    backgroundColor: theme.colors.accentText,
+                    borderRadius: 999,
+                    height: 16,
+                    justifyContent: 'center',
+                    minWidth: 16,
+                    paddingHorizontal: 3,
+                    position: 'absolute',
+                    right: -3,
+                    top: -3
+                  }}
+                  testID="composer-send-badge"
+                >
+                  <Text color="onAccent" style={{ fontSize: 10, fontWeight: '700', lineHeight: 12 }}>
+                    {String(attachments.length)}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
           )}
         </GlassGroup>
 

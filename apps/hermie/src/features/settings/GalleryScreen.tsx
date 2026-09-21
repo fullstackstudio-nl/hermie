@@ -80,7 +80,10 @@ import {
   subagentGroupItem,
   subagentMap,
   subagentTree,
-  userItem
+  sampleAttachmentUri,
+  userItem,
+  userItemWithImages,
+  userItemWithMixedAttachments
 } from '../../chat-ui/fixtures'
 import type { ApprovalItem, ClarifyItem, PickerOption, Verbosity } from '../../chat-ui/types'
 import { ConnectionLine } from '../bots/ConnectionLine'
@@ -468,6 +471,30 @@ const SECTIONS: readonly GallerySection[] = [
     )
   },
   { id: 'streaming', title: 'Streaming reply', render: () => <StreamingBody /> },
+  {
+    id: 'attachments',
+    title: 'Attachments',
+    render: ctx => (
+      <>
+        {/* A picture the app can load is a card; one it cannot stays a chip,
+            which is what every attachment older than this session looks like. */}
+        <UserBubble
+          attachmentUri={sampleAttachmentUri}
+          item={userItemWithImages}
+          onOpenAttachment={entry => ctx.say(`Open ${entry.name}`)}
+          tail={false}
+        />
+        <UserBubble
+          attachmentUri={sampleAttachmentUri}
+          item={userItemWithMixedAttachments}
+          onOpenAttachment={entry => ctx.say(`Open ${entry.name}`)}
+          receipt="read"
+          tail
+        />
+        <UserBubble item={userItemWithImages} tail />
+      </>
+    )
+  },
   {
     id: 'bubbles',
     title: 'Bubbles',
