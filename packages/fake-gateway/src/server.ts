@@ -460,6 +460,14 @@ export interface FakeGatewayState {
    * session nothing has bound yet.
    */
   openServerRequests: Map<string, { session_id: string; method: string; params: Record<string, unknown> }>
+  /**
+   * Pictures `profiles.set_asset` has written, by `<profile>:<asset>`.
+   *
+   * Kept beside the roster rather than on the row: a `ProfileRow` is what
+   * `profiles.list` answers with, and a real roster row carries no bytes — only
+   * `has_avatar` and the revision a client re-fetches on.
+   */
+  profileAssets: Map<string, { mime: string; bytes: Buffer }>
   /** Images accepted through `image.attach_bytes`, newest last. */
   attachedImages: { session_id: string; filename: string; bytes: number }[]
   /**
@@ -969,6 +977,44 @@ const LONG_REPORT_MARKDOWN = [
  */
 const AVATAR_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+
+/**
+ * The bytes behind `profiles.set_asset`'s `data`, which the contract describes
+ * as "a data URL or bare base64". Both spellings have to land the same picture:
+ * a client that pastes what `get_asset` answered sends the prefix, and one that
+ * encoded a file itself usually does not.
+ */
+function decodeAssetData(data: string): Buffer {
+  const comma = data.startsWith('data:') ? data.indexOf(',') : -1
+
+  return Buffer.from(comma === -1 ? data : data.slice(comma + 1), 'base64')
+}
+
+/**
+ * The type read from the BYTES, the way the contract's "PNG/JPEG/WebP, sniffed"
+ * says it is read — never from what a data URL claimed it was. A client that
+ * labels its JPEG `image/png` is the whole reason a sniff exists, and a fake
+ * that echoed the label back would make that client look correct here and
+ * broken against a real gateway.
+ *
+ * Anything the three magic numbers do not cover falls back to `image/png`,
+ * which is what a viewer assumes when nothing better is named.
+ */
+function sniffImageMime(bytes: Buffer): string {
+  if (bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    return 'image/png'
+  }
+
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return 'image/jpeg'
+  }
+
+  if (bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP') {
+    return 'image/webp'
+  }
+
+  return 'image/png'
+}
 
 /**
  * A canonical Bot Chat with enough shape to exercise the whole engine: a tool
@@ -1578,6 +1624,7 @@ function initialState(options: FakeGatewayOptions): FakeGatewayState {
     sessionConfig: new Map<string, Record<string, string>>(),
     pendingApprovals: new Map<string, { session_id: string; payload: Record<string, unknown> }>(),
     openServerRequests: new Map<string, { session_id: string; method: string; params: Record<string, unknown> }>(),
+    profileAssets: new Map<string, { mime: string; bytes: Buffer }>(),
     attachedImages: [],
     uploadedFiles: new Map(),
     liveSubagents: new Map<string, LiveSubagent>(),
@@ -2997,7 +3044,9 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
         return { profiles: state.profiles, bot_mode_protocol: true }
 
       /**
-       * `ui_meta` only, which is the section a client has any business writing.
+       * `ui_meta` and `description`, which are the two sections a bot editor
+       * writes: the bag nothing else owns, and the one line of prose the roster
+       * shows under a bot's name.
        *
        * Upstream's docstring is the specification and the generated contract
        * carries it verbatim: "Sections are independent; `ui_meta_expected_revisions`
@@ -3025,6 +3074,18 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
        * section by writing null passed here and would have left a dead key on a
        * real profile. The revision still goes up, because a removal is a write.
        *
+       * `description` is NOT a `ui_meta` key. It is a column of its own on the
+       * profile row — the one `profiles.list` answers as `description` — so it
+       * carries no revision, takes part in no compare-and-swap, and is reported
+       * on its own in `applied`. Writing it into the bag instead would put a
+       * second, divergent copy of the bot's subtitle somewhere the roster never
+       * reads.
+       *
+       * Only the sections the request CARRIED come back in `applied`, which is
+       * what the generated contract says ("only the sections the request
+       * carried are present"), so a request that names neither still answers an
+       * empty `applied` rather than a pile of falses.
+       *
        * Everything else `profiles.configure` can set (soul, model, skills) is
        * deliberately absent: the fake answers what it can honestly reproduce,
        * and a section it pretended to write would be a green test about nothing.
@@ -3037,10 +3098,17 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
           throw new Error(`Unknown profile: ${name}`)
         }
 
+        const applied: Record<string, unknown> = {}
+
+        if (typeof params.description === 'string') {
+          profile.description = params.description
+          applied.description = true
+        }
+
         const patch = params.ui_meta
 
         if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
-          return { ok: true, applied: {} }
+          return { ok: true, applied }
         }
 
         const expected = (
@@ -3074,15 +3142,14 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
 
         profile.ui_meta = stored
         profile.ui_meta_revisions = revisions
+        applied.ui_meta = wrote
+        applied.ui_meta_revisions = revisions
 
-        return {
-          ok: true,
-          applied: {
-            ui_meta: wrote,
-            ui_meta_revisions: revisions,
-            ...(Object.keys(conflicts).length ? { ui_meta_conflicts: conflicts } : {})
-          }
+        if (Object.keys(conflicts).length) {
+          applied.ui_meta_conflicts = conflicts
         }
+
+        return { ok: true, applied }
       }
 
       case 'session.list': {
@@ -3273,9 +3340,96 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       case 'cron.manage':
         return cronManage(params)
 
+      /**
+       * The write half of the avatar pair, which the fake had no answer for at
+       * all — so an editor that uploaded a picture got "unknown method" back and
+       * no test could tell an upload that landed from one that never left the
+       * client.
+       *
+       * Both halves move `ui_meta_revisions.avatar`, because that number is the
+       * cache-buster a client keys its avatar fetches on: a picture replaced
+       * under the same profile name is invisible to anybody who never sees the
+       * revision change, and so is a picture removed.
+       */
+      case 'profiles.set_asset': {
+        const name = typeof params.name === 'string' && params.name ? params.name : String(params.profile ?? '')
+        const profile = state.profiles.find(entry => entry.name === name)
+
+        if (!profile) {
+          throw new Error(`Unknown profile: ${name}`)
+        }
+
+        const asset = typeof params.asset === 'string' && params.asset ? params.asset : 'avatar'
+        const key = `${name}:${asset}`
+        // `clear` is `boolean | string` in the contract, so it is read through
+        // the same `_BOOL_WORDS` as every other switch rather than compared
+        // against one spelling.
+        const clear = params.clear === true || boolWord(typeof params.clear === 'string' ? params.clear : undefined)
+
+        // Both halves move the revision, but only once the write has landed: a
+        // refused call that had already bumped it would send every client off
+        // to re-fetch a picture nothing changed.
+        const bumpAssetRevision = (): void => {
+          profile.ui_meta_revisions = {
+            ...profile.ui_meta_revisions,
+            [asset]: (profile.ui_meta_revisions[asset] ?? 0) + 1
+          }
+        }
+
+        if (clear) {
+          // `removed` counts what was actually there to delete, so a client can
+          // tell "there is no picture now" from "there was no picture to begin
+          // with". The staged fixture counts: a profile that answers
+          // `has_avatar` has one, whether or not this server was the one that
+          // wrote the bytes.
+          const had = state.profileAssets.delete(key) || (asset === 'avatar' && profile.has_avatar)
+
+          if (asset === 'avatar') {
+            profile.has_avatar = false
+          }
+
+          bumpAssetRevision()
+
+          return { ok: true, asset, removed: had ? 1 : 0 }
+        }
+
+        const bytes = decodeAssetData(typeof params.data === 'string' ? params.data : '')
+
+        if (!bytes.length) {
+          // A write with neither `data` nor `clear` is a client bug, and `ok`
+          // would hide it behind a green round trip.
+          throw new Error(`profiles.set_asset needs data or clear: ${asset}`)
+        }
+
+        state.profileAssets.set(key, { mime: sniffImageMime(bytes), bytes })
+
+        if (asset === 'avatar') {
+          profile.has_avatar = true
+        }
+
+        bumpAssetRevision()
+
+        return { ok: true, asset, size: bytes.length }
+      }
+
       case 'profiles.get_asset': {
         const name = String(params.name ?? '')
         const profile = state.profiles.find(entry => entry.name === name)
+        const asset = typeof params.asset === 'string' && params.asset ? params.asset : 'avatar'
+        const stored = state.profileAssets.get(`${name}:${asset}`)
+
+        // What `set_asset` wrote wins over the staged fixture. Answering the
+        // fixture after an upload would make a write that never landed look
+        // exactly like one that did, which is the single thing an editor's test
+        // needs to be able to tell apart.
+        if (stored) {
+          return {
+            found: true,
+            mime: stored.mime,
+            size: stored.bytes.length,
+            data: `data:${stored.mime};base64,${stored.bytes.toString('base64')}`
+          }
+        }
 
         if (!profile?.has_avatar) {
           return { found: false }
