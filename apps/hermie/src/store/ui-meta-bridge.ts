@@ -26,6 +26,7 @@ import {
   foreignContextUsers,
   type ContextSectionShape
 } from '@hermie/gateway-client/context'
+import { hasPluginCapability, PLUGIN_CAPABILITIES } from '@hermie/gateway-client/plugin'
 import {
   foreignPushRows,
   pushSectionFor,
@@ -110,7 +111,17 @@ export function snapshotFromStores(): UiMetaSnapshot {
     others: push.others,
     own: ownRegistration(push, pushPlatformName()),
     seen: push.seen,
-    now: pushStampOf(Date.now())
+    now: pushStampOf(Date.now()),
+    /*
+      The shape the GATEWAY said it can read, not the one this build prefers.
+
+      A plugin that predates `push.seen.per_chat` reads a bare number and would
+      see `{bot, at}` as unreadable — which is a device that appears to be
+      looking away for ever, and therefore a notification for every chat it is
+      actually reading. Asking first is the difference between saying more and
+      saying nothing.
+    */
+    perChat: hasPluginCapability(usePluginStore.getState().advert, PLUGIN_CAPABILITIES.pushSeenPerChat)
   })
 
   /*
@@ -244,9 +255,17 @@ export function applySnapshot(snapshot: UiMetaSnapshot): void {
     carried forward unread — see `foreignPushRows` — and the stamps come back so
     that a write from this device does not erase somebody else's heartbeat.
   */
+  /*
+    And the push maps come from wherever the NOTIFIER is looking, which is not
+    always the same section: a gateway whose plugin cannot read a per-person key
+    keeps the registrations on the bare `hermie-app` while the arrangement moves
+    on without them. `pushHome` is the gateway's own copy of that section.
+  */
+  const pushNeighbours = (snapshot.pushHome ?? neighbours) as HermieAppShape | null
+
   usePushStore.getState().applyRemote({
-    others: foreignPushRows(neighbours, usePushStore.getState().installationId),
-    seen: pushSeenOf(neighbours)
+    others: foreignPushRows(pushNeighbours, usePushStore.getState().installationId),
+    seen: pushSeenOf(pushNeighbours)
   })
 
   /*

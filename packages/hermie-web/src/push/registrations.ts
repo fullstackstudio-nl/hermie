@@ -156,8 +156,19 @@ export function readPushSection(section: unknown): PushSection {
   const seen: Record<string, number> = {}
 
   for (const [installationId, value] of Object.entries(rawSeen)) {
-    if (num(value) > 0) {
-      seen[installationId] = num(value)
+    /*
+      Two shapes. A bare number is what every app before `push.seen.per_chat`
+      wrote; `{bot, at}` is what a newer one writes where the gateway said it
+      could be read. This daemon suppresses on "somebody is reading SOMETHING",
+      which is what the number always meant, so it takes `at` and ignores the
+      chat name — over-suppressing in the direction ADR-0017 already chose,
+      rather than reading a newer section as a device that looks away for ever.
+    */
+    const at =
+      value && typeof value === 'object' && !Array.isArray(value) ? num((value as { at?: unknown }).at) : num(value)
+
+    if (at > 0) {
+      seen[installationId] = at
     }
   }
 

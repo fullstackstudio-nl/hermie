@@ -34,7 +34,14 @@ import { startFakeGateway } from '@hermie/fake-gateway'
 import { describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
 
-import { foreignPushRows, pushSectionFor, pushSeenOf, type PushRegistrationInput, type PushType } from './push'
+import {
+  foreignPushRows,
+  pushSectionFor,
+  pushSeenOf,
+  type PushRegistrationInput,
+  type PushSeenEntry,
+  type PushType
+} from './push'
 import { appKeyFor, UiMetaSync, type UiMetaGateway, type UiMetaSnapshot } from './ui-meta'
 
 const NOW = 1_789_957_143
@@ -133,7 +140,7 @@ async function withGateway<T>(run: (harness: Harness) => Promise<T>): Promise<T>
         },
         device(installationId) {
           let others: Record<string, unknown> = {}
-          let seen: Record<string, number> = {}
+          let seen: Record<string, PushSeenEntry> = {}
           let own: PushRegistrationInput | null = null
           const local: UiMetaSnapshot = { app: null, bots: {} }
 

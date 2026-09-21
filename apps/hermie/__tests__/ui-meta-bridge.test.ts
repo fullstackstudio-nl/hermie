@@ -114,7 +114,30 @@ describe('the bridge', () => {
         calls.push({ method, params })
 
         return method === 'profiles.list'
-          ? { profiles: [{ name: 'researcher', is_default: true, ui_meta: { 'hermes-bots': {} } }] }
+          ? {
+              profiles: [
+                {
+                  name: 'researcher',
+                  is_default: true,
+                  ui_meta: {
+                    'hermes-bots': {},
+                    /*
+                      A plugin that reads the per-person key. Without this
+                      advert the bridge would ALSO write the bare `hermie-app`
+                      to keep the registrations where an older notifier is
+                      looking, which is a different case with its own cases in
+                      `packages/gateway-client/src/ui-meta.test.ts`.
+                    */
+                    'hermie-plugin': {
+                      v: 1,
+                      version: '0.2.0',
+                      capabilities: ['ui_meta.per_user', 'push.seen.per_chat'],
+                      modules: { push: 'on' }
+                    }
+                  }
+                }
+              ]
+            }
           : { ok: true, applied: { ui_meta: true, ui_meta_revisions: { hermie: 1, 'hermie-app:owner': 1 } } }
       }
     }

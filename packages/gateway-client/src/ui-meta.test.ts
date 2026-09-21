@@ -17,7 +17,7 @@
  * asked is whether this client and that protocol agree, and two stubs agreeing
  * with each other proves nothing.
  */
-import { startFakeGateway } from '@hermie/fake-gateway'
+import { PLUGIN_ADVERT, startFakeGateway } from '@hermie/fake-gateway'
 import { describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
 
@@ -448,6 +448,119 @@ describe('one key per person', () => {
 
       expect(Object.keys(meta).filter(key => key.startsWith(HERMIE_APP_KEY))).toEqual([])
       expect(await metaOf(request, 'writer')).toMatchObject({ [HERMIE_KEY]: { archived: true } })
+    })
+  })
+})
+
+describe('a gateway whose notifier cannot read the new key yet', () => {
+  /**
+   * The split write, and why it is not simply "wait for the plugin".
+   *
+   * The arrangement is read by nothing but this app, so it can move to the
+   * per-person key the moment the app ships. The registrations are read by the
+   * PLUGIN, and one written where the plugin is not looking is a phone that has
+   * silently stopped buzzing — which nobody finds out about except by not being
+   * woken up. So the two halves go to two keys until the gateway says otherwise.
+   */
+  const withoutPerUser = async (run: (harness: Harness) => Promise<void>): Promise<void> => {
+    const gateway = await startFakeGateway({
+      port: 0,
+      plugin: { ...PLUGIN_ADVERT, capabilities: ['push.expo'] }
+    })
+
+    try {
+      const socket = new WebSocket(gateway.wsUrl, ['hermes-gateway-v1'])
+
+      await new Promise<void>((resolve, reject) => {
+        socket.once('open', () => resolve())
+        socket.once('error', reject)
+      })
+
+      const request = callOn(socket)
+
+      try {
+        await run({
+          request,
+          device(initial = { app: null, bots: {} }, userId = OWNER) {
+            const local: UiMetaSnapshot = { app: initial.app, bots: { ...initial.bots } }
+            const sync = new UiMetaSync({
+              gateway: { request },
+              read: () => local,
+              apply: snapshot => {
+                local.app = snapshot.app
+                local.bots = { ...snapshot.bots }
+              }
+            })
+
+            sync.setUser(userId)
+
+            return { sync, local }
+          }
+        })
+      } finally {
+        socket.close()
+      }
+    } finally {
+      await gateway.close()
+    }
+  }
+
+  it('leaves the registrations on the bare key and moves the rest', async () => {
+    await withoutPerUser(async ({ request, device }) => {
+      const phone = device()
+
+      await phone.sync.reconcile()
+      phone.local.app = {
+        v: 1,
+        themeChoice: 'midnight',
+        push: { registrations: { 'i-phone': { v: 1, transport: 'expo', token: 'x' } }, seen: {} }
+      }
+      phone.sync.markApp()
+      await phone.sync.flush()
+
+      const meta = await metaOf(request, 'researcher')
+
+      expect(meta[APP_KEY]).toMatchObject({ themeChoice: 'midnight' })
+      expect(meta[APP_KEY]).not.toHaveProperty('push')
+      expect(meta[HERMIE_APP_KEY]).toHaveProperty('push')
+    })
+  })
+
+  it('reads its own registrations back from the bare key', async () => {
+    // The other half of the split: a second device of the same person has to
+    // find the first one's row, or it will write a section without it.
+    await withoutPerUser(async ({ device }) => {
+      const phone = device()
+
+      await phone.sync.reconcile()
+      phone.local.app = {
+        v: 1,
+        push: { registrations: { 'i-phone': { v: 1, transport: 'expo', token: 'x' } }, seen: {} }
+      }
+      phone.sync.markApp()
+      await phone.sync.flush()
+
+      const tablet = device()
+      const seenByTablet = await tablet.sync.pull()
+
+      expect(seenByTablet?.pushHome).toHaveProperty('push')
+      // And the per-person key it found there carries none, so a reader that
+      // took the neighbours out of `app` would have found nobody.
+      expect(seenByTablet?.app).not.toHaveProperty('push')
+    })
+  })
+
+  it('sends both keys in one request, because their sections are independent', async () => {
+    await withoutPerUser(async ({ device }) => {
+      const phone = device()
+
+      await phone.sync.reconcile()
+      phone.local.app = { v: 1, themeChoice: 'sand', push: { registrations: {}, seen: {} } }
+      phone.sync.markApp()
+      await phone.sync.flush()
+
+      expect(phone.sync.pending).toBe(false)
+      expect(phone.sync.mode).toBe('synced')
     })
   })
 })

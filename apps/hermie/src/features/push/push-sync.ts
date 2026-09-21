@@ -393,7 +393,10 @@ export class PushSync {
 
   /** Stamp now. Public so a test can drive the cadence without a clock. */
   beat(): void {
-    this.store.getState().beat(pushStampOf(this.now()))
+    // The chat on screen travels with the stamp. `openBot` is null only when
+    // the heartbeat is not wanted at all, so an empty name here is the harmless
+    // "some chat" an older build could also say.
+    this.store.getState().beat(this.openBot ?? '', pushStampOf(this.now()))
   }
 
   private syncHeartbeat(): void {

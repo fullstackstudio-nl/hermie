@@ -645,15 +645,18 @@ const LAUNCH_PROFILE = 'default'
  */
 export const PLUGIN_ADVERT: Record<string, unknown> = {
   v: 1,
-  version: '0.1.0',
+  version: '0.2.0',
   capabilities: [
     'context.per_bot',
     'context.system_prompt',
     'push.expo',
+    'push.mute',
     'push.preview',
+    'push.seen.per_chat',
     'push.type.turn_done',
     'push.type.turn_failed',
-    'push.webpush'
+    'push.webpush',
+    'ui_meta.per_user'
   ],
   modules: {
     attachments: 'planned',

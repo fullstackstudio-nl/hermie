@@ -43,7 +43,7 @@
  * is in force so a screen can be honest about it, and a refusal is retried on the
  * next reconcile rather than being retried forever.
  */
-import { pluginAdvert, type PluginAdvert } from './plugin'
+import { hasPluginCapability, pluginAdvert, PLUGIN_CAPABILITIES, type PluginAdvert } from './plugin'
 import type { ProfileRow, ProfilesConfigureResult, ProfilesListResult } from '@hermes/shared/gateway-contract'
 
 /** That bot's profile: everything about one conversation. */
@@ -182,6 +182,17 @@ export interface UiMetaSnapshot {
    */
   remote?: HermieAppSection | null
   /**
+   * The gateway's own copy of whichever section holds the push maps.
+   *
+   * Usually the same as `remote`. It differs on a gateway whose plugin cannot
+   * read a per-person key yet: the arrangement moves there regardless, because
+   * nothing but this app reads it, while the registrations stay on the bare
+   * `hermie-app` where the notifier is still looking. A registration written
+   * somewhere nothing reads is a phone that has silently stopped buzzing, and
+   * that is not a thing to find out about by not being woken up.
+   */
+  pushHome?: HermieAppSection | null
+  /**
    * True on the one pull where this person's key did not exist and the legacy
    * one did, so `app` is the anonymous section read through
    * `inheritedFromLegacy`.
@@ -312,6 +323,18 @@ export class UiMetaSync {
    * had it and is not a degraded mode to apologise for.
    */
   private userId = ''
+
+  /**
+   * Whether the gateway's plugin said it reads `hermie-app:<user_id>`.
+   *
+   * It gates the PUSH half only — see `UiMetaSnapshot.pushHome`. False is the
+   * honest default: an absent advert, a plugin too old to write one and no
+   * plugin at all are indistinguishable, and all three mean "do not assume".
+   */
+  private perUser = false
+
+  /** The bare key as the gateway holds it, for the read-modify-write above. */
+  private legacyApp: HermieAppSection | null = null
 
   /** Sections written locally that the gateway has not taken yet. */
   private readonly dirtyBots = new Set<string>()
@@ -471,7 +494,13 @@ export class UiMetaSync {
       }
     }
 
-    return { app: this.dirtyApp ? local.app : remote.app, bots, plugin, remote: remote.app }
+    return {
+      app: this.dirtyApp ? local.app : remote.app,
+      bots,
+      plugin,
+      remote: remote.app,
+      pushHome: remote.pushHome ?? null
+    }
   }
 
   /** Read `profiles.list` and project the two keys out of it. */
@@ -514,6 +543,7 @@ export class UiMetaSync {
       if (row.is_default === true) {
         this.defaultProfile = name
         legacy = readSection<HermieAppSection>(row.ui_meta, HERMIE_APP_KEY, HERMIE_APP_SECTION_VERSION)
+        this.revisions.set(`${name}:${HERMIE_APP_KEY}`, revisions[HERMIE_APP_KEY] ?? 0)
 
         if (appKey) {
           this.revisions.set(`${name}:${appKey}`, revisions[appKey] ?? 0)
@@ -523,6 +553,8 @@ export class UiMetaSync {
     }
 
     this.currentMode = 'synced'
+    this.perUser = hasPluginCapability(plugin, PLUGIN_CAPABILITIES.uiMetaPerUser)
+    this.legacyApp = legacy
 
     /*
       The one-time inheritance, and the condition is deliberately narrow: this
@@ -532,10 +564,17 @@ export class UiMetaSync {
       the previous occupant of this gateway left behind.
     */
     if (appKey && !app && legacy) {
-      return { app: inheritedFromLegacy(legacy), bots, plugin, remote: null, migrated: true }
+      return {
+        app: inheritedFromLegacy(legacy),
+        bots,
+        plugin,
+        remote: null,
+        pushHome: this.perUser ? null : legacy,
+        migrated: true
+      }
     }
 
-    return { app, bots, plugin, remote: app }
+    return { app, bots, plugin, remote: app, pushHome: this.perUser ? app : legacy }
   }
 
   /**
@@ -599,6 +638,14 @@ export class UiMetaSync {
     // nowhere to go. It stays on the device; see `userId`.
     if (this.dirtyApp && this.defaultProfile && appKey) {
       at(this.defaultProfile).push(appKey)
+
+      // The second key, for a gateway whose notifier cannot read the first.
+      // Both go out in ONE request: sections are independent inside it, so the
+      // arrangement landing and the registrations landing are two answers the
+      // protocol already gives separately.
+      if (!this.perUser) {
+        at(this.defaultProfile).push(HERMIE_APP_KEY)
+      }
     }
 
     for (const [profile, keys] of byProfile) {
@@ -626,9 +673,25 @@ export class UiMetaSync {
         const section = snapshot.bots[profile]
 
         sections[key] = section ? { ...section, v: HERMIE_SECTION_VERSION } : null
-      } else {
-        sections[key] = snapshot.app ? { ...snapshot.app, v: HERMIE_APP_SECTION_VERSION } : null
+        continue
       }
+
+      if (key === HERMIE_APP_KEY) {
+        sections[key] = this.legacyPushSection(snapshot)
+        continue
+      }
+
+      const app: Record<string, unknown> | null = snapshot.app
+        ? { ...snapshot.app, v: HERMIE_APP_SECTION_VERSION }
+        : null
+
+      // The arrangement without the registrations, on a gateway that would not
+      // find them here. Writing them in both places would notify twice.
+      if (app && !this.perUser) {
+        delete app.push
+      }
+
+      sections[key] = app
     }
 
     return sections
@@ -706,6 +769,27 @@ export class UiMetaSync {
     // this section as fast as we are. Leave it dirty for the next reconcile.
   }
 
+  /**
+   * The bare key, as a read-modify-write that changes only `push`.
+   *
+   * Everything else in it belongs to whoever wrote it — an older build on
+   * somebody's other device is still reading the anonymous arrangement out of
+   * exactly these bytes — so the section goes back as it came, with this
+   * person's registrations dropped into it. `null` when there is nothing to
+   * say and nothing was there, which removes a key rather than leaving an empty
+   * one behind.
+   */
+  private legacyPushSection(snapshot: UiMetaSnapshot): Record<string, unknown> | null {
+    const push = (snapshot.app as Record<string, unknown> | null)?.push
+    const held = this.legacyApp as Record<string, unknown> | null
+
+    if (!push && !held) {
+      return null
+    }
+
+    return { ...(held ?? {}), v: HERMIE_APP_SECTION_VERSION, ...(push ? { push } : {}) }
+  }
+
   private clearDirty(profile: string, keys: readonly string[]): void {
     for (const key of keys) {
       if (key === HERMIE_KEY) {
@@ -739,6 +823,8 @@ export class UiMetaSync {
     // And a different person: the identity was that gateway's answer about who
     // is holding the phone, not this device's.
     this.userId = ''
+    this.perUser = false
+    this.legacyApp = null
     this.currentMode = 'local'
   }
 }

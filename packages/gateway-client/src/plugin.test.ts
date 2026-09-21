@@ -32,7 +32,7 @@ describe('one advert', () => {
   it('reads the shape the plugin publishes', () => {
     const advert = pluginAdvertOf(PLUGIN_ADVERT)
 
-    expect(advert?.version).toBe('0.1.0')
+    expect(advert?.version).toBe('0.2.0')
     expect(advert?.modules.push).toBe('on')
     expect(advert?.limits).toMatchObject({ contextChars: 1200 })
     expect(hasPluginCapability(advert, PLUGIN_CAPABILITIES.pushTurnDone)).toBe(true)
@@ -83,7 +83,7 @@ describe('a roster', () => {
       row('researcher', { 'hermes-bots': {}, [HERMIE_PLUGIN_KEY]: PLUGIN_ADVERT }, true)
     ])
 
-    expect(advert?.version).toBe('0.1.0')
+    expect(advert?.version).toBe('0.2.0')
   })
 
   it('finds one on a profile that is not the default, rather than insisting', () => {
@@ -94,7 +94,7 @@ describe('a roster', () => {
       row('researcher', { 'hermes-bots': {} }, true)
     ])
 
-    expect(advert?.version).toBe('0.1.0')
+    expect(advert?.version).toBe('0.2.0')
   })
 
   it('prefers the default profile’s when two disagree', () => {
@@ -103,7 +103,7 @@ describe('a roster', () => {
       row('researcher', { [HERMIE_PLUGIN_KEY]: PLUGIN_ADVERT }, true)
     ])
 
-    expect(advert?.version).toBe('0.1.0')
+    expect(advert?.version).toBe('0.2.0')
   })
 
   it('answers null for a gateway with no plugin, which is what "do not offer it" means', () => {

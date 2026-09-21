@@ -54,7 +54,21 @@ export const PLUGIN_CAPABILITIES = {
   pushTurnDone: 'push.type.turn_done',
   pushTurnFailed: 'push.type.turn_failed',
   contextPrompt: 'context.system_prompt',
-  contextPerBot: 'context.per_bot'
+  contextPerBot: 'context.per_bot',
+  /**
+   * The plugin reads `hermie-app:<user_id>` as well as the bare key.
+   *
+   * It gates only the PUSH half. The arrangement moves to the per-person key
+   * whatever the plugin says, because nothing but this app ever reads it — but
+   * a registration written somewhere the notifier does not look is a phone that
+   * has silently stopped buzzing, so those stay on the legacy key until the
+   * gateway says it can find them.
+   */
+  uiMetaPerUser: 'ui_meta.per_user',
+  /** The heartbeat may say WHICH chat is on screen, not merely that one is. */
+  pushSeenPerChat: 'push.seen.per_chat',
+  /** A muted chat is not notified about. Without it, mute is app-side only. */
+  pushMute: 'push.mute'
 } as const
 
 export type PluginCapability = (typeof PLUGIN_CAPABILITIES)[keyof typeof PLUGIN_CAPABILITIES]

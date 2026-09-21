@@ -79,7 +79,7 @@ describe('the three states', () => {
     applySnapshot({ app: null, bots: {}, plugin: ADVERT })
 
     expect(pluginPresence(usePluginStore.getState())).toBe('installed')
-    expect(usePluginStore.getState().advert?.version).toBe('0.1.0')
+    expect(usePluginStore.getState().advert?.version).toBe('0.2.0')
   })
 
   it('reads a gateway that carried no advert as not installed', () => {

@@ -310,7 +310,7 @@ describe('the switch', () => {
     await settled()
     usePushStore.getState().applyRemote({
       others: { 'i-tablet': { v: 1, transport: 'expo', token: 'theirs' } },
-      seen: { 'i-tablet': NOW - 10 }
+      seen: { 'i-tablet': { bot: 'writer', at: NOW - 10 } }
     })
     await sync.enable()
 
@@ -382,7 +382,7 @@ describe('every way a registration goes away', () => {
 
     usePushStore.getState().applyRemote({
       others: { 'i-tablet': { v: 1, transport: 'expo', token: 'theirs' } },
-      seen: { 'i-tablet': NOW }
+      seen: { 'i-tablet': { bot: 'writer', at: NOW } }
     })
 
     await sync.retire()
@@ -401,6 +401,8 @@ describe('every way a registration goes away', () => {
     const section = (snapshotFromStores().app as HermieAppShape).push
 
     expect(Object.keys(section?.registrations ?? {})).toEqual(['i-tablet'])
+    // A bare number, because this gateway's plugin has not said it can read the
+    // `{bot, at}` shape — see `PushSectionShape.seen`.
     expect(section?.seen).toEqual({ 'i-tablet': NOW })
 
     sync.stop()
@@ -451,7 +453,7 @@ describe('the heartbeat', () => {
 
     const id = usePushStore.getState().installationId
 
-    expect(usePushStore.getState().seen[id]).toBe(NOW)
+    expect(usePushStore.getState().seen[id]?.at).toBe(NOW)
 
     sync.stop()
   })
@@ -530,7 +532,7 @@ describe('the heartbeat', () => {
 
     const id = usePushStore.getState().installationId
 
-    expect(usePushStore.getState().seen[id]).toBe(NOW)
+    expect(usePushStore.getState().seen[id]?.at).toBe(NOW)
 
     sync.stop()
     jest.useFakeTimers()
