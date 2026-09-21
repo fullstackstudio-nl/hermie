@@ -196,7 +196,18 @@ export function SignInStep({ draft, update }: SignInStepProps) {
         </StatusLine>
       ) : null}
 
-      {phase === 'ready' && probe && authModeOf(probe) !== 'cookie' ? (
+      {/*
+        `native_pkce` and not "anything that is not cookie".
+        
+        `authModeOf` answers `session_token` for a gateway that is not gated at
+        all, and that took this branch: an ungated gateway was shown "This
+        gateway is too old for browser sign-in — it requires a sign-in but does
+        not advertise the cookie flow" directly under a lead saying it is not
+        gated and authenticates with a session token. Two sentences on one
+        screen contradicting each other, one of them accusing a perfectly
+        current gateway of being old.
+      */}
+      {phase === 'ready' && probe && authModeOf(probe) === 'native_pkce' ? (
         <View style={{ gap: theme.space.xs }}>
           <StatusLine testID="signin-blocked" tone="error">
             {strings.onboarding.signIn.cookieBlockedTitle}

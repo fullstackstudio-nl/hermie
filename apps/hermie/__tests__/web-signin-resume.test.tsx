@@ -91,3 +91,47 @@ describe('resuming the wizard after a sign-out', () => {
     expect(screen.getByTestId('cookie-password-submit')).toBeTruthy()
   })
 })
+
+describe('a gateway that is not gated at all', () => {
+  it('is not accused of being too old for browser sign-in', async () => {
+    // `authModeOf` answers `session_token` here, and the blocked notice tested
+    // `!== 'cookie'` — so an ungated gateway was told it requires a sign-in it
+    // cannot complete, directly under a lead saying it requires none.
+    probe.mockResolvedValue({
+      version: '0.21.3-fake',
+      authRequired: false,
+      authFlows: [],
+      providers: [],
+      supportsNativePkce: false
+    })
+
+    renderScreen(
+      <SignInStep
+        draft={draftFromConfig({ baseUrl: 'http://127.0.0.1:9220', authMode: 'session_token' })}
+        update={jest.fn()}
+      />
+    )
+
+    await waitFor(() => expect(probe).toHaveBeenCalled())
+    expect(screen.queryByTestId('signin-blocked')).toBeNull()
+  })
+
+  it('still says so when the gateway is gated and has no cookie flow', async () => {
+    probe.mockResolvedValue({
+      version: '2026.1.1',
+      authRequired: true,
+      authFlows: ['native_pkce'],
+      providers: [{ name: 'self-hosted', displayName: 'Self-Hosted OIDC', supportsPassword: false }],
+      supportsNativePkce: true
+    })
+
+    renderScreen(
+      <SignInStep
+        draft={draftFromConfig({ baseUrl: 'http://127.0.0.1:9220', authMode: 'native_pkce' })}
+        update={jest.fn()}
+      />
+    )
+
+    await waitFor(() => expect(screen.getByTestId('signin-blocked')).toBeTruthy())
+  })
+})
