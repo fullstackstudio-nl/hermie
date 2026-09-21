@@ -91,8 +91,24 @@ export function addressOfSubscription(subscription: PushSubscription | null): Pu
 
 let registration: ServiceWorkerRegistration | null = null
 
+/**
+ * Whether registering has already been tried and failed.
+ *
+ * Failure is remembered, and that is the whole of this variable. It used to
+ * leave `registration` at `null`, which is indistinguishable from "not tried
+ * yet", so every later caller tried again — and a browser that cannot register
+ * at all answers each attempt with a console error. Driving one transcript in a
+ * Chromium with service workers turned off produced eighteen of them.
+ *
+ * The comment below already said what the code should have done: a worker that
+ * will not register means no Web Push on this deployment, and a deployment does
+ * not change while the page is open. A reload tries again, because the module
+ * is new.
+ */
+let refused = false
+
 async function ensureWorker(): Promise<ServiceWorkerRegistration | null> {
-  if (!supported()) {
+  if (!supported() || refused) {
     return null
   }
 
@@ -105,11 +121,19 @@ async function ensureWorker(): Promise<ServiceWorkerRegistration | null> {
     await navigator.serviceWorker.ready
   } catch {
     // A worker that will not register — a file that is not there, a scope the
-    // server will not allow — means no Web Push on this deployment.
+    // server will not allow, a browser with the whole machinery switched off —
+    // means no Web Push on this deployment. Asked once, not once per caller.
     registration = null
+    refused = true
   }
 
   return registration
+}
+
+/** Test seam: the module-level memory above outlives a single test. */
+export function resetWorkerRegistrationForTests(): void {
+  registration = null
+  refused = false
 }
 
 const permissionOf = (value: NotificationPermission): PushPermission =>

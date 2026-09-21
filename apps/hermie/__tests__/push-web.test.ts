@@ -9,8 +9,11 @@
  *
  * What CANNOT, and is therefore verified on a real browser or not at all:
  *
- *  - **Service-worker registration.** jsdom implements no
- *    `navigator.serviceWorker`, so `ensureWorker` is unreachable from here.
+ *  - **Service-worker registration succeeding.** jsdom implements no
+ *    `navigator.serviceWorker`, so a registration that works has no stand-in
+ *    worth writing. Registration FAILING is stubbed at the bottom of this file,
+ *    because what matters there is how many times it is asked, not what a real
+ *    browser would have answered.
  *  - **`pushManager.subscribe`.** There is no push service to mint an endpoint,
  *    and no implementation of `applicationServerKey` to reject a bad one.
  *  - **The worker itself.** `public/hermie-push-sw.js` runs in a
@@ -25,7 +28,12 @@
  * `docs/platform-notes.md` carries the same list, with what a person has to do
  * to close it.
  */
-import { addressOfSubscription, decodeVapidKey, pushPlatform } from '../src/features/push/platform.web'
+import {
+  addressOfSubscription,
+  decodeVapidKey,
+  pushPlatform,
+  resetWorkerRegistrationForTests
+} from '../src/features/push/platform.web'
 
 /** One subscription, as `toJSON()` renders it, without a browser. */
 const subscription = (json: unknown) => ({ toJSON: () => json }) as unknown as PushSubscription
@@ -91,5 +99,51 @@ describe('the gate', () => {
       failure: { reason: 'unsupported', message: 'no service worker' }
     })
     expect(pushPlatform.onResponse(() => undefined)).toBeInstanceOf(Function)
+  })
+})
+
+/**
+ * A browser that will not register a worker, asked more than once.
+ *
+ * Observed in a Chromium with service workers switched off: registering a
+ * missing path, an `image/x-icon` and the real worker all failed identically,
+ * so nothing about the app or the server was wrong — but every caller retried,
+ * and one transcript produced eighteen console errors. A deployment that cannot
+ * register does not start being able to while the page is open.
+ */
+describe('a worker that will not register', () => {
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'serviceWorker')
+  const register = jest.fn<Promise<never>, [string]>()
+
+  beforeEach(() => {
+    resetWorkerRegistrationForTests()
+    register.mockReset()
+    register.mockRejectedValue(new TypeError('An unknown error occurred when fetching the script.'))
+
+    Object.defineProperty(window.navigator, 'serviceWorker', {
+      configurable: true,
+      value: { register, ready: Promise.resolve(undefined) }
+    })
+    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true })
+    ;(window as unknown as { PushManager: unknown }).PushManager = class {}
+    ;(globalThis as unknown as { Notification: unknown }).Notification = { permission: 'default' }
+  })
+
+  afterEach(() => {
+    resetWorkerRegistrationForTests()
+
+    if (original) {
+      Object.defineProperty(window.navigator, 'serviceWorker', original)
+    } else {
+      delete (window.navigator as unknown as Record<string, unknown>).serviceWorker
+    }
+  })
+
+  it('is asked once, however many callers want it', async () => {
+    await pushPlatform.prepare()
+    await pushPlatform.prepare()
+    await pushPlatform.prepare()
+
+    expect(register).toHaveBeenCalledTimes(1)
   })
 })
