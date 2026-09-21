@@ -13,6 +13,7 @@ const { values } = parseArgs({
     'public-host': { type: 'string' },
     scenario: { type: 'string' },
     'stream-delay': { type: 'string' },
+    'history-rows': { type: 'string' },
     host: { type: 'string', default: '127.0.0.1' },
     help: { type: 'boolean', default: false }
   }
@@ -31,6 +32,8 @@ if (values.help) {
       '  --close-code <n>        close code used when a WS upgrade fails auth (default 4401)',
       '  --scenario <file.json>  scripted prompt replies',
       '  --stream-delay <ms>     delay between streamed frames (default 2, which is instant)',
+      '  --history-rows <n>      extra back-history in front of every Bot Chat, in rows',
+      '                          (mixed prose, code and tool calls; for measuring a long list)',
       '',
       'Prompts steer the built-in scenario: "approve" raises an approval request,',
       '"delegate" fans out subagent events, anything else streams a reply with a tool call.',
@@ -63,6 +66,7 @@ const gateway = await startFakeGateway({
   ...(values['close-code'] ? { closeCode: Number.parseInt(values['close-code'], 10) } : {}),
   ...(values['public-host'] ? { publicHost: values['public-host'] } : {}),
   ...(values['stream-delay'] ? { streamDelayMs: Number.parseInt(values['stream-delay'], 10) } : {}),
+  ...(values['history-rows'] ? { historyRows: Number.parseInt(values['history-rows'], 10) } : {}),
   ...(scenario ? { scenario } : {})
 })
 

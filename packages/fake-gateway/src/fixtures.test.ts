@@ -223,3 +223,55 @@ describe('fixture hygiene', () => {
     }
   })
 })
+
+/**
+ * The long-history flag, which exists so a long list can be MEASURED.
+ *
+ * The scroll of four hundred rows could not be measured against this server:
+ * the fixtures are a dozen rows each, and the only way to reach four hundred
+ * was two hundred send-and-reply round trips through the live socket, which
+ * measures the socket. This is the history a real gateway would already have
+ * had, written in front of the fixture rather than instead of it.
+ *
+ * Read off the server's own state rather than over a transport: what is being
+ * checked is what the fixture builder produced, and the transports have their
+ * own tests above.
+ */
+describe('the back-history flag', () => {
+  const rowsOf = async (options: { historyRows?: number }) => {
+    const server = await startFakeGateway(options)
+
+    try {
+      const session = [...server.state.sessions.values()].find(entry => entry.profile === 'researcher')
+
+      return session?.messages ?? []
+    } finally {
+      await server.close()
+    }
+  }
+
+  it('adds the rows in front of the fixture, which keeps its own shape', async () => {
+    const rows = await rowsOf({ historyRows: 400 })
+
+    expect(rows.length).toBeGreaterThanOrEqual(400)
+
+    const texts = rows.map(row => ('text' in row && typeof row.text === 'string' ? row.text : ''))
+
+    // The fixture is still newest and still itself…
+    expect(texts.at(-1)).toContain('Retry semantics')
+    // …and the history is in front of it, oldest first.
+    expect(texts[0]).toContain('Question 1:')
+
+    // Mixed on purpose: a list of four hundred identical one-line bubbles
+    // measures a list of identical one-line bubbles. What makes scrolling
+    // expensive is rows of different heights, a markdown lexer running on some
+    // and not others, and a tool card that measures itself.
+    const history = rows.slice(0, 400)
+    expect(history.filter(row => row.role === 'tool').length).toBeGreaterThan(90)
+    expect(history.filter(row => 'text' in row && String(row.text).includes('```ts')).length).toBeGreaterThan(90)
+  })
+
+  it('adds nothing at all by default', async () => {
+    expect((await rowsOf({})).length).toBeLessThan(20)
+  })
+})

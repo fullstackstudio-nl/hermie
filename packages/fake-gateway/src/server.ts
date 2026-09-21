@@ -103,6 +103,26 @@ export interface FakeGatewayOptions {
   /** Delay between streamed frames, in ms. */
   streamDelayMs?: number
   /**
+   * Extra history to put in front of every Bot Chat, in ROWS.
+   *
+   * The scroll of a long transcript could not be measured against this server:
+   * the fixtures are a dozen rows each, and the only way to make four hundred
+   * was two hundred send-and-reply round trips through the live socket, which
+   * measures the socket. This is the history a real gateway would already have
+   * had — written straight into the session, ahead of the fixture, so the
+   * fixture's own shapes stay where the tests that read them expect.
+   *
+   * The rows are deliberately MIXED. A transcript of four hundred identical
+   * one-line bubbles measures a list of identical one-line bubbles: what makes
+   * scrolling expensive is rows of different heights, a markdown lexer running
+   * on some of them and not others, and a tool card that measures itself. So
+   * the cycle is prose, a longer paragraph, a fenced code block and a tool call,
+   * in the proportion an actual session has them.
+   *
+   * Zero, absent, or a Bot Chat created at runtime: nothing is added.
+   */
+  historyRows?: number
+  /**
    * Delay between two frames of a delegation, in ms.
    *
    * Deliberately its own knob and deliberately slow by default: the agents bar,
@@ -1163,11 +1183,77 @@ function makeCronRunSession(
   }
 }
 
-function makeSession(profile: string, title: string): FakeSession {
+/**
+ * `historyRows` worth of plausible back-history, oldest first.
+ *
+ * Four shapes on a cycle of four, so a run of any length holds them in a fixed
+ * ratio: a short exchange, a paragraph long enough to wrap several times, a
+ * fenced code block and a tool call with a result. Row ids and timestamps run
+ * backwards from the fixture's own base so the real fixture stays newest and
+ * the day separators fall where a week of conversation would put them.
+ */
+function historyRows(profile: string, count: number, base: number): TranscriptRow[] {
+  const rows: TranscriptRow[] = []
+  // One row a minute, ending an hour before the fixture starts.
+  const start = base - 3600 - count * 60
+
+  for (let index = 0; index < count; index += 1) {
+    const at = start + index * 60
+    const rowId = -(count - index)
+
+    switch (index % 4) {
+      case 0:
+        rows.push({ role: 'user', text: `Question ${index + 1}: what changed in the retry path?`, row_id: rowId, timestamp: at }) // prettier-ignore
+        break
+
+      case 1:
+        rows.push({
+          role: 'assistant',
+          text:
+            `Answer ${index + 1}. The backoff is computed per attempt rather than per call, so a long ` +
+            'request no longer inherits the delay of the one before it. The ceiling is thirty seconds ' +
+            'and the jitter is twenty per cent either way, which matters more than the curve: a fleet ' +
+            'that retries on the same tick turns a recovery into a second outage.',
+          row_id: rowId,
+          timestamp: at
+        })
+        break
+
+      case 2:
+        rows.push({
+          role: 'assistant',
+          text: [
+            'Here is the shape:',
+            '',
+            '```ts',
+            `export const attempt${index} = (n: number) => 2 ** n * 1000`,
+            '```'
+          ].join('\n'),
+          row_id: rowId,
+          timestamp: at
+        })
+        break
+
+      default:
+        rows.push({
+          role: 'tool',
+          name: 'read_file',
+          tool_id: `call_history_${profile}_${index}`,
+          context: `read_file(notes/${index}.md)`,
+          args: { path: `notes/${index}.md` }
+        })
+    }
+  }
+
+  return rows
+}
+
+function makeSession(profile: string, title: string, history = 0): FakeSession {
   const storedId = `stored-${profile}-${randomUUID().slice(0, 8)}`
   const base = nowSeconds() - 600
 
   const messages: TranscriptRow[] = [
+    ...(history > 0 ? historyRows(profile, history, base) : []),
     { role: 'user', text: 'Introduce yourself in one line.', row_id: 1, timestamp: base },
     {
       role: 'assistant',
@@ -1256,8 +1342,9 @@ function makeSession(profile: string, title: string): FakeSession {
 }
 
 function initialState(options: FakeGatewayOptions): FakeGatewayState {
-  const researcher = makeSession('researcher', 'Bot Chat')
-  const writer = makeSession('writer', 'Bot Chat')
+  const history = Math.max(0, Math.trunc(options.historyRows ?? 0))
+  const researcher = makeSession('researcher', 'Bot Chat', history)
+  const writer = makeSession('writer', 'Bot Chat', history)
   const sessions = new Map<string, FakeSession>()
 
   for (const session of [researcher, writer]) {
