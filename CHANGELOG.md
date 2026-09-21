@@ -301,6 +301,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   server before it gets there (`mcp__terminal__run_in_terminal` → `Running terminal…`), because
   eliding a namespace tells a reader nothing. The words cross-fade over 120 ms, instantly under
   Reduce Motion.
+- **The badge beside an open chat goes out when the message is in front of you.** The chat list kept
+  showing 1 unread for the chat that was open, with the message plainly on screen. The watermark was
+  only ever written twice — when a chat was opened and when it was left — which is a rule from a
+  phone, where an open chat has covered the list. On the iPad and in a Mac window the list and the
+  chat are side by side. A chat that is open with the transcript at the bottom now counts every
+  message as read as it arrives; one that arrives while the reader is scrolled up stays unread, and
+  is read when they come back down — the same message, and the same moment, that the jump-to-latest
+  pill counts.
 - **A tap beside a bottom sheet closes it again.** The scrim was a flex sibling ABOVE the panel in a
   column, so it covered only the space over the sheet; on the wide layout, where the panel is capped
   and parked over the content column, most of what reads as backdrop is BESIDE it — and that area

@@ -296,21 +296,52 @@ export function unreadCountSince(state: ChatState, since: number): number {
   for (const id of state.order) {
     const item = state.items[id]
 
-    if (!item || (item.kind !== 'assistant' && item.kind !== 'bot_dm_in')) {
-      continue
-    }
-
-    if (item.kind === 'assistant' && (item.interim || !item.text.trim())) {
-      // An empty or interim bubble is the turn in progress, not a message.
-      continue
-    }
-
-    if ((item.ts ?? 0) > since) {
+    if (item && countsAsMessage(item) && (item.ts ?? 0) > since) {
       count += 1
     }
   }
 
   return count
+}
+
+/**
+ * Is this row a message, for the purposes of a badge?
+ *
+ * One predicate rather than two copies of the same list: `unreadCountSince`
+ * counts what is past the watermark and `lastMessageAt` says where the watermark
+ * has to go to leave nothing behind it. If the two ever disagreed about what a
+ * message is, a chat the reader is looking at would count one for ever.
+ */
+function countsAsMessage(item: TranscriptItem): boolean {
+  if (item.kind !== 'assistant' && item.kind !== 'bot_dm_in') {
+    return false
+  }
+
+  // An empty or interim bubble is the turn in progress, not a message.
+  return item.kind !== 'assistant' || (!item.interim && item.text.trim() !== '')
+}
+
+/**
+ * When the newest message in this chat arrived, in unix seconds, or 0.
+ *
+ * Read backwards, because the answer is almost always the last row and walking
+ * a whole transcript for it on every delta is a cost a long chat would feel.
+ *
+ * What it is FOR: a chat that is open and scrolled to the bottom is read, and
+ * "read" has to be written as a watermark the unread count will then find
+ * nothing past. Writing `now` alone is not enough — a gateway whose clock runs
+ * ahead stamps a message in the reader's future, and the badge comes back.
+ */
+export function lastMessageAt(state: ChatState): number {
+  for (let index = state.order.length - 1; index >= 0; index -= 1) {
+    const item = state.items[state.order[index] ?? '']
+
+    if (item && countsAsMessage(item)) {
+      return item.ts ?? 0
+    }
+  }
+
+  return 0
 }
 
 /** `3`, `99+` — the badge label, or an empty string when nothing is unread. */

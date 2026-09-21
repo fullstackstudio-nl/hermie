@@ -43,6 +43,7 @@ import {
   TranscriptList,
   type TranscriptListHandle
 } from '../../chat-ui'
+import { lastMessageAt } from '@hermie/transcript'
 import type { ConnectionStatus } from '@hermie/gateway-client'
 import { looksLikeSlashCommand, parseSlashCommand } from '@hermes/shared/slash'
 
@@ -72,6 +73,7 @@ import type { ManualSheet } from './sheet-host'
 import { useChatRuntime } from './ChatRuntime'
 import { findMatchingItem } from '../search'
 import { connectionNotice, RETRY_OFFER_MS } from './connection-notice'
+import { countsAsRead, readWatermark } from './read-watermark'
 import { ChatConnectingState, ReconnectPill } from './ConnectionState'
 import { useChat, type UseChatResult } from './useChat'
 
@@ -402,6 +404,36 @@ function Conversation({
   const lastCount = useRef(messageCount)
 
   awayRef.current = away
+
+  /**
+   * When the newest message arrived, off the RAW chat rather than off the
+   * transcript this screen is drawing.
+   *
+   * `chat.items` has already been through the view settings, and Quiet folds a
+   * teammate's DM into a chip — so a transcript that is not showing a message is
+   * not evidence that no message arrived. The badge counts the same rows
+   * `lastMessageAt` looks at, which is the point of them sharing a predicate.
+   */
+  const storedChat = useChatsStore(state => state.chats[botName])
+  const newestMessageAt = useMemo(() => (storedChat ? lastMessageAt(storedChat) : 0), [storedChat])
+
+  /**
+   * A chat in front of a reader at the bottom of it is read, and stays read as
+   * messages arrive.
+   *
+   * It runs on two edges and they are the two halves of the rule: a new message
+   * (`newestMessageAt` moves) while the reader is at the bottom, and the reader
+   * arriving back at the bottom after being scrolled up. `markSeen` ignores a
+   * watermark that is not newer than the one it holds, so the repeats this
+   * effect makes on an unrelated re-render cost nothing and write nothing.
+   */
+  useEffect(() => {
+    if (!countsAsRead({ away, open: true })) {
+      return
+    }
+
+    useBotsStore.getState().markSeen(botName, readWatermark(Math.floor(Date.now() / 1000), newestMessageAt))
+  }, [away, botName, newestMessageAt])
 
   // Messages that landed while the reader was further up: the pill's count.
   //
