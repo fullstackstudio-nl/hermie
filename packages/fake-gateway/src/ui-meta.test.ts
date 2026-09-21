@@ -18,8 +18,11 @@
  * whole would have one revision, not one per key. So the unit is the TOP-LEVEL
  * KEY, and that is what the cases below pin.
  *
- * NOT verified against a running `hermes serve` in this round — see the note in
- * docs/adr/0016.
+ * Verified against a running `hermes serve` 0.21.3 on 2026-09-21 — the probe
+ * ADR-0016 asked for. Every case below behaved identically there, including the
+ * refusal's `{ expected, actual }` shape, and one did NOT: a key written as
+ * `null` is REMOVED by the real gateway where the fake used to store the null.
+ * The fake deletes it now, and the case below is the one that pins it.
  */
 import { describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
@@ -203,6 +206,26 @@ describe('profiles.configure ui_meta', () => {
 
       expect(blind.applied?.ui_meta).toBe(true)
       expect(await metaOf(call, 'researcher')).toMatchObject({ hermie: { v: 2 } })
+    })
+  })
+
+  it('removes a key written as null, rather than storing the null', async () => {
+    // Measured on a real gateway, not assumed — see the note at the top. It is
+    // how a client drops a section it no longer has anything to say in, and a
+    // stored null would be a key on somebody's profile that means nothing.
+    await withGateway(async call => {
+      await call('profiles.configure', { name: 'researcher', ui_meta: { hermie: { v: 1, colour: 'teal' } } })
+
+      const removal = (await call('profiles.configure', {
+        name: 'researcher',
+        ui_meta: { hermie: null },
+        ui_meta_expected_revisions: { hermie: 1 }
+      })) as { applied?: { ui_meta?: boolean; ui_meta_revisions?: Record<string, number> } }
+
+      expect(removal.applied?.ui_meta).toBe(true)
+      // A removal is a write, so the revision moves with it.
+      expect(removal.applied?.ui_meta_revisions?.hermie).toBe(2)
+      expect(await metaOf(call, 'researcher')).toEqual({ 'hermes-bots': {} })
     })
   })
 

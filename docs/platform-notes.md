@@ -4356,3 +4356,137 @@ module's HID latch; `useColorScheme` follows the SYSTEM appearance, and
 `Appearance.setColorScheme` pins the trait collection outright. There is no
 AppKit-style inactive-window treatment to inherit, because the Mac build is the
 iPad one.
+
+## Themes, and `ui_meta` against a real gateway (2026-09-21, later again)
+
+### A theme is three values, and the rest was always derivable
+
+The token set had a per-scheme elevation ladder, a per-scheme glass table, a
+per-scheme bubble table and a list of wallpapers, and each of those was a place a
+new theme had to be added by hand. It is one table now: a preset, per scheme, is
+a **background**, an **elevation ladder** and a **default accent**, and
+`glassFor(scheme, ladder)` / `bubblesFor(scheme, ladder)` produce the rest.
+
+That is not a tidy-up; the relations were already exact and nobody had noticed:
+
+- every dark `nativeTint` was `withAlpha(solid, α)` of the rung it names, to the
+  byte — `rgba(28,42,69,0.80)` against `e1 = #1C2A45`, and so on for all five;
+- a bubble's `tail` has to be the bubble's own lower edge, and with the gradients
+  removed a round ago a bubble is one flat wash over one opaque rung, so the tail
+  is that composite exactly. The hand-tuned values were off by 2–4 per channel,
+  which is the residue of the two-stop gradients they were sampled from.
+
+`theme.wallpaper.fill` keeps its name. It is the floor, `Wallpaper` paints it,
+every glass recipe composites against it and the contrast check measures against
+it; renaming the one field all of them share would have been a diff across the
+app to say the same thing.
+
+### One ink set, three ladders, and the constraint that follows
+
+`darkColors` is per scheme and stays that way — `onAccent` in particular is one
+value, deliberately. So the Graphite and Lime dark ladders were not picked by
+eye: each rung was computed from the Blue rung's relative luminance and given its
+hue back, and `__tests__/themes.test.ts` fails if any of them drifts more than
+3 %. Without that, a ladder nudged half a shade lighter would take every ratio in
+`npm run contrast:check` with it and nobody would know which change did it.
+
+`npm run contrast:check` iterates `THEME_PRESETS` now — 551 pairs across three
+themes and two schemes — and the arithmetic moved into
+`apps/hermie/src/ui/contrast.ts` so the theme editor's guard and the build's gate
+are one rule. A colour the editor accepts is a colour the check accepts, by
+construction rather than by discipline.
+
+### The studio lime is a ring colour, and that has consequences
+
+`#C7FF4A` carries white at about **1.3 : 1**. Two places in the app put white on
+an accent's `fill` and both had to move:
+
+- the composer's send button takes `accent().bubble` — the half of the swatch the
+  check measures white against — rather than `fill`;
+- a swatch's check mark picks whichever of black and white reads on the colour
+  under it, which is one rule for all eleven swatches instead of a table.
+
+`accent().fill` is therefore held to no contrast floor at all, and `contrast.ts`
+says so out loud. An invented 3 : 1 there would refuse both the studio lime on a
+white panel (1.14 : 1) and the Graphite accent on its own dark panel (1.55 : 1) —
+the two accents the themes that need them are built around.
+
+Warm and Slate are gone. Graphite absorbs what Slate was FOR — a matte floor at
+about five times Blue's luminance, so panels sit a step above it rather than a
+chasm above it — at a neutral grey. A stored `slate` reads back as Graphite and a
+stored `warm` as Blue.
+
+### `ui_meta`: the probe, and the one thing the fake had wrong
+
+ADR-0016 ended on a condition: _"one probe settles it before anything writes for
+real."_ Run on 2026-09-21 against `hermes serve` **0.21.3** (`upstream b25ce157`),
+on a profile that already carried the `hermes-bots` marker:
+
+```
+before  ui_meta keys : ['hermes-bots']    revisions: {}
+write   applied      : {"ui_meta":true,"ui_meta_revisions":{"hermie":1}}
+after   ui_meta keys : ['hermes-bots','hermie']
+stale   applied      : {"ui_meta":false,
+                        "ui_meta_conflicts":{"hermie":{"expected":0,"actual":1}}}
+cleanup applied      : {"ui_meta":true,"ui_meta_revisions":{"hermie":2}}
+final   ui_meta      : {"hermes-bots":{}}
+```
+
+The marker survived, the revision moved by one, and a stale expected revision came
+back refused with exactly the `{ expected, actual }` shape the fake reproduces.
+The same probe on the default profile (`default`, `is_default: true` — it carries
+no `hermes-bots` marker, because it is not a bot) wrote and removed `hermie-app`
+and left the two bot profiles untouched. ADR-0016 is Accepted.
+
+**A key written as `null` is REMOVED by the real gateway.** The fake stored the
+null, which made the fake the more forgiving of the two — and this client drops a
+section by writing null, so it would have left a dead key on a real profile with
+every test green. That is the entire value of the probe, and it is the shape of
+thing a probe is for: the fake reproduced the protocol correctly and was wrong
+about the one case nothing in the contract mentions. The fake deletes now, and
+`packages/fake-gateway/src/ui-meta.test.ts` pins it.
+
+**Found on the way, not fixed, and not known to be a problem.** Upstream answers
+the WebSocket upgrade WITHOUT echoing `Sec-WebSocket-Protocol` — at
+`127.0.0.1:9121` as well as through the public proxy — while the fake gateway
+echoes `hermes-gateway-v1`. RFC 6455 permits the omission and a browser accepts
+it; Node's `ws` refuses a 101 with no subprotocol when it asked for one, which is
+how this was noticed. The app's own dial has always worked against real gateways,
+so nothing here is evidence of a bug. It is recorded because the asymmetry runs
+the wrong way: the fake is stricter than the thing it stands in for, and that is
+the direction that hides a client fault rather than a server one.
+
+### The seeding rule, which is not in the ADR and should be
+
+A section the gateway does NOT have is sent from this device on the first
+reconcile. Without it a gateway only ever learns an arrangement from a device
+that changes one AFTER connecting, so somebody who spent an afternoon ordering
+their list and then signed in on a tablet would find the tablet empty and the
+gateway empty, each politely waiting for the other to go first. An absent key is
+not a decision anybody made; a present one is, and that asymmetry is the whole
+justification. It is not symmetric: a section the gateway has and the device does
+not is simply taken.
+
+The mirror of that rule is the one that costs data if it is wrong, and it has its
+own test: a reconcile does not overwrite a section this device changed while the
+socket was down. That section is still dirty, so the remote copy is kept out of
+it and the local value goes out behind it — otherwise a change made on a plane
+would not merely fail to arrive, it would be erased on landing by the device that
+made it.
+
+### What is verified, and what is only reasoned
+
+**Measured against a running gateway**: everything in the probe above, twice —
+once on a bot profile and once on the default one.
+
+**By unit test**: the preset model and its derivations (`themes.test.ts`), the
+contrast guard and the themes store (`user-themes.test.ts`), the picker and the
+editor (`settings-screen.test.tsx`), the `ui_meta` client over a real socket
+against the fake (`packages/gateway-client/src/ui-meta.test.ts`), and the store
+projection and its diff (`ui-meta-bridge.test.ts`).
+
+**Audited rather than measured**: nothing styles by window focus, still. The
+theme layer has no `AppState` listener at all — the only two in the app belong to
+the connection and to the chat runtime's lifecycle — and the token set reaches
+UIKit through `Appearance.setColorScheme`, which pins a trait collection rather
+than reading one.

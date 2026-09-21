@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Your arrangement follows you to a second device.** The chat list's order, its dividers, which
+  bots are archived, each chat's colour, the theme and the view defaults are stored in the gateway's
+  `ui_meta` — under two keys Hermie owns, per profile, guarded by the per-key compare-and-swap
+  upstream already had. The device's own copy is still what the app paints from, so it opens before
+  the socket has answered and works with no gateway at all; a write the gateway refuses or never
+  receives stays local and goes out on the next reconcile. A key another tool owns is never touched:
+  the `hermes-bots` marker is what makes a profile a bot, and a client that wrote its settings by
+  replacing the bag would un-bot every profile it coloured. [ADR-0016](docs/adr/0016-ui-meta-sync.md)
+  has the design and the probe against a real gateway that settled it — including the one thing the
+  fake gateway had wrong, which is that a key written as `null` is removed rather than stored.
+
 - **Themes, and a theme is now a thing rather than a wallpaper.** Six of them — Blue, Graphite and
   Lime, each with a light and a dark face — and a preset is exactly three pieces of data: a
   background, an elevation ladder and the accent that **Default** resolves to. Everything else falls

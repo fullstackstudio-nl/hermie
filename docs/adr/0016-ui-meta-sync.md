@@ -1,6 +1,6 @@
 # 0016. Per-client settings live in `ui_meta`, one section per concern, last writer wins
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-21
 - Amends: [0012](0012-local-chat-list-layout.md)
 
@@ -104,12 +104,48 @@ is not a degraded mode to be apologised for — it is the behaviour ADR-0012 cho
 `packages/fake-gateway/src/ui-meta.test.ts` pins the semantics above against the fake gateway: the
 round trip, that a write leaves `hermes-bots` alone, that a named key is replaced whole, that
 revisions count per key from zero, that a stale expected revision is refused with
-`{ expected, actual }` while the other sections of the same request still apply, and that a blind
-write with no expected revision is accepted.
+`{ expected, actual }` while the other sections of the same request still apply, that a blind write
+with no expected revision is accepted, and that a key written as `null` is removed.
+`packages/gateway-client/src/ui-meta.test.ts` drives the CLIENT over a real socket against that
+fake: the round trip between two devices, the conflict retried, an offline write synced when a
+gateway appears, and the marker untouched.
 
-Those semantics are read from the generated contract's shapes and from upstream's docstring quoted
-above. **They have not been exercised against a running `hermes serve` in this round** — no gateway
-was reachable from where the work was done. Before anything writes for real, one probe settles it:
-call `profiles.configure` with a single key on a profile that already carries `hermes-bots`, then
-`profiles.list`, and check the marker is still there. If it is not, the fake is wrong and this record
-is wrong with it.
+### The probe, and what it settled (2026-09-21)
+
+Run against `hermes serve` **0.21.3** (`upstream b25ce157`) on the reviewer gateway, on the `guide`
+profile, which already carried `ui_meta: {"hermes-bots": {}}`:
+
+```
+before  ui_meta keys : ['hermes-bots']        revisions: {}
+write   applied      : {"ui_meta":true,"ui_meta_revisions":{"hermie":1}}
+after   ui_meta keys : ['hermes-bots','hermie']
+MARKER SURVIVED      : true
+REVISION MOVED       : true (0 -> 1)
+stale   applied      : {"ui_meta":false,"ui_meta_conflicts":{"hermie":{"expected":0,"actual":1}},
+                        "ui_meta_revisions":{"hermie":1}}
+cleanup applied      : {"ui_meta":true,"ui_meta_revisions":{"hermie":2}}
+final   ui_meta      : {"hermes-bots":{}}
+```
+
+Every claim in this record held. The marker survived a write of a neighbouring key; the revision
+moved by exactly one; a stale expected revision was refused with the `{ expected, actual }` shape the
+fake reproduces, and refused means refused — the loser's value was not on the profile. The same probe
+on the **default** profile (`default`, `is_default: true`, which carries no `hermes-bots` marker
+because it is not a bot) wrote and removed `hermie-app` and left `guide` and `notes` untouched, which
+is the other half of the decision above.
+
+**One thing the fake had wrong, and it is the reason the probe was worth running.** A key written as
+`null` is REMOVED by the real gateway; the fake stored the null. So the fake was the more forgiving
+of the two, and a client that drops a section by writing null — which is this client — would have
+left a dead key on a real profile while every test stayed green. The fake deletes it now.
+
+**Not the protocol, but worth writing down.** Upstream answers the WebSocket upgrade **without**
+echoing `Sec-WebSocket-Protocol`, at the origin as well as through the proxy, while the fake gateway
+echoes `hermes-gateway-v1`. RFC 6455 permits the omission and a browser accepts it, but Node's `ws`
+refuses a 101 with no subprotocol when it asked for one. Nothing in Hermie is known to be affected —
+the app's own dial has always worked against real gateways — but the fake is stricter than the thing
+it stands in for here, and that asymmetry is the kind that hides a client bug rather than a server
+one.
+
+The gateway was left as it was found: both keys removed, both bags back to their original contents.
+Only the revision counters moved, which they cannot be asked not to.

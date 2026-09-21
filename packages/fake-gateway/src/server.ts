@@ -2266,6 +2266,14 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
        * claiming a key for the first time sends `0` and finds out whether
        * somebody beat it to it.
        *
+       * **A key written as `null` is REMOVED.** That is not a guess: the
+       * 2026-09-21 probe against `hermes serve` 0.21.3 wrote `{"hermie": null}`
+       * to a profile and read the bag back holding only `hermes-bots` — the key
+       * was gone, not stored as a null. The fake kept the null until that probe,
+       * which made it the more forgiving of the two: a client that removes a
+       * section by writing null passed here and would have left a dead key on a
+       * real profile. The revision still goes up, because a removal is a write.
+       *
        * Everything else `profiles.configure` can set (soul, model, skills) is
        * deliberately absent: the fake answers what it can honestly reproduce,
        * and a section it pretended to write would be a green test about nothing.
@@ -2303,7 +2311,12 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
             continue
           }
 
-          stored[key] = value
+          if (value === null) {
+            delete stored[key]
+          } else {
+            stored[key] = value
+          }
+
           revisions[key] = actual + 1
           wrote = true
         }
