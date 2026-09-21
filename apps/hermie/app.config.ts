@@ -198,7 +198,10 @@ const config: ExpoConfig = {
     permissions: [
       'android.permission.INTERNET',
       'android.permission.USE_BIOMETRIC',
-      'android.permission.USE_FINGERPRINT'
+      'android.permission.USE_FINGERPRINT',
+      // Dictation. Named here as well as being added by the speech-recognition
+      // plugin, so this array stays the one place to read what the app asks for.
+      'android.permission.RECORD_AUDIO'
     ],
     blockedPermissions: ['android.permission.VIBRATE', 'android.permission.WRITE_EXTERNAL_STORAGE']
   },
