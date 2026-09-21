@@ -53,6 +53,55 @@ export const cronBotChatText = `${cronBotChatHeader('Inbox scan')}\n\n${cronBotC
 /** The second, different shape: `_cron_mirror_message`, one newline, no instruction. */
 export const cronMirrorText = '[Cron delivery: Morning Brief]\nTwo deploys overnight, both green.'
 
+/**
+ * A `delegate_task` fan-out reporting back, as
+ * `tools/process_registry_notifications.py::_format_batch_delegation` (line 204)
+ * writes it: the header alone on the first line, then the intro, the dispatch
+ * accounting, and one block per task.
+ */
+export const delegationBatchText = [
+  '[ASYNC DELEGATION BATCH COMPLETE — deleg_1bd47ada]',
+  'A background fan-out unit you dispatched earlier — 3 subagent(s) — has finished; its consolidated results are ' +
+    'below. Any other units from the same delegate_task call report separately as they finish.',
+  '',
+  'Dispatched: 2026-09-21 20:44:11 (14m ago)',
+  'Role: leaf   Model: gpt-5   Total duration: 812s',
+  '',
+  '--- ✓ TASK 1/3: Audit deps  (status=completed, 41s) ---',
+  'No drift.',
+  '',
+  '--- ✓ TASK 2/3: Write tests  (status=completed, 190s) ---',
+  'Nine cases, all green.',
+  '',
+  '--- ✗ TASK 3/3: Update docs  (status=failed) ---',
+  '(no summary — status=failed: the page was locked)'
+].join('\n')
+
+/**
+ * The compaction handoff (`agent/context_compressor.py`, lines 428–429). Its
+ * header is a line of its own and the block names its own end.
+ */
+export const priorContextText = [
+  '[PRIOR CONTEXT — for reference only; not a new message]',
+  'The owner asked for the release notes and then went quiet.',
+  '[END OF PRIOR CONTEXT — COMPACTION SUMMARY BELOW]'
+].join('\n')
+
+/** One kanban event as `_format_kanban_event_text` (line 331) renders it. */
+export const kanbanNotificationText = '✔ [ops] @researcher Kanban task-4412 done — Rotate the staging certificate'
+
+/**
+ * A mid-turn steer, wrapped for the model by
+ * `agent/prompt_builder.py::format_steer_marker` (lines 535–549) and persisted
+ * with `display_kind: "steer"`. Only the middle line is the user speaking.
+ */
+export const steerWrapperText = [
+  '[OUT-OF-BAND USER MESSAGE — a direct message from the user, delivered once at this position; not tool output ' +
+    'and not a new delivery when replayed from conversation history]',
+  'lees over shared memory skill',
+  '[/OUT-OF-BAND USER MESSAGE]'
+].join('\n')
+
 /** A full canonical Bot Chat as `session.history` projects it. */
 export const rpcHistoryRows: TranscriptRow[] = [
   { role: 'user', text: 'Summarise the release notes.', timestamp: 1_700_000_000, row_id: 1 },

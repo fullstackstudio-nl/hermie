@@ -15,8 +15,11 @@ import {
   cronBotChatHeader,
   cronBotChatText,
   cronMirrorText,
+  delegationBatchText,
   dmReplyProcessText,
+  kanbanNotificationText,
   plainProcessText,
+  priorContextText,
   restHistoryRows,
   rpcHistoryRows
 } from './__fixtures__/rows'
@@ -384,5 +387,63 @@ describe('cron deliveries in a transcript', () => {
     expect(normalizedItemText(rpc)).toBe(normalizedItemText(rest))
     expect(normalizedItemText(rpc)).toContain('Inbox scan')
     expect(normalizedItemText(rpc)).toContain(cronBotChatBody.replace(/\s+/gu, ' ').trim())
+  })
+})
+
+/**
+ * The rows a gateway injects to start a turn, arriving without the
+ * `display_kind` that would have named them.
+ *
+ * Over REST the column is not in the payload at all, and an older gateway never
+ * wrote it — so the same row that is a card on one transport used to be the
+ * owner's own bubble on the other, signed by somebody who never typed it.
+ */
+describe('an injected row with no display_kind', () => {
+  const only = (text: string) => rowsToItems([{ role: 'user', row_id: 40, text }], 'rpc')[0] as NoticeItem
+
+  it('draws a fan-out report as a notice, not as the owner speaking', () => {
+    expect(only(delegationBatchText)).toMatchObject({
+      kind: 'notice',
+      noticeKind: 'async_delegation_complete',
+      title: 'ASYNC DELEGATION BATCH COMPLETE — deleg_1bd47ada',
+      body: delegationBatchText,
+      rowId: 40
+    })
+  })
+
+  it('closes the delegation group the report belongs to, exactly as the labelled row does', () => {
+    const items = rowsToItems(
+      [
+        { role: 'tool', name: 'delegate_task', tool_id: 'call_d1', args: { tasks: [{ goal: 'Audit deps' }] } },
+        { role: 'user', row_id: 41, text: delegationBatchText }
+      ],
+      'rpc'
+    )
+
+    expect(items[0]).toMatchObject({ kind: 'subagent_group', status: 'done', completion: delegationBatchText })
+  })
+
+  it('draws a background process, a compaction handoff and a kanban dispatch as notices', () => {
+    expect(only(plainProcessText).noticeKind).toBe('process_complete')
+    expect(only(priorContextText).noticeKind).toBe('internal_notification')
+    expect(only(kanbanNotificationText + '\ndetails').noticeKind).toBe('internal_notification')
+  })
+
+  it('pairs with the same row described by its display_kind, because both say the same thing', () => {
+    // The titles differ on purpose — the labelled row is titled by the gateway,
+    // this one by its own header — and reconciliation must pair them anyway.
+    const [labelled] = rowsToItems(
+      [{ role: 'user', row_id: 42, text: delegationBatchText, display_kind: 'async_delegation_complete' }],
+      'rpc'
+    ) as [NoticeItem]
+    const unlabelled = only(delegationBatchText)
+
+    expect(labelled.title).not.toBe(unlabelled.title)
+    expect(normalizedItemText(labelled)).toBe(normalizedItemText(unlabelled))
+  })
+
+  it('still leaves a message that merely opens with a bracket a user turn', () => {
+    expect(kinds([{ role: 'user', row_id: 43, text: '[ok] done' }])).toEqual(['user'])
+    expect(kinds([{ role: 'user', row_id: 44, text: '[1] first item\n[2] second item' }])).toEqual(['user'])
   })
 })

@@ -18,6 +18,7 @@ import {
   replyFromDeliveryOutput
 } from './bot-dm'
 import { parseCronDelivery } from './cron-delivery'
+import { type InjectedRow, parseInjectedRow } from './injected'
 import {
   type AssistantItem,
   type BotDmInItem,
@@ -459,9 +460,9 @@ export function rowsToItems(rows: readonly TranscriptRow[], shape: RowShape, opt
       return
     }
 
-    if (displayKind === 'async_delegation_complete') {
-      const title =
-        displayText(row.display_metadata) ?? NOTICE_TITLES.async_delegation_complete ?? 'Background agent work finished'
+    // A fan-out's report closes the group that dispatched it, wherever the row
+    // was recognised: by its `display_kind` here, or by its header below.
+    const closeOpenGroup = () => {
       const group = lastOpenGroup()
 
       if (group) {
@@ -469,7 +470,13 @@ export function rowsToItems(rows: readonly TranscriptRow[], shape: RowShape, opt
         group.completion = content
         group.version += 1
       }
+    }
 
+    if (displayKind === 'async_delegation_complete') {
+      const title =
+        displayText(row.display_metadata) ?? NOTICE_TITLES.async_delegation_complete ?? 'Background agent work finished'
+
+      closeOpenGroup()
       notice('async_delegation_complete', title, content)
 
       return
@@ -518,6 +525,23 @@ export function rowsToItems(rows: readonly TranscriptRow[], shape: RowShape, opt
         text: incoming.body,
         ...base
       })
+
+      return
+    }
+
+    // The last thing standing between a machine's report and the owner's own
+    // bubble. A row the gateway labelled has already returned above, so this only
+    // sees the ones it left unmarked — an older gateway, a transport that drops
+    // `display_kind`, or a shape upstream added since. Anything that is not a
+    // real message must not be drawn as one.
+    const injected: InjectedRow | null = role === 'user' && !displayKind ? parseInjectedRow(content) : null
+
+    if (injected) {
+      if (injected.noticeKind === 'async_delegation_complete') {
+        closeOpenGroup()
+      }
+
+      notice(injected.noticeKind, injected.title, injected.body)
 
       return
     }
@@ -643,7 +667,17 @@ export function normalizedItemText(item: TranscriptItem): string {
     item.kind === 'user' || item.kind === 'assistant' || item.kind === 'bot_dm_in'
       ? item.text
       : item.kind === 'notice'
-        ? `${item.title}\n${item.body ?? ''}`
+        ? // The BODY, and the title only when there is no body.
+          //
+          // A notice's title is whatever the surface decided to call it, and the
+          // two descriptions of one row do not have to agree on that: the gateway
+          // ships its own (`display_metadata.display_text`) on the persisted row,
+          // and a live projection reading the same text off `inflight` cannot know
+          // it. What they always agree on is what the notice SAYS, so that is the
+          // key. A notice with no body keeps the title as its only identity.
+          item.body?.trim()
+          ? item.body
+          : item.title
         : item.kind === 'status'
           ? item.text
           : // Both transports parse the same header into the same name and body,

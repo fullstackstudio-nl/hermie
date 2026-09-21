@@ -9,6 +9,7 @@
  *
  * Ported from `apps/desktop/src/lib/chat-messages/reconciliation.ts`.
  */
+import { isInjectedNotice } from './injected'
 import { isMatchable, itemMatchKey } from './rows-to-items'
 import {
   type AssistantItem,
@@ -52,9 +53,14 @@ const isEphemeral = (item: TranscriptItem): boolean => item.kind === 'approval' 
  * is waiting for. `mergeWithLive` needs no cron case of its own — the stream
  * learns nothing about a delivery that the persisted row does not also carry, so
  * the default "fresh wins, id is kept" merge is already correct.
+ *
+ * A gateway-injected notice counts for the same reason: a fan-out's report or a
+ * background process's completion is written on the `user` role and the gateway
+ * runs a turn on it. Without this the placeholder had nothing to become and
+ * stayed on screen as an empty bubble beside the card.
  */
 const isAuthoredRow = (item: TranscriptItem): boolean =>
-  item.kind === 'user' || item.kind === 'bot_dm_in' || item.kind === 'cron_delivery'
+  item.kind === 'user' || item.kind === 'bot_dm_in' || item.kind === 'cron_delivery' || isInjectedNotice(item)
 
 /** Merge live knowledge onto a hydrated row: history is thinner than the stream. */
 function mergeWithLive(fresh: TranscriptItem, current: TranscriptItem): TranscriptItem {

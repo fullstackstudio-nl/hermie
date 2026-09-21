@@ -12,6 +12,7 @@ import {
   replyFromDeliveryOutput
 } from './bot-dm'
 import { parseCronDelivery } from './cron-delivery'
+import { type InjectedRow, isInjectedNotice, parseInjectedRow } from './injected'
 import { attachmentsMatchKey, normalizedItemText, normalizeMatchText, stripUserText } from './rows-to-items'
 import { subagentIdOf, TERMINAL_SUBAGENT_STATUS, toSubagent } from './subagent-progress'
 import type { ErrorSurface, SessionLiveInfo, Usage } from '@hermes/shared/gateway-events'
@@ -1338,6 +1339,12 @@ function isForeignPlaceholder(item: TranscriptItem | undefined): boolean {
  * the comparison against `inflight.user` missed, and the resume stood a SECOND
  * card beside the first. A placeholder must neither count as the shown prompt
  * nor hide the item that really is it; skipping it is both halves of that.
+ *
+ * A gateway-injected notice IS returned. A fan-out's report or a background
+ * process's completion arrives on the `user` role and the gateway runs a turn on
+ * it, so it opens a turn exactly as a cron delivery does — and, like a cron
+ * delivery, it is drawn as a card rather than as speech, which is why this
+ * comparison has to know about it here and not only in `rows-to-items`.
  */
 function shownTurn(state: ChatState): { authored?: string; carried?: string; settledReply?: string } {
   let settledReply: string | undefined
@@ -1353,6 +1360,14 @@ function shownTurn(state: ChatState): { authored?: string; carried?: string; set
 
     if (isForeignPlaceholder(item)) {
       continue
+    }
+
+    if (item && isInjectedNotice(item)) {
+      return {
+        authored: normalizedItemText(item),
+        carried: '',
+        ...(settledReply !== undefined ? { settledReply } : {})
+      }
     }
 
     if (item?.kind !== 'user' && item?.kind !== 'bot_dm_in' && item?.kind !== 'cron_delivery') {
@@ -1410,9 +1425,10 @@ type InflightPrompt = {
   carried: string
   /** Those references themselves, for the item this prompt projects to. */
   refs?: string[]
-  kind: 'user' | 'cron_delivery' | 'bot_dm_in'
+  kind: 'user' | 'cron_delivery' | 'bot_dm_in' | 'notice'
   cron?: ReturnType<typeof parseCronDelivery>
   incoming?: ReturnType<typeof parseIncomingBotMessage>
+  injected?: InjectedRow
 }
 
 function readInflightPrompt(userText: string): InflightPrompt {
@@ -1432,6 +1448,17 @@ function readInflightPrompt(userText: string): InflightPrompt {
 
   if (incoming) {
     return { raw: userText, key: normalizeMatchText(incoming.body), carried: '', kind: 'bot_dm_in', incoming }
+  }
+
+  // Anything that is not a real message must not be drawn as one, and LIVE is
+  // where that used to fail. The persisted row carries a `display_kind` and
+  // `rows-to-items` has always read it; `inflight.user` carries the text and
+  // nothing else, so a fan-out's report reached the screen as a blue bubble
+  // opening `[ASYNC DELEGATION BATCH COMPLETE — …]`, signed by the owner.
+  const injected = parseInjectedRow(userText)
+
+  if (injected) {
+    return { raw: userText, key: normalizeMatchText(injected.body), carried: '', kind: 'notice', injected }
   }
 
   // `stripUserText` is what the persisted row goes through, directives and
@@ -1562,17 +1589,26 @@ export function applyResumeSnapshot(state: ChatState, snapshot: ResumeSnapshot, 
               text: prompt.incoming.body,
               ts: now / 1000
             }
-          : {
-              id: `i:${next.turn.nextSeq}`,
-              kind: 'user',
-              text: stripUserText(userText).text,
-              // The references too, for the same reason the projection lifts them
-              // out of the text: without them a prompt that was nothing but a
-              // file resumes as an empty bubble, and the row that lands for it has
-              // nothing to pair with and becomes a second one.
-              ...(prompt.refs ? { attachments: prompt.refs } : {}),
-              ts: now / 1000
-            }
+          : prompt.kind === 'notice' && prompt.injected
+            ? {
+                id: `i:${next.turn.nextSeq}`,
+                kind: 'notice',
+                noticeKind: prompt.injected.noticeKind,
+                title: prompt.injected.title,
+                body: prompt.injected.body,
+                ts: now / 1000
+              }
+            : {
+                id: `i:${next.turn.nextSeq}`,
+                kind: 'user',
+                text: stripUserText(userText).text,
+                // The references too, for the same reason the projection lifts them
+                // out of the text: without them a prompt that was nothing but a
+                // file resumes as an empty bubble, and the row that lands for it has
+                // nothing to pair with and becomes a second one.
+                ...(prompt.refs ? { attachments: prompt.refs } : {}),
+                ts: now / 1000
+              }
 
     // Filling the placeholder rather than appending is the whole point:
     // appended, the prompt would sit BELOW the reply it started, because the
