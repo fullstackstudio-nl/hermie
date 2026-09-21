@@ -307,7 +307,7 @@ function Conversation({
   const chat = useChat(botName)
   const runtime = useChatRuntime()
   const cronJobs = useCronStore(state => state.jobs)
-  const { config, connection, http, status } = useGateway()
+  const { config, connection, http, lastError, status } = useGateway()
   const view = useChatView(botName)
   const avatar = useBotsStore(state => state.avatars[botName])
   const byName = useBotsStore(state => state.byName)
@@ -922,6 +922,7 @@ function Conversation({
   const connectionState = connectionNotice({
     blocked: chat.connectionError !== null,
     hasTranscript: chat.items.length > 0,
+    lastError: lastError ?? null,
     status,
     waitingMs
   })
@@ -1422,6 +1423,8 @@ function Conversation({
               app does not know whether it is true yet. It has not been able to ask.
             */
             <ChatConnectingState
+              hint={connectionState.hint}
+              message={connectionState.message}
               name={display}
               onRetry={retryConnection}
               phase={connectionState.phase}
@@ -1533,7 +1536,12 @@ function Conversation({
             testID="chat-reconnect-slot"
             visible={connectionState.kind === 'pill'}
           >
-            <ReconnectPill onRetry={retryConnection} phase={connectionState.phase} retry={connectionState.retry} />
+            <ReconnectPill
+              message={connectionState.message}
+              onRetry={retryConnection}
+              phase={connectionState.phase}
+              retry={connectionState.retry}
+            />
           </Appear>
 
           <Composer

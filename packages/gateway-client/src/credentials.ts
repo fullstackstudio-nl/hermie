@@ -1,6 +1,7 @@
 import { type AuthTimelineSink, NULL_AUTH_TIMELINE } from './auth-timeline'
-import { type FetchLike, parseJsonObject, requestText } from './fetch-json'
+import { type FetchLike, type JsonResponse, parseJsonObject, requestText } from './fetch-json'
 import { type TokenCoordinator } from './native-auth'
+import { notHermesHint } from './probe'
 import { apiUrl, normalizeHeaders } from './url'
 import { type DialPlan, type GatewayAuthMode, GatewayError } from './types'
 
@@ -118,6 +119,34 @@ export interface MintWsTicketOptions {
 }
 
 /**
+ * The mint got a well-formed HTTP answer that no gateway would give.
+ *
+ * "Minting a WebSocket ticket failed with HTTP 405" was true and told the owner
+ * nothing: it reads as a gateway that is unwell, so the dial ladder hammered
+ * away and the header said "Reconnecting…" while the thing on the other end was
+ * never going to become a gateway. What was actually there — measured on a real
+ * device — was a reverse proxy in front of an unrelated landing page, which
+ * refuses a POST to a path it does not route and NAMES ITSELF in `server`.
+ *
+ * So this says what was seen and nothing more. What it is NOT allowed to do is
+ * guess why: the network sentence comes from `notHermesHint`, which writes it
+ * only for a host that is verifiably reachable on one network. It rides as
+ * `hint` as well as in the message, because a screen that writes its own
+ * sentence for a kind still has to be able to show the part specific to this
+ * failure.
+ */
+function notAGateway(baseUrl: string, response: JsonResponse): GatewayError {
+  const seen = `The address answered HTTP ${response.status}, but not as a Hermes gateway.`
+  const who = response.server ? ` The answer came from ${response.server}.` : ''
+  const hint = notHermesHint(baseUrl, response.text)
+
+  return new GatewayError('protocol', hint ? `${seen}${who} ${hint}` : `${seen}${who}`, {
+    status: response.status,
+    ...(hint ? { hint } : {})
+  })
+}
+
+/**
  * One ticket for one dial: `POST /api/auth/ws-ticket`, single-use, 30 s TTL.
  *
  * Shared by both flows that dial with a ticket, because this is the ONLY place
@@ -168,9 +197,7 @@ export async function mintWsTicket(options: MintWsTicketOptions): Promise<string
   if (!response.ok) {
     timeline.record({ event: 'ticket.failed', kind: 'protocol', status: response.status })
 
-    throw new GatewayError('protocol', `Minting a WebSocket ticket failed with HTTP ${response.status}.`, {
-      status: response.status
-    })
+    throw notAGateway(options.baseUrl, response)
   }
 
   const body = parseJsonObject(response.text, url, 'protocol')

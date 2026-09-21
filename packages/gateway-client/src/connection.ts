@@ -24,6 +24,49 @@ export const FIRST_SESSION_TIMEOUT_MS = 60_000
 export const RECONNECT_CAP_MS = 15_000
 
 /**
+ * The lowest share of the exponential ceiling a wait is allowed to be.
+ *
+ * `@hermes/shared/reconnect-backoff` defaults to FULL jitter — a uniform draw
+ * from `[0, ceiling)` — which is the right shape for a fleet of servers all
+ * waking after one restart, and the wrong shape for one phone. Half its draws
+ * land in the bottom half of the range and a good share land near zero, so a
+ * ladder that had reached 2.4 s still dialled again 40 ms later.
+ *
+ * Bounded jitter keeps the spread that stops a thundering herd and drops the
+ * floor no further than halfway. The vendored module is upstream code and is
+ * not edited for this; the override lives in the connection's own default.
+ */
+const JITTER_FLOOR = 0.5
+
+/**
+ * Where the ladder starts when the address answered as something else.
+ *
+ * Attempt 3 is a 2.4 s ceiling on the 300 ms base. A `protocol` failure is a
+ * well-formed HTTP answer from something that is not a gateway — a proxy
+ * refusing a POST it does not route, a landing page — and none of that changes
+ * in 300 ms. Measured on a real device before this existed: 18 dials in 24 s,
+ * because each foreground calls `resume()`, which resets the ladder to the
+ * bottom, and the bottom is a third of a second.
+ *
+ * A `network` failure deliberately keeps the fast first rungs. Those are the
+ * flaps that really do heal in a second, and making them wait would be paying
+ * for this fix with the case that already worked.
+ */
+export const PROTOCOL_LADDER_FLOOR = 3
+
+/**
+ * The ladder this connection climbs when the app does not supply one.
+ *
+ * Exported so the floor can be asserted rather than described: a jitter that is
+ * allowed to return zero is exactly the defect this replaces.
+ */
+export function defaultBackoffDelayMs(attempt: number): number {
+  const ceiling = reconnectBackoffDelayMs(attempt, { capMs: RECONNECT_CAP_MS, jitter: false })
+
+  return ceiling * (JITTER_FLOOR + (1 - JITTER_FLOOR) * Math.random())
+}
+
+/**
  * How long a NetInfo "offline" has to hold before the socket comes down.
  *
  * On a phone, connectivity reports flap: a Wi-Fi/cellular handover, a VPN
@@ -158,7 +201,7 @@ export class GatewayConnection {
     this.offlineGraceMs = options.offlineGraceMs ?? OFFLINE_GRACE_MS
     this.now = options.now ?? (() => Date.now())
     this.timeline = options.timeline ?? NULL_AUTH_TIMELINE
-    this.backoff = options.backoffDelayMs ?? (attempt => reconnectBackoffDelayMs(attempt, { capMs: RECONNECT_CAP_MS }))
+    this.backoff = options.backoffDelayMs ?? defaultBackoffDelayMs
 
     this.http = new GatewayHttp({
       baseUrl,
@@ -707,8 +750,11 @@ export class GatewayConnection {
       return
     }
 
-    const delay = this.backoff(this.attempt)
-    this.attempt += 1
+    // An answer that is not a gateway starts part-way up: see
+    // `PROTOCOL_LADDER_FLOOR`. Everything else climbs from wherever it was.
+    const rung = error.kind === 'protocol' ? Math.max(this.attempt, PROTOCOL_LADDER_FLOOR) : this.attempt
+    const delay = this.backoff(rung)
+    this.attempt = rung + 1
     // The ladder climbs either way; `offline` is only the word for it while the
     // device says there is no network to climb over. See `setOnline`.
     this.setStatus(this.online ? 'reconnecting' : 'offline', error)

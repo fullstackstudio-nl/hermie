@@ -40,6 +40,10 @@ export interface ChatConnectingStateProps {
   avatarUri?: string
   retry: boolean
   onRetry: () => void
+  /** What the connection said, when the phase word alone would mislead. */
+  message?: string
+  /** A second line under it, where the placement has room. */
+  hint?: string
   testID?: string
 }
 
@@ -54,6 +58,8 @@ export interface ChatConnectingStateProps {
  */
 export function ChatConnectingState({
   avatarUri,
+  hint = '',
+  message = '',
   name,
   onRetry,
   phase,
@@ -81,10 +87,21 @@ export function ChatConnectingState({
 
       <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.sm }}>
         {spins(phase) ? <ActivityIndicator testID={`${testID}-activity`} /> : null}
-        <Text color="textMuted" variant="preview">
-          {connectionLabel(phase)}
+        <Text color="textMuted" style={{ textAlign: 'center' }} variant="preview">
+          {message || connectionLabel(phase)}
         </Text>
       </View>
+
+      {/*
+        The plate is the one placement with room for a second line, so the hint
+        — "make sure this device is connected to that network", and only where
+        that can be justified — is shown here and nowhere else.
+      */}
+      {hint ? (
+        <Text color="textFaint" style={{ textAlign: 'center' }} testID={`${testID}-hint`} variant="meta">
+          {hint}
+        </Text>
+      ) : null}
 
       {retry ? (
         <Pressable
@@ -107,6 +124,14 @@ export interface ReconnectPillProps {
   phase: ConnectionPhase
   retry: boolean
   onRetry: () => void
+  /**
+   * What the connection said, when the phase word alone would mislead.
+   *
+   * No hint here. The pill is one line over a conversation somebody is reading;
+   * a second sentence in it stops being a pill and starts being the banner this
+   * placement exists to avoid.
+   */
+  message?: string
   testID?: string
 }
 
@@ -118,7 +143,13 @@ export interface ReconnectPillProps {
  * conversation without being mistaken for part of it. Thin, because the reader
  * is reading and this is not what they opened the app for.
  */
-export function ReconnectPill({ onRetry, phase, retry, testID = 'chat-reconnect-pill' }: ReconnectPillProps) {
+export function ReconnectPill({
+  message = '',
+  onRetry,
+  phase,
+  retry,
+  testID = 'chat-reconnect-pill'
+}: ReconnectPillProps) {
   const theme = useTheme()
 
   return (
@@ -140,8 +171,8 @@ export function ReconnectPill({ onRetry, phase, retry, testID = 'chat-reconnect-
       >
         {spins(phase) ? <ActivityIndicator size="small" testID={`${testID}-activity`} /> : null}
 
-        <Text color="textMuted" variant="meta">
-          {connectionLabel(phase)}
+        <Text color="textMuted" style={{ flexShrink: 1 }} variant="meta">
+          {message || connectionLabel(phase)}
         </Text>
 
         {retry ? (

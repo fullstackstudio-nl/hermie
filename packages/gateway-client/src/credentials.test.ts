@@ -9,6 +9,7 @@ import {
   bearerFrom
 } from './credentials'
 import { TokenCoordinator, type TokenSet } from './native-auth'
+import { isGatewayError } from './types'
 
 const tokens = (over: Partial<TokenSet> = {}): TokenSet => ({
   accessToken: 'at-1',
@@ -110,6 +111,73 @@ describe('NativePkceCredentials', () => {
     })
 
     await expect(credentials.dialPlan('wss://example.test/api/ws', {})).rejects.toMatchObject({ kind: 'server' })
+  })
+
+  /**
+   * The measured case, and the reason the message changed: the gateway host was
+   * answered by a reverse proxy in front of an unrelated landing page, which
+   * refuses a POST to a path it does not route. "Minting a WebSocket ticket
+   * failed with HTTP 405" reads as a gateway that is unwell, and the dial loop
+   * treated it as one.
+   */
+  describe('an address that answered, but not as a gateway', () => {
+    const mint = (response: () => Response) =>
+      new NativePkceCredentials({
+        baseUrl: 'https://hermes.example.com',
+        coordinator: coordinatorWith(tokens(), async () => tokens()),
+        fetchImpl: (async () => response()) as typeof fetch
+      }).dialPlan('wss://hermes.example.com/api/ws', {})
+
+    it('says what it saw, and does not guess why', async () => {
+      const error = await mint(() => new Response('<!doctype html><html></html>', { status: 405 })).catch(
+        (thrown: unknown) => thrown
+      )
+
+      expect(isGatewayError(error) && error.kind).toBe('protocol')
+      expect(isGatewayError(error) && error.status).toBe(405)
+      expect(isGatewayError(error) && error.message).toBe(
+        'The address answered HTTP 405, but not as a Hermes gateway. ' +
+          'This looks like a landing page, not a Hermes gateway.'
+      )
+      // A PUBLIC host answering with a page says nothing about a tailnet, so
+      // nothing about one is said.
+      expect(isGatewayError(error) && error.message).not.toMatch(/private network or tailnet/u)
+    })
+
+    it('names whoever answered, when the answer said so', async () => {
+      const error = await mint(() => new Response('nope', { status: 405, headers: { server: 'nginx/1.27.0' } })).catch(
+        (thrown: unknown) => thrown
+      )
+
+      expect(isGatewayError(error) && error.message).toBe(
+        'The address answered HTTP 405, but not as a Hermes gateway. The answer came from nginx/1.27.0.'
+      )
+    })
+
+    it('says nothing about who answered when no header named them', async () => {
+      const error = await mint(() => new Response('nope', { status: 405 })).catch((thrown: unknown) => thrown)
+
+      expect(isGatewayError(error) && error.message).toBe('The address answered HTTP 405, but not as a Hermes gateway.')
+    })
+
+    /**
+     * On the error as well as in the message: every screen writes its own
+     * sentence for a KIND, and the part specific to this failure has to survive
+     * that. Here the host really is one only one network can reach, so the
+     * network sentence is earned.
+     */
+    it('carries the network sentence as a hint for a host that is on one', async () => {
+      const error = await new NativePkceCredentials({
+        baseUrl: 'http://gateway.ts.net',
+        coordinator: coordinatorWith(tokens(), async () => tokens()),
+        fetchImpl: (async () => new Response('nope', { status: 405 })) as typeof fetch
+      })
+        .dialPlan('ws://gateway.ts.net/api/ws', {})
+        .catch((thrown: unknown) => thrown)
+
+      expect(isGatewayError(error) && error.hint).toMatch(/private network or tailnet/u)
+      expect(isGatewayError(error) && error.message).toMatch(/private network or tailnet/u)
+    })
   })
 
   it('asks for a retry when a refresh succeeds and for a sign-in when it does not', async () => {

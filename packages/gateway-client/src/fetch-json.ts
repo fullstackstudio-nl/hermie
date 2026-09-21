@@ -48,6 +48,20 @@ export interface JsonResponse {
    * "no redirect was observed" rather than as a redirect to nowhere.
    */
   url: string
+  /**
+   * The `server` response header, lowercased key, verbatim value.
+   *
+   * Read for one sentence and one only: when an address answers something that
+   * is not a gateway, WHO answered is the fact that ends the guessing. A
+   * reverse proxy in front of an unrelated site answers `POST
+   * /api/auth/ws-ticket` with a 405 and names itself here, and "the answer came
+   * from <that>" is the difference between an owner checking their gateway and
+   * an owner checking the thing that is actually in the way.
+   *
+   * Empty when the header is absent, which is ordinary — many servers suppress
+   * it — so a caller must say nothing rather than say "unknown".
+   */
+  server: string
 }
 
 /**
@@ -158,7 +172,10 @@ export async function requestText(url: string, request: JsonRequest = {}): Promi
       status: response.status,
       ok: response.ok,
       text: await response.text(),
-      url: typeof response.url === 'string' ? response.url : ''
+      url: typeof response.url === 'string' ? response.url : '',
+      // `headers` is absent on some hand-rolled test doubles, and a missing
+      // header is the same story as a suppressed one: nothing to say.
+      server: response.headers?.get('server') ?? ''
     }
   } catch (error) {
     if (timedOut) {

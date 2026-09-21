@@ -4,18 +4,21 @@ import { WebSocket as NodeWebSocket } from 'ws'
 
 import {
   assertDesktopContract,
+  defaultBackoffDelayMs,
   FIRST_SESSION_TIMEOUT_MS,
   GatewayConnection,
   OFFLINE_GRACE_MS,
   PROMPT_SUBMIT_TIMEOUT_MS,
+  PROTOCOL_LADDER_FLOOR,
+  RECONNECT_CAP_MS,
   DEFAULT_RPC_TIMEOUT_MS,
   rpcTimeoutMs
 } from './connection'
-import { NativePkceCredentials, SessionTokenCredentials } from './credentials'
+import { type CredentialProvider, NativePkceCredentials, SessionTokenCredentials } from './credentials'
 import { exchangeCode, TokenCoordinator, type TokenSet, type TokenStore } from './native-auth'
 import { buildAuthorizeUrl, createPkce, parseLoopbackRedirect, REDIRECT_URI } from './pkce'
 import { DialPlanSocketFactory, type WebSocketConstructorLike } from './socket-factory'
-import type { ConnectionStatus } from './types'
+import { type ConnectionStatus, GatewayError } from './types'
 import { wsUrlFor } from './url'
 
 const SocketImpl = NodeWebSocket as unknown as WebSocketConstructorLike
@@ -737,6 +740,106 @@ describe('the offline grace period', () => {
     // Starting from zero again would hammer an unreachable gateway once per
     // flap, which is exactly what the ladder exists to prevent.
     expect(attempts[mark]).toBeGreaterThan(0)
+  })
+})
+
+/**
+ * How far up the ladder a failure starts, and how far down a wait may fall.
+ *
+ * The reported defect was 18 dials in 24 seconds against an address that was
+ * answering — a proxy in front of an unrelated site, refusing the ticket mint
+ * with a 405. Two things made that possible: full jitter, which draws a wait
+ * uniformly from zero, and a ladder that begins at 300 ms whatever it is that
+ * failed. No gateway or socket is needed to pin either, so neither is used:
+ * a credential provider that throws is the whole of the dial.
+ */
+describe('the reconnect ladder', () => {
+  /** A connection whose every dial fails with `error`, reporting the rung used. */
+  function ladder(error: GatewayError): { connection: GatewayConnection; rungs: number[] } {
+    const rungs: number[] = []
+    const credentials: CredentialProvider = {
+      mode: 'session_token',
+      async httpAuthHeaders() {
+        return {}
+      },
+      async dialPlan() {
+        throw error
+      },
+      async onRejected() {
+        return 'reauth'
+      },
+      async signOut() {
+        // Nothing is held.
+      }
+    }
+
+    const connection = new GatewayConnection({
+      config: { baseUrl: 'http://gateway.invalid', authMode: 'session_token' },
+      credentials,
+      socketFactory: new DialPlanSocketFactory(SocketImpl),
+      backoffDelayMs: attempt => {
+        rungs.push(attempt)
+
+        // Long enough that the timer never fires inside the test: what is
+        // under test is which rung was asked for, not the waiting.
+        return 60_000
+      }
+    })
+
+    return { connection, rungs }
+  }
+
+  const firstRung = async (error: GatewayError): Promise<number> => {
+    const { connection, rungs } = ladder(error)
+
+    try {
+      connection.start()
+
+      const deadline = Date.now() + 2000
+
+      while (rungs.length === 0 && Date.now() < deadline) {
+        await settle(10)
+      }
+
+      expect(rungs.length).toBeGreaterThan(0)
+
+      return rungs[0] as number
+    } finally {
+      connection.stop()
+    }
+  }
+
+  it('starts an answer that is not a gateway part-way up, because a 405 will not change in 300 ms', async () => {
+    expect(
+      await firstRung(new GatewayError('protocol', 'The address answered HTTP 405, but not as a Hermes gateway.'))
+    ).toBe(PROTOCOL_LADDER_FLOOR)
+  })
+
+  it('keeps the fast first retries for a failure to reach anything at all', async () => {
+    // The flaps that really do heal in a second. Making these wait would pay
+    // for the fix above with the case that already worked.
+    expect(await firstRung(new GatewayError('network', 'Could not reach the gateway.'))).toBe(0)
+  })
+
+  it('never waits anywhere near zero, whatever the jitter draws', () => {
+    // Full jitter — the vendored default — is a uniform draw from [0, ceiling),
+    // so a ladder that had climbed to 2.4 s still redialled 40 ms later.
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const ceiling = Math.min(RECONNECT_CAP_MS, 300 * 2 ** attempt)
+
+      for (let draw = 0; draw < 200; draw += 1) {
+        const delay = defaultBackoffDelayMs(attempt)
+
+        expect(delay).toBeGreaterThanOrEqual(ceiling / 2)
+        expect(delay).toBeLessThanOrEqual(ceiling)
+      }
+    }
+  })
+
+  it('still spreads the draws out, so a fleet does not redial in lockstep', () => {
+    const draws = new Set(Array.from({ length: 200 }, () => defaultBackoffDelayMs(5)))
+
+    expect(draws.size).toBeGreaterThan(100)
   })
 })
 

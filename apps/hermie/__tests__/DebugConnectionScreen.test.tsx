@@ -80,9 +80,10 @@ describe('SettingsScreen → Connection test', () => {
         { at: Date.parse('2026-09-20T11:00:01Z'), event: 'ticket.minted' },
         { at: Date.parse('2026-09-20T11:00:02Z'), event: 'ws.closed', closeCode: 4401 },
         { at: Date.parse('2026-09-20T11:00:03Z'), event: 'refresh.failed', kind: 'auth', status: 401 },
-        { at: Date.parse('2026-09-20T11:00:04Z'), event: 'signin.required', reason: 'refresh_rejected' }
+        { at: Date.parse('2026-09-20T11:00:04Z'), event: 'ticket.failed', kind: 'protocol', status: 405 },
+        { at: Date.parse('2026-09-20T11:00:05Z'), event: 'signin.required', reason: 'refresh_rejected' }
       ],
-      lastSignOut: { at: Date.parse('2026-09-20T11:00:04Z'), reason: 'refresh_rejected' }
+      lastSignOut: { at: Date.parse('2026-09-20T11:00:05Z'), reason: 'refresh_rejected' }
     })
 
     await user.press(screen.getByText('Connection test'))
@@ -91,9 +92,12 @@ describe('SettingsScreen → Connection test', () => {
 
     const lines = screen.getAllByTestId('debug-auth-event').map(node => String(node.props.children))
 
-    expect(lines).toHaveLength(5)
+    expect(lines).toHaveLength(6)
     expect(lines[2]).toContain('ws.closed · close 4401')
     expect(lines[3]).toContain('refresh.failed · http 401 · auth')
+    // The mint refusal that reads as a gateway problem and is not one: the
+    // status is what tells an owner the address answered as something else.
+    expect(lines[4]).toContain('ticket.failed · http 405 · protocol')
     // Signed, so an already-expired token is visibly expired rather than rounded
     // into looking fine — which is how clock drift shows itself.
     expect(lines[0]).toContain('expires in -12s')
