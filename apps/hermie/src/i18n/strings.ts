@@ -917,5 +917,67 @@ export const strings = {
       'The WebSocket closed without a reason. A proxy in front of the gateway usually has to be configured to pass WebSocket upgrades through.',
     incompatible: 'This gateway is too old for Hermie. Update Hermes on the gateway.',
     unknown: 'Something went wrong.'
+  },
+
+  botProfile: {
+    /** The row menu's line, and the label on the header pill that opens the same sheet. */
+    menuItem: 'Edit profile',
+    open: (name: string) => `Edit ${name}'s profile`,
+    title: 'Profile',
+
+    photo: 'PHOTO',
+    photoHint: 'Shown on the chat list, the header and every message this bot sends.',
+    photoChange: 'Choose a photo',
+    photoReplace: 'Change photo',
+    photoRemove: 'Remove photo',
+
+    description: 'DESCRIPTION',
+    descriptionPlaceholder: 'What this bot is for',
+    /**
+     * The one field on this sheet that the gateway does NOT let a client write.
+     *
+     * `profiles.configure` carries `description` and no display name, so the name
+     * is shown next to the profile it belongs to rather than as a field that
+     * would silently fail to save. Said out loud, because a greyed-out box with
+     * no reason next to it reads as a bug.
+     */
+    displayNameReadOnly: 'Set on the gateway, in this profile.',
+
+    colour: 'COLOUR',
+    colourHint: 'This chat only. It tints the bubbles, the avatar ring and the row in the list.',
+
+    context: 'CONTEXT FOR THIS BOT',
+    contextPlaceholder: 'Nothing extra',
+    contextCount: (used: number, limit: number) => `${used} of ${limit} characters`,
+    /** What the bot is told BESIDES this note, as the Settings switches stand. */
+    contextAlso: (parts: string[]) => `This bot also gets ${andList(parts)}.`,
+    contextAlsoName: 'your name',
+    contextAlsoAbout: 'what you wrote about yourself',
+    contextAlsoDevice: 'this device',
+    contextSettingsLink: 'Change in Settings → Context',
+
+    about: 'ABOUT THIS BOT',
+    model: 'Model',
+    provider: 'Provider',
+    profileName: 'Profile',
+    session: 'Session',
+    gatewayVersion: 'Gateway',
+    unknown: '—',
+
+    save: 'Save',
+    saving: 'Saving…',
+    saveFailed: 'The gateway would not save that.',
+    photoFailed: 'That photo could not be uploaded.'
   }
 } as const
+
+/** `a, b and c` — the sentence form the context line needs, which `list` does not give. */
+function andList(items: string[]): string {
+  if (items.length <= 1) {
+    return items[0] ?? ''
+  }
+
+  const head = items.slice(0, -1).join(', ')
+
+  return `${head} and ${items[items.length - 1]}`
+}

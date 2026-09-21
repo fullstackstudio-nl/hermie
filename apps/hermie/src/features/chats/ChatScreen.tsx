@@ -48,6 +48,7 @@ import type { ConnectionStatus } from '@hermie/gateway-client'
 import { looksLikeSlashCommand, parseSlashCommand } from '@hermes/shared/slash'
 
 import { useGateway } from '../../gateway'
+import { chatGatewayFor } from '../../gateway/link'
 import { SignedOutPanel } from '../../gateway/SignedOutPanel'
 import { strings } from '../../i18n/strings'
 import { haptic } from '../../platform/haptics'
@@ -1310,6 +1311,32 @@ function Conversation({
 
   const openAgents = useCallback(() => setSheet('agents'), [])
   const openOptions = useCallback(() => setSheet('options'), [])
+  const openProfile = useCallback(() => setSheet('profile'), [])
+
+  /*
+    The profile sheet's own connection.
+
+    Built here rather than threaded down from `ChatRuntime` because the sheet's
+    two writes — `profiles.configure` and `profiles.set_asset` — have nothing to
+    do with a chat's session, and giving the runtime's gateway a second owner
+    would tie a profile edit to whether a transcript happens to be streaming.
+  */
+  const profileGateway = useMemo(() => (connection ? chatGatewayFor(connection) : null), [connection])
+
+  /*
+    A saved profile only reaches the rest of the app through the roster.
+
+    The sheet writes to the gateway; the header, the chat list and every other
+    chat paint from `profiles.list`. So a save is followed by a re-read, which
+    is also what invalidates the avatar cache — that is keyed on the profile's
+    `ui_meta` revision, and `profiles.set_asset` is what moves it.
+
+    The runtime's own controller, which is the one the pull-to-refresh on the
+    chat list uses: a second instance would race it for the same store.
+  */
+  const onProfileSaved = useCallback(() => {
+    void runtime?.bots.refresh()
+  }, [runtime])
 
   const onScrolledAway = useCallback((next: boolean) => {
     setAway(next)
@@ -1511,6 +1538,7 @@ function Conversation({
               name={display}
               onBack={onBack}
               onOpenOptions={openOptions}
+              onOpenProfile={openProfile}
               onToggleSidebar={onToggleSidebar}
               // The resolved state, from the same function the chat list uses. It is
               // what keeps the header from saying "Connecting…" over a live chat: the
@@ -1605,6 +1633,20 @@ function Conversation({
         botHandle={botName}
         findRequest={findRequest}
         manual={sheet}
+        {...(byName[botName]
+          ? {
+              profile: {
+                avatarUri: avatar,
+                bot: byName[botName],
+                gateway: profileGateway,
+                gatewayVersion: config?.version ?? '',
+                // A saved description or picture only reaches the header, the
+                // list and every other chat once the roster has been read
+                // again; the sheet itself writes to the gateway, not the store.
+                onSaved: onProfileSaved
+              }
+            }
+          : {})}
         onCloseManual={closeManualSheet}
         onCloseRequest={dismissRequest}
         onLockClarify={lockClarify}

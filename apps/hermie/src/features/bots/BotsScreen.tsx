@@ -41,6 +41,7 @@ import { snippetSegments, tidySnippet } from '@hermie/gateway-client'
 import { unreadCountSince } from '@hermie/transcript'
 
 import { useGateway } from '../../gateway'
+import { chatGatewayFor } from '../../gateway/link'
 import { SignedOutPanel } from '../../gateway/SignedOutPanel'
 import { strings } from '../../i18n/strings'
 import { ContextMenuHost, HAS_NATIVE_CONTEXT_MENU } from '../../platform/context-menu'
@@ -48,6 +49,7 @@ import { setMenuBar } from '../../platform/desktop-shortcuts'
 import { directTouchPanRef } from '../../platform/pointer-drag'
 import { useSafeAreaInsets } from '../../platform/safe-area'
 import { isUnread, useBotsStore, type Bot } from '../../store/bots'
+import { BotProfileSheet } from '../bot-profile'
 import { archivedOf, dividersOf, sectionsOf, useChatLayoutStore } from '../../store/chat-layout'
 import { useChatsStore } from '../../store/chats'
 import { GlassSurface } from '../../ui/glass'
@@ -162,7 +164,7 @@ export function BotsScreen({
   const theme = useTheme()
   const insets = useSafeAreaInsets()
   const runtime = useChatRuntime()
-  const { status } = useGateway()
+  const { config, connection, status } = useGateway()
   const bots = useBotsStore(state => state.bots)
   const byName = useBotsStore(state => state.byName)
   const running = useBotsStore(state => state.running)
@@ -186,6 +188,15 @@ export function BotsScreen({
   const [addedDividerId, setAddedDividerId] = useState<string | null>(null)
   const [archiveOpen, setArchiveOpen] = useState(false)
   const [menuFor, setMenuFor] = useState<string | null>(null)
+  /** The bot whose profile sheet is open, by name. */
+  const [profileFor, setProfileFor] = useState<string | null>(null)
+
+  /*
+    The profile sheet's connection. Built from the live socket rather than taken
+    from the runtime, because `profiles.configure` and `profiles.set_asset` are
+    plain gateway calls with nothing to do with a chat's session.
+  */
+  const profileGateway = useMemo(() => (connection ? chatGatewayFor(connection) : null), [connection])
 
   /**
    * The gateway half of the search.
@@ -628,6 +639,11 @@ export function BotsScreen({
 
           return
 
+        case 'editProfile':
+          setProfileFor(name)
+
+          return
+
         case 'dividerAbove': {
           const id = layout.addDividerAbove(name, '')
 
@@ -898,6 +914,25 @@ export function BotsScreen({
           })}
           onClose={() => setMenuFor(null)}
           onSelect={id => onMenuSelect(menuFor, id)}
+          visible
+        />
+      ) : null}
+
+      {/*
+        The profile editor, opened from the row menu's Edit profile.
+
+        A sibling of the row menu rather than a page inside it: the menu is a
+        list of intentions and this is a form, and `RowMenu` closes on every
+        selection — including this one — so the two are never on screen at once.
+      */}
+      {profileFor && byName[profileFor] ? (
+        <BotProfileSheet
+          avatarUri={avatars[profileFor]}
+          bot={byName[profileFor]}
+          gateway={profileGateway}
+          gatewayVersion={config?.version ?? ''}
+          onClose={() => setProfileFor(null)}
+          onSaved={() => void runtime?.bots.refresh()}
           visible
         />
       ) : null}

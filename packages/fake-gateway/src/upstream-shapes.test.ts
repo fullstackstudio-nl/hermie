@@ -1011,3 +1011,273 @@ describe('config.set fast — methods_config_set.py::_set_fast', () => {
     }
   })
 })
+
+/**
+ * The three calls a bot-profile editor makes, pinned against the CONTRACT.
+ *
+ * Unlike the REST cases above there is no vendored handler to read: the profile
+ * RPCs live behind `tui_gateway/contracts`, and what a client is held to is the
+ * declaration the generator emits from it —
+ * `ProfilesConfigureParams/Result/Applied`, `ProfilesSetAssetParams/Result` and
+ * `ProfilesGetAssetParams/Result` in
+ * `packages/hermes-shared/src/gateway-contract.generated.ts`. So these cases
+ * name the type they were read from rather than a Python file nobody here has
+ * open, and they check WHICH KEYS come back and what type each one is: an
+ * editor that stores a picture the roster cannot find again fails on the shape
+ * long before it fails on the bytes.
+ */
+describe('profiles.set_asset / get_asset over the socket — tui_gateway/contracts::ProfilesSetAssetResult', () => {
+  let live: FakeGateway
+  let socket: WebSocket
+  let nextId = 0
+
+  const pending = new Map<number, (value: Record<string, unknown>) => void>()
+
+  /** The whole frame, so a refusal can be read as one rather than as a result. */
+  const call = (method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> => {
+    const id = ++nextId
+
+    return new Promise(resolve => {
+      pending.set(id, resolve)
+      socket.send(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`)
+    })
+  }
+
+  const resultOf = async (method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> => {
+    const frame = await call(method, params)
+
+    expect(frame.error).toBeUndefined()
+
+    return frame.result as Record<string, unknown>
+  }
+
+  /** The avatar revision as the roster reports it — the number a client re-fetches on. */
+  const avatarRevisionOf = async (name: string): Promise<number> => {
+    const roster = await resultOf('profiles.list')
+    const row = (roster.profiles as Record<string, unknown>[]).find(entry => entry.name === name)
+
+    return (row?.ui_meta_revisions as Record<string, number> | undefined)?.avatar ?? 0
+  }
+
+  /** A four-byte JPEG: enough magic for the sniff, and not the staged PNG. */
+  const jpegBytes = Buffer.from([0xff, 0xd8, 0xff, 0xdb])
+
+  beforeAll(async () => {
+    live = await startFakeGateway({ port: 0 })
+    socket = new WebSocket(live.wsUrl, ['hermes-gateway-v1'])
+
+    socket.on('message', data => {
+      for (const line of String(data).split('\n')) {
+        if (!line.trim()) {
+          continue
+        }
+
+        const frame = JSON.parse(line) as Record<string, unknown>
+        const id = typeof frame.id === 'number' ? frame.id : null
+        const waiter = id === null ? undefined : pending.get(id)
+
+        if (waiter && id !== null) {
+          pending.delete(id)
+          waiter(frame)
+        }
+      }
+    })
+
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', () => resolve())
+      socket.once('error', reject)
+    })
+  })
+
+  afterAll(async () => {
+    socket.close()
+    await live.close()
+  })
+
+  it('answers a write with `ok`, the asset it wrote, and the DECODED byte count', async () => {
+    // The writer is the profile staged WITHOUT a picture, so nothing here can
+    // pass on the fixture the researcher carries.
+    const wrote = await resultOf('profiles.set_asset', {
+      name: 'writer',
+      asset: 'avatar',
+      data: `data:image/jpeg;base64,${jpegBytes.toString('base64')}`
+    })
+
+    expect(keysOf(wrote)).toEqual(['asset', 'ok', 'size'])
+    expect(wrote.ok).toBe(true)
+    expect(wrote.asset).toBe('avatar')
+    // Bytes, not base64 characters: `size` is what the gateway stored, and the
+    // encoded form is a third longer than that.
+    expect(wrote.size).toBe(jpegBytes.length)
+  })
+
+  it('takes bare base64 as well as a data URL, and counts the same bytes for both', async () => {
+    const bare = await resultOf('profiles.set_asset', {
+      name: 'writer',
+      asset: 'avatar',
+      data: jpegBytes.toString('base64')
+    })
+
+    expect(bare.size).toBe(jpegBytes.length)
+  })
+
+  it('reads the written picture back, as the four keys `ProfilesGetAssetResult` declares', async () => {
+    const read = await resultOf('profiles.get_asset', { name: 'writer', asset: 'avatar' })
+
+    expect(keysOf(read)).toEqual(['data', 'found', 'mime', 'size'])
+    expect(read.found).toBe(true)
+    expect(read.size).toBe(jpegBytes.length)
+    // Sniffed from the bytes, so it is a JPEG here and not the staged PNG this
+    // profile would have answered if the write had gone nowhere.
+    expect(read.mime).toBe('image/jpeg')
+    expect(read.data).toBe(`data:image/jpeg;base64,${jpegBytes.toString('base64')}`)
+  })
+
+  it('moves `ui_meta_revisions.avatar` on a write, because that is the cache-buster', async () => {
+    const before = await avatarRevisionOf('writer')
+
+    await resultOf('profiles.set_asset', { name: 'writer', asset: 'avatar', data: jpegBytes.toString('base64') })
+
+    expect(await avatarRevisionOf('writer')).toBe(before + 1)
+  })
+
+  it('clears a picture with `removed`, and moves the revision for that too', async () => {
+    const before = await avatarRevisionOf('writer')
+    const cleared = await resultOf('profiles.set_asset', { name: 'writer', asset: 'avatar', clear: true })
+
+    expect(keysOf(cleared)).toEqual(['asset', 'ok', 'removed'])
+    expect(cleared.ok).toBe(true)
+    expect(cleared.asset).toBe('avatar')
+    expect(cleared.removed).toBe(1)
+    // A removal is a write: a client still holding the old picture has to be
+    // told to look again, or it goes on drawing a face nobody has any more.
+    expect(await avatarRevisionOf('writer')).toBe(before + 1)
+  })
+
+  it('answers `found: false` and nothing else once the picture is gone', async () => {
+    const read = await resultOf('profiles.get_asset', { name: 'writer', asset: 'avatar' })
+
+    expect(keysOf(read)).toEqual(['found'])
+    expect(read.found).toBe(false)
+  })
+
+  it('counts nothing removed when there was nothing there', async () => {
+    const again = await resultOf('profiles.set_asset', { name: 'writer', asset: 'avatar', clear: true })
+
+    expect(again.removed).toBe(0)
+  })
+
+  it('still answers the staged picture for a profile nobody has written to', async () => {
+    const read = await resultOf('profiles.get_asset', { name: 'researcher', asset: 'avatar' })
+
+    expect(read.found).toBe(true)
+    expect(read.mime).toBe('image/png')
+    expect(String(read.data)).toMatch(/^data:image\/png;base64,/u)
+  })
+
+  it('refuses a profile it does not have rather than inventing one', async () => {
+    const frame = await call('profiles.set_asset', { name: 'nobody', asset: 'avatar', clear: true })
+
+    expect(frame.result).toBeUndefined()
+    expect(String((frame.error as Record<string, unknown>).message)).toMatch(/Unknown profile/u)
+  })
+})
+
+describe('profiles.configure description — tui_gateway/contracts::ProfilesConfigureApplied', () => {
+  let live: FakeGateway
+  let socket: WebSocket
+  let nextId = 0
+
+  const pending = new Map<number, (value: Record<string, unknown>) => void>()
+
+  const call = (method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> => {
+    const id = ++nextId
+
+    return new Promise(resolve => {
+      pending.set(id, resolve)
+      socket.send(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`)
+    })
+  }
+
+  const descriptionOf = async (name: string): Promise<unknown> => {
+    const roster = (await call('profiles.list')).result as Record<string, unknown>
+
+    return (roster.profiles as Record<string, unknown>[]).find(row => row.name === name)?.description
+  }
+
+  beforeAll(async () => {
+    live = await startFakeGateway({ port: 0 })
+    socket = new WebSocket(live.wsUrl, ['hermes-gateway-v1'])
+
+    socket.on('message', data => {
+      for (const line of String(data).split('\n')) {
+        if (!line.trim()) {
+          continue
+        }
+
+        const frame = JSON.parse(line) as Record<string, unknown>
+        const id = typeof frame.id === 'number' ? frame.id : null
+        const waiter = id === null ? undefined : pending.get(id)
+
+        if (waiter && id !== null) {
+          pending.delete(id)
+          waiter(frame)
+        }
+      }
+    })
+
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', () => resolve())
+      socket.once('error', reject)
+    })
+  })
+
+  afterAll(async () => {
+    socket.close()
+    await live.close()
+  })
+
+  it('writes the line the roster shows, and reports the section on its own', async () => {
+    const frame = await call('profiles.configure', { name: 'writer', description: 'Writes the announcements.' })
+    const result = frame.result as Record<string, unknown>
+    const applied = result.applied as Record<string, unknown>
+
+    expect(frame.error).toBeUndefined()
+    expect(result.ok).toBe(true)
+    // Only the section the request carried: a `ui_meta` key here would mean the
+    // fake had reported on a bag the request never mentioned.
+    expect(keysOf(applied)).toEqual(['description'])
+    expect(applied.description).toBe(true)
+    expect(await descriptionOf('writer')).toBe('Writes the announcements.')
+  })
+
+  it('keeps the line out of the ui_meta bag, because it is a column of its own', async () => {
+    const roster = (await call('profiles.list')).result as Record<string, unknown>
+    const row = (roster.profiles as Record<string, unknown>[]).find(entry => entry.name === 'writer')
+
+    expect(Object.keys((row?.ui_meta as Record<string, unknown>) ?? {})).not.toContain('description')
+  })
+
+  it('reports both sections when one request carries both', async () => {
+    const frame = await call('profiles.configure', {
+      name: 'researcher',
+      description: 'Finds the sources.',
+      ui_meta: { hermie: { colour: 'teal' } }
+    })
+    const applied = (frame.result as Record<string, unknown>).applied as Record<string, unknown>
+
+    expect(keysOf(applied)).toEqual(['description', 'ui_meta', 'ui_meta_revisions'])
+    expect(applied.description).toBe(true)
+    expect(applied.ui_meta).toBe(true)
+    expect((applied.ui_meta_revisions as Record<string, number>).hermie).toBe(1)
+    expect(await descriptionOf('researcher')).toBe('Finds the sources.')
+  })
+
+  it('leaves the line alone for a request that carries no description at all', async () => {
+    const frame = await call('profiles.configure', { name: 'researcher', ui_meta: { hermie: { colour: 'amber' } } })
+    const applied = (frame.result as Record<string, unknown>).applied as Record<string, unknown>
+
+    expect(applied).not.toHaveProperty('description')
+    expect(await descriptionOf('researcher')).toBe('Finds the sources.')
+  })
+})
