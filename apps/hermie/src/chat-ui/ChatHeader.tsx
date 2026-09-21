@@ -300,7 +300,7 @@ export function ChatHeader({
             whole of the rule above. `minWidth` is the floor under a short one.
           */}
           <View style={{ flexShrink: 1, minWidth: PILL_MIN_TEXT_WIDTH }}>
-            <Text numberOfLines={1} variant="chatName">
+            <Text accessibilityRole="header" aria-level={1} numberOfLines={1} variant="chatName">
               {name}
             </Text>
             <StatusLine line={line} reduceMotion={theme.reduceMotion} />

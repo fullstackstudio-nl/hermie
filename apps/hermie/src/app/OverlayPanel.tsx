@@ -145,7 +145,7 @@ export function OverlayPanel({ children, frame, onClose, title, visible }: Overl
               paddingTop: theme.space.panel
             }}
           >
-            <Text style={{ flex: 1 }} variant="title">
+            <Text accessibilityRole="header" aria-level={1} style={{ flex: 1 }} variant="title">
               {title}
             </Text>
 

@@ -47,7 +47,9 @@ export function ScreenHeader({ back, onBack, title, subtitle, action }: ScreenHe
 
       <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.md }}>
         <View style={{ flex: 1, gap: theme.space.xxs }}>
-          <Text variant="title">{title}</Text>
+          <Text accessibilityRole="header" aria-level={1} variant="title">
+            {title}
+          </Text>
           {subtitle ? (
             <Text color="textMuted" variant="preview">
               {subtitle}

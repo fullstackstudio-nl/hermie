@@ -112,6 +112,27 @@
       }
 
       /*
+        A heading is a heading and nothing else.
+
+        `accessibilityRole="header"` makes react-native-web render a real
+        `<h1>`…`<h6>`, which arrives with the user agent's own size, weight and
+        margins attached. RNW's reset covers `Text` but not the `View` a heading
+        can also be, so a date stamp's box inherited `font-size: 1.5em` from the
+        element it had just become. Nothing visible came of it — every string
+        inside states its own size — and that is exactly the kind of thing that
+        stays invisible until one of them does not.
+      */
+      h1,
+      h2,
+      h3,
+      h4,
+      h5,
+      h6 {
+        font: inherit;
+        margin: 0;
+      }
+
+      /*
         The keyboard's own mark, at the theme's accent rather than the system's.
 
         An OUTLINE, for the reason `ui/useFocusRing.ts` gives at length: every

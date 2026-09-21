@@ -63,7 +63,9 @@ export function LicencesScreen({ onClose }: LicencesScreenProps) {
 
   const header = (
     <View style={{ gap: theme.space.sm, paddingBottom: theme.space.lg }}>
-      <Text variant="title">{strings.settings.licences}</Text>
+      <Text accessibilityRole="header" aria-level={1} variant="title">
+        {strings.settings.licences}
+      </Text>
       <Text color="textMuted" variant="preview">
         {state.status === 'ready'
           ? strings.settings.licencesSummary(state.data.packages.length)

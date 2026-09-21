@@ -75,7 +75,9 @@ export function ChatConnectingState({
     >
       <Avatar name={name} size={72} {...(avatarUri ? { uri: avatarUri } : {})} />
 
-      <Text variant="title">{name}</Text>
+      <Text accessibilityRole="header" aria-level={1} variant="title">
+        {name}
+      </Text>
 
       <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.sm }}>
         {spins(phase) ? <ActivityIndicator testID={`${testID}-activity`} /> : null}

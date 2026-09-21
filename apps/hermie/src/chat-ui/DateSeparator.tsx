@@ -30,6 +30,12 @@ export function DateSeparator({ label, testID }: DateSeparatorProps) {
   return (
     <View
       accessibilityRole="header"
+      // Level 2, and stated. A heading with no level is an `<h1>` on the web,
+      // so a transcript's day stamps were the only first-level headings in the
+      // document — a reader navigating by heading got a list of dates and
+      // nothing to say which conversation they belonged to. The screen's own
+      // title is the `<h1>`; a day is a section of it.
+      aria-level={2}
       style={{ alignItems: 'center', paddingBottom: theme.space.xs, paddingTop: BUBBLE_GAP.separate }}
       testID={testID}
     >

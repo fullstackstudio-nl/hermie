@@ -1206,7 +1206,9 @@ export function GalleryScreen({ onClose, section }: GalleryScreenProps) {
     <Screen edgeToEdgeTop={false} padded={false}>
       <ScrollView contentContainerStyle={{ gap: theme.space.xl, padding: theme.space.lg }}>
         <View style={{ gap: theme.space.sm }}>
-          <Text variant="title">Component gallery</Text>
+          <Text accessibilityRole="header" aria-level={1} variant="title">
+            Component gallery
+          </Text>
           <Text color="textMuted" variant="preview">
             Every chat surface with fixture data. Last action: {lastAction}
           </Text>

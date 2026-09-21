@@ -233,7 +233,9 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
         contentContainerStyle={{ gap: theme.space.md, paddingVertical: theme.space.lg }}
         ref={directTouchPanRef}
       >
-        <Text variant="title">Connection test</Text>
+        <Text accessibilityRole="header" aria-level={1} variant="title">
+          Connection test
+        </Text>
         <Text color="textMuted">
           Points a raw gateway connection at an address and reports what happens. Session-token gateways only; signing
           in with a provider arrives with onboarding.

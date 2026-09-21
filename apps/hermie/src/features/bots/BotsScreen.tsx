@@ -928,7 +928,7 @@ function Head({
         paddingTop: theme.space.panel
       }}
     >
-      <Text style={{ flex: 1 }} variant={sidebar ? 'titleWide' : 'title'}>
+      <Text accessibilityRole="header" aria-level={1} style={{ flex: 1 }} variant={sidebar ? 'titleWide' : 'title'}>
         {strings.bots.title}
       </Text>
 

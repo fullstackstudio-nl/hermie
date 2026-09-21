@@ -25,7 +25,15 @@ export function InsetGroup({ header, footer, children, style, ...rest }: InsetGr
   return (
     <View {...rest} style={[{ gap: theme.space.sm }, style]}>
       {header ? (
-        <Text variant="meta" color="textMuted" style={{ marginLeft: theme.space.lg, letterSpacing: 0.6 }}>
+        <Text
+          accessibilityRole="header"
+          // The section label under a screen's title, which is what it looks
+          // like and now what it is: level 2 under the title's 1.
+          aria-level={2}
+          color="textMuted"
+          style={{ marginLeft: theme.space.lg, letterSpacing: 0.6 }}
+          variant="meta"
+        >
           {header}
         </Text>
       ) : null}

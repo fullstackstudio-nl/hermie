@@ -36,6 +36,14 @@ describe('the document the browser build ships in', () => {
     expect(template).not.toMatch(/[^-]:focus\s*\{/)
   })
 
+  it('gives a heading element no size, weight or margin of its own', () => {
+    // `accessibilityRole="header"` makes react-native-web render a real
+    // `<h1>`…`<h6>`. RNW's own reset covers `Text` and not the `View` a heading
+    // can also be, so the date stamp's box inherited `font-size: 1.5em` from the
+    // element it had become.
+    expect(template).toMatch(/h1,\s*h2,\s*h3,\s*h4,\s*h5,\s*h6\s*\{[^}]*font: inherit;[^}]*margin: 0;/)
+  })
+
   it('keeps the two tokens the exporter substitutes out of its own prose', () => {
     // The substitution is a `String.replace` with a string pattern, so it
     // replaces the FIRST occurrence and stops: a token named in the comment is

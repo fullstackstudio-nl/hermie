@@ -68,7 +68,9 @@ export function ThemesScreen({ onClose }: ThemesScreenProps) {
         }}
       >
         <View style={{ gap: theme.space.sm }}>
-          <Text variant="title">{strings.settings.themes.header}</Text>
+          <Text accessibilityRole="header" aria-level={1} variant="title">
+            {strings.settings.themes.header}
+          </Text>
           <Text color="textMuted" variant="preview">
             {strings.settings.themes.advancedHint}
           </Text>
