@@ -83,6 +83,7 @@ import { useChatRuntime } from './ChatRuntime'
 import { findMatchingItem } from '../search'
 import { connectionNotice, RETRY_OFFER_MS } from './connection-notice'
 import { countsAsRead, readWatermark } from './read-watermark'
+import { regenerateLastTurn } from './regenerate'
 import { ChatConnectingState, ReconnectPill } from './ConnectionState'
 import { useChat, type UseChatResult } from './useChat'
 
@@ -1389,6 +1390,67 @@ function Conversation({
   const display = byName[botName]?.displayName ?? botName
 
   /**
+   * The newest reply in what the reader is looking at.
+   *
+   * Computed once here rather than by each row: a row is one item and cannot see
+   * what came after it, and `Regenerate` is offered on exactly one row. Off
+   * `chat.items` — the VISIBLE list — because the menu is opened on a row in that
+   * list, and a hidden reply the filter removed is not a row anybody can ask to
+   * run again.
+   */
+  const lastAssistantId = useMemo(() => {
+    for (let at = chat.items.length - 1; at >= 0; at -= 1) {
+      const entry = chat.items[at]
+
+      if (entry?.item.kind === 'assistant') {
+        return entry.item.id
+      }
+    }
+
+    return undefined
+  }, [chat.items])
+
+  /**
+   * Put one of the reader's own turns back in the composer.
+   *
+   * The turn already in the conversation is left exactly where it is — this
+   * starts a NEW one from the same words, which is why the menu line says "and
+   * resend" rather than "Edit". The attachment references travel with the text
+   * because they are what the turn holds and what the gateway understands; the
+   * bytes are long gone from this device, so a picture comes back as a chip.
+   */
+  const editResend = useCallback(
+    (text: string, references: readonly string[]) => {
+      chat.setDraft(references.length ? `${text}\n${references.join(' ')}`.trim() : text)
+    },
+    [chat]
+  )
+
+  /**
+   * Ask for the last reply again.
+   *
+   * The decision — `/retry` where the gateway has it, the previous prompt again
+   * where it does not, and a refusal in the two cases where neither is honest —
+   * is `regenerate.ts`, which has its own suite. This is the half that belongs
+   * to the screen: turning an outcome into a notice.
+   */
+  const regenerate = useCallback(() => {
+    void regenerateLastTurn(chat)
+      .then(outcome => {
+        if (outcome.kind === 'busy') {
+          setNotice(openFailed(chatStrings.menu.turnRunning))
+
+          return
+        }
+
+        if (outcome.kind === 'nothing') {
+          setNotice(openFailed(chatStrings.menu.nothingToRegenerate))
+        }
+      })
+      .catch(error => setNotice(openFailed(messageOf(error))))
+  }, [chat])
+
+  /**
    * Write the conversation out and hand it to the platform.
    *
    * `chat.items` is what the reader is looking at — the verbosity filter, the
@@ -1657,6 +1719,10 @@ function Conversation({
               newMessageCount={newCount}
               loadingOlder={loadingOlder}
               onEndReached={loadOlder}
+              {...(lastAssistantId ? { lastAssistantId } : {})}
+              onEditResend={editResend}
+              onRegenerate={regenerate}
+              turnRunning={chat.turnActive}
               onOpenBot={openBot}
               onOpenCron={openCron}
               onOpenRequest={reopenRequest}

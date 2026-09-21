@@ -172,6 +172,34 @@ export interface TranscriptContext {
    */
   canOpenCron?: (jobName: string) => boolean
   onRunCron?: (jobName: string) => void
+  /**
+   * Put one of the reader's own turns back in the composer.
+   *
+   * The text and the attachment REFERENCES the turn holds — never the bytes,
+   * which this device no longer has. The host owns the field, exactly as it does
+   * for a `prefill` directive out of a slash command, so nothing here reaches
+   * into it.
+   */
+  onEditResend?: (text: string, attachments: readonly string[]) => void
+  /**
+   * Run the last reply again.
+   *
+   * No argument: there is only ever one row this can be offered on, and the
+   * screen already knows which turn it is repeating. Whether that is the
+   * gateway's `/retry` or the previous prompt sent again is the screen's
+   * decision and depends on the catalogue.
+   */
+  onRegenerate?: () => void
+  /**
+   * The id of the newest assistant reply, or absent.
+   *
+   * Computed once by the list rather than by each row: a row is one item and has
+   * no idea whether anything came after it, and asking every row to search the
+   * list would be a scan per open menu per row.
+   */
+  lastAssistantId?: string
+  /** A turn is running on this chat, so the two turn-starting lines are greyed. */
+  turnRunning?: boolean
   /** The chat's outgoing bubble fill, from `useChatAccent`. */
   accent?: string
   /**
@@ -701,19 +729,34 @@ function useMessageMenu(
   const items = useMemo(
     () =>
       messageMenuItems({
+        canEditResend: Boolean(context.onEditResend),
         canOpenBot: Boolean(context.onOpenBot),
+        // Both halves of the question, answered by the only thing that can:
+        // the host can regenerate at all, and this row is the newest reply.
+        canRegenerate: Boolean(context.onRegenerate) && context.lastAssistantId === item.id,
         // A Mac question rather than a capability one. The panel renders
         // everywhere, but only where a pointer can drag across it does it offer
         // anything the long press does not already give.
         canSelectText: RUNS_ON_MAC && Boolean(context.onSelectText),
         detailsOpen: expanded,
         hasDetails,
-        item
+        item,
+        turnRunning: Boolean(context.turnRunning)
       }),
     // `item.version` is the engine's change key, so a streamed reply rebuilds the
     // menu's Copy lines and its links without deep-comparing the text.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [context.onOpenBot, expanded, hasDetails, item, item.version]
+    [
+      context.lastAssistantId,
+      context.onEditResend,
+      context.onOpenBot,
+      context.onRegenerate,
+      context.turnRunning,
+      expanded,
+      hasDetails,
+      item,
+      item.version
+    ]
   )
 
   const select = useCallback(
@@ -739,6 +782,29 @@ function useMessageMenu(
 
         case 'selectText':
           context.onSelectText?.(action.text)
+
+          return
+
+        /*
+          Both refuse rather than fire while a turn is running.
+
+          The menu already draws them disabled, and a disabled `UIMenu` item
+          cannot be selected — but the fallback sheet draws a flat list, a
+          keyboard can reach a row, and the turn can start between the menu
+          opening and the tap. The guard is here because this is the one place
+          all three paths meet.
+        */
+        case 'editResend':
+          if (!context.turnRunning) {
+            context.onEditResend?.(action.text, action.attachments)
+          }
+
+          return
+
+        case 'regenerate':
+          if (!context.turnRunning) {
+            context.onRegenerate?.()
+          }
 
           return
 

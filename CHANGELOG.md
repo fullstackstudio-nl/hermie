@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Edit and resend, and Regenerate.** A message's own menu gains two lines that start a turn: on one
+  of your own turns, **Edit and resend** puts the text back in the composer with the attachment
+  references it carried — the turn already in the conversation stays exactly where it is, which is
+  why the line says "and resend" rather than "Edit"; and on the newest reply, **Regenerate** asks for
+  it again. Regenerate takes the gateway's own `/retry` down the ordinary slash path where the
+  catalogue has it, so the conversation gains a reply rather than a second copy of the prompt, and
+  falls back to sending the previous prompt again where it does not — which is what a reader would do
+  by hand, and honest about there now being two turns. Both are **drawn disabled while a turn is
+  running** rather than disappearing, because a line that vanishes for the length of every turn is a
+  line nobody believes in, and both refuse at the tap as well. Regenerate is offered on the last
+  reply only: appending an answer to a question three turns back would be worse than no line at all.
+
 - **Export a conversation.** The chat's options sheet offers the transcript as a Markdown file or as
   plain text, handed to the share sheet on the phones and the Mac and downloaded in a browser. Both
   formats are offered because neither is a default: a `.md` is for somewhere that renders it and a

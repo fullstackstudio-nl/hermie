@@ -210,6 +210,22 @@ export const chatStrings = {
      * see `SelectTextOverlay` and `src/markdown/attributed.ts`.
      */
     selectText: 'Select text',
+    /**
+     * On your own turn: put it back in the field, cursor and all.
+     *
+     * "and resend" rather than "Edit": nothing is edited in place. The turn that
+     * is already in the conversation stays exactly where it is, and what this
+     * does is start a new one from the same words — which is the whole
+     * difference between this and what a reader might reasonably expect from a
+     * line called "Edit".
+     */
+    editResend: 'Edit and resend',
+    /** On the last reply: ask for it again. */
+    regenerate: 'Regenerate',
+    /** A turn is running, so neither turn-starting line can be taken. */
+    turnRunning: 'Wait for the current turn to finish.',
+    /** Regenerate was asked for in a conversation with no prompt to repeat. */
+    nothingToRegenerate: 'There is no message here to send again.',
     /** What a screen reader announces the menu itself as. */
     message: 'Message actions'
   },

@@ -6550,3 +6550,46 @@ the package has no business knowing what that is — the caller passes a formatt
 - **There is no entry in the message context menu.** The brief offered "message menu / chat options";
   the options sheet is where a whole-conversation action belongs, and a per-message row that exported
   the whole chat would be a menu line about something other than the message it was opened on.
+
+### A disabled menu line says something a missing one cannot
+
+`Edit and resend` and `Regenerate` both put a new turn on the gateway, so neither can be taken while
+one is already running. The obvious implementation is to leave them out of the menu for the
+duration — and it is wrong for the same reason a control that appears and disappears is worse than
+one that greys: a reader who opens the menu mid-turn and sees nothing learns that the feature does
+not exist on this row, and stops looking. A greyed line says "not now".
+
+So `turnRunning` disables rather than filters, and the guard is repeated at the tap. Three paths meet
+there and only one of them is UIKit's: a `UIMenu` will not fire a disabled item, but the fallback
+sheet draws a flat list, a keyboard can reach a row, and the turn can start between the menu opening
+and the selection landing.
+
+### `Regenerate` takes the gateway's road where there is one
+
+`/retry` goes down `chat-controller.runSlash`, the same path every other command takes — same
+directive handling, same notices, same failure reporting. The gateway knows what the turn was and
+re-runs it, so the conversation gains a reply and not a second copy of the prompt that produced it.
+
+Where the catalogue does not carry `/retry` — an older gateway, a profile without the command — the
+fallback sends the reader's previous prompt again. Not the newest row: a cron delivery and an inbound
+bot message both land on the user role, and repeating one of those would be repeating somebody else's
+words. A conversation with no prompt of the reader's own in the visible list refuses and says so,
+which is better than sending something that was never asked for.
+
+The catalogue is the one the composer's autocomplete already reads, and a catalogue that has not
+arrived yet answers "no" — the safe direction, because the fallback works everywhere and `/retry` is
+an optimisation on it.
+
+### What is not covered
+
+- **Neither line has been selected against a real gateway.** `/retry` exists in the vendored contract
+  and in upstream's command list; whether a given profile's catalogue carries it, and what its
+  directive answers with, is unverified here. If it answers with a `send` directive the slash path
+  already handles that — but nobody has watched it.
+- **`Edit and resend` puts the references back as TEXT.** A turn holds `@file:` and `@image:`
+  directives and `stripUserText` lifts them out of the body, so appending them to the draft is the
+  round trip. It has not been driven through the composer's own chip rendering, and an image comes
+  back as a chip rather than a thumbnail because the bytes are long gone from this device.
+- **`Copy as Markdown` was already there** and is unchanged. It is still hidden on a message whose
+  markdown and whose words are the same string, which is deliberate — two identical Copy lines read
+  as a bug — and the brief's "add it next to the existing copy" was already satisfied.
