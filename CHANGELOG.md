@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The header pill keeps its width while the bot thinks.** The owner reported it still changing
+  size after the status line had already been taken out of the pill's intrinsic width — and
+  "an absolutely positioned child cannot widen its parent" is an argument about one layout engine's
+  box model, which this component has to win on four targets, one compositing the pill as a native
+  glass surface and one drawing the name as a line-clamped `-webkit-box`. So the width stopped
+  being derived. A ruler measures the name once, with nothing around it and nothing to shrink
+  against, and the pill's text column is given that number as an explicit width. From then on the
+  only thing in the world that can move the pill is the bot being renamed.
+
 ### Changed
 
 - **The chat's (…) menu is a popover in the chat, not a sheet that moves the chat.** The owner's

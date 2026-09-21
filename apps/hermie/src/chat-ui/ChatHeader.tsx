@@ -47,6 +47,21 @@
  * namespace, which `shortToolName` does, because eliding
  * `Running mcp__terminal__run_…` tells a reader nothing at all.
  *
+ * **That was not enough, and the reason is worth writing down.** The owner
+ * reported the pill still changing size while a bot thinks, after the status was
+ * already out of the intrinsic width. "An absolute child cannot widen its
+ * parent" is an argument about Yoga's box model, and this component renders on
+ * four targets — one of which composites the pill as a native glass surface and
+ * another of which draws the name as a line-clamped `-webkit-box`. An invariant
+ * that has to be re-argued per platform is not one.
+ *
+ * So the column's width is no longer DERIVED. A ruler — the name at the same
+ * type token, laid out with nothing around it — reports the name's own width
+ * once, and the column is given that number as an explicit `width`
+ * (`pillTextWidth`). After that the only thing in the world that can move the
+ * pill is the bot being renamed. Not a status, not a font fallback, not a
+ * native surface re-measuring itself between two frames.
+ *
  * Changing it cross-fades rather than cutting, over `motion.press`, which is short
  * enough that a reader who is watching the words reads a change and a reader who is
  * not sees nothing flicker. Reduce Motion collapses it to a swap.
@@ -59,7 +74,7 @@ import { durationFor, easing, NATIVE_DRIVER } from '../ui/motion'
 import { PresenceBead } from '../ui/PresenceBead'
 import { RoundIconButton, Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
-import { AVATAR_SIZE, BEAD_SIZE, CONTROL_SIZE, type, type PresenceState } from '../ui/tokens'
+import { AVATAR_SIZE, BEAD_SIZE, CONTROL_SIZE, type PresenceState } from '../ui/tokens'
 import { Avatar } from './primitives/Avatar'
 import { formatClock } from './format'
 import { chatStrings } from './strings'
@@ -173,7 +188,32 @@ export function SidebarToggleButton({ onPress }: { onPress: () => void }) {
 }
 
 /** The pill will not be narrower than this, whatever the bot is called. */
-const PILL_MIN_TEXT_WIDTH = 96
+export const PILL_MIN_TEXT_WIDTH = 96
+
+/**
+ * The pill's text column, as a NUMBER rather than as whatever Yoga makes of it.
+ *
+ * The status line has been out of the pill's intrinsic width since it was made
+ * absolute, and the owner still reported the pill changing size while a bot
+ * thinks. Reasoning about why is the wrong move at that point: "the status
+ * cannot widen the pill" is an argument about Yoga's box model, and it has to
+ * hold on four targets, one of which composites the surface natively and
+ * another of which draws it as a line-clamped `-webkit-box`. An argument that
+ * has to be re-made per platform is not an invariant.
+ *
+ * So the width stops being derived at all. The name is measured once, off a
+ * copy nothing constrains, and the column is given that measurement as an
+ * EXPLICIT width. From then on the only thing that can change it is the bot
+ * being renamed — not a status, not a font fallback, not a native surface
+ * re-measuring itself between frames.
+ *
+ * `floor` is the minimum a pill may be, for a bot called `Al`. Before the
+ * measurement lands the answer is the floor, which is what the column already
+ * did.
+ */
+export function pillTextWidth(measuredName: number, floor: number = PILL_MIN_TEXT_WIDTH): number {
+  return Math.max(Math.ceil(measuredName), floor)
+}
 
 /**
  * One line of status, faded out and back when the words change.
@@ -185,6 +225,7 @@ const PILL_MIN_TEXT_WIDTH = 96
  * callback.
  */
 function StatusLine({ line, reduceMotion }: { line: string; reduceMotion: boolean }) {
+  const theme = useTheme()
   const [shown, setShown] = useState(line)
   const fade = useRef(new Animated.Value(1)).current
   const latest = useRef(line)
@@ -211,7 +252,7 @@ function StatusLine({ line, reduceMotion }: { line: string; reduceMotion: boolea
       an absolutely positioned child does not contribute to its parent's intrinsic
       size, so the longest tool name in the world cannot widen this.
     */
-    <View style={{ height: type.meta.lineHeight }} testID="chat-header-status">
+    <View style={{ height: theme.type.meta.lineHeight }} testID="chat-header-status">
       <Animated.View style={{ left: 0, opacity: fade, position: 'absolute', right: 0, top: 0 }}>
         <Text color="textFaint" numberOfLines={1} variant="meta">
           {shown}
@@ -238,6 +279,20 @@ export function ChatHeader({
   const theme = useTheme()
   const ring = accentFill ?? theme.accent().fill
   const size = CONTROL_SIZE.regular
+  /*
+    The name's own width, measured off a copy nothing constrains.
+
+    It is reset to 0 when the NAME changes, which is the one thing that may
+    move the pill: a roster that arrives late renames `researcher` to
+    `Researcher`, and a width measured for the old one would clip the new.
+    Nothing else resets it, which is the whole point — see `pillTextWidth`.
+  */
+  const [nameWidth, setNameWidth] = useState(0)
+  const measuredFor = useRef(name)
+
+  if (measuredFor.current !== name) {
+    measuredFor.current = name
+  }
   const state = stateLabel(presence, lastSeenAt)
   /*
     The other name AND what the bot is doing, on one line.
@@ -300,6 +355,30 @@ export function ChatHeader({
       */}
       <View pointerEvents="box-none" style={{ alignItems: 'center', flex: 1 }}>
         {/*
+          The ruler: the name at the same type token, laid out with nothing
+          around it and nothing to shrink against, so what it reports is the
+          name's OWN width rather than the width it was given.
+
+          Absolutely positioned inside the centring column and not inside the
+          pill, because a measurement taken inside the box it decides the size
+          of is a measurement that measures itself. Invisible, inert and hidden
+          from assistive technology: the real name two lines down is the one
+          that gets read out.
+        */}
+        <View
+          accessibilityElementsHidden
+          aria-hidden
+          importantForAccessibility="no-hide-descendants"
+          key={name}
+          onLayout={event => setNameWidth(event.nativeEvent.layout.width)}
+          pointerEvents="none"
+          style={{ left: 0, opacity: 0, position: 'absolute', top: 0 }}
+          testID={`${testID}-ruler`}
+        >
+          <Text variant="chatName">{name}</Text>
+        </View>
+
+        {/*
           The pill is the way into the bot's profile, which is why the whole of
           it is the target rather than the avatar alone: the avatar is 38pt, the
           name beside it is the thing a reader points at, and two adjacent
@@ -351,7 +430,17 @@ export function ChatHeader({
             The name is the only child that contributes a width here, which is the
             whole of the rule above. `minWidth` is the floor under a short one.
           */}
-            <View style={{ flexShrink: 1, minWidth: PILL_MIN_TEXT_WIDTH }}>
+            <View
+              style={{
+                flexShrink: 1,
+                minWidth: PILL_MIN_TEXT_WIDTH,
+                // Once the ruler has answered, the column stops being sized by
+                // its contents at all. A status can no longer reach the width
+                // by any route on any platform.
+                ...(nameWidth > 0 ? { width: pillTextWidth(nameWidth) } : {})
+              }}
+              testID={`${testID}-text`}
+            >
               <Text accessibilityRole="header" aria-level={1} numberOfLines={1} variant="chatName">
                 {name}
               </Text>

@@ -14,21 +14,48 @@
  * and the status itself is inside an absolutely positioned view, which Yoga leaves
  * out of its parent's intrinsic size.
  */
-import { render } from '@testing-library/react-native'
+import { act, render } from '@testing-library/react-native'
 
-import { ChatHeader } from '../src/chat-ui/ChatHeader'
+import { ChatHeader, PILL_MIN_TEXT_WIDTH, pillTextWidth } from '../src/chat-ui/ChatHeader'
+import type { PresenceState } from '../src/ui/tokens'
 import { shortToolName, TOOL_NAME_MAX } from '../src/chat-ui/tool-label'
 import { ThemeProvider } from '../src/ui/theme'
 
-function header(subtitle: string) {
+function header(subtitle: string, presence: PresenceState = 'working', name = 'Researcher') {
   return render(
     <ThemeProvider>
-      <ChatHeader name="Researcher" onOpenOptions={() => undefined} presence="working" subtitle={subtitle} />
+      <ChatHeader name={name} onOpenOptions={() => undefined} presence={presence} subtitle={subtitle} />
     </ThemeProvider>
   )
 }
 
 const STATUSES = ['Online', 'Thinking…', 'Typing…', 'Running terminal…']
+
+/**
+ * Lay the ruler out, the way a real layout pass would.
+ *
+ * The test renderer has no layout engine, so the measurement has to be handed
+ * in. That is not a weakening of the assertion — it is the whole mechanism
+ * being tested: the pill is supposed to take ONE number from ONE view and
+ * never ask anything else.
+ *
+ * The handler is called rather than dispatched, because the ruler is inert
+ * (`pointerEvents="none"`) and `fireEvent` will not deliver to a view that
+ * takes no events — which is correct of it, and not what is being tested here.
+ */
+function measure(tree: ReturnType<typeof header>, width: number) {
+  const ruler = tree.getByTestId('chat-header-ruler', { includeHiddenElements: true })
+  const onLayout = ruler.props.onLayout as (event: { nativeEvent: { layout: { width: number } } }) => void
+
+  act(() => {
+    onLayout({ nativeEvent: { layout: { width } } })
+  })
+}
+
+/** The style the pill's text column actually resolved to. */
+function columnStyle(tree: ReturnType<typeof header>): Record<string, unknown> {
+  return tree.getByTestId('chat-header-text', { includeHiddenElements: true }).props.style as Record<string, unknown>
+}
 
 describe('the status line cannot widen the pill', () => {
   it('draws the status absolutely, so it is outside the pill’s intrinsic width', () => {
@@ -57,6 +84,74 @@ describe('the status line cannot widen the pill', () => {
     const tree = header('Running an extremely long tool name that could never fit…')
 
     expect(tree.getByText('Running an extremely long tool name that could never fit…').props.numberOfLines).toBe(1)
+  })
+})
+
+describe('the pill takes one number and stops asking', () => {
+  it('pins the text column to the measured name, so no status can reach the width', () => {
+    const tree = header('Thinking…')
+
+    // Before the ruler answers, the floor is all there is.
+    expect(columnStyle(tree).width).toBeUndefined()
+    expect(columnStyle(tree).minWidth).toBe(PILL_MIN_TEXT_WIDTH)
+
+    measure(tree, 143.4)
+
+    // An explicit width, not an intrinsic one: from here the column's size is a
+    // stored number rather than a question anything can answer.
+    expect(columnStyle(tree).width).toBe(144)
+  })
+
+  it('keeps that width equal across three states', () => {
+    const widths = (['online', 'working', 'needsInput'] as PresenceState[]).map(presence => {
+      const tree = header('', presence)
+
+      measure(tree, 143.4)
+
+      return columnStyle(tree).width
+    })
+
+    expect(new Set(widths).size).toBe(1)
+    expect(widths[0]).toBe(144)
+  })
+
+  it('keeps it equal across the statuses a working bot cycles through', () => {
+    const widths = STATUSES.map(status => {
+      const tree = header(status)
+
+      measure(tree, 143.4)
+
+      return columnStyle(tree).width
+    })
+
+    expect(new Set(widths).size).toBe(1)
+  })
+
+  it('re-measures when the BOT is renamed, which is the one thing that may move it', () => {
+    const tree = header('Online', 'online', 'Al')
+
+    measure(tree, 24)
+    expect(columnStyle(tree).width).toBe(PILL_MIN_TEXT_WIDTH)
+
+    tree.rerender(
+      <ThemeProvider>
+        <ChatHeader
+          name="Alexandra the Researcher"
+          onOpenOptions={() => undefined}
+          presence="online"
+          subtitle="Online"
+        />
+      </ThemeProvider>
+    )
+    measure(tree, 260)
+
+    expect(columnStyle(tree).width).toBe(260)
+  })
+
+  it('never goes under the floor, whatever the ruler reports', () => {
+    expect(pillTextWidth(0)).toBe(PILL_MIN_TEXT_WIDTH)
+    expect(pillTextWidth(12)).toBe(PILL_MIN_TEXT_WIDTH)
+    expect(pillTextWidth(200.1)).toBe(201)
   })
 })
 
