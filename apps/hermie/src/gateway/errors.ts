@@ -52,7 +52,9 @@ export function describeProbeError(error: unknown, baseUrl: string, httpsWasPinn
     case 'timeout':
       return strings.errors.timeout(host)
     case 'not_hermes':
-      return strings.errors.notHermes(host)
+      // The kind's own sentence, plus whatever is specific to this failure —
+      // today, that the gateway may be on a network this device is not on.
+      return error.hint ? `${strings.errors.notHermes(host)} ${error.hint}` : strings.errors.notHermes(host)
     case 'redirect':
       return strings.errors.redirected(host, error.redirectedTo ?? strings.settings.unknown)
     case 'auth':

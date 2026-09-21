@@ -1,7 +1,9 @@
 /**
- * A probe that lands somewhere else.
+ * A probe that lands somewhere else, and one that lands nowhere useful.
  *
- * `hermes.fullstackstudio.nl` had moved to
+ * Both of these come from the same afternoon on the owner's gateway.
+ *
+ * **The redirect.** `hermes.fullstackstudio.nl` had moved to
  * `hermes.provibr.net` and left a 301 behind. The iOS URL cache is keyed by
  * bundle identifier and OUTLIVES the app, so deleting Hermie and installing it
  * again did not clear it: the new install's very first onboarding probe was
@@ -9,6 +11,13 @@
  * "that is not a Hermes gateway" — naming the address they had typed, which was
  * correct. The probe now refuses to follow a redirect to a different host and
  * says where it was sent, so the wizard can offer that host instead.
+ *
+ * **The wording.** "answered, but not like a Hermes gateway" is true and, on
+ * its own, useless in the two cases where it is most often read: a gateway that
+ * is only reachable on a tailnet, probed from a device that is not on it, and a
+ * public name whose DNS answers with somebody's front page. Both look identical
+ * from here — a 200 with something that is not a gateway in it — and both have
+ * the same first thing to check.
  *
  * The redirect cases run against two real servers, because "did fetch follow
  * it, and does `response.url` say where it ended up" is exactly the kind of
@@ -18,7 +27,7 @@ import { startFakeGateway } from '@hermie/fake-gateway'
 import { describe, expect, it } from 'vitest'
 
 import { requestText } from './fetch-json'
-import { probeGateway, resolveGatewayAddress } from './probe'
+import { notHermesHint, probeGateway, resolveGatewayAddress } from './probe'
 import { isGatewayError } from './types'
 
 describe('an address that redirects somewhere else', () => {
@@ -96,5 +105,56 @@ describe('every request', () => {
     })
 
     expect(seen[0]?.cache).toBe('no-store')
+  })
+})
+
+describe('"answered, but not like a Hermes gateway"', () => {
+  const LANDING = '<!doctype html><html><body><h1>It works</h1></body></html>'
+
+  it('says so plainly for a public host that answered with JSON of its own', () => {
+    expect(notHermesHint('https://api.example.com', '{"ok":true}')).toBe('')
+  })
+
+  it('names the network when the host is only reachable on one', () => {
+    for (const address of [
+      'http://192.168.1.10:9120',
+      'http://gateway.ts.net',
+      'http://100.101.102.103',
+      'nas.local'
+    ]) {
+      expect(notHermesHint(address, '{"ok":true}')).toMatch(/private network or tailnet/u)
+    }
+  })
+
+  it('says it looks like a landing page when a page is what came back', () => {
+    const hint = notHermesHint('https://hermes.example.com', LANDING)
+
+    expect(hint).toMatch(/^This looks like a landing page\./u)
+    expect(hint).toMatch(/private network or tailnet/u)
+  })
+
+  it('reaches the failure the reader actually sees', async () => {
+    const error = await probeGateway(
+      'https://hermes.example.com',
+      {},
+      async () => new Response(LANDING, { status: 200, headers: { 'content-type': 'text/html' } })
+    ).catch((thrown: unknown) => thrown)
+
+    expect(isGatewayError(error) && error.kind).toBe('not_hermes')
+    // On the error as well as in the message: every screen writes its own
+    // sentence for a KIND, and the part that is specific to this failure has to
+    // survive that.
+    expect(isGatewayError(error) && error.hint).toMatch(/landing page/u)
+  })
+
+  it('leaves an ordinary "not a gateway" alone on a public host', async () => {
+    const error = await probeGateway(
+      'https://hermes.example.com',
+      {},
+      async () => new Response('{"something":"else"}', { status: 200 })
+    ).catch((thrown: unknown) => thrown)
+
+    expect(isGatewayError(error) && error.kind).toBe('not_hermes')
+    expect(isGatewayError(error) && error.hint).toBeUndefined()
   })
 })

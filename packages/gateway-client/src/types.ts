@@ -50,6 +50,16 @@ export interface GatewayErrorOptions {
   closeCode?: number
   /** For `redirect`: the host the address actually led to. */
   redirectedTo?: string
+  /**
+   * One extra sentence, when the classification alone is not enough to act on.
+   *
+   * Carried beside the message rather than only inside it, so a caller that
+   * writes its own sentence for a KIND — which every screen in the app does —
+   * can still show the part that is specific to this failure. Today that is
+   * the private-network line on `not_hermes`, which is the difference between
+   * "check the address" and "check which network this device is on".
+   */
+  hint?: string
 }
 
 /**
@@ -62,6 +72,8 @@ export class GatewayError extends Error {
   readonly closeCode?: number
   /** The host a `redirect` failure actually reached, for the offer to use it. */
   readonly redirectedTo?: string
+  /** An extra sentence a screen may show beside its own wording for the kind. */
+  readonly hint?: string
 
   constructor(kind: GatewayErrorKind, message: string, options: GatewayErrorOptions = {}) {
     super(message, options.cause === undefined ? undefined : { cause: options.cause })
@@ -70,6 +82,7 @@ export class GatewayError extends Error {
     this.status = options.status
     this.closeCode = options.closeCode
     this.redirectedTo = options.redirectedTo
+    this.hint = options.hint
   }
 }
 

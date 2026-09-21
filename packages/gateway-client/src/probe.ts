@@ -5,7 +5,7 @@ import {
   requestText,
   type JsonResponse
 } from './fetch-json'
-import { hostOfAddress } from './host-privacy'
+import { classifyHost, hostOfAddress } from './host-privacy'
 import { apiUrl, hasExplicitScheme, normalizeBaseUrl, normalizeHeaders } from './url'
 import { GatewayError, isGatewayError } from './types'
 
@@ -46,6 +46,44 @@ function redirectedHost(response: JsonResponse, requested: string): string {
   const asked = hostOfAddress(requested)
 
   return landed && asked && landed !== asked ? landed : ''
+}
+
+/**
+ * Does this body look like a landing page rather than a gateway's answer?
+ *
+ * Deliberately crude, and only ever used to ADD a sentence to a failure that
+ * has already been decided. What it is looking for is the shape of a web page
+ * where a JSON object was expected, which is what a reverse proxy's default
+ * host, a parked domain and a marketing site all answer with.
+ */
+function looksLikeLandingPage(body: string): boolean {
+  const head = body.slice(0, 2000).toLowerCase()
+
+  return head.includes('<!doctype html') || head.includes('<html')
+}
+
+/**
+ * The extra sentence for "answered, but not like a Hermes gateway".
+ *
+ * That message is true and, on its own, unhelpful in the two cases where it is
+ * most often seen: a gateway that is only reachable on a tailnet or a private
+ * network, probed from a device that is not on it, and an address whose public
+ * DNS answers with somebody's front page. Both look identical from here — a
+ * 200 with something that is not a gateway in it — and both have the same first
+ * thing to check.
+ */
+export function notHermesHint(baseUrl: string, body: string): string {
+  const privacy = classifyHost(baseUrl).privacy
+  const isReachableOnlyThere = privacy !== 'public'
+  const landing = looksLikeLandingPage(body)
+
+  if (!isReachableOnlyThere && !landing) {
+    return ''
+  }
+
+  const opening = landing ? 'This looks like a landing page. ' : ''
+
+  return `${opening}If the gateway is only reachable on a private network or tailnet, make sure this device is connected to it.`
 }
 
 export interface ProbeResult {
@@ -113,10 +151,30 @@ export async function probeGateway(
     throw new GatewayError('not_hermes', `${statusUrl} answered HTTP ${status.status}.`, { status: status.status })
   }
 
-  const body = parseJsonObject(status.text, statusUrl, 'not_hermes')
+  const hint = notHermesHint(baseUrl, status.text)
+  const withHint = (message: string): string => (hint ? `${message} ${hint}` : message)
+
+  let body: Record<string, unknown>
+
+  try {
+    body = parseJsonObject(status.text, statusUrl, 'not_hermes')
+  } catch (error) {
+    // Re-thrown rather than let through, so the hint reaches the one failure
+    // that most often means "this device is not on that network": a 200 with a
+    // web page in it.
+    throw new GatewayError(
+      'not_hermes',
+      withHint(isGatewayError(error) ? error.message : `${statusUrl} answered something that is not JSON.`),
+      { cause: error, ...(hint ? { hint } : {}) }
+    )
+  }
 
   if (typeof body.auth_required !== 'boolean') {
-    throw new GatewayError('not_hermes', `${statusUrl} answered JSON without "auth_required" — not a Hermes gateway.`)
+    throw new GatewayError(
+      'not_hermes',
+      withHint(`${statusUrl} answered JSON without "auth_required" — not a Hermes gateway.`),
+      hint ? { hint } : {}
+    )
   }
 
   const authFlows = asStringArray(body.auth_flows)
