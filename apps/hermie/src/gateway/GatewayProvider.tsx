@@ -18,6 +18,16 @@ import { retirePushRegistration } from '../features/push/runtime'
 import { createPersistentAuthTimeline } from './auth-timeline'
 import { attachLifecycle, createGatewayConnection, createTokenCoordinator, endGatewaySession } from './client'
 import { clearCredentials, clearGateway, type GatewaySetup, loadGatewaySetup, type StoredGatewayConfig } from './config'
+import {
+  activeGatewayOf,
+  EMPTY_REGISTRY,
+  type GatewayRecord,
+  type GatewayRegistry,
+  loadGatewayRegistry,
+  reconcileActiveGateway,
+  removeGateway,
+  saveGatewayRegistry
+} from './registry'
 import { useConnectionStore } from './store'
 
 /**
@@ -58,6 +68,19 @@ export interface GatewayContextValue {
   status: ConnectionStatus
   lastError: GatewayError | null
   config: StoredGatewayConfig | null
+  /**
+   * Every gateway this device knows about, and which one is live.
+   *
+   * Exposed rather than read from disk by whoever wants it, because there is
+   * exactly one live connection and therefore exactly one right answer at a
+   * time: a second reader of the key would be a second place for the list and
+   * the socket to disagree.
+   */
+  registry: GatewayRegistry
+  /** The active entry, or `null` while nothing is configured. */
+  gateway: GatewayRecord | null
+  /** The active gateway's id — what every namespaced store is keyed by. */
+  gatewayId: string | null
   extraHeaders: Record<string, string>
   http: GatewayHttp | null
   /**
@@ -116,6 +139,7 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
   const [resumeConfig, setResumeConfig] = useState<StoredGatewayConfig | null>(null)
   const [resumeAccess, setResumeAccess] = useState<ResumeAccess | null>(null)
   const [resumeIntent, setResumeIntent] = useState<OnboardingIntent>('fresh')
+  const [registry, setRegistry] = useState<GatewayRegistry>(EMPTY_REGISTRY)
 
   const connectionRef = useRef<GatewayConnection | null>(null)
   const coordinatorRef = useRef<TokenCoordinator | null>(null)
@@ -192,7 +216,33 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
     // rest of `src/dev`; see `seed-gateway.ts` for the three gates.
     await seedDevGateway()
 
+    /*
+      The list before the gateway, because the list is what says WHICH gateway.
+
+      On the first launch after this shipped the read also performs the move:
+      the single configured gateway becomes entry one, with the same address and
+      the same credentials it already had. Nothing else changes and nothing is
+      asked — see `loadGatewayRegistry`.
+    */
+    const { registry: stored } = await loadGatewayRegistry()
+
     const loaded = await loadGatewaySetup()
+
+    /*
+      Keep the entry and the configuration in step.
+
+      The wizard writes a `StoredGatewayConfig` and knows nothing about the
+      registry, so this is where a freshly saved address, auth mode or signed-in
+      name reaches the list. It is also the path a first run takes: there is no
+      entry yet, and the configuration that has just been written becomes one.
+    */
+    const next = loaded ? reconcileActiveGateway(stored, loaded.config, Date.now()) : stored
+
+    setRegistry(next)
+
+    if (next !== stored) {
+      await saveGatewayRegistry(next)
+    }
 
     if (!loaded || !loaded.hasCredentials) {
       // A configured gateway with no credential beside it is the shape of the
@@ -309,11 +359,25 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
 
     teardown()
     await clearGateway()
+
+    // And out of the list, which is the record of what this device knows about
+    // rather than of what it is talking to right now. Leaving the row behind
+    // would leave a gateway with no credentials, no cache and no address
+    // anybody could still reach it by.
+    const active = registry.activeGatewayId
+
+    if (active) {
+      const next = removeGateway(registry, active)
+
+      setRegistry(next)
+      await saveGatewayRegistry(next)
+    }
+
     setSetup(null)
     setResumeConfig(null)
     setResumeIntent('fresh')
     setPhase('onboarding')
-  }, [setup, teardown])
+  }, [registry, setup, teardown])
 
   const recordAuth = useCallback<AuthEventRecorder['record']>(event => {
     timelineRef.current?.record(event)
@@ -354,6 +418,9 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
       status,
       lastError,
       config: setup?.config ?? null,
+      registry,
+      gateway: activeGatewayOf(registry),
+      gatewayId: registry.activeGatewayId,
       extraHeaders: setup?.extraHeaders ?? {},
       http: connectionRef.current?.http ?? null,
       canRefresh: setup?.canRefresh ?? true,
@@ -373,6 +440,7 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
       lastError,
       phase,
       recordAuth,
+      registry,
       reload,
       request,
       resumeAccess,
