@@ -125,7 +125,16 @@ export function visibleItems(state: ChatState, options: VisibilityOptions): Visi
         break
 
       case 'assistant': {
-        const shown = showThinking ? item : { ...item, reasoning: undefined, reasoningVerbose: undefined }
+        /*
+          The copy is made only when there is a thought to take away. Stripping
+          unconditionally rebuilt every assistant row in the transcript on every
+          call — and this runs on every version bump, so on a four-hundred-row
+          conversation that is four hundred allocations per streamed frame for
+          rows that never had a `reasoning` to lose.
+        */
+        const hasThought = item.reasoning !== undefined || item.reasoningVerbose !== undefined
+        const shown =
+          showThinking || !hasThought ? item : { ...item, reasoning: undefined, reasoningVerbose: undefined }
         const empty = !item.text.trim() && !item.error
 
         if (empty && (!showThinking || !item.reasoning?.trim() || level === 'quiet')) {

@@ -492,12 +492,36 @@ const TranscriptRow = memo(
   (previous, next) =>
     previous.entry.item.id === next.entry.item.id &&
     previous.entry.item.version === next.entry.item.version &&
+    sameThought(previous.entry.item, next.entry.item) &&
     previous.entry.presentation === next.entry.presentation &&
     previous.receipt === next.receipt &&
     previous.layout === next.layout &&
     previous.dmRole === next.dmRole &&
     previous.context === next.context
 )
+
+/**
+ * The one thing `version` cannot answer.
+ *
+ * `version` is bumped by the REDUCER, so it is an exact change key for anything
+ * the gateway said. Show thinking is not that: `visibleItems` answers it at read
+ * time by handing this row a copy of the same item with `reasoning` stripped —
+ * same id, same version, same presentation. So the key above called the two
+ * identical and the transcript kept drawing thoughts after the switch was off
+ * (and drew none after it was switched on, until the next frame from the
+ * gateway bumped the version for an unrelated reason).
+ *
+ * Two identity checks rather than a deep compare: that copy is the only place a
+ * transcript item is ever rebuilt outside the reducer, and it differs in exactly
+ * these two fields.
+ */
+function sameThought(previous: TranscriptItem, next: TranscriptItem): boolean {
+  if (previous.kind !== 'assistant' || next.kind !== 'assistant') {
+    return true
+  }
+
+  return previous.reasoning === next.reasoning && previous.reasoningVerbose === next.reasoningVerbose
+}
 
 /** The gap a row opens above itself. Speech rhythm, or §6.6's ledger one. */
 function gapAbove(layout: RowLayout): number {
