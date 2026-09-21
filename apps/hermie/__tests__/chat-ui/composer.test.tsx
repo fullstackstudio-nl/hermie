@@ -5,6 +5,7 @@ import { act, fireEvent, screen } from '@testing-library/react-native'
 import { Platform, StyleSheet } from 'react-native'
 
 import { Composer } from '../../src/chat-ui'
+import { ATTACH_LIST_MIN_WIDTH } from '../../src/chat-ui/AttachMenu'
 import {
   ATTACH_POPOVER_MIN_WIDTH,
   COMPOSER_FIELD_INSET,
@@ -775,16 +776,22 @@ describe('the Composer and Escape', () => {
 /**
  * The attach menu as a POPOVER.
  *
- * It was a list of two rows in a card above the composer, and the owner's note was
- * that nothing in it said which control had opened it. WhatsApp's answer is a
- * popover with a pointer at the button and the choices as round icon buttons with
- * their labels underneath — so the three facts asserted here are the pointer's
- * existence, the pointer's POSITION (a pointer a few points off its anchor reads as
- * a rendering fault, which is worse than none), and that a choice is a drawn icon
- * rather than a row of text.
+ * It was a list of two rows in a card above the composer; the choices are round icon
+ * buttons with their labels underneath now, so two choices read as two objects.
+ *
+ * It also had a TAIL aimed at the `+`, and the owner's call is that it must not: a
+ * tail is a bubble's shape and a menu that wears one reads as something the composer
+ * said. What replaces it is the MOTION, which is why the two facts about leaving are
+ * asserted here rather than left to the eye — the menu has to animate OUT as well as
+ * in, and it must stop taking taps the moment it starts leaving, or the tap that
+ * dismissed it lands on it twice.
  */
 describe('the attach popover', () => {
   const hidden = { includeHiddenElements: true } as const
+
+  /** The stacked list's `minWidth`; the popover has none, which is how they differ. */
+  const widthFloorOf = (testID: string): number | undefined =>
+    (StyleSheet.flatten(screen.getByTestId(testID).props.style as never) as { minWidth?: number }).minWidth
 
   const pressEscape = () =>
     act(() => {
@@ -801,20 +808,13 @@ describe('the attach popover', () => {
     return handlers
   }
 
-  it('points at the “+” it belongs to, and at its centre', () => {
+  it('wears no tail, on either layout', () => {
     openMenu()
 
-    const pointer = StyleSheet.flatten(
-      screen.getByTestId('composer-attach-menu-pointer', hidden).props.style as never
-    ) as { bottom?: number; left?: number; width?: number }
-
-    // Below the card, not inside it: the shape escapes the popover the way the
-    // bubble's tail escapes the bubble.
-    expect(pointer.bottom).toBeLessThan(0)
-
-    // The tip lands on the button's centre. `left` is the tip less half the shape,
-    // so tip = left + width / 2 = half the round control.
-    expect((pointer.left ?? 0) + (pointer.width ?? 0) / 2).toBe(COMPOSER_ROUND_SIZE / 2)
+    expect(screen.getByTestId('composer-attach-menu')).toBeTruthy()
+    expect(screen.queryByTestId('composer-attach-menu-pointer', hidden)).toBeNull()
+    // The anchor view the tail was positioned against went with it.
+    expect(screen.queryByTestId('composer-attach-menu-anchor', hidden)).toBeNull()
   })
 
   it('draws each choice as an icon with its label underneath, not as a row of text', () => {
@@ -832,14 +832,21 @@ describe('the attach popover', () => {
     expect(inner).toBeTruthy()
   })
 
-  it('dismisses on a tap that is not on it', () => {
+  it('dismisses on a tap that is not on it, and leaves by animating out', () => {
     openMenu()
 
-    expect(screen.getByTestId('composer-attach-menu')).toBeTruthy()
+    expect(screen.getByTestId('composer-attach-appear').props.pointerEvents).toBe('auto')
 
     fireEvent.press(screen.getByTestId('composer-attach-dismiss'))
 
-    expect(screen.queryByTestId('composer-attach-menu')).toBeNull()
+    // Still mounted: that frame is the exit. It used to be `exit="cut"`, which is
+    // the thing the owner asked to change — a menu with no tail has only its
+    // motion left to say where it went.
+    expect(screen.getByTestId('composer-attach-menu')).toBeTruthy()
+    // …and it takes no taps while it goes, so the dismissal cannot land twice.
+    expect(screen.getByTestId('composer-attach-appear').props.pointerEvents).toBe('none')
+    // The catcher, which is not animated, is gone on the same frame.
+    expect(screen.queryByTestId('composer-attach-dismiss')).toBeNull()
   })
 
   it('dismisses on Escape, before anything else Escape could mean', () => {
@@ -847,7 +854,8 @@ describe('the attach popover', () => {
 
     pressEscape()
 
-    expect(screen.queryByTestId('composer-attach-menu')).toBeNull()
+    expect(screen.getByTestId('composer-attach-appear').props.pointerEvents).toBe('none')
+    expect(screen.queryByTestId('composer-attach-dismiss')).toBeNull()
     // Registered last, so the running turn is untouched — the menu is the level the
     // reader is looking at.
     expect(handlers.onStop).not.toHaveBeenCalled()
@@ -868,9 +876,9 @@ describe('the attach popover', () => {
     })
     fireEvent.press(screen.getByTestId('composer-attach'))
 
-    // The list has no pointer, because it is not anchored to anything.
-    expect(screen.getByTestId('composer-attach-menu')).toBeTruthy()
-    expect(screen.queryByTestId('composer-attach-menu-pointer', hidden)).toBeNull()
+    // The stacked list is the one with a floor under its width; the popover is as
+    // wide as its two labels and no wider.
+    expect(widthFloorOf('composer-attach-menu')).toBe(ATTACH_LIST_MIN_WIDTH)
     // …and the choices are still both there and still both work.
     expect(screen.getByText('Photo library')).toBeTruthy()
     expect(screen.getByText('Choose file')).toBeTruthy()
@@ -884,6 +892,6 @@ describe('the attach popover', () => {
     })
     fireEvent.press(screen.getByTestId('composer-attach'))
 
-    expect(screen.getByTestId('composer-attach-menu-pointer', hidden)).toBeTruthy()
+    expect(widthFloorOf('composer-attach-menu')).toBeUndefined()
   })
 })

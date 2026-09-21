@@ -757,21 +757,23 @@ export function Composer({
         style={{ bottom: rowHeight, left: 0, paddingHorizontal: theme.space.md, position: 'absolute', right: 0 }}
         testID="composer-attach-layer"
       >
-        {/* It comes UP out of the button it belongs to, the way the slash list drops down onto the field. */}
-        <Appear exit="cut" rise={8} visible={menuVisible}>
-          <AttachMenu
-            choices={choices}
-            layout={menuLayout}
-            onChoose={choose}
-            /*
-              The popover's leading edge and the row's leading edge are the same
-              (both are inside this padding), so the `+`'s centre is half its own
-              width in — which makes the pointer's tip land on the button rather
-              than near it. The composer owns this number because the composer owns
-              the button; the popover would have to guess.
-            */
-            pointerOffset={round / 2}
-          />
+        {/*
+          It comes UP out of the button it belongs to, and it sinks back into it.
+
+          The travel is the whole of what says where this menu came from, now that
+          the popover has no tail — so unlike the slash list, which `cut`s because
+          its reason has resolved, this one animates BOTH ways. A menu that vanishes
+          on the frame it is dismissed leaves the reader's eye with nowhere to go
+          back to, which is the same complaint the tail was there to answer.
+
+          `exit` is therefore the default `fade`, which keeps the surface mounted
+          for one exit and forces its `pointerEvents` to `none` while it leaves, so
+          the tap that dismissed it cannot be taken twice. Under Reduce Motion the
+          duration is zero on both sides (`usePresence`), which puts the hard cut
+          back for the reader who asked for one.
+        */}
+        <Appear rise={8} testID="composer-attach-appear" visible={menuVisible}>
+          <AttachMenu choices={choices} layout={menuLayout} onChoose={choose} />
         </Appear>
       </View>
 

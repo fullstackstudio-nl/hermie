@@ -660,7 +660,10 @@ describe('ChatScreen', () => {
     // the gesture that dismisses a popover for a screen reader is its own.
     fireEvent.press(screen.getByTestId('composer-attach-backdrop', HIDDEN))
 
-    expect(screen.queryByTestId('composer-attach-menu')).toBeNull()
+    // The menu itself is still mounted for one exit — it animates out now that it
+    // has no tail to say where it came from — but it is inert while it goes and
+    // the catcher is gone on the frame.
+    expect(screen.getByTestId('composer-attach-appear').props.pointerEvents).toBe('none')
     expect(screen.queryByTestId('composer-attach-backdrop', HIDDEN)).toBeNull()
   })
 
