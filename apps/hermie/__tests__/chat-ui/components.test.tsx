@@ -107,7 +107,9 @@ describe('bubbles', () => {
 
     expect(view.getByText(/4.2s/)).toBeTruthy()
     expect(view.getByText(/3.1k in/)).toBeTruthy()
-    expect(view.getByText(/example-model/)).toBeTruthy()
+    // The model is named the way its maker writes it, not the way the wire does:
+    // `example-model` is the fixture's id and `Example Model` is its reading.
+    expect(view.getByText(/Example Model/)).toBeTruthy()
   })
 
   it('offers Retry for a lost turn and not for a recoverable one', () => {

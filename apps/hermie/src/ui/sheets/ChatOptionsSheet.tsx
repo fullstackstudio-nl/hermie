@@ -13,6 +13,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Pressable, View } from 'react-native'
 
+import { prettyModelName } from '@hermie/transcript'
+
 import { chatStrings } from '../../chat-ui/strings'
 import type { PickerOption, Verbosity } from '../../chat-ui/types'
 import { strings } from '../../i18n/strings'
@@ -231,7 +233,11 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
     props.onClose()
   }
 
-  const modelLabel = props.modelOptions.find(option => option.value === props.model)?.label ?? props.model
+  // The catalogue's label when the gateway listed this model, and the id's own
+  // reading when it did not — a chat can sit on a model the inventory has since
+  // dropped, and that row should not be the one place a wire id shows through.
+  const modelLabel =
+    props.modelOptions.find(option => option.value === props.model)?.label ?? prettyModelName(props.model)
   const reasoningLabel =
     props.reasoningOptions.find(option => option.value === props.reasoningEffort)?.label ?? props.reasoningEffort
 

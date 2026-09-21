@@ -13,6 +13,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, View } from 'react-native'
 
+import { prettyModelName } from '@hermie/transcript'
+
 import { humaniseStatus } from '../../i18n/humanise'
 import { directTouchPanRef } from '../../platform/pointer-drag'
 import { BottomSheet, SheetEyebrow } from '../../ui/BottomSheet'
@@ -170,7 +172,9 @@ export function CronDetailScreen({ controller, job, onClose, onOpenRun, onEdit, 
             // under a humanised `Success` read as two different facts.
             value={humaniseStatus(detail.lastStatus) ?? cronStrings.detail.unknown}
           />
-          {detail.model ? <InsetValueRow label={cronStrings.detail.modelLabel} value={detail.model} /> : null}
+          {detail.model ? (
+            <InsetValueRow label={cronStrings.detail.modelLabel} value={prettyModelName(detail.model)} />
+          ) : null}
           {detail.skills.length ? (
             <InsetValueRow label={cronStrings.detail.skillsLabel} value={detail.skills.join(', ')} />
           ) : null}

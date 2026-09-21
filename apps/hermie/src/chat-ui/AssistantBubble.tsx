@@ -20,6 +20,8 @@
  */
 import { View } from 'react-native'
 
+import { prettyModelName } from '@hermie/transcript'
+
 import { Markdown, markdownLeading, type MarkdownImageSource } from '../markdown'
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
@@ -68,7 +70,9 @@ function footerParts(item: AssistantItem): string[] {
   }
 
   if (item.usage?.model) {
-    parts.push(item.usage.model)
+    // The maker's own spelling rather than the wire id: this line is read, not
+    // typed, and `claude-haiku-4-5-20251001` under a reply is a receipt number.
+    parts.push(prettyModelName(item.usage.model))
   }
 
   if (!parts.length) {

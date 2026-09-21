@@ -43,7 +43,7 @@ import {
   TranscriptList,
   type TranscriptListHandle
 } from '../../chat-ui'
-import { lastMessageAt } from '@hermie/transcript'
+import { lastMessageAt, prettyModelName } from '@hermie/transcript'
 import type { ConnectionStatus } from '@hermie/gateway-client'
 import { looksLikeSlashCommand, parseSlashCommand } from '@hermes/shared/slash'
 
@@ -1233,7 +1233,13 @@ function Conversation({
   )
 
   const modelOptions = useMemo<PickerOption[]>(() => {
-    const options = models.map(model => ({ value: model.id, label: model.label, detail: model.provider }))
+    /*
+      The name on top, the wire id underneath. The id is what a reader has to be
+      able to paste into a config or a `--model` flag, so it is never replaced —
+      and the picker's own search still matches on it, because `option.value` is
+      one of the three fields it looks in.
+    */
+    const options = models.map(model => ({ value: model.id, label: prettyModelName(model.id), detail: model.id }))
     const current = chat.info?.model
 
     // The chat's own model always appears, even when the inventory is empty or

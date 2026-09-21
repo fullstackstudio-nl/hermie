@@ -309,6 +309,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   message as read as it arrives; one that arrives while the reader is scrolled up stays unread, and
   is read when they come back down — the same message, and the same moment, that the jump-to-latest
   pill counts.
+- **A model is named the way its maker names it.** `claude-haiku-4-5-20251001` under a reply,
+  `example-provider/example-model` in the options sheet, `qwen3-235b` in the picker — the wire id was
+  shown raw wherever a model appeared. `prettyModelName` reads one as a name: `Claude Haiku 4.5`,
+  `GPT-5.5`, `Gemini 2.5 Pro`, `Llama 3.1 70B`, `DeepSeek V3`, `Qwen3 235B`, `o3 Mini`. It is a set
+  of patterns and not a catalogue — a family word gets its maker's spelling, a run of version numbers
+  joins with dots, a parameter count gets a capital B, a snapshot's date suffix is dropped, a routing
+  prefix (`openai/`, `openrouter/anthropic/`, `duo-chat-`) becomes a separate provider value, and an
+  id it has never seen is Title-Cased with its numbers intact. The wire id is never changed and never
+  lost: the model picker prints it under the name, which is also what its search matches on.
 - **A tap beside a bottom sheet closes it again.** The scrim was a flex sibling ABOVE the panel in a
   column, so it covered only the space over the sheet; on the wide layout, where the panel is capped
   and parked over the content column, most of what reads as backdrop is BESIDE it — and that area
