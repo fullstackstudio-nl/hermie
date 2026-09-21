@@ -5660,7 +5660,7 @@ Redialling those fails the same way and erases the explanation.
   the ladder now keeps asking — which is the best this layer can do about it —
   but nothing here measured whether it happens.
 
-## Web QA (2026-09-21, last)
+## Web QA (2026-09-21)
 
 A pass over the browser build, driven in a real Chromium against
 `packages/fake-gateway` in cookie mode behind `packages/hermie-web` — the
@@ -5800,7 +5800,9 @@ untested here.
 ### Not covered
 
 Said plainly, because a defect list that implies coverage it does not have is
-worse than a short one.
+worse than a short one. **Read this against the second pass below**: some of it
+is covered now, some of it is covered for a different reason than expected, and
+the conversation surface is still the big hole.
 
 - **Most of the conversation surface.** Streaming and the fold were watched; tool
   cards, thoughts, bot-to-bot lines, cron cards, the approval and clarify sheets
@@ -5821,3 +5823,226 @@ worse than a short one.
   `127.0.0.1` is a secure context, so the likely cause is the automation
   environment rather than the app — but it was not reproduced in a stock browser,
   so push on the web remains exactly as unverified as it was before.
+
+## Web QA, second pass (2026-09-21, last)
+
+The list the pass above produced, worked through in its own priority order,
+with everything re-checked in a real browser afterwards. Twenty commits. What
+follows is what is now true, what this pass found that the first one had not,
+and — still the part that matters most — what it did not get to.
+
+### The method note that earned its place this time
+
+**Programmatic scrolling is not scrolling.** Setting `scrollTop` on the
+transcript's scroller fires a scroll event, moves the list and measures
+perfectly well — and it does not make `onEndReached` fire, so the list never
+pages in older history. Two hours went into "the browser build cannot reach the
+start of a long transcript" before a real wheel event over the same list grew
+it from 240 rows to 818. Every claim about paging below comes from wheel input;
+`scrollTop` is used only where the question is how long a frame took.
+
+The same care settled the service worker. Registering a path that 404s, an
+`image/x-icon` and the real worker all failed with Chromium's identical
+"An unknown error occurred when fetching the script.", where a browser with
+service workers switched on distinguishes all three. So the refusal is the
+automation environment's, as the first pass suspected — now with evidence
+rather than reasoning, and Web Push is still unverified.
+
+### Fixed
+
+In the order the previous section listed them.
+
+| What                                                                       | Commit               |
+| -------------------------------------------------------------------------- | -------------------- |
+| A markdown link was a `div` with a press handler; now an `<a href>`        | `e5fd553`            |
+| Decorative marks stayed in the accessibility tree — 14 on one transcript   | `2d78caa`            |
+| `accessibilityState` never reached the browser at all: 32 call sites       | `9d8b50d`            |
+| `TextField` could emit `aria-label=""`, which REMOVES a name               | `c794035`            |
+| Focus rings stopped at text fields; every button, row and tab had the UA's | `af595ad`            |
+| Day separators were the page's only `<h1>`                                 | `a7b5b36`            |
+| Settings and the wizard called Hermie Web's own origin "the gateway"       | `83c26cc`            |
+| The welcome copy showed its backticks                                      | `da936a1`            |
+| The sign-in error was not announced                                        | `62df06b`            |
+| No maskable PWA icon                                                       | `d92fc8c`            |
+| Two untranslatable literals (`"Dismiss"`, `"Replying"`)                    | `242f4bc`            |
+| Console noise: `useNativeDriver`, and a service worker retried every time  | `9b9528f`, `2e6c17a` |
+| `design/tokens.md` gave an app background that is in no source file        | `c0aecb6`            |
+
+Each commit message carries its own reasoning. Four are worth repeating here,
+because they turned out to be bigger than the line above them.
+
+- **`accessibilityState` is dropped on the floor by react-native-web.** The
+  defect list said "decorative icons stay in the tree"; fixing that exposed
+  the larger one underneath. RNW's prop table takes `aria-expanded`,
+  `aria-selected`, `aria-checked`, `aria-disabled` and `aria-busy`, and an
+  `accessibilityState` object reaches nothing. Thirty-two call sites authored
+  the spelling the browser cannot hear, so every tab in the strip, every
+  disclosure in a transcript — tool cards, thoughts, folds, DM rollups, cron
+  cards — every switch in a sheet and every busy button shipped with no state
+  on them. React Native accepts the aria spelling and normalises it back into
+  `accessibilityState` on the host node, so the phones are unchanged;
+  `accessibility-state.test.tsx` pins both halves, and pins the absence of the
+  old spelling by reading the source.
+- **The focus ring is one CSS rule, because nothing in React can reach
+  `:focus-visible`.** It takes its colour from `--hermie-focus`, declared for
+  both schemes in the document template and corrected from the live theme by
+  `status-bar.web.tsx` — the same path the page background already used, so a
+  pinned preset rings in its own accent. `:focus-visible` and not `:focus`: a
+  ring on every mouse click is noise on a chat list, while a field somebody
+  just clicked into is one they are about to type in.
+- **A heading with no level is an `<h1>`.** The fix is not "make the date
+  stamp an `<h2>`" but "give the page something to be second to": each
+  screen's own title is now the first level, a grouped section's quiet label
+  the second, and a day stamp a section of the transcript. The document also
+  resets user-agent heading styles, because RNW's reset covers `Text` and not
+  the `View` a heading can also be — a date stamp's box was inheriting
+  `font-size: 1.5em` from the element it had just become.
+- **The maskable icon needed the rasteriser to layer.** A maskable image is
+  cropped to whatever silhouette the launcher likes, so the backdrop has to
+  reach every edge while the mark stays inside a circle of 80% of the canvas:
+  two mappings of one drawing, where `render` composited everything through
+  one. A shape may now carry its own transform. The safe box is measured, not
+  assumed — fitted to 1000 the mark's furthest point is the tail's TIP at
+  607.5 from the centre, not a corner, so 674 is the largest box that fits
+  inside 409.6 and 664 is that with six points to spare.
+
+### Found by driving it, and fixed
+
+Everything here is new. None of it is a browser-only bug except where it says
+so; the browser is where it was noticed.
+
+- **Sign out did not sign out.** `clearCredentials()` empties the secret
+  store, which on the phones IS the credential — and in a browser holds
+  nothing, because the session is the gateway's own `HttpOnly` cookie. So the
+  app returned to the wizard, the session stayed alive on the gateway, and the
+  next reload signed straight back in as the person who had just left. Found by
+  signing out during this pass and reloading. `CookieSessionCredentials` has
+  always known how to `POST /auth/logout`; nothing called it. `b9983e7`
+- **The password form was unreachable after a sign-out.** `draftFromConfig`
+  synthesises a probe from the stored gateway so the wizard can resume on the
+  sign-in step, and a preference file cannot know whether the provider takes a
+  password — the entry it writes says `false`. The step started in `ready`
+  whenever the draft carried a probe and then believed it, so every resume
+  offered the redirect and nothing else. The in-app form, the one the previous
+  pass had just taught to submit on Return and to be filled by a password
+  manager, was unreachable for exactly the visitor who had used it. `62df06b`
+- **An ungated gateway was told it was too old.** `authModeOf` answers
+  `session_token` for a gateway that is not gated at all, and the blocked
+  notice tested "anything that is not cookie". The screen said "not gated by an
+  identity provider" and "it requires a sign-in but does not advertise the
+  cookie flow" one under the other. `e91044c`
+- **…and then offered a Continue that could never be pressed.** A
+  session-token gateway is a genuine dead end in a tab — this build keeps no
+  bearer token at all, for the reasons `platform/secret-store.web.ts` sets out
+  — and the step rendered nothing at all rather than saying so. `a899dd0`
+- **A right click on a chat row did nothing.** The row menu (open, mark as
+  read, colour, move, add a divider, archive) was reachable by one gesture: a
+  long press, which is right on a phone and is not a thing anybody does with a
+  mouse. React Native has no secondary-click event, which is why the Mac
+  answers this with a native view; the browser has the event. `0b2c7c0`
+- **The `+` labelled New cron did not make a cron.** It navigated to the
+  crons screen and left the reader to find the same `+` again at the bottom of
+  the list. Not a browser defect — the same header, and the same behaviour, on
+  every platform. `79815e2`
+- **A refused service worker was retried by every caller.** `ensureWorker`
+  left `registration` at `null` after a failure, which is indistinguishable
+  from "not tried yet". Eighteen console errors on one transcript. `2e6c17a`
+
+### Measured, on a transcript long enough to mean something
+
+`--history-rows <n>` (`ba44b5a`) writes the history a real gateway would
+already have had in front of the fixture, so 400 rows no longer means 200
+round trips through the live socket. The rows are mixed — a short question, a
+paragraph that wraps several times, a fenced code block, a tool call — because
+four hundred identical one-line bubbles measure a list of identical one-line
+bubbles.
+
+Driven on the Writer chat with ~390 rows, deliberately under
+`REST_HISTORY_THRESHOLD` so the whole conversation loads in one request and
+paging is not part of what is being timed. 41,474 px of content in an 842 px
+viewport, flung end to end and back twice at 240 px per frame — a fling, not a
+walk: the list gets no spare frame to catch up in. `requestAnimationFrame`
+deltas, `PerformanceObserver` on `longtask`, CPU throttling through the
+DevTools protocol and verified against a busy loop (18 ms against 5 ms, so the
+4× is real).
+
+| Run             | p50     | p95     | p99      | max      | frames > 16.7 ms | long tasks |
+| --------------- | ------- | ------- | -------- | -------- | ---------------- | ---------- |
+| Unthrottled     | 8.3 ms  | 10.9 ms | 12.9 ms  | 19.1 ms  | 2 of 339         | 0          |
+| 4× CPU throttle | 10.6 ms | 41.0 ms | 138.5 ms | 237.9 ms | **157 of 341**   | 8          |
+
+**This is the first jank this project has recorded.** Unthrottled the list is
+what the previous pass found on a short one: a p50 at the display's own 120 Hz
+cadence and two dropped frames in a thousand. At 4× — a mid-range laptop, or a
+phone — it drops 46% of its frames and the worst is a quarter of a second. No
+long task fired until the very end of that run, which is the shape of the
+problem: the work is spread across frames rather than concentrated in one, so
+it is the list's per-frame measuring and mounting rather than a single
+expensive operation.
+
+A second measurement, for scale: the Researcher chat paged to 25,580 px
+unthrottled gave p95 12.0 ms, p99 15.2 ms, max 17.1 ms and 1 dropped frame of 189. The cliff is the throttle, not the length.
+
+Paging itself works and is worth stating, because it was half-suspected of
+being broken: wheel-scrolling to the far end walked the list from 240 rows to
+818 a page at a time, and the oldest fixture row was reachable.
+
+### Safari
+
+Loaded from `open -a Safari http://127.0.0.1:9120`, captured window-only. It
+renders the app: the dark scheme off the system, the glass card with its
+radius and tint, the `hermes serve` chip in the right face, the primary button
+in the theme's accent. Nothing visibly differs from Chromium at the same
+width.
+
+Beyond that this is honest rather than complete:
+
+- **The page could not be driven.** `do JavaScript` needs "Allow JavaScript
+  from Apple Events" in Safari's Developer settings, which is a security
+  setting this pass would not change; `source of front document` returns the
+  template, not the rendered DOM.
+- **Signing in was not attempted**, so the transcript, the sheets and
+  `backdrop-filter` over real content were not seen in Safari. A card over a
+  flat background cannot show whether a blur is being applied.
+- **The focus ring was not reached.** Plain Tab moves between form fields only
+  in Safari's default configuration, and neither Tab nor Option+Tab drew a ring
+  on the wizard's button through UI scripting. That is Safari's "Press Tab to
+  highlight each item" being off by default rather than a finding about the
+  rule — but it is a real thing about who can reach the app's controls in
+  Safari, and it is unresolved.
+
+### Still not covered
+
+Shorter than last time, and still not short.
+
+- **Most of the conversation surface, again.** Tool cards, thoughts,
+  bot-to-bot lines, cron cards, the approval and clarify sheets (backdrop
+  click, Escape, mouse drag), the queued strip with Steer/Edit/Delete, the
+  slash popover, the attach menu, attachments by picker, drag-and-drop and
+  paste, and the jump-to-latest pill were **not** exercised. The reason is
+  worth writing down so the next pass does not repeat it: the long-transcript
+  measurement was set up by injecting 585 turns into the running fixture, which
+  buried every one of those shapes under four hundred rows of generated
+  history. Do the conversation sweep FIRST, against a clean fixture, and start
+  the long one with `--history-rows` on a server of its own.
+- **The chats list beyond search and the context menu.** Search filters
+  correctly and Escape closes the menu; mouse drag reorder, arrow-key
+  navigation, and actually performing archive and add-divider were not driven.
+- **⌘K and the shortcut table.** Escape was exercised twice (the row menu, and
+  Settings one level). Nothing else.
+- **Crons and Activity in depth.** The crons editor opens from the chats `+`
+  and cancels cleanly; nothing past that.
+- **Settings sub-pages.** The Gateway group was read closely because its
+  address was wrong; the sub-pages were not opened.
+- **390 px and 820 px.** Everything above is 1280. The narrow layouts were not
+  re-walked after any of these changes.
+- **The light scheme.** Every screenshot in this pass is dark.
+- **Web Push**, exactly as unverified as it was, and now for a reason that has
+  been demonstrated rather than guessed.
+
+### One thing left deliberately
+
+The browser tab keeps the last screen's title while signed out: signing out of
+Settings leaves "Settings · Hermie" on a page showing the wizard, and a fresh
+visit shows "Hermie". `page-title.web.ts` follows the route, and the wizard is
+not a route. Small, real, and not touched this round.
