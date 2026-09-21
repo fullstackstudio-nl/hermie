@@ -18,6 +18,7 @@ import type { Verbosity } from '@hermie/transcript'
 import { create } from 'zustand'
 
 import { keyValueStore } from '../platform/key-value-store'
+import { asNameOrder, DEFAULT_NAME_ORDER, type NameOrder } from './bot-names'
 import {
   DEFAULT_THEME_CHOICE,
   isThemePresetName,
@@ -53,6 +54,7 @@ interface PersistedChatView {
   defaults: ChatViewSettings
   perChat: Record<string, Partial<ChatViewSettings>>
   appearance?: Appearance
+  botNameOrder?: NameOrder
   themeChoice?: ThemeChoice
   userThemes?: UserTheme[]
   /** What Part 2 wrote before a theme was a theme. Read, never written. */
@@ -179,6 +181,14 @@ export interface SettingsState {
   defaults: ChatViewSettings
   perChat: Record<string, Partial<ChatViewSettings>>
   appearance: Appearance
+  /**
+   * Which of a bot's two names is the large one. See `store/bot-names.ts`.
+   *
+   * App-wide rather than per chat, and deliberately so: it is a statement about
+   * how this reader thinks about their bots, and a list where four rows lead
+   * with a handle and two with a label is a list that has to be read twice.
+   */
+  botNameOrder: NameOrder
   /** Which theme the glass floats over: a preset, or one of the reader's own. */
   themeChoice: ThemeChoice
   /** Themes the reader made. App-wide, and ADR-0016's `hermie-app` carries them. */
@@ -190,6 +200,7 @@ export interface SettingsState {
   setChatView: (botName: string, patch: Partial<ChatViewSettings>) => void
   resetChatView: (botName: string) => void
   setAppearance: (appearance: Appearance) => void
+  setBotNameOrder: (order: NameOrder) => void
   setThemeChoice: (choice: ThemeChoice) => void
   /** Copy a preset into a theme of the reader's own, and return its id. */
   createUserTheme: (base: ThemePresetName, name: string) => string
@@ -206,6 +217,7 @@ export interface SettingsState {
    */
   applyAppSettings: (patch: {
     defaults?: ChatViewSettings
+    botNameOrder?: NameOrder
     themeChoice?: ThemeChoice
     userThemes?: UserTheme[]
   }) => void
@@ -242,9 +254,9 @@ function newThemeId(): string {
 export const useSettingsStore = create<SettingsState>((set, get) => {
   /** Write whatever is in the store now; every setter calls this after its `set`. */
   const save = (): void => {
-    const { defaults, perChat, appearance, themeChoice, userThemes } = get()
+    const { defaults, perChat, appearance, botNameOrder, themeChoice, userThemes } = get()
 
-    persist({ defaults, perChat, appearance, themeChoice, userThemes })
+    persist({ defaults, perChat, appearance, botNameOrder, themeChoice, userThemes })
   }
 
   const writeThemes = (userThemes: UserTheme[]): void => {
@@ -256,6 +268,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
     defaults: DEFAULT_CHAT_VIEW,
     perChat: {},
     appearance: DEFAULT_APPEARANCE,
+    botNameOrder: DEFAULT_NAME_ORDER,
     themeChoice: DEFAULT_THEME_CHOICE,
     userThemes: [],
     loaded: false,
@@ -276,6 +289,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
         defaults: { ...DEFAULT_CHAT_VIEW, ...asPatch(stored?.defaults) },
         perChat,
         appearance: asAppearance(stored?.appearance) ?? DEFAULT_APPEARANCE,
+        botNameOrder: asNameOrder(stored?.botNameOrder) ?? DEFAULT_NAME_ORDER,
         themeChoice: asThemeChoice(stored?.themeChoice, stored?.wallpaper) ?? DEFAULT_THEME_CHOICE,
         userThemes: asUserThemes(stored?.userThemes),
         loaded: true
@@ -302,6 +316,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
 
     setAppearance(appearance) {
       set({ appearance })
+      save()
+    },
+
+    setBotNameOrder(botNameOrder) {
+      set({ botNameOrder })
       save()
     },
 
@@ -379,6 +398,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
     applyAppSettings(patch) {
       set({
         ...(patch.defaults ? { defaults: patch.defaults } : {}),
+        ...(patch.botNameOrder ? { botNameOrder: patch.botNameOrder } : {}),
         ...(patch.themeChoice ? { themeChoice: patch.themeChoice } : {}),
         ...(patch.userThemes ? { userThemes: patch.userThemes } : {})
       })
@@ -389,6 +409,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
         defaults: DEFAULT_CHAT_VIEW,
         perChat: {},
         appearance: DEFAULT_APPEARANCE,
+        botNameOrder: DEFAULT_NAME_ORDER,
         themeChoice: DEFAULT_THEME_CHOICE,
         userThemes: [],
         loaded: false

@@ -65,8 +65,25 @@ import { formatClock } from './format'
 import { chatStrings } from './strings'
 
 export interface ChatHeaderProps {
+  /**
+   * The large line: whichever of the bot's two names this reader put first.
+   *
+   * Resolved by the caller (`store/bot-names.ts`), because the choice is one
+   * app-wide setting and a header that read it for itself would be a second
+   * place the rule lives.
+   */
   name: string
-  handle?: string
+  /**
+   * The bot's OTHER name, for the line under it. Empty when it has only one.
+   *
+   * It used to be the handle specifically, drawn as `@handle` and only when no
+   * subtitle existed — which `subtitleFor` always produces, so in the real app
+   * it was never drawn at all and only the gallery ever saw it. It is now
+   * whichever name did not win the top line, plain: the `@` was doing the work
+   * of saying "this is the addressable one", and that is no longer reliably
+   * true of the name on this line.
+   */
+  secondaryName?: string
   /** The profile's picture, when the roster has loaded one. */
   avatarUri?: string
   /**
@@ -206,7 +223,7 @@ function StatusLine({ line, reduceMotion }: { line: string; reduceMotion: boolea
 
 export function ChatHeader({
   name,
-  handle,
+  secondaryName,
   avatarUri,
   presence = 'online',
   lastSeenAt,
@@ -222,7 +239,16 @@ export function ChatHeader({
   const ring = accentFill ?? theme.accent().fill
   const size = CONTROL_SIZE.regular
   const state = stateLabel(presence, lastSeenAt)
-  const line = subtitle ?? (handle ? `@${handle} · ${state}` : state)
+  /*
+    The other name AND what the bot is doing, on one line.
+
+    `subtitle` used to replace this line wholesale, and since `subtitleFor`
+    answers for every connection state it always did — so the second name was
+    unreachable in the app. The override now replaces only the STATE half, which
+    is what it was always describing, and the name in front of it survives.
+  */
+  const status = subtitle ?? state
+  const line = secondaryName ? `${secondaryName} · ${status}` : status
 
   return (
     <View

@@ -53,6 +53,7 @@ import { strings } from '../../i18n/strings'
 import { Avatar } from '../../chat-ui/primitives/Avatar'
 import { useChatLayoutStore } from '../../store/chat-layout'
 import { effectiveDisplayName, needsSharingNotice, useDeviceContextStore } from '../../store/device-context'
+import { botNames, useNameOrder } from '../../store/bot-names'
 import type { Bot } from '../../store/bots'
 import { AccentSwatches } from '../../ui/AccentSwatches'
 import { BottomSheet } from '../../ui/BottomSheet'
@@ -94,6 +95,8 @@ export function BotProfileSheet({
 }: BotProfileSheetProps) {
   const theme = useTheme()
   const text = strings.botProfile
+  /* The same two lines every other surface draws, in this reader's own order. */
+  const names = botNames(bot, useNameOrder())
 
   const [description, setDescription] = useState(bot.description)
   /** A picked picture, `null` to remove the current one, `undefined` to leave it. */
@@ -199,7 +202,7 @@ export function BotProfileSheet({
 
   return (
     <BottomSheet
-      accessibilityLabel={text.open(bot.displayName || bot.name)}
+      accessibilityLabel={text.open(names.primary)}
       onRequestClose={onClose}
       {...(onClosed ? { onClosed } : {})}
       testID={testID}
@@ -210,7 +213,7 @@ export function BotProfileSheet({
 
         <InsetGroup footer={text.photoHint} header={text.photo}>
           <InsetRow style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.md }}>
-            <Avatar name={bot.displayName || bot.name} size={AVATAR_SIZE.list} {...(shown ? { uri: shown } : {})} />
+            <Avatar name={names.primary} size={AVATAR_SIZE.list} {...(shown ? { uri: shown } : {})} />
             <View style={{ flex: 1, gap: theme.space.xs }}>
               <Button
                 onPress={() => void onPickPhoto()}
@@ -298,10 +301,21 @@ export function BotProfileSheet({
         )}
 
         <InsetGroup header={text.about}>
+          {/*
+            TWO rows, because they are two facts.
+
+            One row showed the display name under the label "Profile", which
+            said neither thing: the handle — the name `@`-addressing, crons, DM
+            lines and the gateway's own logs all use — was not on this sheet at
+            all, and the label promised the other one. The handle is `mono`
+            because it is an identifier and reads as one.
+          */}
+          <InsetValueRow detail={text.profileNameHint} label={text.profileName} mono value={bot.name} />
           <InsetValueRow
             detail={text.displayNameReadOnly}
-            label={text.profileName}
-            value={bot.displayName || bot.name}
+            label={text.displayName}
+            mono={false}
+            value={bot.displayName && bot.displayName !== bot.name ? bot.displayName : text.displayNameUnset}
           />
           <InsetValueRow
             label={text.model}

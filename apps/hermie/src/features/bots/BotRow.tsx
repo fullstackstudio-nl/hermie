@@ -17,6 +17,7 @@ import { Avatar, formatListTime } from '../../chat-ui'
 import { strings } from '../../i18n/strings'
 import { ContextMenuHost, HAS_NATIVE_CONTEXT_MENU } from '../../platform/context-menu'
 import { secondaryClick } from '../../platform/secondary-click'
+import { botNames, useNameOrder } from '../../store/bot-names'
 import type { Bot } from '../../store/bots'
 import { GlassSurface } from '../../ui/glass'
 import { Icon, ICON_SIZE } from '../../ui/Icon'
@@ -102,6 +103,13 @@ export const BotRow = memo(function BotRow({
   const theme = useTheme()
   const [hovered, setHovered] = useState(false)
   const swatch = theme.accent(accent)
+  /*
+    Both of the bot's names, in the order this reader chose. `secondary` is
+    empty for a bot that has only one name, which is every bot on a gateway
+    where nobody has set a display name — so the third line is conditional and
+    the row keeps the height it had.
+  */
+  const names = botNames(bot, useNameOrder())
 
   /**
    * Built here rather than by the list, so the list can keep handing every row the
@@ -114,13 +122,13 @@ export const BotRow = memo(function BotRow({
         accent,
         archived,
         botName: bot.name,
-        displayName: bot.displayName,
+        displayName: names.primary,
         movable: !archived,
         mutedUntil,
         folders: menuFolders,
         unread
       }),
-    [accent, archived, bot.displayName, bot.name, menuFolders, mutedUntil, unread]
+    [accent, archived, names.primary, bot.name, menuFolders, mutedUntil, unread]
   )
 
   // The last REAL message this bot's chat holds, from the transcript when there
@@ -144,7 +152,9 @@ export const BotRow = memo(function BotRow({
   const stamp = stampOf(presence, bot)
 
   const label = [
-    bot.displayName,
+    // Both names, so a screen reader announces the row by the name the reader
+    // sees AND by the one the rest of the app addresses it by.
+    [names.primary, names.secondary].filter(Boolean).join(', '),
     strings.presence[presence.state],
     unreadCount > 0 ? strings.bots.unreadLabel(unreadCount) : unread ? strings.bots.unread : '',
     // Said in words here rather than left to the glyph, which keeps itself out
@@ -189,7 +199,11 @@ export const BotRow = memo(function BotRow({
 
       <View>
         <Avatar
-          name={bot.displayName}
+          // The PRIMARY line, so the initial and the tint agree with the name
+          // drawn beside them. `initialFor` takes the first character and
+          // `tintIndex` hashes the whole string, so feeding it the other name
+          // would give `lance-vance` an N in a colour nothing else uses.
+          name={names.primary}
           size={AVATAR_SIZE.list}
           // The accent ring is how a per-chat colour shows up in the list. A
           // chat on Default gets no ring at all rather than a blue one, so the
@@ -221,7 +235,7 @@ export const BotRow = memo(function BotRow({
       <View style={{ flex: 1, minWidth: 0 }}>
         <View style={{ alignItems: 'baseline', flexDirection: 'row', gap: theme.space.sm }}>
           <Text numberOfLines={1} style={{ flex: 1, fontWeight: unread ? '700' : '600' }} variant="name">
-            {bot.displayName}
+            {names.primary}
           </Text>
           {stamp ? (
             <Text color="textFaint" variant="meta">
@@ -229,6 +243,20 @@ export const BotRow = memo(function BotRow({
             </Text>
           ) : null}
         </View>
+
+        {/*
+          The other name, small and quiet, and only when there is one.
+
+          It is not the preview's line: the preview says what was last said and
+          this says what the bot is called, and folding one into the other would
+          make a bot with no messages yet look as though its name were its last
+          message.
+        */}
+        {names.secondary ? (
+          <Text color="textMuted" numberOfLines={1} testID={`bot-secondary-name-${bot.name}`} variant="meta">
+            {names.secondary}
+          </Text>
+        ) : null}
 
         <Text
           color={systemLine ? 'textFaint' : unread ? 'text' : 'textMuted'}
@@ -360,7 +388,7 @@ export const BotRow = memo(function BotRow({
       // the one that did not was the system's, drawn over the top.
       cornerRadius={theme.radii.card}
       items={menu}
-      menuTitle={bot.displayName}
+      menuTitle={names.primary}
       onSelect={id => onMenuSelect(bot.name, id)}
       testID={`bot-row-menu-${bot.name}`}
     >

@@ -27,7 +27,7 @@ const flat = (testID: string) => StyleSheet.flatten(screen.getByTestId(testID).p
 describe('the chat header', () => {
   function render() {
     renderScreen(
-      <ChatHeader name="Researcher" handle="researcher" onOpenOptions={jest.fn()} onToggleSidebar={jest.fn()} />
+      <ChatHeader name="researcher" onOpenOptions={jest.fn()} onToggleSidebar={jest.fn()} secondaryName="Researcher" />
     )
   }
 
@@ -59,6 +59,7 @@ describe('the chat header', () => {
     // presence line; moving the header out of the layout must not lose it.
     render()
 
-    expect(screen.getByText(/@researcher/)).toBeTruthy()
+    // The second line is the bot's OTHER name beside what it is doing.
+    expect(screen.getByText(/Researcher · /)).toBeTruthy()
   })
 })

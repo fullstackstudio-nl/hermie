@@ -892,6 +892,18 @@ export const strings = {
     theme: 'Theme',
     themeOptions: { system: 'System', light: 'Light', dark: 'Dark' },
     themeHint: 'System follows the device; Light and Dark pin the app either way.',
+    botNames: 'Bot names',
+    /**
+     * Named after the FIELDS, not after an example.
+     *
+     * An example is a promise about this reader's own bots that the setting
+     * cannot keep — on a gateway where nobody has set a display name both
+     * orders show the same thing — and these are the two words the bot profile
+     * sheet already labels the same two rows with.
+     */
+    botNameOptions: { profile: 'Profile name', display: 'Display name' },
+    botNamesHint:
+      'Which name is the large one. The profile name is what the rest of the app addresses a bot by; the display name is the label set on the gateway. A bot with only one of them shows one line.',
     preset: 'THEME',
     presetOptions: { blue: 'Blue', graphite: 'Graphite', lime: 'Lime' },
     /** Said under the cards, because a card shows the theme rather than naming it. */
@@ -1068,6 +1080,11 @@ export const strings = {
      * no reason next to it reads as a bug.
      */
     displayNameReadOnly: 'Set on the gateway, in this profile.',
+    /** The handle row's own caption: what this name is FOR, not where it came from. */
+    profileNameHint: 'The name the rest of the app addresses this bot by.',
+    displayName: 'Display name',
+    /** Shown in place of a display name that was never set. */
+    displayNameUnset: 'Not set',
 
     colour: 'COLOUR',
     colourHint: 'This chat only. It tints the bubbles, the avatar ring and the row in the list.',
@@ -1085,7 +1102,7 @@ export const strings = {
     about: 'ABOUT THIS BOT',
     model: 'Model',
     provider: 'Provider',
-    profileName: 'Profile',
+    profileName: 'Profile name',
     session: 'Session',
     gatewayVersion: 'Gateway',
     unknown: '—',

@@ -82,17 +82,20 @@ function harness(bridgeOverrides: Partial<WidgetBridge> = {}) {
   const bots = fakeStore({ bots: [bot('researcher')], running: {}, lastSeen: {}, avatars: {} })
   const chats = fakeStore({ chats: {} })
   const layout = fakeStore({ accents: {}, archived: {}, mutes: {} })
+  // The widget's one name line follows the app's own order, so the sync reads
+  // it and re-writes when it changes. `profile` is the shipping default.
+  const settings = fakeStore({ botNameOrder: 'profile' })
 
   const sync = new WidgetSync({
     bridge: fake.bridge,
-    // The three stores are structurally what the sync reads and nothing more,
-    // which is the whole reason it takes them rather than importing them.
-    stores: { bots, chats, layout } as unknown as never,
+    // The stores are structurally what the sync reads and nothing more, which
+    // is the whole reason it takes them rather than importing them.
+    stores: { bots, chats, layout, settings } as unknown as never,
     debounceMs: 10,
     now: () => 1_770_000_000_000
   })
 
-  return { ...fake, sync, bots, chats, layout }
+  return { ...fake, sync, bots, chats, layout, settings }
 }
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 40))

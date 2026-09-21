@@ -433,30 +433,30 @@ const SECTIONS: readonly GallerySection[] = [
     render: ctx => (
       <>
         <ChatHeader
-          handle="researcher"
-          name="Researcher"
+          name="researcher"
+          secondaryName="Researcher"
           onOpenOptions={() => ctx.openSheet('options')}
           presence="working"
           testID="gallery-chat-header"
         />
         <ChatHeader
-          handle="writer"
           lastSeenAt={1_767_000_000}
-          name="Writer"
+          name="writer"
+          secondaryName="Writer"
           onOpenOptions={() => ctx.openSheet('options')}
           presence="offline"
           testID="gallery-chat-header-offline"
         />
         <ChatHeader
-          handle="bookkeeper"
-          name="Bookkeeper"
+          name="bookkeeper"
+          secondaryName="Bookkeeper"
           onOpenOptions={() => ctx.openSheet('options')}
           presence="needsInput"
           testID="gallery-chat-header-needs-input"
         />
         <ChatHeader
-          handle="postman"
-          name="Postman"
+          name="postman"
+          secondaryName="Postman"
           onOpenOptions={() => ctx.openSheet('options')}
           presence="online"
           testID="gallery-chat-header-online"
@@ -885,7 +885,7 @@ const SECTIONS: readonly GallerySection[] = [
       // Typing is forced on rather than driven by the composer, so `simctl`
       // needs no tap to reach the state the owner actually reported.
       <Screen edgeToEdgeTop={false} padded={false} testID="gallery-typing-after-own">
-        <ChatHeader handle="researcher" name="Researcher" onOpenOptions={() => ctx.say('Options')} presence="working" />
+        <ChatHeader name="researcher" onOpenOptions={() => ctx.say('Options')} presence="working" />
         <TranscriptList
           items={pendingTurnTranscript}
           onOpenBot={handle => ctx.say(`Open bot @${handle}`)}
@@ -1194,8 +1194,8 @@ export function GalleryScreen({ onClose, section }: GalleryScreenProps) {
   const chatDemo = (
     <Screen edgeToEdgeTop={false} padded={false} testID="gallery-chat">
       <ChatHeader
-        handle="researcher"
-        name="Researcher"
+        name="researcher"
+        secondaryName="Researcher"
         onBack={() => setTranscriptOpen(false)}
         onOpenOptions={() => setOptionsOpen(true)}
         presence="working"

@@ -43,6 +43,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   VoiceOver's rotor and a keyboard both already look, and in the row's context menu as before. A
   folder gains the same pair in its menu and its accessibility actions.
 
+- **A bot's profile name is visible, and it leads.** `profiles.list` gives two names — the handle
+  (`lance-vance`), which is what `@`-addressing, crons, DM lines and the gateway's own logs use, and
+  the display name ("Netwerkbeheerder"), which is a label somebody typed — and the app showed only
+  the second. A reader looking at a chat list could not tell which bot an `@mention` elsewhere in the
+  app referred to. Both are drawn now: the chat list row, the chat header pill and the bot profile
+  sheet carry a large line and a small one, and **Settings → Appearance → Bot names** swaps which is
+  which, app-wide, stored per account in `ui_meta`. The widget's single line follows the same choice.
+  A bot whose display name was never set, or is its handle in different case, still shows one line.
+  The profile sheet's About group separates "Profile name" from "Display name" instead of labelling
+  one of them with the other's name.
+
 ## [0.1.1] - 2026-09-22
 
 

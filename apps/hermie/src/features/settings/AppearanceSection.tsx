@@ -17,6 +17,7 @@ import { type Appearance, useSettingsStore } from '../../store/settings'
 import { InsetButtonRow, InsetGroup, Text } from '../../ui/primitives'
 import { SegmentedRow } from '../../ui/sheets'
 import { useTheme } from '../../ui/theme'
+import type { NameOrder } from '../../store/bot-names'
 import { THEME_PRESET_ORDER } from '../../ui/themes'
 import { ThemeCard } from './ThemeCard'
 
@@ -24,6 +25,19 @@ const APPEARANCE_OPTIONS: { value: Appearance; label: string }[] = [
   { value: 'system', label: strings.settings.themeOptions.system },
   { value: 'light', label: strings.settings.themeOptions.light },
   { value: 'dark', label: strings.settings.themeOptions.dark }
+]
+
+/**
+ * Which of a bot's two names is the large one, app-wide.
+ *
+ * The segments are named after the FIELDS rather than after an example, because
+ * an example is a promise about this reader's own bots that the setting cannot
+ * keep: a gateway where nobody has set a display name shows the same thing
+ * either way, and a segment reading "lance-vance" would be a lie on it.
+ */
+const NAME_ORDER_OPTIONS: { value: NameOrder; label: string }[] = [
+  { value: 'profile', label: strings.settings.botNameOptions.profile },
+  { value: 'display', label: strings.settings.botNameOptions.display }
 ]
 
 export interface AppearanceSectionProps {
@@ -35,6 +49,8 @@ export function AppearanceSection({ onOpenAdvanced }: AppearanceSectionProps) {
   const theme = useTheme()
   const appearance = useSettingsStore(state => state.appearance)
   const setAppearance = useSettingsStore(state => state.setAppearance)
+  const botNameOrder = useSettingsStore(state => state.botNameOrder)
+  const setBotNameOrder = useSettingsStore(state => state.setBotNameOrder)
   const themeChoice = useSettingsStore(state => state.themeChoice)
   const userThemes = useSettingsStore(state => state.userThemes)
   const setThemeChoice = useSettingsStore(state => state.setThemeChoice)
@@ -48,6 +64,23 @@ export function AppearanceSection({ onOpenAdvanced }: AppearanceSectionProps) {
           options={APPEARANCE_OPTIONS}
           testID="settings-appearance"
           value={appearance}
+        />
+      </InsetGroup>
+
+      {/*
+        Its own group, for its own footer.
+
+        The two names need explaining in a way the light/dark choice does not —
+        which of them the rest of the app addresses a bot by is the whole reason
+        somebody would move this — and a group has one footer.
+      */}
+      <InsetGroup footer={strings.settings.botNamesHint}>
+        <SegmentedRow
+          label={strings.settings.botNames}
+          onChange={(value: NameOrder) => setBotNameOrder(value)}
+          options={NAME_ORDER_OPTIONS}
+          testID="settings-bot-names"
+          value={botNameOrder}
         />
       </InsetGroup>
 

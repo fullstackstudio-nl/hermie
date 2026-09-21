@@ -32,6 +32,7 @@
 import { formatPreview, initialFor } from '../../chat-ui'
 import { hasOpenRequest, unreadCountSince } from '@hermie/transcript'
 import type { ChatState } from '@hermie/transcript'
+import { botLabel, type NameOrder } from '../../store/bot-names'
 import type { Bot } from '../../store/bots'
 import { isMuted, type Mutes } from '../../store/mute'
 import { ACCENTS, type AccentName } from '../../ui/tokens'
@@ -86,6 +87,16 @@ export interface WidgetSnapshot {
 
 export interface WidgetSnapshotInput {
   bots: readonly Bot[]
+  /**
+   * Which of a bot's two names the widget's one line carries.
+   *
+   * A widget row has room for exactly one name, so it gets the PRIMARY one —
+   * the same one the chat list leads with — and a reader who switched the order
+   * in Settings sees the switch on their home screen as well. The native
+   * renderers read `displayName` and know nothing about the choice; this is the
+   * only place it is made.
+   */
+  nameOrder: NameOrder
   chats: Record<string, ChatState>
   /** Bots the last `session.active_list` poll could place a busy session on. */
   running: Record<string, true>
@@ -172,11 +183,16 @@ function projectBot(bot: Bot, input: WidgetSnapshotInput): WidgetBot {
   // `Date.now()` because that is what the snapshot stamps itself with.
   const muted = isMuted(input.mutes, bot.name, Math.floor(input.now / 1000))
 
+  // The line the widget draws, which is the app's primary name for this bot.
+  // `name` beside it stays the HANDLE whatever the order says: it is the deep
+  // link's key (`hermie://chat/<bot>`) and the avatar file's key, not a label.
+  const label = botLabel(bot, input.nameOrder)
+
   return {
     name: bot.name,
-    displayName: bot.displayName || bot.name,
+    displayName: label,
     ...(input.avatars[bot.name] ? { avatarPath: widgetAvatarPath(bot.name) } : {}),
-    initials: initialFor(bot.displayName || bot.name),
+    initials: initialFor(label),
     colour: (ACCENTS[accent] ?? ACCENTS.default).bubble,
     presence: presence.state,
     lastLine: bot.canonical?.preview ? formatPreview(bot.canonical.preview) : '',

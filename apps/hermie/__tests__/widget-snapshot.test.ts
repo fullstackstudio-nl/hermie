@@ -45,6 +45,7 @@ function bot(name: string, overrides: Partial<Bot> = {}): Bot {
 function input(overrides: Partial<WidgetSnapshotInput> = {}): WidgetSnapshotInput {
   return {
     bots: [bot('researcher')],
+    nameOrder: 'profile',
     chats: {},
     running: {},
     lastSeen: {},
@@ -222,11 +223,25 @@ describe('projectWidgetSnapshot', () => {
     expect(widgetAvatarPath('../../etc/passwd')).toBe('avatars/..%2F..%2Fetc%2Fpasswd.png')
   })
 
-  it('takes the initial off the display name, which is what the app draws', () => {
-    const snapshot = projectWidgetSnapshot(input({ bots: [bot('researcher', { displayName: 'Onderzoeker' })] }))
+  it('draws the app’s primary name, and takes the initial off that', () => {
+    const withBoth = { bots: [bot('researcher', { displayName: 'Onderzoeker' })] }
 
-    expect(snapshot.bots[0]?.initials).toBe('O')
-    expect(snapshot.bots[0]?.displayName).toBe('Onderzoeker')
+    // The widget has room for ONE name, so it draws the app's primary one —
+    // the handle under the shipping default — and the initial follows it.
+    const leading = projectWidgetSnapshot(input(withBoth))
+
+    expect(leading.bots[0]?.displayName).toBe('researcher')
+    expect(leading.bots[0]?.initials).toBe('R')
+
+    // Switch the order in Settings and the home screen follows.
+    const friendly = projectWidgetSnapshot(input({ ...withBoth, nameOrder: 'display' }))
+
+    expect(friendly.bots[0]?.displayName).toBe('Onderzoeker')
+    expect(friendly.bots[0]?.initials).toBe('O')
+
+    // `name` is the deep link's key and the avatar file's key either way.
+    expect(leading.bots[0]?.name).toBe('researcher')
+    expect(friendly.bots[0]?.name).toBe('researcher')
   })
 })
 

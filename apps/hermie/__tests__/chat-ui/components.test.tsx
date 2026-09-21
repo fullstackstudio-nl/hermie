@@ -227,9 +227,9 @@ describe('ChatHeader', () => {
   it('opens the options menu', () => {
     const onOpenOptions = jest.fn()
 
-    renderScreen(<ChatHeader handle="researcher" name="Researcher" onOpenOptions={onOpenOptions} running />)
+    renderScreen(<ChatHeader name="researcher" onOpenOptions={onOpenOptions} running secondaryName="Researcher" />)
 
-    expect(screen.getByText(/@researcher/)).toBeTruthy()
+    expect(screen.getByText(/Researcher · /)).toBeTruthy()
 
     fireEvent.press(screen.getByTestId('chat-header-options'))
     expect(onOpenOptions).toHaveBeenCalled()

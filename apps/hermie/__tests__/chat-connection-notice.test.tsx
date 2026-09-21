@@ -195,7 +195,7 @@ describe('a chat whose gateway is away', () => {
 
     expect(screen.getByTestId('chat-connecting-state')).toBeTruthy()
     // The bot's own name, under its disc — the header carries the other one.
-    expect(screen.getAllByText('Researcher').length).toBeGreaterThan(1)
+    expect(screen.getAllByText('researcher').length).toBeGreaterThan(1)
     expect(screen.getAllByText('Reconnecting…').length).toBeGreaterThan(0)
     // Something is happening, and the plate says so without claiming more.
     expect(screen.getByTestId('chat-connecting-state-activity')).toBeTruthy()

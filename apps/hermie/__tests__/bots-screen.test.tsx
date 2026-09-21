@@ -11,6 +11,7 @@ import { BotsScreen } from '../src/features/bots'
 import { strings } from '../src/i18n/strings'
 import { type Bot, useBotsStore } from '../src/store/bots'
 import { useChatLayoutStore } from '../src/store/chat-layout'
+import { useSettingsStore } from '../src/store/settings'
 import { useChatsStore } from '../src/store/chats'
 import { renderScreen } from './support/render'
 
@@ -103,7 +104,10 @@ describe('BotsScreen', () => {
 
     expect(screen.getByTestId('bot-row-researcher')).toBeTruthy()
     expect(screen.getByTestId('bot-row-writer')).toBeTruthy()
-    expect(screen.getByText('Researcher')).toBeTruthy()
+    // The row leads with the profile name. `Researcher` is this handle in
+    // different case, which is one name and not two, so there is no second line.
+    expect(screen.getByText('researcher')).toBeTruthy()
+    expect(screen.queryByTestId('bot-secondary-name-researcher')).toBeNull()
     expect(screen.getByText('Which tone should I use?')).toBeTruthy()
   })
 
@@ -141,8 +145,8 @@ describe('BotsScreen', () => {
 
     // The bead never carries the state on colour alone; this label is what a
     // screen reader gets instead of it.
-    expect(screen.getByLabelText('Researcher, Working…, New')).toBeTruthy()
-    expect(screen.getByLabelText('Writer, Online, New')).toBeTruthy()
+    expect(screen.getByLabelText('researcher, Working…, New')).toBeTruthy()
+    expect(screen.getByLabelText('writer, Online, New')).toBeTruthy()
   })
 
   it('shows the working state for a bot the gateway reports as busy', () => {
@@ -205,6 +209,50 @@ describe('BotsScreen', () => {
     renderScreen(<BotsScreen />)
 
     expect(screen.getByTestId('bots-empty')).toBeTruthy()
+  })
+})
+
+/**
+ * A bot with two genuinely different names gets two lines, in the order this
+ * reader chose; one whose display name is only its handle in different case
+ * gets one. See `store/bot-names.ts`.
+ */
+describe('the two names a bot has', () => {
+  const NAMED: Bot[] = [
+    bot({
+      name: 'lance-vance',
+      displayName: 'Netwerkbeheerder',
+      description: 'Keeps the network up.',
+      canonical: { id: 's', resolvedId: 's', preview: 'All quiet.', lastActive: 1_700_000_100, messageCount: 1 }
+    })
+  ]
+
+  beforeEach(() => {
+    useSettingsStore.setState({ botNameOrder: 'profile' })
+    useBotsStore.getState().setBots(NAMED)
+  })
+
+  afterEach(() => useSettingsStore.setState({ botNameOrder: 'profile' }))
+
+  it('leads with the profile name by default, and says the display name under it', () => {
+    renderScreen(<BotsScreen />)
+
+    expect(screen.getByText('lance-vance')).toBeTruthy()
+    expect(screen.getByTestId('bot-secondary-name-lance-vance').props.children).toBe('Netwerkbeheerder')
+  })
+
+  it('swaps the two lines when the reader asks for the display name first', () => {
+    useSettingsStore.setState({ botNameOrder: 'display' })
+    renderScreen(<BotsScreen />)
+
+    expect(screen.getByText('Netwerkbeheerder')).toBeTruthy()
+    expect(screen.getByTestId('bot-secondary-name-lance-vance').props.children).toBe('lance-vance')
+  })
+
+  it('announces both names to a screen reader, whichever order they are in', () => {
+    renderScreen(<BotsScreen />)
+
+    expect(screen.getByLabelText(/^lance-vance, Netwerkbeheerder,/)).toBeTruthy()
   })
 })
 

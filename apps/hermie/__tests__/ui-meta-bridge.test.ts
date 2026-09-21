@@ -79,6 +79,43 @@ describe('the projection', () => {
     expect(useSettingsStore.getState().userThemes[0]?.name).toBe('Studio')
   })
 
+  /**
+   * The name order travels, because it is a preference and not a device fact.
+   *
+   * An additive field on an unbumped section version: a reader that meets a `v`
+   * it does not know re-seeds the whole section from its own local copy, so
+   * bumping would hand an older build the power to delete the arrangement
+   * rather than protecting this key from it.
+   */
+  describe('which of a bot’s names leads', () => {
+    it('is projected into the app section', () => {
+      useSettingsStore.getState().setBotNameOrder('display')
+
+      expect((snapshotFromStores().app as HermieAppShape).botNameOrder).toBe('display')
+    })
+
+    it('comes back out of a gateway’s copy', () => {
+      applySnapshot({ app: { v: 1, botNameOrder: 'display' } as HermieAppShape, bots: {} })
+
+      expect(useSettingsStore.getState().botNameOrder).toBe('display')
+    })
+
+    it('leaves this reader on their own choice when the section never mentions it', () => {
+      // A section written by a build that predates the field says nothing about
+      // it, and "absent" must not be read as "they chose the other one".
+      useSettingsStore.getState().setBotNameOrder('display')
+      applySnapshot({ app: { v: 1 } as HermieAppShape, bots: {} })
+
+      expect(useSettingsStore.getState().botNameOrder).toBe('display')
+    })
+
+    it('ignores a value it does not recognise', () => {
+      applySnapshot({ app: { v: 1, botNameOrder: 'handle' } as unknown as HermieAppShape, bots: {} })
+
+      expect(useSettingsStore.getState().botNameOrder).toBe('profile')
+    })
+  })
+
   it('does not read an absent arrangement as an empty one', () => {
     // A gateway nobody has written to has no arrangement. Taking that as "no
     // rows anywhere" would empty a list somebody spent an afternoon on.

@@ -57,6 +57,7 @@ import { chatGatewayFor } from '../../gateway/link'
 import { strings } from '../../i18n/strings'
 import { haptic } from '../../platform/haptics'
 import { presenceOf } from '../bots/presence'
+import { botNames } from '../../store/bot-names'
 import { useBotsStore } from '../../store/bots'
 import { useChatAccent, useChatLayoutStore, useChatMuted } from '../../store/chat-layout'
 import { mutedUntil as mutedUntilOf } from '../../store/mute'
@@ -1423,7 +1424,18 @@ function Conversation({
     [attachments, pendingFiles, uploaded]
   )
 
-  const display = byName[botName]?.displayName ?? botName
+  /*
+    Both of the bot's names, in the order this reader chose.
+
+    `display` stays as the ONE-line answer for the places that have room for
+    exactly one — the connecting card, the composer's placeholder, the options
+    sheet's subtitle — and is the primary line so those agree with the header.
+  */
+  const names = botNames(
+    { name: botName, displayName: byName[botName]?.displayName ?? botName },
+    useSettingsStore(state => state.botNameOrder)
+  )
+  const display = names.primary
 
   /**
    * Stable callbacks for the transcript.
@@ -1664,8 +1676,7 @@ function Conversation({
             <ChatHeader
               accentFill={theme.accent(accent).fill}
               avatarUri={avatar}
-              handle={botName}
-              name={display}
+              name={names.primary}
               onBack={onBack}
               onOpenOptions={openOptions}
               onOpenProfile={openProfile}
@@ -1674,6 +1685,7 @@ function Conversation({
               // what keeps the header from saying "Connecting…" over a live chat: the
               // socket's own status is not a bot's state.
               presence={presence.state}
+              {...(names.secondary ? { secondaryName: names.secondary } : {})}
               {...(presence.lastSeenAt !== undefined ? { lastSeenAt: presence.lastSeenAt } : {})}
               {...(subtitle ? { subtitle } : {})}
             />

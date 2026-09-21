@@ -46,6 +46,7 @@ import {
 import { Platform } from 'react-native'
 
 import { ACCENTS, type AccentName } from '../ui/tokens'
+import { asNameOrder, type NameOrder } from './bot-names'
 import { useChatLayoutStore } from './chat-layout'
 import { readArrangement, type Folder, type LayoutEntry } from './folders'
 import { ownContextRow, useDeviceContextStore } from './device-context'
@@ -83,6 +84,18 @@ export interface HermieAppShape extends HermieAppSection {
    */
   mutes?: Mutes
   defaults?: ChatViewSettings
+  /**
+   * Which of a bot's two names leads. See `store/bot-names.ts`.
+   *
+   * An ADDITIVE field, and the section version is deliberately not bumped for
+   * it, for the reason `folders` gives above: a reader that meets a `v` it does
+   * not know treats the whole section as unreadable and re-seeds it from its own
+   * local copy, so bumping would hand an older build the power to delete the
+   * arrangement rather than protecting this key from it. A build that does not
+   * mention the field simply leaves this reader on their own default, which is
+   * the smallest possible loss and the same trade ADR-0016 already made.
+   */
+  botNameOrder?: NameOrder
   themeChoice?: unknown
   themes?: unknown
   /** ADR-0017: every device that asked to be told, and who was last looking. */
@@ -160,6 +173,7 @@ export function snapshotFromStores(): UiMetaSnapshot {
     // nothing about mutes" rather than as "there are none".
     mutes: layout.mutes,
     defaults: settings.defaults,
+    botNameOrder: settings.botNameOrder,
     themeChoice: settings.themeChoice,
     themes: settings.userThemes,
     // Omitted rather than empty while nobody has ever registered; see
@@ -276,6 +290,10 @@ export function applySnapshot(snapshot: UiMetaSnapshot): void {
 
   useSettingsStore.getState().applyAppSettings({
     ...(chatViewOf(app?.defaults) ? { defaults: chatViewOf(app?.defaults) as ChatViewSettings } : {}),
+    // Absent is not the same as wrong: a section written by a build that
+    // predates this field leaves the reader on their own default rather than
+    // being read as "they chose the other one".
+    ...(asNameOrder(app?.botNameOrder) ? { botNameOrder: asNameOrder(app?.botNameOrder)! } : {}),
     ...(asThemeChoice(app?.themeChoice) ? { themeChoice: asThemeChoice(app?.themeChoice)! } : {}),
     ...(Array.isArray(app?.themes) ? { userThemes: asUserThemes(app?.themes) } : {})
   })

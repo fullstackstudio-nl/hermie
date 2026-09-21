@@ -26,6 +26,7 @@
 import { widgetBridge, type WidgetBridge } from '../../platform/widgets'
 import { useBotsStore, type BotsState } from '../../store/bots'
 import { useChatLayoutStore, type ChatLayoutState } from '../../store/chat-layout'
+import { useSettingsStore, type SettingsState } from '../../store/settings'
 import { useChatsStore, type ChatsState } from '../../store/chats'
 import { projectWidgetSnapshot, sameWidgetContent, type WidgetSnapshot } from './snapshot'
 
@@ -43,6 +44,8 @@ interface Stores {
   bots: { getState: () => BotsState; subscribe: (listener: () => void) => Unsubscribe }
   chats: { getState: () => ChatsState; subscribe: (listener: () => void) => Unsubscribe }
   layout: { getState: () => ChatLayoutState; subscribe: (listener: () => void) => Unsubscribe }
+  /** For the name order alone — see `projectBot`'s `label`. */
+  settings: { getState: () => SettingsState; subscribe: (listener: () => void) => Unsubscribe }
 }
 
 export interface WidgetSyncOptions {
@@ -87,7 +90,8 @@ export class WidgetSync {
     this.stores = options.stores ?? {
       bots: useBotsStore,
       chats: useChatsStore,
-      layout: useChatLayoutStore
+      layout: useChatLayoutStore,
+      settings: useSettingsStore
     }
     this.debounceMs = options.debounceMs ?? WIDGET_SYNC_DEBOUNCE_MS
     this.now = options.now ?? (() => Date.now())
@@ -111,7 +115,10 @@ export class WidgetSync {
     const stop = [
       this.stores.bots.subscribe(() => this.schedule()),
       this.stores.chats.subscribe(() => this.schedule()),
-      this.stores.layout.subscribe(() => this.schedule())
+      this.stores.layout.subscribe(() => this.schedule()),
+      // The name order is the only thing here a widget reads, and switching it
+      // has to reach the home screen without waiting for the next message.
+      this.stores.settings.subscribe(() => this.schedule())
     ]
 
     // One write straight away, so a widget added while the app was closed has
@@ -252,6 +259,7 @@ export class WidgetSync {
 
     const snapshot = projectWidgetSnapshot({
       bots: bots.bots,
+      nameOrder: this.stores.settings.getState().botNameOrder,
       chats: this.stores.chats.getState().chats,
       running: bots.running,
       lastSeen: bots.lastSeen,

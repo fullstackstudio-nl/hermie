@@ -131,7 +131,10 @@ describe('ChatScreen', () => {
       expect(mockController.openChat).toHaveBeenCalledWith(expect.objectContaining({ name: 'researcher' }))
     )
     expect(screen.getByTestId('chat-header')).toBeTruthy()
-    expect(screen.getByText('Researcher')).toBeTruthy()
+    // The header leads with the profile name. `Researcher` is that handle in
+    // different case, so there is one name here and the second line is the
+    // status on its own.
+    expect(screen.getByText('researcher')).toBeTruthy()
   })
 
   it('renders the transcript through the view settings', async () => {
