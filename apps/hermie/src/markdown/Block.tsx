@@ -7,12 +7,12 @@
  * string keeps them all mounted and only the tail re-lexes.
  */
 import { memo, useMemo } from 'react'
-import { ScrollView, Text, View } from 'react-native'
-import { directTouchPanRef } from '../platform/pointer-drag'
+import { Text, View } from 'react-native'
 import { marked, type Token, type Tokens } from './marked-compat'
 
 import { CodeBlock } from './CodeBlock'
 import { Inline } from './Inline'
+import { OverflowScroll } from './OverflowScroll'
 import { MONOSPACE, type MarkdownContext } from './context'
 
 const HEADING_SCALE = [1.5, 1.32, 1.18, 1.08, 1, 0.94]
@@ -73,6 +73,7 @@ function ListBlock({ token, context }: { token: Tokens.List; context: MarkdownCo
  * Both bounds matter: the floor keeps a column of `on` / `off` from collapsing
  * to nothing, and the ceiling keeps a prose cell wrapping like prose.
  */
+const TABLE_BORDER = 1
 const COLUMN_MIN = 110
 const COLUMN_MAX = 280
 const COLUMN_PADDING = 20
@@ -95,57 +96,92 @@ export function tableColumnWidths(token: Tokens.Table, fontSize: number): number
   )
 }
 
+/**
+ * How wide the table wants to be, border included.
+ *
+ * EXACT rather than estimated, which is the difference from the code block:
+ * this renderer chose the column widths itself, and a cell's box is
+ * border-boxed, so the outer hairline on each side is the only thing the sum
+ * misses. That is what lets the scroll-or-not decision be a comparison rather
+ * than a guess.
+ */
+export function tableNaturalWidth(widths: readonly number[]): number {
+  return widths.reduce((total, width) => total + width, 0) + TABLE_BORDER * 2
+}
+
+/**
+ * Whether a table of this natural width has to scroll inside that much room.
+ *
+ * `false` where the room is unknown, so a caller that cannot measure keeps the
+ * scrolling surface it had rather than being told the table fits.
+ */
+export function tableFitsInline(natural: number, contentWidth?: number): boolean {
+  return contentWidth !== undefined && contentWidth > 0 && natural <= contentWidth
+}
+
 function TableBlock({ token, context }: { token: Tokens.Table; context: MarkdownContext }) {
   const widths = useMemo(() => tableColumnWidths(token, context.fontSize), [token, context.fontSize])
+  const natural = tableNaturalWidth(widths)
+
+  // A table that fits gets no scrolling surface at all. Not a tidiness
+  // preference: a scroll view whose content fits still eats a drag that started
+  // on it, and a two-column table is most of the tables an agent writes.
+  const inline = tableFitsInline(natural, context.contentWidth)
 
   const cellStyle = {
     borderColor: context.borderColor,
-    borderRightWidth: 1,
+    borderRightWidth: TABLE_BORDER,
     paddingHorizontal: 10,
     paddingVertical: 8
   } as const
 
-  return (
-    <ScrollView
-      directionalLockEnabled
-      horizontal
-      ref={directTouchPanRef}
-      showsHorizontalScrollIndicator={false}
-      // `flexGrow: 0`: a horizontal `ScrollView` otherwise grows to the height
-      // of whatever column it sits in.
-      style={{ flexGrow: 0, marginVertical: 8 }}
+  const frame = (
+    <View
+      style={{
+        borderColor: context.borderColor,
+        borderRadius: 10,
+        borderWidth: TABLE_BORDER,
+        overflow: 'hidden',
+        width: natural
+      }}
     >
-      <View
-        style={{
-          borderColor: context.borderColor,
-          borderRadius: 10,
-          borderWidth: 1,
-          overflow: 'hidden'
-        }}
-      >
-        <View style={{ backgroundColor: context.blockBackground, flexDirection: 'row' }}>
-          {token.header.map((cell, index) => (
-            <View key={index} style={[cellStyle, { width: widths[index] }]}>
-              <Inline
-                context={context}
-                style={{ fontWeight: '600', textAlign: cell.align ?? 'left' }}
-                tokens={cell.tokens}
-              />
-            </View>
-          ))}
-        </View>
-
-        {token.rows.map((row, rowIndex) => (
-          <View key={rowIndex} style={{ borderColor: context.borderColor, borderTopWidth: 1, flexDirection: 'row' }}>
-            {row.map((cell, cellIndex) => (
-              <View key={cellIndex} style={[cellStyle, { width: widths[cellIndex] }]}>
-                <Inline context={context} style={{ textAlign: cell.align ?? 'left' }} tokens={cell.tokens} />
-              </View>
-            ))}
+      <View style={{ backgroundColor: context.blockBackground, flexDirection: 'row' }}>
+        {token.header.map((cell, index) => (
+          <View key={index} style={[cellStyle, { width: widths[index] }]}>
+            <Inline
+              context={context}
+              style={{ fontWeight: '600', textAlign: cell.align ?? 'left' }}
+              tokens={cell.tokens}
+            />
           </View>
         ))}
       </View>
-    </ScrollView>
+
+      {token.rows.map((row, rowIndex) => (
+        <View key={rowIndex} style={{ borderColor: context.borderColor, borderTopWidth: 1, flexDirection: 'row' }}>
+          {row.map((cell, cellIndex) => (
+            <View key={cellIndex} style={[cellStyle, { width: widths[cellIndex] }]}>
+              <Inline context={context} style={{ textAlign: cell.align ?? 'left' }} tokens={cell.tokens} />
+            </View>
+          ))}
+        </View>
+      ))}
+    </View>
+  )
+
+  if (inline) {
+    return <View style={{ marginVertical: 8 }}>{frame}</View>
+  }
+
+  return (
+    <OverflowScroll
+      {...(context.fadeColor ? { fadeTo: context.fadeColor } : {})}
+      style={{ marginVertical: 8 }}
+      testID="markdown-table-scroll"
+      {...(context.contentWidth ? { width: context.contentWidth } : {})}
+    >
+      {frame}
+    </OverflowScroll>
   )
 }
 

@@ -544,6 +544,44 @@ export const foldTableStraddleItem: AssistantItem = {
 }
 
 /**
+ * A reply that is WIDER than the bubble it lands in, in the three ways a reply
+ * can be.
+ *
+ * The owner photographed the first one on the phone: a table whose cells ended
+ * mid-word at the bubble's right edge. The other two ride along because they
+ * share the failure — a fenced line and an unbreakable token are the other two
+ * shapes that cannot be made narrower by wrapping.
+ *
+ * The table has six columns on purpose. Four already overflow a phone bubble,
+ * but six overflow a 640pt one too, so one fixture answers for every layout
+ * instead of looking fine on the Mac and wrong on the phone.
+ */
+export const overflowMarkdown = `Here is the full sweep, one row per registrar.
+
+| Registrar | Domain | Renews | Autorenew | Nameservers | Owner |
+| --- | --- | --- | --- | --- | --- |
+| Registrar One | docs.example.org | 2026-10-04 | off | ns1.example.net | Operations |
+| Registrar Two | status.example.com | 2026-11-19 | on | ns2.example.net | Operations |
+| Registrar One | archive.example.io | 2027-01-02 | off | ns1.example.net | Research |
+
+The one-line check I ran, if you want it again:
+
+\`\`\`sh
+curl --silent --show-error --fail https://gateway.example.org/api/v1/domains?include=nameservers,autorenew --header "Authorization: Bearer $TOKEN" | jq '.items[] | select(.autorenew == false)'
+\`\`\`
+
+The report is at /srv/hermes/exports/2026-09-21/domains-with-autorenew-disabled-full-sweep.json and its digest is 9f2c41b8e7d6a5039c81be24f7a0d95e3b6c17482fd0ae95c3b1d87f604ea2b1, from https://gateway.example.org/api/v1/exports/2026-09-21/domains-with-autorenew-disabled-full-sweep.json?signature=verified&expires=1790000000.`
+
+export const overflowItem: AssistantItem = {
+  ...base('a-overflow', 31),
+  interim: false,
+  kind: 'assistant',
+  status: 'complete',
+  streaming: false,
+  text: overflowMarkdown
+}
+
+/**
  * The inline-code regression, as the owner actually hit it.
  *
  * Both halves in one sentence: a code span near the end of a line (which used to
@@ -631,6 +669,10 @@ export const pendingTurnTranscript: VisibleItem[] = [
 export const galleryTranscript: VisibleItem[] = [
   { item: userItem, presentation: 'full' },
   { item: assistantItem, presentation: 'full' },
+  // A reply wider than its bubble, in the list rather than alone on a page:
+  // whether a table steals the transcript's vertical drag is a question only an
+  // inverted `FlatList` under it can answer.
+  { item: overflowItem, presentation: 'full' },
   { item: searchToolItem, presentation: 'collapsed' },
   { item: patchToolItem, presentation: 'full' },
   { item: failedToolItem, presentation: 'collapsed' },

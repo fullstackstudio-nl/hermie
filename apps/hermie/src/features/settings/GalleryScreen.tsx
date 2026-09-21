@@ -68,6 +68,7 @@ import {
   interimAssistantItem,
   longReportItem,
   noticeItem,
+  overflowItem,
   pendingTurnTranscript,
   patchToolItem,
   pendingDmOutItem,
@@ -547,6 +548,18 @@ const SECTIONS: readonly GallerySection[] = [
       // of cells in half. Only a rendered bubble can show whether it did.
       <ExpandedProvider>
         <AssistantBubble item={foldTableStraddleItem} presentation="full" />
+      </ExpandedProvider>
+    )
+  },
+  {
+    id: 'markdown-overflow',
+    title: 'Markdown — wider than the bubble',
+    render: () => (
+      // The owner's photograph: a table cut off mid-word at the bubble's right
+      // edge. A fenced one-liner and an unbreakable path ride along, because a
+      // table is only one of the three shapes that cannot wrap narrower.
+      <ExpandedProvider>
+        <AssistantBubble item={overflowItem} presentation="full" />
       </ExpandedProvider>
     )
   },

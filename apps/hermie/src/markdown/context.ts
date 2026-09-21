@@ -45,6 +45,27 @@ export interface MarkdownContext {
    * the chip treats as "it fits".
    */
   lineWidth?: number
+  /**
+   * The width a BLOCK is allowed to occupy, in points.
+   *
+   * Separate from `lineWidth`, which is what running text laid out in and is
+   * measured from inside. This one cannot be measured from inside: a bubble's
+   * body is `alignItems: 'flex-start'`, so everything under it is sized BY its
+   * content and asking the content how much room it has is circular. See
+   * `OverflowScroll` for the layout rule and the measurement that found it.
+   *
+   * Absent in any caller that does not know — a gallery section, a test — and
+   * a block that needs it then keeps the behaviour it had before it existed.
+   */
+  contentWidth?: number
+  /**
+   * The surface a block sits ON, for an edge fade to dissolve into.
+   *
+   * Not `blockBackground`, which is the surface a code block PAINTS. A table's
+   * cells are transparent, so the colour behind its last column is the bubble's
+   * own, and only the bubble knows it. No fade without it.
+   */
+  fadeColor?: string
   borderColor: string
   textColor: string
   mutedTextColor: string
@@ -119,3 +140,19 @@ export function isOpenableLink(href: string): boolean {
  * a command or a diff must not render in.
  */
 export const MONOSPACE = Platform.select({ android: 'monospace', default: 'Menlo' })
+
+/**
+ * How wide one monospace character is, as a fraction of the font size.
+ *
+ * Every monospace face this app can end up with — Menlo on iOS, whatever
+ * `monospace` resolves to on Android, Courier as the last fallback — advances at
+ * 0.6 em. That is a constant of the CLASS rather than a guess at one member of
+ * it, which is why it is written down rather than measured: measuring costs a
+ * hidden `Text` and a layout pass per use, and both readers feed it into a
+ * comparison with a whole box's width where a few per cent decides nothing.
+ *
+ * Two things read it: an inline chip deciding whether it may break at all
+ * (`codeJoinFor`), and a fenced block deciding how wide its listing wants to be
+ * (`codeNaturalWidth`).
+ */
+export const MONO_ADVANCE = 0.6

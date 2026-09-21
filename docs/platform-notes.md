@@ -12,6 +12,56 @@ by Hermie Web (ADR-0015), and it is the only one nobody installs. Sections dated
 that talk about a native macOS target described a platform that no longer exists — they were removed
 rather than rewritten, and git history has them.
 
+## A horizontal ScrollView with no width does not scroll (2026-09-21)
+
+The owner photographed a Markdown table on the phone: cells ending mid-word at the
+bubble's right edge, and no way to drag it sideways. Both blocks that can be wider
+than a bubble — a table and a fenced listing — were ALREADY wrapped in a horizontal
+`ScrollView`, and neither of them scrolled. What was actually wrong is a layout rule
+that is invisible from the JSX, so it is written down here.
+
+A bubble's body sits under `alignItems: 'flex-start'`, because `Bubble` needs the
+body's natural width to decide whether the clock fits on its last line. A flex item
+under `flex-start` gets its CONTENT width, and a content width is allowed to overflow
+its container. A `ScrollView` has no intrinsic width to stop that — its content is
+its content — so the scroll view came out exactly as wide as the table inside it.
+`contentSize == bounds`, the pan recogniser never fires, and the only thing clipping
+the table was the bubble's own `overflow: 'hidden'` several ancestors up.
+
+Measured on an iPhone 17 Pro simulator against a six-column table:
+
+- **`maxWidth` on an ancestor does not fix it.** Capping the bubble's body box at
+  `max - paddingX * 2` changed nothing: it clamps that ancestor's reported size
+  without handing the scroll view a definite width to stretch into.
+- **An explicit `width` on the scroll view does.** A hard-coded 280 made the same
+  table scroll immediately, which is what identified the rule.
+- **Nothing under the `flex-start` boundary can measure the number**, because
+  everything down there is sized by the content asking the question. So it comes from
+  outside: `useBubbleContentWidth` in `Bubble`, through `<Markdown maxContentWidth>`,
+  into `MarkdownContext.contentWidth`.
+
+`DiffView` inside a tool card was never affected and scrolled all along, which is the
+control that confirms the diagnosis: a tool card is a stretched box with a `maxWidth`,
+so its scroll view is stretched to a definite width by the ordinary `stretch` rule.
+
+Also settled in the same pass, on the simulator rather than by reading:
+
+- A vertical drag that starts ON a table still scrolls the transcript.
+  `directionalLockEnabled` plus `nestedScrollEnabled` is enough, and the inverted
+  `FlatList` does not fight it.
+- iOS breaks an unbreakable prose token — a 64-character digest, a long URL, a long
+  path — per character inside the paragraph, so nothing there had to change.
+  react-native-web gives `Text` `word-wrap: break-word` by default, which is the same
+  rule; that half is read, not run.
+- The indicator stays hidden, so the overflowing side carries a 22pt gradient into the
+  surface behind it. It appears from the real `contentSize`, not from the estimate
+  that sized the box.
+
+**Unverified:** the ledger hosts (`CronDeliveryCard`, `BotDmOutLine`) pass no content
+width and therefore keep the frameless scroll. They are stretched boxes like the tool
+card, so the `DiffView` control says they should already be fine — but no wide table
+was put in one and photographed.
+
 ## The chat chrome floats, and the glass is the real material (2026-09-20)
 
 The header was one glass surface spanning the column. It is now three separate
