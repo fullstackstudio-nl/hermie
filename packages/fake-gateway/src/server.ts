@@ -402,6 +402,123 @@ interface RingEntry {
   payload: unknown
 }
 
+/**
+ * One MCP server as the gateway's config holds it, before any of the four
+ * `mcp.servers.*` views project it.
+ *
+ * The fake keeps the CONFIG and derives every answer from it, because that is
+ * how upstream works: `mcp.servers.list` summarises `_get_mcp_servers()`,
+ * `status` joins it with cached runtime state, and `test` actually connects. A
+ * fake that stored three independent fixtures could report a server as
+ * connected in one view and absent from another.
+ */
+export interface FakeMcpServer {
+  name: string
+  /** `http` servers can do OAuth; `stdio` ones authenticate with env keys. */
+  transport: 'http' | 'stdio'
+  url?: string
+  command?: string
+  args: string[]
+  /** Env KEY NAMES only. Upstream never ships the values over the socket. */
+  env: string[]
+  auth?: 'oauth' | 'bearer' | null
+  /** Whether a token is on disk. Only meaningful for `auth: 'oauth'`. */
+  oauthTokensPresent: boolean
+  /** `disabled: true` in config is the absence of this. */
+  enabled: boolean
+  /** What a probe would find. `null` means the connection itself fails. */
+  tools: { name: string; description: string }[] | null
+  /** The error a failing probe reports. */
+  probeError?: string
+}
+
+/** A PKCE flow `mcp.servers.oauth.start` opened and `…poll` walks. */
+interface FakeOauthFlow {
+  name: string
+  /** `poll` answers `pending` this many more times before it approves. */
+  pendingPolls: number
+  status: 'pending' | 'approved' | 'error'
+  errorMessage?: string
+}
+
+/**
+ * The per-profile half of the capability state, which is NOT the same shape in
+ * the three sections `profiles.configure` writes:
+ *
+ * - skills are stored as the DISABLED set (`skills.disabled` in config), so a
+ *   skill nobody has ever mentioned is on;
+ * - toolsets are stored as an optional PIN of enabled names, and `null` means
+ *   no pin at all — which is a different state from "pinned to nothing", and
+ *   the difference is what `toolsets_pinned` reports;
+ * - MCP servers are stored per server as `disabled: true`, so the enabled list
+ *   is the complement and always exists.
+ *
+ * Modelling all three as one enabled-set would make the fake agree with a
+ * client that got any of them backwards.
+ */
+interface FakeProfileCapabilities {
+  /** Lower-cased names, as `get_disabled_skills` normalises them. */
+  disabledSkills: Set<string>
+  /** `null` = unpinned: `_describe_toolsets` then falls back to the platform defaults. */
+  pinnedToolsets: Set<string> | null
+  /** Servers this profile has switched off. */
+  disabledMcpServers: Set<string>
+}
+
+/**
+ * The configurable toolsets, as `_get_effective_configurable_toolsets()` yields
+ * them, plus the platform default that decides `enabled` for an UNPINNED
+ * profile.
+ *
+ * Upstream filters two groups out of this list before a client ever sees them —
+ * toolsets not allowed on the `cli` platform, and `_DEFAULT_OFF_TOOLSETS` that
+ * are not already enabled — so the fake ships one of each: `kanban` is
+ * default-off and therefore invisible until something enables it, which is the
+ * behaviour a client that expects a stable list will get wrong.
+ */
+const FAKE_TOOLSETS: {
+  name: string
+  label: string
+  description: string
+  toolCount: number
+  platformDefault: boolean
+  defaultOff?: boolean
+}[] = [
+  {
+    name: 'files',
+    label: 'Files',
+    description: 'Read and write files in the workspace.',
+    toolCount: 6,
+    platformDefault: true
+  },
+  { name: 'web', label: 'Web', description: 'Fetch pages and search the web.', toolCount: 3, platformDefault: true },
+  { name: 'terminal', label: 'Terminal', description: 'Run shell commands.', toolCount: 2, platformDefault: true },
+  {
+    name: 'memory',
+    label: 'Memory',
+    description: 'Remember things between sessions.',
+    toolCount: 4,
+    platformDefault: false
+  },
+  {
+    name: 'kanban',
+    label: 'Kanban',
+    description: 'Track work on a board.',
+    toolCount: 5,
+    platformDefault: false,
+    defaultOff: true
+  }
+]
+
+/** The hub catalogue `skills.manage` search / browse / inspect answer from. */
+const FAKE_SKILL_HUB: { name: string; description: string; source: string; trust: string }[] = [
+  { name: 'pdf', description: 'Read and fill PDF files.', source: 'bundled', trust: 'official' },
+  { name: 'docx', description: 'Read and write Word documents.', source: 'bundled', trust: 'official' },
+  { name: 'web-search', description: 'Search the web and cite results.', source: 'bundled', trust: 'official' },
+  { name: 'xlsx', description: 'Read and write spreadsheets.', source: 'hub', trust: 'community' },
+  { name: 'changelog-video', description: 'Turn a changelog into a video.', source: 'hub', trust: 'community' }
+]
+
 export interface FakeGatewayState {
   auth: FakeAuthMode
   token: string
@@ -453,6 +570,24 @@ export interface FakeGatewayState {
   profiles: ProfileRow[]
   /** Profile name → that profile's two memory files, as lists of entries. */
   memory: Map<string, Record<MemoryTarget, string[]>>
+  /** Capability state per profile name, filled in on first read. */
+  profileCapabilities: Map<string, FakeProfileCapabilities>
+  /** Skills installed under each profile, which is what `profiles.describe` lists. */
+  profileSkills: Map<string, string[]>
+  /** The gateway-wide MCP catalogue every `mcp.servers.*` view is derived from. */
+  mcpServers: FakeMcpServer[]
+  /**
+   * `approvals.mcp_reload_confirm`. While it is true, a `reload.mcp` without
+   * `confirm` answers `confirm_required` instead of reloading — the prompt-cache
+   * warning — and `always` is what turns it off for good.
+   */
+  mcpReloadConfirm: boolean
+  /** Completed `reload.mcp` runs, so a test can prove one actually happened. */
+  mcpReloads: number
+  /** OAuth flows opened by `mcp.servers.oauth.start`, by flow id. */
+  mcpOauthFlows: Map<string, FakeOauthFlow>
+  /** Skill names installed from the hub over the socket, newest last. */
+  skillsInstalled: string[]
   cronJobs: CronJob[]
   /**
    * The profile `hermes serve` was launched with. `cron.manage` binds
@@ -1315,6 +1450,19 @@ function boolWord(value: string | undefined): boolean {
   return TRUE_WORDS.has((value ?? '').trim().toLowerCase())
 }
 
+/**
+ * `hermes_constants.py::is_truthy_value`, which is what every `bool | str`
+ * parameter in the contract goes through.
+ *
+ * The contract types these as `boolean | string | null` and means it: the REST
+ * twin of `profiles.create` takes form values, so `"true"` has to mean the same
+ * thing as `true`. A fake that only accepted the boolean would let a client
+ * through that a real gateway reads as false.
+ */
+function isTruthy(value: unknown): boolean {
+  return value === true || (typeof value === 'string' && boolWord(value))
+}
+
 /** The stored mode for one `config.set` value, or a 4002 like upstream's. */
 function fastMode(value: string): string {
   const mode = FAST_MODES[value.trim().toLowerCase()]
@@ -1889,6 +2037,77 @@ function initialState(options: FakeGatewayOptions): FakeGatewayState {
       ],
       [writer.profile, { memory: ['Drafts open with the verb, never with the subject.'], user: [] }]
     ]),
+    profileCapabilities: new Map<string, FakeProfileCapabilities>([
+      // `researcher` has never been edited: no toolset pin, nothing disabled.
+      // That is the state a fresh profile is really in, and the one a client
+      // that treats "unpinned" as "everything off" gets wrong.
+      [researcher.profile, { disabledSkills: new Set(), pinnedToolsets: null, disabledMcpServers: new Set() }],
+      // `writer` has been edited, so every section is in its non-default state.
+      [
+        writer.profile,
+        {
+          disabledSkills: new Set(['pdf']),
+          pinnedToolsets: new Set(['files', 'web']),
+          disabledMcpServers: new Set(['weather'])
+        }
+      ]
+    ]),
+    profileSkills: new Map<string, string[]>([
+      [researcher.profile, ['pdf', 'docx', 'web-search']],
+      [writer.profile, ['pdf', 'docx']]
+    ]),
+    /*
+      Three servers, one per outcome the MCP page has to draw: an http one that
+      probes clean, an http one behind OAuth with no token on disk (which is the
+      "needs auth" row, and the one upstream deliberately reports as ok:false
+      even though its tools/list would answer anonymously), and a stdio one
+      whose command is not installed. `weather` is also the server `writer` has
+      switched off, so the per-bot list and the gateway-wide list disagree about
+      it on purpose.
+    */
+    mcpServers: [
+      {
+        name: 'files',
+        transport: 'stdio',
+        command: 'npx',
+        args: ['-y', '@modelcontextprotocol/server-filesystem', '/tmp'],
+        env: [],
+        auth: null,
+        oauthTokensPresent: false,
+        enabled: true,
+        tools: [
+          { name: 'read_file', description: 'Read a file from disk.' },
+          { name: 'write_file', description: 'Write a file to disk.' }
+        ]
+      },
+      {
+        name: 'calendar',
+        transport: 'http',
+        url: 'https://calendar.example.test/mcp',
+        args: [],
+        env: [],
+        auth: 'oauth',
+        oauthTokensPresent: false,
+        enabled: true,
+        tools: [{ name: 'list_events', description: 'List events in a range.' }]
+      },
+      {
+        name: 'weather',
+        transport: 'stdio',
+        command: 'weather-mcp',
+        args: [],
+        env: ['WEATHER_API_KEY'],
+        auth: null,
+        oauthTokensPresent: false,
+        enabled: true,
+        tools: null,
+        probeError: 'spawn weather-mcp ENOENT'
+      }
+    ],
+    mcpReloadConfirm: true,
+    mcpReloads: 0,
+    mcpOauthFlows: new Map<string, FakeOauthFlow>(),
+    skillsInstalled: [],
     runningSessions: new Set<string>(),
     sessionConfig: new Map<string, Record<string, string>>(),
     pendingApprovals: new Map<string, { session_id: string; payload: Record<string, unknown> }>(),
@@ -2296,6 +2515,71 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
         }
       }
     })
+  }
+
+  /**
+   * A profile's capability state, minted on first touch.
+   *
+   * A profile created during the run has none, and upstream's answer for it is
+   * the same as for one that has never been edited — no pin, nothing disabled —
+   * because both are simply a config.yaml without those keys.
+   */
+  function profileCapabilities(name: string): FakeProfileCapabilities {
+    const existing = state.profileCapabilities.get(name)
+
+    if (existing) {
+      return existing
+    }
+
+    const fresh: FakeProfileCapabilities = {
+      disabledSkills: new Set<string>(),
+      pinnedToolsets: null,
+      disabledMcpServers: new Set<string>()
+    }
+
+    state.profileCapabilities.set(name, fresh)
+
+    return fresh
+  }
+
+  /**
+   * `_describe_toolsets`: the checklist, with `enabled` read from the pin when
+   * there is one and from the platform defaults when there is not.
+   *
+   * The filter is the part worth keeping: a default-off toolset is omitted
+   * ENTIRELY until something enables it, so the list a client draws is not a
+   * constant and a row can appear that was never there before.
+   */
+  function describeToolsets(capabilities: FakeProfileCapabilities): Record<string, unknown>[] {
+    const pinned = capabilities.pinnedToolsets
+
+    return FAKE_TOOLSETS.filter(toolset => {
+      const enabled = pinned ? pinned.has(toolset.name) : toolset.platformDefault
+
+      return !(toolset.defaultOff && !enabled)
+    }).map(toolset => ({
+      name: toolset.name,
+      label: toolset.label,
+      description: toolset.description,
+      tool_count: toolset.toolCount,
+      enabled: pinned ? pinned.has(toolset.name) : toolset.platformDefault
+    }))
+  }
+
+  /** `mcp.servers.list`'s projection of one config entry. */
+  function summariseMcpServer(server: FakeMcpServer): Record<string, unknown> {
+    return {
+      name: server.name,
+      transport: server.transport,
+      url: server.url ?? null,
+      command: server.command ?? null,
+      args: server.args,
+      env: server.env,
+      auth: server.auth ?? null,
+      oauth_tokens_present: server.auth === 'oauth' ? server.oauthTokensPresent : null,
+      enabled: server.enabled,
+      tools: server.tools ? server.tools.length : null
+    }
   }
 
   function resolveSession(id: string): FakeSession | undefined {
@@ -3793,6 +4077,51 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
           applied.description = true
         }
 
+        /*
+          The three capability sections, each stored the way upstream stores it
+          rather than the way the switch rows read it. `_configure_cfg_sections`
+          is the handler; the three savers beside it are the reason none of
+          these is a plain enabled-set:
+
+           - `save_disabled_skills` writes the complement, so what arrives as
+             `disabled_skills` replaces that set whole and every skill not named
+             is on;
+           - `_save_toolset_pin` writes `tools.enabled_toolsets` when the list
+             has anything in it and REMOVES the key when it is empty, so an
+             empty list is "unpin", not "nothing enabled";
+           - `_save_mcp_toggles` pops `disabled` off every server named and sets
+             it on every other server in the config, which is why the state kept
+             here is the disabled set and not the enabled one.
+
+          All three are replace semantics, and each is reported in `applied`
+          under the name upstream uses — `skills`, `toolsets`, `mcp_servers` —
+          which is not the name the parameter came in under.
+        */
+        const capabilities = profileCapabilities(name)
+
+        if (Array.isArray(params.disabled_skills)) {
+          capabilities.disabledSkills = new Set(
+            params.disabled_skills.map(entry => String(entry).trim().toLowerCase()).filter(Boolean)
+          )
+          applied.skills = true
+        }
+
+        if (Array.isArray(params.enabled_toolsets)) {
+          const wanted = params.enabled_toolsets.map(entry => String(entry).trim()).filter(Boolean)
+
+          capabilities.pinnedToolsets = wanted.length ? new Set(wanted) : null
+          applied.toolsets = true
+        }
+
+        if (Array.isArray(params.enabled_mcp_servers)) {
+          const wanted = new Set(params.enabled_mcp_servers.map(entry => String(entry).trim()).filter(Boolean))
+
+          capabilities.disabledMcpServers = new Set(
+            state.mcpServers.map(server => server.name).filter(server => !wanted.has(server))
+          )
+          applied.mcp_servers = true
+        }
+
         const patch = params.ui_meta
 
         if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
@@ -3838,6 +4167,517 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
         }
 
         return { ok: true, applied }
+      }
+
+      /**
+       * The editor snapshot: soul, model pin, skills, toolsets, MCP servers.
+       *
+       * `methods_profiles.py::profiles.describe`. Two shapes here are easy to
+       * get backwards and both are asserted in `upstream-shapes.test.ts`:
+       * `skills` reports `enabled`, derived from the stored DISABLED set, and
+       * `toolsets_pinned` is whether a pin EXISTS rather than whether anything
+       * is on. A profile with no pin still reports enabled toolsets — the
+       * platform defaults — and writing an empty `enabled_toolsets` puts it
+       * back into that state rather than switching everything off.
+       */
+      case 'profiles.describe': {
+        const name = typeof params.name === 'string' && params.name ? params.name : String(params.profile ?? '')
+        const profile = state.profiles.find(entry => entry.name === name)
+
+        if (!profile) {
+          throw new RpcFault(5063, `Unknown profile: ${name}`)
+        }
+
+        const capabilities = profileCapabilities(name)
+
+        return {
+          name,
+          description: profile.description ?? '',
+          soul: '',
+          model: { provider: profile.provider ?? '', default: profile.model ?? '' },
+          skills: (state.profileSkills.get(name) ?? []).map(skill => ({
+            name: skill,
+            enabled: !capabilities.disabledSkills.has(skill.toLowerCase())
+          })),
+          toolsets: describeToolsets(capabilities),
+          toolsets_pinned: capabilities.pinnedToolsets !== null,
+          mcp_servers: state.mcpServers.map(server => ({
+            name: server.name,
+            enabled: !capabilities.disabledMcpServers.has(server.name),
+            transport: server.transport
+          }))
+        }
+      }
+
+      /**
+       * `profiles.create` — the ws twin of `POST /api/profiles`.
+       *
+       * The refusals are the reason this is modelled at all. Upstream validates
+       * with `hermes_cli/profiles.py::_canon_valid` and then refuses `default`
+       * separately, so three different bad names produce three different errors
+       * and a client that only handles "already exists" will show the wrong one
+       * twice. `4062` is the code the handler maps `ValueError` and
+       * `FileExistsError` onto; `4061` is the empty name.
+       *
+       * What it does NOT do is mint a canonical chat. `create_profile` writes a
+       * directory and nothing else, so the new row comes back with no
+       * `canonical_session` and the client has to resolve one the ordinary way
+       * — which is ADR-0007's flow and the only reason a new bot's chat is not
+       * a second, forked conversation.
+       */
+      case 'profiles.create': {
+        const raw = String(params.name ?? '').trim()
+
+        if (!raw) {
+          throw new RpcFault(4061, 'name required')
+        }
+
+        const name = raw.toLowerCase() === 'default' ? 'default' : raw.toLowerCase()
+
+        if (name === 'default') {
+          throw new RpcFault(4062, "Cannot create a profile named 'default' — it is the built-in profile (~/.hermes).")
+        }
+
+        if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(name)) {
+          throw new RpcFault(
+            4062,
+            `'${name}' is not a valid profile name. Use lowercase letters, numbers, '-' or '_', ` +
+              'starting with a letter or number, up to 64 characters'
+          )
+        }
+
+        if (['hermes', 'test', 'tmp', 'root', 'sudo'].includes(name)) {
+          throw new RpcFault(
+            4062,
+            `Profile name '${name}' is reserved — it collides with either the Hermes installation itself or a common system binary.`
+          )
+        }
+
+        if (state.profiles.some(entry => entry.name === name)) {
+          throw new RpcFault(4062, `Profile '${name}' already exists`)
+        }
+
+        const cloneFrom = typeof params.clone_from === 'string' && params.clone_from ? params.clone_from : null
+
+        if (cloneFrom && !state.profiles.some(entry => entry.name === cloneFrom)) {
+          throw new RpcFault(4062, `Profile '${cloneFrom}' not found`)
+        }
+
+        const model = typeof params.model === 'string' ? params.model : null
+        const provider = typeof params.provider === 'string' ? params.provider : null
+        const soul = typeof params.soul === 'string' ? params.soul.trim() : ''
+        // `mirror_credentials` defaults to TRUE: a bare create seeds a
+        // comment-only .env and no auth.json, which is a bot with no provider.
+        const mirror = params.mirror_credentials === undefined || isTruthy(params.mirror_credentials)
+
+        state.profiles.push({
+          name,
+          path: `/root/.hermes/profiles/${name}`,
+          is_default: false,
+          description: typeof params.description === 'string' ? params.description : '',
+          display_name: name[0]?.toUpperCase() + name.slice(1),
+          // Empty rather than null for an unpinned model, which is what
+          // `profiles.describe` writes (`str(model_cfg.get("default") or "")`)
+          // and what the roster shows for a bot that inherited nothing.
+          model: model ?? (mirror ? 'example-provider/example-model' : ''),
+          provider: provider ?? (mirror ? 'example-provider' : ''),
+          has_avatar: false,
+          ui_meta_revisions: {},
+          ui_meta: {}
+        })
+
+        /*
+          A clone copies the source's capability state. `create_profile`
+          (`clone_config`) copies config.yaml, which is where all three sections
+          live, so "clone settings from <bot>" means exactly this and not a
+          fresh profile with a different name.
+        */
+        const source = cloneFrom ? profileCapabilities(cloneFrom) : null
+
+        state.profileCapabilities.set(name, {
+          disabledSkills: new Set(source?.disabledSkills ?? []),
+          pinnedToolsets: source?.pinnedToolsets ? new Set(source.pinnedToolsets) : null,
+          disabledMcpServers: new Set(source?.disabledMcpServers ?? [])
+        })
+        state.profileSkills.set(
+          name,
+          cloneFrom
+            ? [...(state.profileSkills.get(cloneFrom) ?? [])]
+            : // A fresh profile is seeded with the bundled skills
+              // (`seed_profile_skills`); a `no_skills` create is not.
+              isTruthy(params.no_skills)
+              ? []
+              : ['pdf', 'docx', 'web-search']
+        )
+
+        return {
+          ok: true,
+          name,
+          path: `/root/.hermes/profiles/${name}`,
+          soul_written: Boolean(soul),
+          model_set: Boolean(model && provider),
+          mirrored: {
+            env: mirror,
+            auth: isTruthy(params.share_auth) ? 'shared' : mirror,
+            model_inherited: mirror && !(model && provider),
+            voice: mirror
+          }
+        }
+      }
+
+      /**
+       * `tools.configure` — the SESSION-scoped toolset switch.
+       *
+       * This is not the per-bot path and the difference matters: the handler
+       * reads `session_id`, takes the live session's profile home as
+       * authoritative, and says so in a comment ("The client sends session_id,
+       * not profile"). Editing a bot that has no live session goes through
+       * `profiles.configure` instead.
+       *
+       * A name containing `:` is an MCP target rather than a toolset, which is
+       * how `server:tool` reaches the same call. Unknown toolsets come back in
+       * `unknown` and MCP targets whose server is not configured come back in
+       * `missing_servers` — neither is an error, and both are dropped from
+       * `changed`, so a client that assumes success from the absence of an
+       * error reports a switch as flipped when it was not.
+       */
+      case 'tools.configure': {
+        const action = String(params.action ?? '')
+          .trim()
+          .toLowerCase()
+
+        if (action !== 'enable' && action !== 'disable') {
+          throw new RpcFault(4017, `unknown tools action: ${action}`)
+        }
+
+        const targets = (Array.isArray(params.names) ? params.names : [])
+          .map(entry => String(entry).trim())
+          .filter(Boolean)
+
+        if (!targets.length) {
+          throw new RpcFault(4018, 'names required')
+        }
+
+        const sessionId = String(params.session_id ?? '')
+        const session = sessionId ? resolveSession(sessionId) : undefined
+        const capabilities = profileCapabilities(session?.profile ?? state.cronLaunchProfile)
+        const known = new Set(FAKE_TOOLSETS.map(toolset => toolset.name))
+        const unknown = targets.filter(name => !name.includes(':') && !known.has(name))
+        const mcpTargets = targets.filter(name => name.includes(':'))
+        const missingServers = [
+          ...new Set(
+            mcpTargets
+              .map(name => name.split(':', 1)[0] ?? '')
+              .filter(server => !state.mcpServers.some(entry => entry.name === server))
+          )
+        ].sort()
+
+        // The pin is what this writes, so a session whose profile had none
+        // acquires one — starting from the platform defaults, because that is
+        // the set `_apply_toolset_change` mutates.
+        const pinned =
+          capabilities.pinnedToolsets ??
+          new Set(FAKE_TOOLSETS.filter(toolset => toolset.platformDefault).map(toolset => toolset.name))
+
+        for (const name of targets.filter(entry => !entry.includes(':') && known.has(entry))) {
+          if (action === 'enable') {
+            pinned.add(name)
+          } else {
+            pinned.delete(name)
+          }
+        }
+
+        capabilities.pinnedToolsets = pinned
+
+        return {
+          changed: targets.filter(
+            name =>
+              !unknown.includes(name) && (!name.includes(':') || !missingServers.includes(name.split(':', 1)[0] ?? ''))
+          ),
+          enabled_toolsets: [...pinned].sort(),
+          info: null,
+          missing_servers: missingServers,
+          reset: Boolean(session),
+          unknown
+        }
+      }
+
+      /**
+       * `skills.manage` — five actions behind one method, each answering a
+       * DIFFERENT key, which is the shape `_run_action` produces and the one
+       * thing a client must not assume away.
+       *
+       * `list` answers `skills` as category → names (not a flat list, and with
+       * no enabled flag on it: enabled state is per profile and lives in
+       * `profiles.describe`). `search` answers `results`, `browse` answers
+       * `items` with paging, `inspect` answers `info`, and `install` answers
+       * `installed` + `name`.
+       *
+       * Install really is available over the socket — `_skills_install` calls
+       * `do_install(skip_confirm=True)` — so a client that assumes it is CLI
+       * only would hide a button that works.
+       */
+      case 'skills.manage': {
+        const action = String(params.action ?? 'list')
+        const query = String(params.query ?? '')
+        const profileName = typeof params.profile === 'string' && params.profile ? params.profile : null
+
+        if (action === 'list') {
+          const installed = profileName
+            ? (state.profileSkills.get(profileName) ?? [])
+            : [...new Set([...(state.profileSkills.get(state.cronLaunchProfile) ?? []), ...state.skillsInstalled])]
+          const bundled = installed.filter(name => FAKE_SKILL_HUB.find(hit => hit.name === name)?.source === 'bundled')
+
+          return {
+            skills: {
+              bundled,
+              installed: installed.filter(name => !bundled.includes(name))
+            }
+          }
+        }
+
+        if (action === 'search') {
+          const needle = query.trim().toLowerCase()
+
+          return {
+            results: FAKE_SKILL_HUB.filter(
+              hit => !needle || hit.name.includes(needle) || hit.description.toLowerCase().includes(needle)
+            ).map(hit => ({ name: hit.name, description: hit.description }))
+          }
+        }
+
+        if (action === 'browse') {
+          const pageSize = Number(params.page_size ?? 20) || 20
+          const page = Number(params.page ?? 0) || (/^\d+$/.test(query) ? Number(query) : 1)
+          const start = (page - 1) * pageSize
+
+          return {
+            items: FAKE_SKILL_HUB.slice(start, start + pageSize).map(hit => ({
+              name: hit.name,
+              description: hit.description,
+              source: hit.source,
+              trust: hit.trust,
+              identifier: hit.name
+            })),
+            page,
+            total_pages: Math.max(1, Math.ceil(FAKE_SKILL_HUB.length / pageSize)),
+            total: FAKE_SKILL_HUB.length
+          }
+        }
+
+        if (action === 'inspect') {
+          const hit = FAKE_SKILL_HUB.find(entry => entry.name === query)
+
+          // `inspect_skill(query) or {}` — a miss is an empty object, not an error.
+          return {
+            info: hit
+              ? {
+                  name: hit.name,
+                  description: hit.description,
+                  source: hit.source,
+                  identifier: hit.name,
+                  tags: [hit.trust],
+                  skill_md_preview: `# ${hit.name}\n\n${hit.description}\n`
+                }
+              : {}
+          }
+        }
+
+        if (action === 'install') {
+          const hit = FAKE_SKILL_HUB.find(entry => entry.name === query)
+
+          if (!hit) {
+            throw new RpcFault(5024, `skill '${query}' not found in the hub`)
+          }
+
+          const target = profileName ?? state.cronLaunchProfile
+          const installed = state.profileSkills.get(target) ?? []
+
+          if (!installed.includes(hit.name)) {
+            state.profileSkills.set(target, [...installed, hit.name])
+          }
+
+          state.skillsInstalled.push(hit.name)
+
+          return { installed: true, name: hit.name }
+        }
+
+        throw new RpcFault(4017, `unknown skills action: ${action}`)
+      }
+
+      /**
+       * `reload.mcp` — the one call in this family that can refuse by answering
+       * successfully.
+       *
+       * Without `confirm`, and while the approval is still set, it answers
+       * `{status: 'confirm_required', message}` with a 200. There is no error
+       * frame, so a client that only inspects `error` will believe it reloaded.
+       * `always` proceeds AND clears the approval for good, which is what
+       * `/reload-mcp always` does, and is why the second plain call after one
+       * goes straight through.
+       */
+      case 'reload.mcp': {
+        const confirm = params.confirm === true
+        const always = params.always === true
+
+        if (!confirm && !always && state.mcpReloadConfirm) {
+          return {
+            status: 'confirm_required',
+            message:
+              '⚠️  /reload-mcp invalidates the prompt cache (next message re-sends full input tokens). ' +
+              'Reply `/reload-mcp now` to proceed, or `/reload-mcp always` to proceed and silence this prompt permanently.'
+          }
+        }
+
+        if (always) {
+          state.mcpReloadConfirm = false
+        }
+
+        state.mcpReloads += 1
+
+        return { status: 'reloaded', loaded_rev: `rev-${state.mcpReloads}`, coalesced: false }
+      }
+
+      case 'mcp.servers.list':
+        return { servers: state.mcpServers.map(summariseMcpServer) }
+
+      /**
+       * `mcp.servers.status` — CACHED runtime state. It never connects, probes
+       * or starts auth, so a server that needs OAuth looks exactly like one
+       * that is fine here; `test` is the only call that can tell them apart.
+       */
+      case 'mcp.servers.status':
+        return {
+          servers: state.mcpServers.map(server => ({
+            name: server.name,
+            transport: server.transport,
+            tools: server.tools?.length ?? 0,
+            connected: server.enabled && server.tools !== null,
+            disabled: !server.enabled,
+            status: !server.enabled ? 'disabled' : server.tools === null ? 'failed' : 'connected'
+          })),
+          checked_at: Date.now()
+        }
+
+      /**
+       * `mcp.servers.test` — connect, list tools, disconnect.
+       *
+       * A failure is `{ok: false, error, tools: []}` at the RPC level, not an
+       * error frame. The OAuth case is the subtle one and upstream comments on
+       * it: a server declaring `auth: oauth` that would serve `tools/list`
+       * anonymously is still reported `ok: false` when no token is on disk,
+       * because a green probe with no token is a false green.
+       */
+      case 'mcp.servers.test': {
+        const name = String(params.name ?? '')
+        const server = state.mcpServers.find(entry => entry.name === name)
+
+        if (!server) {
+          throw new RpcFault(4064, `server '${name}' not found`)
+        }
+
+        const needsOauth = server.auth === 'oauth'
+
+        if (server.tools === null) {
+          return {
+            ok: false,
+            error: server.probeError ?? 'connection failed',
+            tools: [],
+            oauth_needed: needsOauth,
+            oauth_tokens_present: needsOauth ? server.oauthTokensPresent : null
+          }
+        }
+
+        if (needsOauth && !server.oauthTokensPresent) {
+          return {
+            ok: false,
+            error: 'OAuth authentication required — no token found.',
+            tools: [],
+            oauth_needed: true,
+            oauth_tokens_present: false
+          }
+        }
+
+        return {
+          ok: true,
+          tools: server.tools,
+          prompts: 0,
+          resources: 0,
+          oauth_needed: needsOauth,
+          oauth_tokens_present: needsOauth ? true : null
+        }
+      }
+
+      /**
+       * `mcp.servers.oauth.start` — PKCE, with the two refusals upstream raises
+       * before any flow exists: stdio servers authenticate with env keys, and a
+       * server already carrying headers uses API-key auth. Both are `4001`.
+       */
+      case 'mcp.servers.oauth.start': {
+        const name = String(params.name ?? '')
+        const server = state.mcpServers.find(entry => entry.name === name)
+
+        if (!server) {
+          throw new RpcFault(4064, `server '${name}' not found`)
+        }
+
+        if (!server.url) {
+          throw new RpcFault(4001, 'stdio servers authenticate via env keys, not OAuth')
+        }
+
+        if (server.auth === 'bearer') {
+          throw new RpcFault(4001, 'this server uses header/API-key auth, not OAuth')
+        }
+
+        const flowId = randomUUID()
+
+        state.mcpOauthFlows.set(flowId, { name, pendingPolls: 1, status: 'pending' })
+
+        return {
+          ok: true,
+          session_id: flowId,
+          auth_url: `https://calendar.example.test/authorize?client_id=hermes&state=${flowId}`,
+          flow: 'pkce'
+        }
+      }
+
+      /** `mcp.servers.oauth.poll` — `pending` until it is `approved`, which persists the token. */
+      case 'mcp.servers.oauth.poll': {
+        const flowId = String(params.session_id ?? '')
+        const flow = state.mcpOauthFlows.get(flowId)
+
+        if (!flow) {
+          throw new RpcFault(4064, `no OAuth flow '${flowId}'`)
+        }
+
+        if (flow.status === 'pending' && flow.pendingPolls > 0) {
+          flow.pendingPolls -= 1
+
+          return { ok: true, status: 'pending', session_id: flowId }
+        }
+
+        if (flow.status === 'error') {
+          return { ok: true, status: 'error', session_id: flowId, error_message: flow.errorMessage ?? 'denied' }
+        }
+
+        flow.status = 'approved'
+
+        const server = state.mcpServers.find(entry => entry.name === flow.name)
+
+        if (server) {
+          server.oauthTokensPresent = true
+        }
+
+        return { ok: true, status: 'approved', session_id: flowId, tools: server?.tools ?? [] }
+      }
+
+      /** `mcp.servers.oauth.cancel` — drops the flow; the token state is untouched. */
+      case 'mcp.servers.oauth.cancel': {
+        const flowId = String(params.session_id ?? '')
+
+        state.mcpOauthFlows.delete(flowId)
+
+        return { ok: true, status: 'cancelled' }
       }
 
       case 'session.list': {

@@ -156,6 +156,25 @@ no third-party network call. The only address Hermie knows is the one you typed.
   Save — that name is the handle crons, `@`-mentions and the gateway's logs use.
   A rename carries your colour, folder, mute, note and cached conversation over
   with it.
+- **Make a bot, from the app.** New bot… in the chat list or in Settings: a
+  handle, a description, a model from the gateway's own catalogue, and
+  optionally another bot's settings to start from. The handle is checked while
+  you type it, by the same rules the gateway uses, so a name it would refuse is
+  refused before the round trip. The new bot's conversation opens when it is
+  made. Deleting a bot is not offered because the gateway does not expose it —
+  `hermes profile delete <name>`, on the machine that hosts your agent.
+- **What each bot can do.** A bot's profile has Capabilities: its toolsets, its
+  skills and its MCP servers, as switches that write as you touch them.
+  Changing an MCP server offers to reload the servers for chats that are
+  already running, with the gateway's own warning about what that costs — and
+  "stop asking" is the gateway's own setting, so it quiets the CLI too.
+- **MCP servers.** Settings lists the gateway's servers, what each one is and
+  whether it is connected. Open one to test the connection and see the tools it
+  offers, or to authorise it if it sits behind OAuth. Nothing is probed until
+  you ask: connecting to a server can take seconds, and a page that did it on
+  arrival would feel broken while it worked.
+- **Skills.** What is installed, with a switch per skill for whichever bot you
+  pick, and a search of the hub to install more.
 - **Offline-tolerant.** The last stretch of every conversation is cached, so a
   chat paints before the gateway answers and is still readable on a plane.
 - **A lock, if you want one.** Face ID, Touch ID, Optic ID or your Android

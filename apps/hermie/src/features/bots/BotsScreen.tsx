@@ -69,6 +69,8 @@ import { formatListTime } from '../../chat-ui'
 import { useChatRuntime } from '../chats/ChatRuntime'
 import { type MessageMatch, useMessageSearch } from '../search'
 import { BotRow } from './BotRow'
+import { NewBotFlow } from '../profiles/NewBotFlow'
+import { profileStrings } from '../profiles/strings'
 import { ConnectionLine } from './ConnectionLine'
 import {
   committedRowIndex,
@@ -203,6 +205,13 @@ export function BotsScreen({
   // opens with the keyboard in it. Cleared when edit mode ends, so leaving and
   // coming back does not steal focus for a section that already has a name.
   const [addedFolderId, setAddedFolderId] = useState<string | null>(null)
+  /*
+    The New-bot form. A sheet rather than a destination, because making a bot
+    is a thing you do once and then leave — and the flow it wraps ends by
+    OPENING the new bot's chat, so pushing a screen first would mean popping
+    it again a moment later.
+  */
+  const [creatingBot, setCreatingBot] = useState(false)
   const [archiveOpen, setArchiveOpen] = useState(false)
   const [menuFor, setMenuFor] = useState<string | null>(null)
   /** The bot whose profile sheet is open, by name. */
@@ -960,6 +969,7 @@ export function BotsScreen({
           setAddedFolderId(null)
         }}
         sidebar={sidebar}
+        onNewBot={() => setCreatingBot(true)}
         {...(onOpenSection ? { onNewCron: () => onOpenSection('cron', { create: true }) } : {})}
       />
 
@@ -1247,6 +1257,14 @@ export function BotsScreen({
           visible
         />
       ) : null}
+
+      {/*
+        `onOpened` is what makes this the chat list's entry point rather than
+        Settings': a bot made here lands the reader in its conversation, which
+        is the only reason they made it. The chat it opens is the canonical one,
+        resolved the ordinary way — `NewBotFlow` never mints a session itself.
+      */}
+      <NewBotFlow onClose={() => setCreatingBot(false)} onOpened={bot => openBot(bot)} visible={creatingBot} />
     </View>
   )
 }
@@ -1263,11 +1281,13 @@ export function BotsScreenOrSignedOut(props: BotsScreenProps) {
 
 function Head({
   editing,
+  onNewBot,
   onNewCron,
   onToggleEdit,
   sidebar
 }: {
   editing: boolean
+  onNewBot?: () => void
   onNewCron?: () => void
   onToggleEdit: () => void
   sidebar: boolean
@@ -1288,6 +1308,27 @@ function Head({
       <Text accessibilityRole="header" aria-level={1} style={{ flex: 1 }} variant={sidebar ? 'titleWide' : 'title'}>
         {strings.bots.title}
       </Text>
+
+      {/*
+        Its own control rather than a second meaning for the `+`. That button
+        says New cron and makes a cron; a menu behind it would take a
+        one-tap action away from the thing it is for, and two `+` glyphs side by
+        side would say nothing about which is which. This one is a word.
+      */}
+      {onNewBot ? (
+        <Pressable
+          accessibilityLabel={profileStrings.settings.newBot}
+          accessibilityRole="button"
+          hitSlop={TAP_SLOP}
+          onPress={onNewBot}
+          style={{ cursor: 'pointer' }}
+          testID="bots-new-bot"
+        >
+          <Text color="accentText" style={{ fontWeight: '600' }} variant="preview">
+            {profileStrings.settings.newBot}
+          </Text>
+        </Pressable>
+      ) : null}
 
       {onNewCron ? (
         <Pressable

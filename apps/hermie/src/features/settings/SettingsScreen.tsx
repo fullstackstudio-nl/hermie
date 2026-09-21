@@ -24,6 +24,9 @@ import { useTheme } from '../../ui/theme'
 import { useEscapeKey } from '../../ui/useEscapeKey'
 import { useHardwareBack } from '../../ui/useHardwareBack'
 import { FORM_MAX_WIDTH } from '../../ui/tokens'
+import { McpScreen, mcpStrings } from '../mcp'
+import { NewBotFlow, profileStrings } from '../profiles'
+import { SkillsScreen, skillStrings } from '../skills'
 import { AboutFooter } from './AboutFooter'
 import { AppearanceSection } from './AppearanceSection'
 import { ContextSection } from './ContextSection'
@@ -64,6 +67,15 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
   const [showThemes, setShowThemes] = useState(initialPage === 'themes')
   const [showMemory, setShowMemory] = useState(false)
   const [confirmingChange, setConfirmingChange] = useState(false)
+  /*
+    The three capability surfaces, as pages over Settings rather than routes —
+    the shape this screen already uses for Licences and the gallery, and the
+    one the two shells can both hold (see `CronScreen`'s note about push).
+    `showNewBot` is a sheet rather than a page: it is a form, not a place.
+  */
+  const [showSkills, setShowSkills] = useState(false)
+  const [showMcp, setShowMcp] = useState(false)
+  const [showNewBot, setShowNewBot] = useState(false)
 
   // Escape goes back ONE level: out of a screen Settings opened and into
   // Settings, and only then out of whatever is holding Settings.
@@ -74,8 +86,10 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
       setShowLicences(false)
       setShowThemes(false)
       setShowMemory(false)
+      setShowSkills(false)
+      setShowMcp(false)
     },
-    showConnectionTest || showGallery || showLicences || showThemes || showMemory
+    showConnectionTest || showGallery || showLicences || showThemes || showMemory || showSkills || showMcp
   )
 
   // The same one level for Android's back button, which is not Escape and has
@@ -90,8 +104,10 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
       setShowLicences(false)
       setShowThemes(false)
       setShowMemory(false)
+      setShowSkills(false)
+      setShowMcp(false)
     },
-    showConnectionTest || showGallery || showLicences || showThemes || showMemory
+    showConnectionTest || showGallery || showLicences || showThemes || showMemory || showSkills || showMcp
   )
 
   // A screen opened from here REPLACES Settings rather than pushing onto a
@@ -116,6 +132,14 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
 
   if (showMemory) {
     return <MemoryBotsScreen onClose={() => setShowMemory(false)} />
+  }
+
+  if (showSkills) {
+    return <SkillsScreen onClose={() => setShowSkills(false)} />
+  }
+
+  if (showMcp) {
+    return <McpScreen onClose={() => setShowMcp(false)} />
   }
 
   const token = config?.authMode === 'session_token'
@@ -300,6 +324,34 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
             else this renders nothing. */}
         <WebUpdateRow />
 
+        {/*
+          The gateway-wide capability surfaces, plus the one action that makes a
+          bot. They sit together because all three answer "what can my bots
+          do" — and the New-bot row is here as well as in the chat list's header
+          because Settings is where somebody looks for a thing they do once.
+
+          There is deliberately no "delete a bot" anywhere. The gateway has no
+          profile-delete method at all; see `PROFILE_DELETE_UNAVAILABLE` in
+          `features/profiles/profiles-controller.ts` for the whole argument.
+        */}
+        <InsetGroup header={profileStrings.settings.group}>
+          <InsetButtonRow
+            detail={profileStrings.settings.newBotHint}
+            onPress={() => setShowNewBot(true)}
+            title={profileStrings.settings.newBot}
+          />
+          <InsetButtonRow
+            detail={skillStrings.settings.hint}
+            onPress={() => setShowSkills(true)}
+            title={skillStrings.settings.row}
+          />
+          <InsetButtonRow
+            detail={mcpStrings.settings.hint}
+            onPress={() => setShowMcp(true)}
+            title={mcpStrings.settings.row}
+          />
+        </InsetGroup>
+
         <InsetGroup header={strings.settings.about}>
           <InsetButtonRow
             detail={strings.settings.licencesHint}
@@ -323,6 +375,14 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
 
         <View style={{ height: theme.space.xxl }} />
       </ScrollView>
+
+      {/*
+        A sheet rather than a page, and mounted beside the scroller rather than
+        inside it: `BottomSheet` draws its own backdrop over the whole screen.
+        No `onOpened` — from Settings there is nowhere to land, so the new bot
+        simply appears in the chat list where somebody will look for it.
+      */}
+      <NewBotFlow onClose={() => setShowNewBot(false)} visible={showNewBot} />
     </Screen>
   )
 }

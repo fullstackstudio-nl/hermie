@@ -68,6 +68,8 @@ import { useTheme } from '../../ui/theme'
 import { AVATAR_SIZE } from '../../ui/tokens'
 import { asRenameError, BotNameFields, botNameChanged, initialBotName, saveBotName } from '../bot-rename'
 import { memoryStrings } from '../memory/strings'
+import { CapabilitiesSheet } from '../profiles/CapabilitiesSheet'
+import { profileStrings } from '../profiles/strings'
 import { clearAvatar, changesFor, saveDescription, uploadAvatar } from './bot-profile-controller'
 import { pickAvatar } from './avatar'
 
@@ -151,6 +153,7 @@ export function BotProfileSheet({
   const [avatar, setAvatar] = useState<{ base64: string; uri: string } | null | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showCapabilities, setShowCapabilities] = useState(false)
 
   /*
     Reopening on a different bot — which the wide layout does without unmounting
@@ -390,6 +393,27 @@ export function BotProfileSheet({
           </InsetGroup>
         )}
 
+        {/*
+          One row, because the three groups behind it are one question: what can
+          this bot do. Its own sheet rather than a section here — three lists of
+          switches would bury the two fields this sheet is actually for, and the
+          switches write immediately while those fields wait for Save, which is
+          a difference worth keeping on two surfaces rather than explaining on
+          one.
+
+          There is no row under this for deleting the bot. The gateway has no
+          profile-delete method at all; the argument is written out in
+          `features/profiles/profiles-controller.ts`.
+        */}
+        <InsetGroup>
+          <InsetButtonRow
+            detail={profileStrings.capabilities.rowDetail}
+            onPress={() => setShowCapabilities(true)}
+            testID={`${testID}-capabilities`}
+            title={profileStrings.capabilities.row}
+          />
+        </InsetGroup>
+
         <InsetGroup header={text.about}>
           {/*
             TWO rows, because they are two facts.
@@ -458,6 +482,13 @@ export function BotProfileSheet({
           title={busy ? text.saving : text.save}
         />
       </View>
+
+      <CapabilitiesSheet
+        gateway={gateway}
+        onClose={() => setShowCapabilities(false)}
+        profile={bot.name}
+        visible={showCapabilities}
+      />
     </BottomSheet>
   )
 }
