@@ -372,7 +372,7 @@ function Conversation({
   const [dismissedRequests, setDismissed] = useState<string[]>([])
   const [newCount, setNewCount] = useState(0)
   const [away, setAway] = useState(false)
-  const [notice, setNotice] = useState<string | null>(null)
+  const [notice, setNotice] = useState<ChatNotice | null>(null)
   const [highlightId, setHighlightId] = useState<string | undefined>(undefined)
   /** The query this screen has already answered, and how far it has paged back for one. */
   const searchedFor = useRef<string | undefined>(undefined)
@@ -638,7 +638,7 @@ function Conversation({
 
     if (walked >= FIND_PAGE_LIMIT) {
       searchedFor.current = findText
-      setNotice(strings.chat.findExhausted(findText))
+      setNotice(openFailed(strings.chat.findExhausted(findText)))
 
       return
     }
@@ -656,7 +656,7 @@ function Conversation({
         searchedFor.current = findText
         // `start` and `unavailable` are the same sentence to a reader: this is
         // everything there is, and the words are not in it.
-        setNotice(walked ? strings.chat.findExhausted(findText) : strings.chat.findMissed(findText))
+        setNotice(openFailed(walked ? strings.chat.findExhausted(findText) : strings.chat.findMissed(findText)))
       })
       .catch(() => undefined)
   }, [botName, chat.hydration, chat.items, findText, runtime])
@@ -918,6 +918,17 @@ function Conversation({
    * behind the contact pill. `connection-notice.ts` has the whole decision; this
    * is only the two inputs it cannot work out for itself.
    */
+  /**
+   * Which of the three the bar is showing.
+   *
+   * The connection's own account of a terminal refusal beats the RPC message it
+   * produced, which only ever says "gateway not connected"; both are the chat
+   * failing to open, so both wear that sentence. Anything this screen put there
+   * itself already knows which of the two shapes it is.
+   */
+  const opening = chat.connectionError ?? chat.error
+  const bannerNotice = opening ? openFailed(opening) : notice
+
   const waitingMs = useWaitingMs(status)
   const connectionState = connectionNotice({
     blocked: chat.connectionError !== null,
@@ -1008,7 +1019,7 @@ function Conversation({
           }
         } catch (error) {
           chat.setDraft(body)
-          setNotice(messageOf(error))
+          setNotice(openFailed(messageOf(error)))
         }
 
         return
@@ -1046,7 +1057,7 @@ function Conversation({
         // The optimistic bubble stays — the words were the user's — and the
         // draft comes back so the message is not lost with it.
         chat.setDraft(body)
-        setNotice(messageOf(error))
+        setNotice(openFailed(messageOf(error)))
       }
     },
     [attachments, chat, uploaded]
@@ -1070,7 +1081,7 @@ function Conversation({
       // A refused picker is the one failure the user can do something about,
       // and the only place to do it is the system settings app.
       setNeedsPhotoAccess(message === strings.chat.attach.permission)
-      setNotice(strings.chat.attach.failed(message))
+      setNotice(openFailed(strings.chat.attach.failed(message)))
     } finally {
       setAttachBusy(null)
     }
@@ -1137,7 +1148,7 @@ function Conversation({
     try {
       picked = await pickFile()
     } catch (error) {
-      setNotice(strings.chat.attach.failed(messageOf(error)))
+      setNotice(openFailed(strings.chat.attach.failed(messageOf(error))))
 
       return
     } finally {
@@ -1227,7 +1238,10 @@ function Conversation({
 
         setPendingModel(null)
       } catch (error) {
-        setNotice(messageOf(error))
+        // The conversation is open and unaffected; one option was refused. The
+        // gateway's sentence already names the setting and the reason, so it is
+        // kept whole and only what happened to it is added.
+        setNotice(settingRefused(messageOf(error)))
       }
     },
     [chat]
@@ -1323,7 +1337,7 @@ function Conversation({
   const respondApproval = useCallback(
     (item: ApprovalItem, choice: string) => {
       haptic('choice')
-      void chat.respondApproval(item.requestId, choice).catch(error => setNotice(messageOf(error)))
+      void chat.respondApproval(item.requestId, choice).catch(error => setNotice(openFailed(messageOf(error))))
     },
     [chat]
   )
@@ -1331,7 +1345,7 @@ function Conversation({
   const submitClarify = useCallback(
     (item: ClarifyItem, answers: Record<string, string>) => {
       haptic('choice')
-      void chat.respondClarify(item.requestId, answers).catch(error => setNotice(messageOf(error)))
+      void chat.respondClarify(item.requestId, answers).catch(error => setNotice(openFailed(messageOf(error))))
     },
     [chat]
   )
@@ -1358,15 +1372,15 @@ function Conversation({
     (id: string) => {
       void chat
         .steerQueued(id)
-        .then(status => setNotice(status === 'rejected' ? chatStrings.queue.steerRejected : null))
-        .catch(error => setNotice(messageOf(error)))
+        .then(status => setNotice(status === 'rejected' ? openFailed(chatStrings.queue.steerRejected) : null))
+        .catch(error => setNotice(openFailed(messageOf(error))))
     },
     [chat]
   )
 
   const lockClarify = useCallback(
     (item: ClarifyItem, qid: string, answer: string) => {
-      void chat.lockClarify(item.requestId, qid, answer).catch(error => setNotice(messageOf(error)))
+      void chat.lockClarify(item.requestId, qid, answer).catch(error => setNotice(openFailed(messageOf(error))))
     },
     [chat]
   )
@@ -1394,10 +1408,8 @@ function Conversation({
         */}
         <KeyboardInset style={{ flex: 1 }} testID="chat-keyboard-inset">
           <Banner
-            // The connection's own account of a terminal refusal beats the RPC
-            // message it produced, which only ever says "gateway not connected".
-            error={chat.connectionError ?? chat.error ?? notice}
             hydration={chat.hydration}
+            notice={bannerNotice}
             onDismiss={() => {
               setNotice(null)
               setNeedsPhotoAccess(false)
@@ -1683,6 +1695,24 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+/**
+ * What the bar above the transcript is ABOUT, which is not always the same
+ * thing.
+ *
+ * It used to be one string and one sentence — "This conversation could not be
+ * opened: …" — wrapped around whatever had gone wrong. That sentence is right
+ * for the failure it was written for and false for the other one: a gateway
+ * refusing a single setting says nothing about the conversation, which is open,
+ * readable and still streaming while the bar claims it could not be opened.
+ */
+type ChatNotice = { kind: 'open' | 'setting'; text: string }
+
+/** This conversation could not be opened. */
+const openFailed = (text: string): ChatNotice => ({ kind: 'open', text })
+
+/** The chat is fine; the gateway refused one option on it. */
+const settingRefused = (text: string): ChatNotice => ({ kind: 'setting', text })
+
 /** The earliest start among the running children, in epoch milliseconds. */
 function oldestStart(children: readonly { startedAt: number }[]): number | undefined {
   const starts = children.map(child => child.startedAt).filter(value => value > 0)
@@ -1795,13 +1825,13 @@ function subtitleFor(state: {
  */
 function Banner({
   hydration,
-  error,
+  notice,
   onRetry,
   onDismiss,
   onOpenSettings
 }: {
   hydration: UseChatResult['hydration']
-  error: string | null
+  notice: ChatNotice | null
   onRetry: () => Promise<void>
   onDismiss: () => void
   /** Only for a refused photo picker: the one failure with a way out. */
@@ -1809,23 +1839,31 @@ function Banner({
 }) {
   const theme = useTheme()
 
-  if (error) {
+  if (notice) {
     return (
       <View style={{ backgroundColor: theme.elevation.e3c, gap: theme.space.xs, padding: theme.space.md }}>
-        <Text color="dangerText" variant="preview">
-          {strings.chat.failed(error)}
+        <Text color="dangerText" testID="chat-notice" variant="preview">
+          {notice.kind === 'setting' ? strings.chat.settingRefused(notice.text) : strings.chat.failed(notice.text)}
         </Text>
         <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.lg }}>
-          <Pressable
-            accessibilityRole="button"
-            hitSlop={TAP_SLOP}
-            onPress={() => void onRetry()}
-            style={{ justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT }}
-          >
-            <Text color="accentText" variant="preview">
-              {strings.chat.retry}
-            </Text>
-          </Pressable>
+          {/*
+            Reload is the answer to a chat that would not open, and it is no
+            answer at all to a setting the gateway refused: the conversation is
+            already there, and rebuilding it would spend a session rebuild on a
+            switch that flipped back. Done is the whole of what is on offer.
+          */}
+          {notice.kind === 'open' ? (
+            <Pressable
+              accessibilityRole="button"
+              hitSlop={TAP_SLOP}
+              onPress={() => void onRetry()}
+              style={{ justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT }}
+            >
+              <Text color="accentText" variant="preview">
+                {strings.chat.retry}
+              </Text>
+            </Pressable>
+          ) : null}
           {onOpenSettings ? (
             <Pressable
               accessibilityRole="button"

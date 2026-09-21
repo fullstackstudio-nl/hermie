@@ -516,6 +516,16 @@ export const strings = {
     offlineCopy: 'Showing the last saved copy of this conversation.',
     stale: 'This conversation lost its connection to the gateway. It reattaches on the next open.',
     failed: (message: string) => `This conversation could not be opened: ${message}`,
+    /**
+     * A gateway that refused one SETTING, which is not the conversation failing.
+     *
+     * These shared a sentence, and the shared one was about opening: a fast
+     * mode the model does not offer read as "This conversation could not be
+     * opened: fast mode is not available for this model", while the chat was
+     * open and working underneath it. The gateway's own wording is kept — it
+     * names the setting and the reason — and only what happened to it is added.
+     */
+    settingRefused: (message: string) => `Setting not changed: ${message}`,
     empty: 'Nothing has been said in this chat yet.',
     /**
      * A search hit opened this chat and the row is not in it.

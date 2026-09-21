@@ -504,7 +504,17 @@ describe('ChatScreen', () => {
     // the reader is done with the sheet. That is where the refusal is waiting.
     fireEvent.press(screen.getByTestId('chat-options-done'))
 
-    await waitFor(() => expect(screen.getByText(/fast mode is not available for this model/u)).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByTestId('chat-notice')).toHaveTextContent(
+        'Setting not changed: fast mode is not available for this model'
+      )
+    )
+    // NOT the open-failure sentence. The conversation is open, readable and
+    // still streaming; only the setting was refused.
+    expect(screen.queryByText(/could not be opened/u)).toBeNull()
+    // And no Try again: reloading rebuilds a conversation that is already here.
+    expect(screen.queryByText('Try again')).toBeNull()
+    expect(screen.getByTestId('chat-error-dismiss')).toBeTruthy()
   })
 
   it('keeps verbosity local to the app rather than sending it to the gateway', async () => {
@@ -744,7 +754,13 @@ describe('ChatScreen', () => {
     mockController.openChat.mockRejectedValueOnce(new Error('gateway not connected'))
     renderChat()
 
-    await waitFor(() => expect(screen.getByText(/gateway not connected/u)).toBeTruthy())
+    // A chat that would not open keeps its own sentence, and its Try again.
+    await waitFor(() =>
+      expect(screen.getByTestId('chat-notice')).toHaveTextContent(
+        'This conversation could not be opened: gateway not connected'
+      )
+    )
+    expect(screen.getByText('Try again')).toBeTruthy()
 
     fireEvent.press(screen.getByTestId('chat-error-dismiss'))
 
