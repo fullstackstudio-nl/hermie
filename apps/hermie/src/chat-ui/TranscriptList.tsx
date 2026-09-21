@@ -487,18 +487,7 @@ function RowView({ entry, context, receipt, layout, dmRole }: RowProps) {
   }
 }
 
-const TranscriptRow = memo(
-  RowView,
-  (previous, next) =>
-    previous.entry.item.id === next.entry.item.id &&
-    previous.entry.item.version === next.entry.item.version &&
-    sameThought(previous.entry.item, next.entry.item) &&
-    previous.entry.presentation === next.entry.presentation &&
-    previous.receipt === next.receipt &&
-    previous.layout === next.layout &&
-    previous.dmRole === next.dmRole &&
-    previous.context === next.context
-)
+const TranscriptRow = memo(RowView, sameRow)
 
 /**
  * The one thing `version` cannot answer.
@@ -585,7 +574,39 @@ function useRowTrace(key: string): { wrapper: LayoutHook; content: LayoutHook } 
   }, [key])
 }
 
-function TranscriptRowFrame({ entry, context, receipt, layout, dmRole }: RowProps) {
+/**
+ * The memo boundary the LIST re-renders against, and the one that was missing.
+ *
+ * `TranscriptRow` has always been memoized, which keeps a settled bubble's
+ * Markdown from being parsed again — and `VirtualizedList` never reached it.
+ * The list re-renders on its own state whenever the render window moves, which
+ * during a fling is every frame; `CellRenderer` has no `shouldComponentUpdate`,
+ * so it calls `renderItem` again, so THIS function ran for every mounted row on
+ * every frame. Sixty-odd rows' worth of hooks, a `ContextMenuHost` and two
+ * wrapper views, sixty times a second, for rows where nothing had changed.
+ *
+ * Measured at 4× CPU on a 390-row transcript — see docs/platform-notes.md.
+ *
+ * The same comparator as the row inside it, because it is the same question.
+ * The hooks below subscribe to the disclosure store and re-render this
+ * component when THEY change, which memo does not interfere with.
+ */
+const TranscriptRowFrame = memo(TranscriptRowFrameView, (previous, next) => sameRow(previous, next))
+
+function sameRow(previous: RowProps, next: RowProps): boolean {
+  return (
+    previous.entry.item.id === next.entry.item.id &&
+    previous.entry.item.version === next.entry.item.version &&
+    sameThought(previous.entry.item, next.entry.item) &&
+    previous.entry.presentation === next.entry.presentation &&
+    previous.receipt === next.receipt &&
+    previous.layout === next.layout &&
+    previous.dmRole === next.dmRole &&
+    previous.context === next.context
+  )
+}
+
+function TranscriptRowFrameView({ entry, context, receipt, layout, dmRole }: RowProps) {
   const runId = dmRole?.role === 'rollupMember' ? dmRole.runId : ''
   const runExpanded = useRollupExpanded(runId)
   const menu = useMessageMenu(entry.item, context)
@@ -1473,6 +1494,29 @@ function TranscriptListBody({
               contentStyle
             ]}
             data={rows}
+            /*
+              The window, stated rather than defaulted.
+
+              `VirtualizedList`'s defaults are `windowSize: 21` and
+              `initialNumToRender: 10`, and 21 means twenty-one VIEWPORTS —
+              about 16,000pt of a transcript mounted at once. That costs twice:
+              every row in it is in the layout tree that a scroll handler's read
+              of `scrollTop` has to flush (see the forced-reflow note in
+              docs/platform-notes.md), and every one of them is a cell the list
+              re-renders when its own window moves.
+
+              Eleven is five viewports either side of the one being read, which
+              is more than a fling at 240pt per frame can outrun in the ~200ms
+              the list takes to fill in behind itself, and it is the number the
+              measurement settled on: below it the far end of a fling starts
+              showing blank rows on a transcript whose bubbles are tall.
+
+              `initialNumToRender` is the FIRST screen, and on an inverted list
+              that is the newest messages — the ones the reader opened the chat
+              for. Ten of them is under one viewport of bubbles, so the chat
+              opened half-drawn and filled in; fourteen covers it.
+            */
+            initialNumToRender={14}
             inverted
             keyExtractor={row => (isTypingRow(row) ? TYPING_ROW_KEY : row.item.id)}
             // Dragging the transcript down lowers the keyboard with the finger, which
@@ -1529,6 +1573,20 @@ function TranscriptListBody({
              * which is where this is now off.
              */
             maintainVisibleContentPosition={away ? anchorFor(leadingRows, streamingTail) : undefined}
+            /*
+              Four rather than ten, and this is the one that moves p95.
+
+              A batch is mounted inside ONE frame, and a transcript row is a
+              bubble with Markdown in it rather than a line of text. The window
+              above decides how much is mounted in the end; this decides how
+              lumpy getting there is, and a fling mounts a viewport's worth
+              every ~55ms whatever the window is — so the spikes are batches,
+              not the window. Ten of these rows in a frame is the 40ms frame.
+
+              Below four the list cannot keep up with a fling and the far end
+              starts arriving blank, which is the floor this was chosen against.
+            */
+            maxToRenderPerBatch={4}
             onContentSizeChange={settleHold}
             onEndReached={onEndReached}
             onEndReachedThreshold={0.4}
@@ -1543,6 +1601,7 @@ function TranscriptListBody({
             // them is the one that gets dropped.
             scrollEventThrottle={TRACING ? 16 : 64}
             testID={`${testID}-scroll`}
+            windowSize={11}
           />
         </PlainScrollEdges>
 
