@@ -21,8 +21,24 @@
  * `next` is validated by the gateway against its own allow-list of in-app
  * targets, so a value it dislikes comes back as the root rather than as an open
  * redirect.
+ *
+ * ## Where `next` comes from, and why it is not simply `/`
+ *
+ * The gateway builds the IdP's callback out of its own `dashboard.public_url`
+ * and nothing else, so the last redirect of the chain arrives THERE — and
+ * `next` is relative, so it is resolved against that host and port, not against
+ * this page. Where Hermie Web shares the origin, that is the same place and `/`
+ * is right. Where it answers on another port of the same host — which
+ * [ADR-0015](../../../../../docs/adr/0015-web-variant-on-its-own-port.md) is the
+ * reason for, since a cookie ignores the port but the callback does not — the
+ * browser would finish a successful sign-in on the gateway's dashboard instead
+ * of in the app. The operator puts a redirect back to Hermie Web at some path
+ * on the gateway's host and names it with `--login-return`; this module asks
+ * `/hermie/config.json` for it rather than guessing.
  */
 import { GatewayError } from '@hermie/gateway-client'
+
+import { loadHermieWebConfig } from '../../gateway/web-config'
 
 export interface PasswordLoginInput {
   baseUrl: string
@@ -34,15 +50,87 @@ export interface PasswordLoginInput {
 
 export const COOKIE_SIGN_IN_AVAILABLE = true
 
-export function startCookieSignIn(baseUrl: string, provider?: string, next = '/'): void {
+/** The landing path when nothing else is known, and the answer to anything unsafe. */
+export const DEFAULT_LOGIN_RETURN = '/'
+
+/**
+ * How long to wait for `/hermie/config.json` before signing in anyway.
+ *
+ * The fetch is same-origin, tiny, and usually already resolved — the sign-in
+ * step asks for it on mount. But it is on the path of a button press now, and a
+ * button that does nothing while a request hangs is worse than one that lands
+ * the user on the root.
+ */
+const CONFIG_WAIT_MS = 2_000
+
+/**
+ * A path on this origin, or the root.
+ *
+ * `loginReturn` arrives from the server this page came from, so this is not a
+ * trust boundary — it is the same check the server already made, kept here so a
+ * hand-edited or stale answer cannot turn the sign-in button into a link to
+ * somewhere else. `//host` and `/\host` both read as a host to a browser.
+ */
+export function sameOriginPath(raw: string | null | undefined): string {
+  if (typeof raw !== 'string') {
+    return DEFAULT_LOGIN_RETURN
+  }
+
+  const trimmed = raw.trim()
+
+  if (!trimmed.startsWith('/') || trimmed.startsWith('//') || /[\s\\]/.test(trimmed)) {
+    return DEFAULT_LOGIN_RETURN
+  }
+
+  return trimmed
+}
+
+/** The gateway's OAuth door, with the provider and the landing path on it. */
+export function buildCookieSignInUrl(baseUrl: string, provider: string | undefined, next: string): string {
   const url = new URL('/auth/login', baseUrl)
 
   if (provider) {
     url.searchParams.set('provider', provider)
   }
 
-  url.searchParams.set('next', next)
-  window.location.assign(url.toString())
+  url.searchParams.set('next', sameOriginPath(next))
+
+  return url.toString()
+}
+
+/**
+ * The `next` to sign in with: what the caller asked for, else what the server
+ * configured, else the root.
+ */
+export async function loginReturnPath(explicit?: string): Promise<string> {
+  if (explicit !== undefined) {
+    return sameOriginPath(explicit)
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  try {
+    const config = await Promise.race([
+      loadHermieWebConfig(),
+      new Promise<null>(resolve => {
+        timer = setTimeout(() => resolve(null), CONFIG_WAIT_MS)
+      })
+    ])
+
+    return sameOriginPath(config?.loginReturn)
+  } finally {
+    // The race is over either way, and a timer nobody is waiting for still
+    // holds the event loop open — which a test runner notices before a user does.
+    clearTimeout(timer)
+  }
+}
+
+export function startCookieSignIn(baseUrl: string, provider?: string, next?: string): void {
+  // Deliberately not awaited by the caller: this ends in a full-page navigation,
+  // so there is nothing left to tell it.
+  void loginReturnPath(next).then(target => {
+    window.location.assign(buildCookieSignInUrl(baseUrl, provider, target))
+  })
 }
 
 export async function passwordLogin(input: PasswordLoginInput): Promise<string> {

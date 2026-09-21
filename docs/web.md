@@ -64,6 +64,12 @@ configures and why a mismatch there shows up as a 403 rather than as a subtle bu
 travels in `X-Forwarded-For`, `-Proto` and `-Host`, which the gateway reads when
 `dashboard.trusted_proxies` names the machine Hermie Web runs on.
 
+Whether the browser arrived over https is read from the reverse proxy's `X-Forwarded-Proto` before
+it is read from Hermie Web's own socket, which is plain HTTP by design. Reading the socket alone
+would tell the gateway `http` on every TLS deployment, and it answers that by issuing cookies without
+`Secure` and without the `__Host-` prefix — a downgrade produced by the proxy rather than by the
+deployment. The header decides nothing beyond the cookie attributes of the request that carried it.
+
 `Set-Cookie` passes back almost untouched. `Domain` is dropped, because a domain naming the gateway's
 host would make the browser discard the cookie outright. `Secure` is dropped and `SameSite=None`
 becomes `Lax` **only** when the browser reached Hermie Web over plain HTTP — a `Secure` cookie on an
@@ -96,6 +102,38 @@ The native flow and the browser flow share the transcript and share nothing else
 The app's credential provider is `CookieSessionCredentials`: no `Authorization` header on REST,
 `credentials: 'include'` so the browser attaches the cookie, a ticket per dial. There is no refresh
 token within reach, so a rejection is always "sign in again" rather than a silent renewal.
+
+### OIDC: Hermie Web must share the gateway's public hostname
+
+There is one deployment rule that OAuth makes non-negotiable, and it is worth stating on its own
+because getting it wrong produces a sign-in that fails at the very last hop with
+`{"detail":"Missing PKCE state cookie"}`.
+
+**The callback is fixed to `dashboard.public_url`.** The gateway builds the `redirect_uri` it hands
+the identity provider out of that setting and nothing else — not out of the request, not out of
+`X-Forwarded-Host`. So the IdP always returns the browser to
+`https://<public_url>/auth/callback`, wherever the sign-in was started from.
+
+The PKCE state is a cookie set when the chain starts. A cookie belongs to a **host**, and a host is
+not an origin: **cookies ignore the port** but they do not ignore the name. So:
+
+| Where Hermie Web answers                   | What happens at the callback                              |
+| ------------------------------------------ | --------------------------------------------------------- |
+| Same host and port as `public_url`         | Works. One origin, one cookie jar.                        |
+| Same host, **another port** — e.g. `:9443` | Works. The cookie was set for the host, port and all.     |
+| **Another host** — `hermie.example.com`    | Fails. The cookie is on a host the callback never visits. |
+
+This is exactly what [ADR-0015](adr/0015-web-variant-on-its-own-port.md) chose "own port" for. A
+separate hostname for the browser build looks tidier and cannot carry a session through an OAuth
+round trip.
+
+**Which leaves the landing.** `next=` is validated by the gateway and handed back as a **relative**
+redirect from `/auth/callback`, so the browser resolves it against the callback's host _and port_ —
+the gateway's, not Hermie Web's. A successful sign-in therefore ends on the dashboard rather than in
+the app. The fix is a redirect the operator owns: put a path on the gateway's own port that points
+back at Hermie Web, and tell Hermie Web to ask for that path with `--login-return`. It goes into
+`/hermie/config.json` as `loginReturn`, the app uses it as `next=`, and both ends validate it as a
+same-origin path before it is used. `deploy/web/README.md` has the worked nginx configuration.
 
 ### What the wizard does differently
 

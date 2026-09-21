@@ -108,7 +108,11 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
     }
 
     if (url.pathname === '/hermie/config.json') {
-      json(response, 200, { gatewayHost: new URL(options.publicUrl).host, version: options.version })
+      json(response, 200, {
+        gatewayHost: new URL(options.publicUrl).host,
+        loginReturn: options.loginReturn,
+        version: options.version
+      })
 
       return
     }
