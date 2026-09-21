@@ -9,6 +9,8 @@
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native'
 
+import { NS_A } from './support/gateway-namespace'
+
 import { NotificationsSection } from '../src/features/push/NotificationsSection'
 import type { PushPermission } from '../src/features/push/platform-contract'
 import { PushSync } from '../src/features/push/push-sync'
@@ -51,8 +53,8 @@ const paint = (push: PushSync, available = true) =>
 
 beforeEach(async () => {
   usePushStore.getState().reset()
-  await keyValueStore.delete(PUSH_KEY)
-  await usePushStore.getState().hydrate()
+  await keyValueStore.delete(NS_A.key(PUSH_KEY))
+  await usePushStore.getState().hydrate(NS_A)
 })
 
 it('shows one switch, off, and no per-type controls', () => {

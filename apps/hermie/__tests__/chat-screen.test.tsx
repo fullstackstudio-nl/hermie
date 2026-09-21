@@ -840,11 +840,15 @@ describe('following a DM across chats', () => {
 
   /**
    * The line these tests press is the expanded one, which Quiet (the default)
-   * folds to a chip. The screen hydrates the settings store on mount, which
-   * replaces `perChat`, so the level has to be set once that has happened.
+   * folds to a chip.
+   *
+   * It used to have to wait for a hydrate first: the screen read the settings
+   * store on mount and that read replaced `perChat`. The per-account settings
+   * are now read for whichever GATEWAY is live, by the chat runtime, and this
+   * suite mounts the screen without one — so there is nothing left to race and
+   * the override can simply be set.
    */
-  async function showFullDmLines() {
-    await waitFor(() => expect(useSettingsStore.getState().loaded).toBe(true))
+  function showFullDmLines() {
     act(() => {
       useSettingsStore.getState().setChatView('researcher', { level: 'normal' })
     })
@@ -860,7 +864,7 @@ describe('following a DM across chats', () => {
     })
 
     renderScreen(<ChatScreen bot="researcher" onOpenBot={onOpenBot} />)
-    await showFullDmLines()
+    showFullDmLines()
 
     // Tapping the LINE expands it in place and navigates nowhere (§6.6); the
     // explicit link inside is what opens the other chat, and it still lands on
@@ -883,7 +887,7 @@ describe('following a DM across chats', () => {
     })
 
     renderScreen(<ChatScreen bot="researcher" onOpenBot={onOpenBot} />)
-    await showFullDmLines()
+    showFullDmLines()
 
     // Tapping the LINE expands it in place and navigates nowhere (§6.6); the
     // explicit link inside is what opens the other chat, and it still lands on

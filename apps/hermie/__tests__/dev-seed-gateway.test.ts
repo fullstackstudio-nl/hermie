@@ -68,7 +68,21 @@ async function seedWith(argv: readonly string[], dev = true): Promise<SeedRun> {
     }
     const { secretStore } = require('../src/platform/secret-store') as { secretStore: { set: jest.Mock } }
 
-    return { wrote: await seedDevGateway(), setJson: keyValueStore.setJson, setSecret: secretStore.set }
+    const wrote = await seedDevGateway()
+    // The entry the seed minted, read back off the list it wrote: every
+    // namespaced key above is suffixed with this.
+    const registry = keyValueStore.setJson.mock.calls
+      .filter(([key]: [string]) => key === 'hermie.gateways')
+      .map(([, value]: [string, { activeGatewayId: string | null }]) => value)
+      .pop() ?? { activeGatewayId: null, gateways: [] }
+
+    return {
+      wrote,
+      registry,
+      gatewayId: registry.activeGatewayId,
+      setJson: keyValueStore.setJson,
+      setSecret: secretStore.set
+    }
   } finally {
     ;(globalThis as { __DEV__?: boolean }).__DEV__ = previous
   }
@@ -81,23 +95,31 @@ describe('seeding a gateway from a launch argument', () => {
     expect(run.wrote).toBe(true)
 
     // The non-secret half, in the key-value store, under the key the ordinary
-    // read uses. `session_token` because a draft with no probe is an ungated
+    // read uses — which is now suffixed with the id of the entry the seed
+    // minted. `session_token` because a draft with no probe is an ungated
     // gateway, which is what `authModeOf(null)` answers.
-    expect(run.setJson).toHaveBeenCalledWith(CONFIG_KEY, {
+    expect(run.setJson).toHaveBeenCalledWith(`${CONFIG_KEY}@${run.gatewayId}`, {
       baseUrl: 'http://localhost:9119',
       authMode: 'session_token'
     })
 
+    // And the list names it, so the next launch finds the same entry rather
+    // than a configuration under an id nothing claims.
+    expect(run.registry).toMatchObject({
+      activeGatewayId: run.gatewayId,
+      gateways: [{ address: 'http://localhost:9119', authKind: 'session_token', name: 'localhost' }]
+    })
+
     // …and the credential, in the keychain, under the key `loadGatewaySetup`
     // reads to decide `hasCredentials`.
-    expect(run.setSecret).toHaveBeenCalledWith(SECRET_KEYS.sessionToken, 'demo')
+    expect(run.setSecret).toHaveBeenCalledWith(`${SECRET_KEYS.sessionToken}@${run.gatewayId}`, 'demo')
   })
 
   it('seeds the address alone when no token was given', async () => {
     const run = await seedWith(['--hermieGateway', 'http://localhost:9119'])
 
     expect(run.wrote).toBe(true)
-    expect(run.setJson).toHaveBeenCalledWith(CONFIG_KEY, {
+    expect(run.setJson).toHaveBeenCalledWith(`${CONFIG_KEY}@${run.gatewayId}`, {
       baseUrl: 'http://localhost:9119',
       authMode: 'session_token'
     })
@@ -105,7 +127,7 @@ describe('seeding a gateway from a launch argument', () => {
     // No credential, so the launch lands on the wizard's sign-in step with the
     // address already filled — the state a sign-out leaves behind, not a
     // half-written one.
-    expect(run.setSecret).not.toHaveBeenCalledWith(SECRET_KEYS.sessionToken, expect.anything())
+    expect(run.setSecret).not.toHaveBeenCalledWith(`${SECRET_KEYS.sessionToken}@${run.gatewayId}`, expect.anything())
   })
 
   it('writes nothing at all when no gateway was named', async () => {

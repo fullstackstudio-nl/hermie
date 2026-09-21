@@ -40,27 +40,16 @@ jest.mock('../src/gateway/web-config', () => ({
   loadHermieWebConfig: jest.fn(async () => null)
 }))
 
-jest.mock('../src/platform/key-value-store', () => ({
-  keyValueStore: {
-    get: jest.fn(async () => null),
-    set: jest.fn(async () => undefined),
-    delete: jest.fn(async () => undefined),
-    getJson: jest.fn(async () => ({
-      baseUrl: 'http://127.0.0.1:9120',
-      authMode: 'cookie',
-      version: '2026.9.14'
-    })),
-    setJson: jest.fn(async () => undefined)
-  }
-}))
+// One configured gateway, in a list that names it. See `support/stored-gateway`.
+jest.mock('../src/platform/key-value-store', () =>
+  require('./support/stored-gateway').gatewayDisk({
+    baseUrl: 'http://127.0.0.1:9120',
+    authMode: 'cookie',
+    version: '2026.9.14'
+  })
+)
 
-jest.mock('../src/platform/secret-store', () => ({
-  secretStore: {
-    get: jest.fn(async (key: string) => (key === 'hermie.auth.access_token' ? 'access-1' : null)),
-    set: jest.fn(async () => undefined),
-    delete: jest.fn(async () => undefined)
-  }
-}))
+jest.mock('../src/platform/secret-store', () => require('./support/stored-gateway').gatewaySecrets())
 
 const pushStatus = (status: ConnectionStatus, error: GatewayError | null = null) =>
   act(() => {

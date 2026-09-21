@@ -20,6 +20,8 @@ import { PLUGIN_ADVERT } from '@hermie/fake-gateway'
 import { pluginAdvertOf } from '@hermie/gateway-client/plugin'
 import { screen } from '@testing-library/react-native'
 
+import { NS_A } from './support/gateway-namespace'
+
 import { NotificationsSection } from '../src/features/push/NotificationsSection'
 import { PLUGIN_INSTALL_COMMANDS } from '../src/features/push/PluginInstall'
 import { PushSync } from '../src/features/push/push-sync'
@@ -35,6 +37,7 @@ const ADVERT = pluginAdvertOf(PLUGIN_ADVERT)
 
 const push = () =>
   new PushSync({
+    namespace: NS_A,
     ports: {
       showChat: async () => undefined,
       openApprovals: async () => [],
@@ -67,7 +70,7 @@ beforeEach(async () => {
   usePluginStore.getState().reset()
   usePushStore.getState().reset()
   await keyValueStore.delete(PUSH_KEY)
-  await usePushStore.getState().hydrate()
+  await usePushStore.getState().hydrate(NS_A)
 })
 
 describe('the three states', () => {

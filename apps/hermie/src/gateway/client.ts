@@ -18,7 +18,8 @@ import { networkWatcher } from '../platform/net-info'
 import { RUNS_ON_MAC } from '../platform/runs-on-mac'
 import { secretStore } from '../platform/secret-store'
 import { PlatformWebSocket } from '../platform/socket'
-import { SECRET_KEYS } from './config'
+import { secretKeysFor } from './config'
+import type { GatewayNamespace } from './namespace'
 
 interface TokenMeta {
   expiresAt: number
@@ -46,13 +47,15 @@ interface TokenMeta {
  * OLD access token still renews. So the refresh token goes first and alone, and
  * nothing else is written until it is safely down.
  */
-export function createSecretTokenStore(): TokenStore {
+export function createSecretTokenStore(ns: GatewayNamespace): TokenStore {
+  const keys = secretKeysFor(ns)
+
   return {
     async load() {
       const [accessToken, refreshToken, rawMeta] = await Promise.all([
-        secretStore.get(SECRET_KEYS.accessToken),
-        secretStore.get(SECRET_KEYS.refreshToken),
-        secretStore.get(SECRET_KEYS.tokenMeta)
+        secretStore.get(keys.accessToken),
+        secretStore.get(keys.refreshToken),
+        secretStore.get(keys.tokenMeta)
       ])
 
       if (!accessToken) {
@@ -80,17 +83,17 @@ export function createSecretTokenStore(): TokenStore {
 
       // First, alone, and awaited: see the note above on which partial write
       // costs the session and which one survives.
-      await secretStore.set(SECRET_KEYS.refreshToken, tokens.refreshToken)
+      await secretStore.set(keys.refreshToken, tokens.refreshToken)
       await Promise.all([
-        secretStore.set(SECRET_KEYS.accessToken, tokens.accessToken),
-        secretStore.set(SECRET_KEYS.tokenMeta, JSON.stringify(meta))
+        secretStore.set(keys.accessToken, tokens.accessToken),
+        secretStore.set(keys.tokenMeta, JSON.stringify(meta))
       ])
     },
     async clear() {
       await Promise.all([
-        secretStore.delete(SECRET_KEYS.accessToken),
-        secretStore.delete(SECRET_KEYS.refreshToken),
-        secretStore.delete(SECRET_KEYS.tokenMeta)
+        secretStore.delete(keys.accessToken),
+        secretStore.delete(keys.refreshToken),
+        secretStore.delete(keys.tokenMeta)
       ])
     }
   }
@@ -120,6 +123,12 @@ export function createMemoryTokenStore(initial: TokenSet | null = null): TokenSt
 export interface CreateTokenCoordinatorOptions {
   baseUrl: string
   extraHeaders?: Record<string, string>
+  /**
+   * Which gateway's keychain items these are. Required unless `store` is given:
+   * a coordinator that reached for the unsuffixed keys would be a coordinator
+   * writing one gateway's rotated tokens over another's.
+   */
+  namespace?: GatewayNamespace
   /** Defaults to the secret store; the wizard hands in a memory store. */
   store?: TokenStore
   /** The app's auth ring. The wizard leaves it out: it has no session to explain yet. */
@@ -134,9 +143,17 @@ export interface CreateTokenCoordinatorOptions {
  */
 export function createTokenCoordinator(options: CreateTokenCoordinatorOptions): TokenCoordinator {
   const extraHeaders = options.extraHeaders ?? {}
+  const store = options.store ?? (options.namespace ? createSecretTokenStore(options.namespace) : null)
+
+  if (!store) {
+    // Neither a namespace nor a store. There is no sensible default any more —
+    // the unsuffixed keys belong to nobody — so this is a programming error
+    // rather than something to paper over with a guess at a gateway.
+    throw new Error('createTokenCoordinator needs a gateway namespace or a token store.')
+  }
 
   return new TokenCoordinator({
-    store: options.store ?? createSecretTokenStore(),
+    store,
     refresh: tokens => refreshTokens(options.baseUrl, tokens, { extraHeaders }),
     ...(options.timeline ? { timeline: options.timeline } : {})
   })
@@ -144,6 +161,8 @@ export function createTokenCoordinator(options: CreateTokenCoordinatorOptions): 
 
 export interface CreateConnectionOptions {
   config: GatewayConfig
+  /** Which gateway's keychain items to rotate, when no coordinator is handed in. */
+  namespace?: GatewayNamespace
   /** Only for `authMode: 'session_token'`; the native flow uses the coordinator. */
   sessionToken?: string
   /** Only for `authMode: 'native_pkce'`; one is built over the secret store if omitted. */
@@ -214,6 +233,7 @@ export function createGatewayConnection(options: CreateConnectionOptions): Gatew
               createTokenCoordinator({
                 baseUrl: config.baseUrl,
                 extraHeaders,
+                ...(options.namespace ? { namespace: options.namespace } : {}),
                 ...(timeline ? { timeline } : {})
               }),
             extraHeaders,

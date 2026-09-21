@@ -22,6 +22,8 @@
 import { pushSectionFor, pushStampOf } from '@hermie/gateway-client/push'
 import type { PushAddress } from '@hermie/gateway-client/push'
 
+import { NS_A } from './support/gateway-namespace'
+
 import { pushTapOf, resolvePushTap, type OpenApproval } from '../src/features/push/actions'
 import type {
   PushAddressFailure,
@@ -112,11 +114,11 @@ function fakePorts(): PushSyncPorts & { shown: string[]; responded: [string, str
 const settled = () => new Promise(resolve => setTimeout(resolve, 0))
 
 const syncFor = (platform: PushPlatform, ports: PushSyncPorts) =>
-  new PushSync({ platform, ports, projectId: 'project', now: () => NOW_MS })
+  new PushSync({ platform, ports, namespace: NS_A, projectId: 'project', now: () => NOW_MS })
 
 beforeEach(async () => {
   usePushStore.getState().reset()
-  await keyValueStore.delete(PUSH_KEY)
+  await keyValueStore.delete(NS_A.key(PUSH_KEY))
 })
 
 describe('the switch', () => {
@@ -223,6 +225,7 @@ describe('the switch', () => {
       const platform = fakePlatform({ addressValue: null, failureValue: { reason: 'no-project-id' } })
       const sync = new PushSync({
         platform,
+        namespace: NS_A,
         ports: fakePorts(),
         projectId: null,
         now: () => NOW_MS,
@@ -249,6 +252,7 @@ describe('the switch', () => {
       })
       const sync = new PushSync({
         platform,
+        namespace: NS_A,
         ports: fakePorts(),
         projectId: 'project',
         now: () => NOW_MS,
@@ -434,6 +438,7 @@ describe('the heartbeat', () => {
     const sync = new PushSync({
       platform: fakePlatform(),
       ports: fakePorts(),
+      namespace: NS_A,
       now: () => NOW_MS,
       heartbeatMs: 1_000
     })
@@ -446,7 +451,7 @@ describe('the heartbeat', () => {
   it('beats immediately when a chat comes on screen', () => {
     const sync = started()
 
-    void usePushStore.getState().hydrate()
+    void usePushStore.getState().hydrate(NS_A)
     jest.advanceTimersByTime(0)
 
     sync.setOpenChat('researcher')
@@ -479,7 +484,7 @@ describe('the heartbeat', () => {
     const beats: number[] = []
     const unsubscribe = usePushStore.subscribe(state => beats.push(Object.keys(state.seen).length))
 
-    void usePushStore.getState().hydrate()
+    void usePushStore.getState().hydrate(NS_A)
     jest.advanceTimersByTime(0)
     sync.setOpenChat('researcher')
 
@@ -497,7 +502,7 @@ describe('the heartbeat', () => {
   it('stops when the chat closes and starts again when one opens', () => {
     const sync = started()
 
-    void usePushStore.getState().hydrate()
+    void usePushStore.getState().hydrate(NS_A)
     jest.advanceTimersByTime(0)
 
     sync.setOpenChat('researcher')
@@ -521,7 +526,7 @@ describe('the heartbeat', () => {
     // itself by and nothing asked again until the interval came round.
     jest.useRealTimers()
 
-    const sync = new PushSync({ platform: fakePlatform(), ports: fakePorts(), now: () => NOW_MS })
+    const sync = new PushSync({ platform: fakePlatform(), ports: fakePorts(), namespace: NS_A, now: () => NOW_MS })
 
     sync.setOpenChat('researcher')
     sync.start()
@@ -702,7 +707,7 @@ describe('the row the store builds', () => {
   })
 
   it('round-trips the reader’s preferences and omits nothing the daemon reads', async () => {
-    await usePushStore.getState().hydrate()
+    await usePushStore.getState().hydrate(NS_A)
     usePushStore.getState().setEnabled(true)
     usePushStore.getState().setType('cron', false)
     usePushStore.getState().setPreview(true)

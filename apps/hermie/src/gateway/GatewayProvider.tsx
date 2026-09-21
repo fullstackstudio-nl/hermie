@@ -18,6 +18,8 @@ import { retirePushRegistration } from '../features/push/runtime'
 import { createPersistentAuthTimeline } from './auth-timeline'
 import { attachLifecycle, createGatewayConnection, createTokenCoordinator, endGatewaySession } from './client'
 import { clearCredentials, clearGateway, type GatewaySetup, loadGatewaySetup, type StoredGatewayConfig } from './config'
+import { migrateGatewayStorage } from './migrate'
+import { namespace, type GatewayNamespace } from './namespace'
 import {
   activeGatewayOf,
   EMPTY_REGISTRY,
@@ -147,6 +149,8 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
   const unsubscribeRef = useRef<(() => void) | null>(null)
   // Outlives every connection here on purpose: `teardown` must not clear it.
   const timelineRef = useRef<AuthTimeline | null>(null)
+  /** Which gateway the ring in `timelineRef` was restored for. */
+  const timelineIdRef = useRef<string | null>(null)
 
   const status = useConnectionStore(state => state.status)
   const lastError = useConnectionStore(state => state.lastError)
@@ -167,7 +171,7 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
   }, [resetStore])
 
   const connect = useCallback(
-    (loaded: GatewaySetup, timeline: AuthTimeline) => {
+    (loaded: GatewaySetup, ns: GatewayNamespace, timeline: AuthTimeline) => {
       teardown()
 
       // Only the native flow has tokens to rotate. A session token never
@@ -176,11 +180,17 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
       // refresher with nothing to refresh.
       const coordinator =
         loaded.config.authMode === 'native_pkce'
-          ? createTokenCoordinator({ baseUrl: loaded.config.baseUrl, extraHeaders: loaded.extraHeaders, timeline })
+          ? createTokenCoordinator({
+              baseUrl: loaded.config.baseUrl,
+              extraHeaders: loaded.extraHeaders,
+              namespace: ns,
+              timeline
+            })
           : null
 
       const connection = createGatewayConnection({
         config: toGatewayConfig(loaded),
+        namespace: ns,
         timeline,
         ...(loaded.sessionToken ? { sessionToken: loaded.sessionToken } : {}),
         ...(coordinator ? { coordinator } : {})
@@ -206,10 +216,6 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
   )
 
   const reload = useCallback(async () => {
-    // One ring for the app's whole life, not one per connect: it has to span the
-    // sign-out and the reconnect that follow, which is the sequence worth reading.
-    timelineRef.current ??= await createPersistentAuthTimeline()
-
     // Development only, and BEFORE the read below rather than beside it: a launch
     // argument may name a gateway, and the point of it is that the ordinary read
     // then finds a configured one. Compiled out of a production bundle with the
@@ -224,9 +230,45 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
       the same credentials it already had. Nothing else changes and nothing is
       asked — see `loadGatewayRegistry`.
     */
-    const { registry: stored } = await loadGatewayRegistry()
+    const { registry: stored, migratedId } = await loadGatewayRegistry()
+    const active = activeGatewayOf(stored)
 
-    const loaded = await loadGatewaySetup()
+    // And the rest of that gateway's storage follows its entry. Before the read
+    // below, because the configuration is one of the things being moved.
+    if (migratedId && active) {
+      await migrateGatewayStorage(namespace(migratedId), active.address)
+    }
+
+    if (!active) {
+      // Nothing configured. The ring belongs to a gateway now, so there is none
+      // to restore either — the wizard is the whole of this state.
+      teardown()
+      setRegistry(stored)
+      setSetup(null)
+      setResumeConfig(null)
+      setResumeAccess(null)
+      setResumeIntent('fresh')
+      setPhase('onboarding')
+
+      return
+    }
+
+    const ns = namespace(active.id)
+
+    /*
+      One ring per gateway, restored here rather than once at startup.
+
+      It has to span a sign-out and the reconnect that follows — that sequence
+      is the whole reason it is persisted — and it has to be the ring belonging
+      to the gateway now being dialled, because "the gateway rejected the saved
+      sign-in" is a sentence about one machine.
+    */
+    if (!timelineRef.current || timelineIdRef.current !== ns.id) {
+      timelineRef.current = await createPersistentAuthTimeline(ns)
+      timelineIdRef.current = ns.id
+    }
+
+    const loaded = await loadGatewaySetup(ns)
 
     /*
       Keep the entry and the configuration in step.
@@ -249,7 +291,7 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
       // "signed out after replacing the app bundle" report, and the ring is the
       // only thing that outlives the launch to say which of the two happened.
       if (loaded) {
-        timelineRef.current.record(loaded.credentialError ? { event: 'token.read_failed' } : { event: 'token.absent' })
+        timelineRef.current?.record(loaded.credentialError ? { event: 'token.read_failed' } : { event: 'token.absent' })
       }
 
       teardown()
@@ -262,7 +304,7 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
       return
     }
 
-    connect(loaded, timelineRef.current)
+    connect(loaded, ns, timelineRef.current!)
   }, [connect, teardown])
 
   useEffect(() => {
@@ -307,6 +349,7 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     const keep = setup?.config ?? null
+    const ns = registry.activeGatewayId ? namespace(registry.activeGatewayId) : null
 
     // FIRST, and awaited: ADR-0017's registration is only meaningful for the
     // gateway it was made on, and removing it is a `ui_meta` write that needs
@@ -320,12 +363,16 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
     await endGatewaySession(keep)
 
     teardown()
-    await clearCredentials()
+
+    if (ns) {
+      await clearCredentials(ns)
+    }
+
     setSetup(null)
     setResumeConfig(keep)
     setResumeIntent('signin')
     setPhase('onboarding')
-  }, [setup, teardown])
+  }, [registry, setup, teardown])
 
   /**
    * Back to the address step, with everything still on disk.
@@ -358,7 +405,10 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
     await endGatewaySession(setup?.config ?? null)
 
     teardown()
-    await clearGateway()
+
+    if (registry.activeGatewayId) {
+      await clearGateway(namespace(registry.activeGatewayId))
+    }
 
     // And out of the list, which is the record of what this device knows about
     // rather than of what it is talking to right now. Leaving the row behind

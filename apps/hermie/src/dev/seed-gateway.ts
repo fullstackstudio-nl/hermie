@@ -30,7 +30,7 @@
 // every step's UI, and this module is imported by `GatewayProvider`, which mounts
 // before any of it.
 import { configFromDraft, emptyDraft } from '../features/onboarding/draft'
-import { saveGatewaySetup } from '../gateway/config'
+import { loadGatewayRegistry, saveGatewayAndRegister } from '../gateway/registry'
 import { DEV_LAUNCH_INTENT } from './launch-intent'
 
 /**
@@ -60,7 +60,17 @@ export async function seedDevGateway(): Promise<boolean> {
   // line.
   const draft = { ...emptyDraft(), rawAddress: seed.baseUrl, baseUrl: seed.baseUrl, sessionToken: seed.token ?? '' }
 
-  await saveGatewaySetup({
+  // Into the entry that already names this address, when there is one, so a
+  // reload during a Metro session writes the same entry rather than growing the
+  // list by one on every refresh.
+  const { registry } = await loadGatewayRegistry()
+  const existing = registry.gateways.find(gateway => gateway.address === seed.baseUrl)
+
+  await saveGatewayAndRegister({
+    gatewayId: existing?.id ?? null,
+    // A launch argument naming a gateway means "use this one", so it becomes
+    // the live one even on a device that already had others.
+    activate: true,
     config: configFromDraft(draft),
     extraHeaders: {},
     sessionToken: seed.token ?? null

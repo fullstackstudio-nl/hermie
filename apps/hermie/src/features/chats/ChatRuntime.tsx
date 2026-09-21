@@ -13,7 +13,8 @@ import { requestOpenChat } from '../../app/open-chat-bus'
 import { useGateway } from '../../gateway'
 import { chatGatewayFor, type ChatGateway } from '../../gateway/link'
 import { useConnectionStore } from '../../gateway/store'
-import { chatCache } from '../../platform/chat-cache'
+import { namespace } from '../../gateway/namespace'
+import { chatCacheFor } from '../../platform/chat-cache'
 import { RUNS_ON_MAC } from '../../platform/runs-on-mac'
 import { useBotsStore } from '../../store/bots'
 import { useChatLayoutStore } from '../../store/chat-layout'
@@ -91,34 +92,44 @@ async function readIdentity(
 const ChatRuntimeContext = createContext<ChatRuntimeValue | null>(null)
 
 export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
-  const { config, connection, http, status } = useGateway()
+  const { config, connection, gatewayId, http, status } = useGateway()
   const [value, setValue] = useState<ChatRuntimeValue | null>(null)
   const valueRef = useRef<ChatRuntimeValue | null>(null)
 
+  /*
+    Everything that is stored PER GATEWAY is read here, keyed by the active
+    gateway's id, and read again when that id changes.
+
+    Before the registry these were read once at startup, because there was one
+    gateway and therefore one answer. There are now two things they could mean
+    and only one of them is right: the settings, the read watermarks and the
+    push registration all belong to the gateway that is live.
+
+    The reader's own context switches are the exception and stay at startup:
+    they are decisions about what this person is willing to tell a bot, and they
+    do not change because a different machine answered.
+  */
   useEffect(() => {
-    void useSettingsStore.getState().hydrate()
-    void useBotsStore.getState().hydrateLastSeen()
-    // Before any gateway exists, because the installation id it mints is what
-    // every later write of the push section is addressed by.
-    void usePushStore.getState().hydrate()
-    // Same reason, one step weaker: the context section is only written once a
-    // gateway has named somebody, but the reader's switches have to be in
-    // memory before the first projection or the defaults would travel as though
-    // they were decisions.
+    if (!gatewayId) {
+      return
+    }
+
+    const ns = namespace(gatewayId)
+
+    void useSettingsStore.getState().hydrate(ns)
+    void useBotsStore.getState().hydrateLastSeen(ns)
+    void usePushStore.getState().hydrate(ns)
+    // The list's arrangement, on the same key. "Change gateway" now edits an
+    // entry rather than replacing the one gateway, so an arrangement follows
+    // an address correction instead of being dropped by it (ADR-0012, amended).
+    void useChatLayoutStore.getState().load(gatewayId)
+  }, [gatewayId])
+
+  useEffect(() => {
+    // The reader's switches have to be in memory before the first projection or
+    // the defaults would travel as though they were decisions.
     void useDeviceContextStore.getState().hydrate()
   }, [])
-
-  // The list's arrangement is stored per gateway, so it is read when the
-  // gateway is known rather than at startup: "Change gateway" then starts with
-  // an empty arrangement and "Sign out" keeps the one it had, with no clean-up
-  // code on either path (ADR-0012).
-  useEffect(() => {
-    if (config?.baseUrl) {
-      void useChatLayoutStore.getState().load(config.baseUrl)
-    } else {
-      useChatLayoutStore.getState().reset()
-    }
-  }, [config?.baseUrl])
 
   useEffect(() => {
     if (!connection) {
@@ -147,6 +158,10 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     }
 
     const gateway = chatGatewayFor(connection)
+    // One cache per gateway. Two gateways can both have a `researcher`, and a
+    // cache that could not tell them apart would paint one machine's
+    // conversation under the other's name.
+    const chatCache = gatewayId ? chatCacheFor(gatewayId) : null
     // The chat store is handed over read-only: `session.active_list` answers for
     // the whole gateway process and carries no profile, so the roster attributes
     // a busy session to a bot through the ids its chat is known under.
@@ -195,6 +210,7 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     */
     const push = new PushSync({
       platform: pushPlatform,
+      namespace: gatewayId ? namespace(gatewayId) : null,
       projectId: pushProjectId(),
       vapidUrl: pushVapidUrl(),
       // A registration that never happened lands in the same ring the
@@ -252,7 +268,7 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     // `http` is built with the connection and handed out as a ref, like the
     // connection itself, so listing it costs no extra rebuild — and leaving it
     // out would hand the controller a stale one if that ever changed.
-  }, [connection, http])
+  }, [connection, gatewayId, http])
 
   /**
    * Read the roster when the connection becomes usable, and again after every

@@ -15,6 +15,8 @@
 import type { PushAddress } from '@hermie/gateway-client/push'
 import { screen } from '@testing-library/react-native'
 
+import { NS_A } from './support/gateway-namespace'
+
 import { NotificationsSection } from '../src/features/push/NotificationsSection'
 import type { PushPlatform } from '../src/features/push/platform-contract'
 import { PushSync } from '../src/features/push/push-sync'
@@ -129,6 +131,7 @@ describe('Settings → Notifications says it out loud', () => {
 
   const sync = () =>
     new PushSync({
+      namespace: NS_A,
       platform: platform(),
       ports: {
         showChat: async () => undefined,

@@ -1,9 +1,11 @@
 import { keyValueStore } from '../src/platform/key-value-store'
 import { CHAT_VIEW_KEY, chatViewFor, DEFAULT_CHAT_VIEW, useSettingsStore } from '../src/store/settings'
 
+import { NS_A } from './support/gateway-namespace'
+
 beforeEach(async () => {
   useSettingsStore.getState().reset()
-  await keyValueStore.delete(CHAT_VIEW_KEY)
+  await keyValueStore.delete(NS_A.key(CHAT_VIEW_KEY))
 })
 
 /** The store serialises its writes; this waits for the one just queued. */
@@ -33,21 +35,27 @@ describe('chat view settings', () => {
   })
 
   it('reads its settings back from the key-value store', async () => {
+    // Hydrated first, because that is what tells the store which gateway these
+    // settings belong to. Nothing is written before it knows.
+    await useSettingsStore.getState().hydrate(NS_A)
     useSettingsStore.getState().setDefaults({ showThinking: true })
     useSettingsStore.getState().setChatView('writer', { level: 'quiet' })
     await settled()
 
     useSettingsStore.getState().reset()
-    await useSettingsStore.getState().hydrate()
+    await useSettingsStore.getState().hydrate(NS_A)
 
     expect(useSettingsStore.getState().defaults.showThinking).toBe(true)
     expect(chatViewFor(useSettingsStore.getState(), 'writer').level).toBe('quiet')
   })
 
   it('falls back to the defaults when the stored blob is from another build', async () => {
-    await keyValueStore.setJson(CHAT_VIEW_KEY, { defaults: { level: 'shouty' }, perChat: { writer: 'nonsense' } })
+    await keyValueStore.setJson(NS_A.key(CHAT_VIEW_KEY), {
+      defaults: { level: 'shouty' },
+      perChat: { writer: 'nonsense' }
+    })
 
-    await useSettingsStore.getState().hydrate()
+    await useSettingsStore.getState().hydrate(NS_A)
 
     expect(useSettingsStore.getState().defaults).toEqual(DEFAULT_CHAT_VIEW)
     expect(useSettingsStore.getState().perChat).toEqual({})

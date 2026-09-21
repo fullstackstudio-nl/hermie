@@ -45,24 +45,54 @@ jest.mock('../src/features/onboarding/test-connection', () => ({
   runConnectionTest: jest.fn()
 }))
 
+/**
+ * One gateway on disk, and a list that names it.
+ *
+ * The mock has to be key-aware now: every stored thing is suffixed with the
+ * entry's id, and the entry itself lives under `hermie.gateways`. A mock that
+ * answered the same configuration to every key would have the registry read
+ * that configuration as a list of gateways and find none.
+ */
+const mockGatewayId = 'gaaaaaaaaaaaaaaaa'
+const mockStoredConfig = {
+  baseUrl: 'https://hermes.example.com:8443',
+  authMode: 'native_pkce',
+  provider: 'self-hosted',
+  version: '2026.9.14'
+}
+const mockStoredRegistry = {
+  v: 1,
+  activeGatewayId: mockGatewayId,
+  gateways: [
+    {
+      id: mockGatewayId,
+      name: 'hermes.example.com',
+      address: mockStoredConfig.baseUrl,
+      authKind: 'native_pkce',
+      addedAt: 1
+    }
+  ]
+}
+
 jest.mock('../src/platform/key-value-store', () => ({
   keyValueStore: {
     get: jest.fn(async () => null),
     set: jest.fn(async () => undefined),
     delete: jest.fn(async () => undefined),
-    getJson: jest.fn(async () => ({
-      baseUrl: 'https://hermes.example.com:8443',
-      authMode: 'native_pkce',
-      provider: 'self-hosted',
-      version: '2026.9.14'
-    })),
+    getJson: jest.fn(async (key: string) => {
+      if (key === 'hermie.gateways') {
+        return mockStoredRegistry
+      }
+
+      return key === `hermie.gateway.config@${mockGatewayId}` ? mockStoredConfig : null
+    }),
     setJson: jest.fn(async () => undefined)
   }
 }))
 
 jest.mock('../src/platform/secret-store', () => ({
   secretStore: {
-    get: jest.fn(async (key: string) => (key === 'hermie.auth.access_token' ? 'access-1' : null)),
+    get: jest.fn(async (key: string) => (key === `hermie.auth.access_token@${mockGatewayId}` ? 'access-1' : null)),
     set: jest.fn(async () => undefined),
     delete: jest.fn(async () => undefined)
   }
@@ -189,6 +219,7 @@ describe('the wizard it opens', () => {
     render(
       withProviders(
         <OnboardingNavigator
+          gatewayId={mockGatewayId}
           initialDraft={{
             rawAddress: baseUrl,
             baseUrl,
@@ -221,7 +252,7 @@ describe('the wizard it opens', () => {
     // count says nothing on its own.)
     const deleted = secretStore.delete.mock.calls.map(([key]: [string]) => key)
 
-    expect(deleted.includes('hermie.auth.access_token')).toBe(cleared)
+    expect(deleted.includes(`hermie.auth.access_token@${mockGatewayId}`)).toBe(cleared)
     expect(keyValueStore.setJson).toHaveBeenCalled()
   })
 })

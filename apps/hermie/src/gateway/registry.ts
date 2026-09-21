@@ -30,7 +30,14 @@ import type { GatewayAuthMode } from '@hermie/gateway-client'
 
 import { keyValueStore } from '../platform/key-value-store'
 import { randomBytes } from '../platform/random'
-import { CONFIG_KEY, type StoredGatewayConfig } from './config'
+import {
+  clearCredentials,
+  CONFIG_KEY,
+  saveGatewaySetup,
+  type SaveGatewaySetupInput,
+  type StoredGatewayConfig
+} from './config'
+import { namespace } from './namespace'
 
 /** The registry itself. Device-level: never namespaced, never synced. */
 export const GATEWAY_REGISTRY_KEY = 'hermie.gateways'
@@ -336,4 +343,76 @@ export async function loadGatewayRegistry(now: number = Date.now()): Promise<Loa
 
 export async function saveGatewayRegistry(registry: GatewayRegistry): Promise<void> {
   await keyValueStore.setJson(GATEWAY_REGISTRY_KEY, registry)
+}
+
+export interface SaveGatewayInput extends SaveGatewaySetupInput {
+  /**
+   * The entry to write into, or `null` to mint one.
+   *
+   * `null` is what the wizard passes in "add" mode and on a first run; an id is
+   * what it passes when the reader is editing the gateway they are already on.
+   */
+  gatewayId?: string | null
+  /** Make the entry active. A first entry is active whether or not this is set. */
+  activate?: boolean
+}
+
+export interface SaveGatewayResult {
+  registry: GatewayRegistry
+  /** The entry that was written, whether it was minted here or reused. */
+  id: string
+}
+
+/** `reconcileActiveGateway`'s body, for an entry that is not necessarily active. */
+function reconcileGateway(
+  registry: GatewayRegistry,
+  entry: GatewayRecord,
+  config: StoredGatewayConfig
+): GatewayRegistry {
+  const renamed = entry.name !== defaultGatewayName(entry.address)
+
+  return updateGateway(registry, entry.id, {
+    address: config.baseUrl,
+    authKind: config.authMode,
+    name: renamed ? entry.name : defaultGatewayName(config.baseUrl),
+    ...(config.userDisplayName ? { signedInUser: config.userDisplayName } : { signedInUser: undefined })
+  })
+}
+
+/**
+ * Write one gateway's configuration and credentials, and make the list agree.
+ *
+ * The two halves have to happen together and in this order, which is the whole
+ * reason this is a function rather than two calls at each site: a registry
+ * entry with no configuration under its id is a gateway the app will show in a
+ * list and then fail to dial, and a configuration under an id no entry claims
+ * is storage nothing will ever read or clean up.
+ *
+ * Writing a DIFFERENT address into an existing entry drops that entry's
+ * credentials first. The stored access, refresh and session tokens were minted
+ * by a gateway this entry no longer points at, and leaving them in the keychain
+ * hands the next sign-in a credential from somewhere else.
+ */
+export async function saveGatewayAndRegister(input: SaveGatewayInput): Promise<SaveGatewayResult> {
+  const { gatewayId = null, activate = false, ...setup } = input
+  const { registry } = await loadGatewayRegistry()
+  const existing = gatewayById(registry, gatewayId)
+  const id = existing?.id ?? newGatewayId()
+  const ns = namespace(id)
+
+  if (existing && existing.address !== setup.config.baseUrl) {
+    await clearCredentials(ns)
+  }
+
+  await saveGatewaySetup(ns, setup)
+
+  const withEntry = existing
+    ? reconcileGateway(registry, existing, setup.config)
+    : addGateway(registry, recordFromConfig(setup.config, id, Date.now()))
+
+  const next = activate ? setActiveGateway(withEntry, id) : withEntry
+
+  await saveGatewayRegistry(next)
+
+  return { registry: next, id }
 }

@@ -28,30 +28,19 @@ jest.mock('../src/gateway/client', () => ({
   })
 }))
 
-jest.mock('../src/platform/key-value-store', () => ({
-  keyValueStore: {
-    get: jest.fn(async () => null),
-    set: jest.fn(async () => undefined),
-    delete: jest.fn(async () => undefined),
-    getJson: jest.fn(async () => ({
-      baseUrl: 'https://hermes.example.com:8443',
-      authMode: 'native_pkce',
-      provider: 'self-hosted',
-      providerDisplayName: 'Self-Hosted OIDC',
-      version: '2026.9.14',
-      userDisplayName: 'tester@example.invalid'
-    })),
-    setJson: jest.fn(async () => undefined)
-  }
-}))
+// One configured gateway, in a list that names it. See `support/stored-gateway`.
+jest.mock('../src/platform/key-value-store', () =>
+  require('./support/stored-gateway').gatewayDisk({
+    baseUrl: 'https://hermes.example.com:8443',
+    authMode: 'native_pkce',
+    provider: 'self-hosted',
+    providerDisplayName: 'Self-Hosted OIDC',
+    version: '2026.9.14',
+    userDisplayName: 'tester@example.invalid'
+  })
+)
 
-jest.mock('../src/platform/secret-store', () => ({
-  secretStore: {
-    get: jest.fn(async (key: string) => (key === 'hermie.auth.access_token' ? 'access-1' : null)),
-    set: jest.fn(async () => undefined),
-    delete: jest.fn(async () => undefined)
-  }
-}))
+jest.mock('../src/platform/secret-store', () => require('./support/stored-gateway').gatewaySecrets())
 
 const pushStatus = (status: ConnectionStatus, error: GatewayError | null = null) =>
   act(() => {

@@ -29,6 +29,7 @@
  */
 import { pushStampOf } from '@hermie/gateway-client/push'
 
+import type { GatewayNamespace } from '../../gateway/namespace'
 import type { RpcFailure } from '../../gateway/rpc-failures'
 import { usePushStore, type PushState } from '../../store/push'
 import { pushTapOf, resolvePushTap, type OpenApproval } from './actions'
@@ -93,6 +94,20 @@ export interface PushSyncPorts {
 export interface PushSyncOptions {
   platform: PushPlatform
   ports: PushSyncPorts
+  /**
+   * The gateway this device is registering ON, or `null` in the wizard.
+   *
+   * A registration is only meaningful for one gateway (ADR-0017), so the store
+   * it reads is that gateway's and the namespace has to come in from outside:
+   * this class is built with a connection and dies with it, and the connection
+   * knows which gateway it is.
+   *
+   * `null` is the setup step, which offers the switch before the gateway it
+   * would register on has been written down. Nothing is read or persisted
+   * there; the store carries the reader's answer in memory and the first
+   * `hydrate` after setup adopts it. See `PushState.hydrate`.
+   */
+  namespace: GatewayNamespace | null
   /** `extra.eas.projectId`. Native only; a browser needs `vapidUrl` instead. */
   projectId?: string | null
   /** Where the daemon publishes its VAPID public key. Browser only. */
@@ -114,6 +129,7 @@ export interface PushSyncOptions {
 export class PushSync {
   private readonly platform: PushPlatform
   private readonly ports: PushSyncPorts
+  private readonly namespace: GatewayNamespace | null
   private readonly projectId: string | null
   private readonly vapidUrl: string | null
   private readonly store: { getState: () => PushState }
@@ -132,6 +148,7 @@ export class PushSync {
   constructor(options: PushSyncOptions) {
     this.platform = options.platform
     this.ports = options.ports
+    this.namespace = options.namespace
     this.projectId = options.projectId ?? null
     this.vapidUrl = options.vapidUrl ?? null
     this.store = options.store ?? usePushStore
@@ -169,7 +186,10 @@ export class PushSync {
   }
 
   private async boot(): Promise<void> {
-    await this.store.getState().hydrate()
+    // Nothing to read in the wizard: there is no gateway to key it by yet.
+    if (this.namespace) {
+      await this.store.getState().hydrate(this.namespace)
+    }
 
     /*
       A chat can come on screen before the disk read finishes — it always does

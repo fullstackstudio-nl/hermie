@@ -260,16 +260,22 @@ export function ThemeProvider({ children, forceScheme, forcePreset }: ThemeProvi
   const appearance = useSettingsStore(state => state.appearance)
   const storedChoice = useSettingsStore(state => state.themeChoice)
   const userThemes = useSettingsStore(state => state.userThemes)
-  const loaded = useSettingsStore(state => state.loaded)
+  const appearanceLoaded = useSettingsStore(state => state.appearanceLoaded)
   const { reduceTransparency, reduceMotion } = useAccessibilityPreferences()
 
   useEffect(() => {
     // Hydrating here rather than further down the tree keeps the very first
     // paint from flashing the system scheme before the stored one arrives.
-    if (!loaded) {
-      void useSettingsStore.getState().hydrate()
+    //
+    // The APPEARANCE only. The theme itself belongs to a gateway account and is
+    // read by `ChatRuntimeProvider` once there is a gateway to key it by; this
+    // provider sits above the lock and the wizard and has no such key. The cost
+    // is that a chosen preset lands one disk read later than light-or-dark
+    // does, behind the splash.
+    if (!appearanceLoaded) {
+      void useSettingsStore.getState().hydrateAppearance()
     }
-  }, [loaded])
+  }, [appearanceLoaded])
 
   // `null` means "let the system decide", which is also what releases a pin.
   const pinned = forceScheme ?? (appearance === 'system' ? null : appearance)

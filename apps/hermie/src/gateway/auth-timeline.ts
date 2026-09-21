@@ -1,6 +1,7 @@
 import { AuthTimeline, type AuthTimelineSnapshot } from '@hermie/gateway-client'
 
 import { keyValueStore } from '../platform/key-value-store'
+import type { GatewayNamespace } from './namespace'
 import { useConnectionStore } from './store'
 
 /**
@@ -16,6 +17,11 @@ import { useConnectionStore } from './store'
  * It has to survive a restart to be worth having at all: a sign-out is usually
  * followed by one, and a ring that does not outlive it cannot explain the thing it
  * exists to explain.
+ *
+ * One ring PER GATEWAY, which is the only reading that makes the events mean
+ * anything: "the gateway rejected the saved sign-in" is a sentence about one
+ * gateway, and two gateways sharing a ring would interleave one machine's
+ * refresh failures with another's and offer the mixture as an explanation.
  */
 export const AUTH_TIMELINE_KEY = 'hermie.gateway.auth_timeline'
 
@@ -27,18 +33,19 @@ export const AUTH_TIMELINE_KEY = 'hermie.gateway.auth_timeline'
  * developer screen's timeline block and the signed-out card's sentence — and a
  * mutable ring is not something they can subscribe to.
  */
-export async function createPersistentAuthTimeline(): Promise<AuthTimeline> {
+export async function createPersistentAuthTimeline(ns: GatewayNamespace): Promise<AuthTimeline> {
+  const key = ns.key(AUTH_TIMELINE_KEY)
   const timeline = new AuthTimeline({
     sink: snapshot => {
       useConnectionStore.getState().setAuthTimeline(snapshot)
       // Fire and forget: a failed write costs the account of a later sign-out,
       // which is not worth failing a dial over.
-      void keyValueStore.setJson(AUTH_TIMELINE_KEY, snapshot).catch(() => undefined)
+      void keyValueStore.setJson(key, snapshot).catch(() => undefined)
     }
   })
 
   try {
-    timeline.restore(await keyValueStore.getJson<AuthTimelineSnapshot>(AUTH_TIMELINE_KEY))
+    timeline.restore(await keyValueStore.getJson<AuthTimelineSnapshot>(key))
   } catch {
     // An unreadable ring is an empty ring; it must never hold up a launch.
   }

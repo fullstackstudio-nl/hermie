@@ -1,7 +1,8 @@
 import { useCallback, useState } from 'react'
 
-import { clearCredentials, saveGatewaySetup, type StoredGatewayConfig } from '../../gateway/config'
+import type { StoredGatewayConfig } from '../../gateway/config'
 import { describeConnectionError } from '../../gateway/errors'
+import { saveGatewayAndRegister } from '../../gateway/registry'
 import { WEB_GATEWAY_BASE_URL } from '../../gateway/web-config'
 import { strings } from '../../i18n/strings'
 import {
@@ -63,6 +64,14 @@ export interface OnboardingNavigatorProps {
    * expired access token.
    */
   resumeAccess?: ResumeAccess | null
+  /**
+   * The entry this wizard writes into, or `null` to mint one.
+   *
+   * The active gateway when the reader opened setup over a configured one —
+   * "Change gateway" is editing that entry's address, not describing a second
+   * machine — and `null` on a first run.
+   */
+  gatewayId?: string | null
   onComplete: () => void | Promise<void>
   /**
    * Offered when the wizard opened over a gateway that is still configured —
@@ -94,6 +103,7 @@ export interface OnboardingNavigatorProps {
 export function OnboardingNavigator({
   resumeConfig = null,
   resumeAccess = null,
+  gatewayId = null,
   onComplete,
   onCancel,
   initialStep,
@@ -159,22 +169,24 @@ export function OnboardingNavigator({
     try {
       const config = configFromDraft(draft)
 
-      // "Change gateway" leaves the previous gateway entirely alone so that the
-      // trip can be abandoned. This is the moment it stops being abandonable: a
-      // different address means the stored access, refresh and session tokens
-      // were minted by a gateway this app no longer talks to, and leaving them
-      // in the keychain hands the next sign-in a credential from somewhere else.
-      //
-      // The push registration on the OLD gateway is not retired here, and
-      // cannot be: retiring it is a write over a socket that was closed when
-      // the wizard opened. It names a device on a gateway this app has left,
-      // which is worth less than the sign-in that keeping the socket up would
-      // have cost — see `changeGateway` in `GatewayProvider`.
-      if (resumeConfig && resumeConfig.baseUrl !== config.baseUrl) {
-        await clearCredentials()
-      }
+      /*
+        "Change gateway" leaves the previous gateway entirely alone so that the
+        trip can be abandoned. This is the moment it stops being abandonable,
+        and `saveGatewayAndRegister` is what makes it one act rather than two:
+        the configuration lands under the entry's id and the entry is brought
+        into step with it, so the list can never name an address the app is not
+        dialling. A DIFFERENT address into an existing entry drops that entry's
+        credentials on the way — they were minted by a gateway it no longer
+        points at.
 
-      await saveGatewaySetup({
+        The push registration on the OLD gateway is not retired here, and
+        cannot be: retiring it is a write over a socket that was closed when
+        the wizard opened. It names a device on a gateway this app has left,
+        which is worth less than the sign-in that keeping the socket up would
+        have cost — see `changeGateway` in `GatewayProvider`.
+      */
+      await saveGatewayAndRegister({
+        gatewayId,
         config,
         // As TYPED, not as sent: the front door is stored as the preset it is,
         // origin-bound, and folded back in on load. Writing the derived pair
@@ -189,7 +201,7 @@ export function OnboardingNavigator({
       setSaveError(strings.onboarding.done.saveFailed(describeConnectionError(error, draft.baseUrl ?? '')))
       setSaving(false)
     }
-  }, [draft, onComplete, resumeConfig])
+  }, [draft, gatewayId, onComplete])
 
   const advance = () => {
     if (step === 'done') {

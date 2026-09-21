@@ -67,6 +67,9 @@ export function NotificationsStep({ draft }: NotificationsStepProps) {
         platform: pushPlatform,
         projectId: pushProjectId(),
         vapidUrl: pushVapidUrl(),
+        // The gateway this would register on does not have an id yet — it is
+        // written down on the last step. The switch lives in memory until then.
+        namespace: null,
         ports: NO_PORTS
       }),
     []

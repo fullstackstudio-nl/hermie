@@ -14,9 +14,11 @@ import { keyValueStore } from '../src/platform/key-value-store'
 import { CHAT_VIEW_KEY, useSettingsStore } from '../src/store/settings'
 import { resolveThemeFace, THEME_PRESETS } from '../src/ui/themes'
 
+import { NS_A } from './support/gateway-namespace'
+
 beforeEach(async () => {
   useSettingsStore.getState().reset()
-  await keyValueStore.delete(CHAT_VIEW_KEY)
+  await keyValueStore.delete(NS_A.key(CHAT_VIEW_KEY))
 })
 
 const settled = () => new Promise(resolve => setTimeout(resolve, 0))
@@ -105,13 +107,17 @@ describe('the themes store', () => {
   })
 
   it('reads its themes back off disk', async () => {
+    // Hydrated first, because that is what tells the store which gateway these
+    // themes belong to. Nothing is written before it knows.
+    await useSettingsStore.getState().hydrate(NS_A)
+
     const id = useSettingsStore.getState().createUserTheme('lime', 'Studio')
 
     useSettingsStore.getState().setThemeChoice({ kind: 'user', id })
     await settled()
 
     useSettingsStore.getState().reset()
-    await useSettingsStore.getState().hydrate()
+    await useSettingsStore.getState().hydrate(NS_A)
 
     expect(useSettingsStore.getState().themeChoice).toEqual({ kind: 'user', id })
     expect(useSettingsStore.getState().userThemes[0]?.name).toBe('Studio')
@@ -126,16 +132,16 @@ describe('what an older build left behind', () => {
       ['graphite', 'graphite'],
       ['slate', 'graphite']
     ] as const) {
-      await keyValueStore.setJson(CHAT_VIEW_KEY, { defaults: {}, perChat: {}, wallpaper })
+      await keyValueStore.setJson(NS_A.key(CHAT_VIEW_KEY), { defaults: {}, perChat: {}, wallpaper })
       useSettingsStore.getState().reset()
-      await useSettingsStore.getState().hydrate()
+      await useSettingsStore.getState().hydrate(NS_A)
 
       expect(useSettingsStore.getState().themeChoice).toEqual({ kind: 'preset', name: preset })
     }
   })
 
   it('ignores a theme row with no id, which nothing could point at', async () => {
-    await keyValueStore.setJson(CHAT_VIEW_KEY, {
+    await keyValueStore.setJson(NS_A.key(CHAT_VIEW_KEY), {
       defaults: {},
       perChat: {},
       userThemes: [
@@ -144,7 +150,7 @@ describe('what an older build left behind', () => {
       ]
     })
     useSettingsStore.getState().reset()
-    await useSettingsStore.getState().hydrate()
+    await useSettingsStore.getState().hydrate(NS_A)
 
     expect(useSettingsStore.getState().userThemes.map(theme => theme.id)).toEqual(['a'])
   })
