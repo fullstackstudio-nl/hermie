@@ -349,6 +349,19 @@ export function Bubble({
   const clock = useInlineMeta(max - paddingX * 2)
 
   const tailColor = own ? (fill ?? theme.accent().bubble) : recipe.tail
+  /*
+    A caller's `opacity` belongs to the SILHOUETTE, not to the body.
+
+    `style` lands on the rounded box, and the tail is drawn outside that box —
+    so an interim note (0.72) and a reply addressed at a teammate (0.9) faded the
+    body toward the page behind it and left the tail at full strength. In the
+    dark theme that reads exactly as reported: a tail lighter and bluer than the
+    bubble it belongs to. Hoisting the one property that makes a layer
+    translucent onto the box that holds BOTH keeps them one shape; everything
+    else in `style` is still the body's.
+  */
+  const flat = StyleSheet.flatten(style) ?? {}
+  const { opacity, ...bodyStyle } = flat
 
   return (
     <View
@@ -369,7 +382,8 @@ export function Bubble({
         // The tail lives in this padding rather than hanging over the list's
         // gutter, so the bubble and its tail are one box as far as layout is
         // concerned.
-        ...(own ? { paddingRight: TAIL_REACH } : { paddingLeft: TAIL_REACH })
+        ...(own ? { paddingRight: TAIL_REACH } : { paddingLeft: TAIL_REACH }),
+        ...(opacity === undefined ? {} : { opacity })
       }}
       // The alignment lives here and the cap lives here, so this is the box a
       // test has to be able to reach: asserting the bubble's own style proves
@@ -378,7 +392,7 @@ export function Bubble({
     >
       {tail ? <Tail color={tailColor} side={side} /> : null}
 
-      <View style={[corners, { maxWidth: max, overflow: 'hidden' }, style]} testID={testID}>
+      <View style={[corners, { maxWidth: max, overflow: 'hidden' }, bodyStyle]} testID={testID}>
         {/*
           One flat field, and under a translucent incoming recipe the rung it
           composites onto. `own` needs no rung: its accent has no alpha.

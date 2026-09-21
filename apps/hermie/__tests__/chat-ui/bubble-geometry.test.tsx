@@ -28,7 +28,10 @@ import {
 } from '../../src/chat-ui'
 import { assistantItem, subagentMap, userItem } from '../../src/chat-ui/fixtures'
 import { dateStampFor } from '../../src/chat-ui/grouping'
+import { Path } from 'react-native-svg'
+
 import { Text } from '../../src/ui/primitives'
+import { compositeHex } from '../../src/ui/themes'
 import { BUBBLE_GAP, INLINE_META_GAP, radii, TAIL, TAIL_OVERLAP } from '../../src/ui/tokens'
 import { renderScreen } from '../support/render'
 
@@ -475,5 +478,101 @@ describe('the tail', () => {
     for (const [x, y] of shape) {
       expect({ x: Number.isInteger(x), y: Number.isInteger(y) }).toEqual({ x: true, y: true })
     }
+  })
+})
+
+/**
+ * The tail is the same shape as the bubble, in the same colour, at the same
+ * strength.
+ *
+ * The owner photographed the failure in the dark theme: an incoming bubble whose
+ * tail was visibly lighter and bluer than the bubble it hangs off. The recipe was
+ * never wrong — `bubbles[variant].tail` is `compositeHex(fill, solid)` and the
+ * body paints exactly those two layers — but the tail is drawn OUTSIDE the
+ * rounded box a caller's `style` lands on, and `AssistantBubble` fades an interim
+ * note to `opacity: 0.72` and a reply addressed at a teammate to `0.9`. The body
+ * went translucent over the page and the tail did not, so the two came apart by
+ * a third in the one theme where a third is obvious.
+ */
+describe('the tail and the bubble are one surface', () => {
+  /** The `fill` of the one SVG path in the tree: the tail's own colour. */
+  const tailFill = (): string => (screen.UNSAFE_getByType(Path as never).props as { fill: string }).fill
+
+  /** The two layers the body stacks: the opaque rung, then the wash over it. */
+  const bodyLayers = (testID: string): string[] =>
+    screen
+      .getByTestId(testID)
+      .props.children.filter((child: { props?: { pointerEvents?: string } }) => child?.props?.pointerEvents === 'none')
+      .map(
+        (child: { props?: { style?: unknown } }) =>
+          (StyleSheet.flatten(child.props?.style as never) as ViewStyle).backgroundColor as string
+      )
+
+  it('paints the tail in the colour the body composites to', () => {
+    renderScreen(
+      <Bubble side="other" tail testID="b">
+        <Text>Dit valt buiten de scope.</Text>
+      </Bubble>
+    )
+
+    // `tail` is `compositeHex(fill, solid)` by construction, so the assertion
+    // that means something is that the tail is the composite of the two layers
+    // the body actually stacks — not that it equals a token read from the same
+    // place the component read it.
+    const [solid, wash] = bodyLayers('b')
+
+    expect(tailFill()).toBe(compositeHex(wash!, solid!))
+  })
+
+  /**
+   * The regression itself: a faded bubble fades its tail with it. The opacity is
+   * asserted on the OUTER box — the one that holds the tail and the body — and
+   * asserted absent from the body, because a body that dims on its own is the
+   * bug however right the colour underneath it is.
+   */
+  it('fades the whole silhouette rather than only the body', () => {
+    renderScreen(
+      <Bubble side="other" style={{ opacity: 0.72 }} tail testID="faded">
+        <Text>an interim note</Text>
+      </Bubble>
+    )
+
+    expect(flat('faded-box').opacity).toBe(0.72)
+    expect(flat('faded').opacity).toBeUndefined()
+  })
+
+  it('leaves a bubble nobody faded at full strength', () => {
+    renderScreen(
+      <Bubble side="other" tail testID="plain">
+        <Text>an ordinary reply</Text>
+      </Bubble>
+    )
+
+    expect(flat('plain-box').opacity).toBeUndefined()
+    expect(flat('plain').opacity).toBeUndefined()
+  })
+
+  /** The same for an outgoing bubble, whose tail takes the accent instead. */
+  it('fades an outgoing silhouette the same way', () => {
+    renderScreen(
+      <Bubble accent="#2F6BFF" side="own" style={{ opacity: 0.9 }} tail testID="mine">
+        <Text>mine</Text>
+      </Bubble>
+    )
+
+    expect(flat('mine-box').opacity).toBe(0.9)
+    expect(flat('mine').opacity).toBeUndefined()
+  })
+
+  /** A caller's other styles still belong to the body, not to the wrapper. */
+  it('keeps everything that is not opacity on the body', () => {
+    renderScreen(
+      <Bubble side="other" style={{ marginTop: 7, opacity: 0.5 }} tail testID="mixed">
+        <Text>mixed</Text>
+      </Bubble>
+    )
+
+    expect(flat('mixed').marginTop).toBe(7)
+    expect(flat('mixed-box').marginTop).toBeUndefined()
   })
 })
