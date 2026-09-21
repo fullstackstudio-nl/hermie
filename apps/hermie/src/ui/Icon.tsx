@@ -59,6 +59,7 @@ export type IconName =
   | 'arrowUp'
   | 'queue'
   | 'bellSlash'
+  | 'pin'
   | 'grip'
   | 'mic'
 
@@ -211,6 +212,24 @@ function Glyph({ color, name, stroke }: { color: string; name: IconName; stroke:
             stroke={stroke}
           />
           <Line color={color} d="M4.6 4.6L19.4 19.4" stroke={stroke} />
+        </>
+      )
+
+    /**
+     * A pin seen from the side: a round head, a shaft, a point.
+     *
+     * Drawn upright rather than at the 45° a desk pin is usually shown at,
+     * because this one sits in a row of marks that are all square to the text —
+     * the bell beside it, the chevrons, the unread pill — and one glyph leaning
+     * over reads as a rendering fault rather than as a style. Three marks is the
+     * budget at the 13pt marker size, the same budget `bellSlash` works to.
+     */
+    case 'pin':
+      return (
+        <>
+          <Circle cx={12} cy={7.4} fill="none" r={3.2} stroke={color} strokeWidth={stroke} />
+          <Line color={color} d="M12 10.6V19.4" stroke={stroke} />
+          <Line color={color} d="M8.4 10.6H15.6" stroke={stroke} />
         </>
       )
 

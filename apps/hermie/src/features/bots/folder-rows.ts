@@ -33,7 +33,7 @@
  * Pure. The alternative is finding out at sixty frames a second that a row went
  * into the wrong folder.
  */
-import type { Arrangement, Folder } from '../../store/folders'
+import type { Arrangement, Folder, LayoutEntry } from '../../store/folders'
 import { isMuted, type Mutes } from '../../store/mute'
 import type { RowBox } from './drag-order'
 
@@ -113,6 +113,16 @@ export interface RowsInput {
   /** Folder ids the reader has closed. Local to this device; never synced. */
   collapsed: Record<string, true>
   mutes: Mutes
+  /**
+   * Chats held at the top of whatever container they are in.
+   *
+   * A DISPLAY sort and never a move: `arrangement` is untouched, so unpinning
+   * puts a row back exactly where it was rather than wherever the top of the
+   * list has drifted to. Everything that follows — the rows, the anchors, the
+   * drag's clamp — reads the same map, which is what keeps the order somebody
+   * sees and the order somebody drops into from being two different orders.
+   */
+  pinned?: Record<string, true>
   /** Unix seconds, for the mutes. */
   now: number
   /** Per-bot unread count and whether a question is waiting. */
@@ -161,6 +171,49 @@ export function folderCounts(folder: Folder, input: RowsInput): FolderCounts {
 }
 
 /**
+ * The pinned members of one container first, then the rest — each half in the
+ * order it already had.
+ *
+ * A **stable partition**, which is the whole of the rule and the reason it can
+ * be one line: pinning reorders NOTHING within either half, so a reader who
+ * pins three chats sees those three arrive at the top in the order they were
+ * already in, and unpinning one drops it straight back into the gap it left.
+ * A sort by "pinned, then position" would do the same thing more slowly and
+ * would tempt somebody into adding a second key to it later.
+ *
+ * Generic over what a member is, because the top level holds entries and a
+ * folder holds names, and both have to be partitioned the same way.
+ */
+function pinnedFirst<T>(members: readonly T[], isPinned: (member: T) => boolean): T[] {
+  const first: T[] = []
+  const rest: T[] = []
+
+  for (const member of members) {
+    ;(isPinned(member) ? first : rest).push(member)
+  }
+
+  return [...first, ...rest]
+}
+
+/**
+ * The top level, with pinned loose chats lifted to the front.
+ *
+ * **A folder is never pinned and never moves.** Pinning is offered on chats, so
+ * a folder has no pinned-ness of its own — and a pinned chat therefore rises
+ * ABOVE the folders as well as above the other loose chats, because "first
+ * within the top level" is what the owner asked for and a band that stopped at
+ * the first folder would not be the top of anything a reader can see.
+ */
+function topLevelInOrder(input: RowsInput): LayoutEntry[] {
+  return pinnedFirst(input.arrangement.entries, entry => entry.kind === 'chat' && isPinnedRow(input, entry.name))
+}
+
+/** Is this chat pinned? One reading, so the rows and the anchors cannot disagree. */
+function isPinnedRow(input: RowsInput, name: string): boolean {
+  return Boolean(input.pinned?.[name])
+}
+
+/**
  * Every row the list draws, in order.
  *
  * The archived drawer is deliberately NOT here: it is one group with its own
@@ -170,7 +223,7 @@ export function folderCounts(folder: Folder, input: RowsInput): FolderCounts {
 export function folderRows(input: RowsInput): FolderRow[] {
   const rows: FolderRow[] = []
 
-  for (const entry of input.arrangement.entries) {
+  for (const entry of topLevelInOrder(input)) {
     if (entry.kind === 'chat') {
       if (!input.archived[entry.name]) {
         rows.push({ kind: 'bot', key: botRowKey(entry.name), name: entry.name, folderId: null })
@@ -199,7 +252,7 @@ export function folderRows(input: RowsInput): FolderRow[] {
       continue
     }
 
-    const visible = folder.bots.filter(name => !input.archived[name])
+    const visible = pinnedFirst(folder.bots, name => isPinnedRow(input, name)).filter(name => !input.archived[name])
 
     if (!visible.length) {
       // Somewhere to drop a chat back INTO a folder that has just been emptied.
@@ -228,7 +281,24 @@ export function dragAnchors(input: RowsInput): DragAnchor[] {
   const anchors: DragAnchor[] = []
   const { entries, folders } = input.arrangement
 
-  entries.forEach((entry, index) => {
+  /*
+    Walked in DISPLAY order, and this is the line pinning turned into a
+    decision rather than a detail.
+
+    An anchor pairs a row's place ON SCREEN with the arrangement position a drop
+    on it commits to, and pinning makes those two orders different. The geometry
+    has to be the displayed one — the drag measures boxes down the screen, and a
+    list of anchors in a different order from the rows would put every drop line
+    somewhere the finger is not. So the WALK is over the displayed sequence while
+    each anchor's `target` stays the member's own index in the ARRANGEMENT, which
+    is the space `moveBotTo` and `moveFolderTo` read.
+
+    `indexOf` against the untouched arrangement rather than the loop counter, for
+    exactly that reason: the counter is now a screen position.
+  */
+  topLevelInOrder(input).forEach(entry => {
+    const index = entries.indexOf(entry)
+
     if (entry.kind === 'chat') {
       if (!input.archived[entry.name]) {
         anchors.push({ key: botRowKey(entry.name), target: { folderId: null, index } })
@@ -259,14 +329,106 @@ export function dragAnchors(input: RowsInput): DragAnchor[] {
       return
     }
 
-    folder.bots.forEach((name, inside) => {
+    // The same split again, one container down: walked as displayed, committed
+    // as arranged.
+    pinnedFirst(folder.bots, name => isPinnedRow(input, name)).forEach(name => {
       if (!input.archived[name]) {
-        anchors.push({ key: botRowKey(name), target: { folderId: folder.id, index: inside } })
+        anchors.push({ key: botRowKey(name), target: { folderId: folder.id, index: folder.bots.indexOf(name) } })
       }
     })
   })
 
   return anchors
+}
+
+/**
+ * Keep a dragged row inside its own band.
+ *
+ * **The rule, stated once:** a pinned row may only be dropped among the pinned
+ * rows of its container, and an unpinned row only among the unpinned ones. A
+ * drop line that wandered out of the band would be a promise the list cannot
+ * keep — the sort re-runs the moment the arrangement changes, so a pinned row
+ * "dropped" below an unpinned one would spring straight back to the top, and the
+ * reader would have watched a gesture be undone for no stated reason.
+ *
+ * Clamping rather than refusing, for the same reason `nextFocus` clamps: a drag
+ * that stops responding halfway down the list reads as a broken gesture, and one
+ * that holds at the edge of its band reads as a boundary — which is what it is.
+ *
+ * Folders are never pinned, so a folder being dragged is clamped to the unpinned
+ * band and therefore cannot be dropped above the pinned chats. That is the same
+ * statement as "pinned chats sort first within the top level", seen from the
+ * dragging end.
+ *
+ * Pure, and applied to the SLOT rather than to the committed index, so the drop
+ * line the reader sees and the arrangement that results cannot disagree.
+ */
+export function clampToPinnedBand(
+  anchors: readonly DragAnchor[],
+  pinned: Readonly<Record<string, true>>,
+  draggedKey: string,
+  slot: number
+): number {
+  const dragged = parseRowKey(draggedKey)
+  // A folder is never pinned, so a folder drag is clamped to the unpinned band —
+  // which is the same statement as "pinned chats sort first", seen from the
+  // dragging end.
+  const band = dragged?.kind === 'bot' ? Boolean(pinned[dragged.name]) : false
+
+  /**
+   * Whether a drop ON this anchor keeps the dragged row in its own band.
+   *
+   * Three kinds and they answer differently, which is the only fiddly part:
+   *
+   *  - a BOT row is legal when its pinned-ness matches the dragged row's;
+   *  - a FOLDER's own row is a top-level position below the pinned chats, so it
+   *    is legal only for the unpinned band;
+   *  - `folderIn:` and `folderEmpty:` mean "index 0 of that folder", which is
+   *    the TOP of that container and so inside either band — **but only when the
+   *    reader aimed at it.** That is the `exact` flag, and it is not a nicety:
+   *    without it, a pinned row dragged to the bottom of the list walks back up
+   *    looking for somewhere legal, meets a folder's header first, and lands
+   *    INSIDE the folder. Filing a chat somewhere the reader never pointed is a
+   *    worse outcome than the one the clamp exists to prevent.
+   */
+  const legal = (index: number, exact: boolean): boolean => {
+    const anchor = anchors[index]
+
+    if (!anchor) {
+      return false
+    }
+
+    if (anchor.key.startsWith('folderIn:') || anchor.key.startsWith('folderEmpty:')) {
+      return exact
+    }
+
+    const row = parseRowKey(anchor.key)
+
+    return row?.kind === 'bot' ? Boolean(pinned[row.name]) === band : !band
+  }
+
+  if (legal(slot, true)) {
+    return slot
+  }
+
+  /*
+    A slot is a GAP — "immediately before anchor `n`" — so the gap just past the
+    band's last row is still inside the band: that is "at the end of it". The
+    search walks outward from the asked-for slot and takes the nearest legal
+    one, which is what makes a finger dragged past the boundary REST at the
+    boundary rather than snapping to the far end of the band.
+  */
+  for (let distance = 1; distance <= anchors.length; distance += 1) {
+    if (slot - distance >= 0 && legal(slot - distance, false)) {
+      return slot - distance + 1
+    }
+
+    if (slot + distance < anchors.length && legal(slot + distance, false)) {
+      return slot + distance
+    }
+  }
+
+  return slot
 }
 
 /**

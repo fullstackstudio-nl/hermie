@@ -237,3 +237,28 @@ inherited once and only once, that `push` and `context` are left behind by the c
 arriving afterwards starts from the defaults, and that the anonymous section itself is left exactly
 as it was. `packages/hermie-web/src/push/roster.test.ts` pins the pooling, including that a device
 named under two keys is notified once.
+
+## Amendment (2026-09-22): `pinned`, and the rule about not bumping `v`
+
+Round R4b adds `pinned: string[]` to the app-wide section, beside `entries`, `folders` and `mutes`.
+It is additive and the section version stays at 1.
+
+That is now the second time a round's brief has asked for "a schema bump with tolerance" on this
+section and been declined, so the reason is worth stating here as a **rule** rather than as an
+exception in two places:
+
+> **Adding a field to the app-wide section never bumps `v`.** `readSection` answers `null` for any
+> section whose `v` is GREATER than the version the reader knows. A build that meets an unknown `v`
+> therefore treats the whole section as unreadable and re-seeds it from its own local copy. Bumping
+> does not protect the new field from older builds — it hands every older build the power to DELETE
+> the order, the folders and the mutes, for everyone, the first time one of them writes.
+>
+> An additive field costs an older build only that field, on its own next write, which is the same
+> last-writer-wins trade this ADR already made for the order.
+
+A bump would only ever be right for a change that makes the section's EXISTING keys mean something
+different — at which point being re-seeded is the correct outcome rather than data loss.
+
+`folders`, `botNameOrder`, `textSize`, `push.perBot` and now `pinned` all follow this rule.
+`apps/hermie/__tests__/pinned-chats.test.ts` asserts the version is still 1, so the decision has to
+be taken again deliberately rather than by accident.

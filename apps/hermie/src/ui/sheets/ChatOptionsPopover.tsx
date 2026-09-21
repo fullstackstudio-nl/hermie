@@ -97,6 +97,9 @@ export type PopoverRowId =
   | 'colour'
   | 'mute'
   | 'refresh'
+  | 'branch'
+  | 'conversations'
+  | 'pin'
   | 'notifications'
   | 'verbosity'
   | 'bot-to-bot'
@@ -117,9 +120,26 @@ export interface PopoverRowsInput {
   canSetNotifications: boolean
   /** Absent removes Refresh, which is what a surface with no gateway gets. */
   canRefresh: boolean
+  /**
+   * Absent removes both conversation rows.
+   *
+   * One flag for the two, because they answer the same question — is there a
+   * gateway holding this profile's other sessions — and a menu that offered to
+   * branch but not to find the branch afterwards would be worse than one that
+   * offered neither.
+   */
+  canBranch?: boolean
+  /** Absent removes Pin: a surface with no arrangement has nowhere to store it. */
+  canPin?: boolean
 }
 
-export function popoverRows({ canExport, canRefresh, canSetNotifications }: PopoverRowsInput): PopoverRow[] {
+export function popoverRows({
+  canBranch = false,
+  canExport,
+  canPin = false,
+  canRefresh,
+  canSetNotifications
+}: PopoverRowsInput): PopoverRow[] {
   return [
     { id: 'yolo' },
     { id: 'fast' },
@@ -127,7 +147,15 @@ export function popoverRows({ canExport, canRefresh, canSetNotifications }: Popo
     { id: 'model', page: 'model' },
     { id: 'colour', page: 'colour' },
     { id: 'mute', page: 'mute' },
+    ...(canPin ? [{ id: 'pin' as const }] : []),
     ...(canRefresh ? [{ id: 'refresh' as const }] : []),
+    /*
+      Branch, then the page that lists what branching produced, and both of them
+      under Refresh rather than up with the switches. All three are about the
+      CONVERSATION rather than about how this chat is set up or drawn, which is
+      the distinction the separator above them already makes.
+    */
+    ...(canBranch ? [{ id: 'branch' as const }, { id: 'conversations' as const }] : []),
     ...(canSetNotifications ? [{ id: 'notifications' as const, page: 'notifications' as const }] : []),
     { id: 'verbosity' },
     { id: 'bot-to-bot' },
@@ -181,6 +209,23 @@ export interface ChatOptionsPopoverProps extends Omit<
    * transcript and not this menu.
    */
   onRefresh?: () => void
+  /**
+   * Fork this conversation from its newest row.
+   *
+   * The menu's own "Branch from here…" is per ROW and is the precise one; this
+   * is the same intention without having to find a row first, which is what a
+   * reader who has just finished reading a reply actually wants. Absent where
+   * there is no gateway to fork against.
+   */
+  onBranch?: () => void
+  /** Open the Conversations page. Present exactly when `onBranch` is. */
+  onOpenConversations?: () => void
+  /**
+   * Whether this chat is pinned to the top of its folder, and a way to change
+   * it. Both absent on a surface with no arrangement to store it in.
+   */
+  pinned?: boolean
+  onTogglePin?: () => void
   /** This chat's transcript type scale, and a way to change it. */
   textSize: TextSize
   onChangeTextSize: (value: TextSize) => void
@@ -198,6 +243,10 @@ export function ChatOptionsPopover({
   canExport = false,
   canSetNotifications = false,
   onRefresh,
+  onBranch,
+  onOpenConversations,
+  pinned = false,
+  onTogglePin,
   accent,
   botName,
   contextUsage,
@@ -221,7 +270,13 @@ export function ChatOptionsPopover({
   testID = 'chat-options-popover'
 }: ChatOptionsPopoverProps) {
   const theme = useTheme()
-  const rows = popoverRows({ canExport, canRefresh: Boolean(onRefresh), canSetNotifications })
+  const rows = popoverRows({
+    canBranch: Boolean(onBranch && onOpenConversations),
+    canExport,
+    canPin: Boolean(onTogglePin),
+    canRefresh: Boolean(onRefresh),
+    canSetNotifications
+  })
   const [focus, setFocus] = useState(0)
 
   // A popover that reopens on the row the last reader left is a popover that
@@ -273,6 +328,18 @@ export function ChatOptionsPopover({
         return
       case 'refresh':
         onRefresh?.()
+
+        return
+      case 'branch':
+        onBranch?.()
+
+        return
+      case 'conversations':
+        onOpenConversations?.()
+
+        return
+      case 'pin':
+        onTogglePin?.()
 
         return
       default:
@@ -394,6 +461,27 @@ export function ChatOptionsPopover({
             />
           )}
           {/*
+            Pin, with the row menu's wording and beside the other two things that
+            are about this chat's place in the list rather than about the
+            conversation in it.
+
+            An ACTION rather than a switch, and the label is the one that says
+            what pressing it will do rather than what is true now — the same
+            reading Mute/Unmute already takes in both menus, so a reader meeting
+            the two rows together is not asked to hold two conventions at once.
+          */}
+          {row(
+            'pin',
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => onTogglePin?.()}
+              style={{ justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT, paddingHorizontal: theme.space.lg }}
+              testID="option-pin"
+            >
+              <Text>{pinned ? chatStrings.sessions.unpin : chatStrings.sessions.pin}</Text>
+            </Pressable>
+          )}
+          {/*
             Read-only, and the same row the sheet draws: a fact the reader checks
             their other choices against, not a choice of its own. It carries no
             chevron because there is nowhere for it to go.
@@ -446,6 +534,35 @@ export function ChatOptionsPopover({
             >
               <Text>{chatStrings.sessions.refresh}</Text>
             </Pressable>
+          )}
+
+          {/*
+            Branch, and the page that lists what branching produced.
+
+            "Branch from here…" on the MESSAGE menu forks at one row; this one
+            forks at the newest, which is where a reader who has just read a
+            reply already is. The ellipsis is kept on both, because both open
+            something before anything is committed.
+          */}
+          {row(
+            'branch',
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => onBranch?.()}
+              style={{ justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT, paddingHorizontal: theme.space.lg }}
+              testID="option-branch"
+            >
+              <Text>{chatStrings.sessions.branch}</Text>
+            </Pressable>
+          )}
+
+          {row(
+            'conversations',
+            <DisclosureRow
+              label={chatStrings.sessions.conversations}
+              onPress={() => onOpenConversations?.()}
+              testID="option-conversations"
+            />
           )}
 
           {row(

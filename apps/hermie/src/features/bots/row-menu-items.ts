@@ -25,6 +25,14 @@ export interface RowMenuModel {
   /** Greys out Mark as read for a row that has nothing unread. */
   unread: boolean
   /**
+   * Whether this chat is held at the top of its container.
+   *
+   * A state rather than a capability, so the one line can say which way round
+   * it is — the same reading Mute/Unmute takes two lines to give, and it can be
+   * one here because a pin has no deadline to report.
+   */
+  pinned?: boolean
+  /**
    * Every folder the row could move to; `null` is the loose top level.
    *
    * Optional the way `movable` is, and for the same reason: a caller with
@@ -55,6 +63,8 @@ export type RowMenuAction =
   | { kind: 'accent'; accent: AccentName }
   | { kind: 'folder'; folderId: string | null }
   | { kind: 'move'; offset: number }
+  /** A toggle, not a value: the menu already says which way round it is. */
+  | { kind: 'pinToggle' }
   /** Open the bot's profile editor — the same sheet the chat header's pill opens. */
   | { kind: 'editProfile' }
   /** A toggle, not a value: the menu already says which way round it is. */
@@ -142,6 +152,18 @@ export function rowMenuItems(model: RowMenuModel): MenuItem[] {
       title: strings.botProfile.menuItem,
       systemImage: 'person.crop.circle'
     },
+    /*
+      Pin sits directly above Mute and the two placement lines, because it is
+      the first of the four that are about this row's PLACE in the list rather
+      than about the bot or the conversation. Above Mute specifically: pinning
+      is the more often used of the two by some distance, and the group reads
+      top-down from "where it sits" to "whether it interrupts".
+    */
+    {
+      id: 'pin',
+      title: model.pinned ? strings.layout.unpin : strings.layout.pin,
+      systemImage: model.pinned ? 'pin.slash' : 'pin'
+    },
     ...muteItems(model),
     folders.length > 0 && {
       id: 'folder',
@@ -220,6 +242,9 @@ export function parseRowMenuAction(id: string): RowMenuAction | null {
 
     case 'archive':
       return { kind: 'archiveToggle' }
+
+    case 'pin':
+      return { kind: 'pinToggle' }
 
     case 'mute':
       return (MUTE_DURATIONS as readonly string[]).includes(tail)

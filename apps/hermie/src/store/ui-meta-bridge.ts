@@ -78,6 +78,31 @@ export interface HermieAppShape extends HermieAppSection {
    */
   folders?: Folder[]
   /**
+   * Chats the reader holds at the top of their container.
+   *
+   * **The brief for this round asked for a schema bump with tolerance, and this
+   * is deliberately not one.** It is the second time that instruction has been
+   * declined for this section and the reason is the same both times, so it is
+   * worth stating as a rule rather than as an exception:
+   *
+   *   `readSection` answers `null` for any section whose `v` is GREATER than the
+   *   version the reader knows (`packages/gateway-client/src/ui-meta.ts`). A
+   *   build that meets an unknown `v` therefore treats the whole app-wide
+   *   section as unreadable and re-seeds it from its own local copy. Bumping to
+   *   2 would not protect `pinned` from an older build — it would hand every
+   *   older build the power to DELETE the folders, the order and the mutes, for
+   *   everyone, the first time one of them wrote.
+   *
+   * So the field is additive, in exactly the shape `folders`, `botNameOrder` and
+   * `textSize` above already use. A build that has not learned it leaves this
+   * reader's pins alone until it writes the section itself, at which point they
+   * are lost and can be set again — the same last-writer-wins trade ADR-0016
+   * made for the order, and a very small loss next to the arrangement.
+   *
+   * ADR-0016 and ADR-0019 both carry the amendment.
+   */
+  pinned?: string[]
+  /**
    * Which chats are silent, and until when.
    *
    * Here rather than on each bot's own profile because a mute is about the
@@ -185,6 +210,11 @@ export function snapshotFromStores(): UiMetaSnapshot {
     v: HERMIE_APP_SECTION_VERSION,
     entries: layout.entries,
     folders: layout.folders,
+    // Always sent, empty included, for the reason `mutes` gives below: a reader
+    // who unpins their last chat has to be able to say so, and an omitted key
+    // reads as "this build knows nothing about pins" rather than as "there are
+    // none".
+    pinned: Object.keys(layout.pinned),
     // Always sent, empty included: a reader who unmutes their last chat has to
     // be able to say so, and an omitted key reads as "this device knows
     // nothing about mutes" rather than as "there are none".
@@ -268,6 +298,11 @@ export function applySnapshot(snapshot: UiMetaSnapshot): void {
     // key: a section written by a build that knows about mutes says what they
     // are even when there are none, and one written before them says nothing.
     ...(app?.mutes ? { mutes: mutesOf(app.mutes) } : {}),
+    // The same distinction again: a build that predates the field says nothing
+    // about pins, and taking that as "none" would unpin everything.
+    ...(Array.isArray(app?.pinned)
+      ? { pinned: app.pinned.filter((name): name is string => typeof name === 'string' && name.length > 0) }
+      : {}),
     archived,
     accents
   })
