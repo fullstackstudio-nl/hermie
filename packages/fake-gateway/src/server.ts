@@ -993,6 +993,40 @@ export class RpcFault extends Error {
   }
 }
 
+/**
+ * The words `config.set {key:'fast'}` takes, and the mode each one means.
+ *
+ * Upstream parses this key against a word list of its own
+ * (`methods_config_set.py::_set_fast`, `_FAST_WORDS`) rather than against the
+ * boolean list every other switch uses, and it refuses anything outside it with
+ * 4002. A fake that stored whatever it was handed hid that completely: a client
+ * sending `true` — which is a perfectly good `yolo` — looked like it worked here
+ * and failed against every real gateway.
+ *
+ * `status` and `toggle` are left out on purpose. They are READ and FLIP verbs
+ * upstream answers without setting a named mode, and nothing in the app sends
+ * either.
+ */
+const FAST_MODES: Record<string, string> = {
+  fast: 'fast',
+  on: 'fast',
+  normal: 'normal',
+  off: 'normal',
+  auto: 'auto',
+  cold: 'cold'
+}
+
+/** The stored mode for one `config.set` value, or a 4002 like upstream's. */
+function fastMode(value: string): string {
+  const mode = FAST_MODES[value.trim().toLowerCase()]
+
+  if (!mode) {
+    throw new RpcFault(4002, `unknown fast mode: ${value}`)
+  }
+
+  return mode
+}
+
 /** Catalogue names this server treats as SKILLS: `slash.exec` refuses them. */
 const FAKE_SKILL_COMMANDS = new Set(['release-notes'])
 
@@ -3392,12 +3426,20 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
           return { value: 'verbose', tool_progress: 'verbose' }
         }
 
+        // Fast mode is always ON or OFF upstream, never unset: `_set_fast`
+        // stores a mode and the read answers whichever one is in force. A blank
+        // here would leave a client that parses the word with nothing to parse.
+        if (key === 'fast') {
+          return { value: stored.fast ?? 'normal' }
+        }
+
         return { value: stored[key] ?? '' }
       }
 
       case 'config.set': {
         const key = String(params.key ?? '')
-        const value = typeof params.value === 'string' ? params.value : String(params.value ?? '')
+        const raw = typeof params.value === 'string' ? params.value : String(params.value ?? '')
+        const value = key === 'fast' ? fastMode(raw) : raw
         const session = resolveSession(String(params.session_id ?? ''))
 
         if (key === 'model' && value.includes('expensive') && params.confirm_expensive_model !== true) {

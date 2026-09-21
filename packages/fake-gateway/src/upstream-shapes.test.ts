@@ -879,3 +879,117 @@ describe('the slash trio over the socket — methods_tools.py + methods_complete
     })
   })
 })
+
+/**
+ * The one key whose values are NOT the boolean words every other switch takes.
+ *
+ * This is the shape a whole feature was lost to: the options sheet sent
+ * `true`/`false` for fast mode because that is what the yolo switch next to it
+ * sends, upstream parses this key against `_FAST_WORDS` instead, and every tap
+ * came back 4002. The fake stored whatever it was handed, so the suite agreed
+ * with the app and both were wrong about the gateway.
+ */
+describe('config.set fast — methods_config_set.py::_set_fast', () => {
+  let live: FakeGateway
+  let socket: WebSocket
+  let nextId = 0
+
+  const pending = new Map<number, (value: Record<string, unknown>) => void>()
+
+  /** The whole frame: half of these cases are about the ERROR half of it. */
+  const call = (method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> => {
+    const id = ++nextId
+
+    return new Promise(resolve => {
+      pending.set(id, resolve)
+      socket.send(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`)
+    })
+  }
+
+  beforeAll(async () => {
+    live = await startFakeGateway({ port: 0 })
+    socket = new WebSocket(live.wsUrl, ['hermes-gateway-v1'])
+
+    socket.on('message', data => {
+      for (const line of String(data).split('\n')) {
+        if (!line.trim()) {
+          continue
+        }
+
+        const frame = JSON.parse(line) as Record<string, unknown>
+        const id = typeof frame.id === 'number' ? frame.id : null
+        const waiter = id === null ? undefined : pending.get(id)
+
+        if (waiter && id !== null) {
+          pending.delete(id)
+          waiter(frame)
+        }
+      }
+    })
+
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', () => resolve())
+      socket.once('error', reject)
+    })
+  })
+
+  afterAll(async () => {
+    socket.close()
+    await live.close()
+  })
+
+  /** A stored session id the server will actually resolve and write against. */
+  const storedIdOf = async (profile: string): Promise<string> => {
+    const frame = await call('profiles.list', { include_sessions: true })
+    const profiles = (frame.result as Record<string, unknown>).profiles as Record<string, unknown>[]
+    const row = profiles.find(entry => entry.name === profile)
+    const stored = String((row?.canonical_session as Record<string, unknown> | undefined)?.id ?? '')
+
+    expect(stored).not.toBe('')
+
+    return stored
+  }
+
+  let session = ''
+
+  beforeAll(async () => {
+    session = await storedIdOf('writer')
+  })
+
+  it('refuses `true` with 4002, the way upstream refuses a word it does not know', async () => {
+    const frame = await call('config.set', { key: 'fast', value: 'true', session_id: session })
+
+    expect(frame.result).toBeUndefined()
+    expect(frame.error).toMatchObject({ code: 4002, message: 'unknown fast mode: true' })
+  })
+
+  it('takes the words the gateway takes, and reads them back as a mode', async () => {
+    for (const [sent, stored] of [
+      ['fast', 'fast'],
+      ['on', 'fast'],
+      ['normal', 'normal'],
+      ['off', 'normal']
+    ]) {
+      const set = await call('config.set', { key: 'fast', value: sent, session_id: session })
+
+      expect(set.error).toBeUndefined()
+
+      const read = await call('config.get', { key: 'fast', session_id: session })
+
+      expect((read.result as Record<string, unknown>).value).toBe(stored)
+    }
+  })
+
+  it('reports a session nobody has switched as `normal`, never as blank', async () => {
+    const read = await call('config.get', { key: 'fast', session_id: await storedIdOf('researcher') })
+
+    expect((read.result as Record<string, unknown>).value).toBe('normal')
+  })
+
+  it('leaves yolo on the boolean words it really does take', async () => {
+    const set = await call('config.set', { key: 'yolo', value: 'true', session_id: session })
+
+    expect(set.error).toBeUndefined()
+    expect((set.result as Record<string, unknown>).value).toBe('true')
+  })
+})

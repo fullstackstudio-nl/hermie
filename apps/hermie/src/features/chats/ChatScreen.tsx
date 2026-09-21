@@ -1599,7 +1599,16 @@ function Conversation({
           model: chat.info?.model ?? '',
           modelOptions,
           onCancelExpensiveModel: () => setPendingModel(null),
-          onChangeFast: value => void setOption('fast', value ? 'true' : 'false'),
+          /*
+            The gateway's own words, not a boolean.
+
+            `config.set {key:'fast'}` is parsed by a word list — fast, on,
+            normal, off, auto, cold — and `true` is in none of it, so every tap
+            came back as 4002 "unknown fast mode: true" and the switch snapped
+            straight back. `yolo` next door really does take `true`/`false`,
+            which is why one of the two toggles worked and the other never did.
+          */
+          onChangeFast: value => void setOption('fast', value ? 'fast' : 'normal'),
           onChangeModel: value => void setOption('model', value),
           onChangeReasoningEffort: value => void setOption('reasoning', value),
           onChangeShowBotToBot: value => useSettingsStore.getState().setChatView(botName, { showBotToBot: value }),

@@ -434,6 +434,79 @@ describe('ChatScreen', () => {
     )
   })
 
+  /**
+   * The one switch whose values are not booleans.
+   *
+   * `config.set {key:'fast'}` is parsed against the gateway's own word list, so
+   * `true` came back as 4002 "unknown fast mode: true" and the switch snapped
+   * back on every tap. Its neighbour really does take `true`, which is why this
+   * went unnoticed: one of the two worked.
+   */
+  it('sends fast mode as a word the gateway knows, not as a boolean', async () => {
+    renderChat()
+
+    fireEvent.press(screen.getByTestId('chat-header-options'))
+
+    await waitFor(() => expect(screen.getByTestId('chat-options-sheet')).toBeTruthy())
+    fireEvent.press(screen.getByTestId('option-fast'))
+
+    await waitFor(() =>
+      expect(mockController.setOption).toHaveBeenCalledWith('researcher', 'fast', 'fast', {
+        confirmExpensiveModel: false
+      })
+    )
+  })
+
+  it('switches fast mode back off with the word for off, not with false', async () => {
+    act(() => {
+      useChatsStore.getState().dispatchEvent('researcher', {
+        type: 'session.info',
+        session_id: 'runtime-1',
+        payload: { model: 'example-provider/example-model', yolo: false, fast: true, reasoning_effort: 'medium' }
+      })
+    })
+    renderChat()
+
+    fireEvent.press(screen.getByTestId('chat-header-options'))
+
+    await waitFor(() => expect(screen.getByTestId('chat-options-sheet')).toBeTruthy())
+    fireEvent.press(screen.getByTestId('option-fast'))
+
+    await waitFor(() =>
+      expect(mockController.setOption).toHaveBeenCalledWith('researcher', 'fast', 'normal', {
+        confirmExpensiveModel: false
+      })
+    )
+  })
+
+  /**
+   * A gateway may refuse the mode itself — "fast mode is not available for this
+   * model" is a 4002 as well. The reader has to be told, and the switch has to
+   * go back to what the gateway holds rather than sit there claiming a mode
+   * nothing accepted.
+   */
+  it('reports a refused fast mode and leaves the switch where the gateway has it', async () => {
+    mockController.setOption.mockRejectedValueOnce(new Error('fast mode is not available for this model'))
+    renderChat()
+
+    fireEvent.press(screen.getByTestId('chat-header-options'))
+
+    await waitFor(() => expect(screen.getByTestId('chat-options-sheet')).toBeTruthy())
+    fireEvent.press(screen.getByTestId('option-fast'))
+
+    await waitFor(() => expect(mockController.setOption).toHaveBeenCalled())
+
+    // Nothing dispatched a `session.info`, so the switch still reads what the
+    // gateway last said — off — rather than staying where the tap put it.
+    expect(screen.getByTestId('option-fast').props.accessibilityState?.checked).toBe(false)
+
+    // The sheet is a modal, so the banner underneath it is only reachable once
+    // the reader is done with the sheet. That is where the refusal is waiting.
+    fireEvent.press(screen.getByTestId('chat-options-done'))
+
+    await waitFor(() => expect(screen.getByText(/fast mode is not available for this model/u)).toBeTruthy())
+  })
+
   it('keeps verbosity local to the app rather than sending it to the gateway', async () => {
     renderChat()
 
