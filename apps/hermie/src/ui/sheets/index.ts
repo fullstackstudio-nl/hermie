@@ -1,6 +1,24 @@
 // The sheets an agent's question or a chat's settings open.
 export { ApprovalSheet, type ApprovalSheetProps } from './ApprovalSheet'
-export { ChatOptionsSheet, type ChatOptionsSheetProps } from './ChatOptionsSheet'
+export {
+  ChatOptionsSheet,
+  modelRowLabel,
+  muteRowLabel,
+  optionRowLabel,
+  type ChatOptionsPane,
+  type ChatOptionsSheetProps
+} from './ChatOptionsSheet'
+export {
+  CHAT_POPOVER_MAX_HEIGHT,
+  CHAT_POPOVER_MIN_WIDTH,
+  CHAT_POPOVER_WIDTH,
+  ChatOptionsPopover,
+  nextFocus,
+  popoverRows,
+  type ChatOptionsPopoverProps,
+  type PopoverRow,
+  type PopoverRowId
+} from './ChatOptionsPopover'
 export { ClarifySheet, type ClarifySheetProps } from './ClarifySheet'
 export {
   DisclosureRow,

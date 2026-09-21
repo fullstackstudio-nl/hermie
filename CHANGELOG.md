@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The chat's (…) menu is a popover in the chat, not a sheet that moves the chat.** The owner's
+  report was one sentence — *"menu in een chat moet popover in een chat zijn. nu schuift alles"* —
+  and the sheet was the reason: it dimmed the window, took the keyboard and on a phone pushed the
+  transcript up to make room for itself. The first level is now a floating glass surface anchored
+  under the header, drawn the way the composer's `+` menu already is, and laid out absolutely: the
+  transcript's own content inset is the same number open as closed, which is asserted rather than
+  asserted-by-eye. It carries the two mode switches, the four rows that lead somewhere, and the
+  view group — verbosity, bot-to-bot, thinking, text size — as compact rows. Anything that is a
+  PAGE still opens the sheet, and opens it already on that page rather than at the root: a model
+  picker is as long as the gateway's catalogue and a popover is not where a hundred models go. A
+  tap anywhere else closes it, Escape closes it one level, and ↑ / ↓ / Return walk it on a
+  keyboard. On a column too narrow for it the sheet is still the honest answer — decided by
+  MEASURING the chat column, never by asking which platform this is, because a Mac window dragged
+  narrow and a phone are the same problem.
+
 ### Added
 
 - **Chat text size.** Settings → Appearance and the chat's own options both carry **Small /

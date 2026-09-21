@@ -115,12 +115,18 @@ export interface ChatOptionsSheetProps {
 
   /** The gateway answered `confirm_required` for the model just picked. */
   /**
-   * Which page the sheet opens on. Development only, and the reason it exists is
-   * that a page behind a tap cannot be photographed on a simulator this machine
-   * can only launch — see `src/dev/launch-intent.ts`. A tap still navigates
-   * normally from wherever it puts you.
+   * Which page the sheet opens on.
+   *
+   * It began as a development lever — a page behind a tap cannot be photographed
+   * on a simulator this machine can only launch, see `src/dev/launch-intent.ts`
+   * — and it is now also how the POPOVER hands over. The first level of the
+   * chat's options is a popover in the chat (`ChatOptionsPopover`); a row that
+   * leads to a page closes it and opens this sheet already on that page, so the
+   * reader gets the picker they asked for rather than the root they have just
+   * left. A tap still navigates normally from wherever it puts you, and Escape
+   * still goes back exactly one level.
    */
-  initialPane?: 'reasoning' | 'model' | 'colour' | 'mute'
+  initialPane?: ChatOptionsPane
 
   pendingExpensiveModel?: string | null
   confirmMessage?: string
@@ -128,7 +134,17 @@ export interface ChatOptionsSheetProps {
   onConfirmExpensiveModel?: () => void
 }
 
-type Pane = 'root' | 'reasoning' | 'model' | 'colour' | 'mute'
+/**
+ * Every page under the root, which is also every page the popover can hand to.
+ *
+ * Exported because two surfaces now name the same set: the popover's rows say
+ * which page they lead to, and this sheet says which page it opened on. One
+ * union rather than two, so a page added here cannot be a page the popover
+ * quietly cannot reach.
+ */
+export type ChatOptionsPane = 'reasoning' | 'model' | 'colour' | 'mute' | 'export'
+
+type Pane = 'root' | ChatOptionsPane
 
 /**
  * The picker's id for "stop being quiet".
@@ -140,6 +156,40 @@ type Pane = 'root' | 'reasoning' | 'model' | 'colour' | 'mute'
 const UNMUTE = 'unmute'
 
 const nowSeconds = (): number => Math.floor(Date.now() / 1000)
+
+/**
+ * What a disclosure row SAYS, as three functions rather than as three
+ * expressions inside one component.
+ *
+ * The popover draws the same four rows as the sheet's root and has to say the
+ * same words on them, and a second copy of "which label does this model id
+ * have" is a second copy that goes stale when a gateway stops listing a model.
+ * Pure, so both surfaces read one answer.
+ */
+export function optionRowLabel(options: readonly PickerOption[], value: string): string {
+  return options.find(option => option.value === value)?.label ?? value
+}
+
+/**
+ * The model row, which has a fallback the others do not.
+ *
+ * A chat can sit on a model the inventory has since dropped, and that row must
+ * not be the one place a wire id shows through.
+ */
+export function modelRowLabel(options: readonly PickerOption[], value: string): string {
+  return options.find(option => option.value === value)?.label ?? prettyModelName(value)
+}
+
+/** The mute row, which says the STATE — a deadline — rather than the action. */
+export function muteRowLabel(mutedUntil: number | null, now: number): string {
+  if (mutedUntil === null) {
+    return chatStrings.options.notMuted
+  }
+
+  return mutedUntil === MUTE_FOREVER
+    ? strings.layout.muted
+    : strings.layout.mutedUntil(formatMuteUntil(mutedUntil, now, strings.layout.muteWeekdays))
+}
 
 /**
  * A page inside the sheet.
@@ -313,19 +363,9 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
     props.onClose()
   }
 
-  // The catalogue's label when the gateway listed this model, and the id's own
-  // reading when it did not — a chat can sit on a model the inventory has since
-  // dropped, and that row should not be the one place a wire id shows through.
-  const modelLabel =
-    props.modelOptions.find(option => option.value === props.model)?.label ?? prettyModelName(props.model)
-  const reasoningLabel =
-    props.reasoningOptions.find(option => option.value === props.reasoningEffort)?.label ?? props.reasoningEffort
-  const muteLabel =
-    props.mutedUntil === null
-      ? chatStrings.options.notMuted
-      : props.mutedUntil === MUTE_FOREVER
-        ? strings.layout.muted
-        : strings.layout.mutedUntil(formatMuteUntil(props.mutedUntil, nowSeconds(), strings.layout.muteWeekdays))
+  const modelLabel = modelRowLabel(props.modelOptions, props.model)
+  const reasoningLabel = optionRowLabel(props.reasoningOptions, props.reasoningEffort)
+  const muteLabel = muteRowLabel(props.mutedUntil, nowSeconds())
 
   if (props.pendingExpensiveModel) {
     // A confirmation replaces the sheet's body rather than stacking a second
@@ -369,7 +409,34 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
       testID="chat-options-sheet"
       visible={props.visible}
     >
-      {pane === 'mute' ? (
+      {pane === 'export' ? (
+        /*
+          Export as a page of its own, because the popover has to be able to
+          reach it. It was a group on the root and it still is — the root below
+          draws it too — so a reader who opened the sheet the long way round
+          finds it where it always was and one who came through the popover
+          lands straight on it.
+        */
+        <Page onBack={() => setPane('root')} title={chatStrings.export.header}>
+          <Text color="textMuted" variant="preview">
+            {chatStrings.export.hint}
+          </Text>
+          <InsetGroup>
+            <InsetButtonRow
+              onPress={() => props.onExport?.('md')}
+              testID="option-export-markdown-page"
+              title={
+                SHARE_FILE_VERB === 'download' ? chatStrings.export.downloadMarkdown : chatStrings.export.shareMarkdown
+              }
+            />
+            <InsetButtonRow
+              onPress={() => props.onExport?.('txt')}
+              testID="option-export-text-page"
+              title={SHARE_FILE_VERB === 'download' ? chatStrings.export.downloadText : chatStrings.export.shareText}
+            />
+          </InsetGroup>
+        </Page>
+      ) : pane === 'mute' ? (
         /*
           The four spans, and Unmute when there is something to undo.
 

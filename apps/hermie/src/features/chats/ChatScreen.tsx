@@ -73,6 +73,14 @@ import { Appear } from '../../ui/Appear'
 import { KeyboardInset } from '../../ui/KeyboardInset'
 import { Screen, Text } from '../../ui/primitives'
 import { TypeScaleProvider, useTheme } from '../../ui/theme'
+import {
+  CHAT_POPOVER_MIN_WIDTH,
+  ChatOptionsPopover,
+  modelRowLabel,
+  muteRowLabel,
+  optionRowLabel,
+  type ChatOptionsPane
+} from '../../ui/sheets'
 import { CONTROL_MIN_HEIGHT, TAP_SLOP } from '../../ui/tokens'
 import { DropZone } from '../../chat-ui/DropZone'
 import type { DroppedFile } from '../../platform/file-drop'
@@ -406,6 +414,31 @@ function Conversation({
    * it is a number that goes stale the first time either moves.
    */
   const [chromeHeight, setChromeHeight] = useState(0)
+  /**
+   * How wide the chat column is, for the popover-or-sheet decision.
+   *
+   * Measured off the chrome rather than read off the window, for the reason the
+   * composer's `+` menu already gives about exactly this choice: on the wide
+   * layout the chat column is not the window, and a popover that fits the
+   * window can still not fit the column. It is a MEASUREMENT and never
+   * `Platform.OS`, because a Mac window dragged narrow and a phone are the same
+   * problem and the platform answers only one of them.
+   */
+  const [chromeWidth, setChromeWidth] = useState(0)
+  /**
+   * The chat's options, as a popover in the chat.
+   *
+   * The owner's complaint was that the sheet made everything move
+   * (*"nu schuift alles"*), so the first level is a floating surface anchored
+   * under the header and laid out absolutely — see `ChatOptionsPopover`. It is
+   * deliberately NOT part of the sheet host's state machine: the host exists
+   * because iOS presents one `Modal` at a time, and a popover is not a modal.
+   * A question the agent is blocked on still arrives over it, and the popover
+   * closes when one does — see the effect below.
+   */
+  const [optionsPopover, setOptionsPopover] = useState(false)
+  /** Which page the options SHEET should open on, when the popover hands over. */
+  const [optionsPane, setOptionsPane] = useState<ChatOptionsPane | undefined>(undefined)
   /**
    * Files already uploaded and waiting to be named in the next prompt.
    *
@@ -1585,10 +1618,37 @@ function Conversation({
     `refreshUsage` promises.
   */
   const refreshUsage = chat.refreshUsage
+  /*
+    Popover where there is room for one, sheet where there is not.
+
+    `CHAT_POPOVER_MIN_WIDTH` against the MEASURED column, which is the owner's
+    own allowance: under 400pt the rows' value column starts eliding and a
+    popover has stopped being the better answer. A column that has not been laid
+    out yet reports 0, and a width of nothing is not "too narrow" — it is "not
+    known", so the first open before layout takes the sheet rather than
+    guessing.
+  */
   const openOptions = useCallback(() => {
     void refreshUsage()
+
+    if (chromeWidth >= CHAT_POPOVER_MIN_WIDTH) {
+      setOptionsPopover(true)
+
+      return
+    }
+
+    setOptionsPane(undefined)
     setSheet('options')
-  }, [refreshUsage])
+  }, [chromeWidth, refreshUsage])
+
+  /** A row on the popover that leads to a page: close it, open the sheet there. */
+  const openOptionsPage = useCallback((pane: ChatOptionsPane) => {
+    setOptionsPopover(false)
+    setOptionsPane(pane)
+    setSheet('options')
+  }, [])
+
+  const closeOptionsPopover = useCallback(() => setOptionsPopover(false), [])
   const openProfile = useCallback(() => {
     void refreshUsage()
     setSheet('profile')
@@ -1630,6 +1690,9 @@ function Conversation({
   const closeManualSheet = useCallback(() => {
     setSheet('none')
     setTranscript(null)
+    // So the next plain open lands on the root rather than on the page the last
+    // reader happened to be handed.
+    setOptionsPane(undefined)
   }, [])
 
   const dismissRequest = useCallback((item: ApprovalItem | ClarifyItem) => {
@@ -1816,9 +1879,13 @@ function Conversation({
           child of it, so the chrome does not move when the keyboard opens.
         */}
           <View
-            onLayout={event => setChromeHeight(event.nativeEvent.layout.height)}
+            onLayout={event => {
+              setChromeHeight(event.nativeEvent.layout.height)
+              setChromeWidth(event.nativeEvent.layout.width)
+            }}
             pointerEvents="box-none"
             style={{ left: 0, position: 'absolute', right: 0, top: 0 }}
+            testID="chat-chrome"
           >
             <ChatHeader
               accentFill={theme.accent(accent).fill}
@@ -1835,6 +1902,87 @@ function Conversation({
               {...(names.secondary ? { secondaryName: names.secondary } : {})}
               {...(presence.lastSeenAt !== undefined ? { lastSeenAt: presence.lastSeenAt } : {})}
               {...(subtitle ? { subtitle } : {})}
+            />
+          </View>
+
+          {/*
+            The options popover, and the tap that puts it away.
+
+            BOTH are absolutely positioned and both are siblings of the
+            transcript rather than children of it, which is the whole of the
+            owner's request: opening this lays nothing out, so the list's own
+            content inset, the composer and everything behind the surface stay
+            exactly where they were. `chat-options-popover.test.tsx` asserts
+            that inset is the same number open and closed, because "nothing
+            moves" is the requirement and every other assertion here would pass
+            with a padding that quietly changed.
+
+            `box-none` on the layer so the gaps around the popover — which is
+            most of the screen — reach the catcher underneath it, and the
+            catcher is rendered FIRST so the popover's own rows still get the
+            tap.
+          */}
+          {optionsPopover ? (
+            <Pressable
+              accessibilityElementsHidden
+              aria-hidden
+              importantForAccessibility="no-hide-descendants"
+              onPress={closeOptionsPopover}
+              style={{ bottom: 0, left: 0, position: 'absolute', right: 0, top: 0 }}
+              testID="chat-options-backdrop"
+            />
+          ) : null}
+
+          <View
+            pointerEvents="box-none"
+            style={{
+              left: 0,
+              paddingHorizontal: theme.space.md,
+              position: 'absolute',
+              right: 0,
+              top: chromeHeight
+            }}
+            testID="chat-options-layer"
+          >
+            <ChatOptionsPopover
+              accent={accent}
+              botName={display}
+              canExport
+              contextUsage={chat.contextUsage}
+              fast={chat.info?.fast === true}
+              model={chat.info?.model ?? ''}
+              modelLabel={modelRowLabel(modelOptions, chat.info?.model ?? '')}
+              modelOptions={modelOptions}
+              muteLabel={muteRowLabel(
+                mutedUntilOf(mutes, botName, Math.floor(Date.now() / 1000)),
+                Math.floor(Date.now() / 1000)
+              )}
+              mutedUntil={mutedUntilOf(mutes, botName, Math.floor(Date.now() / 1000))}
+              onChangeAccent={value => useChatLayoutStore.getState().setAccent(botName, value)}
+              onChangeFast={value => void setOption('fast', value ? 'fast' : 'normal')}
+              onChangeModel={value => void setOption('model', value)}
+              onChangeMute={(until: number | null) => useChatLayoutStore.getState().setMute(botName, until)}
+              onChangeReasoningEffort={value => void setOption('reasoning', value)}
+              onChangeShowBotToBot={value => useSettingsStore.getState().setChatView(botName, { showBotToBot: value })}
+              onChangeShowThinking={value => useSettingsStore.getState().setChatView(botName, { showThinking: value })}
+              onChangeTextSize={value => useSettingsStore.getState().setTextSize(value)}
+              onChangeVerbosity={(value: Verbosity) =>
+                useSettingsStore.getState().setChatView(botName, { level: value })
+              }
+              onChangeYolo={value => void setOption('yolo', value ? 'true' : 'false')}
+              onClose={closeOptionsPopover}
+              onOpenPage={openOptionsPage}
+              onResetView={() => useSettingsStore.getState().resetChatView(botName)}
+              reasoningEffort={chat.info?.reasoning_effort ?? ''}
+              reasoningLabel={optionRowLabel(REASONING_OPTIONS, chat.info?.reasoning_effort ?? '')}
+              reasoningOptions={REASONING_OPTIONS}
+              showBotToBot={view.showBotToBot}
+              showThinking={view.showThinking}
+              textSize={textSize}
+              verbosity={view.level}
+              viewOverridden={overridden}
+              visible={optionsPopover}
+              yolo={chat.info?.yolo === true}
             />
           </View>
 
@@ -1948,6 +2096,7 @@ function Conversation({
         options={{
           accent,
           botName: display,
+          ...(optionsPane ? { initialPane: optionsPane } : {}),
           confirmMessage: pendingModel?.message ?? '',
           contextUsage: chat.contextUsage,
           onExport: exportChat,
