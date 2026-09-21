@@ -451,6 +451,35 @@ export const SUBAGENT_STREAM_CAP = 24
 /** The gap between history seqs; live items are handed the next multiple. */
 export const SEQ_STEP = 1000
 
+/**
+ * `id`, or the nearest spelling of it no item in `taken` is already using.
+ *
+ * `order` is a LIST, so an id it already holds becomes a SECOND entry pointing
+ * at one item: React reports "Encountered two children with the same key" and
+ * the reader sees the same bubble twice. No id in this package is unique on its
+ * own — a live one is minted from a counter, a persisted one from the gateway's
+ * row number, a tool one from `tool_id` — and a gateway that restarts under a
+ * live session hands all three out again from the beginning. So every id is put
+ * through here on its way into a transcript rather than trusted.
+ *
+ * The suffix is deliberately one an id never carries otherwise, and it only
+ * ever lands on the LATER of the two: an item already on screen keeps the id a
+ * list is keyed on, so nothing remounts.
+ */
+export function freeItemId(taken: Readonly<Record<string, unknown>>, id: string): string {
+  if (!taken[id]) {
+    return id
+  }
+
+  let attempt = 2
+
+  while (taken[`${id}#${attempt}`]) {
+    attempt += 1
+  }
+
+  return `${id}#${attempt}`
+}
+
 export function createChatState(botName: string, storedSessionId: string, resolvedSessionId: string): ChatState {
   return {
     botName,

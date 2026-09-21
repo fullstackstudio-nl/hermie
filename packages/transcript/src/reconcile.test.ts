@@ -11,6 +11,7 @@ import {
   type ChatState,
   createChatState,
   type CronDeliveryItem,
+  SEQ_STEP,
   type ToolItem,
   type UserItem
 } from './types'
@@ -407,5 +408,80 @@ describe('pairing a turn that says nothing but carries something', () => {
     const next = reconcileTail(sent('just words', []), rowsToItems(row('just words', 4), 'rest'))
 
     expect(userItems(next)).toHaveLength(1)
+  })
+})
+
+/**
+ * The gateway restarting under a live session.
+ *
+ * Found by pulling the fake gateway out from under the running app and sending
+ * twice: React reported `Encountered two children with the same key … .$o=29000`
+ * — which is `o:9000` once React's key escaping is undone — and the same user
+ * bubble was drawn twice.
+ *
+ * `o:` ids are minted from `turn.nextSeq`, and `rebuild` used to re-derive that
+ * counter from the transcript's LENGTH. A rebuilt session answers with fewer
+ * rows than the client holds, so the re-hydration shrank the list and moved the
+ * counter back onto a seq that was still in use. `order` is a list, so the next
+ * send pushed an id it already held.
+ */
+describe('a re-hydration that shortens the transcript', () => {
+  /** Seven rows is the seeded Bot Chat, which is the shape this was found in. */
+  const sevenRows = Array.from({ length: 7 }, (_, index): TranscriptRow => ({
+    role: index % 2 ? 'assistant' : 'user',
+    text: `row ${index + 1}`,
+    row_id: index + 1,
+    timestamp: 1_700_000_000 + index
+  }))
+
+  /** Three sends the dead gateway never persisted, on top of the seven rows. */
+  const afterThreeUnpersistedSends = (): ChatState =>
+    ['one', 'two', 'three'].reduce(
+      (state, text) => beginLocalTurn(state, text, undefined, NOW),
+      reconcile(fresh(), rowsToItems(sevenRows, 'rpc'))
+    )
+
+  it('never moves the id counter backwards', () => {
+    const live = afterThreeUnpersistedSends()
+    // The rebuilt session is a row short of what the client holds.
+    const next = reconcile(live, rowsToItems(sevenRows.slice(0, 6), 'rpc'))
+
+    expect(next.turn.nextSeq).toBeGreaterThanOrEqual(live.turn.nextSeq)
+  })
+
+  it('leaves no two rows sharing an id when the next message is sent', () => {
+    const rehydrated = reconcile(afterThreeUnpersistedSends(), rowsToItems(sevenRows.slice(0, 6), 'rpc'))
+    const next = beginLocalTurn(rehydrated, 'after the restart', undefined, NOW)
+
+    expect(new Set(next.order).size).toBe(next.order.length)
+  })
+
+  it('draws the message that was sent once, and the ones before it once each', () => {
+    const rehydrated = reconcile(afterThreeUnpersistedSends(), rowsToItems(sevenRows.slice(0, 6), 'rpc'))
+    const next = beginLocalTurn(rehydrated, 'after the restart', undefined, NOW)
+    const texts = next.order.map(id => next.items[id]).map(item => (item?.kind === 'user' ? item.text : ''))
+
+    expect(texts.filter(text => text === 'after the restart')).toEqual(['after the restart'])
+    expect(texts.filter(text => text === 'three')).toEqual(['three'])
+  })
+
+  /**
+   * The seam, on its own: an id that arrives already taken never becomes a
+   * second entry in `order`. `nextSeq` is monotonic now, so nothing in the app
+   * should reach this — which is exactly why it is worth a case of its own.
+   */
+  it('keeps both items when something mints an id the transcript already holds', () => {
+    const live = afterThreeUnpersistedSends()
+    // The seq the FIRST of those three sends was minted at, so the id the next
+    // one asks for is one the transcript is already holding.
+    const spent = live.turn.nextSeq - 3 * SEQ_STEP
+
+    expect(live.items[`o:${spent}`]).toBeDefined()
+
+    const taken = { ...live, turn: { ...live.turn, nextSeq: spent } }
+    const next = beginLocalTurn(taken, 'after the restart', undefined, NOW)
+
+    expect(new Set(next.order).size).toBe(next.order.length)
+    expect(next.order).toHaveLength(live.order.length + 1)
   })
 })

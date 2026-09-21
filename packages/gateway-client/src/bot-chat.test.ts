@@ -68,6 +68,14 @@ interface ChatHarness {
   sweepTail: (limit?: number) => Promise<void>
   /** Reopening the chat: throw the transcript away and project it from the rows. */
   rehydrate: (limit?: number) => Promise<void>
+  /**
+   * Pull the gateway out from under the live session and let the app recover.
+   *
+   * The process that comes back on the same port has rebuilt every session, so
+   * the stored id the client holds is gone and the transcript it holds can be
+   * LONGER than the one the gateway now has. That asymmetry is what this is for.
+   */
+  restart: () => Promise<void>
 }
 
 async function openBotChat(profile: string, options: FakeGatewayOptions = {}): Promise<ChatHarness> {
@@ -98,6 +106,7 @@ async function openBotChat(profile: string, options: FakeGatewayOptions = {}): P
   const storedId = row.canonical_session.id
   const resolvedId = row.canonical_session.resolved_id || storedId
 
+  let resolved = resolvedId
   let state = createChatState(profile, storedId, resolvedId)
   const apply = (next: ChatState) => {
     state = next
@@ -114,7 +123,7 @@ async function openBotChat(profile: string, options: FakeGatewayOptions = {}): P
 
   assertDesktopContract(resume.info)
 
-  const runtimeSessionId = resume.session_id
+  let runtimeSessionId = resume.session_id
 
   expect(runtimeSessionId).not.toBe(storedId)
 
@@ -192,9 +201,12 @@ async function openBotChat(profile: string, options: FakeGatewayOptions = {}): P
   apply({ ...state, lastSeq: Math.max(state.lastSeq, since.latest_seq), epoch: since.epoch })
 
   const restRows = async (limit: number): Promise<TranscriptRow[]> => {
-    const response = await fetch(`${gateway.url}/api/sessions/${resolvedId}/messages?limit=${limit}&order=latest`, {
-      headers: { 'X-Hermes-Session-Token': 'demo' }
-    })
+    const response = await fetch(
+      `${live[live.length - 1]!.gateway.url}/api/sessions/${resolved}/messages?limit=${limit}&order=latest`,
+      {
+        headers: { 'X-Hermes-Session-Token': 'demo' }
+      }
+    )
     const body = (await response.json()) as { messages?: TranscriptRow[] }
 
     return body.messages ?? []
@@ -218,7 +230,9 @@ async function openBotChat(profile: string, options: FakeGatewayOptions = {}): P
     gateway,
     connection,
     state: () => state,
-    runtimeSessionId,
+    get runtimeSessionId() {
+      return runtimeSessionId
+    },
     answered,
     deliveries,
     storedSessionId: storedId,
@@ -250,6 +264,61 @@ async function openBotChat(profile: string, options: FakeGatewayOptions = {}): P
     },
     async rehydrate(limit = 30) {
       apply(reconcile(state, rowsToItems(await restRows(limit), 'rest')))
+    },
+    async restart() {
+      const port = live[live.length - 1]!.gateway.port
+
+      await live[live.length - 1]!.gateway.close()
+
+      const dead = Date.now() + 5000
+
+      while (Date.now() < dead && connection.status === 'ready') {
+        await new Promise(resolve => setTimeout(resolve, 10))
+      }
+
+      live[live.length - 1]!.gateway = await startFakeGateway({
+        auth: 'token',
+        token: 'demo',
+        streamDelayMs: 1,
+        port,
+        ...options
+      })
+      await waitForStatus(connection, 'ready', 15_000)
+
+      // What the app does when the socket comes back and the session it held is
+      // gone: re-read the roster, resume the rebuilt canonical chat, and project
+      // its rows onto the transcript that is still on screen.
+      const again = await connection.request('profiles.list', { include_sessions: true })
+      const canonical = (again.profiles ?? []).find(entry => entry.name === profile)?.canonical_session
+
+      if (!canonical) {
+        throw new Error(`${profile} lost its canonical Bot Chat across the restart`)
+      }
+
+      resolved = canonical.resolved_id || canonical.id
+
+      const resumed = await connection.request('session.resume', {
+        session_id: canonical.id,
+        profile,
+        omit_messages: true,
+        source: 'hermie',
+        cols: 96
+      })
+
+      runtimeSessionId = resumed.session_id
+
+      const rows = await connection.request('session.history', { session_id: runtimeSessionId, profile })
+
+      apply(reconcile(state, rowsToItems((rows.messages ?? []) as TranscriptRow[], 'rpc')))
+
+      // A different process did the numbering, so every seq held describes a
+      // different sequence: adopt the watermark rather than replaying onto it.
+      const events = await connection.request('session.events.since', {
+        session_id: runtimeSessionId,
+        last_seen: 0
+      })
+
+      apply({ ...state, lastSeq: events.latest_seq, epoch: events.epoch })
     }
   }
 }
@@ -708,4 +777,48 @@ describe('a Bot Chat end to end', () => {
     // claim: one bubble showing an upload nothing read would be no better.
     expect(itemsOf(chat.state()).some(item => item.kind === 'assistant' && item.text.includes('ui.xml'))).toBe(true)
   }, 20_000)
+
+  /**
+   * Pulling the gateway out from under a live session.
+   *
+   * The round that found this had the app open against the fake gateway, killed
+   * it, and sent twice: React reported `Encountered two children with the same
+   * key … .$o=29000` and the same bubble appeared twice. `o:9000` is a
+   * transcript item id, minted from a counter `rebuild` used to re-derive from
+   * the transcript's LENGTH — and the session that comes back is SHORTER than
+   * the one on screen, so the counter walked back onto an id still in use.
+   */
+  it("keeps every row's id its own when the gateway is restarted under it", async () => {
+    const chat = await openBotChat('researcher')
+
+    await chat.submit('before the restart')
+    await chat.waitFor(state => !state.turn.active, 'the first reply to finish')
+    await chat.sweepTail()
+
+    const held = chat.state().order.length
+
+    await chat.restart()
+
+    // The whole point of the case: the rebuilt session has fewer rows than the
+    // client is holding, which is what used to walk the counter backwards.
+    expect(chat.state().order.length).toBeLessThan(held)
+
+    // Two sends, exactly as reported. The gateway that came back does not know
+    // this session's old id, so nothing pairs them away.
+    await chat.submit('first after the restart')
+    await chat.submit('second after the restart')
+
+    // Neither reached the rebuilt session, so both are still unpersisted when
+    // the reader comes back to the chat and it re-reads its rows. That sweep is
+    // what used to hand the next send an id one of these two was already using.
+    await chat.rehydrate()
+    await chat.submit('third after the restart')
+
+    const state = chat.state()
+
+    expect(new Set(state.order).size, `duplicate ids: ${state.order.join(' ')}`).toBe(state.order.length)
+    expect(outgoing(state).filter(item => item.text === 'first after the restart')).toHaveLength(1)
+    expect(outgoing(state).filter(item => item.text === 'second after the restart')).toHaveLength(1)
+    expect(outgoing(state).filter(item => item.text === 'third after the restart')).toHaveLength(1)
+  }, 30_000)
 })

@@ -14,6 +14,7 @@ import {
   type AssistantItem,
   type BotDmOutItem,
   type ChatState,
+  freeItemId,
   type NoticeItem,
   SEQ_STEP,
   type SubagentGroupItem,
@@ -178,7 +179,17 @@ function rebuild(state: ChatState, list: readonly TranscriptItem[]): ChatState {
   }
 
   list.forEach((item, index) => {
-    const placed = { ...item, seq: index * SEQ_STEP }
+    /*
+      The id is re-checked here rather than assumed.
+
+      A persisted item's id is its gateway ROW NUMBER, and a gateway that
+      restarts under a live session numbers the rebuilt one from 1 again. So a
+      freshly projected `r:4` and a live `r:4` kept from the tail are two
+      different rows wearing one id, and this loop is the single funnel both
+      reconcilers push `order` through. The earlier of the two keeps the id a
+      list is keyed on; only the later is renamed.
+    */
+    const placed = { ...item, id: freeItemId(next.items, item.id), seq: index * SEQ_STEP }
 
     next.items[placed.id] = placed
     next.order.push(placed.id)
@@ -210,7 +221,27 @@ function rebuild(state: ChatState, list: readonly TranscriptItem[]): ChatState {
     }
   })
 
-  next.turn.nextSeq = list.length * SEQ_STEP
+  /*
+    `nextSeq` is a HIGH-WATER MARK, not a position.
+
+    It was `list.length * SEQ_STEP`, which reads the counter off the transcript's
+    current length — and a re-hydration is free to make the transcript SHORTER.
+    Pull the gateway out from under a live session and the rebuilt one comes back
+    with fewer rows than the client holds, so this line moved the counter
+    BACKWARDS, onto seq values already spent on ids that are still in the list.
+    The next send then minted an id the transcript already had: `order` is a
+    list, so it grew a second entry pointing at the same item, which is React's
+    "two children with the same key" and, on screen, the same user bubble twice.
+
+    Seven seeded rows, a transcript that loses one on the rebuild, and sends the
+    dead gateway never persisted is the arrangement that was reported, and it
+    lands on `o:9000` exactly.
+
+    The only thing the counter owes the order is to sit ABOVE every seq in the
+    list, and `list.length * SEQ_STEP` still does that — so taking the larger of
+    the two costs nothing and takes the collision away.
+  */
+  next.turn.nextSeq = Math.max(state.turn.nextSeq, list.length * SEQ_STEP)
   next.turn.assistantId = next.turn.assistantId && next.items[next.turn.assistantId] ? next.turn.assistantId : undefined
 
   return next

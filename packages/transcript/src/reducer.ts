@@ -22,6 +22,7 @@ import {
   type ChatState,
   type ClarifyItem,
   type ClarifyQuestionItem,
+  freeItemId,
   type ItemOrigin,
   type ItemReaction,
   type NoticeItem,
@@ -143,7 +144,7 @@ type AnyNewItem = {
 
 function addItem<T extends TranscriptItem>(next: ChatState, draft: NewItem<T>, origin: ItemOrigin = 'live'): T {
   const seq = next.turn.nextSeq
-  const item = { ...draft, seq, version: 0, origin: draft.origin ?? origin } as T
+  const item = { ...draft, id: freeItemId(next.items, draft.id), seq, version: 0, origin: draft.origin ?? origin } as T
 
   next.turn.nextSeq = seq + SEQ_STEP
   next.items[item.id] = item
@@ -202,7 +203,13 @@ function recastItem(next: ChatState, id: string, draft: AnyNewItem, origin: Item
 /** `addItem` for a draft whose kind was decided at runtime. */
 function addAnyItem(next: ChatState, draft: AnyNewItem, origin: ItemOrigin): void {
   const seq = next.turn.nextSeq
-  const item = { ...draft, seq, version: 0, origin: draft.origin ?? origin } as TranscriptItem
+  const item = {
+    ...draft,
+    id: freeItemId(next.items, draft.id),
+    seq,
+    version: 0,
+    origin: draft.origin ?? origin
+  } as TranscriptItem
 
   next.turn.nextSeq = seq + SEQ_STEP
   next.items[item.id] = item
