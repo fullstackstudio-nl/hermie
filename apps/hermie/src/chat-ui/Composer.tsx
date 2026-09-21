@@ -11,7 +11,7 @@
  *   - The slash popover is fed by props. The composer asks (`onQuerySlash`) and
  *     paints what it is given; it never calls the gateway itself.
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   Image,
   KeyboardAvoidingView,
@@ -28,13 +28,15 @@ import {
 
 import { hasHardwareKeyboard, isShiftDown } from '../platform/keyboard-modifiers'
 import { RUNS_ON_MAC } from '../platform/runs-on-mac'
+import { growToContent, ONE_ROW } from '../platform/text-field-web'
 import { GlassGroup, GlassSurface } from '../ui/glass'
 import { Appear } from '../ui/Appear'
 import { KEYBOARD_AVOID_BEHAVIOR } from '../ui/keyboard'
-import { Text } from '../ui/primitives'
+import { RoundIconButton, Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
 import { CONTROL_SIZE, TAP_SLOP } from '../ui/tokens'
 import { useEscapeKey } from '../ui/useEscapeKey'
+import { useFocusRing } from '../ui/useFocusRing'
 import { useShortcut } from '../ui/useShortcut'
 import { AttachMenu } from './AttachMenu'
 import { FileChip } from './FileChip'
@@ -213,6 +215,15 @@ export const COMPOSER_ROUND_SIZE = RUNS_ON_MAC ? CONTROL_SIZE.regular : CONTROL_
 export const COMPOSER_FIELD_RADIUS = (COMPOSER_LINE_HEIGHT + 2 * COMPOSER_FIELD_INSET) / 2
 
 /**
+ * How tall the field is allowed to grow before it scrolls: six lines.
+ *
+ * A number rather than a `style` literal because the web has to be TOLD it —
+ * a `<textarea>` does not size itself to its content, so the same cap that is a
+ * `maxHeight` natively is also the clamp `growToContent` measures against.
+ */
+export const COMPOSER_MAX_HEIGHT = 132
+
+/**
  * How much composer the attach POPOVER needs before it stops being the right shape.
  *
  * Two round buttons, their labels, the popover's own padding and the gap between
@@ -273,6 +284,29 @@ export function Composer({
 }: ComposerProps) {
   const theme = useTheme()
   const inputRef = useRef<TextInput>(null)
+  /*
+    The pill draws the focus ring, not the field inside it.
+
+    Same report as the chat list's search box: a browser rings the `<textarea>`,
+    which is the text line rather than the control, so the indicator was a
+    square-cornered rectangle inside a rounded pill in the system's accent. Both
+    halves are no-ops on iOS and Android.
+  */
+  const fieldFocus = useFocusRing()
+
+  /*
+    The field grows with what is in it, on the platform that will not do it.
+
+    A `<textarea>` keeps the height it was given and scrolls; a native
+    `TextInput` re-measures itself. So this drives the height from the content
+    on every change of the value, and is a no-op everywhere else — see
+    `platform/text-field-web.ts`. `useLayoutEffect` rather than `useEffect`
+    because the alternative is one painted frame at the old height per keystroke
+    that wraps, which is the flicker this is supposed to remove.
+  */
+  useLayoutEffect(() => {
+    growToContent(inputRef.current, COMPOSER_MAX_HEIGHT)
+  }, [attachments.length, value])
   const query = useRef(onQuerySlash)
 
   query.current = onQuerySlash
@@ -816,33 +850,25 @@ export function Composer({
           spacing={theme.space.sm}
           style={{ alignItems: 'flex-end', flexDirection: 'row', gap: theme.space.sm }}
         >
-          <GlassSurface
-            interactive
-            radius={round / 2}
-            shadow="card"
-            style={{ height: round, width: round }}
-            variant="control"
-          >
-            <Pressable
-              accessibilityLabel={chatStrings.composer.attach}
-              accessibilityRole="button"
-              accessibilityState={{ disabled: choices.length === 0, expanded: menuVisible }}
-              disabled={choices.length === 0}
-              onPress={() => setMenuOpen(current => !current)}
-              style={({ pressed }) => ({
-                alignItems: 'center',
-                height: round,
-                justifyContent: 'center',
-                opacity: choices.length === 0 ? 0.3 : pressed ? 0.6 : 1,
-                width: round
-              })}
-              testID="composer-attach"
-            >
-              <Text color="textMuted" style={{ fontSize: 22, lineHeight: 26 }}>
-                +
-              </Text>
-            </Pressable>
-          </GlassSurface>
+          {/*
+            The `+` is a drawn path now, and the button is the shared one.
+
+            It was a `Text` holding the character, centred by its LINE BOX —
+            which is not where the ink is: a font places a glyph by its ascent
+            and descent, so `+` sat about two points low in a 40pt circle. In a
+            browser that is plainly visible. `src/ui/Icon.tsx` opens with the
+            same argument about the tab strip.
+          */}
+          <RoundIconButton
+            disabled={choices.length === 0}
+            expanded={menuVisible}
+            icon="plus"
+            label={chatStrings.composer.attach}
+            onPress={() => setMenuOpen(current => !current)}
+            size={round}
+            testID="composer-attach"
+            tint={theme.colors.textMuted}
+          />
 
           <GlassSurface
             contentStyle={{
@@ -855,7 +881,7 @@ export function Composer({
             }}
             radius={COMPOSER_FIELD_RADIUS}
             shadow="float"
-            style={{ flex: 1 }}
+            style={{ flex: 1, ...fieldFocus.ringStyle }}
             testID={`${testID}-field`}
             variant="float"
           >
@@ -948,21 +974,35 @@ export function Composer({
                 placeholderTextColor={theme.colors.textFaint}
                 ref={inputRef}
                 selection={caret}
-                style={{
-                  color: theme.colors.text,
-                  flex: 1,
-                  fontSize: theme.type.body.fontSize,
-                  // An explicit leading, so the box the padding centres is a box
-                  // this app chose rather than one the platform's font metrics
-                  // happened to produce. See `COMPOSER_TEXT_LINE_HEIGHT`.
-                  lineHeight: COMPOSER_TEXT_LINE_HEIGHT,
-                  maxHeight: 132,
-                  // No `minHeight`: the padding below already makes one line exactly
-                  // `COMPOSER_LINE_HEIGHT` tall, and a minimum ON TOP of that is a box
-                  // taller than its content — which on iOS a multiline field fills
-                  // from the top, leaving the placeholder high and the gap below it.
-                  ...composerFieldPadding(Platform.OS === 'ios' ? COMPOSER_IOS_TOP_INSET : 0)
-                }}
+                onBlur={fieldFocus.fieldProps.onBlur}
+                onFocus={fieldFocus.fieldProps.onFocus}
+                /*
+                  One row, for the one platform that has a default.
+
+                  A `<textarea>` with no `rows` is two lines tall, which is why
+                  the field was 54pt in a tab and 32 on a phone with the same
+                  one line of text in it. `undefined` everywhere else, where a
+                  multiline field measures its own content.
+                */
+                {...ONE_ROW}
+                style={[
+                  {
+                    color: theme.colors.text,
+                    flex: 1,
+                    fontSize: theme.type.body.fontSize,
+                    // An explicit leading, so the box the padding centres is a box
+                    // this app chose rather than one the platform's font metrics
+                    // happened to produce. See `COMPOSER_TEXT_LINE_HEIGHT`.
+                    lineHeight: COMPOSER_TEXT_LINE_HEIGHT,
+                    maxHeight: COMPOSER_MAX_HEIGHT,
+                    // No `minHeight`: the padding below already makes one line exactly
+                    // `COMPOSER_LINE_HEIGHT` tall, and a minimum ON TOP of that is a box
+                    // taller than its content — which on iOS a multiline field fills
+                    // from the top, leaving the placeholder high and the gap below it.
+                    ...composerFieldPadding(Platform.OS === 'ios' ? COMPOSER_IOS_TOP_INSET : 0)
+                  },
+                  fieldFocus.fieldProps.style
+                ]}
                 submitBehavior={submitBehavior}
                 testID="composer-input"
                 value={value}
@@ -970,55 +1010,52 @@ export function Composer({
             </View>
           </GlassSurface>
 
-          {/* Accent while it sends, a red stop SQUARE while a turn runs. */}
-          <Pressable
-            accessibilityLabel={stopping ? chatStrings.composer.stop : chatStrings.composer.send}
-            accessibilityRole="button"
-            disabled={!running && !canSend}
-            onPress={press}
-            style={({ pressed }) => ({
-              alignItems: 'center',
-              height: round,
-              justifyContent: 'center',
-              opacity: !running && !canSend ? 0.35 : pressed ? 0.85 : 1,
-              width: round
-            })}
-            testID={stopping ? 'composer-stop' : 'composer-send'}
-          >
-            <View
-              style={{
+          {/*
+            Accent while it sends, a red stop SQUARE while a turn runs.
+
+            The colour is the accent's BUBBLE, not its `fill`. White sits on this
+            circle, and `bubble` is the half of the swatch that
+            `npm run contrast:check` measures white against — `fill` is the ring
+            colour and may be brilliant, which on the studio's lime left a white
+            arrow at about 1.3 : 1.
+
+            The stop stays a drawn square rather than an icon: it is a shape, not
+            a mark, and it is the one child here that was never a glyph. The
+            arrow was, and it sat low in the circle for the same reason the `+`
+            did.
+          */}
+          {stopping ? (
+            <Pressable
+              accessibilityLabel={chatStrings.composer.stop}
+              accessibilityRole="button"
+              hitSlop={TAP_SLOP}
+              onPress={press}
+              style={({ pressed }) => ({
                 alignItems: 'center',
-                // The BUBBLE, not the accent's `fill`. White sits on this circle
-                // (`onAccent`, the arrow), and `bubble` is the half of the swatch
-                // that `npm run contrast:check` measures white against — `fill` is
-                // the ring colour and may be brilliant, which on the studio's lime
-                // left a white arrow at about 1.3 : 1 on the send button.
-                backgroundColor: stopping ? theme.colors.danger : theme.accent().bubble,
+                backgroundColor: theme.colors.danger,
                 borderRadius: round / 2,
                 height: round,
                 justifyContent: 'center',
+                opacity: pressed ? 0.85 : 1,
                 width: round,
-                // No shadow while the button is dimmed. Android draws an
-                // elevation shadow BEHIND the view and clips nothing, so at
-                // opacity 0.35 the fill stops hiding it and the shadow's own
-                // outline — an octagon, which is how the platform approximates
-                // a circle at this size — reads straight through the circle.
-                // iOS clips a shadow to outside the view's path and never
-                // showed it. A disabled control has nothing to float above
-                // either way, so the shadow goes with the dimming.
-                ...(!running && !canSend ? {} : theme.shadows.card)
-              }}
-              testID="composer-send-circle"
+                ...theme.shadows.card
+              })}
+              testID="composer-stop"
             >
-              {stopping ? (
-                <View style={{ backgroundColor: theme.colors.onAccent, borderRadius: 2, height: 12, width: 12 }} />
-              ) : (
-                <Text color="onAccent" style={{ fontSize: 18, fontWeight: '700', lineHeight: 21 }}>
-                  {'\u2191'}
-                </Text>
-              )}
-            </View>
-          </Pressable>
+              <View style={{ backgroundColor: theme.colors.onAccent, borderRadius: 2, height: 12, width: 12 }} />
+            </Pressable>
+          ) : (
+            <RoundIconButton
+              color={theme.accent().bubble}
+              disabled={!running && !canSend}
+              fill="solid"
+              icon="arrowUp"
+              label={chatStrings.composer.send}
+              onPress={press}
+              size={round}
+              testID="composer-send"
+            />
+          )}
         </GlassGroup>
 
         {/*

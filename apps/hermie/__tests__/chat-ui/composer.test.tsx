@@ -344,10 +344,12 @@ describe('the composer row', () => {
   it('draws both round controls at one whole-numbered size', () => {
     renderComposer({ value: 'ready' })
 
-    const circle = styleOf('composer-send-circle')
+    // The pressable IS the circle now — `RoundIconButton` draws one box rather
+    // than a target with a circle inside it, which is what made "the mark is
+    // centred" one claim instead of one per copy.
+    const circle = styleOf('composer-send')
 
     expect(COMPOSER_ROUND_SIZE).toBe(Math.round(COMPOSER_ROUND_SIZE))
-    expect(styleOf('composer-send').height).toBe(COMPOSER_ROUND_SIZE)
     expect(styleOf('composer-attach').height).toBe(COMPOSER_ROUND_SIZE)
     expect(circle.height).toBe(COMPOSER_ROUND_SIZE)
     expect(circle.width).toBe(circle.height)
@@ -408,8 +410,11 @@ describe('the composer row', () => {
   it('keeps the stop button on exactly the same geometry', () => {
     renderComposer({ running: true })
 
-    expect(styleOf('composer-stop').height).toBe(COMPOSER_ROUND_SIZE)
-    expect(styleOf('composer-send-circle').height).toBe(COMPOSER_ROUND_SIZE)
+    const stop = styleOf('composer-stop')
+
+    expect(stop.height).toBe(COMPOSER_ROUND_SIZE)
+    expect(stop.width).toBe(COMPOSER_ROUND_SIZE)
+    expect(stop.borderRadius).toBe(COMPOSER_ROUND_SIZE / 2)
   })
 })
 

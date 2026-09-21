@@ -54,6 +54,7 @@ import { GlassSurface } from '../../ui/glass'
 import { Icon, ICON_SIZE } from '../../ui/Icon'
 import { Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
+import { useFocusRing } from '../../ui/useFocusRing'
 import { useHover } from '../../ui/useHover'
 import { useNumberedShortcuts, useShortcut } from '../../ui/useShortcut'
 import { CONTROL_MIN_HEIGHT, TAP_SLOP } from '../../ui/tokens'
@@ -1018,6 +1019,16 @@ function SearchField({
   // One token for the size AND its leading, so the icon's slot and the text's line
   // box cannot be derived from two different numbers.
   const line = theme.type.preview
+  /*
+    The ring belongs to the PILL, and that is the whole of the browser report.
+
+    A browser rings the `<input>`, which here is a 20pt text line sitting inside
+    a 44pt pill — so the focus indicator was a small square-cornered rectangle
+    floating in the middle of the control, in the system's accent rather than
+    the theme's. `useFocusRing` suppresses that one on the input and draws the
+    app's own on this view; on iOS and Android both halves are no-ops.
+  */
+  const focus = useFocusRing()
 
   return (
     <View
@@ -1032,7 +1043,8 @@ function SearchField({
         marginBottom: theme.space.md,
         marginHorizontal: theme.space.lg,
         minHeight: CONTROL_MIN_HEIGHT,
-        paddingHorizontal: theme.space.md
+        paddingHorizontal: theme.space.md,
+        ...focus.ringStyle
       }}
       testID="bots-search-field"
     >
@@ -1054,15 +1066,31 @@ function SearchField({
         placeholderTextColor={theme.colors.textFaint}
         ref={inputRef}
         returnKeyType="go"
-        style={{
-          color: theme.colors.text,
-          flex: 1,
-          fontSize: line.fontSize,
-          lineHeight: line.lineHeight,
-          paddingVertical: 0
-        }}
+        style={[
+          {
+            /*
+              The input fills the pill's HEIGHT as well as its width.
+
+              `alignSelf: 'stretch'` with the text centred in it, rather than a
+              20pt line box parked in the middle of a 44pt control: on the web a
+              form control is a real hit target, and a 20pt one meant the bottom
+              and top thirds of the search field did nothing when clicked. On
+              iOS and Android the row was always the target, so this changes
+              only where a pointer may land.
+            */
+            alignSelf: 'stretch',
+            color: theme.colors.text,
+            flex: 1,
+            fontSize: line.fontSize,
+            lineHeight: line.lineHeight,
+            paddingVertical: 0
+          },
+          focus.fieldProps.style
+        ]}
         testID="bots-search"
         value={value}
+        onBlur={focus.fieldProps.onBlur}
+        onFocus={focus.fieldProps.onFocus}
       />
     </View>
   )

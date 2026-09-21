@@ -56,6 +56,7 @@ export type IconName =
   | 'chevronDown'
   | 'ellipsis'
   | 'arrowRight'
+  | 'arrowUp'
   | 'queue'
 
 export interface IconProps {
@@ -277,5 +278,21 @@ function Glyph({ color, name, stroke }: { color: string; name: IconName; stroke:
 
     case 'arrowRight':
       return <Line color={color} d="M4 12H18.6M14 7.4L18.6 12L14 16.6" stroke={stroke} />
+
+    /**
+     * Send. The same arrow as `arrowRight`, turned a quarter and shortened.
+     *
+     * It was `↑`, a character, and it was the last glyph left in a round button
+     * — with `+`, which this file's header already explains at length. The
+     * symptom this time was vertical: a text glyph is centred by its LINE BOX,
+     * and the ink inside that box is placed by the font's ascent and descent
+     * rather than by its own extents, so both marks sat visibly low in their
+     * circles in a browser. A path in a 24-box has no such opinion.
+     *
+     * The shaft stops short of the box on both ends so the mark reads as
+     * centred in a circle rather than as filling it.
+     */
+    case 'arrowUp':
+      return <Line color={color} d="M12 19.2V5.6M6.6 11L12 5.6L17.4 11" stroke={stroke} />
   }
 }

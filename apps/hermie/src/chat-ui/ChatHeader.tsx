@@ -52,15 +52,14 @@
  * not sees nothing flicker. Reduce Motion collapses it to a swap.
  */
 import { useEffect, useRef, useState } from 'react'
-import { Animated, Pressable, View } from 'react-native'
+import { Animated, View } from 'react-native'
 
 import { GlassGroup, GlassSurface } from '../ui/glass'
-import { Icon, ICON_SIZE, type IconName } from '../ui/Icon'
 import { durationFor, easing } from '../ui/motion'
 import { PresenceBead } from '../ui/PresenceBead'
-import { Text } from '../ui/primitives'
+import { RoundIconButton, Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
-import { AVATAR_SIZE, BEAD_SIZE, CONTROL_SIZE, TAP_SLOP, type, type PresenceState } from '../ui/tokens'
+import { AVATAR_SIZE, BEAD_SIZE, CONTROL_SIZE, type, type PresenceState } from '../ui/tokens'
 import { Avatar } from './primitives/Avatar'
 import { formatClock } from './format'
 import { chatStrings } from './strings'
@@ -116,55 +115,19 @@ function stateLabel(presence: PresenceState, lastSeenAt?: number): string {
 }
 
 /**
- * A round glass button. The header has up to three and they merge where they touch.
+ * The header's round buttons, which are the shared ones.
  *
- * The mark is a drawn icon rather than a character, for the reason the tab strip's
- * are: `‹` and `•••` come from different fonts with different ideas about how much
- * of the em box to fill, so at one `fontSize` they were two different weights
- * inside two identical circles. `src/ui/Icon.tsx` has the rest of it.
+ * `RoundIconButton` used to be a copy living here. It moved to `ui/primitives`
+ * when the composer's `+` and send turned out to be the same control drawn a
+ * fourth and a fifth way — with a CHARACTER in the middle instead of a path,
+ * which is what put both of them visibly low in their circles in a browser.
+ *
+ * The alias stays so every call site in this file still reads as a header
+ * button, and so the default ink is stated once: `colors.accentText` used to be
+ * one blue per scheme whatever preset was on, so under Lime a chevron was the
+ * only blue thing on the screen. It is derived from the theme's accent now.
  */
-function RoundButton({
-  label,
-  icon,
-  onPress,
-  size,
-  testID
-}: {
-  label: string
-  icon: IconName
-  onPress: () => void
-  size: number
-  testID: string
-}) {
-  const theme = useTheme()
-
-  return (
-    <GlassSurface interactive radius={size / 2} shadow="card" style={{ height: size, width: size }} variant="control">
-      <Pressable
-        accessibilityLabel={label}
-        accessibilityRole="button"
-        hitSlop={TAP_SLOP}
-        onPress={onPress}
-        style={({ pressed }) => ({
-          alignItems: 'center',
-          height: size,
-          justifyContent: 'center',
-          opacity: pressed ? 0.6 : 1,
-          width: size
-        })}
-        testID={testID}
-      >
-        {/*
-          The theme's accent ink. `colors.accentText` used to be one blue per scheme
-          whatever preset was on, so under Lime this chevron was the only blue thing
-          left on the screen; it is derived from the theme's accent now, and this
-          reads it by the role every other chevron and link reads.
-        */}
-        <Icon color={theme.colors.accentText} name={icon} size={ICON_SIZE.control} />
-      </Pressable>
-    </GlassSurface>
-  )
-}
+const RoundButton = RoundIconButton
 
 /**
  * The sidebar control on its own, for a column that has no header to put it in.

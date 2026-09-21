@@ -280,6 +280,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Hermie Web's fields and round buttons behave like the app's, not like a browser's.** Four browser
+  defaults were contradicting decisions the design had already made. A user agent drew the focus ring
+  around the `<input>` — the text line, a square-cornered rectangle floating inside a 44pt pill — so
+  the app suppresses it and draws its own on the control, as an outline that takes part in no layout.
+  The composer's `<textarea>` was two rows tall because that is a browser's default for one with no
+  `rows`, and it did not grow with its content; it is one line now and grows to the same six-line cap
+  the phone has. Enter sends and Shift+Enter breaks the line, through the send-key table the native
+  builds already share — a browser answers "is there a keyboard" from the primary pointer, so a phone
+  browser keeps Return as the newline. And the composer's `+` and send were the last two marks in the
+  app still typed as CHARACTERS: a glyph is centred by its line box while its ink sits wherever the
+  font's metrics put it, which is why both read low in their circles. They are drawn paths now, in
+  one shared `RoundIconButton` that the header's three buttons use as well.
 - **Settings says whether this device is actually registered for notifications.** On the owner's
   gateway `hermie-app.push` held a live heartbeat and `registrations: {}` — a device that is on from
   the inside and absent from the outside — because `obtainAddress` answered a bare `null` for five

@@ -9,6 +9,7 @@ export {
   InsetValueRow,
   type InsetValueRowProps
 } from './InsetGroup'
+export { RoundIconButton, type RoundIconButtonProps } from './RoundIconButton'
 export { Screen, type ScreenProps } from './Screen'
 export { SecretField, type SecretFieldProps } from './SecretField'
 export { Text, type TextProps } from './Text'
