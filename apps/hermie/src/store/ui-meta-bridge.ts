@@ -320,6 +320,18 @@ export class UiMetaBridge {
     this.timer = undefined
   }
 
+  /**
+   * Say who the gateway named, before the first reconcile.
+   *
+   * The app-wide key carries that person's name, so this has to be known before
+   * anything is read: a reconcile made before it would find no section, hand the
+   * stores the app's defaults, and only then discover there was an arrangement
+   * to load. `ChatRuntime` therefore awaits the identity and calls this first.
+   */
+  setUser(userId: string): void {
+    this.sync.setUser(userId)
+  }
+
   /** Read the gateway's copy and send whatever this device is still holding. */
   reconcile(): Promise<unknown> {
     return this.sync.reconcile()

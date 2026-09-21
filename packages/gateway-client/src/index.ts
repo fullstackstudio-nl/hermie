@@ -126,6 +126,7 @@ export {
   isGatewayError
 } from './types'
 export {
+  appKeyFor,
   BOT_MARKER_KEY,
   HERMIE_APP_KEY,
   HERMIE_APP_SECTION_VERSION,
@@ -133,6 +134,7 @@ export {
   HERMIE_SECTION_VERSION,
   type HermieAppSection,
   type HermieBotSection,
+  inheritedFromLegacy,
   readSection,
   UiMetaSync,
   type UiMetaGateway,

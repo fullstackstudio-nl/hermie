@@ -35,9 +35,20 @@ import { describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
 
 import { foreignPushRows, pushSectionFor, pushSeenOf, type PushRegistrationInput, type PushType } from './push'
-import { HERMIE_APP_KEY, UiMetaSync, type UiMetaGateway, type UiMetaSnapshot } from './ui-meta'
+import { appKeyFor, UiMetaSync, type UiMetaGateway, type UiMetaSnapshot } from './ui-meta'
 
 const NOW = 1_789_957_143
+
+/**
+ * Two installations of ONE person, which is what this suite is about.
+ *
+ * The app-wide key carries the reader's name, so both devices write the same
+ * one — a phone and a Mac belonging to the same person are exactly the case
+ * where one must not unregister the other.
+ */
+const OWNER = 'owner'
+
+const APP_KEY = appKeyFor(OWNER)
 
 const ALL_TYPES: Record<PushType, boolean> = {
   message: true,
@@ -107,7 +118,7 @@ async function withGateway<T>(run: (harness: Harness) => Promise<T>): Promise<T>
       const roster = (await request('profiles.list', {})) as {
         profiles?: { is_default?: boolean; ui_meta?: Record<string, unknown> }[]
       }
-      const app = roster.profiles?.find(row => row.is_default === true)?.ui_meta?.[HERMIE_APP_KEY]
+      const app = roster.profiles?.find(row => row.is_default === true)?.ui_meta?.[APP_KEY]
 
       return (app ?? {}) as Record<string, unknown>
     }
@@ -148,6 +159,8 @@ async function withGateway<T>(run: (harness: Harness) => Promise<T>): Promise<T>
               project()
             }
           })
+
+          sync.setUser(OWNER)
 
           return {
             sync,
@@ -280,7 +293,7 @@ describe('two installations on one gateway', () => {
       const roster = (await request('profiles.list', {})) as {
         profiles?: { is_default?: boolean; ui_meta?: Record<string, unknown> }[]
       }
-      const app = roster.profiles?.find(row => row.is_default === true)?.ui_meta?.[HERMIE_APP_KEY]
+      const app = roster.profiles?.find(row => row.is_default === true)?.ui_meta?.[APP_KEY]
 
       expect(await registered()).toEqual(['i-mac', 'i-phone'])
       // Nothing beat in this test, so the stamps are empty on both sides; what
