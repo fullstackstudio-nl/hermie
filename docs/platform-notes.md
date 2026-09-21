@@ -7301,3 +7301,79 @@ seam, and it is written down here because it reads as incidental and is not.
 - **Nothing tells the other clients.** There is no `profiles.changed` event on
   this gateway, so a TUI or a dashboard open beside the app keeps the old name
   until it re-reads for its own reasons.
+
+## The memory browser, and the three states before a page exists (2026-09-22)
+
+The memory routes are a PLUGIN's, not core's, so "the gateway is connected" does
+not answer whether there is anything to draw. The capability advert does, and it
+answers one of three things rather than two.
+
+| Advert                            | What the page draws               |
+| --------------------------------- | --------------------------------- |
+| no roster read yet                | one quiet line, and nothing else  |
+| no `memory.browse`                | the install command and the guide |
+| `memory.browse`, no `memory.edit` | the list, with no composers       |
+| both                              | the whole page                    |
+
+The first row is the one that is easy to drop. "We have not looked yet" drawn as
+"not installed" tells somebody to install a plugin they already have, and
+`store/plugin.ts` already distinguishes the two — the page just has to use it.
+The second row is a capability and not a plugin: a gateway can have an older
+Hermie plugin installed, enabled and happily sending notifications and still
+have no memory routes, which is why the copy names a version.
+
+### A write is addressed by text, and the id on screen is not a handle
+
+A memory file is plain UTF-8 with entries joined by `"\n§\n"`. No ids, no
+timestamps, no structure. So the plugin mints `memory:3` positionally — "the
+fourth entry as it reads right now" — and that stops being true the moment an
+entry above it is removed, by this app or by the bot itself mid-turn.
+
+Every write therefore sends `old_text`, which is what Hermes' own `MemoryStore`
+matches on. The index travels too, as the plugin's documented fallback, but the
+text is what decides. The failure this prevents is not theoretical: a bot that
+tidies its own memory during a turn shifts every id under an open page, and a
+replace-by-index would then rewrite the neighbour.
+
+For the same reason a successful write is followed by a re-read rather than by a
+local patch. The ids have all moved, and the usage count has changed by the
+delimiter as well as by the text — a page that recomputed it would be holding a
+second opinion about how full a file is.
+
+### What the usage bar must not do
+
+It reads `chars` off the answer. Summing the entries it just drew is off by one
+delimiter per entry, so a file shown as comfortable would refuse the next write,
+and the reader would delete something to make room that was never missing.
+
+### External providers are named and never opened
+
+`MemoryProvider` has `prefetch(query)`, which returns opaque formatted text for
+one turn, and no call that returns entries; mem0's own surface is
+`search(query, top_k)` with no `get_all`. So a provider's memories cannot be
+shown even read-only without inventing an API Hermes does not have. The row
+exists anyway, because a page that silently showed two files while a mem0 store
+held most of what the bot remembers would be lying by omission.
+
+### What is unverified here
+
+- **No real plugin on a live gateway has answered any of this.** Every shape is
+  the fake's, and the fake was written from the plugin's `memory/browse.py` and
+  its tests — including the topic extraction, ported character for character so
+  the graph clusters the way a real one would. What has never been exercised is
+  the plugin itself: the profile scoping through
+  `hermes_constants.set_hermes_home_override`, Hermes' own file lock, the
+  external-drift backup, and what `load_on_disk_store` does when a bot is
+  writing to the same file in the same second.
+- **The 403s are staged from the advert, not from a profile's config.** The real
+  switches are `plugins.entries.hermie.settings.memory.{browse,edit}` in a
+  profile's own `config.yaml`, read per request. The fake derives them from the
+  advert instead, which is the same answer for the app and a different mechanism
+  underneath — in particular, a gateway whose advert and whose per-profile
+  config disagree is a state this has never seen.
+- **Nothing has been tried against a memory file at its char limit.** The
+  refusal is the store's sentence, shown verbatim, and the wording of that
+  sentence is the fake's guess at Hermes'.
+- **Concurrency is untested.** Two clients editing one profile's memory, or a
+  bot writing while the page is open, both end in "the re-read wins" — which is
+  the design, and which nobody has watched happen.

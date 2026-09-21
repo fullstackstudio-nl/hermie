@@ -102,6 +102,12 @@ no third-party network call. The only address Hermie knows is the one you typed.
   context window is — a ring, the percentage and both counts — refreshed as the
   conversation grows. A gateway that does not report a window size simply does
   not show the row.
+- **What your bots remember.** Open a bot's memory from its profile or from
+  Settings: both of Hermes' memory files, how full each one is, a search that
+  runs on the gateway, and add / edit / remove. It needs the `hermie` plugin on
+  the gateway; without it the page says so and gives you the install command
+  rather than showing an empty list. A provider like mem0 is named and marked
+  not browsable — it offers no way to list what it holds.
 - **Rename a bot.** The profile sheet's name is editable. On the default profile
   that sets a display name and the profile keeps its id; on any other profile it
   renames the profile itself, which the field says out loud before you press

@@ -51,6 +51,7 @@ import { directTouchPanRef } from '../../platform/pointer-drag'
 import { useSafeAreaInsets } from '../../platform/safe-area'
 import { isUnread, useBotsStore, type Bot } from '../../store/bots'
 import { BotProfileSheet } from '../bot-profile'
+import { MemoryBotsScreen } from '../memory'
 import { archivedOf, foldersOf, useChatLayoutStore } from '../../store/chat-layout'
 import type { Folder } from '../../store/folders'
 import { isMuted, MUTE_FOREVER, muteUntil, mutedUntil as mutedUntilOf, type Mutes } from '../../store/mute'
@@ -202,6 +203,8 @@ export function BotsScreen({
   const [menuFor, setMenuFor] = useState<string | null>(null)
   /** The bot whose profile sheet is open, by name. */
   const [profileFor, setProfileFor] = useState<string | null>(null)
+  /* The memory browser REPLACES this screen, the way Settings' pages do. */
+  const [memoryFor, setMemoryFor] = useState<string | null>(null)
 
   /*
     The profile sheet's connection. Built from the live socket rather than taken
@@ -856,6 +859,10 @@ export function BotsScreen({
     )
   }
 
+  if (memoryFor) {
+    return <MemoryBotsScreen initialProfile={memoryFor} onClose={() => setMemoryFor(null)} />
+  }
+
   return (
     // The sidebar sits inside a panel the shell has already inset; the phone
     // screen is full-bleed and has to clear the notch and the home bar itself.
@@ -1108,6 +1115,11 @@ export function BotsScreen({
           http={http}
           gatewayVersion={config?.version ?? ''}
           onClose={() => setProfileFor(null)}
+          onOpenMemory={() => {
+            // The sheet goes first, so the page is not a second modal over it.
+            setProfileFor(null)
+            setMemoryFor(profileFor)
+          }}
           onSaved={() => void runtime?.bots.refresh()}
           visible
         />

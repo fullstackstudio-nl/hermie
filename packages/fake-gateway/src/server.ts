@@ -451,6 +451,8 @@ export interface FakeGatewayState {
   hangMethods: Set<string>
   sessions: Map<string, FakeSession>
   profiles: ProfileRow[]
+  /** Profile name → that profile's two memory files, as lists of entries. */
+  memory: Map<string, Record<MemoryTarget, string[]>>
   cronJobs: CronJob[]
   /**
    * The profile `hermes serve` was launched with. `cron.manage` binds
@@ -667,6 +669,198 @@ const LAUNCH_PROFILE = 'default'
 const PROFILE_NAME_LIMIT = 64
 
 /**
+ * What a memory file joins its entries with, and what the store spends on it.
+ *
+ * Defined by Hermes' own `MemoryStore`; repeated in the plugin as
+ * `memory/__init__.py::ENTRY_DELIMITER`, where a test keeps the two equal. A
+ * usage count that summed the entries instead would disagree with the store
+ * about how full a file is, and somebody would delete entries to fix a number
+ * that was never true.
+ */
+const ENTRY_DELIMITER = '\n§\n'
+
+/** Hermes' defaults, as the plugin's own fixture reads them off the store. */
+const MEMORY_LIMITS: Record<MemoryTarget, number> = { memory: 2200, user: 1375 }
+
+/** The two targets there are. The store dispatches on a bare `target === 'user'`. */
+const MEMORY_TARGETS = ['memory', 'user'] as const
+
+type MemoryTarget = (typeof MEMORY_TARGETS)[number]
+
+/** `memory/browse.py::EXCERPT_CHARS`. A graph is drawn, not read. */
+const EXCERPT_CHARS = 120
+
+/** `memory/browse.py::DEFAULT_PAGE`. The graph pages over ENTRIES, not nodes. */
+const MEMORY_PAGE = 100
+
+/** `memory/browse.py::MAX_NODES` / `MAX_EDGES`: a last defence, not the paging. */
+const MEMORY_MAX_NODES = 400
+const MEMORY_MAX_EDGES = 1200
+
+/**
+ * The plugin's cheap topics, character for character.
+ *
+ * None of this is NLP and the plugin says so: a capitalised word that is not a
+ * sentence opener, an `@handle`, a `#hashtag`, an ISO date. It is ported rather
+ * than approximated because the graph the app draws is these nodes, and a fake
+ * that clustered differently would stage a picture no gateway produces.
+ */
+const TOPIC_HANDLE = /(?<![\w@])@([A-Za-z0-9_][A-Za-z0-9_.-]{1,30})/g
+const TOPIC_HASHTAG = /(?<![\w#])#([A-Za-z][A-Za-z0-9_-]{1,30})/g
+const TOPIC_DATE = /\b(\d{4}-\d{2}-\d{2})\b/g
+const TOPIC_CAPITALISED = /\b([A-Z][a-zA-Z0-9]{2,}(?:\s+[A-Z][a-zA-Z0-9]{2,}){0,2})\b/g
+
+const TOPIC_STOPWORDS = new Set(
+  `the this that these those they them their there here when where what which who whom whose
+   and but for nor yet with from into onto upon about after before during until while because
+   should would could must might will shall have has had been being does did doing not never
+   always often sometimes usually prefer prefers wants needs uses using user memory note notes`.split(/\s+/)
+)
+
+function topicsIn(text: string): string[] {
+  const found: string[] = []
+
+  for (const pattern of [TOPIC_HANDLE, TOPIC_HASHTAG, TOPIC_DATE]) {
+    for (const match of text.matchAll(pattern)) {
+      found.push(match[1] as string)
+    }
+  }
+
+  for (const match of text.matchAll(TOPIC_CAPITALISED)) {
+    const phrase = (match[1] as string).trim()
+
+    if (!TOPIC_STOPWORDS.has(phrase.toLowerCase()) && phrase.length > 2) {
+      found.push(phrase)
+    }
+  }
+
+  return [...new Set(found)]
+}
+
+function memoryExcerpt(text: string): string {
+  const flat = text.split(/\s+/).filter(Boolean).join(' ')
+
+  return flat.length <= EXCERPT_CHARS ? flat : `${flat.slice(0, EXCERPT_CHARS - 1).trimEnd()}…`
+}
+
+interface MemoryEntryRow {
+  id: string
+  target: MemoryTarget
+  index: number
+  text: string
+  chars: number
+  topics: string[]
+}
+
+/** `memory/browse.py::entry_rows`. The id is POSITIONAL and deliberately not a handle. */
+function memoryRows(entries: readonly string[], target: MemoryTarget): MemoryEntryRow[] {
+  return entries.map((text, index) => ({
+    id: `${target}:${index}`,
+    target,
+    index,
+    text,
+    chars: text.length,
+    topics: topicsIn(text)
+  }))
+}
+
+/**
+ * `memory/browse.py::graph` — nodes and edges an app can draw.
+ *
+ * The page is over ENTRIES, not over nodes, and that is the property to keep: a
+ * page whose topic nodes happened to fill the cap would silently drop entries,
+ * and an app paging through would never learn it had missed one. The caps are a
+ * last defence and `truncated` says when one bit.
+ *
+ * An edge never names an entry the caller was not sent — entry-to-entry edges
+ * are built inside the page only — because an edge to a node that is not in the
+ * answer is an edge the app cannot draw.
+ */
+function memoryGraph(
+  files: Record<MemoryTarget, string[]>,
+  profile: string,
+  offset: number,
+  limit: number
+): Record<string, unknown> {
+  const rows = MEMORY_TARGETS.flatMap(target => memoryRows(files[target], target))
+  const from = Math.max(0, Math.floor(Number.isFinite(offset) ? offset : 0))
+  const size = Math.max(1, Math.floor(limit || MEMORY_PAGE))
+  const page = rows.slice(from, from + size)
+
+  const profileNode = { id: `profile:${profile}`, type: 'profile', label: profile }
+  const nodes: Record<string, unknown>[] = [profileNode]
+  const edges: Record<string, unknown>[] = []
+  const seenTopics = new Map<string, string>()
+  const byTopic = new Map<string, string[]>()
+  let truncated = false
+
+  for (const row of page) {
+    if (nodes.length >= MEMORY_MAX_NODES) {
+      truncated = true
+
+      break
+    }
+
+    nodes.push({ id: row.id, type: 'entry', target: row.target, label: memoryExcerpt(row.text), chars: row.chars })
+    edges.push({ from: row.id, to: profileNode.id, type: 'in_profile' })
+
+    for (const topic of row.topics) {
+      let nodeId = seenTopics.get(topic)
+
+      if (nodeId === undefined) {
+        if (nodes.length >= MEMORY_MAX_NODES) {
+          truncated = true
+
+          break
+        }
+
+        nodeId = `topic:${topic}`
+        seenTopics.set(topic, nodeId)
+        nodes.push({ id: nodeId, type: 'topic', label: topic })
+      }
+
+      edges.push({ from: row.id, to: nodeId, type: 'mentions' })
+      byTopic.set(topic, [...(byTopic.get(topic) ?? []), row.id])
+    }
+  }
+
+  for (const [topic, members] of byTopic) {
+    for (let first = 0; first < members.length; first += 1) {
+      for (let second = first + 1; second < members.length; second += 1) {
+        if (edges.length >= MEMORY_MAX_EDGES) {
+          truncated = true
+
+          break
+        }
+
+        edges.push({ from: members[first], to: members[second], type: 'shares_topic', topic })
+      }
+    }
+  }
+
+  return {
+    nodes,
+    edges: edges.slice(0, MEMORY_MAX_EDGES),
+    page: {
+      offset: from,
+      limit: size,
+      returned: page.length,
+      total: rows.length,
+      hasMore: from + page.length < rows.length
+    },
+    truncated
+  }
+}
+
+/** `memory/browse.py::matches`: every word, in any order, case-insensitively. */
+function memoryMatches(text: string, query: string): boolean {
+  const haystack = text.toLowerCase()
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean)
+
+  return words.length > 0 && words.every(word => haystack.includes(word))
+}
+
+/**
  * The `hermie-plugin` advert, as the gateway-side plugin publishes it.
  *
  * Copied from the plugin's own `contract.py` rather than invented here: the
@@ -689,6 +883,8 @@ export const PLUGIN_ADVERT: Record<string, unknown> = {
     'push.preview',
     'push.seen.per_chat',
     'push.type.turn_done',
+    'memory.browse',
+    'memory.edit',
     'push.type.turn_failed',
     'push.webpush',
     'ui_meta.per_user'
@@ -696,6 +892,7 @@ export const PLUGIN_ADVERT: Record<string, unknown> = {
   modules: {
     attachments: 'planned',
     context: 'on',
+    memory: 'on',
     presence: 'planned',
     push: 'on',
     search: 'planned',
@@ -1672,6 +1869,26 @@ function initialState(options: FakeGatewayOptions): FakeGatewayState {
     hangMethods: new Set<string>(),
     sessions,
     profiles: [profileRow(researcher, 'Finds things out.'), profileRow(writer, 'Writes things down.')],
+    /*
+      Seeded so a browser has something to draw and a graph has something to
+      cluster on: the capitalised phrases, the `@handle` and the ISO date are
+      the four kinds of topic the plugin mints, and two entries deliberately
+      share one so an edge between entries exists.
+    */
+    memory: new Map([
+      [
+        researcher.profile,
+        {
+          memory: [
+            'FullStack Studio invoices on the first of the month.',
+            'The tailnet address is the one to use from outside; @max set it up on 2026-09-21.',
+            'Prefers footnotes to parentheses.'
+          ],
+          user: ['Sebas works from Utrecht and answers fastest in the morning.', 'Reads Dutch and English.']
+        }
+      ],
+      [writer.profile, { memory: ['Drafts open with the verb, never with the subject.'], user: [] }]
+    ]),
     runningSessions: new Set<string>(),
     sessionConfig: new Map<string, Record<string, string>>(),
     pendingApprovals: new Map<string, { session_id: string; payload: Record<string, unknown> }>(),
@@ -2517,6 +2734,12 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       return
     }
 
+    if (path.startsWith('/api/plugins/')) {
+      await handleMemory(req, res, path, method, url.searchParams)
+
+      return
+    }
+
     if (path.startsWith('/api/cron/jobs')) {
       await handleCron(req, res, path, method, url.searchParams)
 
@@ -2834,6 +3057,252 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
    * uniqueness. `rename_profile` refuses an empty new name for `default` before
    * the setter sees it, which is the 400 below.
    */
+  /**
+   * `/api/plugins/hermie/memory/…` — the plugin's `dashboard/plugin_api.py`.
+   *
+   * Four routes, and the shapes come from the plugin's own `memory/browse.py`
+   * rather than from a reading of what an app would like. Three properties of
+   * that file are load-bearing here and each has a test in the plugin repo:
+   *
+   *  - **An id is POSITIONAL.** A memory file is `"\n§\n"`-joined text with no
+   *    ids, so `memory:3` means "the fourth entry as it reads right now" and
+   *    goes stale the moment one above it is removed. Every write therefore
+   *    matches on the entry's TEXT, which is what the store itself matches on.
+   *  - **`profile` is required on every route.** A plugin handler is handed
+   *    none and would otherwise act on whichever home the dashboard process
+   *    started with — somebody else's memory, on a multiplexed gateway. A name
+   *    carrying a separator, a parent reference or surrounding space is
+   *    REJECTED rather than sanitised.
+   *  - **An external provider is listed and never enumerated.** `MemoryProvider`
+   *    has `prefetch(query)` and no call that returns entries, so every
+   *    non-builtin row carries `enumerable: false`.
+   *
+   * Auth is the one the dashboard already applied: this block sits below the
+   * `httpAuthorized` gate, exactly as the real router sits below Hermes'
+   * process-wide middleware and adds no check of its own.
+   */
+  async function handleMemory(
+    req: IncomingMessage,
+    res: ServerResponse,
+    path: string,
+    method: string,
+    query: URLSearchParams
+  ): Promise<void> {
+    const advert = options.plugin === false ? null : ((options.plugin ?? PLUGIN_ADVERT) as Record<string, unknown>)
+    const capabilities = Array.isArray(advert?.capabilities) ? (advert.capabilities as string[]) : []
+
+    // No plugin means no router mounted, which is a 404 and not a 403: core
+    // never learned about the prefix at all.
+    if (!advert || !path.startsWith('/api/plugins/hermie/memory/')) {
+      json(res, 404, { detail: `No route for ${method} ${path}` })
+
+      return
+    }
+
+    if (!capabilities.includes('memory.browse')) {
+      json(res, 403, {
+        detail:
+          'Memory browsing is switched off for this profile. Set ' +
+          'plugins.entries.hermie.settings.memory.browse to true in that ' +
+          "profile's config.yaml and restart the gateway."
+      })
+
+      return
+    }
+
+    const route = path.slice('/api/plugins/hermie/memory/'.length)
+    const body = method === 'POST' ? await readBody(req) : {}
+    const wanted = route === 'edit' ? String(body.profile ?? '') : (query.get('profile') ?? '')
+
+    /*
+      `memory/__init__.py::_clean_profile`, then the membership check. Rejected,
+      not cleaned: a profile is an identifier the gateway already knows rather
+      than a path to be tidied up, and the refusal does not say whether the name
+      merely does not exist.
+    */
+    if (
+      !wanted ||
+      wanted !== wanted.trim() ||
+      wanted.length > PROFILE_NAME_LIMIT ||
+      ['/', '\\', '..', '\0', ':'].some(bad => wanted.includes(bad)) ||
+      wanted === '.' ||
+      wanted === '~'
+    ) {
+      json(res, 400, { detail: 'a profile name is required' })
+
+      return
+    }
+
+    if (!state.profiles.some(row => row.name === wanted)) {
+      json(res, 400, { detail: `no profile named '${wanted}' on this gateway` })
+
+      return
+    }
+
+    const files = state.memory.get(wanted) ?? { memory: [], user: [] }
+
+    state.memory.set(wanted, files)
+
+    if (route === 'list' && method === 'GET') {
+      json(res, 200, {
+        targets: MEMORY_TARGETS.map(target => {
+          const chars = files[target].join(ENTRY_DELIMITER).length
+          const limit = MEMORY_LIMITS[target]
+
+          return {
+            target,
+            entries: memoryRows(files[target], target),
+            chars,
+            limit,
+            percent: limit ? Math.round((100 * chars) / limit) : 0
+          }
+        }),
+        profile: wanted,
+        providers: [
+          { name: 'builtin', description: 'MEMORY.md and USER.md', available: true, enumerable: true },
+          // See the docstring. Not "not implemented" — not offered.
+          { name: 'mem0', description: 'mem0 (cloud)', available: true, enumerable: false }
+        ]
+      })
+
+      return
+    }
+
+    if (route === 'search' && method === 'GET') {
+      const q = query.get('q') ?? ''
+
+      if (!q.trim()) {
+        json(res, 400, { detail: 'q is required' })
+
+        return
+      }
+
+      const results = MEMORY_TARGETS.flatMap(target =>
+        memoryRows(files[target], target).filter(row => memoryMatches(row.text, q))
+      )
+
+      json(res, 200, { query: q, count: results.length, results, profile: wanted })
+
+      return
+    }
+
+    if (route === 'graph' && method === 'GET') {
+      json(res, 200, memoryGraph(files, wanted, Number(query.get('offset') ?? 0), Number(query.get('limit') ?? 0)))
+
+      return
+    }
+
+    if (route === 'edit' && method === 'POST') {
+      handleMemoryEdit(res, files, body, capabilities)
+
+      return
+    }
+
+    json(res, 404, { detail: `No route for ${method} ${path}` })
+  }
+
+  /**
+   * `POST …/memory/edit`, whose answer is the STORE's own result dict.
+   *
+   * The plugin deliberately does not translate it — `{"success": …}` with
+   * whatever the store put beside it — so a failure the store reports reaches
+   * the app in the store's own words. The two shapes that matter to a client
+   * are `{success: false, error, current_entries}` for a stale index and a bare
+   * `{success: true}` for a write that landed.
+   */
+  function handleMemoryEdit(
+    res: ServerResponse,
+    files: Record<MemoryTarget, string[]>,
+    body: Record<string, unknown>,
+    capabilities: string[]
+  ): void {
+    const target = String(body.target ?? '')
+    const op = String(body.op ?? '')
+
+    if (!(MEMORY_TARGETS as readonly string[]).includes(target)) {
+      json(res, 400, { detail: `target must be one of ${MEMORY_TARGETS.join(', ')}` })
+
+      return
+    }
+
+    if (!['add', 'replace', 'remove'].includes(op)) {
+      json(res, 400, { detail: 'op must be add, replace or remove' })
+
+      return
+    }
+
+    if (!capabilities.includes('memory.edit')) {
+      json(res, 403, {
+        detail:
+          'Memory editing is switched off for this profile. Set ' +
+          'plugins.entries.hermie.settings.memory.edit to true in that ' +
+          "profile's config.yaml and restart the gateway."
+      })
+
+      return
+    }
+
+    const entries = files[target as MemoryTarget]
+    const content = String(body.content ?? '')
+
+    if (op === 'add') {
+      if (!content.trim()) {
+        json(res, 200, { success: false, error: 'content is required to add an entry' })
+
+        return
+      }
+
+      const spent = entries.concat(content).join(ENTRY_DELIMITER).length
+
+      if (spent > MEMORY_LIMITS[target as MemoryTarget]) {
+        json(res, 200, { success: false, error: 'that would exceed the character limit for this file' })
+
+        return
+      }
+
+      entries.push(content)
+      json(res, 200, { success: true, target })
+
+      return
+    }
+
+    /*
+      `memory/browse.py::find_text`: the TEXT is preferred and is what goes to
+      the store; an index is only a way of naming one, and naming one that has
+      moved is an error rather than a guess at its neighbour.
+    */
+    const index = typeof body.index === 'number' ? body.index : null
+    const named = String(body.old_text ?? '')
+    const oldText = named || (index !== null && index >= 0 && index < entries.length ? (entries[index] as string) : '')
+    const at = oldText ? entries.indexOf(oldText) : -1
+
+    if (!oldText || at === -1) {
+      json(res, 200, {
+        success: false,
+        error: 'no such entry; list the target again and retry',
+        current_entries: [...entries]
+      })
+
+      return
+    }
+
+    if (op === 'remove') {
+      entries.splice(at, 1)
+      json(res, 200, { success: true })
+
+      return
+    }
+
+    if (!content.trim()) {
+      json(res, 200, { success: false, error: 'content is required to replace an entry' })
+
+      return
+    }
+
+    entries[at] = content
+    json(res, 200, { success: true, replaced_entry: oldText })
+  }
+
   async function handleProfileRename(req: IncomingMessage, res: ServerResponse, name: string): Promise<void> {
     const body = await readBody(req)
     const profile = state.profiles.find(entry => entry.name === name)

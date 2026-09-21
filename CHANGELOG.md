@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A memory browser.** Bot profile → **Memory**, and Settings → **Memory** for any bot: both of a
+  profile's memory files — `MEMORY.md`, what the bot learned about its work, and `USER.md`, what it
+  learned about you — as two lists with the char usage each one is actually spending. Search runs on
+  the gateway rather than filtering what is on screen, so it means the same thing here as it does to
+  the bot's own `/memory` command: every word of the query has to appear in the entry, in any order,
+  as plain text. Entries can be added, edited in place and removed, and a removal asks first because
+  Hermes keeps no history of a memory file. A write is addressed by the entry's TEXT and never by
+  its position, so an entry that moved between the read and the tap cannot be overwritten by
+  mistake. Whatever the store refuses — a char limit, an entry that is no longer there — is shown in
+  Hermes' own words rather than paraphrased. A gateway whose plugin allows reading and not writing
+  gets the list with the composers gone and a line saying so; a gateway with no memory routes at all
+  gets the install command and a link to the guide instead of an empty page. External memory
+  providers are listed by name as **not browsable**, because they offer no call that returns what
+  they hold.
+
 - **Rename a bot from the app.** The bot profile sheet's name is a field now rather than a fact with
   the sentence "Set on the gateway, in this profile." beside it. Which name it edits depends on the
   profile, and the sheet says so instead of hiding it: the **default** profile takes a display name

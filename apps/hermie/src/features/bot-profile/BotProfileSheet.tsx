@@ -67,6 +67,7 @@ import { Button, InsetButtonRow, InsetGroup, InsetRow, InsetValueRow, Text, Text
 import { useTheme } from '../../ui/theme'
 import { AVATAR_SIZE } from '../../ui/tokens'
 import { asRenameError, BotNameFields, botNameChanged, initialBotName, saveBotName } from '../bot-rename'
+import { memoryStrings } from '../memory/strings'
 import { clearAvatar, changesFor, saveDescription, uploadAvatar } from './bot-profile-controller'
 import { pickAvatar } from './avatar'
 
@@ -102,6 +103,16 @@ export interface BotProfileSheetProps {
    * window size and the row is not drawn — see `contextUsageOf`.
    */
   contextUsage?: ContextUsage | null
+  /**
+   * Open this bot's memory browser. The row is not drawn without it.
+   *
+   * A callback rather than a page this sheet presents itself: the memory
+   * browser is a SCREEN, and a screen opened from inside a `Modal` would be a
+   * second modal over the first — which `ChatSheetHost` exists to avoid, and
+   * which iOS drops when the first is still dismissing. So the host that opened
+   * this sheet is the thing that swaps it for the page.
+   */
+  onOpenMemory?: () => void
   /** A save landed: the roster should re-read so the new values reach every surface. */
   onSaved?: () => void
   testID?: string
@@ -117,6 +128,7 @@ export function BotProfileSheet({
   http,
   gatewayVersion,
   contextUsage,
+  onOpenMemory,
   onSaved,
   testID = 'bot-profile'
 }: BotProfileSheetProps) {
@@ -311,6 +323,17 @@ export function BotProfileSheet({
             />
           </InsetRow>
         </InsetGroup>
+
+        {onOpenMemory ? (
+          <InsetGroup header={memoryStrings.rowTitle}>
+            <InsetButtonRow
+              detail={memoryStrings.rowHint}
+              onPress={onOpenMemory}
+              testID={`${testID}-memory`}
+              title={memoryStrings.rowTitle}
+            />
+          </InsetGroup>
+        ) : null}
 
         <InsetGroup footer={text.colourHint} header={text.colour}>
           <InsetRow>
