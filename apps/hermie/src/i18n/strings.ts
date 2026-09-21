@@ -543,7 +543,7 @@ export const strings = {
     themes: {
       header: 'YOUR THEMES',
       advanced: 'Advanced',
-      advancedHint: 'Make a theme of your own from one of the six above.',
+      advancedHint: 'Start from a theme above and change its colours.',
       back: 'Back to settings',
       create: 'New theme',
       createFrom: (preset: string) => `From ${preset}`,

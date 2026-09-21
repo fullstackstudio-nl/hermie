@@ -524,7 +524,8 @@ export function SheetPage({
           style={{ alignItems: 'center', justifyContent: 'center', minHeight: 32, minWidth: 24 }}
           testID={testID}
         >
-          <Icon color={theme.colors.accentText} name="chevronLeft" size={ICON_SIZE.control} />
+          {/* The theme's accent, for the reason `ChatHeader` gives. */}
+          <Icon color={theme.accent().text} name="chevronLeft" size={ICON_SIZE.control} />
         </Pressable>
         <Text style={{ flex: 1 }} variant="sheetTitle">
           {title}

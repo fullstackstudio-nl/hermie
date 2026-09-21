@@ -131,7 +131,13 @@ function RoundButton({
         })}
         testID={testID}
       >
-        <Icon color={theme.colors.accentText} name={icon} size={ICON_SIZE.control} />
+        {/*
+          The THEME's accent, not the scheme's. `colors.accentText` is one blue per
+          scheme and does not follow a preset, so under Lime this chevron was the
+          only blue thing left on the screen — a navigation control tinted with an
+          accent the window no longer has.
+        */}
+        <Icon color={theme.accent().text} name={icon} size={ICON_SIZE.control} />
       </Pressable>
     </GlassSurface>
   )
