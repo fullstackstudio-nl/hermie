@@ -32,7 +32,7 @@ const HIDDEN = { includeHiddenElements: true } as const
 let mockController: Record<string, jest.Mock>
 let mockRuntime: {
   controller: Record<string, jest.Mock>
-  bots: Record<string, never>
+  bots: { refresh: jest.Mock }
   push: { setOpenChat: jest.Mock }
 }
 
@@ -116,7 +116,11 @@ function seedChat() {
 
 beforeEach(() => {
   mockController = makeController()
-  mockRuntime = { bots: {}, controller: mockController, push: { setOpenChat: jest.fn() } }
+  mockRuntime = {
+    bots: { refresh: jest.fn(async () => undefined) },
+    controller: mockController,
+    push: { setOpenChat: jest.fn() }
+  }
   seedChat()
 })
 
@@ -216,6 +220,27 @@ describe('the options menu is a popover in the chat', () => {
   })
 })
 
+describe('refreshing a chat after a gateway restart', () => {
+  it('re-reads the roster and re-opens the chat, and closes the menu', async () => {
+    await openChat()
+
+    fireEvent.press(screen.getByTestId('chat-header-options'))
+    await waitFor(() => expect(screen.getByTestId('option-refresh')).toBeTruthy())
+
+    mockController.openChat.mockClear()
+
+    fireEvent.press(screen.getByTestId('option-refresh'))
+
+    // The roster is where the canonical session id comes from, and after a
+    // restart it is the one that has to be asked again.
+    await waitFor(() => expect(mockRuntime.bots.refresh).toHaveBeenCalled())
+    await waitFor(() => expect(mockController.openChat).toHaveBeenCalled())
+
+    // The reader wants the transcript, not the menu they just pressed.
+    expect(screen.queryByTestId('chat-options-backdrop', HIDDEN)).toBeNull()
+  })
+})
+
 describe('per-chat notification types', () => {
   it('are not offered at all where nothing would read them', async () => {
     await openChat()
@@ -251,13 +276,14 @@ describe('per-chat notification types', () => {
 
 describe('the rows the keyboard walks', () => {
   it('are the same list the popover draws, export included only when there is one', () => {
-    expect(popoverRows({ canExport: true, canSetNotifications: true }).map(row => row.id)).toEqual([
+    expect(popoverRows({ canExport: true, canRefresh: true, canSetNotifications: true }).map(row => row.id)).toEqual([
       'yolo',
       'fast',
       'reasoning',
       'model',
       'colour',
       'mute',
+      'refresh',
       'notifications',
       'verbosity',
       'bot-to-bot',

@@ -57,6 +57,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Refresh a chat.** The chat's options carry **Refresh**: it re-reads the roster — which is where
+  a chat's canonical session id comes from — and re-opens the chat against whatever that answers,
+  which resumes and replays it. The case it is for is the one a pull gesture cannot express: the
+  gateway restarted, the runtime session this chat was bound to no longer exists, and the transcript
+  on screen belongs to a conversation nothing is listening to any more. A reader who suspects that
+  needs something to press, and on an inverted transcript a pull already means "older messages".
+
 - **Per-chat notification types.** Beyond mute, which is "say nothing at all": the chat's options
   now carry **Notifications** — finished a turn, a turn failed, needs your answer, scheduled runs —
   per bot and per account, so a bot whose cron deliveries are noise can stay quiet about those and

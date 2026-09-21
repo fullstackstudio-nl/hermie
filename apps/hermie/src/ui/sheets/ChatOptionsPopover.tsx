@@ -96,6 +96,7 @@ export type PopoverRowId =
   | 'model'
   | 'colour'
   | 'mute'
+  | 'refresh'
   | 'notifications'
   | 'verbosity'
   | 'bot-to-bot'
@@ -114,9 +115,11 @@ export interface PopoverRowsInput {
   canExport: boolean
   /** Absent removes the notifications row: nothing would read what it wrote. */
   canSetNotifications: boolean
+  /** Absent removes Refresh, which is what a surface with no gateway gets. */
+  canRefresh: boolean
 }
 
-export function popoverRows({ canExport, canSetNotifications }: PopoverRowsInput): PopoverRow[] {
+export function popoverRows({ canExport, canRefresh, canSetNotifications }: PopoverRowsInput): PopoverRow[] {
   return [
     { id: 'yolo' },
     { id: 'fast' },
@@ -124,6 +127,7 @@ export function popoverRows({ canExport, canSetNotifications }: PopoverRowsInput
     { id: 'model', page: 'model' },
     { id: 'colour', page: 'colour' },
     { id: 'mute', page: 'mute' },
+    ...(canRefresh ? [{ id: 'refresh' as const }] : []),
     ...(canSetNotifications ? [{ id: 'notifications' as const, page: 'notifications' as const }] : []),
     { id: 'verbosity' },
     { id: 'bot-to-bot' },
@@ -169,6 +173,14 @@ export interface ChatOptionsPopoverProps extends Omit<
   canExport?: boolean
   /** Present only where a notifier can honour per-type settings. */
   canSetNotifications?: boolean
+  /**
+   * Re-resolve this chat and replay it.
+   *
+   * Absent where there is no gateway to ask — the developer gallery. The
+   * popover closes on it, because the thing the reader wants to look at is the
+   * transcript and not this menu.
+   */
+  onRefresh?: () => void
   /** This chat's transcript type scale, and a way to change it. */
   textSize: TextSize
   onChangeTextSize: (value: TextSize) => void
@@ -185,6 +197,7 @@ export function ChatOptionsPopover({
   onOpenPage,
   canExport = false,
   canSetNotifications = false,
+  onRefresh,
   accent,
   botName,
   contextUsage,
@@ -208,7 +221,7 @@ export function ChatOptionsPopover({
   testID = 'chat-options-popover'
 }: ChatOptionsPopoverProps) {
   const theme = useTheme()
-  const rows = popoverRows({ canExport, canSetNotifications })
+  const rows = popoverRows({ canExport, canRefresh: Boolean(onRefresh), canSetNotifications })
   const [focus, setFocus] = useState(0)
 
   // A popover that reopens on the row the last reader left is a popover that
@@ -256,6 +269,10 @@ export function ChatOptionsPopover({
         return
       case 'thinking':
         onChangeShowThinking(!showThinking)
+
+        return
+      case 'refresh':
+        onRefresh?.()
 
         return
       default:
@@ -407,6 +424,29 @@ export function ChatOptionsPopover({
           >
             {chatStrings.options.viewHeader.toUpperCase()}
           </Text>
+
+          {/*
+            Refresh: re-resolve the canonical chat, resume it and replay.
+
+            An ACTION rather than a page, and a row rather than a pull-to-refresh
+            gesture, because the case it is for is one a gesture cannot express:
+            the gateway restarted, the runtime session id this chat was bound to
+            no longer exists, and the transcript on screen is a transcript of a
+            conversation nothing is listening to any more. A reader who suspects
+            that needs a thing to press, and the pull gesture on an inverted
+            transcript means "older messages".
+          */}
+          {row(
+            'refresh',
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => onRefresh?.()}
+              style={{ justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT, paddingHorizontal: theme.space.lg }}
+              testID="option-refresh"
+            >
+              <Text>{chatStrings.sessions.refresh}</Text>
+            </Pressable>
+          )}
 
           {row(
             'notifications',

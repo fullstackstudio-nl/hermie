@@ -1686,6 +1686,25 @@ function Conversation({
   }, [])
 
   const closeOptionsPopover = useCallback(() => setOptionsPopover(false), [])
+
+  /**
+   * Re-resolve this chat and replay it, from the menu.
+   *
+   * Two calls and both are needed. `bots.refresh` re-reads the roster, which is
+   * where the canonical session id comes from; `chat.reload` re-opens the chat
+   * against whatever that answered, which resumes and replays. After a gateway
+   * restart the first is the one that matters — the runtime id this chat was
+   * bound to is gone and the stored one has to be resolved again — and after a
+   * dropped socket the second is.
+   *
+   * The popover closes first: the thing the reader wants to look at is the
+   * transcript, not the menu they pressed.
+   */
+  const refreshChat = useCallback(() => {
+    setOptionsPopover(false)
+    void runtime?.bots.refresh()
+    void chat.reload().catch(error => setNotice(openFailed(messageOf(error))))
+  }, [chat, runtime])
   const openProfile = useCallback(() => {
     void refreshUsage()
     setSheet('profile')
@@ -2053,6 +2072,7 @@ function Conversation({
               onChangeYolo={value => void setOption('yolo', value ? 'true' : 'false')}
               onClose={closeOptionsPopover}
               onOpenPage={openOptionsPage}
+              onRefresh={refreshChat}
               onResetView={() => useSettingsStore.getState().resetChatView(botName)}
               reasoningEffort={chat.info?.reasoning_effort ?? ''}
               reasoningLabel={optionRowLabel(REASONING_OPTIONS, chat.info?.reasoning_effort ?? '')}
