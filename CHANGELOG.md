@@ -326,6 +326,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The box is now exactly the shape it holds, 14pt, which is the droplet's own arc plus the bubble's
   tail-side bottom corner; the tail can only ever be where the bubble's edge is straight, and a test
   holds that against the shortest bubble so a taller tail or a tighter padding cannot bring it back.
+- **`npm run android:release` notices when `android/` has gone stale.** It prebuilt only when there
+  was no native project at all or when `--clean` was given, and `android.versionCode` is the commit
+  count — so a tree that prebuilt at 133 and released at 192 built a bundle carrying 133, which
+  installs perfectly and which Play refuses because it has seen it. The three values prebuild writes
+  are now read back out of `android/app/build.gradle` before every build and compared with what
+  `expo config` resolves now; a mismatch regenerates and names the value that moved.
 - **A tap beside a bottom sheet closes it again.** The scrim was a flex sibling ABOVE the panel in a
   column, so it covered only the space over the sheet; on the wide layout, where the panel is capped
   and parked over the content column, most of what reads as backdrop is BESIDE it — and that area

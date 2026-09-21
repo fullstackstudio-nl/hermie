@@ -272,6 +272,28 @@ npm run android:release -- --clean      # regenerate android/ first
 npm run android:release -- --aab        # the bundle only
 ```
 
+**"If needed" now includes "if it has gone stale".** `android/` is a prebuild
+output and gitignored, so the first build of a checkout generates it and
+everything agrees. Nothing regenerated it afterwards — and `android.versionCode`
+is the commit count, which moves with every commit on the branch. A tree that
+prebuilt at 133 and released at 192 built a bundle carrying 133, which installs
+perfectly and which Play refuses because it has already seen it; the same trap
+was open the day `applicationId` changed from `nl.fullstackstudio.hermie`.
+
+So before every build the three values prebuild writes — `versionCode`,
+`versionName`, `applicationId` — are read back out of `android/app/build.gradle`
+and compared with what `expo config` resolves from `app.config.ts` now. A
+mismatch regenerates and says which value moved:
+
+```
+Regenerating the native project: versionCode is 133 in android/app/build.gradle; app.config.ts says 192.
+```
+
+`--clean` is unchanged and still the bigger hammer: it regenerates whatever the
+comparison says. If `expo config` cannot be run at all the check is skipped with
+a line saying so, because a release must not be blocked by a check that could not
+run.
+
 It prints where the artefacts landed and how big they are. They are
 `apps/hermie/android/app/build/outputs/bundle/release/app-release.aab` and
 `.../apk/release/app-release.apk`.

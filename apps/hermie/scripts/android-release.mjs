@@ -18,9 +18,13 @@
 // See docs/release.md.
 
 import { spawnSync } from 'node:child_process'
-import { existsSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+const require = createRequire(import.meta.url)
+const { describeDrift, parseGradleIdentity } = require('./android-staleness.js')
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const repoRoot = resolve(appRoot, '..', '..')
@@ -44,13 +48,83 @@ function run(command, commandArgs, options = {}) {
   }
 }
 
+/**
+ * What `app.config.ts` says the Android project should be, right now.
+ *
+ * Asked of Expo rather than read out of the file, because the answer is not IN
+ * the file: `android.versionCode` is `git rev-list --count HEAD` evaluated when
+ * the config is, and the config plugins run over it afterwards. `expo config`
+ * is the one thing that resolves both, and it costs a third of a second.
+ *
+ * `null` when it cannot be asked — a release must not be blocked because this
+ * check could not run, so the caller says so and carries on.
+ */
+function expectedIdentity() {
+  const result = spawnSync('npx', ['expo', 'config', '--json'], {
+    cwd: appRoot,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe']
+  })
+
+  if (result.status !== 0 || !result.stdout) {
+    return null
+  }
+
+  try {
+    const config = JSON.parse(result.stdout)
+
+    return {
+      applicationId: config.android?.package,
+      versionCode: config.android?.versionCode,
+      versionName: config.version
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Why the native project is about to be generated, or nothing.
+ *
+ * Three reasons and they are in the order of how much they cost to be wrong
+ * about: no project at all, the flag, and a project that no longer matches the
+ * configuration it was generated from.
+ */
+function reasonToPrebuild() {
+  if (!existsSync(join(androidDir, 'gradlew'))) {
+    return { clean: false, why: ['no android/ yet'] }
+  }
+
+  if (clean) {
+    return { clean: true, why: ['--clean given'] }
+  }
+
+  const expected = expectedIdentity()
+
+  if (!expected) {
+    console.log('Could not read app.config.ts through `expo config`; not checking whether android/ is stale.')
+
+    return null
+  }
+
+  const generated = parseGradleIdentity(readFileSync(join(androidDir, 'app', 'build.gradle'), 'utf8'))
+  const drift = describeDrift(generated, expected)
+
+  return drift.length > 0 ? { clean: false, why: drift } : null
+}
+
 // `android/` is a prebuild output and gitignored, so a clean checkout has none.
-// `--clean` regenerates it even when it is there, which is what picks up a
-// changed app.config.ts or config plugin.
-if (clean || !existsSync(join(androidDir, 'gradlew'))) {
-  const reason = clean ? '--clean given' : 'no android/ yet'
-  console.log(`Generating the native project (${reason}).`)
-  run('npx', ['expo', 'prebuild', '--platform', 'android', ...(clean ? ['--clean'] : [])], { cwd: appRoot })
+// `--clean` regenerates it even when it is there. A project that IS there and is
+// no longer the one app.config.ts describes is regenerated too — most often
+// because the version code is the commit count and commits have happened since.
+const prebuild = reasonToPrebuild()
+
+if (prebuild) {
+  for (const line of prebuild.why) {
+    console.log(`Regenerating the native project: ${line}.`)
+  }
+
+  run('npx', ['expo', 'prebuild', '--platform', 'android', ...(prebuild.clean ? ['--clean'] : [])], { cwd: appRoot })
 }
 
 if (!process.env.JAVA_HOME) {
