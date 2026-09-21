@@ -334,10 +334,13 @@ export function ThemeProvider({ children, forceScheme, forcePreset }: ThemeProvi
   // transparent, so on a light wallpaper the clock, the battery and the signal
   // bars simply disappear. `ink` is the INK, not the background, so a dark app
   // needs light icons. On a Mac there is no status bar to paint and the call is
-  // inert, and in a browser the seam renders nothing at all.
+  // inert. In a browser there is no status bar either, but there IS a document
+  // whose `theme-color` and page background have to follow the pinned theme —
+  // which is why `background` is handed over as well, and why the web seam is
+  // the one place that reads it.
   return (
     <ThemeContext.Provider value={theme}>
-      <SystemStatusBar ink={scheme === 'dark' ? 'light' : 'dark'} />
+      <SystemStatusBar background={theme.wallpaper.fill} ink={scheme === 'dark' ? 'light' : 'dark'} />
       {children}
     </ThemeContext.Provider>
   )

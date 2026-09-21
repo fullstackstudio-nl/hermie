@@ -22,6 +22,22 @@ const here = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(here, '..')
 const sourceSvg = resolve(repoRoot, 'design/icon.svg')
 const assetsDir = resolve(repoRoot, 'apps/hermie/assets')
+/**
+ * The browser build's icons.
+ *
+ * `apps/hermie/public` is copied to the root of the web export verbatim, so
+ * these land next to `manifest.webmanifest` — which is the only reason they are
+ * not in `assets/` with the rest: nothing bundles them, the manifest names them
+ * by URL.
+ *
+ * There is deliberately no `maskable` icon here. A maskable one has to sit
+ * inside a circle of 80% of the canvas ON a filled backdrop, and the mark's
+ * corners reach 460 of the 409 that circle allows — so it needs the backdrop at
+ * full bleed and the mark shrunk, which is two transforms in one image, and
+ * `render` composites every shape through one. Until the rasteriser can layer,
+ * Android draws the `any` icon on a white circle of its own.
+ */
+const webIconsDir = resolve(repoRoot, 'apps/hermie/public/icons')
 
 /**
  * How much of the canvas the mark may fill in an Android adaptive foreground.
@@ -79,5 +95,13 @@ emit(resolve(assetsDir, 'icon.png'), encodePng(render(allShapes, { ...fullBleed(
 emit(resolve(assetsDir, 'adaptive-icon.png'), encodePng(render(markShapes, fitted(1024, markShapes, ADAPTIVE_SAFE_BOX)))) // prettier-ignore
 emit(resolve(assetsDir, 'splash-icon.png'), encodePng(render(allShapes, fullBleed(512, false))))
 emit(resolve(assetsDir, 'favicon.png'), encodePng(render(allShapes, fullBleed(64, false))))
+
+// The browser build's own. The two manifest icons keep the artwork's rounded
+// corners, because a browser draws them as given; the Apple one is square and
+// opaque, because iOS masks and composites it itself and a transparent corner
+// there comes out black.
+emit(resolve(webIconsDir, 'icon-192.png'), encodePng(render(allShapes, fullBleed(192, false))))
+emit(resolve(webIconsDir, 'icon-512.png'), encodePng(render(allShapes, fullBleed(512, false))))
+emit(resolve(webIconsDir, 'apple-touch-icon.png'), encodePng(render(allShapes, { ...fullBleed(180, true), opaque: true }))) // prettier-ignore
 
 finish({ subject: 'Icons', source: 'design/icon.svg', command: 'node scripts/generate-app-icons.mjs' })

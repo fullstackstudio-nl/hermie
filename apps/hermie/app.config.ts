@@ -158,8 +158,21 @@ const config: ExpoConfig = {
     permissions: ['android.permission.INTERNET'],
     blockedPermissions: ['android.permission.VIBRATE', 'android.permission.WRITE_EXTERNAL_STORAGE']
   },
+  /*
+   * What the EXPORTER needs to know about the browser build; everything else
+   * the document says lives in `public/index.html`, which Expo uses as the
+   * template.
+   *
+   * `themeColor` is deliberately absent. Expo would write a single
+   * `<meta name="theme-color">` from it, and the tab chrome has to follow the
+   * scheme the visitor is in — so the template carries two, one per
+   * `prefers-color-scheme`, and `platform/status-bar.web.tsx` keeps them true
+   * once the app knows which theme is actually pinned.
+   */
   web: {
-    favicon: './assets/favicon.png'
+    favicon: './assets/favicon.png',
+    lang: 'en',
+    description: 'A client for Hermes Agent: chat with the bots on the gateway you run.'
   },
   plugins: [
     'expo-secure-store',

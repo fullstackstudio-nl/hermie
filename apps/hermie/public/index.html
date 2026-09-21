@@ -1,0 +1,148 @@
+<!doctype html>
+<!--
+  The document Hermie Web serves.
+
+  Expo's exporter reads this file when it exists and falls back to its own
+  template when it does not (`@expo/cli`'s `getTemplateIndexHtmlAsync`), so this
+  is the only place the browser build can say anything about the DOCUMENT rather
+  than about the app inside it. The exporter substitutes the two percent-wrapped
+  tokens below — the language and the title — from `app.config.ts`, appends the
+  bundle's script tag and the favicon link, and adds a description meta from
+  `web.description`.
+
+  Nothing else may spell those two tokens. The substitution is a plain
+  `String.replace` with a string pattern, which replaces the FIRST occurrence
+  and stops — so a token named in a comment is the one that gets replaced, and
+  the real one ships to the browser verbatim. That is not a hypothetical: it is
+  what this comment did on its first draft, and the page it produced had the
+  literal token in its title.
+
+  Everything added below the reset is here because a page cannot say it from
+  inside React:
+
+  - The manifest, the icons and the Apple meta tags, which is what makes the tab
+    installable and gives it a home-screen icon instead of a screenshot.
+  - `color-scheme`, which is what tells the user agent to draw its OWN widgets —
+    scrollbars, the text caret, a date picker — in the dark palette. Without it a
+    dark app gets a bright scrollbar track, and no amount of app-side styling
+    reaches it.
+  - A background on `html`/`body`. The bundle is a megabyte of JavaScript and the
+    first paint happens before any of it runs; with no background that gap is a
+    white flash, which on a dark theme is the most visible defect the app has.
+    The values are the default (blue) preset's, because the preset a visitor
+    pinned is not knowable before the app boots — `platform/status-bar.web.tsx`
+    corrects both this and `theme-color` from the live theme once it does.
+  - Scrollbars. macOS hides them until you scroll, which is why they were never
+    noticed here; every other platform draws them, and the default is a
+    light-grey slab that belongs to no theme.
+-->
+<html lang="%LANG_ISO_CODE%">
+  <head>
+    <meta charset="utf-8" />
+    <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover" />
+    <title>%WEB_TITLE%</title>
+
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- No `rel="icon"` here: the exporter appends one from `web.favicon`. -->
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+
+    <!--
+      Two values rather than one: the tab chrome should match the scheme the
+      visitor is actually in. A browser that does not understand `media` here
+      takes the first, which is the light one.
+    -->
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#EAF3FF" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#070F1D" />
+
+    <meta name="mobile-web-app-capable" content="yes" />
+    <!-- Still read by iOS, which has never adopted the unprefixed name above. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Hermie" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+    <!-- The transcript is a private conversation; it has no business in a search index. -->
+    <meta name="robots" content="noindex, nofollow" />
+
+    <!-- The `react-native-web` recommended style reset: https://necolas.github.io/react-native-web/docs/setup/#root-element -->
+    <style id="expo-reset">
+      /* These styles make the body full-height */
+      html,
+      body {
+        height: 100%;
+      }
+      /* These styles disable body scrolling if you are using <ScrollView> */
+      body {
+        overflow: hidden;
+      }
+      /* These styles make the root element full-height */
+      #root {
+        display: flex;
+        height: 100%;
+        flex: 1;
+      }
+    </style>
+
+    <style id="hermie-document">
+      :root {
+        color-scheme: light dark;
+        /* Overwritten from the live theme by platform/status-bar.web.tsx. */
+        --hermie-background: #eaf3ff;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --hermie-background: #070f1d;
+        }
+      }
+
+      html,
+      body {
+        background-color: var(--hermie-background);
+      }
+
+      /*
+        An unobtrusive scrollbar, drawn only where the platform draws one at all.
+        `scrollbar-color` is the standard property and is what Firefox reads;
+        the `::-webkit-` rules below are for Chromium, which still ignores it on
+        some platforms. Both use a translucent ink so the same rule is legible
+        over a light preset and a dark one.
+      */
+      * {
+        scrollbar-width: thin;
+        scrollbar-color: rgba(128, 128, 128, 0.45) transparent;
+      }
+
+      ::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+      }
+
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      ::-webkit-scrollbar-thumb {
+        background-color: rgba(128, 128, 128, 0.45);
+        border: 3px solid transparent;
+        background-clip: content-box;
+        border-radius: 8px;
+      }
+
+      ::-webkit-scrollbar-thumb:hover {
+        background-color: rgba(128, 128, 128, 0.7);
+      }
+
+      ::-webkit-scrollbar-corner {
+        background: transparent;
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- Use static rendering with Expo Router to support running without JavaScript. -->
+    <noscript> You need to enable JavaScript to run this app. </noscript>
+    <!-- The root element for your Expo app. -->
+    <div id="root"></div>
+  </body>
+</html>

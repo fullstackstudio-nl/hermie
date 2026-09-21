@@ -45,6 +45,22 @@ export interface NetworkWatcher {
 export type StatusBarInk = 'light' | 'dark'
 
 /**
+ * What the shell around the app is told about the app's appearance.
+ *
+ * `ink` is the only half the phones use; `background` exists for the browser,
+ * where there is no status bar to tint but there IS a document whose
+ * `theme-color` and page background have to follow the theme the visitor
+ * pinned. It is handed down rather than read from the theme inside the seam,
+ * because the theme provider is what renders this and a seam that imported it
+ * back would close a module cycle.
+ */
+export interface SystemChromeProps {
+  ink: StatusBarInk
+  /** The app's wallpaper fill, as a CSS-ready colour. */
+  background: string
+}
+
+/**
  * One file the user picked, in whichever form this platform hands it over.
  *
  * `body` is appended to a `FormData` as-is: a `File` in a browser, and the
