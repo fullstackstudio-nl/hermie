@@ -64,6 +64,12 @@ configures and why a mismatch there shows up as a 403 rather than as a subtle bu
 travels in `X-Forwarded-For`, `-Proto` and `-Host`, which the gateway reads when
 `dashboard.trusted_proxies` names the machine Hermie Web runs on.
 
+Whether the browser arrived over https is read from the reverse proxy's `X-Forwarded-Proto` before
+it is read from Hermie Web's own socket, which is plain HTTP by design. Reading the socket alone
+would tell the gateway `http` on every TLS deployment, and it answers that by issuing cookies without
+`Secure` and without the `__Host-` prefix — a downgrade produced by the proxy rather than by the
+deployment. The header decides nothing beyond the cookie attributes of the request that carried it.
+
 `Set-Cookie` passes back almost untouched. `Domain` is dropped, because a domain naming the gateway's
 host would make the browser discard the cookie outright. `Secure` is dropped and `SameSite=None`
 becomes `Lax` **only** when the browser reached Hermie Web over plain HTTP — a `Secure` cookie on an

@@ -20,7 +20,9 @@
  *  - `Secure` is dropped, and `SameSite=None` becomes `Lax`, ONLY when the
  *    browser reached Hermie Web over plain HTTP. A `Secure` cookie on an
  *    `http://` origin is silently thrown away, which looks exactly like a
- *    sign-in that did nothing.
+ *    sign-in that did nothing. What "over plain HTTP" means is decided by
+ *    `isSecureRequest`, which reads the reverse proxy's `X-Forwarded-Proto`
+ *    before it reads its own socket.
  *
  * `Path` is never touched: the gateway computes it from its own proxy prefix
  * and rewriting it would unscope the session.
@@ -48,10 +50,39 @@ const HOP_BY_HOP = new Set([
   'upgrade'
 ])
 
+/**
+ * Did the BROWSER reach us over https?
+ *
+ * Not "is this socket TLS": Hermie Web speaks plain HTTP and is meant to have
+ * something in front of it, so the answer is almost always in the header that
+ * something set. Without this the scheme is read off a loopback socket, comes
+ * out as `http` on every deployment behind nginx, Caddy or Tailscale Serve, and
+ * two things quietly go wrong: the gateway is told `http`, so it issues cookies
+ * without `Secure` and without the `__Host-` prefix it would otherwise use, and
+ * the rewrite below then strips `Secure` off any that arrive with it.
+ *
+ * Trusting a header a client could have sent is a real question, and here it is
+ * a narrow one. The header decides nothing but the cookie attributes on this
+ * same request: a client that lies to itself gets cookies its own browser
+ * refuses. It cannot reach another session, and nothing downstream reads it for
+ * anything but this.
+ */
 export function isSecureRequest(request: IncomingMessage): boolean {
   const socket = request.socket as { encrypted?: boolean }
 
-  return socket.encrypted === true
+  if (socket.encrypted === true) {
+    return true
+  }
+
+  return forwardedProto(request) === 'https'
+}
+
+/** The first hop's scheme from `X-Forwarded-Proto`, lowercased; `''` when unset. */
+function forwardedProto(request: IncomingMessage): string {
+  const raw = request.headers['x-forwarded-proto']
+  const first = Array.isArray(raw) ? raw[0] : raw
+
+  return (first ?? '').split(',')[0]?.trim().toLowerCase() ?? ''
 }
 
 /**
