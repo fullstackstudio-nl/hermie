@@ -59,6 +59,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Share to Hermie, from any app.** An image, a file, a link or some text goes straight into a
+  chat. On iPhone, iPad and Mac a small sheet inside the other application lists your bots — read
+  out of the same snapshot the widgets draw from, so it opens instantly and without launching
+  anything — takes an optional note, and hands over. On Android the system's own chooser starts
+  Hermie and it asks which chat once it is up, which is the same question one screen later. Neither
+  can send anything: a share sheet has no gateway, no socket and no credentials, so what they write
+  is a durable entry in a directory the app reads. A share made with no route to the gateway waits
+  there, its chat's row says so, and it goes out on the next reconnect. Five screenshots and a note
+  are one message with five attachments, by the same two roads the composer already uses.
+
+- **Shortcuts, Siri and Spotlight.** Four actions. _Ask a bot_ sends a message and waits for the
+  reply, so it can flow into the next step of a Shortcut or be spoken back by Siri; _Send to a bot_
+  returns as soon as the gateway has the prompt, which is the honest answer for anything that takes
+  real work; _Open a chat_ is a Home Screen button; and _Bots needing input_ reads the widgets'
+  snapshot and answers without opening Hermie at all, so it runs from an automation with the phone
+  locked. The three that send bring the app forward, because the gateway session lives inside it.
+  Forty-five seconds is what _Ask_ waits; a turn still running when that runs out says so and points
+  at _Send to_. Bots are indexed in Spotlight as the roster changes, and a result opens that chat.
+
+- **A widget for one folder.** The medium widget can be pinned to a folder of your chat list instead
+  of the whole of it: that folder's three most recent chats, with the folder's name, its unread
+  badge and a dot when something inside is waiting on you. Tapping the header opens the list with
+  that folder expanded and scrolled to. The two numbers follow the chat list's folder rules — unread
+  counts muted chats, the needs-input dot does not — which means a folder can show a count that no
+  row inside it shows; see `docs/platform-notes.md`.
+
 - **A gateway that cannot be used says which gateway it is.** A fresh install inherited a stored
   address from an earlier one, and all the app had to say was that the endpoint was not what it
   expected: no address on screen, nothing to press, and reinstalling as the only way out. The

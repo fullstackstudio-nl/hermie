@@ -6763,3 +6763,134 @@ shape as `botNameOrder`; the only new decision is whether the scale multiplies
 the `type` tokens in the theme — which markdown would inherit for free, and
 which needs no edits under `src/markdown` at all — or is threaded through the
 bubble components one at a time. The theme is almost certainly the right seam.
+
+## Three system surfaces, one container (2026-09-22)
+
+Sharing into Hermie, Shortcuts and Siri, and a widget pinned to one folder. They arrived as three
+items and turned out to be one problem — everything the system can put on somebody's screen runs
+outside the app, and the gateway runs inside it — so the answer is one seam and it is now an ADR:
+[0023](adr/0023-the-shared-container-is-the-seam.md).
+
+### What was verified here, and how
+
+There is no signed-in gateway reachable from this machine and no device attached to it, so the line
+between "tested" and "written down" matters more than usual in this section.
+
+**The TypeScript is tested.** `npm run typecheck`, the full `npx vitest run` (64 files) and the full
+`npx jest` in `apps/hermie` (161 suites) pass. The new suites are:
+
+- `__tests__/share-outbox.test.ts` — the manifest as a table, mostly the refusals: a version this
+  build does not know, an id that is not a name, a path that could climb out of the entry, an item
+  kind it has never heard of. This is the one file in the app whose input comes from a process this
+  repository does not run.
+- `__tests__/share-delivery.test.ts` — the delivery flow against faked ports: a photograph, a file
+  and a link become ONE message; the chat is opened before the upload, because the upload needs the
+  working directory the resume reports; the entry is cleared after the send and never before; a
+  failed send leaves it exactly where it was.
+- `__tests__/intent-queue.test.ts`, `__tests__/intent-runner.test.ts`,
+  `__tests__/intent-await-reply.test.ts` — the request format, the runner's "every request is
+  answered" rule, and the two races the reply watch exists for.
+- `__tests__/widget-snapshot.test.ts` — the folder projection, including the divergence recorded
+  below.
+- `__tests__/ios-share-plugin.test.ts`, `__tests__/ios-intents-plugin.test.ts` — the pure halves of
+  both config plugins, plus the strings that three languages spell by hand and no compiler checks:
+  the App Group, the outbox directory, the item cap, the intent budget, the principal class name,
+  and that every Siri phrase carries `.applicationName`.
+
+**The Swift type-checks against the iOS SDK.** Not a build — a `swiftc -typecheck` of each target's
+sources against `iPhoneSimulator27.0.sdk`, which is what can be run without generating the Xcode
+project:
+
+```
+modules/hermie-share/share/*.swift          -target arm64-apple-ios15.1-simulator   clean
+modules/hermie-intents/intents/*.swift      -target arm64-apple-ios15.1-simulator   clean
+modules/hermie-widgets/widget/*.swift       -target arm64-apple-ios17.0-simulator   clean
+```
+
+The three Expo modules (`HermieShareModule`, `HermieIntentsModule`, the amended
+`HermieSceneDelegate`) cannot be type-checked that way because they import `ExpoModulesCore`, which
+only exists once CocoaPods has built it. They were `swiftc -parse`d instead, which catches syntax
+and nothing else.
+
+### What was NOT verified, and why
+
+- **Nothing was built.** `apps/hermie/ios/` and `apps/hermie/android/` are generated and absent from
+  a fresh checkout (`.gitignore`), so `xcodebuild` and `./gradlew` both need `npx expo prebuild`
+  first — which for the iOS half means a full `pod install` against this tree. That was not run
+  here. The consequence is specific and worth stating: **neither config plugin has been executed**,
+  so the Xcode surgery in `with-hermie-share.js` and `with-hermie-intents.js` is unproven. Both
+  carry assertions that fail the prebuild rather than shipping silently — `assertEmbedded`,
+  `touched === 0`, `assertCompiled` — and those assertions are the thing that has not been
+  exercised. The first person to run `npm run ios` or `npm run mac` is running them for the first
+  time.
+- **The share sheet has not been seen.** Not on an iPhone, not in the Mac's share menu under the
+  "Designed for iPad" build, and not as a row in Android's chooser. What is covered is the manifest
+  and the delivery; what is not is whether the extension appears at all, whether its activation rule
+  admits the right things, and whether `openURL` through the responder chain still works on iOS 27.
+  That last one is an idiom rather than an API and the code says so: if it stops working the entry
+  is still in the outbox and the app still delivers it at the next launch, so what is lost is the
+  immediacy and not the share.
+- **No Siri phrase has been spoken and no action has been seen in Shortcuts.** Two things are
+  unproven and they fail differently. A phrase that Siri never matches reports nothing at all — that
+  is why every phrase is pinned to carry `.applicationName`. An App Intent that does not appear in
+  the gallery is usually metadata extraction, which is why `intents/*.swift` is compiled into the
+  APP target rather than into the pod; `assertCompiled` fails the prebuild if that ever stops being
+  true, but neither half has been watched happen.
+- **The App Group is now load-bearing for three binaries.** The app, the widget extension and the
+  share extension all name `group.dev.hermie.app`, and it has to exist under the team in the
+  Developer portal with all three bundle ids joined to it: `dev.hermie.app`,
+  `dev.hermie.app.widgets`, `dev.hermie.app.share`. A capability that is missing from a provisioning
+  profile produces a nil container and nothing else — no build failure, no crash, no log. Each
+  native module exposes `hasSharedContainer()` for the developer screen, and that is the only signal
+  there is.
+- **The Spotlight tap-through is written and unseen.** `HermieIntentsModule.indexBots` indexes each
+  bot under its own `hermie://chat/<name>`, and `modules/hermie-scene` turns the resulting
+  `CSSearchableItemActionType` activity back into that link — React Native answers only
+  `NSUserActivityTypeBrowsingWeb`, so without that a result would open the app at whatever screen it
+  was last on. The conversion has a unit test on neither side; it is nine lines in the scene
+  delegate.
+- **The folder widget has not been drawn.** The projection is covered as a table. WidgetKit
+  re-reading the file, the `AppIntentConfiguration` picker listing the folders, and what the header
+  looks like at systemMedium have not been looked at.
+
+### A folder's badge and a row's badge now disagree, on purpose
+
+Worth reading before it is reported as a bug, because both halves are deliberate and they were
+decided at different times.
+
+`snapshot.ts` zeroes a muted chat's unread **on its own row**, and says why at length: a widget is
+the loudest place a count appears and a lock screen is louder still, so a chat somebody asked the
+app to be quiet about contributes nothing to either.
+
+The chat list's folder rule is the opposite, and ADR-0019 was corrected in place on 2026-09-22 to
+say so: a folder's unread **includes** muted chats, because a collapsed folder that dropped them
+would remove information rather than aggregate it. The needs-input dot still excludes them, because
+that one is a summons rather than a tally.
+
+A folder widget inherits the second rule, so:
+
+> a folder holding one muted chat with four unread shows **4**, while that same chat's row in the
+> same widget shows **nothing**.
+
+Both rules are right about their own question and nothing reconciles them. The options, if it reads
+badly on a device:
+
+1. Leave it. The folder badge matches the chat list exactly, which is the surface it is a summary
+   of.
+2. Make the folder badge follow the widget's own rule and drop muted chats. The home screen then
+   agrees with itself and disagrees with the app.
+
+This is a product decision about what a count on a home screen means, not a mechanical gap, so it is
+the owner's call rather than a build agent's.
+
+### Two smaller things that came out of the same work
+
+- **The bot list in the snapshot is no longer exactly twelve.** A folder whose members have all been
+  quiet for a week would fall off the end of the twelve most recent and leave a widget pinned to it
+  permanently empty, so the file now carries the twelve most recent **plus** every bot a folder
+  names, capped at twenty-four. The unconfigured widgets are untouched: they read the front of the
+  same list, which is the same twelve it always was.
+- **`sameWidgetContent` compares the folders too.** A folder's badge counts muted chats, so a message
+  into a silenced conversation moves a number that no bot row shows — and comparing the rows alone
+  would drop that write and leave a folder widget stale for exactly the case it was configured to
+  watch.

@@ -115,6 +115,25 @@ describe('parseHermieLink', () => {
   ])('refuses an intent link with %s', (_label, url) => {
     expect(parseHermieLink(url)).toBeNull()
   })
+
+  /**
+   * The fourth kind: `hermie://folder/<id>`, from a widget somebody pinned to
+   * one of their folders. It names a folder in the owner's own list and carries
+   * nothing else — the widget does not tell the app what to draw, it names what
+   * to show.
+   */
+  it('reads the id out of a folder link', () => {
+    expect(parseHermieLink('hermie://folder/fm4k2a1')).toEqual({ kind: 'folder', id: 'fm4k2a1' })
+  })
+
+  it.each([
+    ['an escaped separator', 'hermie://folder/a%2Fb'],
+    ['an escaped climb out of the arrangement', 'hermie://folder/%2E%2E'],
+    ['no id', 'hermie://folder/'],
+    ['a second segment', 'hermie://folder/f1/open']
+  ])('refuses a folder link with %s', (_label, url) => {
+    expect(parseHermieLink(url)).toBeNull()
+  })
 })
 
 function Probe({ onLink }: { onLink: (bot: string) => void }) {

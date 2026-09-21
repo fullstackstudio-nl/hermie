@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { DevInitialView } from '../dev'
 import { ActivityScreen } from '../features/activity'
-import { BotsScreenOrSignedOut, type BotsSection } from '../features/bots'
+import { BotsScreenOrSignedOut, requestRevealFolder, type BotsSection } from '../features/bots'
 import { ChatScreen } from '../features/chats'
 import { CronScreen } from '../features/cron'
 import { SettingsScreen } from '../features/settings'
@@ -21,6 +21,7 @@ import { useHermieLink } from '../platform/deep-link'
 import { usePageTitle } from '../platform/page-title'
 import { onOpenChatRequest } from './open-chat-bus'
 import { useBotDisplayName } from '../store/bots'
+import { useChatLayoutStore } from '../store/chat-layout'
 import { GlassSurface, Wallpaper } from '../ui/glass'
 import { useTheme } from '../ui/theme'
 import { useShortcut } from '../ui/useShortcut'
@@ -190,18 +191,40 @@ export function CompactShell({ initial }: { initial?: DevInitialView } = {}) {
     [navigationRef]
   )
 
-  // Neither of the other two link kinds carries a destination of its own. The
-  // share sheet and the Shortcut have each already written their request into
-  // the shared container, and the id in the URL is only there so that the tap
-  // arrives as a pump rather than as a foreground three seconds later — both
-  // readers work from the directory, not from the link.
+  /**
+   * A widget pinned to a folder: show the list, with that folder open.
+   *
+   * Two writes and neither is navigation. Opening the folder is a write to the
+   * arrangement and works whether or not any list is mounted; the scroll is a
+   * request the list picks up when it has rows to scroll to
+   * (`features/bots/folder-reveal.ts`). The navigation is separate because on a
+   * phone the list may be several screens down the stack.
+   */
+  const openFolder = useCallback(
+    (folderId: string) => {
+      useChatLayoutStore.getState().setFolderOpen(folderId, true)
+      requestRevealFolder(folderId)
+
+      if (navigationRef.isReady()) {
+        navigationRef.navigate('Bots')
+      }
+    },
+    [navigationRef]
+  )
+
+  // Neither the share nor the Shortcut link carries a destination of its own:
+  // each has already written its request into the shared container, and the id
+  // in the URL is only there so that the tap arrives as a pump rather than as a
+  // foreground three seconds later. Both readers work from the directory.
   useHermieLink(link => {
     if (link.kind === 'chat') {
       openChat(link.bot)
     } else if (link.kind === 'share') {
       requestShareDelivery()
-    } else {
+    } else if (link.kind === 'intent') {
       requestIntentRun()
+    } else {
+      openFolder(link.id)
     }
   })
 

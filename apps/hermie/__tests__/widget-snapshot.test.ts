@@ -20,7 +20,9 @@ import {
   projectWidgetSnapshot,
   sameWidgetContent,
   widgetAvatarPath,
+  WIDGET_BOT_CAP,
   WIDGET_BOT_LIMIT,
+  WIDGET_FOLDER_BOT_LIMIT,
   WIDGET_SNAPSHOT_VERSION,
   type WidgetSnapshotInput
 } from '../src/features/widgets/snapshot'
@@ -51,6 +53,7 @@ function input(overrides: Partial<WidgetSnapshotInput> = {}): WidgetSnapshotInpu
     lastSeen: {},
     accents: {},
     archived: {},
+    folders: [],
     mutes: {},
     gatewayReady: true,
     avatars: {},
@@ -262,5 +265,175 @@ describe('sameWidgetContent', () => {
 
   it('is false against nothing written yet, so the first write always happens', () => {
     expect(sameWidgetContent(null, projectWidgetSnapshot(input()))).toBe(false)
+  })
+})
+
+/**
+ * A widget pinned to one folder.
+ *
+ * The folder is the only part of the owner's arrangement that reaches a home
+ * screen, and the two numbers on it follow the CHAT LIST's rules rather than
+ * the per-bot rules the rows follow. That divergence is the thing most worth
+ * pinning here, because it is the one a reader will notice and report.
+ */
+describe('the folders a widget can be pinned to', () => {
+  const folder = (bots: string[]) => ({ id: 'f1', name: 'Finance', bots })
+
+  it('carries each folder with its contents in recency order', () => {
+    const snapshot = projectWidgetSnapshot(
+      input({
+        bots: [
+          bot('older', { canonical: { id: 'a', resolvedId: 'a', preview: '', lastActive: 100, messageCount: 1 } }),
+          bot('newer', { canonical: { id: 'b', resolvedId: 'b', preview: '', lastActive: 900, messageCount: 1 } })
+        ],
+        // Written in the arrangement's order, which is NOT the widget's.
+        folders: [folder(['older', 'newer'])]
+      })
+    )
+
+    expect(snapshot.folders).toHaveLength(1)
+    expect(snapshot.folders[0]?.bots).toEqual(['newer', 'older'])
+    expect(snapshot.folders[0]?.size).toBe(2)
+  })
+
+  /**
+   * The divergence, stated as a test. A muted chat contributes nothing to its
+   * OWN badge — a widget is the loudest place a count appears — and everything
+   * to its folder's, because a summary that drops part of what it is
+   * summarising removes information rather than aggregating it.
+   */
+  it('counts a muted chat in the folder and not on its row', () => {
+    const snapshot = projectWidgetSnapshot(
+      input({
+        bots: [bot('quiet')],
+        chats: { quiet: chatWithReplies('quiet', 4, 2_000) },
+        mutes: { quiet: 0 },
+        folders: [folder(['quiet'])]
+      })
+    )
+
+    expect(snapshot.bots[0]?.unread).toBe(0)
+    expect(snapshot.folders[0]?.unread).toBe(4)
+  })
+
+  /** The other half of the same rule, and it points the other way. */
+  it('leaves a muted chat out of the needs-input count', () => {
+    const snapshot = projectWidgetSnapshot(
+      input({
+        bots: [bot('quiet'), bot('loud')],
+        chats: { quiet: chatAwaitingApproval('quiet'), loud: chatAwaitingApproval('loud') },
+        mutes: { quiet: 0 },
+        folders: [folder(['quiet', 'loud'])]
+      })
+    )
+
+    expect(snapshot.folders[0]?.needsInput).toBe(1)
+  })
+
+  it('counts every bot inside, not only the ones that fit', () => {
+    const many = Array.from({ length: WIDGET_FOLDER_BOT_LIMIT + 3 }, (_, index) => bot(`b${index}`))
+    const chats = Object.fromEntries(many.map(entry => [entry.name, chatWithReplies(entry.name, 1, 2_000)]))
+
+    const snapshot = projectWidgetSnapshot(
+      input({ bots: many, chats, folders: [folder(many.map(entry => entry.name))] })
+    )
+
+    expect(snapshot.folders[0]?.bots).toHaveLength(WIDGET_FOLDER_BOT_LIMIT)
+    expect(snapshot.folders[0]?.size).toBe(many.length)
+    expect(snapshot.folders[0]?.unread).toBe(many.length)
+  })
+
+  it('leaves an archived bot out of both the list and the count', () => {
+    const snapshot = projectWidgetSnapshot(
+      input({
+        bots: [bot('kept'), bot('gone')],
+        chats: { gone: chatWithReplies('gone', 3, 2_000) },
+        archived: { gone: true },
+        folders: [folder(['kept', 'gone'])]
+      })
+    )
+
+    expect(snapshot.folders[0]?.bots).toEqual(['kept'])
+    expect(snapshot.folders[0]?.size).toBe(1)
+    expect(snapshot.folders[0]?.unread).toBe(0)
+  })
+
+  /**
+   * A widget configured for one of these would be permanently empty, and the
+   * picker offering it would be a picker offering a dead end.
+   */
+  it('drops a folder whose bots have all left the roster', () => {
+    expect(projectWidgetSnapshot(input({ bots: [bot('here')], folders: [folder(['ghost'])] })).folders).toEqual([])
+  })
+
+  it('writes the colour as hex, the same way a bot’s is written', () => {
+    const snapshot = projectWidgetSnapshot(
+      input({ bots: [bot('a')], folders: [{ id: 'f1', name: 'Finance', colour: 'lime', bots: ['a'] }] })
+    )
+
+    expect(snapshot.folders[0]?.colour).toBe(ACCENTS.lime.bubble)
+    expect(projectWidgetSnapshot(input({ folders: [folder(['researcher'])] })).folders[0]).not.toHaveProperty('colour')
+  })
+
+  /**
+   * The reason the bot list changed shape at all. A folder whose members have
+   * all been quiet for a week would otherwise fall off the end of the twelve
+   * most recent and leave a widget pinned to it permanently empty.
+   */
+  it('keeps a folder’s bots in the file even when they are not recent', () => {
+    const recent = Array.from({ length: WIDGET_BOT_LIMIT }, (_, index) =>
+      bot(`r${index}`, {
+        canonical: { id: `r${index}`, resolvedId: `r${index}`, preview: '', lastActive: 9_000 + index, messageCount: 1 }
+      })
+    )
+    const stale = bot('stale', {
+      canonical: { id: 'stale', resolvedId: 'stale', preview: '', lastActive: 1, messageCount: 1 }
+    })
+
+    const snapshot = projectWidgetSnapshot(input({ bots: [...recent, stale], folders: [folder(['stale'])] }))
+
+    expect(snapshot.bots.map(entry => entry.name)).toContain('stale')
+    // And the unconfigured widgets are untouched: they read the front of the
+    // same list, which is the same twelve it always was.
+    expect(snapshot.bots.slice(0, WIDGET_BOT_LIMIT).map(entry => entry.name)).not.toContain('stale')
+  })
+
+  it('never writes more than the file’s ceiling, however many folders there are', () => {
+    const many = Array.from({ length: WIDGET_BOT_CAP + 10 }, (_, index) =>
+      bot(`b${index}`, {
+        canonical: { id: `b${index}`, resolvedId: `b${index}`, preview: '', lastActive: index, messageCount: 1 }
+      })
+    )
+
+    const folders = Array.from({ length: 6 }, (_, index) => ({
+      id: `f${index}`,
+      name: `Folder ${index}`,
+      bots: many.slice(index * 5, index * 5 + 5).map(entry => entry.name)
+    }))
+
+    expect(projectWidgetSnapshot(input({ bots: many, folders })).bots.length).toBeLessThanOrEqual(WIDGET_BOT_CAP)
+  })
+
+  /**
+   * A folder's badge counts muted chats, so a message into a silenced
+   * conversation moves a number no bot row shows. Comparing the rows alone
+   * would drop that write and leave a folder widget stale for exactly the case
+   * it was configured to watch.
+   */
+  it('notices a change that only a folder can see', () => {
+    const before = projectWidgetSnapshot(
+      input({ bots: [bot('quiet')], mutes: { quiet: 0 }, folders: [folder(['quiet'])] })
+    )
+    const after = projectWidgetSnapshot(
+      input({
+        bots: [bot('quiet')],
+        chats: { quiet: chatWithReplies('quiet', 2, 2_000) },
+        mutes: { quiet: 0 },
+        folders: [folder(['quiet'])]
+      })
+    )
+
+    expect(JSON.stringify(before.bots)).toBe(JSON.stringify(after.bots))
+    expect(sameWidgetContent(before, after)).toBe(false)
   })
 })

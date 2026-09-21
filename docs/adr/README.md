@@ -30,6 +30,7 @@ new record supersedes it, and the old one gets a line at the top pointing forwar
 | [0017](0017-push-through-hermie-web.md)           | Push comes from the `hermie` gateway plugin; a device registers in `ui_meta` | Accepted, amended  |
 | [0018](0018-injected-rows-are-notices.md)         | A row the gateway injected is a notice, recognised by its shape              | Accepted           |
 | [0019](0019-folders-in-the-chat-list.md)          | The chat list groups into folders, and a bot is in exactly one               | Accepted           |
+| [0023](0023-the-shared-container-is-the-seam.md)  | The shared container is the seam for every system surface                    | Accepted           |
 
 ## Template
 

@@ -280,6 +280,11 @@ export class WidgetSync {
       lastSeen: bots.lastSeen,
       accents: layout.accents,
       archived: layout.archived,
+      // The arrangement itself, for the folder a widget can be pinned to. It is
+      // the only part of the owner's list order that reaches a home screen —
+      // see `projectWidgetSnapshot` on why the rows are ordered by recency and
+      // this is not.
+      folders: layout.folders,
       mutes: layout.mutes,
       gatewayReady: this.frozenGatewayReady ?? this.gatewayReady,
       avatars: Object.fromEntries([...this.avatarsWritten.keys()].map(name => [name, true as const])),

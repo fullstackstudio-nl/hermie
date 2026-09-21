@@ -32,6 +32,7 @@ import { Linking } from 'react-native'
 
 import { isSafeIntentId } from '../features/intents/queue'
 import { isSafeShareId } from '../features/share/outbox'
+import { isSafeFolderId } from '../store/folders'
 
 /**
  * The URL this process was launched by, read once and then forgotten.
@@ -68,9 +69,10 @@ function consumeNativeLaunchURL(): string | null {
  *
  * Every member names something that ALREADY EXISTS and was put there by this
  * app: a chat on the roster, an entry this device's own share sheet wrote, an
- * entry its own Shortcuts action queued. None of them carries an address, a
- * token or a payload, which is the rule the module comment states and the only
- * thing that makes a scheme any web page can invoke safe to answer.
+ * entry its own Shortcuts action queued, a folder in the owner's own list. None
+ * of them carries an address, a token or a payload, which is the rule the module
+ * comment states and the only thing that makes a scheme any web page can invoke
+ * safe to answer.
  */
 export type HermieLink =
   | { kind: 'chat'; bot: string }
@@ -78,30 +80,32 @@ export type HermieLink =
   | { kind: 'share'; id: string }
   /** `hermie://intent/<id>` — a Shortcut queued a request and is waiting. */
   | { kind: 'intent'; id: string }
+  /** `hermie://folder/<id>` — a widget pinned to one of the owner's folders. */
+  | { kind: 'folder'; id: string }
 
 /**
  * The grammar: `hermie://<kind>/<one segment>`.
  *
  * `exp+hermie://` is accepted alongside it because that is the scheme a dev
  * client registers and uses, so a link tested in development is the same link.
- * A second segment is not accepted at all, for both kinds, which is what keeps
- * a name from being read as a path.
+ * A second segment is not accepted at all, for any kind, which is what keeps a
+ * name from being read as a path.
  */
-const LINK = /^(?:exp\+)?hermie:\/\/(chat|share|intent)\/([^/?#]+)\/?(?:[?#].*)?$/
+const LINK = /^(?:exp\+)?hermie:\/\/(chat|share|intent|folder)\/([^/?#]+)\/?(?:[?#].*)?$/
 
 /**
- * `hermie://chat/<bot>` or `hermie://share/<id>`, or nothing.
+ * One of the four shapes, or nothing.
  *
  * A bot name is percent-decoded and then checked: an empty one and anything
  * with a slash in it after decoding are rejected.
  *
- * A share or intent id is NOT decoded, and that difference is deliberate rather
- * than an omission. A bot name is somebody else's string — a profile can be
- * called anything, including things that have to be escaped to survive a URL.
- * An id is minted by this app's own extension out of a fixed alphabet, so a
- * link carrying anything else did not come from the share sheet or from a
- * Shortcut, and the useful response to that is to answer nothing rather than to
- * work out what it meant.
+ * An ID is NOT decoded, and that difference is deliberate rather than an
+ * omission. A bot name is somebody else's string — a profile can be called
+ * anything, including things that have to be escaped to survive a URL. Every id
+ * here is minted by this app out of a fixed alphabet, so a link carrying
+ * anything else did not come from a share sheet, a Shortcut or a widget, and the
+ * useful response to that is to answer nothing rather than to work out what it
+ * meant.
  */
 export function parseHermieLink(url: string | null | undefined): HermieLink | null {
   if (!url) {
@@ -120,6 +124,10 @@ export function parseHermieLink(url: string | null | undefined): HermieLink | nu
 
   if (match[1] === 'intent') {
     return isSafeIntentId(match[2]) ? { kind: 'intent', id: match[2] } : null
+  }
+
+  if (match[1] === 'folder') {
+    return isSafeFolderId(match[2]) ? { kind: 'folder', id: match[2] } : null
   }
 
   let bot: string
