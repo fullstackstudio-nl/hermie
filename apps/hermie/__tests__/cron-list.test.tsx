@@ -334,3 +334,25 @@ describe('the editor chooses a profile on create', () => {
     )
   })
 })
+
+/**
+ * The `+` in the chats list is labelled New cron.
+ *
+ * It navigated to this screen and stopped there, leaving the reader to find
+ * the same `+` again at the bottom of the list — a button that promises a
+ * thing and delivers the page that thing lives on. It is the same button on
+ * every platform, so this is not a browser defect; it was found in a browser.
+ */
+describe('opening the crons screen on a new job', () => {
+  it('has the editor up on the first render', () => {
+    renderScreen(<CronScreen initialCreate />)
+
+    expect(screen.getByTestId('cron-editor')).toBeTruthy()
+  })
+
+  it('leaves it shut otherwise', () => {
+    renderScreen(<CronScreen />)
+
+    expect(screen.queryByTestId('cron-editor')).toBeNull()
+  })
+})

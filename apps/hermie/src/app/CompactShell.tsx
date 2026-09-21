@@ -27,7 +27,7 @@ export type CompactStackParamList = {
   Bots: undefined
   Chat: { bot: string; focusItemId?: string; findText?: string }
   Activity: undefined
-  Cron: { jobId?: string } | undefined
+  Cron: { jobId?: string; create?: boolean } | undefined
   Settings: undefined
 }
 
@@ -94,7 +94,9 @@ function BotsRoute() {
             ...(options?.findText ? { findText: options.findText } : {})
           })
         }
-        onOpenSection={section => navigation.navigate(SECTION_ROUTES[section] as 'Settings')}
+        onOpenSection={(section, options) =>
+          navigation.navigate(SECTION_ROUTES[section] as 'Cron', options?.create ? { create: true } : undefined)
+        }
       />
     </GlassSurface>
   )
@@ -266,8 +268,11 @@ export function CompactShell({ initial }: { initial?: DevInitialView } = {}) {
           />
           <Stack.Screen component={ActivityRoute} name="Activity" options={{ title: strings.tabs.activity }} />
           <Stack.Screen name="Cron" options={{ title: strings.tabs.routines }}>
-            {({ route }: { route: { params?: { jobId?: string } } }) => (
-              <CronScreen {...(route.params?.jobId ? { initialJobId: route.params.jobId } : {})} />
+            {({ route }: { route: { params?: { jobId?: string; create?: boolean } } }) => (
+              <CronScreen
+                {...(route.params?.jobId ? { initialJobId: route.params.jobId } : {})}
+                {...(route.params?.create ? { initialCreate: true } : {})}
+              />
             )}
           </Stack.Screen>
           <Stack.Screen name="Settings" options={{ title: strings.tabs.settings }}>

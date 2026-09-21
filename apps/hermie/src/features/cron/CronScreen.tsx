@@ -48,9 +48,17 @@ export interface CronScreenProps {
    * is done by whoever had both the name and the profile — see `ChatScreen`.
    */
   initialJobId?: string
+  /**
+   * Open the editor on an empty job, straight away.
+   *
+   * What the `+` in the chats list means. That button is labelled New cron;
+   * until this it navigated here and left the reader to find the same `+`
+   * again at the bottom of the list.
+   */
+  initialCreate?: boolean
 }
 
-export function CronScreen({ initialJobId }: CronScreenProps = {}) {
+export function CronScreen({ initialCreate, initialJobId }: CronScreenProps = {}) {
   const controller = useCronController()
   const jobs = useCronStore(state => state.jobs)
   const loading = useCronStore(state => state.loading)
@@ -67,7 +75,10 @@ export function CronScreen({ initialJobId }: CronScreenProps = {}) {
     initialJobId ? { screen: 'detail', jobId: initialJobId } : { screen: 'list' }
   )
   const [refreshing, setRefreshing] = useState(false)
-  const [editing, setEditing] = useState<{ open: boolean; job: CronJob | null }>({ open: false, job: null })
+  const [editing, setEditing] = useState<{ open: boolean; job: CronJob | null }>({
+    open: initialCreate === true && !initialJobId,
+    job: null
+  })
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   // The one thing a row's menu cannot do by itself: two of its four lines have

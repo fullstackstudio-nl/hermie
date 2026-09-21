@@ -90,7 +90,15 @@ export interface BotsScreenProps {
   /** Compact shell: navigate. Regular shell: select in place. */
   onOpenBot?: (bot: Bot, options?: OpenBotOptions) => void
   selectedBot?: string | undefined
-  onOpenSection?: (section: BotsSection) => void
+  /**
+   * Open one of the other three destinations.
+   *
+   * `options.create` is the difference between "show me the crons" and "make
+   * me a cron". The `+` in this screen's own header is labelled New cron and
+   * used to do the first, which is a button that promises a thing and delivers
+   * the page that thing lives on.
+   */
+  onOpenSection?: (section: BotsSection, options?: { create?: boolean }) => void
   /** Which footer tab reads as current; the wide shell drives this from its overlay. */
   currentTab?: TabKey
   /**
@@ -674,7 +682,7 @@ export function BotsScreen({
           setAddedDividerId(null)
         }}
         sidebar={sidebar}
-        {...(onOpenSection ? { onNewCron: () => onOpenSection('cron') } : {})}
+        {...(onOpenSection ? { onNewCron: () => onOpenSection('cron', { create: true }) } : {})}
       />
 
       {/*

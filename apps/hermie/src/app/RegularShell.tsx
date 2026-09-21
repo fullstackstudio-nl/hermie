@@ -104,6 +104,8 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
   /** Words a search hit asked this chat to land on; see `OpenChatOptions.findText`. */
   const [findText, setFindText] = useState<string | undefined>(undefined)
   const [cronJobId, setCronJobId] = useState<string | undefined>(undefined)
+  /** Set by the chats list's `+`: open the crons screen on a new job. */
+  const [cronCreate, setCronCreate] = useState(false)
   // Showing the list temporarily is a thing this WINDOW is doing, not a thing the
   // owner has decided about their list, so it never reaches the store.
   const [listOverlay, setListOverlay] = useState(false)
@@ -150,11 +152,13 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
   // list rather than on whichever cron somebody followed a card to last week.
   const openCron = useCallback((jobId: string) => {
     setCronJobId(jobId)
+    setCronCreate(false)
     setSection('cron')
   }, [])
 
-  const openSection = useCallback((next: BotsSection) => {
+  const openSection = useCallback((next: BotsSection, options?: { create?: boolean }) => {
     setCronJobId(undefined)
+    setCronCreate(options?.create === true)
     setSection(next)
     setListOverlay(false)
   }, [])
@@ -355,7 +359,16 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
           visible={overlayOpen}
         >
           {section === 'activity' ? <ActivityScreen onOpenBot={openBot} /> : null}
-          {section === 'cron' ? <CronScreen {...(cronJobId ? { initialJobId: cronJobId } : {})} /> : null}
+          {section === 'cron' ? (
+            <CronScreen
+              {...(cronJobId ? { initialJobId: cronJobId } : {})}
+              {...(cronCreate ? { initialCreate: true } : {})}
+              // Remounted per intent, so opening `+` twice opens the editor
+              // twice: the screen decides on its first render whether the
+              // editor is up, and a live screen would ignore the second press.
+              key={cronCreate ? 'cron-create' : 'cron'}
+            />
+          ) : null}
           {section === 'settings' ? <SettingsScreen {...(initial?.page ? { initialPage: initial.page } : {})} /> : null}
         </OverlayPanel>
       </View>
