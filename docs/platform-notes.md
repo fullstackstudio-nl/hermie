@@ -7377,3 +7377,95 @@ held most of what the bot remembers would be lying by omission.
 - **Concurrency is untested.** Two clients editing one profile's memory, or a
   bot writing while the page is open, both end in "the re-read wins" — which is
   the design, and which nobody has watched happen.
+
+## A force-directed layout that has to draw the same picture twice (2026-09-22)
+
+The memory graph is the second drawing in this app computed in JavaScript and
+handed to `react-native-svg` rather than to a library in a web view. The first
+was the Mermaid renderer, and ADR-0020 has the argument in full: a `WebView`
+learns its content's height after the page has laid out, and a picture that
+resizes after layout moves the reader by exactly the correction.
+
+### Determinism is the requirement, not the polish
+
+A Fruchterman-Reingold layout is iterative and is normally seeded from
+`Math.random`. That would draw the same memory differently on every open — and,
+because a write refetches, differently after every edit. Somebody who has
+learned that their `FullStack Studio` cluster sits bottom-left would have to
+find it again each time, which is the sort of cost that does not show up in a
+screenshot.
+
+Three things make it reproducible and each of them is load-bearing:
+
+- **`mulberry32`, not `Math.random`.** Pure 32-bit integer arithmetic, so the
+  sequence does not depend on which JavaScript engine is running — otherwise a
+  test that pins coordinates would pass under jest and be meaningless in a
+  browser.
+- **A fixed iteration count**, not a convergence threshold. "Stop when it stops
+  moving" makes the result depend on floating-point accumulation.
+- **Coordinates rounded to two decimals** at the end, so a last pass that
+  differed in the twelfth decimal cannot move a circle.
+
+The node ORDER is not pinned here and does not need to be: the plugin emits
+nodes in a stable order — the profile, then entries in file order, then each
+topic the first time an entry needs it — so the _n_-th node takes the _n_-th
+place on the seeding ring whatever the memory contains.
+
+### The profile node is pinned, and that is a drawing decision
+
+It is connected to every entry. Left free, it drifts to wherever the mass
+happens to be and the picture stops reading as "this bot's memory" and starts
+reading as an arbitrary blob. Pinning it at the centre costs nothing and is what
+makes the hub legible.
+
+### Entry nodes carry no label
+
+The plugin's excerpt is up to 120 characters. A hundred of those drawn at once
+is a grey field, not a graph. Only the hub and the topics are labelled; the
+entry's text is one tap away in the card, which is what the card is for.
+
+### Two kinds of "there is more", said separately
+
+The plugin pages over ENTRIES and reports `truncated` when its own node or edge
+cap bit. The layout has a node ceiling of its own and reports `dropped`. Rolling
+those into one sentence would tell somebody their memory is too big when what
+they actually have is a second page.
+
+### Pan without a gesture library, and zoom without a pinch
+
+`react-native-gesture-handler` is not a dependency of this app — `BottomSheet`
+says so and uses one `PanResponder`, and this does the same. The responder
+claims the gesture only after the finger has passed a slop, so a tap still
+reaches the node under it.
+
+Zoom is two buttons, and on the web also the wheel. The buttons are not a
+fallback for a pinch: a pinch is unavailable on a pointer, on a keyboard and
+under a switch control, and a picture whose only way in is a two-finger gesture
+is a picture some readers cannot use at all. They are worded rather than `+` and
+`−` marks, because this app has no minus icon and `ui/Icon.tsx` is emphatic
+about why a typed glyph is not one.
+
+### What is unverified here
+
+- **The wheel has never fired.** `onWheel` is set only on the web build and is
+  passed through to the DOM node by react-native-web; whether RNW forwards it on
+  a `View` in this version has not been observed. If it does not, zooming still
+  works through the buttons, which is why it is written that way round.
+- **Nothing has been drawn on a device.** The suite renders the SVG tree and
+  asserts nodes and taps; how a hundred-node graph performs on a phone, whether
+  the pan feels direct, and what the picture looks like at all have not been
+  seen. The standing acceptance bar for scroll and jank has not been measured
+  against this screen.
+- **The pinch that is not there.** A two-finger zoom is the gesture a reader
+  will try first on a phone and there is none. Adding it means either a gesture
+  library the app does not depend on or a second `PanResponder` tracking two
+  touches, and neither was in scope this round.
+- **No graph has come from a real plugin.** The fixture and the fake both come
+  from `memory/browse.py`, including its topic extraction ported character for
+  character. What a real profile's memory clusters into — whether the cheap
+  topics produce anything a person recognises — is the open question the feature
+  exists to answer and cannot answer from here.
+- **Large pages are untested in practice.** The layout is O(n²) per pass over
+  240 passes; at the plugin's 400-node cap that is around 19 million distance
+  computations on the JavaScript thread, synchronously, while the tab opens. It
+  has been run against six nodes.

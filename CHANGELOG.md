@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A map of a bot's memory.** A **Graph** tab beside the entries draws what the plugin's `graph`
+  answer holds: the bot at the centre, an entry per memory, and the topics they share — a
+  capitalised phrase, an `@handle`, a `#hashtag`, a date — with a line wherever two entries mention
+  the same one. It is laid out in the app rather than fetched as a picture, with a spring-and-repel
+  pass that always starts from the same seed, so the same memory draws the same map every time it
+  is opened and after every edit. Drag to pan, zoom with the buttons or, in a browser, the wheel,
+  and tap a node for a card with the entry's full text, the topics it mentions and a way into the
+  list at that entry. It is drawn with the app's own SVG — no web view, nothing to sandbox — and
+  under Reduce Motion it arrives with no animation at all. A page that hit one of the plugin's caps
+  says so rather than showing a partial map in silence.
+
 - **A memory browser.** Bot profile → **Memory**, and Settings → **Memory** for any bot: both of a
   profile's memory files — `MEMORY.md`, what the bot learned about its work, and `USER.md`, what it
   learned about you — as two lists with the char usage each one is actually spending. Search runs on

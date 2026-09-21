@@ -22,6 +22,7 @@
  */
 import { create } from 'zustand'
 
+import type { MemoryGraph } from '../features/memory/graph-model'
 import type { MemoryEntry, MemoryListing } from '../features/memory/model'
 
 export interface MemoryState {
@@ -43,6 +44,17 @@ export interface MemoryState {
   /** Null means "not searching"; an empty array means "searched, nothing". */
   results: MemoryEntry[] | null
 
+  /**
+   * The graph tab's own answer, fetched only once that tab is opened.
+   *
+   * A separate route and a separate fetch rather than something derived from
+   * the listing: the topics, the edges and the paging are the PLUGIN's, and
+   * re-deriving them here would mean this app clustering a memory differently
+   * from the gateway that owns it.
+   */
+  graph: MemoryGraph | null
+  graphLoading: boolean
+
   open: (profile: string, readOnly: boolean) => void
   setListing: (listing: MemoryListing) => void
   setLoading: (loading: boolean) => void
@@ -52,6 +64,8 @@ export interface MemoryState {
   setQuery: (query: string) => void
   setSearching: (searching: boolean) => void
   setResults: (results: MemoryEntry[] | null) => void
+  setGraph: (graph: MemoryGraph | null) => void
+  setGraphLoading: (loading: boolean) => void
   reset: () => void
 }
 
@@ -65,7 +79,9 @@ const INITIAL = {
   readOnly: false,
   query: '',
   searching: false,
-  results: null as MemoryEntry[] | null
+  results: null as MemoryEntry[] | null,
+  graph: null as MemoryGraph | null,
+  graphLoading: false
 }
 
 export const useMemoryStore = create<MemoryState>(set => ({
@@ -114,6 +130,14 @@ export const useMemoryStore = create<MemoryState>(set => ({
 
   setResults(results) {
     set({ results, searching: false })
+  },
+
+  setGraph(graph) {
+    set({ graph, graphLoading: false })
+  },
+
+  setGraphLoading(graphLoading) {
+    set({ graphLoading })
   },
 
   reset() {

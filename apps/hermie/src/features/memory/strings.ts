@@ -88,6 +88,31 @@ export const memoryStrings = {
   readOnly:
     'This gateway lets memory be read and not written. Switch on the plugin’s memory.edit for this profile to change that.',
 
+  graph: {
+    /** The whole picture's accessible name; the nodes are not separately named. */
+    label: 'A map of this memory: the bot, its entries and the topics they share',
+    zoomIn: 'Zoom in',
+    zoomOut: 'Zoom out',
+    reset: 'Reset',
+    empty: 'Nothing to draw yet.',
+    loading: 'Drawing…',
+    /** The plugin pages over ENTRIES; a page that filled a cap says so. */
+    truncated: (shown: number, total: number) =>
+      `Showing ${shown} of ${total} entries. The rest are not on this page of the map.`,
+    /** Our own cap bit, over and above the plugin's. */
+    dropped: (count: number) => `${count} more nodes were left out of the drawing.`,
+    detail: {
+      profile: 'This bot',
+      topic: 'Topic',
+      entry: 'Entry',
+      topics: 'MENTIONS',
+      noTopics: 'No topics in this entry.',
+      /** The button that leaves the map for the list. */
+      open: 'Show in the list',
+      close: 'Close'
+    }
+  },
+
   providers: {
     header: 'PROVIDERS',
     notBrowsable: 'Not browsable',

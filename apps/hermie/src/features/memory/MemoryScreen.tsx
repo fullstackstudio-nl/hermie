@@ -24,8 +24,8 @@
  * install panel; `memory.browse` without `memory.edit`, which draws the page
  * with its composers and row actions gone and a line saying why.
  */
-import { useCallback, useState } from 'react'
-import { Linking, ScrollView, View } from 'react-native'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Linking, Pressable, ScrollView, View } from 'react-native'
 
 import { PLUGIN_GUIDE_URL, PLUGIN_INSTALL_COMMANDS } from '../push/PluginInstall'
 import { strings } from '../../i18n/strings'
@@ -45,11 +45,23 @@ import { useHardwareBack } from '../../ui/useHardwareBack'
 import { useEscapeKey } from '../../ui/useEscapeKey'
 import { useTheme } from '../../ui/theme'
 import { MemoryEntryRow } from './MemoryEntryRow'
+import type { MemoryGraph as MemoryGraphType, MemoryGraphNode } from './graph-model'
+import { MemoryGraphView } from './MemoryGraphView'
+import { MemoryNodeCard } from './MemoryNodeCard'
 import { MemoryUsageBar } from './MemoryUsageBar'
-import { externalProviders, type MemoryEntry, MEMORY_TARGETS, type MemoryTarget } from './model'
+import {
+  externalProviders,
+  type MemoryEntry,
+  type MemoryListing as MemoryListingType,
+  MEMORY_TARGETS,
+  type MemoryTarget
+} from './model'
 import { MemoryScreenHeader } from './MemoryScreenHeader'
 import { memoryStrings } from './strings'
 import { useMemoryAvailability, useMemoryController } from './useMemory'
+
+/** A little air above the row the map sent us to, so it is not against the top. */
+const SCROLL_MARGIN = 24
 
 export interface MemoryScreenProps {
   /** The bot whose memory this is — the profile NAME, never a display name. */
@@ -73,6 +85,28 @@ export function MemoryScreen({ profile, title, onClose, testID = 'memory' }: Mem
   const query = useMemoryStore(state => state.query)
   const searching = useMemoryStore(state => state.searching)
   const results = useMemoryStore(state => state.results)
+  const graph = useMemoryStore(state => state.graph)
+  const graphLoading = useMemoryStore(state => state.graphLoading)
+
+  const [tab, setTab] = useState<MemoryTab>('entries')
+  const [selected, setSelected] = useState<MemoryGraphNode | null>(null)
+  /** The entry the map sent us to, lit until the reader touches something else. */
+  const [highlighted, setHighlighted] = useState<string | null>(null)
+  const scroller = useRef<ScrollView | null>(null)
+  /** Entry id → the row's own view, so it can be measured against the scroller. */
+  const rows = useRef<Record<string, View | null>>({})
+
+  /*
+    The graph is a second read of the same files, so it is fetched when its tab
+    is opened rather than beside the listing — most readers never open it.
+    Asked again whenever the controller changes, which is a new bot or a new
+    connection, because the answer belongs to one profile.
+  */
+  useEffect(() => {
+    if (tab === 'graph' && controller) {
+      void controller.loadGraph()
+    }
+  }, [controller, tab])
 
   useEscapeKey(onClose, true)
   useHardwareBack(onClose, true)
@@ -91,6 +125,37 @@ export function MemoryScreen({ profile, title, onClose, testID = 'memory' }: Mem
       title={memoryStrings.title}
     />
   )
+
+  /**
+   * Jump from a node to the entry it stands for.
+   *
+   * `measureLayout` against the scroller's own inner view rather than an
+   * `onLayout` offset: a row sits inside an `InsetGroup`, which wraps every
+   * child in a view of its own, so the `y` a row reports is relative to that
+   * card and not to the scrolling content. Measuring asks the one question that
+   * has the right answer.
+   *
+   * The Entries tab is shown first and the measurement waits a frame, because a
+   * tab that has never been drawn has no rows to measure.
+   */
+  const openInList = useCallback((entryId: string) => {
+    setTab('entries')
+    setHighlighted(entryId)
+    requestAnimationFrame(() => {
+      const row = rows.current[entryId]
+      const content = scroller.current?.getInnerViewNode?.()
+
+      if (!row || !content) {
+        return
+      }
+
+      row.measureLayout?.(
+        content as never,
+        (_x: number, y: number) => scroller.current?.scrollTo({ animated: true, y: Math.max(0, y - SCROLL_MARGIN) }),
+        () => undefined
+      )
+    })
+  }, [])
 
   if (availability === 'unknown') {
     return (
@@ -147,77 +212,103 @@ export function MemoryScreen({ profile, title, onClose, testID = 'memory' }: Mem
     <Screen padded={false}>
       {header}
 
-      <ScrollView contentContainerStyle={{ gap: theme.space.lg, padding: theme.space.lg }} testID={`${testID}-scroll`}>
-        <InsetGroup footer={memoryStrings.search.hint}>
-          <InsetRow>
-            <TextField
-              autoCapitalize="none"
-              autoCorrect={false}
-              onChangeText={next => void controller?.search(next)}
-              placeholder={memoryStrings.search.placeholder}
-              testID={`${testID}-search`}
-              value={query}
-            />
-          </InsetRow>
-        </InsetGroup>
+      <MemoryTabs onChange={setTab} tab={tab} testID={testID} />
 
-        {readOnly ? (
-          <Text color="textMuted" testID={`${testID}-read-only`} variant="meta">
-            {memoryStrings.readOnly}
-          </Text>
-        ) : null}
-
-        {notice ? (
-          <Text color="dangerText" testID={`${testID}-notice`} variant="meta">
-            {notice}
-          </Text>
-        ) : null}
-
-        {error ? (
-          <InsetGroup>
-            <InsetRow>
-              <Text color="dangerText" testID={`${testID}-error`} variant="meta">
-                {memoryStrings.failed(error)}
-              </Text>
-            </InsetRow>
-            <InsetButtonRow onPress={() => void controller?.refresh()} title={memoryStrings.retry} />
-          </InsetGroup>
-        ) : null}
-
-        {loading && !listing ? (
-          <Text color="textMuted" testID={`${testID}-loading`} variant="meta">
-            {memoryStrings.loading}
-          </Text>
-        ) : null}
-
-        {query.trim() ? (
-          <SearchResults
-            busy={busy}
-            onRemove={onRemove}
-            onReplace={onReplace}
-            query={query}
-            readOnly={readOnly}
-            results={results}
-            searching={searching}
+      <ScrollView
+        contentContainerStyle={{ gap: theme.space.lg, padding: theme.space.lg }}
+        ref={scroller}
+        testID={`${testID}-scroll`}
+      >
+        {tab === 'graph' ? (
+          <GraphTab
+            graph={graph}
+            listing={listing}
+            loading={graphLoading}
+            onOpenInList={openInList}
+            onSelect={setSelected}
+            selected={selected}
             testID={testID}
           />
-        ) : (
-          MEMORY_TARGETS.map(target => (
-            <MemorySection
-              busy={busy}
-              key={target}
-              onAdd={text => void controller?.add(target, text)}
-              onRemove={onRemove}
-              onReplace={onReplace}
-              readOnly={readOnly}
-              section={listing?.sections.find(row => row.target === target) ?? null}
-              target={target}
-              testID={testID}
-            />
-          ))
-        )}
+        ) : null}
 
-        <Providers listing={listing} testID={testID} />
+        {tab === 'graph' ? null : (
+          <>
+            <InsetGroup footer={memoryStrings.search.hint}>
+              <InsetRow>
+                <TextField
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  onChangeText={next => void controller?.search(next)}
+                  placeholder={memoryStrings.search.placeholder}
+                  testID={`${testID}-search`}
+                  value={query}
+                />
+              </InsetRow>
+            </InsetGroup>
+
+            {readOnly ? (
+              <Text color="textMuted" testID={`${testID}-read-only`} variant="meta">
+                {memoryStrings.readOnly}
+              </Text>
+            ) : null}
+
+            {notice ? (
+              <Text color="dangerText" testID={`${testID}-notice`} variant="meta">
+                {notice}
+              </Text>
+            ) : null}
+
+            {error ? (
+              <InsetGroup>
+                <InsetRow>
+                  <Text color="dangerText" testID={`${testID}-error`} variant="meta">
+                    {memoryStrings.failed(error)}
+                  </Text>
+                </InsetRow>
+                <InsetButtonRow onPress={() => void controller?.refresh()} title={memoryStrings.retry} />
+              </InsetGroup>
+            ) : null}
+
+            {loading && !listing ? (
+              <Text color="textMuted" testID={`${testID}-loading`} variant="meta">
+                {memoryStrings.loading}
+              </Text>
+            ) : null}
+
+            {query.trim() ? (
+              <SearchResults
+                busy={busy}
+                onRemove={onRemove}
+                onReplace={onReplace}
+                query={query}
+                readOnly={readOnly}
+                results={results}
+                searching={searching}
+                testID={testID}
+              />
+            ) : (
+              MEMORY_TARGETS.map(target => (
+                <MemorySection
+                  busy={busy}
+                  key={target}
+                  highlighted={highlighted}
+                  onAdd={text => void controller?.add(target, text)}
+                  onRow={(entryId, view) => {
+                    rows.current[entryId] = view
+                  }}
+                  onRemove={onRemove}
+                  onReplace={onReplace}
+                  readOnly={readOnly}
+                  section={listing?.sections.find(row => row.target === target) ?? null}
+                  target={target}
+                  testID={testID}
+                />
+              ))
+            )}
+
+            <Providers listing={listing} testID={testID} />
+          </>
+        )}
       </ScrollView>
     </Screen>
   )
@@ -231,10 +322,24 @@ interface SectionProps {
   onAdd: (text: string) => void
   onReplace: (entry: MemoryEntry, text: string) => void
   onRemove: (entry: MemoryEntry) => void
+  /** Hand back each row's view, so "show in the list" can measure and scroll to it. */
+  onRow: (entryId: string, view: View | null) => void
+  highlighted: string | null
   testID: string
 }
 
-function MemorySection({ target, section, readOnly, busy, onAdd, onReplace, onRemove, testID }: SectionProps) {
+function MemorySection({
+  target,
+  section,
+  readOnly,
+  busy,
+  onAdd,
+  onReplace,
+  onRemove,
+  onRow,
+  highlighted,
+  testID
+}: SectionProps) {
   const theme = useTheme()
   const [draft, setDraft] = useState('')
   const label = memoryStrings.sections[target]
@@ -267,14 +372,16 @@ function MemorySection({ target, section, readOnly, busy, onAdd, onReplace, onRe
       ) : null}
 
       {(section?.entries ?? []).map(entry => (
-        <MemoryEntryRow
-          busy={busy}
-          entry={entry}
-          key={entry.id}
-          onRemove={onRemove}
-          onReplace={onReplace}
-          readOnly={readOnly}
-        />
+        <View key={entry.id} ref={view => onRow(entry.id, view)}>
+          <MemoryEntryRow
+            busy={busy}
+            entry={entry}
+            highlighted={entry.id === highlighted}
+            onRemove={onRemove}
+            onReplace={onReplace}
+            readOnly={readOnly}
+          />
+        </View>
       ))}
 
       {readOnly ? null : (
@@ -376,5 +483,118 @@ function Providers({ listing, testID }: { listing: Parameters<typeof externalPro
         <InsetValueRow key={provider.name} label={provider.name} value={memoryStrings.providers.notBrowsable} />
       ))}
     </InsetGroup>
+  )
+}
+
+/** Which half of the page is showing. */
+export type MemoryTab = 'entries' | 'graph'
+
+/**
+ * The two tabs.
+ *
+ * A pair of pressables rather than the app's `SegmentedRow`, which belongs to a
+ * sheet's control stack and carries a row's chrome with it. This is a strip
+ * under a screen header, and the selected one is marked with the accent rule
+ * the design board uses for exactly that.
+ */
+function MemoryTabs({
+  tab,
+  onChange,
+  testID
+}: {
+  tab: MemoryTab
+  onChange: (next: MemoryTab) => void
+  testID: string
+}) {
+  const theme = useTheme()
+
+  return (
+    <View style={{ flexDirection: 'row', gap: theme.space.lg, paddingHorizontal: theme.space.lg }}>
+      {(['entries', 'graph'] as const).map(name => (
+        <Pressable
+          accessibilityRole="tab"
+          // `aria-selected`, never `accessibilityState`: react-native-web drops
+          // the object on the floor. `accessibility-state.test.tsx` sweeps for it.
+          aria-selected={tab === name}
+          key={name}
+          onPress={() => onChange(name)}
+          style={{
+            borderBottomColor: tab === name ? theme.colors.accentText : 'transparent',
+            borderBottomWidth: 2,
+            paddingVertical: theme.space.sm
+          }}
+          testID={`${testID}-tab-${name}`}
+        >
+          <Text color={tab === name ? 'accentText' : 'textMuted'} variant="name">
+            {memoryStrings.tabs[name]}
+          </Text>
+        </Pressable>
+      ))}
+    </View>
+  )
+}
+
+/**
+ * The map, what it left out, and whatever node is open.
+ *
+ * Two different kinds of "left out" are said separately, because they have
+ * different fixes: the PLUGIN pages over entries and says `truncated` when a
+ * cap bit, and the LAYOUT has a node ceiling of its own. Rolling them into one
+ * sentence would tell somebody their memory is too big when the picture simply
+ * has a page after it.
+ */
+function GraphTab({
+  graph,
+  listing,
+  loading,
+  selected,
+  onSelect,
+  onOpenInList,
+  testID
+}: {
+  graph: MemoryGraphType | null
+  listing: MemoryListingType | null
+  loading: boolean
+  selected: MemoryGraphNode | null
+  onSelect: (node: MemoryGraphNode | null) => void
+  onOpenInList: (entryId: string) => void
+  testID: string
+}) {
+  if (loading && !graph) {
+    return (
+      <Text color="textMuted" testID={`${testID}-graph-loading`} variant="meta">
+        {memoryStrings.graph.loading}
+      </Text>
+    )
+  }
+
+  if (!graph || graph.nodes.length <= 1) {
+    return (
+      <Text color="textMuted" testID={`${testID}-graph-empty`} variant="meta">
+        {memoryStrings.graph.empty}
+      </Text>
+    )
+  }
+
+  return (
+    <>
+      <MemoryGraphView graph={graph} onSelect={onSelect} selectedId={selected?.id ?? null} />
+
+      {graph.truncated || graph.page.hasMore ? (
+        <Text color="textMuted" testID={`${testID}-graph-truncated`} variant="meta">
+          {memoryStrings.graph.truncated(graph.page.returned, graph.page.total)}
+        </Text>
+      ) : null}
+
+      {selected ? (
+        <MemoryNodeCard
+          graph={graph}
+          listing={listing}
+          node={selected}
+          onClose={() => onSelect(null)}
+          onOpenInList={onOpenInList}
+        />
+      ) : null}
+    </>
   )
 }

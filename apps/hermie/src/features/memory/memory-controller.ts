@@ -37,6 +37,7 @@
 import { type GatewayHttp, isGatewayError } from '@hermie/gateway-client'
 
 import type { MemoryState } from '../../store/memory'
+import { memoryGraphOf } from './graph-model'
 import {
   type MemoryEntry,
   memoryListingOf,
@@ -158,6 +159,36 @@ export class MemoryController {
     } catch (failure) {
       if (this.current(mine)) {
         this.store.getState().setSearching(false)
+        this.store.getState().setNotice(asRouteError(failure).message)
+      }
+    }
+  }
+
+  /**
+   * `GET …/memory/graph`.
+   *
+   * Fetched when the Graph tab is opened rather than beside the listing: it is
+   * a second read of the same files and most readers never open it.
+   *
+   * `offset` and `limit` are left off. The plugin's own default page is 100
+   * ENTRIES, which is more than a memory file holds in practice, and a page
+   * that did fill it answers `truncated` — which the tab says out loud rather
+   * than drawing a partial picture silently.
+   */
+  async loadGraph(): Promise<void> {
+    const mine = ++this.generation
+
+    this.store.setState({ graphLoading: true })
+
+    try {
+      const body = await this.get(`${MEMORY_ROUTE}/graph?profile=${encodeURIComponent(this.profile)}`)
+
+      if (this.current(mine)) {
+        this.store.getState().setGraph(memoryGraphOf(body))
+      }
+    } catch (failure) {
+      if (this.current(mine)) {
+        this.store.getState().setGraphLoading(false)
         this.store.getState().setNotice(asRouteError(failure).message)
       }
     }

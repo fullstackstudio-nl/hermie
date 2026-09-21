@@ -108,6 +108,10 @@ no third-party network call. The only address Hermie knows is the one you typed.
   the gateway; without it the page says so and gives you the install command
   rather than showing an empty list. A provider like mem0 is named and marked
   not browsable — it offers no way to list what it holds.
+- **A map of what a bot remembers.** The memory page has a Graph tab: the bot,
+  its entries, and the topics they share. Pan, zoom, tap a node to read the
+  whole entry and jump to it in the list. Drawn in the app, so the same memory
+  draws the same map every time.
 - **Rename a bot.** The profile sheet's name is editable. On the default profile
   that sets a display name and the profile keeps its id; on any other profile it
   renames the profile itself, which the field says out loud before you press
