@@ -22,10 +22,11 @@ new record supersedes it, and the old one gets a line at the top pointing forwar
 | [0009](0009-bot-to-bot-detection.md)              | Bot-to-bot traffic is detected from transcript conventions     | Accepted           |
 | [0010](0010-agent-questions-as-bottom-sheets.md)  | Questions from the agent are bottom sheets                     | Accepted           |
 | [0011](0011-mac-via-the-ipad-build.md)            | The Mac version is the iPad build                              | Accepted           |
-| [0012](0012-local-chat-list-layout.md)            | The chat list's arrangement and colours are client-local       | Accepted           |
+| [0012](0012-local-chat-list-layout.md)            | The chat list's arrangement and colours are client-local       | Amended by 0016    |
 | [0013](0013-cron-deliveries-in-the-transcript.md) | A cron delivery is its own item kind, detected from its header | Accepted           |
 | [0014](0014-plain-http-on-private-networks.md)    | Plain http is supported on a private network                   | Accepted           |
 | [0015](0015-web-variant-on-its-own-port.md)       | The web variant is one server on its own port, same-origin     | Accepted           |
+| [0016](0016-ui-meta-sync.md)                      | Per-client settings live in `ui_meta`, one section per concern | Proposed           |
 
 ## Template
 

@@ -2234,6 +2234,82 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       case 'profiles.list':
         return { profiles: state.profiles, bot_mode_protocol: true }
 
+      /**
+       * `ui_meta` only, which is the section a client has any business writing.
+       *
+       * Upstream's docstring is the specification and the generated contract
+       * carries it verbatim: "Sections are independent; `ui_meta_expected_revisions`
+       * is a per-key compare-and-swap." So the unit is the TOP-LEVEL KEY:
+       *
+       *  - a key the request does not name is left exactly as it was, which is
+       *    what keeps a client from wiping the `hermes-bots` marker another tool
+       *    put there by writing only its own key;
+       *  - a key the request does name REPLACES that key's value whole, and its
+       *    revision goes up by one;
+       *  - a key whose `ui_meta_expected_revisions` entry disagrees with the
+       *    stored revision writes nothing and comes back in `ui_meta_conflicts`
+       *    as `{ expected, actual }` — and the other keys in the same request
+       *    still apply, because the sections are independent.
+       *
+       * The revision of a key that has never been written is 0, so a client
+       * claiming a key for the first time sends `0` and finds out whether
+       * somebody beat it to it.
+       *
+       * Everything else `profiles.configure` can set (soul, model, skills) is
+       * deliberately absent: the fake answers what it can honestly reproduce,
+       * and a section it pretended to write would be a green test about nothing.
+       */
+      case 'profiles.configure': {
+        const name = typeof params.name === 'string' && params.name ? params.name : String(params.profile ?? '')
+        const profile = state.profiles.find(entry => entry.name === name)
+
+        if (!profile) {
+          throw new Error(`Unknown profile: ${name}`)
+        }
+
+        const patch = params.ui_meta
+
+        if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+          return { ok: true, applied: {} }
+        }
+
+        const expected = (
+          params.ui_meta_expected_revisions && typeof params.ui_meta_expected_revisions === 'object'
+            ? params.ui_meta_expected_revisions
+            : {}
+        ) as Record<string, unknown>
+        const stored = { ...(profile.ui_meta ?? {}) }
+        const revisions = { ...profile.ui_meta_revisions }
+        const conflicts: Record<string, { expected: unknown; actual: number }> = {}
+        let wrote = false
+
+        for (const [key, value] of Object.entries(patch as Record<string, unknown>)) {
+          const actual = revisions[key] ?? 0
+
+          if (key in expected && expected[key] !== actual) {
+            conflicts[key] = { expected: expected[key], actual }
+
+            continue
+          }
+
+          stored[key] = value
+          revisions[key] = actual + 1
+          wrote = true
+        }
+
+        profile.ui_meta = stored
+        profile.ui_meta_revisions = revisions
+
+        return {
+          ok: true,
+          applied: {
+            ui_meta: wrote,
+            ui_meta_revisions: revisions,
+            ...(Object.keys(conflicts).length ? { ui_meta_conflicts: conflicts } : {})
+          }
+        }
+      }
+
       case 'session.list': {
         const title = typeof params.title === 'string' ? params.title : null
         const profile = typeof params.profile === 'string' ? params.profile : null

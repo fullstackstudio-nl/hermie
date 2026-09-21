@@ -1,7 +1,14 @@
 # 0012. The chat list's arrangement and colours are client-local
 
-- Status: Accepted
+- Status: Accepted, amended by [0016](0016-ui-meta-sync.md)
 - Date: 2026-09-19
+
+> **Amended 2026-09-21.** The last line of this record set a condition — "if the gateway ever grows a
+> per-client metadata scope, this is the one module to change" — and it turned out to have one all
+> along: `ui_meta` on a profile row, written per top-level key through `profiles.configure`.
+> [ADR-0016](0016-ui-meta-sync.md) takes that door. Everything below still holds as the description
+> of the local store, which remains what the UI reads and what the app falls back to when the gateway
+> refuses a write or does not carry the field.
 
 ## Context
 
