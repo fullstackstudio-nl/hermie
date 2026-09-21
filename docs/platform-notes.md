@@ -6,10 +6,11 @@ Findings are dated, because the answers change with every SDK bump.
 Everything below was measured on: macOS 27.0 (Darwin 27.0.0, Apple Silicon), Xcode 27.0, Node 26.8.2,
 npm 11.19.1, CocoaPods 1.17.0, Expo SDK 54.0.37, React Native 0.81.5.
 
-There are three targets and two builds. iOS and Android are what you expect; the Mac is the **iOS
-build** running as "Designed for iPad" (ADR-0011). Sections dated before 2026-09-19 that talk about a
-native macOS target described a platform that no longer exists — they were removed rather than
-rewritten, and git history has them.
+There are four targets and three builds. iOS and Android are what you expect; the Mac is the **iOS
+build** running as "Designed for iPad" (ADR-0011); the browser is a separate Expo web export served
+by Hermie Web (ADR-0015), and it is the only one nobody installs. Sections dated before 2026-09-19
+that talk about a native macOS target described a platform that no longer exists — they were removed
+rather than rewritten, and git history has them.
 
 ## The chat chrome floats, and the glass is the real material (2026-09-20)
 
@@ -132,7 +133,7 @@ actually land is a question for a Mac.
 | Does `contrast:check` cover avatar tints?         | **No** — measure those by hand                  | 2026-09-20 |
 | Is `TextDecoder` present at runtime?              | Not verified; the guard ships either way        | 2026-09-18 |
 | Does the Android app build, Debug and Release?    | **Yes** — both, with no change to the project   | 2026-09-20 |
-| Is the Android release APK shippable?             | **No** — debug-signed; there is no keystore     | 2026-09-20 |
+| Is the Android release APK shippable?             | **Yes** when the upload key signs it            | 2026-09-21 |
 | Does a RELEASE build reach http on Android?       | **Yes** — measured on an emulator, not read     | 2026-09-20 |
 | Does Android's back button close a panel?         | **Yes, since `useHardwareBack`** — it did not   | 2026-09-20 |
 | Does a default AVD report Reduce Motion?          | **Yes** — its animation scales ship at 0        | 2026-09-20 |
@@ -2903,10 +2904,15 @@ point it at the real SDK with `--sdk_root=$ANDROID_HOME`, because it defaults to
 `android/`. Debug 177 MB, Release 105 MB — both carry all four ABIs
 (`reactNativeArchitectures=armeabi-v7a,arm64-v8a,x86,x86_64`).
 
-**The release APK is debug-signed.** `app/build.gradle` gives the release build type
-`signingConfig signingConfigs.debug`, which is the React Native template's default and is still what
-is there; no keystore exists in the repository. It installs and runs, and it is not a shippable
-artefact. Play signing is untouched by any of this.
+**The release APK was debug-signed, because on this date there was no key to sign it with.**
+`app/build.gradle` gave the release build type `signingConfig signingConfigs.debug`, the React
+Native template's default. That is no longer the whole story: the upload key exists now — with the
+owner, never in this repository — and `app/build.gradle` picks it whenever all four
+`HERMIE_UPLOAD_*` values reach Gradle, keeping the debug signing only when one of them is missing,
+so a fork and a secretless CI job still build. A debug-signed release still installs and runs, and
+Play still refuses it, which is why the build prints the key it used on one `hermie:` line instead
+of leaving it to be assumed. See `docs/release.md` and the 2026-09-21 section at the end of this
+file.
 
 ### Cleartext works in the release build, which is the thing that had never been checked
 
@@ -3072,8 +3078,12 @@ to the transcript package's contract and its tests, not a line. Filed as what it
   refusal path — was watched. It is the largest untested branch on this platform.
 - **A real device.** Everything here is one arm64 emulator. No physical hardware, no other OEM skin,
   no API level below 37, and `minSdk` is 24.
-- **Play signing, and anything downstream of it.** The release APK is debug-signed; no bundle was
-  built, nothing was uploaded, and no notification path exists to test.
+- **Play signing, and anything downstream of it.** This pass had no upload key, so its release APK
+  was debug-signed and no bundle was built at all. Both are signed now (see the 2026-09-21 section
+  at the end of this file), but nothing has been uploaded and the upload key has not been registered
+  with Play. Notifications are unchanged by that: ADR-0017 is accepted and the Hermie Web half is
+  written, but the app has no `expo-notifications` dependency and no call site, so there is still no
+  device-side path to test.
 - **The photo picker.** The attach menu's photo entry was opened but no image was picked, so
   `expo-image-picker` → `ImageManipulator` → `image.attach_bytes` is still the 2026-09-19 result
   rather than this one's.
@@ -4707,3 +4717,173 @@ opened by its own containing app rather than by a scheme lookup.
   iOS throttles `reloadAllTimelines()` at the rate this app calls it (debounced to
   1.5s, and dropped entirely when the content would be identical) is not something
   a simulator can answer.
+
+## The signed Android build, and putting it on real hardware (2026-09-21, last)
+
+Everything Android in this file above was measured on an emulator. This section exists so the first
+run on real hardware — a phone and a tablet, 2026-09-22 — produces findings rather than a shrug.
+
+### What is being installed, and what signed it
+
+`npm run android:release` on this machine, with JDK 17 and `ANDROID_HOME` both exported:
+
+```sh
+export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
+export ANDROID_HOME="$HOME/Library/Android/sdk"     # Gradle fails at configure time without it
+npm run android:release
+```
+
+**BUILD SUCCESSFUL in 1m 41s.** The one line that matters came out of the configure phase:
+
+```
+hermie: release builds are signed with the upload key in HERMIE_UPLOAD_STORE_FILE (alias hermie-upload)
+```
+
+So this is **not** the debug-signed fallback. Both artefacts landed:
+
+| Artefact   | Path                                                                   | Size     |
+| ---------- | ---------------------------------------------------------------------- | -------- |
+| APK        | `apps/hermie/android/app/build/outputs/apk/release/app-release.apk`    | 105.0 MB |
+| app bundle | `apps/hermie/android/app/build/outputs/bundle/release/app-release.aab` | 66.9 MB  |
+
+`apksigner verify --print-certs` on the APK and `keytool -printcert -jarfile` on the bundle print the
+same certificate and the same digest, which is the check `docs/release.md` asks for:
+
+```
+CN=Sebastiaan Eekhof, OU=Unknown, O=FullStack Studio, L=Den Haag, ST=Zuid-Holland, C=NL
+SHA-256: e67957e2756807764d842cbd47b6b4daad9b410445839dceb857d19cb5809f0c
+```
+
+`CN=Android Debug` would have been the tell that the four `HERMIE_UPLOAD_*` properties had not
+reached Gradle. It is not there, so the upload key signed both.
+
+**The APK is the thing to install**; the `.aab` is for Play and a device cannot take it. It is 105 MB
+because it carries all four ABIs, so the install itself takes a while over USB — that is not a hang.
+
+One consequence of testing a **release** build: the `hermie-dev-launch` Intent channel is gated on
+`FLAG_DEBUGGABLE` and is therefore inert here. Nothing can be pre-filled from the command line; the
+gateway address and the sign-in have to be typed on the device, which is the point of this pass.
+
+### Getting it onto one device when two are attached
+
+With a phone and a tablet both plugged in, a bare `adb install` refuses rather than guessing. List
+them first and address each one by serial:
+
+```sh
+adb devices -l
+# List of devices attached
+# 1A2B3C4D5E6F   device product:... model:Pixel_7   transport_id:1
+# R9WT201XXXX    device product:... model:SM_X200   transport_id:2
+
+APK=apps/hermie/android/app/build/outputs/apk/release/app-release.apk
+adb -s 1A2B3C4D5E6F install -r "$APK"      # the phone
+adb -s R9WT201XXXX install -r "$APK"       # the tablet
+```
+
+`-r` reinstalls over an existing copy and keeps its data. It only works when the **signature
+matches**. Anything already on these devices was signed with the debug key, so the first install of
+this build will fail with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`. Uninstall first:
+
+```sh
+adb -s <serial> uninstall dev.hermie.app
+```
+
+That wipes the app's data along with it — the keystore-backed credentials included — so onboarding
+starts from nothing afterwards. For this pass that is what is wanted; it is worth knowing before
+somebody does it by accident to a device that was mid-test.
+
+### Reading the logs
+
+The app's own output is drowned by the system log, so filter to the process:
+
+```sh
+adb -s <serial> logcat -c                                       # clear first, then reproduce
+adb -s <serial> logcat --pid=$(adb -s <serial> shell pidof dev.hermie.app)
+adb -s <serial> logcat -s ReactNativeJS:V                       # the JS console only
+```
+
+`pidof` returns nothing until the app is actually running, so launch it before that second command.
+A crash takes the process with it, which takes the `--pid` filter with it — for that, read the crash
+buffer instead, which survives:
+
+```sh
+adb -s <serial> logcat -b crash -d
+```
+
+### The checklist
+
+Each line is something to look at and mark. "Pass" means the described thing was seen, not that
+nothing obviously exploded. Run the whole list on **both** devices unless a line says otherwise —
+the tablet is not a big phone, and the two-pane layout is the reason.
+
+**Onboarding and sign-in**
+
+1. The wizard accepts a scheme-less gateway address (`host:9119`) and the probe reports which scheme
+   it landed on. Pass = the found-over line names `http://` or `https://` and matches reality.
+2. The warning about a connection in the clear appears for a plain-`http` address that is **not** on
+   a private network, and does not appear for one that is. This was measured on an emulator against
+   a tailnet name; a real phone has a real DNS resolver and is the better test.
+3. Sign-in completes and a cold restart comes straight back to the chats list, still signed in. Pass
+   = no second sign-in. This is the Android keystore doing its job.
+4. **`--auth native`, against a gateway configured for it.** The in-app WebView flow has never been
+   run on Android — it is the largest untested branch on this platform. Also worth forcing the
+   documented refusal: a gateway with extra headers configured should make
+   `webViewMayCarryHeaders()` return false and the app should say so rather than fail silently.
+
+**The conversation**
+
+5. Send a message and watch a reply stream in. Pass = the bubble grows, and the transcript stays
+   pinned to the newest line without being dragged there.
+6. An approval arrives and both answers work. Pass = allow and deny each reach the bot and the
+   request stops being pending.
+7. Attach a file, and separately attach a **photo** from the picker. The photo path
+   (`expo-image-picker` → `ImageManipulator` → `image.attach_bytes`) has never been carried through
+   to a sent message on Android — the menu entry was opened once and nothing was picked.
+8. Scroll back through a long transcript. Pass = it stays smooth. The wallpaper stacks a base
+   gradient plus a per-corner bloom behind an inverted list and no frame timings have ever been
+   taken on real silicon; if it stutters, say where and how far back.
+9. The crons list loads and a cron delivery appears in the transcript where it belongs (ADR-0013).
+
+**Layout and system behaviour**
+
+10. **Rotate the tablet.** `REGULAR_LAYOUT_MIN_WIDTH` is 700, so landscape should give the
+    sidebar-plus-detail shell and portrait may too, depending on the tablet's width in dp. Pass =
+    the two panes appear at the right moment and the transition does not drop the open chat. A large
+    phone in landscape can cross 700 dp as well (one emulator measured 914 dp), so check it there too.
+11. Hide the sidebar and bring it back. Pass = the slim rail keeps the way back plus Activity, Crons
+    and Settings, and nothing moves more than one tap away.
+12. Dark and light, switched from the **system** setting while the app is open. Pass = the whole app
+    follows, including the avatar tints, which `contrast:check` does not cover and which have to be
+    looked at.
+13. The hardware back button: closes an open panel, then a sheet, then leaves the app — in that
+    order, and without the transcript jumping. There is one unreproduced sighting on record of
+    dismissing the keyboard with back during a streaming turn leaving the transcript slightly above
+    the bottom with the jump pill over the newest bubble. If it happens, note exactly what was on
+    screen.
+14. **Reduce Motion should be OFF** here. A stock AVD ships all three animation scales at zero and
+    reports it as on, which made every emulator pass useless for this. Real hardware is the first
+    honest reading: pass = animations actually animate.
+15. **Home-screen widgets.** No Android widget has ever been drawn — no emulator was started for the
+    2026-09-21 widget pass. Place one from the launcher's widget picker. Pass = it renders with the
+    right avatars and a tap opens the app at the right place.
+16. **Nothing vibrates, and that is expected.** `VIBRATE` is in `blockedPermissions`, so `haptic()`
+    reaches a native module that cannot fire. Confirm it does not crash anything; a buzz would be
+    the surprise.
+
+### When something fails
+
+Capture enough that it does not have to be reproduced to be understood:
+
+- The filtered `logcat` from `adb logcat -c` through the failure, and `adb logcat -b crash -d` if the
+  app disappeared.
+- `adb devices -l` output, so the model and the serial are on the record — an OEM skin is a variable
+  and half of these lines have never met one.
+- The device's Android version and its width in dp
+  (`adb -s <serial> shell wm size` and `adb -s <serial> shell wm density`), which is what decides
+  whether the two-pane layout should have appeared at all.
+- A screen recording for anything about motion, scrolling or layout, because a still frame cannot
+  show a stutter: `adb -s <serial> shell screenrecord /sdcard/hermie.mp4`, Ctrl-C to stop, then
+  `adb -s <serial> pull /sdcard/hermie.mp4`.
+
+Add what comes back to this file as a new dated section rather than editing this one — this one is
+the plan, and what actually happened is the finding.
