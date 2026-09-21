@@ -16,7 +16,7 @@ import {
   visibleItems
 } from './selectors'
 import { approvalRequest, delegationEvents, dmDispatchTurn, streamedTurn } from './__fixtures__/events'
-import { rpcHistoryRows } from './__fixtures__/rows'
+import { kanbanNotificationText, plainProcessText, priorContextText, rpcHistoryRows } from './__fixtures__/rows'
 import { type AssistantItem, type ChatState, createChatState } from './types'
 
 const NOW = 1_700_000_000_000
@@ -35,17 +35,53 @@ const options = (over: Partial<VisibilityOptions> = {}): VisibilityOptions => ({
 const shown = (state: ChatState, over: Partial<VisibilityOptions> = {}) =>
   visibleItems(state, options(over)).map(entry => [entry.item.kind, entry.presentation])
 
+/** `[noticeKind, presentation]` for the notices a level lets through. */
+const notices = (state: ChatState, over: Partial<VisibilityOptions> = {}) =>
+  visibleItems(state, options(over))
+    .filter(entry => entry.item.kind === 'notice')
+    .map(entry => [entry.item.kind === 'notice' ? entry.item.noticeKind : '', entry.presentation])
+
 describe('visibleItems levels', () => {
   const state = reconcile(fresh(), rowsToItems(rpcHistoryRows, 'rpc'))
 
-  it('hides tool cards and notices at quiet, but never the conversation', () => {
+  it('hides tool cards at quiet, but never the conversation', () => {
     const kinds = shown(state, { level: 'quiet' }).map(entry => entry[0])
 
     expect(kinds).not.toContain('tool')
-    expect(kinds).not.toContain('notice')
     expect(kinds).toContain('user')
     expect(kinds).toContain('assistant')
     expect(kinds).toContain('bot_dm_in')
+  })
+
+  /**
+   * Which notices survive `quiet`, and which do not.
+   *
+   * The line is not "is it a notice" but "did the owner ask for this". A fan-out
+   * they dispatched and a background process they started are results they went
+   * away and came back for — the same argument ADR-0013 makes for a cron
+   * delivery, and the amendment of 2026-09-21 extends it to these two. Narration
+   * — a model switch, a compaction handoff, a kanban event — is not.
+   */
+  it('keeps work the owner dispatched at quiet, folded', () => {
+    expect(notices(state, { level: 'quiet' })).toContainEqual(['async_delegation_complete', 'collapsed'])
+  })
+
+  it('keeps a background process at quiet too, folded', () => {
+    const completion = reconcile(fresh(), rowsToItems([{ role: 'user', row_id: 1, text: plainProcessText }], 'rpc'))
+
+    expect(notices(completion, { level: 'quiet' })).toEqual([['process_complete', 'collapsed']])
+  })
+
+  it.each([
+    ['a model switch', { role: 'user', row_id: 1, text: 'gpt-5', display_kind: 'model_switch' }],
+    ['a roster refresh', { role: 'user', row_id: 1, text: 'refreshed', display_kind: 'internal_notification' }],
+    ['a compaction handoff', { role: 'user', row_id: 1, text: priorContextText }],
+    ['a kanban dispatch', { role: 'user', row_id: 1, text: `${kanbanNotificationText}\ndetails` }]
+  ])('still drops %s at quiet', (_what, row) => {
+    const only = reconcile(fresh(), rowsToItems([row], 'rpc'))
+
+    expect(notices(only)).toHaveLength(1)
+    expect(notices(only, { level: 'quiet' })).toEqual([])
   })
 
   it('collapses tool cards and notices at normal', () => {

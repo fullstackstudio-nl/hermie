@@ -1,6 +1,6 @@
 # 0013. A cron delivery is its own item kind, detected from its header
 
-- Status: Accepted
+- Status: Accepted, amended 2026-09-21 (the `quiet` exemption covers work the owner dispatched)
 - Date: 2026-09-19
 
 ## Context
@@ -93,3 +93,23 @@ because the scheduler is not a peer bot.
   than a rewrite.
 - `reconcile` needs no merge rule for the new kind: the stream learns nothing about a delivery the
   persisted row does not also carry, so the default merge is already correct. A test pins that.
+
+## Amendment, 2026-09-21: the `quiet` exemption is about who asked, not about cron
+
+This record gave a cron delivery one privilege the rest of the notice family does not have: it
+survives `quiet`, folded rather than dropped. The reason written down was that it "is the result the
+owner scheduled — the reason they opened the chat".
+
+[0018](0018-injected-rows-are-notices.md) gave two more row kinds the same card treatment: a
+`delegate_task` fan-out reporting back, and a background process that exited. Once they were cards,
+`quiet` dropped them — and that made the stated reason inconsistent with itself, because those are
+results the owner dispatched too. A fan-out that ran for fourteen minutes is exactly the row somebody
+reopens the chat for, and it disappeared at the level people leave the app on.
+
+So the exemption is restated as what it always meant: **`quiet` keeps a row the owner asked for, and
+drops the machine narrating itself.** `cron_delivery`, `async_delegation_complete` and
+`process_complete` stay, folded. `internal_notification` — which is where a kanban event, a
+compaction handoff and a roster refresh land — plus `model_switch`, `personality_switch` and
+`auto_continue` stay hidden, because nobody asked for those. The rule lives in `selectors.ts` with a
+test per kind, and the cost is unchanged: a chat with a busy fan-out shows more at `quiet` than a
+strict reading of "quiet" would suggest, which is the trade this record already made once.

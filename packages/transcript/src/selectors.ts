@@ -190,6 +190,25 @@ export function visibleItems(state: ChatState, options: VisibilityOptions): Visi
         if (level === 'quiet') {
           if (item.noticeKind === 'reclaimed') {
             out.push({ item, presentation: 'chip' })
+            break
+          }
+
+          /*
+            Work the owner dispatched, reporting back.
+
+            Same rule as the cron card above, for the same reason (ADR-0013,
+            amended 2026-09-21): a fan-out's results and a background process's
+            output are not the machine narrating itself — they are the PAYLOAD of
+            something the owner started and then walked away from, which is
+            usually the row they reopened the chat for. `quiet` folds the report
+            rather than losing it.
+
+            The rest of the family stays hidden, because the rest of the family is
+            narration: a model switch, a compaction handoff, a kanban event, the
+            roster refreshing. Nobody asked for those.
+          */
+          if (item.noticeKind === 'async_delegation_complete' || item.noticeKind === 'process_complete') {
+            out.push({ item, presentation: 'collapsed' })
           }
 
           break
