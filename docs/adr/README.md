@@ -16,7 +16,7 @@ new record supersedes it, and the old one gets a line at the top pointing forwar
 | [0003](0003-vendor-hermes-shared.md)                | Vendor the Hermes protocol sources with a sync script                        | Accepted           |
 | [0004](0004-native-pkce-via-webview.md)             | Native PKCE sign-in through an intercepted web view redirect                 | Accepted           |
 | [0005](0005-ticket-per-websocket-dial.md)           | A fresh ticket per WebSocket dial, offered as a subprotocol                  | Accepted           |
-| [0006](0006-single-gateway-no-relay.md)             | One gateway per install, no cross-gateway bot relay                          | Accepted           |
+| [0006](0006-single-gateway-no-relay.md)             | One gateway per install, no cross-gateway bot relay                          | Amended by 0022    |
 | [0007](0007-canonical-bot-chats-only.md)            | Only canonical Bot Chats                                                     | Accepted           |
 | [0008](0008-verbosity-as-client-selector.md)        | Verbosity is a client-side selector                                          | Accepted           |
 | [0009](0009-bot-to-bot-detection.md)                | Bot-to-bot traffic is detected from transcript conventions                   | Accepted           |
@@ -31,6 +31,7 @@ new record supersedes it, and the old one gets a line at the top pointing forwar
 | [0018](0018-injected-rows-are-notices.md)           | A row the gateway injected is a notice, recognised by its shape              | Accepted           |
 | [0019](0019-folders-in-the-chat-list.md)            | The chat list groups into folders, and a bot is in exactly one               | Accepted           |
 | [0020](0020-diagrams-and-math-without-a-webview.md) | Diagrams and mathematics are drawn in the bundle, not in a web view          | Accepted           |
+| [0022](0022-a-list-of-gateways.md)                  | A list of gateways, one live at a time, storage keyed by which               | Accepted           |
 
 | #                                                 | Title                                                                        | Status             |
 | ------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------ |
@@ -39,7 +40,7 @@ new record supersedes it, and the old one gets a line at the top pointing forwar
 | [0003](0003-vendor-hermes-shared.md)              | Vendor the Hermes protocol sources with a sync script                        | Accepted           |
 | [0004](0004-native-pkce-via-webview.md)           | Native PKCE sign-in through an intercepted web view redirect                 | Accepted           |
 | [0005](0005-ticket-per-websocket-dial.md)         | A fresh ticket per WebSocket dial, offered as a subprotocol                  | Accepted           |
-| [0006](0006-single-gateway-no-relay.md)           | One gateway per install, no cross-gateway bot relay                          | Accepted           |
+| [0006](0006-single-gateway-no-relay.md)           | One gateway per install, no cross-gateway bot relay                          | Amended by 0022    |
 | [0007](0007-canonical-bot-chats-only.md)          | Only canonical Bot Chats                                                     | Accepted           |
 | [0008](0008-verbosity-as-client-selector.md)      | Verbosity is a client-side selector                                          | Accepted           |
 | [0009](0009-bot-to-bot-detection.md)              | Bot-to-bot traffic is detected from transcript conventions                   | Accepted           |
@@ -54,6 +55,7 @@ new record supersedes it, and the old one gets a line at the top pointing forwar
 | [0018](0018-injected-rows-are-notices.md)         | A row the gateway injected is a notice, recognised by its shape              | Accepted           |
 | [0019](0019-folders-in-the-chat-list.md)          | The chat list groups into folders, and a bot is in exactly one               | Accepted           |
 | [0021](0021-header-based-front-doors.md)          | Header-based front doors: Cloudflare Access                                  | Accepted           |
+| [0022](0022-a-list-of-gateways.md)                | A list of gateways, one live at a time, storage keyed by which               | Accepted           |
 
 ## Template
 

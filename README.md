@@ -88,6 +88,15 @@ no third-party network call. The only address Hermie knows is the one you typed.
   chats archive, and each one can carry its own colour. None of it is sent to the
   gateway: the arrangement is yours and it is per gateway, because a different
   machine's bots are a different list.
+- **More than one gateway, one at a time.** A machine at home and one at work,
+  or a gateway you run and one you are testing: Settings → Gateways keeps them
+  all, names them what you like, and switches between them with a tap. Hermie
+  holds one connection, so switching disconnects and dials the other — but
+  nothing is thrown away on the way. Each gateway keeps its own sign-in, its own
+  cached conversations, its own read marks and its own arrangement, even when
+  both have a bot called `researcher`. Notifications and widget taps know which
+  gateway they came from and take you there. Bots still only message each other
+  inside their own gateway; Hermie does not route between them.
 - **Every message has a menu.** Copy the words or the Markdown, copy any link in
   it, open the other bot's chat, and — on one of your own turns — put it back in
   the composer to send again. On the newest reply, ask for it again: that goes
@@ -142,6 +151,9 @@ Hermie is a client, not a server. It needs a Hermes gateway you can reach:
   token gets a request past the edge, not a browser, and the sign-in page is a
   browser. See
   [ADR-0021](docs/adr/0021-header-based-front-doors.md).
+
+You can set up more than one. Everything above applies to each of them
+separately, and Hermie talks to whichever one you last switched to.
 
 Two things about the gateway's own configuration are worth knowing before you
 start:

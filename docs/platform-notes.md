@@ -7231,3 +7231,129 @@ The assertion now spells out the whole message; the new suite uses regexes.
 - **The landing-page detector is unchanged and still crude**: `<!doctype html`
   or `<html` in the first 2000 characters. A proxy that answers with an error
   page that opens with a comment or a BOM is not detected, and never was.
+
+## Two gateways on one device (2026-09-22)
+
+Every stored thing in this app used to have exactly one meaning, because there
+was exactly one gateway. `hermie.auth.access_token` was THE access token. The
+whole of this section is downstream of that stopping being true.
+
+### The keychain is the one where a collision is not a stale preference
+
+A settings blob read under the wrong key costs somebody their verbosity
+default. A keychain item read under the wrong key hands gateway B's access
+token to gateway A — and on a provider with refresh-token reuse detection,
+presenting a token minted elsewhere does not merely fail, it revokes the
+session. So `secretKeysFor(namespace)` exists at the one place the six names
+are written down, and `createTokenCoordinator` now **throws** rather than
+defaulting to the bare names when it is given neither a namespace nor a store.
+A default there would be a coordinator writing one gateway's rotated tokens
+over another's, silently, on a timer.
+
+### Which keys are NOT namespaced, and the one that moved
+
+| Key                   | Why it stays device-level                                          |
+| --------------------- | ------------------------------------------------------------------ |
+| `hermie.gateways`     | it is what knows the ids                                           |
+| `hermie.lock`         | a phone that unlocked by switching gateway would not be a lock     |
+| `hermie.installation` | ADR-0017's id is minted once per DEVICE; per gateway is a leak     |
+| `hermie.appearance`   | light or dark is about the eyes, not about an account              |
+| `hermie.context`      | the reader's own switches; it already carries its one gateway fact |
+
+`hermie.appearance` is the one that MOVED, out of `hermie.chat.view`, and it
+cost something worth writing down. `ThemeProvider` sits above the app lock and
+above the gateway provider — it has to, because the lock plate is themed — so
+it has no gateway id to key anything by. It therefore reads only the appearance
+now, through `hydrateAppearance()` and its own `appearanceLoaded` flag, and the
+THEME (preset, user themes) is read by `ChatRuntimeProvider` once a gateway is
+known. The visible consequence: a chosen preset lands one AsyncStorage read
+later than light-or-dark does, behind the splash. Not measured on a device.
+
+### The cached transcripts: a column, not a second database
+
+Three shapes were considered for keying the SQLite cache by gateway:
+
+| Shape                         | Why not                                                                                                                                            |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| one database file per gateway | `hermie-chats.db` for the first and `-<id>.db` for the rest is the ad-hoc suffix this whole design exists to avoid; and a rename needs a file copy |
+| composite PRIMARY KEY         | changing a primary key means rebuilding the table                                                                                                  |
+| composite key string + `ns`   | chosen                                                                                                                                             |
+
+So `bot` and `name` hold `<gateway id>:<bot>` and an `ns` column holds the id
+on its own. The key column keeps the primary key one column and needs no table
+rebuild; the `ns` column is what makes "replace this gateway's roster" an exact
+`DELETE FROM bots WHERE ns = ?` rather than a `LIKE` over a pattern somebody
+could get wrong. The gateway id is hex, so splitting the key on its FIRST colon
+recovers a bot name containing any number of colons.
+
+`ALTER TABLE … ADD COLUMN` is wrapped in try/catch, because SQLite has no
+`IF NOT EXISTS` for it and reading `PRAGMA table_info` first is the same
+question asked twice.
+
+**IndexedDB did not need a version bump**, which is the point of putting the
+composite in the existing key path rather than adding an index: a browser runs
+`onupgradeneeded` with every other tab blocked, and an index would have bought
+nothing for a roster of a dozen rows. What it did need is care about
+transactions — a readwrite transaction that `await`s a read halfway through may
+have auto-committed by the time the writes are issued. So every "look, then
+write" pass in `chat-cache.web.ts` reads in a transaction of its own and then
+opens a readwrite one that issues nothing but synchronous requests.
+
+### The key on the wire is specified, not shared
+
+The app keys storage by a random local id, which is exactly the wrong thing to
+put in a push payload: it is minted on one device and nothing outside the app
+has ever seen it. What travels is `gatewayKeyOf(origin)` — FNV-1a, 64-bit, over
+the UTF-8 bytes of `scheme://host:port`, 16 lowercase hex digits.
+
+It exists **twice in this repository and will exist a third time**, and that is
+deliberate rather than a failure to factor. `packages/hermie-web` is
+zero-runtime-dependency by ADR-0015 — it ships as a zip and a Docker image that
+run `dist/server` with nothing installed beside them — so it cannot import
+`@hermie/gateway-client` for ten lines of arithmetic. The gateway plugin is
+Python. So the ALGORITHM is the artefact: it is written out in
+`packages/gateway-client/src/gateway-key.ts`, with the Python beside it, and
+both copies' tests pin the same vector (`https://gateway.example.com:8443` →
+`bf796761db84e312`). A third copy proves itself against that literal.
+
+The origin and not the address, so a path prefix somebody added to a
+configuration does not stop a device recognising its own notifications.
+
+### What a cross-gateway tap deliberately does not do
+
+It does not answer the approval. `PushSync.handle` switches and returns.
+
+The reason is not caution, it is that there is nothing to validate against:
+ADR-0017 requires a response to be re-read against `approval.pending` on the
+gateway that asked, and that gateway's connection does not exist until the
+switch has finished — the chat controller the ports were bound to is stopped by
+the teardown the switch performs. So the reader lands on the request and
+answers it there. Same for the chat itself: the open goes through
+`app/open-chat-bus.ts` rather than through the captured controller, because the
+shell that receives it is the one mounted over the NEW connection.
+
+### What is unverified here
+
+- **No device has been set up against two real gateways.** Everything is the
+  fake gateway, mocked stores and a mocked keychain. The claim that a switch
+  paints from the other gateway's cache and then reconciles is a reading of the
+  code paths a cold start already takes, not a measurement — and in particular
+  nobody has watched what the first second after a switch actually looks like.
+- **No real push tap has routed across gateways.** No notifier has produced a
+  payload carrying a `gatewayKey` and nobody has tapped one. The app's half is
+  tested against payloads this repository synthesised.
+- **The plugin does not send the field yet.** `payload.gatewayKey` is
+  documented in `packages/hermie-web/src/push/payload.ts` and sent by
+  `hermie-web --push`; the gateway plugin has to add it. Until it does, a
+  notification from a plugin-notified gateway carries no key and is read exactly
+  as it always was.
+- **The widget's tap does not carry the key.** The snapshot holds it now; the
+  Swift in `apps/hermie/modules/hermie-widgets` still builds
+  `hermie://chat/<bot>` with no query. The JavaScript half is ready.
+- **The SQL and the IndexedDB calls are checked by what they ISSUE**, against a
+  recording double, because there is no engine in the test environment. That
+  catches the thing that could leak — an unscoped `DELETE` — and does not catch
+  a statement that is well-formed and wrong.
+- **The keychain migration has never met a keychain that refuses.** Each item is
+  moved in its own try/catch and the failure is designed to cost one sign-in,
+  but `expo-secure-store` refusing an item mid-move has only ever been staged.
