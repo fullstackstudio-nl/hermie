@@ -56,6 +56,7 @@ new record supersedes it, and the old one gets a line at the top pointing forwar
 | [0019](0019-folders-in-the-chat-list.md)          | The chat list groups into folders, and a bot is in exactly one               | Accepted           |
 | [0021](0021-header-based-front-doors.md)          | Header-based front doors: Cloudflare Access                                  | Accepted           |
 | [0023](0023-the-shared-container-is-the-seam.md)  | The shared container is the seam for every system surface                    | Accepted           |
+| [0024](0024-hermie-web-is-a-service-layer.md)     | Hermie Web is a service layer, not only a proxy                              | Accepted           |
 
 ## Template
 
