@@ -249,7 +249,12 @@ export const BotRow = memo(function BotRow({
       onPress={() => onPress(bot)}
       onPressOut={onDisarm}
       // A row is a thing you click, and on a Mac the pointer has to say so.
-      style={{ cursor: 'pointer', marginHorizontal: theme.space.sm }}
+      //
+      // The radius is here as well as on the surface inside, and it paints
+      // nothing: the two boxes are identical, and a browser draws a focus ring
+      // around the FOCUSABLE element's radius. Without it the keyboard ring is a
+      // rectangle around a pill.
+      style={{ borderRadius: theme.radii.card, cursor: 'pointer', marginHorizontal: theme.space.sm }}
       testID={`bot-row-${bot.name}`}
     >
       {selected ? (

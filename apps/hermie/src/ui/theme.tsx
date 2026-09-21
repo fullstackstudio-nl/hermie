@@ -340,7 +340,11 @@ export function ThemeProvider({ children, forceScheme, forcePreset }: ThemeProvi
   // the one place that reads it.
   return (
     <ThemeContext.Provider value={theme}>
-      <SystemStatusBar background={theme.wallpaper.fill} ink={scheme === 'dark' ? 'light' : 'dark'} />
+      <SystemStatusBar
+        background={theme.wallpaper.fill}
+        focus={theme.colors.accentText}
+        ink={scheme === 'dark' ? 'light' : 'dark'}
+      />
       {children}
     </ThemeContext.Provider>
   )

@@ -58,6 +58,15 @@ export interface SystemChromeProps {
   ink: StatusBarInk
   /** The app's wallpaper fill, as a CSS-ready colour. */
   background: string
+  /**
+   * The colour the keyboard's focus ring is drawn in, for the same reason.
+   *
+   * The document rings every button, row, tab and link from one stylesheet rule
+   * — nothing in React can reach a `:focus-visible` selector — and that rule has
+   * to be told which accent the visitor's preset is using. Ignored by the
+   * phones, which draw no such ring.
+   */
+  focus: string
 }
 
 /**

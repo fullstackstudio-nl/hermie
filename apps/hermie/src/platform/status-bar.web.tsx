@@ -33,7 +33,7 @@ export type { StatusBarInk } from './platform-contracts'
 /** The id the template's own pair of tags carries, so they can be found again. */
 const THEME_COLOR_SELECTOR = 'meta[name="theme-color"]'
 
-export function SystemStatusBar({ background }: SystemChromeProps) {
+export function SystemStatusBar({ background, focus }: SystemChromeProps) {
   useEffect(() => {
     // A unit test renderer has no document, and neither does a server render.
     if (typeof document === 'undefined') {
@@ -52,7 +52,8 @@ export function SystemStatusBar({ background }: SystemChromeProps) {
 
     meta.setAttribute('content', background)
     document.documentElement.style.setProperty('--hermie-background', background)
-  }, [background])
+    document.documentElement.style.setProperty('--hermie-focus', focus)
+  }, [background, focus])
 
   return null
 }

@@ -35,6 +35,14 @@
   - Scrollbars. macOS hides them until you scroll, which is why they were never
     noticed here; every other platform draws them, and the default is a
     light-grey slab that belongs to no theme.
+  - The focus ring for everything that is not a text field. `ui/useFocusRing.ts`
+    draws the app's own ring on the two controls that are a text box inside a
+    pill; every button, row, tab and link in the app is a real focusable element
+    and was getting the user agent's, in the SYSTEM accent rather than the
+    theme's. One rule here rings all of them, and it is `:focus-visible` rather
+    than `:focus` on purpose: a ring on every mouse click is noise on a list of
+    chats, while a field somebody has just clicked into is one they are about to
+    type in — which is the difference the two rings are drawing.
 -->
 <html lang="%LANG_ISO_CODE%">
   <head>
@@ -86,19 +94,40 @@
     <style id="hermie-document">
       :root {
         color-scheme: light dark;
-        /* Overwritten from the live theme by platform/status-bar.web.tsx. */
+        /* Both overwritten from the live theme by platform/status-bar.web.tsx. */
         --hermie-background: #eaf3ff;
+        --hermie-focus: #0b57c4;
       }
 
       @media (prefers-color-scheme: dark) {
         :root {
           --hermie-background: #070f1d;
+          --hermie-focus: #b4d6ff;
         }
       }
 
       html,
       body {
         background-color: var(--hermie-background);
+      }
+
+      /*
+        The keyboard's own mark, at the theme's accent rather than the system's.
+
+        An OUTLINE, for the reason `ui/useFocusRing.ts` gives at length: every
+        control here already has a hairline, and thickening it on focus would
+        move the control's contents by a point and unmove them on blur. An
+        outline is painted outside the border box and takes part in no layout,
+        and a modern browser draws it around the element's own `border-radius`,
+        so a pill is ringed as a pill without this file knowing any radius.
+
+        The offset keeps it clear of that hairline so the two read as a ring with
+        a gap rather than as one thick smudge; both numbers match the ring the
+        fields draw, so the two indicators are the same indicator.
+      */
+      :focus-visible {
+        outline: 2px solid var(--hermie-focus);
+        outline-offset: 2px;
       }
 
       /*
