@@ -6583,3 +6583,183 @@ has.
 - **`session.close` against a session the gateway has already reaped.** Treated
   as best effort and swallowed, which is a guess about a 4001 rather than a
   measurement.
+
+## The composer, the two names, and a badge that hid itself (2026-09-22)
+
+Five reports, and the thread running through three of them is the same: a fact
+the app knew and did not draw.
+
+### An empty slash popover was the app knowing and not saying
+
+`ChatController.querySlash` wrapped both completion calls in a `catch` that
+answered `{ items: [] }`, and `Composer` opened the popover on
+`suggestions.length > 0`. So a gateway that refused `commands.catalog` or
+`complete.slash` produced exactly the same composer as a gateway with no
+commands: nothing. The owner typed `/` on his phone against his own gateway and
+saw an empty field, while the same build showed the list on the web and on the
+simulator — which is what made it read as a platform bug rather than as a
+refusal, and sent the search in the wrong direction.
+
+The ring in `gateway/rpc-failures.ts` was written for precisely this family and
+its own header says so. It was doing its job; nothing a reader can see was
+reading it. `noteRpcFailure` now hands the failure BACK to the caller as well as
+into the ring, and `querySlash` carries it beside its items.
+
+**Beside, not instead of, and that is the interesting case.** `complete.slash`
+answers out of the live session; `commands.catalog` is what `knowsSlashCommand`
+routes on. A catalogue that refused while completions kept working gives a
+reader a list that looks perfect and a Return that sends the accepted pick to
+the model as prose. That state now says so.
+
+The `Loading…` row exists because "slow" and "silent" were indistinguishable
+from the outside, and the only honest way to tell them apart is elapsed time:
+`SLASH_SLOW_MS` is 400, long enough that a gateway on the same machine never
+draws it.
+
+### The slash popover's arrow keys had nothing to aim at
+
+A `ScrollView` cannot be asked to scroll to a child. The slash list's arrow keys
+therefore moved the highlight and nothing else, and a real gateway answers a
+bare `/` with thirty-four commands in a 220pt box — so the fourth down-arrow put
+the selection below the fold and every press after that changed something
+invisible. Rows report their own boxes on layout and the effect does the
+arithmetic. Boxes are dropped whenever the candidate list changes, because index
+3 of `/mo` and index 3 of `/model` are different rows at different heights.
+
+### A collapsed folder deleted information it was supposed to summarise
+
+`folderCounts` skipped a muted bot before adding either number. Open, that bot's
+row showed four unread; closed, the folder showed none — so collapsing a folder
+_removed_ a fact rather than aggregating it. The owner's rule splits the two:
+unread counts muted chats, the needs-input dot does not. A badge on a list
+somebody opened on purpose is not an interruption; a dot that says "a bot is
+blocked until you answer" is. `BotRow` had already made this call by drawing the
+bell and the unread pill side by side. ADR-0019 stated the old rule and has been
+corrected in place with a dated note.
+
+### The handle was in the roster the whole time
+
+`profiles.list` has carried `name` and `display_name` since the roster was
+written, and `store/bots.ts` has carried a comment about the difference for just
+as long. `ChatHeader` had an `@handle` line — and it drew only when no
+`subtitle` existed, while `subtitleFor` answers for every connection state. It
+was therefore dead in the app and alive only in the gallery, which is why it
+survived so long looking implemented.
+
+Both names are drawn now, and which one leads is one app-wide setting. Three
+things about the shape are worth keeping:
+
+- **The rule is a pure function**, because the widget projection needs it and
+  runs inside a store subscription with no hooks available to it.
+- **One name is one line, in both orders.** `researcher` over `Researcher` is a
+  second line that invites the reader to hunt for a difference that is not
+  there, and the case-only pair is the commonest shape on a real gateway.
+- **Avatar initials and tints follow the primary line.** `initialFor` takes the
+  first character and `tintIndex` hashes the whole string, so leaving the avatar
+  on the other name would give a hyphenated handle an initial and a colour
+  nothing else in the app uses.
+
+The setting is an additive field on an **unbumped** `hermie-app` version. The
+reasoning is already in the `folders` field's comment and it is worth repeating
+because it inverts the instinct: a reader that meets a `v` it does not know
+treats the whole section as unreadable and re-seeds it from its own local copy,
+so bumping would not protect this key from an older build — it would hand that
+build the power to delete the arrangement.
+
+### The drag column had three tap targets in the space of one
+
+Edit mode drew a 26pt handle containing two 15pt arrow glyphs, each its own
+`Pressable`. The column is what the pan responder is attached to, so the one
+thing a reader is meant to grab was the hardest of the three to hit. It is a
+single six-dot grip now. Stepping one position at a time moved to the row's
+`accessibilityActions` — on the ROW, which is the element VoiceOver focuses —
+and the context menu's Move up / Move down were already there.
+
+**Folders did not get the grip, deliberately.** `use-row-drag` is keyed by bot
+name from end to end — `handleHandlers(botName)`, `liftedKey: bot:<name>`, and a
+commit through `dropBot` — so dragging a folder is not implemented at all. A
+handle labelled "Hold to drag" that cannot be dragged is a worse affordance than
+no handle, so folders gained the reorder actions and the menu items and nothing
+that promises a gesture. Generalising the drag hook from bot names to row keys
+is the piece of work that would let the grip go there too.
+
+## What could not be verified, and two things that were not built
+
+There is no signed-in gateway reachable from here, so **nothing below has been
+seen against a real `hermes serve`**. Every claim about upstream is read from the
+pinned clone; every claim about behaviour is the fake gateway and the suites.
+
+- **The slash-failure row has not been seen on a device.** The report it answers
+  is specifically the owner's iPhone against his own gateway. What is covered is
+  the controller's failure shape on a refusal and on a timeout, and the
+  composer's three popover states. What a real 4018 from `commands.catalog`
+  actually reads like at phone width has not been looked at.
+- **The arrow-key scroll is measured against reported boxes, not a rendered
+  list.** The test feeds `onLayout` six 50pt rows in a 220pt window. Whether a
+  real row with a wrapping description measures what this assumes is unchecked.
+- **The name order has not been seen on a gateway where the two names differ.**
+  The fake's fixtures and this repo's tests use generic names.
+- **The widget's one line following the setting has not been seen on a home
+  screen.** The projection is covered; WidgetKit reloading on a settings change
+  is not, and the native renderers were not rebuilt.
+
+### `profiles.configure` cannot set a display name
+
+Item 4 of this round asked for the display name to become editable through
+`profiles.configure`, with the fake gateway taught to accept `display_name`.
+**That call has no such field, and adding one to the fake would make the suite
+green over a feature that cannot work.**
+
+The vendored contract
+(`packages/hermes-shared/src/gateway-contract.generated.ts`,
+`ProfilesConfigureParams`) lists `profile`, `name`, `ui_meta`,
+`ui_meta_expected_revisions`, `soul`, `description`, `model`, `provider`,
+`confirm_expensive_model`, `disabled_skills`, `enabled_toolsets` and
+`enabled_mcp_servers`. No display name. `name` identifies the profile rather
+than renaming it.
+
+Upstream agrees, and the handler is the part that matters:
+`tui_gateway/methods_profiles.py`'s `profiles.configure` branches on `ui_meta`,
+`soul`, `description`, the model pair and the three config lists, and **ignores
+every other key silently**. It does not refuse. `applied` simply would not
+mention `display_name`, and `ok` is `all(applied.values())` over whatever else
+the request carried — so a save that changed nothing would report success and
+the name would revert on the next roster poll. That is worse than a refusal,
+because a refusal is visible.
+
+Upstream _can_ set one — `hermes_cli/profiles.py::set_profile_display_name`
+writes `display_name` into `profile.yaml` — but it is reachable only through
+`hermes profile rename` on the gateway host. There is no RPC and no REST route.
+
+So item 4 was **not built**. The honest ways forward, in the order I would pick
+them:
+
+1. **Store an app-side override in the per-bot `hermie` `ui_meta` section**
+   (ADR-0016). The app already owns that key, the bridge already syncs it with a
+   compare-and-swap, and it works on every gateway. The cost is that the name is
+   Hermie's rather than the profile's: the TUI, Hermes Desktop and the bot-mode
+   `@handle` resolution would go on seeing the gateway's copy.
+2. **Leave it read-only and say where it comes from**, which is what the sheet
+   does today and what its header comment already explains at length.
+
+Option 1 is a product decision about whose name it is, not a mechanical gap, so
+it should be the owner's call rather than a build agent's. The profile sheet's
+About group now at least shows the handle and the display name as two separate
+rows, so the thing that cannot be edited is labelled correctly while it waits.
+
+### Chat text size was not built
+
+Item 6 asked for a Small / Default / Large / Extra large control scaling the
+bubble and markdown type scale. The plumbing it needs — a persisted app-wide
+setting in the `hermie-app` slice, read defensively, surfaced in Settings →
+Appearance — is exactly the plumbing the name order just laid down, so it is
+cheap to add on top.
+
+What stopped it this round is ownership: the type scale it has to move is read
+by the markdown renderer, and `src/markdown` belongs to another agent's worktree
+in this round. Landing a change that reaches into those files would collide on
+merge. The store field, the `ui_meta` field and the Appearance row are the same
+shape as `botNameOrder`; the only new decision is whether the scale multiplies
+the `type` tokens in the theme — which markdown would inherit for free, and
+which needs no edits under `src/markdown` at all — or is threaded through the
+bubble components one at a time. The theme is almost certainly the right seam.
