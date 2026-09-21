@@ -1457,6 +1457,234 @@ describe('session.title / set_hidden / close over the socket — methods_session
   })
 })
 
+/**
+ * `session.branch` and `session.delete`, and the honest size of what is known.
+ *
+ * These two are pinned in a describe of their own with a gateway of their own,
+ * because the block above deliberately leaves `writer`'s chat renamed and a
+ * branch test that inherited that state would be asserting about the wrong
+ * thing.
+ *
+ * **What the contract says, in full.** `session.branch` is described upstream as
+ * "Fork a live session into a new stored child that shares the parent's history
+ * so far", and takes `{session_id, profile?, name?, count?}`. `session.delete`
+ * takes `{session_id, profile?}` and its own doc comment is "``session_id`` is
+ * the STORED id". That is all of it — there is no row index, no row id, and no
+ * statement anywhere of what `count` counts.
+ *
+ * So one assertion below (`count` as a message count taken from the start) is
+ * this app's READING of the parameter rather than a fact read off a handler, and
+ * it is marked as such where it appears. The rest — which id each method takes,
+ * that a branch is visible, that the parent is untouched — follows from
+ * sentences upstream actually writes.
+ */
+describe('session.branch / session.delete — methods_session.py, and one assumption', () => {
+  let live: FakeGateway
+  let socket: WebSocket
+  let nextId = 0
+
+  const pending = new Map<number, (value: Record<string, unknown>) => void>()
+
+  const call = (method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> => {
+    const id = ++nextId
+
+    return new Promise(resolve => {
+      pending.set(id, resolve)
+      socket.send(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`)
+    })
+  }
+
+  const ok = <T>(frame: Record<string, unknown>): T => frame.result as T
+
+  /** The canonical chat's stored row, and a runtime id for it. */
+  const liveBotChat = async (profile: string): Promise<{ stored: string; runtime: string }> => {
+    const listed = await call('session.list', { profile, title: 'Bot Chat', include_hidden: true })
+    const stored = String(ok<{ sessions: { id: string }[] }>(listed).sessions[0]?.id ?? '')
+    const resumed = await call('session.resume', { session_id: stored, omit_messages: true })
+
+    return { stored, runtime: String(ok<{ session_id: string }>(resumed).session_id) }
+  }
+
+  beforeAll(async () => {
+    live = await startFakeGateway({ port: 0 })
+    socket = new WebSocket(live.wsUrl, ['hermes-gateway-v1'])
+
+    socket.on('message', data => {
+      for (const line of String(data).split('\n')) {
+        if (!line.trim()) {
+          continue
+        }
+
+        const frame = JSON.parse(line) as Record<string, unknown>
+        const id = typeof frame.id === 'number' ? frame.id : null
+        const waiter = id === null ? undefined : pending.get(id)
+
+        if (waiter && id !== null) {
+          pending.delete(id)
+          waiter(frame)
+        }
+      }
+    })
+
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', () => resolve())
+      socket.once('error', reject)
+    })
+  })
+
+  afterAll(async () => {
+    socket.close()
+    await live.close()
+  })
+
+  /**
+   * "Fork a LIVE session." Every session-scoped method upstream resolves through
+   * `_sess_nowait`, a plain lookup in the live `_sessions` map, so a stored id —
+   * which `session.list`, `session.resume` and the REST routes all accept — is
+   * 4001 here. This is the same rule `session.title` is held to above.
+   */
+  it('takes the runtime id and refuses a stored one with 4001', async () => {
+    const { stored } = await liveBotChat('writer')
+
+    expect((await call('session.branch', { session_id: stored, name: 'Branch · nope' })).error).toMatchObject({
+      code: 4001
+    })
+  })
+
+  it('answers the seven fields SessionBranchResult declares', async () => {
+    const { runtime, stored } = await liveBotChat('writer')
+    const branched = await call('session.branch', { session_id: runtime, name: 'Branch · the shape' })
+    const result = ok<Record<string, unknown>>(branched)
+
+    expect(keysOf(result)).toEqual([
+      'info',
+      'message_count',
+      'messages',
+      'parent',
+      'session_id',
+      'stored_session_id',
+      'title'
+    ])
+    // Two DIFFERENT ids, exactly as a resume reports: the runtime one is the
+    // live child, the stored one is the durable row a listing hands out.
+    expect(result.session_id).not.toBe(result.stored_session_id)
+    expect(result.parent).toBe(stored)
+    expect(result.title).toBe('Branch · the shape')
+  })
+
+  /**
+   * **The assumption.** `count` is the only parameter that can express a
+   * position and nothing upstream says what it counts; the app reads it as "how
+   * many of the parent's messages the child starts with" and this handler agrees
+   * with the app. If a real gateway ever says otherwise, this assertion and
+   * `ChatController.branchFrom` are the two places that change.
+   */
+  it('starts the child with `count` of the parent’s messages, counted from the start', async () => {
+    const { runtime } = await liveBotChat('researcher')
+    const parent = ok<{ count: number }>(await call('session.history', { session_id: runtime }))
+    const branched = await call('session.branch', { session_id: runtime, name: 'Branch · two rows', count: 2 })
+    const result = ok<{ message_count: number; stored_session_id: string }>(branched)
+
+    expect(parent.count).toBeGreaterThan(2)
+    expect(result.message_count).toBe(2)
+
+    // And the copy is a COPY: the two conversations diverge from here, which is
+    // the whole point of a branch.
+    const child = ok<{ count: number }>(await call('session.history', { session_id: result.stored_session_id }))
+
+    expect(child.count).toBe(2)
+  })
+
+  it('carries the parent’s whole history when no count is given', async () => {
+    const { runtime } = await liveBotChat('researcher')
+    const parent = ok<{ count: number }>(await call('session.history', { session_id: runtime }))
+    const branched = await call('session.branch', { session_id: runtime, name: 'Branch · everything' })
+
+    expect(ok<{ message_count: number }>(branched).message_count).toBe(parent.count)
+  })
+
+  /**
+   * Nothing in the parameters can ask for a hidden child, and a branch that
+   * arrived hidden would be a conversation the reader could not find. This is
+   * what lets the app's Branches group list without `include_hidden`.
+   */
+  it('makes an ordinary VISIBLE session of the same profile, leaving the parent alone', async () => {
+    const { runtime, stored } = await liveBotChat('researcher')
+    const branched = await call('session.branch', { session_id: runtime, name: 'Branch · visible' })
+    const childId = ok<{ stored_session_id: string }>(branched).stored_session_id
+
+    const plain = ok<{ sessions: { id: string }[] }>(await call('session.list', { profile: 'researcher' }))
+
+    expect(plain.sessions.map(row => row.id)).toContain(childId)
+
+    // The parent is still the hidden canonical chat it was.
+    const canonical = ok<{ sessions: { id: string }[] }>(
+      await call('session.list', { profile: 'researcher', title: 'Bot Chat', include_hidden: true })
+    )
+
+    expect(canonical.sessions.map(row => row.id)).toEqual([stored])
+  })
+
+  /**
+   * `_set_session_title` refuses a duplicate, and `session.create` models the
+   * same thing: the create succeeds and the NAME does not land. A client that
+   * assumed otherwise would go looking for its branch under a title nothing
+   * holds — which is why `ChatController.branchFrom` reports the title the
+   * gateway settled on rather than the one it asked for.
+   */
+  it('still creates the branch when the name is already worn, without taking the name', async () => {
+    const { runtime } = await liveBotChat('writer')
+
+    await call('session.branch', { session_id: runtime, name: 'Branch · taken' })
+
+    const second = await call('session.branch', { session_id: runtime, name: 'Branch · taken' })
+
+    expect(ok<{ stored_session_id: string }>(second).stored_session_id).toBeTruthy()
+    expect(ok<{ title: string }>(second).title).not.toBe('Branch · taken')
+  })
+
+  /**
+   * The opposite id to `session.title` next door, and the contract says so in
+   * one line: "``session_id`` is the STORED id". A client reaching for the
+   * runtime id it happens to be holding finds out here rather than against
+   * somebody's real gateway.
+   */
+  it('deletes by the STORED id, answers `{deleted}`, and 4001s a runtime one', async () => {
+    const { runtime } = await liveBotChat('writer')
+    const branched = await call('session.branch', { session_id: runtime, name: 'Branch · doomed' })
+    const child = ok<{ session_id: string; stored_session_id: string }>(branched)
+
+    expect((await call('session.delete', { session_id: child.session_id })).error).toMatchObject({ code: 4001 })
+
+    const deleted = await call('session.delete', { session_id: child.stored_session_id })
+
+    expect(keysOf(ok<Record<string, unknown>>(deleted))).toEqual(['deleted'])
+    expect(ok<{ deleted: string }>(deleted).deleted).toBe(child.stored_session_id)
+
+    const listed = ok<{ sessions: { id: string }[] }>(await call('session.list', { profile: 'writer' }))
+
+    expect(listed.sessions.map(row => row.id)).not.toContain(child.stored_session_id)
+  })
+
+  /**
+   * **No canonical guard, and that is deliberate.** It would be easy to make the
+   * fake refuse to delete a hidden `Bot Chat`, and comforting to have it catch
+   * the mistake — and it would be a fake that lies, because upstream documents
+   * no such refusal. The rule that the canonical chat is never deleted is the
+   * APP's: `conversationActions` answers an empty action list for it, and
+   * `apps/hermie/__tests__/session-branch.test.ts` is where that is proved.
+   */
+  it('does NOT invent a refusal upstream does not document for the canonical chat', async () => {
+    const { stored } = await liveBotChat('researcher')
+
+    expect(ok<{ deleted: string }>(await call('session.delete', { session_id: stored })).deleted).toBe(stored)
+  })
+
+  it('4001s a stored id nothing holds', async () => {
+    expect((await call('session.delete', { session_id: 'stored-nothing' })).error).toMatchObject({ code: 4001 })
+  })
+})
+
 describe('session.usage over the socket — server.py::_get_usage + agent/context_breakdown.py', () => {
   let live: FakeGateway
   let socket: WebSocket
