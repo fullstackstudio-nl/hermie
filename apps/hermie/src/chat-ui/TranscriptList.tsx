@@ -63,6 +63,7 @@ import { copyToClipboard } from '../platform/clipboard'
 import { ContextMenuHost } from '../platform/context-menu'
 import { applyDirectTouchPan } from '../platform/pointer-drag'
 import { RUNS_ON_MAC } from '../platform/runs-on-mac'
+import { PlainScrollEdges } from '../platform/scroll-edges'
 import { GlassSurface } from '../ui/glass'
 import { Button, Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
@@ -1349,85 +1350,100 @@ function TranscriptListBody({
       <BubbleColumn style={{ flex: 1 }} testID={testID}>
         {header}
 
-        <FlatList
-          ListEmptyComponent={
-            <Text color="textMuted" style={{ padding: theme.space.lg, textAlign: 'center' }}>
-              {chatStrings.transcript.empty}
-            </Text>
-          }
-          contentContainerStyle={[{ paddingHorizontal: theme.space.md, paddingVertical: theme.space.md }, contentStyle]}
-          data={rows}
-          inverted
-          keyExtractor={row => (isTypingRow(row) ? TYPING_ROW_KEY : isQueuedRow(row) ? row.queued.id : row.item.id)}
-          // Dragging the transcript down lowers the keyboard with the finger, which
-          // is what every messenger does and what the inverted list makes possible
-          // without a gesture handler. Android has no interactive dismissal — the
-          // value is ignored there and the keyboard simply stays up — so it drops
-          // the keyboard when the drag starts instead.
-          keyboardDismissMode={Platform.select({ ios: 'interactive', default: 'on-drag' })}
-          keyboardShouldPersistTaps="handled"
-          /*
-           * Held ONLY while the reader is away from the bottom, and that is the
-           * whole of the reported jump.
-           *
-           * `maintainVisibleContentPosition` anchors on a VIEW: iOS records the
-           * frame of the first subview whose bottom edge is past the current offset,
-           * and afterwards moves `contentOffset` by however far that view's origin
-           * moved (`RCTScrollViewComponentView`). At the bottom of an INVERTED list
-           * every new row — the message just sent, the reply's first bubble, a tool
-           * row, the bubble after it — is inserted BEFORE that view in content
-           * order, so the anchor moves down by exactly the new row's height and the
-           * list corrects for a shift the reader never saw. With
-           * `autoscrollToTopThreshold` set, the same branch then animates back to
-           * zero: the chat jumps up and scrolls itself back down, which is the bug
-           * as it was reported.
-           *
-           * Measured on an iPhone 17 Pro against the fake gateway with
-           * `--hermieTraceScroll`; a 70pt outgoing bubble moved the offset from 0 to
-           * 94 (the row plus its gap) and it took ~290ms to crawl back:
-           *
-           *     [row]    +38626 user-o:7000 h=70.0 (new)
-           *     [scroll] +38626 offset=94.0  content=968.0
-           *     [scroll] +38654 offset=90.3  content=951.0   ← animating back
-           *     [scroll] +38921 offset=0.0   content=951.0
-           *
-           * A constant-height `ListHeaderComponent` was tried as the anchor and
-           * CANNOT be one: `VirtualizedList` adds one to `minIndexForVisible`
-           * whenever a header exists ("Adjust index to account for
-           * ListHeaderComponent"), so the native loop starts at the first CELL and
-           * never looks at the header. There is no value of `minIndexForVisible`
-           * that reaches it — which is why the header is gone rather than tuned.
-           *
-           * The typing row is an insertion and a removal at index 0 like any
-           * other, and it is answered by the same two branches: away from the
-           * bottom the anchor corrects for it, at the bottom there is nothing to
-           * correct. That is what let the dots move into the list at all.
-           *
-           * Off at the bottom nothing has to be corrected: an inverted list already
-           * keeps offset 0 pinned to the newest row while the content grows above
-           * it. Away from the bottom the anchor is a genuinely visible row and the
-           * correction is what the reader wants — a message arriving under them must
-           * not shove the paragraph they are reading up the screen. So the prop is
-           * on exactly where it earns its keep, and `autoscrollToTopThreshold` is
-           * gone with it: it only ever fires within `AWAY_THRESHOLD` of the bottom,
-           * which is where this is now off.
-           */
-          maintainVisibleContentPosition={away ? AWAY_ANCHOR : undefined}
-          onContentSizeChange={settleHold}
-          onEndReached={onEndReached}
-          onEndReachedThreshold={0.4}
-          onMomentumScrollEnd={endJump}
-          onScroll={handleScroll}
-          onScrollBeginDrag={beginDrag}
-          onScrollToIndexFailed={recoverScroll}
-          ref={listRef}
-          renderItem={renderItem}
-          // A frame apart while tracing: a correction and the animated scroll back
-          // to the bottom are two events inside 300ms, and at 64ms the first of
-          // them is the one that gets dropped.
-          scrollEventThrottle={TRACING ? 16 : 64}
-          testID={`${testID}-scroll`}
-        />
+        {/*
+          The platform's own edge blur, taken off this list.
+
+          iOS 26 draws a scroll edge effect on every scroll view, and on the Mac
+          that effect covered the whole transcript and faded in when the POINTER
+          entered it — every bubble going blurry on the way to the composer, which
+          is what the owner reported. The chat already has real glass over both
+          ends of this list, the header and the composer, so there is nothing for a
+          second blur to do. See `platform/scroll-edges`.
+        */}
+        <PlainScrollEdges style={{ flex: 1 }}>
+          <FlatList
+            ListEmptyComponent={
+              <Text color="textMuted" style={{ padding: theme.space.lg, textAlign: 'center' }}>
+                {chatStrings.transcript.empty}
+              </Text>
+            }
+            contentContainerStyle={[
+              { paddingHorizontal: theme.space.md, paddingVertical: theme.space.md },
+              contentStyle
+            ]}
+            data={rows}
+            inverted
+            keyExtractor={row => (isTypingRow(row) ? TYPING_ROW_KEY : isQueuedRow(row) ? row.queued.id : row.item.id)}
+            // Dragging the transcript down lowers the keyboard with the finger, which
+            // is what every messenger does and what the inverted list makes possible
+            // without a gesture handler. Android has no interactive dismissal — the
+            // value is ignored there and the keyboard simply stays up — so it drops
+            // the keyboard when the drag starts instead.
+            keyboardDismissMode={Platform.select({ ios: 'interactive', default: 'on-drag' })}
+            keyboardShouldPersistTaps="handled"
+            /*
+             * Held ONLY while the reader is away from the bottom, and that is the
+             * whole of the reported jump.
+             *
+             * `maintainVisibleContentPosition` anchors on a VIEW: iOS records the
+             * frame of the first subview whose bottom edge is past the current offset,
+             * and afterwards moves `contentOffset` by however far that view's origin
+             * moved (`RCTScrollViewComponentView`). At the bottom of an INVERTED list
+             * every new row — the message just sent, the reply's first bubble, a tool
+             * row, the bubble after it — is inserted BEFORE that view in content
+             * order, so the anchor moves down by exactly the new row's height and the
+             * list corrects for a shift the reader never saw. With
+             * `autoscrollToTopThreshold` set, the same branch then animates back to
+             * zero: the chat jumps up and scrolls itself back down, which is the bug
+             * as it was reported.
+             *
+             * Measured on an iPhone 17 Pro against the fake gateway with
+             * `--hermieTraceScroll`; a 70pt outgoing bubble moved the offset from 0 to
+             * 94 (the row plus its gap) and it took ~290ms to crawl back:
+             *
+             *     [row]    +38626 user-o:7000 h=70.0 (new)
+             *     [scroll] +38626 offset=94.0  content=968.0
+             *     [scroll] +38654 offset=90.3  content=951.0   ← animating back
+             *     [scroll] +38921 offset=0.0   content=951.0
+             *
+             * A constant-height `ListHeaderComponent` was tried as the anchor and
+             * CANNOT be one: `VirtualizedList` adds one to `minIndexForVisible`
+             * whenever a header exists ("Adjust index to account for
+             * ListHeaderComponent"), so the native loop starts at the first CELL and
+             * never looks at the header. There is no value of `minIndexForVisible`
+             * that reaches it — which is why the header is gone rather than tuned.
+             *
+             * The typing row is an insertion and a removal at index 0 like any
+             * other, and it is answered by the same two branches: away from the
+             * bottom the anchor corrects for it, at the bottom there is nothing to
+             * correct. That is what let the dots move into the list at all.
+             *
+             * Off at the bottom nothing has to be corrected: an inverted list already
+             * keeps offset 0 pinned to the newest row while the content grows above
+             * it. Away from the bottom the anchor is a genuinely visible row and the
+             * correction is what the reader wants — a message arriving under them must
+             * not shove the paragraph they are reading up the screen. So the prop is
+             * on exactly where it earns its keep, and `autoscrollToTopThreshold` is
+             * gone with it: it only ever fires within `AWAY_THRESHOLD` of the bottom,
+             * which is where this is now off.
+             */
+            maintainVisibleContentPosition={away ? AWAY_ANCHOR : undefined}
+            onContentSizeChange={settleHold}
+            onEndReached={onEndReached}
+            onEndReachedThreshold={0.4}
+            onMomentumScrollEnd={endJump}
+            onScroll={handleScroll}
+            onScrollBeginDrag={beginDrag}
+            onScrollToIndexFailed={recoverScroll}
+            ref={listRef}
+            renderItem={renderItem}
+            // A frame apart while tracing: a correction and the animated scroll back
+            // to the bottom are two events inside 300ms, and at 64ms the first of
+            // them is the one that gets dropped.
+            scrollEventThrottle={TRACING ? 16 : 64}
+            testID={`${testID}-scroll`}
+          />
+        </PlainScrollEdges>
 
         {/*
           "Jump to latest" is the only thing left floating over the conversation.

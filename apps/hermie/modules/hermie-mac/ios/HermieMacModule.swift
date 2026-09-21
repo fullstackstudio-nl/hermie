@@ -190,6 +190,24 @@ public class HermieMacModule: Module {
     .runOnQueue(.main)
 
     /**
+     A list that keeps its own edges. See `HermieScrollEdgeView`.
+
+     No props: the view does one thing to the scroll view inside it, and a flag to turn that off
+     would only ever be set one way. The call site is the wrapper itself.
+     */
+    View(HermieScrollEdgeView.self) {}
+
+    /**
+     Whether this binary registers `HermieScrollEdgeView`.
+
+     The same probe `supportsSelectableText` is, for the same reason, added in the same change as
+     the view it answers for.
+     */
+    Function("supportsPlainScrollEdges") { () -> Bool in
+      true
+    }
+
+    /**
      Whether this binary registers `HermieSelectableTextView`.
 
      A probe, not a capability: it exists so JavaScript can ask the MODULE instead of asking for the
