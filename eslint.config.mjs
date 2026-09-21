@@ -60,6 +60,10 @@ export default config(
       'scripts/**/*.mjs',
       'apps/*/scripts/**/*.mjs',
       'apps/*/plugins/**/*.js',
+      // A config plugin that lives inside the local module it installs, rather
+      // than in apps/hermie/plugins/ with the three that only patch the app's
+      // own project. Same runtime, same rules.
+      'apps/*/modules/*/plugin/**/*.js',
       // The published entry point of @hermie/web. It is CommonJS on purpose —
       // it has to run before anything is bundled, from a package with no build
       // step of its own — so `require` is the only import it can use.

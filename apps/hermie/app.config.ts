@@ -211,7 +211,14 @@ const config: ExpoConfig = {
     // iOS 27 refuses to launch an app built against its SDK that has not adopted the UIKit scene
     // life cycle, and SDK 54's template has not. The plugin writes the manifest; the scene delegate
     // it names lives in modules/hermie-scene.
-    './plugins/with-ios-scene-lifecycle'
+    './plugins/with-ios-scene-lifecycle',
+    // The home-screen widgets. This one lives INSIDE its module rather than in ./plugins, because
+    // unlike the three above it is not a patch to the app's own project: it adds a second target
+    // whose entire source — Swift, Info.plist and entitlements — is in that module, and a plugin
+    // half a directory away from the thing it installs is a plugin that goes stale. It also writes
+    // the App Group onto the app's entitlements, which is why `ios.entitlements` above does not
+    // name it: one plugin owns the group on both targets so the two cannot disagree.
+    './modules/hermie-widgets/plugin/with-hermie-widgets'
   ]
   // `extra.eas.projectId` is deliberately absent. `eas init` writes it, and it
   // ties the repository to one EAS account — a fork should get its own rather

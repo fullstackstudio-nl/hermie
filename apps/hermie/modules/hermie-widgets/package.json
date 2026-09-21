@@ -1,0 +1,10 @@
+{
+  "name": "hermie-widgets",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Home-screen widgets: the shared snapshot, a WidgetKit extension and an AppWidgetProvider",
+  "license": "MIT",
+  "author": "FullStack Studio",
+  "homepage": "https://hermie.dev",
+  "main": "plugin/with-hermie-widgets.js"
+}

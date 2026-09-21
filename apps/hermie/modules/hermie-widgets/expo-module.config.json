@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["HermieWidgetsModule"]
+  },
+  "android": {
+    "modules": ["nl.fullstackstudio.hermie.widgets.HermieWidgetsModule"]
+  }
+}
