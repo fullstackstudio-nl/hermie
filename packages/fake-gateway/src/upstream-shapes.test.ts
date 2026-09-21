@@ -1553,3 +1553,758 @@ describe('session.usage over the socket — server.py::_get_usage + agent/contex
     expect(frame.error).toBeTruthy()
   })
 })
+
+/**
+ * One socket, opened per `describe` that wants one.
+ *
+ * The blocks above each grew their own copy of this, which was fine while there
+ * were two of them. The families below would have made eight, so it is a
+ * function now — and deliberately still returns a bare `call` rather than
+ * anything clever, because a shape test that needs a helper to express what it
+ * asserts has stopped being readable as a record of what upstream does.
+ */
+function socketHarness(): {
+  call: (method: string, params?: Record<string, unknown>) => Promise<Record<string, unknown>>
+  open: () => Promise<void>
+  close: () => Promise<void>
+} {
+  let live: FakeGateway
+  let socket: WebSocket
+  let nextId = 0
+
+  const pending = new Map<number, (value: Record<string, unknown>) => void>()
+
+  return {
+    call: (method, params = {}) => {
+      const id = ++nextId
+
+      return new Promise<Record<string, unknown>>(resolve => {
+        pending.set(id, resolve)
+        socket.send(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`)
+      })
+    },
+    open: async () => {
+      live = await startFakeGateway({ port: 0 })
+      socket = new WebSocket(live.wsUrl, ['hermes-gateway-v1'])
+
+      socket.on('message', data => {
+        for (const line of String(data).split('\n')) {
+          if (!line.trim()) {
+            continue
+          }
+
+          const frame = JSON.parse(line) as Record<string, unknown>
+          const id = typeof frame.id === 'number' ? frame.id : null
+          const waiter = id === null ? undefined : pending.get(id)
+
+          if (waiter && id !== null) {
+            pending.delete(id)
+            waiter(frame)
+          }
+        }
+      })
+
+      await new Promise<void>((resolve, reject) => {
+        socket.once('open', () => resolve())
+        socket.once('error', reject)
+      })
+    },
+    close: async () => {
+      socket.close()
+      await live.close()
+    }
+  }
+}
+
+/**
+ * Making a bot, over the socket.
+ *
+ * Upstream: `tui_gateway/methods_profiles.py::profiles.create`, which delegates
+ * its validation to `hermes_cli/profiles.py::create_profile` → `_canon_valid` →
+ * `validate_profile_name` → `hermes_constants.PROFILE_ID_RE`.
+ *
+ * The refusals are most of what is worth pinning. Three different bad names
+ * produce three different errors upstream, and the app shows each of them in a
+ * form field before it sends anything — so if the fake collapsed them into one,
+ * `profile-name.test.ts` would be asserting against a rule nobody shares.
+ *
+ * The other half is what create does NOT do: it writes a profile directory and
+ * stops. No canonical chat is minted, which is why the roster row comes back
+ * without `canonical_session` and ADR-0007's resolve-then-create is still the
+ * only thing standing between a new bot and a forked conversation.
+ */
+describe('profiles.create over the socket — methods_profiles.py::profiles.create', () => {
+  const harness = socketHarness()
+
+  beforeAll(harness.open)
+  afterAll(harness.close)
+
+  it('answers the six keys the contract declares, with `mirrored` as an object', async () => {
+    const frame = await harness.call('profiles.create', { name: 'scout', description: 'Looks ahead.' })
+    const result = frame.result as Record<string, unknown>
+
+    expect(frame.error).toBeUndefined()
+    expect(result.ok).toBe(true)
+    expect(result.name).toBe('scout')
+    expect(typeof result.path).toBe('string')
+    expect(typeof result.soul_written).toBe('boolean')
+    expect(typeof result.model_set).toBe('boolean')
+    expect(typeof result.mirrored).toBe('object')
+  })
+
+  /**
+   * `_mirror_launch_credentials` defaults `mirror_credentials` to TRUE, and the
+   * docstring says why: a bare `create_profile()` seeds a comment-only `.env`
+   * and no `auth.json`, which is a bot with no provider at all. A client that
+   * sent `mirror_credentials: false` to be tidy would make an unusable bot.
+   */
+  it('mirrors the launch credentials unless told not to', async () => {
+    const mirrored = ((await harness.call('profiles.create', { name: 'tidy' })).result as Record<string, unknown>)
+      .mirrored as Record<string, unknown>
+
+    expect(mirrored.env).toBe(true)
+    expect(mirrored.model_inherited).toBe(true)
+
+    const bare = (
+      (await harness.call('profiles.create', { name: 'bare', mirror_credentials: false })).result as Record<
+        string,
+        unknown
+      >
+    ).mirrored as Record<string, unknown>
+
+    expect(bare.env).toBe(false)
+  })
+
+  /** `share_auth` reports the string `"shared"`, not a boolean — it skips the copy. */
+  it('reports shared auth as a word rather than a flag', async () => {
+    const mirrored = (
+      (await harness.call('profiles.create', { name: 'shared-bot', share_auth: true })).result as Record<
+        string,
+        unknown
+      >
+    ).mirrored as Record<string, unknown>
+
+    expect(mirrored.auth).toBe('shared')
+  })
+
+  it('leaves the new bot without a canonical chat, so the client resolves one', async () => {
+    await harness.call('profiles.create', { name: 'fresh' })
+
+    const roster = (await harness.call('profiles.list')).result as Record<string, unknown>
+    const row = (roster.profiles as Record<string, unknown>[]).find(entry => entry.name === 'fresh')
+
+    expect(row).toBeTruthy()
+    expect(row?.canonical_session).toBeUndefined()
+  })
+
+  it('refuses an empty name with 4061, which is its own code', async () => {
+    const frame = await harness.call('profiles.create', { name: '   ' })
+
+    expect((frame.error as Record<string, unknown>)?.code).toBe(4061)
+  })
+
+  it('refuses a name the pattern rejects, and quotes the rule', async () => {
+    const error = (await harness.call('profiles.create', { name: 'my bot' })).error as Record<string, unknown>
+
+    expect(error?.code).toBe(4062)
+    expect(String(error?.message)).toContain('lowercase letters')
+  })
+
+  it('refuses a reserved name as reserved', async () => {
+    const error = (await harness.call('profiles.create', { name: 'sudo' })).error as Record<string, unknown>
+
+    expect(String(error?.message)).toContain('reserved')
+  })
+
+  /**
+   * `default` is in `_RESERVED_NAMES` and yet never reaches the reserved
+   * branch: `validate_profile_name` returns early for it and `create_profile`
+   * refuses it separately as the built-in profile. Two names, two sentences.
+   */
+  it('refuses `default` as the built-in rather than as a reserved word', async () => {
+    const message = String(
+      ((await harness.call('profiles.create', { name: 'default' })).error as Record<string, unknown>)?.message
+    )
+
+    expect(message).toContain('built-in')
+    expect(message).not.toContain('reserved')
+  })
+
+  it('refuses a second bot with a name that is taken', async () => {
+    await harness.call('profiles.create', { name: 'twin' })
+
+    const error = (await harness.call('profiles.create', { name: 'twin' })).error as Record<string, unknown>
+
+    expect(String(error?.message)).toContain('already exists')
+  })
+
+  it('refuses to clone from a bot that is not there', async () => {
+    const error = (await harness.call('profiles.create', { name: 'orphan', clone_from: 'nobody' })).error as Record<
+      string,
+      unknown
+    >
+
+    expect(error?.code).toBe(4062)
+  })
+})
+
+/**
+ * The editor snapshot, over the socket.
+ *
+ * Upstream: `methods_profiles.py::profiles.describe` and `_describe_toolsets`.
+ *
+ * Two of these shapes are inverted or conditional in a way that reads wrong at
+ * a glance, and both would produce a switch list that is exactly backwards:
+ * `skills` reports `enabled` although the gateway STORES the disabled set, and
+ * `toolsets_pinned` reports whether a pin exists rather than whether anything
+ * is enabled.
+ */
+describe('profiles.describe over the socket — methods_profiles.py::profiles.describe', () => {
+  const harness = socketHarness()
+
+  beforeAll(harness.open)
+  afterAll(harness.close)
+
+  it('answers the editor keys, with the model pin as an object', async () => {
+    const result = (await harness.call('profiles.describe', { name: 'researcher' })).result as Record<string, unknown>
+
+    expect(keysOf(result)).toEqual([
+      'description',
+      'mcp_servers',
+      'model',
+      'name',
+      'skills',
+      'soul',
+      'toolsets',
+      'toolsets_pinned'
+    ])
+    expect(keysOf(result.model)).toEqual(['default', 'provider'])
+  })
+
+  it('reports skills as {name, enabled}, which is the complement of what is stored', async () => {
+    const result = (await harness.call('profiles.describe', { name: 'writer' })).result as Record<string, unknown>
+    const skills = result.skills as { name: string; enabled: boolean }[]
+
+    expect(skills.find(skill => skill.name === 'pdf')?.enabled).toBe(false)
+    expect(skills.find(skill => skill.name === 'docx')?.enabled).toBe(true)
+  })
+
+  it('carries a label, a description and a tool count on every toolset row', async () => {
+    const toolsets = (
+      (await harness.call('profiles.describe', { name: 'researcher' })).result as Record<string, unknown>
+    ).toolsets as Record<string, unknown>[]
+
+    expect(toolsets.length).toBeGreaterThan(0)
+
+    for (const toolset of toolsets) {
+      expect(typeof toolset.name).toBe('string')
+      expect(typeof toolset.label).toBe('string')
+      expect(typeof toolset.description).toBe('string')
+      expect(typeof toolset.tool_count).toBe('number')
+      expect(typeof toolset.enabled).toBe('boolean')
+    }
+  })
+
+  /**
+   * The distinction the whole section turns on. An unpinned profile still
+   * reports enabled toolsets — the platform defaults — so a client that read
+   * `toolsets_pinned: false` as "nothing is on" would draw every switch off and
+   * then write that back.
+   */
+  it('separates having no pin from having nothing enabled', async () => {
+    const unpinned = (await harness.call('profiles.describe', { name: 'researcher' })).result as Record<string, unknown>
+
+    expect(unpinned.toolsets_pinned).toBe(false)
+    expect((unpinned.toolsets as { enabled: boolean }[]).some(toolset => toolset.enabled)).toBe(true)
+
+    const pinned = (await harness.call('profiles.describe', { name: 'writer' })).result as Record<string, unknown>
+
+    expect(pinned.toolsets_pinned).toBe(true)
+  })
+
+  /**
+   * `_describe_toolsets` drops a `_DEFAULT_OFF_TOOLSETS` entry entirely while it
+   * is off, so the list is not a constant: enabling one makes a row appear that
+   * was never there. A client that diffed against a remembered list would read
+   * that as the gateway inventing a toolset.
+   */
+  it('hides a default-off toolset until something enables it', async () => {
+    const names = async (): Promise<string[]> =>
+      harness
+        .call('profiles.describe', { name: 'researcher' })
+        .then(frame => ((frame.result as Record<string, unknown>).toolsets as { name: string }[]).map(row => row.name))
+
+    expect(await names()).not.toContain('kanban')
+
+    await harness.call('profiles.configure', { name: 'researcher', enabled_toolsets: ['files', 'kanban'] })
+
+    expect(await names()).toContain('kanban')
+  })
+
+  it('reports each MCP server with its transport and its per-bot switch', async () => {
+    const servers = ((await harness.call('profiles.describe', { name: 'writer' })).result as Record<string, unknown>)
+      .mcp_servers as Record<string, unknown>[]
+
+    expect(servers.find(server => server.name === 'weather')?.enabled).toBe(false)
+    expect(servers.find(server => server.name === 'files')?.enabled).toBe(true)
+    expect(servers.every(server => typeof server.transport === 'string')).toBe(true)
+  })
+
+  it('refuses a profile it does not have', async () => {
+    expect((await harness.call('profiles.describe', { name: 'nobody' })).error).toBeTruthy()
+  })
+})
+
+/**
+ * Writing the three capability sections, over the socket.
+ *
+ * Upstream: `methods_profiles.py::_configure_cfg_sections` and the three savers
+ * beside it — `save_disabled_skills`, `_save_toolset_pin`, `_save_mcp_toggles`.
+ *
+ * All three are REPLACE semantics over a full list, and no two of them are the
+ * same polarity. The desktop's own editor
+ * (`apps/desktop/src/plugins/hermes-bots/profile-config.tsx`) builds all three
+ * this way, including the `[]`-means-unpin rule, and these cases are the reason
+ * a client can be written against them without a live gateway.
+ */
+describe('profiles.configure capabilities — methods_profiles.py::_configure_cfg_sections', () => {
+  const harness = socketHarness()
+
+  beforeAll(harness.open)
+  afterAll(harness.close)
+
+  const describeProfile = async (name: string): Promise<Record<string, unknown>> =>
+    (await harness.call('profiles.describe', { name })).result as Record<string, unknown>
+
+  it('reports each section under the name upstream uses, not the parameter name', async () => {
+    const applied = (
+      (
+        await harness.call('profiles.configure', {
+          name: 'researcher',
+          disabled_skills: ['pdf'],
+          enabled_toolsets: ['files'],
+          enabled_mcp_servers: ['files']
+        })
+      ).result as Record<string, unknown>
+    ).applied as Record<string, unknown>
+
+    expect(keysOf(applied)).toEqual(['mcp_servers', 'skills', 'toolsets'])
+  })
+
+  it('takes the DISABLED list for skills and replaces it whole', async () => {
+    await harness.call('profiles.configure', { name: 'writer', disabled_skills: ['docx'] })
+
+    const skills = (await describeProfile('writer')).skills as { name: string; enabled: boolean }[]
+
+    // `pdf` was the disabled one before this write and is on again, because the
+    // list replaces rather than adds.
+    expect(skills.find(skill => skill.name === 'pdf')?.enabled).toBe(true)
+    expect(skills.find(skill => skill.name === 'docx')?.enabled).toBe(false)
+  })
+
+  it('clears the disabled set when the list is empty', async () => {
+    await harness.call('profiles.configure', { name: 'writer', disabled_skills: [] })
+
+    const skills = (await describeProfile('writer')).skills as { enabled: boolean }[]
+
+    expect(skills.every(skill => skill.enabled)).toBe(true)
+  })
+
+  /**
+   * `_save_toolset_pin` pops `tools.enabled_toolsets` when the list is empty, so
+   * an empty list UNPINS and the platform defaults come back. Reading it as
+   * "switch everything off" is the mistake that makes a bot lose its tools the
+   * first time somebody turns the last switch off.
+   */
+  it('unpins on an empty toolset list rather than disabling everything', async () => {
+    await harness.call('profiles.configure', { name: 'writer', enabled_toolsets: ['web'] })
+
+    const pinned = await describeProfile('writer')
+
+    expect(pinned.toolsets_pinned).toBe(true)
+    expect((pinned.toolsets as { name: string; enabled: boolean }[]).find(row => row.name === 'files')?.enabled).toBe(
+      false
+    )
+
+    await harness.call('profiles.configure', { name: 'writer', enabled_toolsets: [] })
+
+    const unpinned = await describeProfile('writer')
+
+    expect(unpinned.toolsets_pinned).toBe(false)
+    expect((unpinned.toolsets as { name: string; enabled: boolean }[]).find(row => row.name === 'files')?.enabled).toBe(
+      true
+    )
+  })
+
+  it('takes the ENABLED list for MCP servers, which is the other polarity', async () => {
+    await harness.call('profiles.configure', { name: 'researcher', enabled_mcp_servers: ['calendar'] })
+
+    const servers = (await describeProfile('researcher')).mcp_servers as { name: string; enabled: boolean }[]
+
+    expect(servers.find(server => server.name === 'calendar')?.enabled).toBe(true)
+    expect(servers.find(server => server.name === 'files')?.enabled).toBe(false)
+  })
+
+  it('leaves a section alone when the request does not carry it', async () => {
+    await harness.call('profiles.configure', { name: 'researcher', enabled_mcp_servers: ['calendar'] })
+
+    const applied = (
+      (await harness.call('profiles.configure', { name: 'researcher', description: 'Still finds things out.' }))
+        .result as Record<string, unknown>
+    ).applied as Record<string, unknown>
+
+    expect(applied).not.toHaveProperty('mcp_servers')
+    expect(
+      ((await describeProfile('researcher')).mcp_servers as { name: string; enabled: boolean }[]).find(
+        server => server.name === 'calendar'
+      )?.enabled
+    ).toBe(true)
+  })
+
+  /** A clone copies config.yaml, which is where all three sections live. */
+  it('carries the source bot’s capability state into a clone', async () => {
+    await harness.call('profiles.configure', {
+      name: 'researcher',
+      disabled_skills: ['web-search'],
+      enabled_toolsets: ['web']
+    })
+    await harness.call('profiles.create', { name: 'understudy', clone_from: 'researcher' })
+
+    const clone = await describeProfile('understudy')
+
+    expect(clone.toolsets_pinned).toBe(true)
+    expect(
+      (clone.skills as { name: string; enabled: boolean }[]).find(skill => skill.name === 'web-search')?.enabled
+    ).toBe(false)
+  })
+})
+
+/**
+ * The session-scoped toolset switch, over the socket.
+ *
+ * Upstream: `methods_tools.py::tools.configure` → `_configure_session_tools`.
+ *
+ * Worth pinning even though the desktop never calls it (it toggles toolsets over
+ * REST, which a socket-only client cannot reach), because the result is the one
+ * in this family that reports partial success WITHOUT an error frame: an unknown
+ * toolset and an MCP target whose server is missing both come back in their own
+ * arrays and are dropped from `changed`.
+ */
+describe('tools.configure over the socket — methods_tools.py::_configure_session_tools', () => {
+  const harness = socketHarness()
+
+  beforeAll(harness.open)
+  afterAll(harness.close)
+
+  it('answers the six keys the contract declares', async () => {
+    const result = (await harness.call('tools.configure', { action: 'enable', names: ['memory'] })).result as Record<
+      string,
+      unknown
+    >
+
+    expect(keysOf(result)).toEqual(['changed', 'enabled_toolsets', 'info', 'missing_servers', 'reset', 'unknown'])
+    expect(result.changed).toEqual(['memory'])
+    expect(result.enabled_toolsets).toContain('memory')
+  })
+
+  it('reports an unknown toolset without failing the call', async () => {
+    const result = (await harness.call('tools.configure', { action: 'enable', names: ['memory', 'nonsense'] }))
+      .result as Record<string, unknown>
+
+    expect(result.unknown).toEqual(['nonsense'])
+    expect(result.changed).not.toContain('nonsense')
+  })
+
+  it('reports a missing MCP server separately from an unknown toolset', async () => {
+    const result = (await harness.call('tools.configure', { action: 'enable', names: ['nowhere:tool'] }))
+      .result as Record<string, unknown>
+
+    expect(result.missing_servers).toEqual(['nowhere'])
+    expect(result.unknown).toEqual([])
+  })
+
+  it('refuses an action that is neither enable nor disable', async () => {
+    const error = (await harness.call('tools.configure', { action: 'toggle', names: ['web'] })).error as Record<
+      string,
+      unknown
+    >
+
+    expect(error?.code).toBe(4017)
+  })
+
+  it('refuses an empty name list', async () => {
+    const error = (await harness.call('tools.configure', { action: 'enable', names: [] })).error as Record<
+      string,
+      unknown
+    >
+
+    expect(error?.code).toBe(4018)
+  })
+})
+
+/**
+ * Skills, over the socket.
+ *
+ * Upstream: `methods_tools.py::skills.manage` → `_run_action` over
+ * `_SKILLS_ACTIONS`.
+ *
+ * Five actions behind one method, each answering a DIFFERENT key. `list` answers
+ * a category map rather than a flat list and carries no enabled flag at all —
+ * which is why the Skills page has to join it against `profiles.describe`, and
+ * why a client that expected `skills` to be an array would paint nothing.
+ */
+describe('skills.manage over the socket — methods_tools.py::_SKILLS_ACTIONS', () => {
+  const harness = socketHarness()
+
+  beforeAll(harness.open)
+  afterAll(harness.close)
+
+  it('answers `list` as a category map of names, with no enabled flag', async () => {
+    const result = (await harness.call('skills.manage', { action: 'list', profile: 'researcher' })).result as Record<
+      string,
+      unknown
+    >
+    const skills = result.skills as Record<string, string[]>
+
+    expect(Array.isArray(skills)).toBe(false)
+    expect(Object.values(skills).every(names => Array.isArray(names))).toBe(true)
+    expect(Object.values(skills).flat()).toContain('pdf')
+  })
+
+  it('defaults to `list` when no action is given, like `_run_action`', async () => {
+    expect((await harness.call('skills.manage', { profile: 'researcher' })).result).toHaveProperty('skills')
+  })
+
+  it('answers `search` as `results` of {name, description}', async () => {
+    const results = (
+      (await harness.call('skills.manage', { action: 'search', query: 'pdf' })).result as Record<string, unknown>
+    ).results as Record<string, unknown>[]
+
+    expect(results.length).toBeGreaterThan(0)
+    expect(keysOf(results[0])).toEqual(['description', 'name'])
+  })
+
+  it('answers `browse` as `items` plus paging', async () => {
+    const result = (await harness.call('skills.manage', { action: 'browse', page: 1, page_size: 2 })).result as Record<
+      string,
+      unknown
+    >
+
+    expect((result.items as unknown[]).length).toBe(2)
+    expect(result.page).toBe(1)
+    expect(typeof result.total_pages).toBe('number')
+    expect(typeof result.total).toBe('number')
+  })
+
+  it('answers `inspect` as `info`, and an empty object for a miss', async () => {
+    const hit = (
+      (await harness.call('skills.manage', { action: 'inspect', query: 'pdf' })).result as Record<string, unknown>
+    ).info as Record<string, unknown>
+
+    expect(hit.name).toBe('pdf')
+
+    const miss = (await harness.call('skills.manage', { action: 'inspect', query: 'nope' })).result as Record<
+      string,
+      unknown
+    >
+
+    expect(miss.info).toEqual({})
+  })
+
+  /**
+   * `_skills_install` calls `do_install(skip_confirm=True)`, so installing from
+   * the hub really does work over the socket. The Skills page offers the button
+   * because of this case; if upstream ever made it CLI-only, this is what would
+   * go red.
+   */
+  it('installs from the hub over the socket and answers {installed, name}', async () => {
+    const result = (await harness.call('skills.manage', { action: 'install', query: 'xlsx', profile: 'researcher' }))
+      .result as Record<string, unknown>
+
+    expect(result).toEqual({ installed: true, name: 'xlsx' })
+
+    const listed = (
+      (await harness.call('skills.manage', { action: 'list', profile: 'researcher' })).result as Record<string, unknown>
+    ).skills as Record<string, string[]>
+
+    expect(Object.values(listed).flat()).toContain('xlsx')
+  })
+
+  it('refuses an action it does not have with 4017', async () => {
+    const error = (await harness.call('skills.manage', { action: 'uninstall', query: 'pdf' })).error as Record<
+      string,
+      unknown
+    >
+
+    expect(error?.code).toBe(4017)
+  })
+})
+
+/**
+ * MCP servers, over the socket.
+ *
+ * Upstream: `methods_tools.py`, the `@_mcp_rpc` block — `list`, `status`,
+ * `test`, `oauth.start`, `oauth.poll`, `oauth.cancel`.
+ *
+ * The one that decides the whole page's design is `test`: a failure is a
+ * SUCCESSFUL RPC answering `{ok: false, error, tools: []}`, and so is the
+ * needs-auth case. A client that only inspects the error frame reports a broken
+ * server as working.
+ */
+describe('mcp.servers.* over the socket — methods_tools.py::_mcp_rpc', () => {
+  const harness = socketHarness()
+
+  beforeAll(harness.open)
+  afterAll(harness.close)
+
+  it('lists servers with env KEY NAMES and never their values', async () => {
+    const servers = ((await harness.call('mcp.servers.list')).result as Record<string, unknown>).servers as Record<
+      string,
+      unknown
+    >[]
+
+    expect(servers.length).toBeGreaterThan(0)
+    expect(keysOf(servers[0])).toEqual([
+      'args',
+      'auth',
+      'command',
+      'enabled',
+      'env',
+      'name',
+      'oauth_tokens_present',
+      'tools',
+      'transport',
+      'url'
+    ])
+    expect(servers.find(server => server.name === 'weather')?.env).toEqual(['WEATHER_API_KEY'])
+  })
+
+  /**
+   * `status` reads CACHED runtime state and never connects, probes or starts
+   * auth — upstream says so in the docstring. So the OAuth server looks healthy
+   * here, and only `test` can tell the difference. Anything that draws a
+   * "needs auth" badge has to probe for it.
+   */
+  it('answers a cheap runtime view whose status vocabulary is the runtime one', async () => {
+    const result = (await harness.call('mcp.servers.status')).result as Record<string, unknown>
+    const servers = result.servers as Record<string, unknown>[]
+
+    expect(typeof result.checked_at).toBe('number')
+    expect(keysOf(servers[0])).toEqual(['connected', 'disabled', 'name', 'status', 'tools', 'transport'])
+
+    for (const server of servers) {
+      expect(['connected', 'disabled', 'connecting', 'failed', 'lazy', 'configured']).toContain(server.status)
+    }
+
+    expect(servers.find(server => server.name === 'calendar')?.status).toBe('connected')
+  })
+
+  it('answers a good probe with ok and the tool list', async () => {
+    const result = (await harness.call('mcp.servers.test', { name: 'files' })).result as Record<string, unknown>
+
+    expect(result.ok).toBe(true)
+    expect((result.tools as Record<string, unknown>[])[0]).toHaveProperty('description')
+    expect(result.oauth_needed).toBe(false)
+  })
+
+  it('answers a failing probe with ok:false and no error frame at all', async () => {
+    const frame = await harness.call('mcp.servers.test', { name: 'weather' })
+    const result = frame.result as Record<string, unknown>
+
+    expect(frame.error).toBeUndefined()
+    expect(result.ok).toBe(false)
+    expect(result.tools).toEqual([])
+    expect(typeof result.error).toBe('string')
+  })
+
+  /**
+   * The false-green upstream comments on: an `auth: oauth` server whose
+   * `tools/list` would answer anonymously is still `ok: false` while no token is
+   * on disk, because a green probe with no token is not a working server.
+   */
+  it('refuses to call an OAuth server healthy while it has no token', async () => {
+    const result = (await harness.call('mcp.servers.test', { name: 'calendar' })).result as Record<string, unknown>
+
+    expect(result.ok).toBe(false)
+    expect(result.oauth_needed).toBe(true)
+    expect(result.oauth_tokens_present).toBe(false)
+  })
+
+  it('walks a PKCE flow from start to approved, and the probe goes green after it', async () => {
+    const started = (await harness.call('mcp.servers.oauth.start', { name: 'calendar' })).result as Record<
+      string,
+      unknown
+    >
+
+    expect(keysOf(started)).toEqual(['auth_url', 'flow', 'ok', 'session_id'])
+    expect(started.flow).toBe('pkce')
+    expect(String(started.auth_url)).toMatch(/^https:\/\//)
+
+    const flowId = String(started.session_id)
+    const pending = (await harness.call('mcp.servers.oauth.poll', { name: 'calendar', session_id: flowId }))
+      .result as Record<string, unknown>
+
+    expect(pending.status).toBe('pending')
+
+    const approved = (await harness.call('mcp.servers.oauth.poll', { name: 'calendar', session_id: flowId }))
+      .result as Record<string, unknown>
+
+    expect(approved.status).toBe('approved')
+    expect((await harness.call('mcp.servers.test', { name: 'calendar' })).result).toMatchObject({ ok: true })
+  })
+
+  it('refuses OAuth on a stdio server, which authenticates with env keys', async () => {
+    const error = (await harness.call('mcp.servers.oauth.start', { name: 'files' })).error as Record<string, unknown>
+
+    expect(error?.code).toBe(4001)
+    expect(String(error?.message)).toContain('stdio')
+  })
+})
+
+/**
+ * `reload.mcp`, over the socket.
+ *
+ * Upstream: `methods_tools.py::reload.mcp` for the gate, and
+ * `tui_gateway/server.py::_finish_reload` for where `always` is stored.
+ *
+ * The only call in this round that REFUSES BY SUCCEEDING. Without `confirm` it
+ * answers a 200 carrying `status: 'confirm_required'` and a message, so a client
+ * that checks only the error frame believes it reloaded. The desktop sidesteps
+ * this entirely by always sending `confirm: true`; Hermie shows the sheet, which
+ * is why the fake models the gate rather than the shortcut.
+ */
+describe('reload.mcp over the socket — methods_tools.py::reload.mcp', () => {
+  const harness = socketHarness()
+
+  beforeAll(harness.open)
+  afterAll(harness.close)
+
+  it('asks first, with a 200 and no error frame', async () => {
+    const frame = await harness.call('reload.mcp', {})
+    const result = frame.result as Record<string, unknown>
+
+    expect(frame.error).toBeUndefined()
+    expect(result.status).toBe('confirm_required')
+    expect(String(result.message)).toContain('prompt cache')
+  })
+
+  it('goes through on confirm, and asks again next time', async () => {
+    expect(((await harness.call('reload.mcp', { confirm: true })).result as Record<string, unknown>).status).toBe(
+      'reloaded'
+    )
+    expect(((await harness.call('reload.mcp', {})).result as Record<string, unknown>).status).toBe('confirm_required')
+  })
+
+  /**
+   * `always` proceeds AND clears `approvals.mcp_reload_confirm` — in the
+   * GATEWAY's config, not the client's. So the opt-out is shared with the CLI
+   * and the desktop, and a client that stored it locally would keep asking on a
+   * gateway that had already been told not to.
+   */
+  it('stops asking for good once `always` has been sent', async () => {
+    expect(((await harness.call('reload.mcp', { always: true })).result as Record<string, unknown>).status).toBe(
+      'reloaded'
+    )
+    expect(((await harness.call('reload.mcp', {})).result as Record<string, unknown>).status).toBe('reloaded')
+  })
+})
