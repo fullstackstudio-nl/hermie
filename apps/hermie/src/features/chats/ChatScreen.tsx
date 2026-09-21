@@ -70,6 +70,8 @@ import { useChatsStore } from '../../store/chats'
 import { useCronStore } from '../../store/cron'
 import { hasChatViewOverride, useChatView, useSettingsStore } from '../../store/settings'
 import { textSizeScale } from '../../store/text-size'
+import { usePushStore } from '../../store/push'
+import { effectivePushTypes, type PushType } from '@hermie/gateway-client/push'
 import { Appear } from '../../ui/Appear'
 import { KeyboardInset } from '../../ui/KeyboardInset'
 import { Screen, Text } from '../../ui/primitives'
@@ -351,6 +353,19 @@ function Conversation({
     `TypeScaleProvider`.
   */
   const textSize = useSettingsStore(state => state.textSize)
+  /*
+    This chat's own notification types, where anything would honour them.
+
+    `canNotify` is the capability gate and it is deliberately the REGISTRATION
+    rather than the plugin's advert: the per-type rule is read from the same
+    `push` section a registration lives in, so a device that has never asked to
+    be told has nothing for these switches to modify and the page is not
+    offered at all. A switch that writes a preference nothing reads is worse
+    than no switch.
+  */
+  const pushEnabled = usePushStore(state => state.enabled)
+  const pushTypes = usePushStore(state => state.types)
+  const botPushTypes = usePushStore(state => state.perBot[botName])
   const theme = useTheme()
   // The chat's own colour: the avatar ring in the header and the outgoing bubble
   // gradient. One lookup per screen rather than one per row.
@@ -1603,6 +1618,27 @@ function Conversation({
     setDismissed(current => current.filter(id => id !== item.id))
   }, [])
 
+  /**
+   * The chat's notification page, as the sheet and the popover both want it.
+   *
+   * `types` is the EFFECTIVE answer — `effectivePushTypes` folds this chat's
+   * overrides into the global switches — because "will this chat wake me for a
+   * failed turn" is the question being asked, and `overridden` is what lets the
+   * footer say which of the two is answering it.
+   */
+  const notifications = useMemo(
+    () =>
+      pushEnabled
+        ? {
+            types: effectivePushTypes(pushTypes, botPushTypes),
+            overridden: Object.keys(botPushTypes ?? {}).length > 0,
+            onChangeType: (type: PushType, on: boolean | null) => usePushStore.getState().setBotType(botName, type, on),
+            onUseGlobal: () => usePushStore.getState().resetBotTypes(botName)
+          }
+        : undefined,
+    [botName, botPushTypes, pushEnabled, pushTypes]
+  )
+
   const openAgents = useCallback(() => setSheet('agents'), [])
   /*
     Opening either sheet asks the gateway for the context reading once.
@@ -1992,6 +2028,7 @@ function Conversation({
               accent={accent}
               botName={display}
               canExport
+              canSetNotifications={Boolean(notifications)}
               contextUsage={chat.contextUsage}
               fast={chat.info?.fast === true}
               model={chat.info?.model ?? ''}
@@ -2149,6 +2186,7 @@ function Conversation({
           model: chat.info?.model ?? '',
           modelOptions,
           mutedUntil: mutedUntilOf(mutes, botName, Math.floor(Date.now() / 1000)),
+          ...(notifications ? { notifications } : {}),
           onCancelExpensiveModel: () => setPendingModel(null),
           onChangeMute: (until: number | null) => useChatLayoutStore.getState().setMute(botName, until),
           /*

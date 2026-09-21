@@ -57,6 +57,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-chat notification types.** Beyond mute, which is "say nothing at all": the chat's options
+  now carry **Notifications** — finished a turn, a turn failed, needs your answer, scheduled runs —
+  per bot and per account, so a bot whose cron deliveries are noise can stay quiet about those and
+  still wake you when it fails. An override is PARTIAL: a type a chat says nothing about follows the
+  global switch in Settings as that switch moves, and putting the last one back leaves nothing
+  behind. It rides beside the device registrations in the same `push` section the notifier already
+  reads, at `hermie-app.push.perBot.<bot>.<type>`, because it is a decision about the reader rather
+  than about a device — the same argument the mutes make. The section version is deliberately NOT
+  bumped: `v` is checked per row and an unreadable row is dropped, so a bump would unregister the
+  device instead of protecting the key, and a notifier that has not learned the field yet simply
+  keeps honouring the global types.
+
 - **Chat text size.** Settings → Appearance and the chat's own options both carry **Small /
   Default / Large / Extra large**, and it changes the size of the words in a conversation — the
   bubbles, the markdown and the code blocks — and of nothing else. It is a factor ON TOP of the

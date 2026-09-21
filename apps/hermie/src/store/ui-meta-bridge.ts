@@ -29,6 +29,7 @@ import {
 import { hasPluginCapability, PLUGIN_CAPABILITIES } from '@hermie/gateway-client/plugin'
 import {
   foreignPushRows,
+  pushPerBotOf,
   pushSectionFor,
   pushSeenOf,
   pushStampOf,
@@ -150,6 +151,9 @@ export function snapshotFromStores(): UiMetaSnapshot {
     others: push.others,
     own: ownRegistration(push, pushPlatformName()),
     seen: push.seen,
+    // Per CHAT and per person, beside the registrations: silencing one bot's
+    // cron deliveries is a decision about the reader, not about this device.
+    perBot: push.perBot,
     now: pushStampOf(Date.now()),
     /*
       The shape the GATEWAY said it can read, not the one this build prefers.
@@ -283,7 +287,8 @@ export function applySnapshot(snapshot: UiMetaSnapshot): void {
 
   usePushStore.getState().applyRemote({
     others: foreignPushRows(pushNeighbours, usePushStore.getState().installationId),
-    seen: pushSeenOf(pushNeighbours)
+    seen: pushSeenOf(pushNeighbours),
+    perBot: pushPerBotOf(pushNeighbours)
   })
 
   /*

@@ -96,6 +96,7 @@ export type PopoverRowId =
   | 'model'
   | 'colour'
   | 'mute'
+  | 'notifications'
   | 'verbosity'
   | 'bot-to-bot'
   | 'thinking'
@@ -111,9 +112,11 @@ export interface PopoverRow {
 export interface PopoverRowsInput {
   /** Absent removes the export row, the way it removes the group on the sheet. */
   canExport: boolean
+  /** Absent removes the notifications row: nothing would read what it wrote. */
+  canSetNotifications: boolean
 }
 
-export function popoverRows({ canExport }: PopoverRowsInput): PopoverRow[] {
+export function popoverRows({ canExport, canSetNotifications }: PopoverRowsInput): PopoverRow[] {
   return [
     { id: 'yolo' },
     { id: 'fast' },
@@ -121,6 +124,7 @@ export function popoverRows({ canExport }: PopoverRowsInput): PopoverRow[] {
     { id: 'model', page: 'model' },
     { id: 'colour', page: 'colour' },
     { id: 'mute', page: 'mute' },
+    ...(canSetNotifications ? [{ id: 'notifications' as const, page: 'notifications' as const }] : []),
     { id: 'verbosity' },
     { id: 'bot-to-bot' },
     { id: 'thinking' },
@@ -163,6 +167,8 @@ export interface ChatOptionsPopoverProps extends Omit<
   onOpenPage: (pane: ChatOptionsPane) => void
   /** Present only where there is a transcript to write out. */
   canExport?: boolean
+  /** Present only where a notifier can honour per-type settings. */
+  canSetNotifications?: boolean
   /** This chat's transcript type scale, and a way to change it. */
   textSize: TextSize
   onChangeTextSize: (value: TextSize) => void
@@ -178,6 +184,7 @@ export function ChatOptionsPopover({
   onClose,
   onOpenPage,
   canExport = false,
+  canSetNotifications = false,
   accent,
   botName,
   contextUsage,
@@ -201,7 +208,7 @@ export function ChatOptionsPopover({
   testID = 'chat-options-popover'
 }: ChatOptionsPopoverProps) {
   const theme = useTheme()
-  const rows = popoverRows({ canExport })
+  const rows = popoverRows({ canExport, canSetNotifications })
   const [focus, setFocus] = useState(0)
 
   // A popover that reopens on the row the last reader left is a popover that
@@ -400,6 +407,15 @@ export function ChatOptionsPopover({
           >
             {chatStrings.options.viewHeader.toUpperCase()}
           </Text>
+
+          {row(
+            'notifications',
+            <DisclosureRow
+              label={chatStrings.notifications.label}
+              onPress={() => onOpenPage('notifications')}
+              testID="option-notifications"
+            />
+          )}
 
           {row(
             'verbosity',

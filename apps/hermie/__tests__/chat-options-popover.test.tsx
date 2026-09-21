@@ -18,6 +18,7 @@ import { act, fireEvent, screen, waitFor } from '@testing-library/react-native'
 import { ChatScreen } from '../src/features/chats/ChatScreen'
 import { type Bot, useBotsStore } from '../src/store/bots'
 import { useChatsStore } from '../src/store/chats'
+import { usePushStore } from '../src/store/push'
 import { useSettingsStore } from '../src/store/settings'
 import { nextFocus, popoverRows } from '../src/ui/sheets'
 import { renderScreen } from './support/render'
@@ -99,6 +100,7 @@ function seedChat() {
   useBotsStore.getState().reset()
   useChatsStore.getState().reset()
   useSettingsStore.getState().reset()
+  usePushStore.getState().reset()
   useBotsStore.getState().setBots([BOT])
 
   const chats = useChatsStore.getState()
@@ -214,15 +216,49 @@ describe('the options menu is a popover in the chat', () => {
   })
 })
 
+describe('per-chat notification types', () => {
+  it('are not offered at all where nothing would read them', async () => {
+    await openChat()
+
+    fireEvent.press(screen.getByTestId('chat-header-options'))
+    await waitFor(() => expect(screen.getByTestId('chat-options-popover')).toBeTruthy())
+
+    // This device has never asked to be told anything, so there is nothing for
+    // these switches to modify.
+    expect(screen.queryByTestId('option-notifications')).toBeNull()
+  })
+
+  it('open as a page of the sheet, and write the chat’s own override', async () => {
+    await openChat()
+
+    act(() => {
+      usePushStore.getState().setEnabled(true)
+    })
+
+    fireEvent.press(screen.getByTestId('chat-header-options'))
+    await waitFor(() => expect(screen.getByTestId('option-notifications')).toBeTruthy())
+
+    fireEvent.press(screen.getByTestId('option-notifications'))
+
+    await waitFor(() => expect(screen.getByTestId('option-notify-cron')).toBeTruthy())
+
+    // Switching one on turns every type on by default, so this one is a change.
+    fireEvent.press(screen.getByTestId('option-notify-cron'))
+
+    expect(usePushStore.getState().perBot.researcher).toEqual({ cron: false })
+  })
+})
+
 describe('the rows the keyboard walks', () => {
   it('are the same list the popover draws, export included only when there is one', () => {
-    expect(popoverRows({ canExport: true }).map(row => row.id)).toEqual([
+    expect(popoverRows({ canExport: true, canSetNotifications: true }).map(row => row.id)).toEqual([
       'yolo',
       'fast',
       'reasoning',
       'model',
       'colour',
       'mute',
+      'notifications',
       'verbosity',
       'bot-to-bot',
       'thinking',
@@ -230,7 +266,10 @@ describe('the rows the keyboard walks', () => {
       'export'
     ])
 
-    expect(popoverRows({ canExport: false }).some(row => row.id === 'export')).toBe(false)
+    expect(popoverRows({ canExport: false, canSetNotifications: false }).some(row => row.id === 'export')).toBe(false)
+    expect(popoverRows({ canExport: true, canSetNotifications: false }).some(row => row.id === 'notifications')).toBe(
+      false
+    )
   })
 
   it('clamps rather than wrapping, so the end of the list says it is the end', () => {

@@ -18,6 +18,7 @@ import { prettyModelName, type ContextUsage } from '@hermie/transcript'
 import { ContextMeter } from '../../chat-ui/ContextMeter'
 import { chatStrings } from '../../chat-ui/strings'
 import type { PickerOption, Verbosity } from '../../chat-ui/types'
+import type { PushType } from '@hermie/gateway-client/push'
 import { formatMuteUntil, MUTE_DURATIONS, MUTE_FOREVER, muteUntil, type MuteDuration } from '../../store/mute'
 import { strings } from '../../i18n/strings'
 import { AccentSwatches } from '../AccentSwatches'
@@ -75,6 +76,16 @@ export interface ChatOptionsSheetProps {
   mutedUntil: number | null
   /** `null` unmutes; a number is the second the silence lapses, `0` for never. */
   onChangeMute: (until: number | null) => void
+
+  /**
+   * Per-type notification settings for this chat, where the gateway can honour
+   * them.
+   *
+   * Absent removes the row and the page entirely, the way `onExport` removes
+   * the export group: a gateway with no notifier has nothing to set, and a
+   * switch that writes a preference nothing reads is worse than no switch.
+   */
+  notifications?: ChatNotificationSettings
 
   /**
    * How full this session's context window is, or nothing.
@@ -142,9 +153,41 @@ export interface ChatOptionsSheetProps {
  * union rather than two, so a page added here cannot be a page the popover
  * quietly cannot reach.
  */
-export type ChatOptionsPane = 'reasoning' | 'model' | 'colour' | 'mute' | 'export'
+export type ChatOptionsPane = 'reasoning' | 'model' | 'colour' | 'mute' | 'export' | 'notifications'
 
 type Pane = 'root' | ChatOptionsPane
+
+/**
+ * What the chat's own notification page needs.
+ *
+ * `types` is the EFFECTIVE answer — the global switches with this chat's
+ * overrides folded in — because that is the question the reader is asking: will
+ * this chat wake me for a failed turn. `overridden` is what makes the footer
+ * honest, and it is separate precisely because an effective `true` can mean
+ * either "the global says so" or "this chat says so".
+ */
+export interface ChatNotificationSettings {
+  types: Record<PushType, boolean>
+  /** True when this chat pins any type rather than following the global set. */
+  overridden: boolean
+  /** `null` puts the type back to following the global switch. */
+  onChangeType: (type: PushType, on: boolean | null) => void
+  onUseGlobal: () => void
+}
+
+/**
+ * The four a reader recognises, in the order they matter.
+ *
+ * Not every `PushType`: `message` is what mute already covers and is the one
+ * switch a per-chat page would duplicate, so the page names the four EVENTS a
+ * reader would answer differently per bot. The wire keeps all of them.
+ */
+const CHAT_NOTIFICATION_TYPES: { type: PushType; label: string }[] = [
+  { type: 'turn_done', label: chatStrings.notifications.types.turnDone as string },
+  { type: 'turn_failed', label: chatStrings.notifications.types.turnFailed as string },
+  { type: 'request', label: chatStrings.notifications.types.needsInput as string },
+  { type: 'cron', label: chatStrings.notifications.types.cron as string }
+]
 
 /**
  * The picker's id for "stop being quiet".
@@ -409,7 +452,50 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
       testID="chat-options-sheet"
       visible={props.visible}
     >
-      {pane === 'export' ? (
+      {pane === 'notifications' && props.notifications ? (
+        /*
+          Per TYPE, on top of mute rather than instead of it.
+
+          Mute is "say nothing at all" and these are "say this but not that",
+          which is why they are a page of their own and why the footer says
+          which of the two states a switch is in: a switch that is on because
+          the global setting is on and one that is on because this chat says so
+          look identical, and only one of them moves when Settings moves.
+        */
+        <Page onBack={() => setPane('root')} title={chatStrings.notifications.title}>
+          <Text color="textMuted" variant="preview">
+            {chatStrings.notifications.subtitle(props.botName)}
+          </Text>
+          <InsetGroup
+            footer={
+              props.notifications.overridden
+                ? chatStrings.notifications.overridden
+                : chatStrings.notifications.following
+            }
+          >
+            {CHAT_NOTIFICATION_TYPES.map(entry => (
+              <SwitchRow
+                key={entry.type}
+                label={entry.label}
+                onChange={value => props.notifications?.onChangeType(entry.type, value)}
+                testID={`option-notify-${entry.type}`}
+                value={props.notifications?.types[entry.type] === true}
+              />
+            ))}
+          </InsetGroup>
+          <Text color="textMuted" variant="meta">
+            {chatStrings.notifications.hint}
+          </Text>
+          {props.notifications.overridden ? (
+            <Button
+              onPress={props.notifications.onUseGlobal}
+              testID="option-notify-global"
+              title={chatStrings.notifications.useDefault}
+              variant="secondary"
+            />
+          ) : null}
+        </Page>
+      ) : pane === 'export' ? (
         /*
           Export as a page of its own, because the popover has to be able to
           reach it. It was a group on the root and it still is — the root below
@@ -569,6 +655,13 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
               testID="option-mute"
               value={muteLabel}
             />
+            {props.notifications ? (
+              <DisclosureRow
+                label={chatStrings.notifications.label}
+                onPress={() => setPane('notifications')}
+                testID="option-notifications"
+              />
+            ) : null}
             {/*
               Read-only, and the only row here that is. Everything else in this
               group is a decision the reader makes; this is a fact they check one

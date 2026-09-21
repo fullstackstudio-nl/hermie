@@ -34,7 +34,8 @@ import {
   type PushAddress,
   type PushRegistrationInput,
   type PushSeenEntry,
-  type PushType
+  type PushType,
+  type PushTypeOverrides
 } from '@hermie/gateway-client/push'
 import { create } from 'zustand'
 
@@ -81,6 +82,20 @@ export interface PushState {
   /** What the reader asked for. Independent of whether a token was obtained. */
   enabled: boolean
   types: Record<PushType, boolean>
+  /**
+   * Chat name → the types that chat overrides, where it overrides any.
+   *
+   * PARTIAL, so a type a chat has not been given an opinion about follows the
+   * global switch as the global switch moves. About the READER rather than
+   * about this device, which is why it rides in the app-wide section beside the
+   * mutes and not in this device's own registration row: silencing one bot's
+   * cron deliveries means it on the phone and on the Mac.
+   *
+   * NOT persisted locally, for the reason the neighbours' rows are not: it is
+   * the gateway's copy that is authoritative and the gateway is read on every
+   * reconnect.
+   */
+  perBot: Record<string, PushTypeOverrides>
   /** Off by default: ADR-0017's payload says who, not what. */
   preview: boolean
   /** Where the platform says to send. Null until permission and a token. */
@@ -106,6 +121,17 @@ export interface PushState {
   /** Turn the whole section on or off. The address is set separately. */
   setEnabled: (enabled: boolean) => void
   setType: (type: PushType, on: boolean) => void
+  /**
+   * Override one type for one chat, or let it follow the global switch again.
+   *
+   * `null` REMOVES the override rather than writing `false`, which is the
+   * difference between "this chat never wants a cron notice" and "this chat has
+   * no opinion". An empty bag is dropped, so a chat that has been put back to
+   * following the default leaves nothing behind in the section.
+   */
+  setBotType: (botName: string, type: PushType, on: boolean | null) => void
+  /** Drop every override for one chat, so it follows the global types again. */
+  resetBotTypes: (botName: string) => void
   setPreview: (preview: boolean) => void
   /** Record the address the platform handed over, and stamp the row. */
   setAddress: (address: PushAddress | null, stamp: number) => void
@@ -116,7 +142,11 @@ export interface PushState {
   /** Note WHICH chat is on screen on THIS device, at `stamp` (epoch seconds). */
   beat: (bot: string, stamp: number) => void
   /** Fold the gateway's copy of the section in. Never written back out by itself. */
-  applyRemote: (patch: { others: Record<string, unknown>; seen: Record<string, PushSeenEntry> }) => void
+  applyRemote: (patch: {
+    others: Record<string, unknown>
+    seen: Record<string, PushSeenEntry>
+    perBot?: Record<string, PushTypeOverrides>
+  }) => void
   /** Forget this device's registration: sign-out, or a different gateway. */
   retire: () => void
   reset: () => void
@@ -159,6 +189,7 @@ export const usePushStore = create<PushState>((set, get) => {
     address: null,
     updatedAt: 0,
     others: {},
+    perBot: {},
     seen: {},
     loaded: false,
     addressFailure: null,
@@ -199,6 +230,37 @@ export const usePushStore = create<PushState>((set, get) => {
       // what was tried.
       set({ enabled, types, addressFailure: null, ...(enabled ? {} : { address: null }) })
       save()
+    },
+
+    setBotType(botName, type, on) {
+      const current = { ...(get().perBot[botName] ?? {}) }
+
+      if (on === null) {
+        delete current[type]
+      } else {
+        current[type] = on
+      }
+
+      const perBot = { ...get().perBot }
+
+      if (Object.keys(current).length) {
+        perBot[botName] = current
+      } else {
+        delete perBot[botName]
+      }
+
+      set({ perBot })
+    },
+
+    resetBotTypes(botName) {
+      if (!get().perBot[botName]) {
+        return
+      }
+
+      const perBot = { ...get().perBot }
+
+      delete perBot[botName]
+      set({ perBot })
     },
 
     setType(type, on) {
@@ -246,7 +308,10 @@ export const usePushStore = create<PushState>((set, get) => {
         seen[installationId] = ours
       }
 
-      set({ others: patch.others, seen })
+      // Theirs is taken and ours is replaced, the same rule the rows follow.
+      // The overrides belong to the PERSON rather than to a device, so the
+      // gateway's copy simply wins: there is no local half to merge.
+      set({ others: patch.others, seen, ...(patch.perBot ? { perBot: patch.perBot } : {}) })
     },
 
     retire() {
@@ -279,6 +344,7 @@ export const usePushStore = create<PushState>((set, get) => {
         address: null,
         updatedAt: 0,
         others: {},
+        perBot: {},
         seen: {},
         loaded: false,
         addressFailure: null

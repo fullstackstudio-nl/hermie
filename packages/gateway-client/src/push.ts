@@ -102,9 +102,64 @@ export interface PushSeenEntry {
   at: number
 }
 
+/**
+ * What one chat wants, where it differs from the global types.
+ *
+ * PARTIAL on purpose, and that is the whole design: a type this bag does not
+ * mention follows the global setting as the global setting moves. A full
+ * `Record<PushType, boolean>` would freeze every type at whatever it happened
+ * to be the day the reader touched one of them, which is the same mistake a
+ * chat's view override would make if it copied all three switches instead of
+ * the one that was changed.
+ */
+export type PushTypeOverrides = Partial<Record<PushType, boolean>>
+
+/** Where the per-chat overrides sit inside the `push` section. */
+export const PUSH_PER_BOT_KEY = 'perBot'
+
+/**
+ * The global types with one chat's overrides folded in.
+ *
+ * Stated here, in the package both sides import, so that the app's switches and
+ * the notifier's decision cannot be two different rules that happen to agree.
+ */
+export function effectivePushTypes(
+  global: Record<PushType, boolean>,
+  overrides: PushTypeOverrides | undefined
+): Record<PushType, boolean> {
+  const out = { ...global }
+
+  for (const type of PUSH_TYPES) {
+    const override = overrides?.[type]
+
+    if (typeof override === 'boolean') {
+      out[type] = override
+    }
+  }
+
+  return out
+}
+
 /** The section as it travels, which is a plain bag both sides read defensively. */
 export interface PushSectionShape {
   registrations: Record<string, unknown>
+  /**
+   * Chat name → the types that chat overrides. Absent when nothing is overridden.
+   *
+   * Beside the registrations rather than inside a row, because this is a
+   * decision about the READER and not about a device: somebody who silences the
+   * cron deliveries of one bot means it on their phone and on their Mac. It is
+   * the same argument `mutes` makes for living in the app-wide section rather
+   * than on a bot's own profile.
+   *
+   * An ADDITIVE field and the section version is deliberately NOT bumped for
+   * it. `v` is checked per ROW and an unreadable row is DROPPED — so bumping
+   * would not protect this key from an older notifier, it would unregister the
+   * device and make the phone go quiet. A notifier that does not know the field
+   * keeps sending what the global types say, which is exactly what it did
+   * before the field existed.
+   */
+  perBot?: Record<string, PushTypeOverrides>
   /**
    * Object per device where the gateway can read one, bare number otherwise.
    *
@@ -228,6 +283,40 @@ export function pushSeenOf(section: unknown): Record<string, PushSeenEntry> {
 }
 
 /**
+ * Read the per-chat overrides defensively: they arrive from a wire.
+ *
+ * A key with nothing recognisable under it is dropped rather than kept as an
+ * empty bag, because an empty bag and an absent one mean the same thing and one
+ * of them costs a revision every time the section is written.
+ */
+export function pushPerBotOf(section: unknown): Record<string, PushTypeOverrides> {
+  const push = isObject(section) ? section[PUSH_SECTION_KEY] : null
+  const raw =
+    isObject(push) && isObject(push[PUSH_PER_BOT_KEY]) ? (push[PUSH_PER_BOT_KEY] as Record<string, unknown>) : {}
+  const out: Record<string, PushTypeOverrides> = {}
+
+  for (const [bot, value] of Object.entries(raw)) {
+    if (!bot || !isObject(value)) {
+      continue
+    }
+
+    const overrides: PushTypeOverrides = {}
+
+    for (const type of PUSH_TYPES) {
+      if (typeof value[type] === 'boolean') {
+        overrides[type] = value[type] as boolean
+      }
+    }
+
+    if (Object.keys(overrides).length) {
+      out[bot] = overrides
+    }
+  }
+
+  return out
+}
+
+/**
  * How long a `seen` stamp is kept before it is swept out of the section.
  *
  * It is not the daemon's suppression window — that is the daemon's to choose and
@@ -245,6 +334,8 @@ export interface PushSectionInput {
   own: PushRegistrationInput | null
   /** Every `seen` entry this device knows about, including its own. */
   seen: Record<string, PushSeenEntry>
+  /** Chat name → the types that chat overrides. Empty writes nothing. */
+  perBot?: Record<string, PushTypeOverrides>
   /** Epoch seconds. Sweeps `seen`; does NOT stamp the registration. */
   now: number
   /**
@@ -282,5 +373,21 @@ export function pushSectionFor(input: PushSectionInput): PushSectionShape | unde
     }
   }
 
-  return Object.keys(registrations).length || Object.keys(seen).length ? { registrations, seen } : undefined
+  const perBot: Record<string, PushTypeOverrides> = {}
+
+  for (const [bot, overrides] of Object.entries(input.perBot ?? {})) {
+    if (bot && overrides && Object.keys(overrides).length) {
+      perBot[bot] = { ...overrides }
+    }
+  }
+
+  const has = Object.keys(registrations).length || Object.keys(seen).length || Object.keys(perBot).length
+
+  if (!has) {
+    return undefined
+  }
+
+  // Omitted rather than empty, for the reason the doc comment above gives about
+  // the section as a whole: a key that means nothing still moves a revision.
+  return { registrations, seen, ...(Object.keys(perBot).length ? { perBot } : {}) }
 }
