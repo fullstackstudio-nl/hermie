@@ -16,10 +16,14 @@ Pod::Spec.new do |s|
   s.source         = { git: '' }
   s.static_framework = true
 
-  # No ExpoModulesCore dependency and no module in expo-module.config.json: there is no JavaScript
-  # side to this. Autolinking is used only to get the pod into the build, and the app target's
-  # `-ObjC` link flag is what keeps a class nobody references at compile time — UIKit finds
-  # `HermieSceneDelegate` by the name in Info.plist — out of the linker's dead-strip.
+  # There is one thing JavaScript asks this module, and it is not about scenes as such: the URL this
+  # process was launched by, which `Linking.getInitialURL()` cannot answer under the scene life
+  # cycle. See `HermieSceneDelegate.launchURL`. Everything else here is still invisible from
+  # JavaScript — autolinking is what gets the pod into the build at all, and the app target's
+  # `-ObjC` link flag is what keeps `HermieSceneDelegate` (which UIKit finds by the name in
+  # Info.plist and nothing references at compile time) out of the linker's dead-strip.
+  s.dependency 'ExpoModulesCore'
+
   s.frameworks = 'UIKit'
 
   s.pod_target_xcconfig = {

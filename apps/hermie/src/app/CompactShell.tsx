@@ -1,6 +1,12 @@
-import { DefaultTheme, NavigationContainer, useNavigation, type Theme as NavTheme } from '@react-navigation/native'
+import {
+  DefaultTheme,
+  NavigationContainer,
+  useNavigation,
+  useNavigationContainerRef,
+  type Theme as NavTheme
+} from '@react-navigation/native'
 import { createNativeStackNavigator, type NativeStackNavigationProp } from '@react-navigation/native-stack'
-import { useMemo } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 
 import type { DevInitialView } from '../dev'
 import { ActivityScreen } from '../features/activity'
@@ -9,6 +15,7 @@ import { ChatScreen } from '../features/chats'
 import { CronScreen } from '../features/cron'
 import { SettingsScreen } from '../features/settings'
 import { strings } from '../i18n/strings'
+import { useHermieLink } from '../platform/deep-link'
 import { GlassSurface, Wallpaper } from '../ui/glass'
 import { useTheme } from '../ui/theme'
 import { useShortcut } from '../ui/useShortcut'
@@ -103,6 +110,41 @@ function ActivityRoute() {
  */
 export function CompactShell({ initial }: { initial?: DevInitialView } = {}) {
   const theme = useTheme()
+  const navigationRef = useNavigationContainerRef<CompactStackParamList>()
+
+  /**
+   * `hermie://chat/<bot>`, from a home-screen widget.
+   *
+   * Through the container ref rather than a `linking` config on the navigator,
+   * and the reason is the wide layout: `RegularShell` has no navigator at all,
+   * so a link that only worked through React Navigation's own linking would
+   * work on a phone and silently do nothing on an iPad or a Mac. One parser and
+   * one hook (`platform/deep-link`) is what the two shells share instead.
+   *
+   * `navigate` and not `push`: a widget names a chat, and tapping the same
+   * widget twice should land on that chat rather than build a stack of it.
+   *
+   * A cold start is the case that needs the parking space. The link is read
+   * during the first mount, and the container is not ready until after it — so a
+   * link that arrives before `onReady` is held and replayed there rather than
+   * dropped, which is exactly the launch a widget tap on a closed app produces.
+   */
+  const pendingBot = useRef<string | null>(null)
+
+  const openChat = useCallback(
+    (botName: string) => {
+      if (navigationRef.isReady()) {
+        navigationRef.navigate('Chat', { bot: botName })
+
+        return
+      }
+
+      pendingBot.current = botName
+    },
+    [navigationRef]
+  )
+
+  useHermieLink(link => openChat(link.bot))
 
   // A navigator paints its own background over everything, including the
   // wallpaper, unless both the container theme and the screen say otherwise.
@@ -126,7 +168,18 @@ export function CompactShell({ initial }: { initial?: DevInitialView } = {}) {
   // because the regular shell has no navigator at all.
   return (
     <Wallpaper style={{ flex: 1 }} testID="wallpaper">
-      <NavigationContainer theme={navTheme}>
+      <NavigationContainer
+        onReady={() => {
+          const botName = pendingBot.current
+          pendingBot.current = null
+
+          if (botName) {
+            navigationRef.navigate('Chat', { bot: botName })
+          }
+        }}
+        ref={navigationRef}
+        theme={navTheme}
+      >
         <Stack.Navigator
           // A launch argument puts one route in the stack rather than pushing
           // onto Bots: a screenshot wants the screen, not a back button to a

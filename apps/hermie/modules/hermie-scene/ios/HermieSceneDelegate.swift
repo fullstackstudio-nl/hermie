@@ -59,6 +59,28 @@ import UIKit
  */
 @objc(HermieSceneDelegate)
 public class HermieSceneDelegate: UIResponder, UIWindowSceneDelegate {
+  /**
+   The URL this process was LAUNCHED by, for whoever asks first.
+
+   `Linking.getInitialURL()` reads the app delegate's launch options, and under the scene life cycle
+   a cold-start URL is not in them — it is in the scene's connection options, which arrive after
+   `startReactNative` has already been handed the launch options. So React Native answers `null` and
+   the URL reaches JavaScript, if at all, as a `url` EVENT fired while the bridge is still starting
+   and nothing is listening. Measured on a simulator on 2026-09-21: a widget tapped while the app
+   was closed opened Hermie on whatever screen it was last on.
+
+   It is worse than "not delivered" in a build that links expo-dev-client, which is every build made
+   from this repository today. `ExpoDevLauncherAppDelegateSubscriber` sees the URL first — the
+   forward below goes through the app delegate, and `ExpoAppDelegate` offers it to its subscribers
+   before `RCTLinkingManager` — and with no bridge started yet the launcher treats it as a bundle
+   URL and shows its own screen instead. Also measured, on a Release simulator build.
+
+   So the URL is recorded HERE, before either of those can lose it, and `HermieSceneModule` hands it
+   to `src/platform/deep-link.ts`. Recorded rather than acted on: this class knows nothing about
+   chats, and what a link MEANS is one narrow parser in TypeScript with a table of refusals.
+   */
+  public static var launchURL: URL?
+
   /// UIKit reads this to find the scene's window; the app delegate owns the same instance.
   public var window: UIWindow?
 
@@ -93,6 +115,11 @@ public class HermieSceneDelegate: UIResponder, UIWindowSceneDelegate {
     // launch options, and by now `startReactNative` has already been given them, so the app delegate
     // gets the event instead. Hermie never receives links (ADR-0004 keeps the sign-in round trip
     // inside a WebView), but the dev client does — that is how the launcher opens a bundle.
+    // Recorded before it is forwarded, because the forward is where it gets lost. See `launchURL`.
+    if let first = connectionOptions.urlContexts.first {
+      Self.launchURL = first.url
+    }
+
     connectionOptions.urlContexts.forEach {
       open(url: $0.url, options: Self.openURLOptions(from: $0.options))
     }
