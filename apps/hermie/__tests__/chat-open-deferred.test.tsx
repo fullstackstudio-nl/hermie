@@ -139,7 +139,7 @@ beforeEach(() => {
 it('does not open the chat while the socket is still dialling', async () => {
   renderChat()
 
-  await waitFor(() => expect(screen.getByTestId('chat-waiting-for-connection')).toBeTruthy())
+  await waitFor(() => expect(screen.getByTestId('chat-connecting-state')).toBeTruthy())
 
   expect(mockController.openChat).not.toHaveBeenCalled()
 })
@@ -147,7 +147,7 @@ it('does not open the chat while the socket is still dialling', async () => {
 it('says it is waiting rather than showing a failure with a retry on it', async () => {
   renderChat()
 
-  await screen.findByTestId('chat-waiting-for-connection')
+  await screen.findByTestId('chat-connecting-state')
 
   expect(screen.queryByText(FAILED_BANNER)).toBeNull()
   expect(screen.queryByTestId('chat-error-dismiss')).toBeNull()
@@ -156,12 +156,12 @@ it('says it is waiting rather than showing a failure with a retry on it', async 
 it('opens by itself the moment the connection reports ready', async () => {
   const view = renderChat()
 
-  await screen.findByTestId('chat-waiting-for-connection')
+  await screen.findByTestId('chat-connecting-state')
 
   view.setStatus('ready')
 
   await waitFor(() => expect(mockController.openChat).toHaveBeenCalledWith(BOT))
-  expect(screen.queryByTestId('chat-waiting-for-connection')).toBeNull()
+  expect(screen.queryByTestId('chat-connecting-state')).toBeNull()
 })
 
 it('opens once, not once per render, while the connection stays ready', async () => {
@@ -216,7 +216,7 @@ it("drops a previous connection's failure instead of carrying it into the next d
 
   // The retry that banner offered is the reconnect now under way.
   expect(screen.queryByText(FAILED_BANNER)).toBeNull()
-  expect(screen.getByTestId('chat-waiting-for-connection')).toBeTruthy()
+  expect(screen.getByTestId('chat-connecting-state')).toBeTruthy()
 })
 
 describe('a connection that will not become ready on its own', () => {
@@ -230,7 +230,7 @@ describe('a connection that will not become ready on its own', () => {
     expect(await screen.findByTestId('signed-out-panel')).toBeTruthy()
     expect(screen.getByTestId('signed-out-sign-in')).toBeTruthy()
     // Terminal: waiting is not the story, so the quiet notice gives way.
-    expect(screen.queryByTestId('chat-waiting-for-connection')).toBeNull()
+    expect(screen.queryByTestId('chat-connecting-state')).toBeNull()
     expect(mockController.openChat).not.toHaveBeenCalled()
   })
 
@@ -241,14 +241,14 @@ describe('a connection that will not become ready on its own', () => {
     view.setStatus('reconnecting', new GatewayError('config', 'socket closed', { closeCode: 4403 }))
 
     expect(await screen.findByText(/does not trust this address/)).toBeTruthy()
-    expect(screen.queryByTestId('chat-waiting-for-connection')).toBeNull()
+    expect(screen.queryByTestId('chat-connecting-state')).toBeNull()
   })
 
   it('keeps waiting through an ordinary network wobble', async () => {
     const view = renderChat()
     view.setStatus('reconnecting', new GatewayError('network', 'ECONNREFUSED'))
 
-    expect(await screen.findByTestId('chat-waiting-for-connection')).toBeTruthy()
+    expect(await screen.findByTestId('chat-connecting-state')).toBeTruthy()
   })
 })
 

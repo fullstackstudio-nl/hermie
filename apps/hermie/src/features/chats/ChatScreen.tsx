@@ -41,6 +41,7 @@ import {
   TranscriptList,
   type TranscriptListHandle
 } from '../../chat-ui'
+import type { ConnectionStatus } from '@hermie/gateway-client'
 import { looksLikeSlashCommand, parseSlashCommand } from '@hermes/shared/slash'
 
 import { useGateway } from '../../gateway'
@@ -53,6 +54,7 @@ import { useChatAccent, useChatLayoutStore } from '../../store/chat-layout'
 import { useChatsStore } from '../../store/chats'
 import { useCronStore } from '../../store/cron'
 import { hasChatViewOverride, useChatView, useSettingsStore } from '../../store/settings'
+import { Appear } from '../../ui/Appear'
 import { KeyboardInset } from '../../ui/KeyboardInset'
 import { Screen, Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
@@ -67,6 +69,8 @@ import type { AttachmentInput, ModelChoice } from './chat-controller'
 import type { ManualSheet } from './sheet-host'
 import { useChatRuntime } from './ChatRuntime'
 import { findMatchingItem } from '../search'
+import { connectionNotice, RETRY_OFFER_MS } from './connection-notice'
+import { ChatConnectingState, ReconnectPill } from './ConnectionState'
 import { useChat, type UseChatResult } from './useChat'
 
 export interface OpenChatOptions {
@@ -118,6 +122,50 @@ export type ChatScreenProps = {
 
 /** How long a found row stays lit. Long enough to see, short enough not to be a state. */
 const HIGHLIGHT_MS = 2_000
+
+/**
+ * How long this connection has been away from `ready`.
+ *
+ * A clock rather than a `Date.now()` read per render, because the thing it
+ * decides — whether the reader is offered a dial of their own — has to become
+ * true while nothing else is happening. A reconnect produces no renders: the
+ * ladder is inside the connection object and the status does not change between
+ * rungs, so a screen that only measured the elapsed time when something else
+ * re-rendered it would offer the button at an arbitrary moment or never.
+ *
+ * One timeout, armed on the transition away from `ready` and disarmed on the way
+ * back, so a chat sitting on a live connection runs no timer at all.
+ */
+function useWaitingMs(status: ConnectionStatus): number {
+  const since = useRef<number | null>(null)
+  const [, tick] = useState(0)
+
+  if (status === 'ready' || status === 'paused') {
+    since.current = null
+  } else if (since.current === null) {
+    since.current = Date.now()
+  }
+
+  const startedAt = since.current
+
+  useEffect(() => {
+    if (startedAt === null) {
+      return
+    }
+
+    const remaining = RETRY_OFFER_MS - (Date.now() - startedAt) + 1
+
+    if (remaining <= 0) {
+      return
+    }
+
+    const timer = setTimeout(() => tick(value => value + 1), remaining)
+
+    return () => clearTimeout(timer)
+  }, [startedAt])
+
+  return startedAt === null ? 0 : Date.now() - startedAt
+}
 
 const REASONING_OPTIONS: PickerOption[] = [
   { value: 'none', label: 'Off', detail: 'No extra thinking' },
@@ -255,7 +303,7 @@ function Conversation({
   const chat = useChat(botName)
   const runtime = useChatRuntime()
   const cronJobs = useCronStore(state => state.jobs)
-  const { config, http, status } = useGateway()
+  const { config, connection, http, status } = useGateway()
   const view = useChatView(botName)
   const avatar = useBotsStore(state => state.avatars[botName])
   const byName = useBotsStore(state => state.byName)
@@ -826,6 +874,35 @@ function Conversation({
   }, [chat, subagents, transcript?.subagentId, transcript?.source])
 
   const busy = chat.busy
+
+  /**
+   * What the connection has to say, and where it is allowed to say it.
+   *
+   * The old answer was a `Banner` at the top of the transcript pane, and the
+   * transcript pane's top is UNDER the floating header — so a reader whose
+   * gateway had gone away read "Waiting for th…" with the middle of the sentence
+   * behind the contact pill. `connection-notice.ts` has the whole decision; this
+   * is only the two inputs it cannot work out for itself.
+   */
+  const waitingMs = useWaitingMs(status)
+  const connectionState = connectionNotice({
+    blocked: chat.connectionError !== null,
+    hasTranscript: chat.items.length > 0,
+    status,
+    waitingMs
+  })
+
+  /**
+   * Reset the ladder to the bottom and dial now.
+   *
+   * `retryNow` is deliberately harmless at any time and deliberately refuses to
+   * restart a connection that stopped for a reason it can explain — so the
+   * button never has to ask whether this is the kind of failure it can fix.
+   */
+  const retryConnection = useCallback(() => {
+    connection?.retryNow()
+  }, [connection])
+
   // Every question the agent is still blocked on, including one the reader put
   // aside with "Later". The header must not go quiet while the agent waits.
   const needsInput = chat.requests.length > 0
@@ -1280,7 +1357,6 @@ function Conversation({
             // message it produced, which only ever says "gateway not connected".
             error={chat.connectionError ?? chat.error ?? notice}
             hydration={chat.hydration}
-            waitingForConnection={chat.waitingForConnection}
             onDismiss={() => {
               setNotice(null)
               setNeedsPhotoAccess(false)
@@ -1296,9 +1372,26 @@ function Conversation({
           transcript card is a receipt for a run that already happened, and one
           tap away from starting another one is not where that belongs.
         */}
-          <TranscriptList
-            canOpenCron={canOpenCron}
+          {connectionState.kind === 'empty' ? (
             /*
+              Nothing cached and nothing live: the notice IS the screen.
+
+              The list is not rendered at all rather than rendered empty. An empty
+              inverted list would put "Nothing has been said in this chat yet."
+              under the header — which is a claim about the CONVERSATION, and the
+              app does not know whether it is true yet. It has not been able to ask.
+            */
+            <ChatConnectingState
+              name={display}
+              onRetry={retryConnection}
+              phase={connectionState.phase}
+              retry={connectionState.retry}
+              {...(avatar ? { avatarUri: avatar } : {})}
+            />
+          ) : (
+            <TranscriptList
+              canOpenCron={canOpenCron}
+              /*
             The transcript runs UNDER the floating chrome and pads its own content
             out of the way. An inverted list's content container has its top where
             the screen's bottom is, so the padding that clears a header at the
@@ -1308,40 +1401,41 @@ function Conversation({
             laid out at, so the clearance and the thing it clears cannot drift
             apart when a subtitle wraps or a control size changes.
           */
-            contentStyle={{ paddingBottom: chromeHeight }}
-            header={
-              chat.subagents.length ? (
-                <AgentsBar
-                  count={chat.subagents.length}
-                  onPress={openAgents}
-                  startedAtMs={oldestStart(chat.subagents)}
-                />
-              ) : null
-            }
-            {...(highlightId ? { highlightItemId: highlightId } : {})}
-            images={images}
-            items={chat.items}
-            newMessageCount={newCount}
-            loadingOlder={loadingOlder}
-            onEndReached={loadOlder}
-            onOpenBot={openBot}
-            onOpenCron={openCron}
-            onOpenRequest={reopenRequest}
-            onOpenTranscript={openTranscript}
-            onScrolledAwayFromBottom={onScrolledAway}
-            ref={listRef}
-            selfHandle={botName}
-            subagents={subagents}
-            // The TURN is running and nothing has been said yet: three dots. Not
-            // `busy` — that also covers a tool or a child still working, and dots
-            // under a finished reply promise a sentence that is not coming.
-            onDeleteQueued={chat.deleteQueued}
-            onEditQueued={editQueued}
-            onSteerQueued={steerQueued}
-            queued={chat.queued}
-            typing={chat.turnActive && !hasStreamingText(chat.items)}
-            typingHandles={typing}
-          />
+              contentStyle={{ paddingBottom: chromeHeight }}
+              header={
+                chat.subagents.length ? (
+                  <AgentsBar
+                    count={chat.subagents.length}
+                    onPress={openAgents}
+                    startedAtMs={oldestStart(chat.subagents)}
+                  />
+                ) : null
+              }
+              {...(highlightId ? { highlightItemId: highlightId } : {})}
+              images={images}
+              items={chat.items}
+              newMessageCount={newCount}
+              loadingOlder={loadingOlder}
+              onEndReached={loadOlder}
+              onOpenBot={openBot}
+              onOpenCron={openCron}
+              onOpenRequest={reopenRequest}
+              onOpenTranscript={openTranscript}
+              onScrolledAwayFromBottom={onScrolledAway}
+              ref={listRef}
+              selfHandle={botName}
+              subagents={subagents}
+              // The TURN is running and nothing has been said yet: three dots. Not
+              // `busy` — that also covers a tool or a child still working, and dots
+              // under a finished reply promise a sentence that is not coming.
+              onDeleteQueued={chat.deleteQueued}
+              onEditQueued={editQueued}
+              onSteerQueued={steerQueued}
+              queued={chat.queued}
+              typing={chat.turnActive && !hasStreamingText(chat.items)}
+              typingHandles={typing}
+            />
+          )}
 
           {/*
           The chrome, laid OVER the transcript rather than above it.
@@ -1376,6 +1470,26 @@ function Conversation({
             />
           </View>
 
+          {/*
+            The same fact as the plate above, for a chat that has something to
+            read: a thin pill in the flow directly over the composer.
+
+            In the FLOW rather than floating, which is the one arrangement that
+            cannot collide with the jump-to-latest pill — that one already floats
+            at the bottom of the transcript, and two pills landing on each other
+            is the sort of thing only a dropped connection would ever show. The
+            list loses the pill's height and an inverted list keeps its bottom
+            pinned, so the newest message does not move when it arrives.
+          */}
+          <Appear
+            rise={6}
+            style={{ paddingBottom: theme.space.xs, paddingHorizontal: theme.space.md }}
+            testID="chat-reconnect-slot"
+            visible={connectionState.kind === 'pill'}
+          >
+            <ReconnectPill onRetry={retryConnection} phase={connectionState.phase} retry={connectionState.retry} />
+          </Appear>
+
           <Composer
             attachBusy={attachBusy}
             attachments={composerAttachments}
@@ -1396,6 +1510,13 @@ function Conversation({
             onSend={text => void send(text)}
             onStop={() => void chat.stop()}
             running={busy}
+            /*
+              Typing stays possible and sending does not. A draft written while
+              the gateway is away is worth keeping — it is the reason to sit
+              through a reconnect at all — but a send that cannot reach anything
+              either throws the words away or invents a queue nobody asked for.
+            */
+            sendBlocked={connectionState.kind !== 'none'}
             suggestions={suggestions}
             value={chat.draft}
             {...(chat.queuedText ? { queuedText: chat.queuedText } : {})}
@@ -1593,18 +1714,25 @@ function subtitleFor(state: {
   }
 }
 
+/**
+ * The bar above the transcript, for the three things that are NOT the connection.
+ *
+ * The connection used to be here too and is not any more: this bar's top edge is
+ * the transcript pane's top edge, which the floating chrome covers, so anything
+ * put here has to be short enough to survive being half-hidden. An error and a
+ * cache notice are; "Waiting for the gateway. This conversation opens as soon as
+ * it answers." was not, and that is what the reader was shown. See
+ * `connection-notice.ts` for where it went.
+ */
 function Banner({
   hydration,
   error,
-  waitingForConnection,
   onRetry,
   onDismiss,
   onOpenSettings
 }: {
   hydration: UseChatResult['hydration']
   error: string | null
-  /** The socket is not up yet. Quiet, and with nothing to press: see `useChat`. */
-  waitingForConnection: boolean
   onRetry: () => Promise<void>
   onDismiss: () => void
   /** Only for a refused photo picker: the one failure with a way out. */
@@ -1681,27 +1809,6 @@ function Banner({
       <View style={{ backgroundColor: theme.elevation.e3c, padding: theme.space.md }}>
         <Text color="textMuted" variant="preview">
           {hydration === 'cached' ? strings.chat.offlineCopy : strings.chat.stale}
-        </Text>
-      </View>
-    )
-  }
-
-  // Last, because a cache paint already explains itself and says more: this is
-  // the empty-screen case, where otherwise nothing at all would be on it.
-  if (waitingForConnection) {
-    return (
-      <View
-        style={{
-          alignItems: 'center',
-          flexDirection: 'row',
-          gap: theme.space.sm,
-          padding: theme.space.md
-        }}
-        testID="chat-waiting-for-connection"
-      >
-        <ActivityIndicator />
-        <Text color="textMuted" variant="preview">
-          {strings.chat.waitingForConnection}
         </Text>
       </View>
     )

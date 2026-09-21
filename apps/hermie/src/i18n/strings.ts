@@ -431,8 +431,22 @@ export const strings = {
     send: 'Send',
     stop: 'Stop',
     hydrating: 'Loading the conversation…',
-    /** Not a failure: the chat opens itself once the socket is up, so there is nothing to press. */
-    waitingForConnection: 'Waiting for the gateway. This conversation opens as soon as it answers.',
+    /**
+     * The connection, said in the chat rather than in a banner.
+     *
+     * Not a failure and nothing to dismiss: the chat opens itself once the
+     * socket is up. `connecting` names the gateway because on a first open it
+     * is the only thing on screen and "Connecting…" on its own could be about
+     * anything; the other two are what the header's subtitle already says, and
+     * saying it differently two inches apart reads as two different facts.
+     */
+    connection: {
+      connecting: 'Connecting to your gateway…',
+      reconnecting: 'Reconnecting…',
+      offline: 'Offline',
+      /** Reset the backoff and dial now. Harmless at any time — see `retryNow`. */
+      retry: 'Try now'
+    },
     offlineCopy: 'Showing the last saved copy of this conversation.',
     stale: 'This conversation lost its connection to the gateway. It reattaches on the next open.',
     failed: (message: string) => `This conversation could not be opened: ${message}`,

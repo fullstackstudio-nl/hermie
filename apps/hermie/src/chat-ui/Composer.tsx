@@ -50,6 +50,19 @@ export interface ComposerProps {
   onSend: (text: string) => void
   /** A turn is running: the send button becomes a stop square. */
   running?: boolean
+  /**
+   * The gateway cannot carry a send yet, so the round button is dimmed.
+   *
+   * Everything ELSE stays live: the field takes text, the draft is kept, the
+   * slash list still answers. That asymmetry is the point — a reconnect is a
+   * good moment to write the next message and a bad moment to try to send it,
+   * and a composer that refuses the keyboard as well says "come back later" to
+   * somebody who is already here.
+   *
+   * It does not disable STOP. A turn that was running when the socket went is
+   * still the reader's to interrupt the moment it comes back.
+   */
+  sendBlocked?: boolean
   onStop?: () => void
   onAttach?: () => void
   /**
@@ -242,6 +255,7 @@ export function Composer({
   onChangeText,
   onSend,
   running = false,
+  sendBlocked = false,
   onStop,
   onAttach,
   onAttachFile,
@@ -368,7 +382,15 @@ export function Composer({
     }
   }, [prefix])
 
-  const canSend = Boolean(value.trim()) || attachments.length > 0
+  /**
+   * Is there something to send, AND somewhere to send it?
+   *
+   * Both halves in one value on purpose: `canSend` is already what dims the
+   * button, what `press` checks and what the Return key checks, so a blocked
+   * connection folded in here reaches all three and cannot be forgotten in one
+   * of them.
+   */
+  const canSend = (Boolean(value.trim()) || attachments.length > 0) && !sendBlocked
 
   /**
    * Put the highlighted candidate in the field.

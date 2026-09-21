@@ -97,15 +97,10 @@ export interface UseChatResult {
   /**
    * A failure that happened WHILE connected — the only kind worth a banner with
    * a retry on it. A chat that has not been opened because the socket is not up
-   * is not an error; see `waitingForConnection`.
+   * is not an error: see `connection-notice.ts`, which turns the status and the
+   * presence of a cached transcript into the one notice the screen draws.
    */
   error: string | null
-  /**
-   * The connection cannot carry the chat yet, and nothing has gone wrong. The
-   * screen keeps whatever the cache painted and says so quietly; the open runs
-   * by itself when the socket reports ready.
-   */
-  waitingForConnection: boolean
   /**
    * What the CONNECTION says, when its own state is why this chat cannot open
    * and waiting will not fix it: signed out, too old, or refused by the
@@ -303,7 +298,6 @@ export function useChat(botName: string): UseChatResult {
     // A stale message from a previous connection must not outlive it: the retry
     // it offers is the reconnect that already happened.
     error: ready ? error : null,
-    waitingForConnection: !ready && connectionError === null,
     connectionError,
     clearError: useCallback(() => setError(null), []),
     setDraft: useCallback((draft: string) => useChatsStore.getState().setDraft(botName, draft), [botName]),
