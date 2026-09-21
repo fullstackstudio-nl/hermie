@@ -1045,7 +1045,7 @@ const SECTIONS: readonly GallerySection[] = [
         <DoneStep
           draft={{
             ...signedIn(ONBOARDING_DRAFTS.gated ?? emptyDraft()),
-            test: { botCount: 2, key: '', userDisplayName: 'Fake Tester' }
+            test: { botCount: 2, key: '', plugin: null, userDisplayName: 'Fake Tester' }
           }}
           error={null}
         />

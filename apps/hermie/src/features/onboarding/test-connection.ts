@@ -1,4 +1,5 @@
 import { type GatewayConnection, GatewayError } from '@hermie/gateway-client'
+import { pluginAdvert } from '@hermie/gateway-client/plugin'
 
 import { createGatewayConnection, createMemoryTokenStore, createTokenCoordinator } from '../../gateway/client'
 import {
@@ -149,6 +150,10 @@ export async function runConnectionTest(
       key: connectionPayloadKey(tested),
       userDisplayName,
       botCount: (result.profiles ?? []).length,
+      // Read off the roster this stage just fetched: the plugin publishes its
+      // advert into the gateway's own `ui_meta`, so "is it installed" is
+      // already in the answer.
+      plugin: pluginAdvert(result.profiles ?? []),
       ...(tokens ? { tokens } : {})
     }
   } finally {

@@ -23,6 +23,7 @@ export { OnboardingNavigator, type OnboardingNavigatorProps } from './Onboarding
 export { StatusDot, StatusLine, type StatusLineProps, type StatusTone } from './StatusLine'
 export { DoneStep } from './steps/DoneStep'
 export { GatewayAddressStep } from './steps/GatewayAddressStep'
+export { NotificationsStep, type NotificationsStepProps } from './steps/NotificationsStep'
 export { SignInStep } from './steps/SignInStep'
 export { TestConnectionStep } from './steps/TestConnectionStep'
 export { WelcomeStep } from './steps/WelcomeStep'

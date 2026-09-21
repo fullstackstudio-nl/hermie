@@ -5,6 +5,7 @@ import {
   type ProbeResult,
   type TokenSet
 } from '@hermie/gateway-client'
+import type { PluginAdvert } from '@hermie/gateway-client/plugin'
 
 import type { StoredGatewayConfig } from '../../gateway/config'
 import { RUNS_IN_BROWSER } from '../../platform/runs-in-browser'
@@ -15,7 +16,7 @@ import { RUNS_IN_BROWSER } from '../../platform/runs-in-browser'
  * through leaves no credential behind.
  */
 
-export type OnboardingStep = 'welcome' | 'address' | 'signin' | 'test' | 'done'
+export type OnboardingStep = 'welcome' | 'address' | 'signin' | 'test' | 'notifications' | 'done'
 
 /**
  * The wizard's order, which is one step shorter in a browser.
@@ -27,8 +28,8 @@ export type OnboardingStep = 'welcome' | 'address' | 'signin' | 'test' | 'done'
  * `/hermie/config.json`.
  */
 export const ONBOARDING_ORDER: OnboardingStep[] = RUNS_IN_BROWSER
-  ? ['welcome', 'signin', 'test', 'done']
-  : ['welcome', 'address', 'signin', 'test', 'done']
+  ? ['welcome', 'signin', 'test', 'notifications', 'done']
+  : ['welcome', 'address', 'signin', 'test', 'notifications', 'done']
 
 /** The steps that carry a "step N of M" counter; Welcome is the cover, not a step. */
 export const NUMBERED_STEPS: OnboardingStep[] = ONBOARDING_ORDER.filter(step => step !== 'welcome')
@@ -45,6 +46,15 @@ export interface ConnectionTestOutcome {
   key: string
   userDisplayName: string
   botCount: number
+  /**
+   * The gateway plugin's advert, out of the roster the test already read.
+   *
+   * `null` means the gateway has no plugin, which is the whole of what the
+   * notifications step branches on. It is carried on the test's outcome rather
+   * than fetched again because the test's last stage IS a `profiles.list`, and
+   * asking twice would be asking the same question of the same socket.
+   */
+  plugin: PluginAdvert | null
   /**
    * The token set as it stands AFTER the test.
    *

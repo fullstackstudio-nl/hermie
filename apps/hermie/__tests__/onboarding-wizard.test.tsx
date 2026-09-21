@@ -73,22 +73,22 @@ beforeEach(() => {
 })
 
 describe('the wizard as a whole', () => {
-  it('walks Welcome → Gateway address → Sign in → Test connection → Done', () => {
+  it('walks Welcome → Gateway address → Sign in → Test connection → Notifications → Done', () => {
     renderScreen(<OnboardingNavigator onComplete={jest.fn()} initialDraft={signedInDraft()} />)
 
     expect(screen.getByText('Welcome to Hermie')).toBeTruthy()
     expect(screen.queryByTestId('step-counter')).toBeNull()
 
     fireEvent.press(primaryButton('Set up a gateway'))
-    expect(screen.getByTestId('step-counter')).toHaveTextContent('Step 1 of 4')
+    expect(screen.getByTestId('step-counter')).toHaveTextContent('Step 1 of 5')
     expect(screen.getByText('Gateway address')).toBeTruthy()
 
     fireEvent.press(primaryButton('Continue'))
-    expect(screen.getByTestId('step-counter')).toHaveTextContent('Step 2 of 4')
+    expect(screen.getByTestId('step-counter')).toHaveTextContent('Step 2 of 5')
     expect(screen.getByText('Sign in')).toBeTruthy()
 
     fireEvent.press(primaryButton('Continue'))
-    expect(screen.getByTestId('step-counter')).toHaveTextContent('Step 3 of 4')
+    expect(screen.getByTestId('step-counter')).toHaveTextContent('Step 3 of 5')
     // The heading and the button share a label, so the gate line identifies the step.
     expect(screen.getByTestId('test-stage-rest')).toBeTruthy()
   })
@@ -104,10 +104,10 @@ describe('the wizard as a whole', () => {
     // ask for it explicitly, which is the assertion that it IS hidden.
     expect(screen.getByTestId('step-rail', { includeHiddenElements: true })).toBeTruthy()
     expect(screen.queryByTestId('step-rail')).toBeNull()
-    expect(screen.getByTestId('step-counter')).toHaveTextContent('Step 1 of 4')
+    expect(screen.getByTestId('step-counter')).toHaveTextContent('Step 1 of 5')
   })
 
-  it('shows no progress rail on the cover, which is not one of the four steps', () => {
+  it('shows no progress rail on the cover, which is not one of the numbered steps', () => {
     renderScreen(<OnboardingNavigator onComplete={jest.fn()} initialDraft={signedInDraft()} />)
 
     expect(screen.queryByTestId('step-rail', { includeHiddenElements: true })).toBeNull()
@@ -149,7 +149,7 @@ describe('the wizard as a whole', () => {
     // Signed-out re-auth and Change gateway both land on this same component,
     // so they get the card too rather than a second, older-looking wizard.
     expect(screen.getByTestId('onboarding-card')).toBeTruthy()
-    expect(screen.getByTestId('step-counter')).toHaveTextContent('Step 2 of 4')
+    expect(screen.getByTestId('step-counter')).toHaveTextContent('Step 2 of 5')
   })
 })
 
@@ -199,6 +199,9 @@ describe('the test-connection gate', () => {
       key: connectionPayloadKey({ ...draft, tokens: rotated }),
       userDisplayName: 'Fake Tester',
       botCount: 2,
+      // No plugin, so the notifications step is the "get the plugin" screen and
+      // asks the platform for nothing at all on the way past.
+      plugin: null,
       tokens: rotated
     })
 
@@ -210,6 +213,8 @@ describe('the test-connection gate', () => {
     // The rotation must not read as "something changed, test again".
     expect(isDisabled('Continue')).toBe(false)
 
+    fireEvent.press(primaryButton('Continue'))
+    // Notifications, which is always skippable.
     fireEvent.press(primaryButton('Continue'))
     fireEvent.press(primaryButton('Start chatting'))
 

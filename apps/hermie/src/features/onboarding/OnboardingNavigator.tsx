@@ -20,6 +20,7 @@ import {
 import { OnboardingCard } from './OnboardingCard'
 import { DoneStep } from './steps/DoneStep'
 import { GatewayAddressStep } from './steps/GatewayAddressStep'
+import { NotificationsStep } from './steps/NotificationsStep'
 import { SignInStep } from './steps/SignInStep'
 import { TestConnectionStep } from './steps/TestConnectionStep'
 import { WelcomeStep } from './steps/WelcomeStep'
@@ -124,6 +125,10 @@ export function OnboardingNavigator({
       }
       case 'test':
         return isTestCurrent(draft)
+      case 'notifications':
+        // Always. Notifications are worth nothing if they are imposed, and a
+        // gateway with no plugin has nothing here for the app to do at all.
+        return true
       case 'done':
         return true
     }
@@ -197,10 +202,23 @@ export function OnboardingNavigator({
             }
           : step === 'test'
             ? { title: strings.onboarding.test.title, lead: strings.onboarding.test.subtitle }
-            : {
-                title: strings.onboarding.done.title,
-                lead: authMode === 'cookie' ? strings.onboarding.done.subtitleCookie : strings.onboarding.done.subtitle
-              }
+            : step === 'notifications'
+              ? draft.test?.plugin
+                ? {
+                    title: strings.onboarding.notifications.title,
+                    lead: strings.onboarding.notifications.subtitle
+                  }
+                : {
+                    title: strings.onboarding.notifications.missingTitle,
+                    // The lead is empty because the body carries a command in
+                    // backticks, which the card's heading cannot draw as a chip.
+                    lead: ''
+                  }
+              : {
+                  title: strings.onboarding.done.title,
+                  lead:
+                    authMode === 'cookie' ? strings.onboarding.done.subtitleCookie : strings.onboarding.done.subtitle
+                }
 
   return (
     <OnboardingCard
@@ -226,6 +244,7 @@ export function OnboardingNavigator({
       ) : null}
       {step === 'signin' ? <SignInStep draft={draft} update={update} /> : null}
       {step === 'test' ? <TestConnectionStep draft={draft} update={update} /> : null}
+      {step === 'notifications' ? <NotificationsStep draft={draft} /> : null}
       {step === 'done' ? <DoneStep draft={draft} error={saveError} /> : null}
     </OnboardingCard>
   )
