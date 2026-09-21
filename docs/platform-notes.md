@@ -6799,3 +6799,94 @@ Access challenge renders as an empty box. That is worth more than a speculative
 - **The origin binding has never rejected a real record.** Its tests write the
   mismatch by hand. The case it is for — a restore onto another device, or a
   record from a build before the binding existed — cannot be produced here.
+
+## Two sentences the setup step could not say (2026-09-22)
+
+The address step had a message for every failure kind and no way to say the two
+things that actually resolve a stuck setup: that the address is fine and the
+NETWORK is the problem, and that there is something to press.
+
+### Why the hint is a code and not a sentence
+
+`probe.ts` already wrote a private-network line, in the gateway client, in
+English. That is right for a library with no string table and wrong for the app,
+which has one — a screen printing a sentence composed inside a package is a
+screen whose voice cannot be read from `i18n/strings.ts`, and the word that
+needed changing would be in the file nobody looks in.
+
+So `classifyProbeFailure` answers in codes. `GatewayError` gained one structured
+field to make that possible, `sawLandingPage`, because the decision needs to
+know whether a WEB PAGE came back and the only other record of that was the
+English sentence it would have had to match on. `error.hint` stays exactly as it
+was, for callers that are not this app.
+
+### What the private-network line requires, and what it refuses
+
+Two triggers, both facts rather than inferences:
+
+| What happened                | Host                        | Link     | Says it |
+| ---------------------------- | --------------------------- | -------- | ------- |
+| a web page came back         | `10.x`, CGNAT, `.ts.net`, … | any      | yes     |
+| a web page came back         | a public name               | any      | no      |
+| JSON that is not a gateway's | `10.x`                      | any      | no      |
+| nothing answered             | `.ts.net`                   | cellular | yes     |
+| nothing answered             | `.ts.net`                   | Wi-Fi    | no      |
+| nothing answered             | `.ts.net`                   | unknown  | no      |
+| nothing answered             | a public name               | cellular | no      |
+| anything                     | loopback                    | any      | no      |
+
+The refusals are the point. A "check your VPN" told to somebody whose gateway is
+simply switched off costs them the next twenty minutes, and the earlier version
+of this line went out for every landing page on any host — which sent readers to
+a tunnel when what they had was a typo. Wi-Fi is excluded for the same reason:
+on a LAN, an unreachable tailnet name is as likely to be a gateway that is off.
+Loopback is excluded because the device IS that network.
+
+**The case it deliberately misses**: a Headscale operator's own domain. Nothing
+here resolves a name, so `hermes.example.org` that only answers inside a tunnel
+looks public and gets the ordinary sentence. Reading it as private would mean
+guessing about every public name on the internet, and the sentence it would
+produce is the one that wastes the most time when it is wrong.
+
+### The link is asked for after the failure, not held
+
+`networkWatcher.kind()` is a new method on the seam rather than a second value
+on the subscription, because nothing reacts to it: the one reader is this hint,
+and it asks in the probe's own `catch`. That also makes the answer describe the
+moment the probe ran rather than whenever the step last mounted — which on a
+phone that has just left the house is a different answer.
+
+NetInfo's four values collapse to `wifi`, `cellular`, `other` and `unknown`, and
+`none` maps to `other` on purpose: "no interface at all" is a real answer, and
+it is one this hint must not read as mobile data. The browser seam answers
+`unknown` unconditionally rather than reaching for `navigator.connection`, which
+is unimplemented in Safari and Firefox, is a fingerprinting surface, and would
+buy one sentence in a wizard step the web build does not have.
+
+### A test that had to change, and why
+
+`__tests__/onboarding-address-step.test.tsx` asserted the pinned-https message
+with `toHaveTextContent(string)`. That matcher is EXACT in
+`@testing-library/react-native` — `matches(..., exact = true)` in
+`build/matches.js` — not a substring check the way jest-dom's is. The failure
+mode is also worth knowing: the assertion never passes, `waitFor` spins, and
+what the run reports is "Exceeded timeout of 5000 ms" with no mention of text at
+all, which reads as a hang rather than as a mismatch.
+
+The fixture address in that test is `hermes.fss.internal` and NetInfo's test
+double reports `cellular`, so it is exactly the pair the new sentence is for.
+The assertion now spells out the whole message; the new suite uses regexes.
+
+### What is unverified here
+
+- **Nothing here has been seen on a device.** No gateway behind a landing page,
+  no phone taken off a tailnet onto mobile data. The link type comes from
+  NetInfo's jest double, which reports `cellular` unconditionally, so what a
+  real `NetInfo.fetch()` answers on a phone with Wi-Fi assist, on a Mac, or on
+  an iPad with no cellular radio at all has not been looked at.
+- **`other` for `none` is a reading, not a measurement.** It matters only if a
+  device can report `none` while a probe still fails in a way worth hinting
+  about, which would be odd.
+- **The landing-page detector is unchanged and still crude**: `<!doctype html`
+  or `<html` in the first 2000 characters. A proxy that answers with an error
+  page that opens with a comment or a BOM is not detected, and never was.

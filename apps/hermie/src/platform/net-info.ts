@@ -12,12 +12,38 @@
  */
 import NetInfo from '@react-native-community/netinfo'
 
-import type { NetworkWatcher } from './platform-contracts'
+import type { NetworkKind, NetworkWatcher } from './platform-contracts'
 
-export type { NetworkWatcher } from './platform-contracts'
+export type { NetworkKind, NetworkWatcher } from './platform-contracts'
+
+/**
+ * NetInfo's `type` reduced to the four values anything here branches on.
+ *
+ * Only `cellular` carries a decision, so everything that is not wifi or
+ * cellular collapses into `other` and everything unreadable into `unknown`.
+ * `none` — no interface at all — is `other` rather than `unknown`: it is a real
+ * answer, and it is one the probe's hint must not read as "on mobile data".
+ */
+function asKind(type: string): NetworkKind {
+  if (type === 'wifi' || type === 'cellular') {
+    return type
+  }
+
+  return type === 'unknown' ? 'unknown' : 'other'
+}
 
 export const networkWatcher: NetworkWatcher = {
   subscribe(onChange) {
     return NetInfo.addEventListener(state => onChange(state.isConnected !== false))
+  },
+
+  async kind() {
+    try {
+      return asKind((await NetInfo.fetch()).type)
+    } catch {
+      // A native module that will not answer is not a reason to fail the
+      // sentence this is for; it is a reason to say nothing extra.
+      return 'unknown'
+    }
   }
 }

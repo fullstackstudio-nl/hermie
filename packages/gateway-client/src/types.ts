@@ -60,6 +60,15 @@ export interface GatewayErrorOptions {
    * "check the address" and "check which network this device is on".
    */
   hint?: string
+  /**
+   * For `not_hermes`: the body looked like a web page where JSON was expected.
+   *
+   * The structured half of `hint`. `probe.ts` already decides this to build its
+   * own sentence, and `probe-hints.ts` needs the same fact to decide whether a
+   * private address earns the network sentence — so it is carried as a boolean
+   * rather than re-derived by matching on English.
+   */
+  sawLandingPage?: boolean
 }
 
 /**
@@ -74,6 +83,8 @@ export class GatewayError extends Error {
   readonly redirectedTo?: string
   /** An extra sentence a screen may show beside its own wording for the kind. */
   readonly hint?: string
+  /** For `not_hermes`: a web page came back where JSON was expected. */
+  readonly sawLandingPage?: boolean
 
   constructor(kind: GatewayErrorKind, message: string, options: GatewayErrorOptions = {}) {
     super(message, options.cause === undefined ? undefined : { cause: options.cause })
@@ -83,6 +94,7 @@ export class GatewayError extends Error {
     this.closeCode = options.closeCode
     this.redirectedTo = options.redirectedTo
     this.hint = options.hint
+    this.sawLandingPage = options.sawLandingPage
   }
 }
 

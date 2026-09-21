@@ -108,6 +108,14 @@ export {
   REDIRECT_URI
 } from './pkce'
 export {
+  classifyProbeFailure,
+  type NetworkKind,
+  type ProbeAction,
+  type ProbeHintCode,
+  type ProbeVerdict,
+  type ProbeVerdictOptions
+} from './probe-hints'
+export {
   type AuthProvider,
   NATIVE_PKCE_FLOW,
   PROBE_TIMEOUT_MS,

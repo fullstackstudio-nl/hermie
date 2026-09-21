@@ -168,6 +168,16 @@ export async function probeGateway(
 
   const hint = notHermesHint(baseUrl, status.text)
   const withHint = (message: string): string => (hint ? `${message} ${hint}` : message)
+  /*
+    The same observation as the landing-page half of `hint`, carried as a fact
+    rather than as a sentence.
+
+    `probe-hints.ts` decides whether a private address earns the "only answers
+    on a private network" line, and that decision needs to know whether a WEB
+    PAGE came back — not whether some English it would have to match on was
+    appended. Two readers, one measurement.
+  */
+  const sawLandingPage = looksLikeLandingPage(status.text)
 
   let body: Record<string, unknown>
 
@@ -180,7 +190,7 @@ export async function probeGateway(
     throw new GatewayError(
       'not_hermes',
       withHint(isGatewayError(error) ? error.message : `${statusUrl} answered something that is not JSON.`),
-      { cause: error, ...(hint ? { hint } : {}) }
+      { cause: error, sawLandingPage, ...(hint ? { hint } : {}) }
     )
   }
 
@@ -188,7 +198,7 @@ export async function probeGateway(
     throw new GatewayError(
       'not_hermes',
       withHint(`${statusUrl} answered JSON without "auth_required" — not a Hermes gateway.`),
-      hint ? { hint } : {}
+      { sawLandingPage, ...(hint ? { hint } : {}) }
     )
   }
 

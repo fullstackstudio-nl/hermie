@@ -38,6 +38,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not get past its own probe to reach the sign-in it had reopened for.
   [ADR-0020](docs/adr/0020-header-based-front-doors.md)
 
+### Changed
+
+- **Setup says which of your problems you have.** An address that answers with a web page, on a
+  host only one network can reach — an RFC 1918 or Tailscale address, a `.ts.net`, `.internal` or
+  `.local` name — now says so: *this address only answers on a private network, is this device on
+  the VPN/tailnet?* So does an address that will not resolve at all while the device is on mobile
+  data. It stays quiet everywhere the same evidence would be a guess: a public name that answered
+  with somebody's front page says nothing about a tunnel, an unreachable address on Wi-Fi is as
+  likely to be a gateway that is switched off, and `localhost` is a network nobody can join. A
+  failure that has a next move in it now offers one as a button rather than describing it — **Use
+  &lt;host&gt;** when a redirect landed somewhere else, and a way straight to the proxy credentials
+  when something refused before the gateway was reached.
+
 ## [0.1.1] - 2026-09-22
 
 

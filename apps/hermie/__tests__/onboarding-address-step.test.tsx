@@ -200,9 +200,17 @@ describe('the gateway address step', () => {
     renderScreen(<Harness />)
     type('https://hermes.fss.internal')
 
+    /*
+      The second sentence arrived with the probe hints and is not incidental to
+      this case: `hermes.fss.internal` is a name only one network resolves, and
+      NetInfo's test double reports cellular — which is the exact pair that
+      earns it. `toHaveTextContent` matches EXACTLY when it is given a string,
+      so the whole message is written out rather than the half this test is
+      about.
+    */
     await waitFor(() =>
       expect(screen.getByTestId('probe-error')).toHaveTextContent(
-        'Could not reach hermes.fss.internal over https://. It is either not answering there, or serving a certificate this device does not trust. Leave the https:// off and Hermie will try http:// as well.'
+        'Could not reach hermes.fss.internal over https://. It is either not answering there, or serving a certificate this device does not trust. Leave the https:// off and Hermie will try http:// as well. This address only answers on a private network \u2014 is this device on the VPN/tailnet?'
       )
     )
   })

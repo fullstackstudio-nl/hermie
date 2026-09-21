@@ -7,6 +7,10 @@
  * share therefore lives here, where neither owns it, and each seam re-exports
  * the ones its callers expect to find next to the implementation.
  */
+import type { NetworkKind } from '@hermie/gateway-client'
+
+/** Re-exported so both `net-info` seams name the same four values. */
+export type { NetworkKind } from '@hermie/gateway-client'
 
 /**
  * Storage for values that must never land in a plain-text preference file:
@@ -39,6 +43,17 @@ export type HapticMoment = 'send' | 'choice' | 'complete'
  */
 export interface NetworkWatcher {
   subscribe(onChange: (online: boolean) => void): () => void
+  /**
+   * What kind of link this device says it is on, asked once.
+   *
+   * Not part of the subscription, because nothing reacts to it: the one reader
+   * is the onboarding probe's failure hint, which asks at the moment a probe
+   * has already failed. A cellular link is the one answer strong enough to be
+   * worth a sentence — it means this device is not on the LAN and, unless a
+   * tunnel is up, not on the tailnet either — and `unknown` is a real answer
+   * rather than an error, which is what a browser gives.
+   */
+  kind(): Promise<NetworkKind>
 }
 
 /**

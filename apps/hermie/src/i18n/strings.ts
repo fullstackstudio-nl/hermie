@@ -1099,6 +1099,23 @@ export const strings = {
     timeout: (host: string) => `${host} did not answer in time. It may be starting up or behind a slow link.`,
     notHermes: (host: string) =>
       `${host} answered, but not like a Hermes gateway. Check the address and any path prefix.`,
+    /** What came back, said as what was SEEN and nothing more. */
+    landingPage: 'This looks like a web page, not a gateway.',
+    /**
+     * Where the address points, which is a different fact from what came back.
+     *
+     * Said only when the host is one `classifyHost` can actually place on a
+     * network of its own — an RFC 1918 or CGNAT address, a `.ts.net`,
+     * `.internal` or `.local` name, a name with no dots — and only when
+     * something either answered with a web page or failed to answer at all on
+     * mobile data. An earlier version of this line went out for every landing
+     * page on any host, which sent people to check a VPN when what they had was
+     * a typo.
+     *
+     * Deliberately not naming a product. A tailnet is Tailscale, Headscale or
+     * anything else somebody runs, and the reader knows which one they have.
+     */
+    privateNetworkOnly: 'This address only answers on a private network — is this device on the VPN/tailnet?',
     /**
      * Where the answer came from.
      *
@@ -1111,6 +1128,12 @@ export const strings = {
     redirected: (from: string, to: string) =>
       `${from} redirected to ${to}, which is a different host. Nothing was read from it.`,
     useRedirectTarget: (host: string) => `Use ${host} instead`,
+    /**
+     * The way out of a 401 or 403 from something standing in front of the
+     * gateway. Generic: Cloudflare Access is one such proxy and the preset
+     * behind this button names it, but the sentence must fit the others too.
+     */
+    openFrontDoor: 'Add the proxy’s credentials',
     authProxy: (status: number) =>
       `An access proxy answered HTTP ${status} before the gateway did. Add its headers under Advanced, or exempt /api/status, /auth/* and /login from it.`,
     server: (status: number) => `The gateway answered HTTP ${status}. It is running but unhealthy; check its logs.`,
