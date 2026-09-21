@@ -37,6 +37,20 @@ export interface NotifiableEvent {
   failed?: boolean
   /** The text, carried only to devices that asked for it. */
   preview?: string
+  /**
+   * Which gateway sent this, as `gatewayKeyOf` its origin.
+   *
+   * A device can be set up against several gateways, and a notification that
+   * says only "researcher" leaves an app with two `researcher`s to guess. The
+   * key is derived from the gateway's own address and is therefore something
+   * two programs arrive at independently — see `./gateway-key.ts` for the
+   * algorithm, for the second copy of it, and for why it is not a secret.
+   *
+   * **The gateway plugin sends the same field.** A payload without it is a
+   * notifier that predates this, and the app reads it exactly as it always
+   * did: open that chat on the gateway that is live.
+   */
+  gatewayKey?: string
 }
 
 /** A short, safe line. Long enough to be useful, short enough not to be a transcript. */
@@ -90,7 +104,10 @@ export function pushMessageFor(event: NotifiableEvent, preview: boolean): PushMe
       type: event.type,
       session: event.sessionId,
       ...(event.requestId ? { request: event.requestId } : {}),
-      ...(event.requestMethod ? { method: event.requestMethod } : {})
+      ...(event.requestMethod ? { method: event.requestMethod } : {}),
+      // Omitted rather than empty, so a reader checks for absence rather than
+      // for a falsy value it would then have to decide about.
+      ...(event.gatewayKey ? { gatewayKey: event.gatewayKey } : {})
     },
     // Only an approval has anything to act on from the notification itself, and
     // even then the action is a hint: the app re-reads the open requests first.

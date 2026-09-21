@@ -35,6 +35,7 @@ import { announceAvailability, availabilityIsCurrent, type PushAvailability, wit
 import type { PushMessage } from './expo'
 import { lastInboundRow } from './inbound'
 import type { LinkEvent, LinkServerRequest } from './link'
+import { gatewayKeyOf } from './gateway-key'
 import { type NotifiableEvent, pushMessageFor, typeForInbound } from './payload'
 import { type PushRegistration, type PushType, registrationsFor, someoneAttached } from './registrations'
 import { readRoster, type Roster, type WatchedBot } from './roster'
@@ -118,6 +119,14 @@ export interface WatcherOptions {
   fetchTail?: FetchTail
   /** How often the approval queue is read; 0 turns the poll off. */
   approvalPollMs?: number
+  /**
+   * The gateway this daemon watches, so every notification can say which one
+   * it came from. `gatewayKeyOf` turns it into the key the payload carries.
+   *
+   * Absent means the payloads carry no key, which is what every notification
+   * looked like before this and what an app with one gateway does not need.
+   */
+  gatewayUrl?: string
 }
 
 interface WatchedSession extends WatchedBot {
@@ -561,11 +570,16 @@ export class PushWatcher {
 
   /** Decide, dedupe, rate-limit and send. The single exit for every notification. */
   private async notify(
-    event: NotifiableEvent,
+    input: NotifiableEvent,
     dedupeKey: string,
     options: { suppressWhenAttached: boolean }
   ): Promise<void> {
     const state = this.options.state
+    // Stamped here rather than at each of the four places an event is built:
+    // this is the one exit, and a key added at three of four call sites is a
+    // notification type that silently cannot route.
+    const key = gatewayKeyOf(this.options.gatewayUrl ?? '')
+    const event: NotifiableEvent = key ? { ...input, gatewayKey: key } : input
 
     if (state.sent[dedupeKey]) {
       return

@@ -89,6 +89,20 @@ export interface PushSyncPorts {
   /** What `approval.pending` says is open for that bot, asked just now. */
   openApprovals(bot: string): Promise<OpenApproval[]>
   respondApproval(bot: string, requestId: string, choice: string): Promise<void>
+  /**
+   * Move to the gateway a notification came from, and open the chat there.
+   *
+   * Answers TRUE when it actually switched, and false for every other case —
+   * no key, a key this device does not recognise, or the key of the gateway
+   * that is already live. A false answer means the tap is an ordinary one and
+   * the three ports above handle it.
+   *
+   * It does the opening as well as the switching, and that is not tidiness: a
+   * switch tears this object's own connection down, so the chat controller
+   * these ports are bound to is stopped by the time it returns. Whatever opens
+   * the chat has to be on the other side of that teardown.
+   */
+  switchToGateway(gatewayKey: string, bot: string): Promise<boolean>
 }
 
 export interface PushSyncOptions {
@@ -462,6 +476,20 @@ export class PushSync {
     const tap = pushTapOf(response)
 
     if (!tap) {
+      return
+    }
+
+    /*
+      A notification from another gateway moves the app before anything else.
+
+      And then stops. An Allow on such a notification opens the chat and
+      answers nothing, which is ADR-0017's own rule taken to its conclusion: a
+      response has to be validated against `approval.pending` ON THE GATEWAY
+      THAT ASKED, and that gateway's connection does not exist until the switch
+      has finished. The reader lands on the request and answers it there, which
+      is the direction this feature is built to fail in.
+    */
+    if (await this.ports.switchToGateway(tap.gatewayKey, tap.bot)) {
       return
     }
 

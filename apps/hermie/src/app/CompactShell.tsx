@@ -15,7 +15,7 @@ import { ChatScreen } from '../features/chats'
 import { CronScreen } from '../features/cron'
 import { SettingsScreen } from '../features/settings'
 import { strings } from '../i18n/strings'
-import { useHermieLink } from '../platform/deep-link'
+import { useChatLink } from './chat-link'
 import { usePageTitle } from '../platform/page-title'
 import { onOpenChatRequest } from './open-chat-bus'
 import { useBotDisplayName } from '../store/bots'
@@ -188,7 +188,7 @@ export function CompactShell({ initial }: { initial?: DevInitialView } = {}) {
     [navigationRef]
   )
 
-  useHermieLink(link => openChat(link.bot))
+  useChatLink(openChat)
 
   // The same destination from a notification. `PushSync` sits beside the chat
   // controller and cannot know which shell is mounted, so it asks through the

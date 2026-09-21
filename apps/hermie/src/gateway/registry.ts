@@ -26,7 +26,7 @@
  * address is a thing a reader edits. Everything else in the app keys off the
  * id, so the whole of what an edited address costs is one row redrawing.
  */
-import type { GatewayAuthMode } from '@hermie/gateway-client'
+import { gatewayKeyOf, type GatewayAuthMode } from '@hermie/gateway-client'
 
 import { keyValueStore } from '../platform/key-value-store'
 import { randomBytes } from '../platform/random'
@@ -115,6 +115,24 @@ export function activeGatewayOf(registry: GatewayRegistry): GatewayRecord | null
 
 export function gatewayById(registry: GatewayRegistry, id: string | null | undefined): GatewayRecord | null {
   return id ? (registry.gateways.find(gateway => gateway.id === id) ?? null) : null
+}
+
+/**
+ * The entry a notification's or a link's `gatewayKey` names, or `null`.
+ *
+ * The one direction the wire can travel: a key is derived from an address, so
+ * this is a search rather than a lookup. Two entries CAN legitimately hold the
+ * same address — the same host under two accounts — and the first is taken,
+ * knowingly: the two are the same machine, the chat being opened exists on
+ * both, and the alternative is refusing to act on a notification that named a
+ * gateway perfectly well.
+ */
+export function gatewayForKey(registry: GatewayRegistry, key: string): GatewayRecord | null {
+  if (!key) {
+    return null
+  }
+
+  return registry.gateways.find(gateway => gatewayKeyOf(gateway.address) === key) ?? null
 }
 
 /**

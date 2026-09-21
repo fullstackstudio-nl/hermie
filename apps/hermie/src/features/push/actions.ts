@@ -18,6 +18,8 @@
  * Everything here is pure. The round trip lives in `push-sync.ts`; what a given
  * pair of (payload, gateway answer) means is a table in a test.
  */
+import { isGatewayKey } from '@hermie/gateway-client'
+
 import { PUSH_ACTION_ALLOW, PUSH_ACTION_DENY, PUSH_TYPES_WITH_ACTIONS, type PushResponse } from './platform-contract'
 
 /** One row of `approval.pending`, as far as this needs to read it. */
@@ -37,6 +39,16 @@ export interface PushTap {
   /** Empty unless the payload named one; an action without one cannot answer. */
   requestId: string
   action: 'allow' | 'deny' | 'open'
+  /**
+   * Which gateway sent it, as `gatewayKeyOf` its origin. Empty when the payload
+   * carried none, which is every notification from a notifier older than this.
+   *
+   * A key is a LOOKUP, exactly like the bot name beside it: it can only select
+   * a gateway the owner has already configured on this device. A key nothing
+   * matches leaves the app where it is, which is the same answer every other
+   * unresolvable field here gets.
+   */
+  gatewayKey: string
 }
 
 const stringOf = (value: unknown): string => (typeof value === 'string' ? value.trim() : '')
@@ -66,8 +78,17 @@ export function pushTapOf(response: PushResponse): PushTap | null {
   // It degrades to opening the chat rather than answering the oldest question,
   // which is the kind of guess that answers the wrong one.
   const requestId = stringOf(response.data.requestId)
+  const key = stringOf(response.data.gatewayKey)
 
-  return { bot, requestId, action: action !== 'open' && !requestId ? 'open' : action }
+  return {
+    bot,
+    requestId,
+    action: action !== 'open' && !requestId ? 'open' : action,
+    // Checked rather than trusted: anything that is not the shape this project
+    // produces is read as no key at all, so a payload cannot make the app
+    // search its list for something that was never a key.
+    gatewayKey: isGatewayKey(key) ? key : ''
+  }
 }
 
 /**

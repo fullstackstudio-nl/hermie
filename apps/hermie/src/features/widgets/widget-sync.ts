@@ -65,6 +65,8 @@ export class WidgetSync {
   private running = false
   private paused = false
   private gatewayReady = false
+  /** The active gateway's address, so the file can name the gateway it describes. */
+  private gatewayAddress = ''
   /**
    * The value `pause()` froze, or null while the app is in the foreground.
    *
@@ -131,6 +133,23 @@ export class WidgetSync {
       for (const unsubscribe of stop) {
         unsubscribe()
       }
+    }
+  }
+
+  /**
+   * Which gateway the rows being written belong to. Pushed in for the same
+   * reason `setGatewayReady` is: the registry lives in a React context and this
+   * class has no React in it.
+   */
+  setGatewayAddress(address: string): void {
+    if (address === this.gatewayAddress) {
+      return
+    }
+
+    this.gatewayAddress = address
+
+    if (!this.paused) {
+      this.schedule()
     }
   }
 
@@ -267,6 +286,7 @@ export class WidgetSync {
       archived: layout.archived,
       mutes: layout.mutes,
       gatewayReady: this.frozenGatewayReady ?? this.gatewayReady,
+      gatewayAddress: this.gatewayAddress,
       avatars: Object.fromEntries([...this.avatarsWritten.keys()].map(name => [name, true as const])),
       now: this.now()
     })

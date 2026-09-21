@@ -24,6 +24,7 @@
  * app do something the owner did not ask for. Opening a chat that already exists
  * is the whole of what a link may do.
  */
+import { isGatewayKey } from '@hermie/gateway-client'
 import { requireOptionalNativeModule } from 'expo'
 import { useEffect, useRef } from 'react'
 import { Linking } from 'react-native'
@@ -59,7 +60,19 @@ function consumeNativeLaunchURL(): string | null {
 }
 
 /** What a link asked for. One kind today; a union because a second is likely. */
-export type HermieLink = { kind: 'chat'; bot: string }
+export type HermieLink = {
+  kind: 'chat'
+  bot: string
+  /**
+   * Which gateway's chat, as `gatewayKeyOf` its origin, or `''`.
+   *
+   * Optional on the wire and absent from every link written before this: a
+   * widget or a notification from a device with one gateway has nothing to
+   * disambiguate. It stays a LOOKUP — it selects a gateway the owner has
+   * already configured, and a key nothing matches leaves the app where it is.
+   */
+  gatewayKey: string
+}
 
 /**
  * `hermie://chat/<bot>`, or nothing.
@@ -69,13 +82,19 @@ export type HermieLink = { kind: 'chat'; bot: string }
  * The bot name is percent-decoded and then checked: an empty one, a path with
  * more segments than one, and anything with a slash in it after decoding are all
  * rejected, which is what keeps a name from being read as a path.
+ *
+ * `?gateway=<key>` is the one parameter, and it is read under the same rule as
+ * everything else here: a key that is not the shape this project produces is
+ * dropped rather than carried, so a link cannot send the app looking through
+ * its own list for a string somebody made up. Every other query parameter is
+ * ignored, which is what keeps the grammar as narrow as the note above says.
  */
 export function parseHermieLink(url: string | null | undefined): HermieLink | null {
   if (!url) {
     return null
   }
 
-  const match = url.match(/^(?:exp\+)?hermie:\/\/chat\/([^/?#]+)\/?(?:[?#].*)?$/)
+  const match = url.match(/^(?:exp\+)?hermie:\/\/chat\/([^/?#]+)\/?(?:\?([^#]*))?(?:#.*)?$/)
 
   if (!match?.[1]) {
     return null
@@ -90,7 +109,26 @@ export function parseHermieLink(url: string | null | undefined): HermieLink | nu
     return null
   }
 
-  return bot && !bot.includes('/') ? { kind: 'chat', bot } : null
+  if (!bot || bot.includes('/')) {
+    return null
+  }
+
+  const key = gatewayKeyFrom(match[2])
+
+  return { kind: 'chat', bot, gatewayKey: key }
+}
+
+/** The `gateway` parameter, checked. Anything else in the query is ignored. */
+function gatewayKeyFrom(query: string | undefined): string {
+  for (const pair of (query ?? '').split('&')) {
+    const [name, value = ''] = pair.split('=')
+
+    if (name === 'gateway' && isGatewayKey(value)) {
+      return value
+    }
+  }
+
+  return ''
 }
 
 /**

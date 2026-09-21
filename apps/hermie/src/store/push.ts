@@ -28,6 +28,7 @@
  * that is what gives the registration ADR-0016's compare-and-swap and its
  * local-only fallback without a second protocol.
  */
+import { gatewayKeyOf } from '@hermie/gateway-client'
 import {
   noPushTypes,
   pushTypesOf,
@@ -348,14 +349,24 @@ export const usePushStore = create<PushState>((set, get) => {
   }
 })
 
-/** This device's registration as ADR-0017 wants it, or `null` when it is off. */
-export function ownRegistration(state: PushState, platform: string): PushRegistrationInput | null {
+/**
+ * This device's registration as ADR-0017 wants it, or `null` when it is off.
+ *
+ * `gatewayKey` is what lets a notification say which gateway it came from on a
+ * device that has more than one. It is derived from the address rather than
+ * held, so an entry whose address the reader corrected produces the new key on
+ * the next write without anybody having to remember to re-register.
+ */
+export function ownRegistration(state: PushState, platform: string, address = ''): PushRegistrationInput | null {
   if (!state.loaded || !state.enabled || !state.installationId || !state.address) {
     return null
   }
 
+  const gatewayKey = gatewayKeyOf(address)
+
   return {
     installationId: state.installationId,
+    ...(gatewayKey ? { gatewayKey } : {}),
     address: state.address,
     platform,
     types: state.types,

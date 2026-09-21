@@ -10,7 +10,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import { AppState } from 'react-native'
 
 import { requestOpenChat } from '../../app/open-chat-bus'
-import { useGateway } from '../../gateway'
+import { gatewayForKey, useGateway } from '../../gateway'
 import { chatGatewayFor, type ChatGateway } from '../../gateway/link'
 import { useConnectionStore } from '../../gateway/store'
 import { namespace } from '../../gateway/namespace'
@@ -92,9 +92,19 @@ async function readIdentity(
 const ChatRuntimeContext = createContext<ChatRuntimeValue | null>(null)
 
 export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
-  const { config, connection, gatewayId, http, status } = useGateway()
+  const { config, connection, gatewayId, http, registry, status, switchGateway } = useGateway()
   const [value, setValue] = useState<ChatRuntimeValue | null>(null)
   const valueRef = useRef<ChatRuntimeValue | null>(null)
+  /*
+    The list, through a ref.
+
+    The push ports below are built once per connection and captured by closures
+    that outlive a render, so reading the list through the value this render saw
+    would answer the list as it was when the socket came up. A gateway added
+    since then would be one a notification could not resolve.
+  */
+  const registryRef = useRef(registry)
+  registryRef.current = registry
 
   /*
     Everything that is stored PER GATEWAY is read here, keyed by the active
@@ -241,7 +251,29 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
           }
         },
         openApprovals: name => controller.openApprovals(name),
-        respondApproval: (name, requestId, choice) => controller.respondApproval(name, requestId, choice)
+        respondApproval: (name, requestId, choice) => controller.respondApproval(name, requestId, choice),
+        /*
+          A notification from another configured gateway.
+
+          It goes through the BUS rather than through `controller.openChat`,
+          because the switch tears this controller down: by the time the dial
+          to the other gateway has finished, the object this closure captured
+          is stopped and the chat the reader wants belongs to a controller that
+          did not exist when the notification was tapped. The bus is read by
+          whichever shell is mounted, which by then is the new one.
+        */
+        switchToGateway: async (key, bot) => {
+          const target = gatewayForKey(registryRef.current, key)
+
+          if (!target || target.id === gatewayId) {
+            return false
+          }
+
+          await switchGateway(target.id)
+          requestOpenChat(bot)
+
+          return true
+        }
       }
     })
     const stopPush = push.start()
@@ -281,6 +313,9 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     // `http` is built with the connection and handed out as a ref, like the
     // connection itself, so listing it costs no extra rebuild — and leaving it
     // out would hand the controller a stale one if that ever changed.
+    // `switchGateway` and the list are read through a ref and a stable callback
+    // respectively, so neither rebuilds the runtime; see `registryRef`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connection, gatewayId, http])
 
   /**
@@ -355,6 +390,17 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     value?.widgets.setGatewayReady(status === 'ready')
   }, [status, value])
+
+  /**
+   * And which gateway the rows it writes belong to.
+   *
+   * Its own effect, beside the one above, because the two move independently: a
+   * socket goes up and down all day on one gateway, and the gateway itself
+   * changes only when somebody switches.
+   */
+  useEffect(() => {
+    value?.widgets.setGatewayAddress(config?.baseUrl ?? '')
+  }, [config?.baseUrl, value])
 
   /**
    * Reconcile again when the gateway says a profile changed.

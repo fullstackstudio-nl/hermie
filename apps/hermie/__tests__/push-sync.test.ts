@@ -94,17 +94,31 @@ function fakePlatform(patch: Partial<FakePlatform> = {}): FakePlatform {
   return platform
 }
 
-function fakePorts(): PushSyncPorts & { shown: string[]; responded: [string, string, string][]; open: OpenApproval[] } {
+function fakePorts(): PushSyncPorts & {
+  shown: string[]
+  responded: [string, string, string][]
+  open: OpenApproval[]
+  switched: [string, string][]
+  /** What `switchToGateway` answers: true stages "this named another gateway". */
+  switches: boolean
+} {
   const ports = {
     shown: [] as string[],
     responded: [] as [string, string, string][],
     open: [] as OpenApproval[],
+    switched: [] as [string, string][],
+    switches: false,
     showChat: async (bot: string) => {
       ports.shown.push(bot)
     },
     openApprovals: async () => ports.open,
     respondApproval: async (bot: string, requestId: string, choice: string) => {
       ports.responded.push([bot, requestId, choice])
+    },
+    switchToGateway: async (key: string, bot: string) => {
+      ports.switched.push([key, bot])
+
+      return ports.switches
     }
   }
 
@@ -561,7 +575,8 @@ describe('what a tap may do', () => {
     expect(pushTapOf(response({ bot: 'researcher', type: 'message' }))).toEqual({
       bot: 'researcher',
       requestId: '',
-      action: 'open'
+      action: 'open',
+      gatewayKey: ''
     })
     expect(pushTapOf(response({ type: 'message' }))).toBeNull()
   })
@@ -570,12 +585,13 @@ describe('what a tap may do', () => {
     expect(pushTapOf(response({ bot: 'researcher' }, 'allow'))).toEqual({
       bot: 'researcher',
       requestId: '',
-      action: 'open'
+      action: 'open',
+      gatewayKey: ''
     })
   })
 
   it('answers only a request the gateway still says is open', () => {
-    const tap = { bot: 'researcher', requestId: 'req-1', action: 'allow' as const }
+    const tap = { bot: 'researcher', requestId: 'req-1', action: 'allow' as const, gatewayKey: '' }
     const open: OpenApproval[] = [{ request_id: 'req-1', choices: ['once', 'session', 'always', 'deny'] }]
 
     expect(resolvePushTap({ tap, pending: open })).toEqual({
@@ -590,7 +606,7 @@ describe('what a tap may do', () => {
     // A button on a lock screen is the least considered decision of the day.
     // `session` and `always` are on the sheet, where the command is in front of
     // the reader, and nowhere else.
-    const tap = { bot: 'researcher', requestId: 'req-1', action: 'allow' as const }
+    const tap = { bot: 'researcher', requestId: 'req-1', action: 'allow' as const, gatewayKey: '' }
     const open: OpenApproval[] = [{ request_id: 'req-1', choices: ['session', 'always'] }]
 
     expect(resolvePushTap({ tap, pending: open })).toEqual({ kind: 'open-chat', bot: 'researcher' })
