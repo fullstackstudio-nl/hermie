@@ -10,6 +10,25 @@
  * The shape carries the meaning as well as the colour — filled for an answer,
  * hollow for a question still open — so the line reads for someone who cannot
  * tell the green from the red.
+ *
+ * ## It also has to be HEARD
+ *
+ * Every one of these lines appears where nothing else on the screen moves:
+ * "That user name and password were not accepted." replaces nothing, takes no
+ * focus and is drawn below the button that was just pressed. A reader was told
+ * nothing at all — the press appeared to do nothing, twice, which is how
+ * somebody concludes their password is wrong when it is not.
+ *
+ * So the line announces itself. An ERROR is `alert`, which is assertive:
+ * something the visitor asked for has failed and the next thing they do
+ * depends on knowing it. Progress and outcomes are polite, so "Checking the
+ * session…" and "Signed in as …" are read when the reader is between
+ * utterances rather than over the top of one. A `pending` line is neither — it
+ * is a step that has not started, and it is on screen before anything happens.
+ *
+ * All of this works because the line is MOUNTED when its moment arrives:
+ * inserting a node into a live region is what a reader announces, and a region
+ * that was always there with its text swapped is the version that goes quiet.
  */
 import { View } from 'react-native'
 
@@ -70,7 +89,14 @@ export function StatusLine({ tone, children, testID }: StatusLineProps) {
   const theme = useTheme()
 
   return (
-    <View style={{ flexDirection: 'row', gap: theme.space.sm }}>
+    <View
+      {...(tone === 'error'
+        ? { accessibilityRole: 'alert' as const }
+        : tone === 'pending'
+          ? {}
+          : { 'aria-live': 'polite' as const })}
+      style={{ flexDirection: 'row', gap: theme.space.sm }}
+    >
       <StatusDot tone={tone} />
       <Text color={INK[tone]} style={{ flex: 1 }} testID={testID} variant="meta">
         {children}

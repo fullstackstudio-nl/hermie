@@ -41,7 +41,14 @@ type Phase = 'probing' | 'checking' | 'ready' | 'leaving' | 'failed'
 export function SignInStep({ draft, update }: SignInStepProps) {
   const theme = useTheme()
   const baseUrl = draft.baseUrl ?? ''
-  const [phase, setPhase] = useState<Phase>(draft.probe ? 'ready' : 'probing')
+  /*
+   * Always probing on mount, never "ready because the draft already had one".
+   *
+   * The draft DOES already have one after a sign-out — `draftFromConfig`
+   * synthesises it from the stored gateway — and it is a guess about today
+   * made out of a preference file. See `discover` for what that guess cost.
+   */
+  const [phase, setPhase] = useState<Phase>('probing')
   const [error, setError] = useState<string | null>(null)
   const [host, setHost] = useState<string>('')
   const [username, setUsername] = useState('')
@@ -60,6 +67,21 @@ export function SignInStep({ draft, update }: SignInStepProps) {
    * only rendered for the cookie case, so the branch simply does not arise. It
    * IS skipped when a session was already found, because a second `/api/auth/me`
    * would tell us the same thing.
+   *
+   * ## Why the draft's probe is not reused
+   *
+   * It used to read `draft.probe ?? (await probeGateway(baseUrl))`, and on the
+   * path that matters most there IS one — `draftFromConfig` synthesises a probe
+   * out of the stored gateway so a sign-out can open the wizard straight on
+   * this step. A preference file knows the auth MODE. It does not know whether
+   * the provider takes a password, and the synthesised entry says `false`, so
+   * after every sign-out this screen offered the redirect and nothing else: the
+   * in-app form — the one with the password manager's autofill on it — was
+   * unreachable for exactly the visitor who had used it before.
+   *
+   * The fix is the one the function's own documentation already promised. The
+   * probe runs. It is one GET against a gateway this page is already talking
+   * to, and it is the only thing here that can answer today's question.
    */
   const discover = useCallback(async () => {
     if (!baseUrl) {
@@ -70,7 +92,7 @@ export function SignInStep({ draft, update }: SignInStepProps) {
     setPhase('probing')
 
     try {
-      const probe = draft.probe ?? (await probeGateway(baseUrl))
+      const probe = await probeGateway(baseUrl)
       update({ probe })
       setPhase('checking')
 
@@ -100,7 +122,7 @@ export function SignInStep({ draft, update }: SignInStepProps) {
       setError(describeProbeError(probeError, baseUrl))
       setPhase('failed')
     }
-  }, [baseUrl, draft.probe, update])
+  }, [baseUrl, update])
 
   useEffect(() => {
     if (phase === 'probing') {
