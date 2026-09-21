@@ -86,6 +86,8 @@ import { findMatchingItem } from '../search'
 import { connectionNotice, RETRY_OFFER_MS } from './connection-notice'
 import { countsAsRead, readWatermark } from './read-watermark'
 import { regenerateLastTurn } from './regenerate'
+import { useReadAloud } from '../voice/useReadAloud'
+import { useVoiceSettingsStore } from '../voice/voice-settings'
 import { ChatConnectingState, ReconnectPill } from './ConnectionState'
 import { useChat, type UseChatResult } from './useChat'
 
@@ -1464,6 +1466,18 @@ function Conversation({
   }, [chat.items])
 
   /**
+   * Speaking, for this chat.
+   *
+   * Everything about it — the queue, the flattening, the automatic read, the
+   * stop on background — is `features/voice`; the screen supplies the two facts
+   * only it has (which chat, and what is visible in it) and hands the result to
+   * the transcript's menu and to the options sheet.
+   */
+  const readAloud = useReadAloud({ botName, items: chat.items, turnRunning: chat.turnActive })
+  const autoRead = useVoiceSettingsStore(state => state.autoReadByChat[botName] === true)
+  const voiceRate = useVoiceSettingsStore(state => state.rate)
+
+  /**
    * Put one of the reader's own turns back in the composer.
    *
    * The turn already in the conversation is left exactly where it is — this
@@ -1776,6 +1790,8 @@ function Conversation({
               onEditResend={editResend}
               onRegenerate={regenerate}
               turnRunning={chat.turnActive}
+              {...(readAloud.available ? { onReadAloud: readAloud.toggle } : {})}
+              readingItemIds={readAloud.readingIds}
               onOpenBot={openBot}
               onOpenCron={openCron}
               onOpenRequest={reopenRequest}
@@ -1968,6 +1984,33 @@ function Conversation({
             }
           },
           onResetView: () => useSettingsStore.getState().resetChatView(botName),
+          /*
+            The Voice group, present only where the platform can speak.
+
+            `voice: undefined` removes the whole group rather than drawing it
+            with a dead switch, which is the same rule the export group follows:
+            a control that cannot do anything is worse than a control that is
+            not there. A browser with no `speechSynthesis` is the case.
+          */
+          ...(readAloud.available
+            ? {
+                voice: {
+                  autoRead,
+                  /*
+                    The toggle is about the NEXT reply, and switching it off
+                    deliberately does not cut the sentence being spoken: a
+                    reader who has heard half an answer did not ask for the
+                    other half to be taken away. Stopping is its own row, and it
+                    is only drawn while there is something to stop.
+                  */
+                  onChangeAutoRead: (value: boolean) => useVoiceSettingsStore.getState().setAutoRead(botName, value),
+                  onChangeRate: (value: number) => useVoiceSettingsStore.getState().setRate(value),
+                  onStopReading: readAloud.stop,
+                  rate: voiceRate,
+                  reading: readAloud.reading
+                }
+              }
+            : {}),
           pendingExpensiveModel: pendingModel?.value ?? null,
           reasoningEffort: chat.info?.reasoning_effort ?? '',
           reasoningOptions: REASONING_OPTIONS,

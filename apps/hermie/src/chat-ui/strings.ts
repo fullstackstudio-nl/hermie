@@ -222,6 +222,15 @@ export const chatStrings = {
     editResend: 'Edit and resend',
     /** On the last reply: ask for it again. */
     regenerate: 'Regenerate',
+    /**
+     * On a reply: say it out loud.
+     *
+     * Two lines rather than one toggle, and only ever one of them is drawn. A
+     * line that reads `Read aloud` while its reply is being spoken would be a
+     * control whose label contradicts what the speaker is doing.
+     */
+    readAloud: 'Read aloud',
+    stopReading: 'Stop reading',
     /** A turn is running, so neither turn-starting line can be taken. */
     turnRunning: 'Wait for the current turn to finish.',
     /** Regenerate was asked for in a conversation with no prompt to repeat. */
@@ -464,6 +473,70 @@ export const chatStrings = {
      * the header cannot drift apart on what "Muted until" looks like.
      */
     notMuted: 'Off'
+  },
+
+  /**
+   * Speaking and listening.
+   *
+   * Everything here is about the DEVICE doing the work — see
+   * `docs/adr/0021-voice-on-device-first.md` — so none of the copy promises a
+   * service, names a provider, or implies the conversation leaves the phone.
+   */
+  voice: {
+    /** The options sheet's group. */
+    header: 'VOICE',
+    /**
+     * What a code listing becomes when it is spoken.
+     *
+     * A shape rather than the characters: see `speech-text.ts` for why forty
+     * lines of TypeScript read out loud is worse than a sentence describing it.
+     */
+    codeBlock: (lines: number) => (lines === 1 ? 'Code block, 1 line' : `Code block, ${lines} lines`),
+    autoRead: 'Read replies aloud',
+    autoReadHint: 'Each finished reply in this chat, without being asked.',
+    rate: 'Speaking rate',
+    /** The five stops, named rather than numbered: 0.75× means nothing out loud. */
+    rateOptions: {
+      slowest: 'Slowest',
+      slow: 'Slow',
+      normal: 'Normal',
+      fast: 'Fast',
+      fastest: 'Fastest'
+    },
+    dictationLanguage: 'Dictation language',
+    dictationAuto: 'Device language',
+    confirmBeforeSending: 'Confirm before sending',
+    confirmBeforeSendingHint: 'Voice mode shows what it heard for a moment first.',
+    stopOnBackground: 'Stop when the app closes',
+    /** The composer's mic button, in its two states. */
+    dictate: 'Dictate',
+    dictateStop: 'Stop dictating',
+    /** Under the mic while it is listening and nothing has been heard yet. */
+    listening: 'Listening…',
+    /** The one-line explanation when the reader has refused the microphone. */
+    permissionDenied: 'Hermie needs the microphone to take dictation.',
+    openSettings: 'Open Settings',
+    /** No recognizer on this platform at all — the button is simply not drawn. */
+    unavailable: 'Dictation is not available on this device.',
+    /** The recognizer heard nothing at all. */
+    noSpeech: 'Nothing was heard.',
+    /** Anything else the recognizer reported. */
+    failed: 'Dictation stopped unexpectedly.',
+    /** Voice mode: the overlay and the way in. */
+    mode: 'Voice mode',
+    modeStart: 'Start voice mode',
+    modeLeave: 'Leave voice mode',
+    /** The overlay's line under the indicator, one per phase. */
+    modeListening: 'Listening',
+    modeSending: 'Sending',
+    modeThinking: 'Waiting for a reply',
+    modeSpeaking: 'Speaking',
+    /** Tap anywhere on the overlay while it speaks. */
+    modeInterrupt: 'Tap to interrupt',
+    /** How to get out, on a surface with no Escape key. */
+    modeDismiss: 'Swipe down to leave',
+    /** The cancel affordance on the confirmation beat. */
+    modeCancel: 'Cancel'
   },
   sheet: {
     close: 'Close'

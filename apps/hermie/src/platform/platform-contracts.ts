@@ -124,3 +124,43 @@ export interface WidgetBridge {
 export function formatPageTitle(screen: string | undefined, app = 'Hermie'): string {
   return screen && screen !== app ? `${screen} · ${app}` : app
 }
+
+/**
+ * One thing to say out loud.
+ *
+ * `language` is a BCP-47 tag or nothing; nothing means "the device's own", which
+ * every engine here already defaults to. `rate` is a multiplier where 1 is the
+ * platform's normal speaking rate — deliberately relative rather than words per
+ * minute, because none of the three engines behind this agrees on an absolute.
+ */
+export interface SpeechUtterance {
+  text: string
+  language?: string
+  rate?: number
+  /** Speaking finished on its own. Never called for an utterance that was stopped. */
+  onDone?: () => void
+  /** The engine refused or failed. The caller treats this as "move on". */
+  onError?: () => void
+}
+
+/**
+ * Speaking, as the one call the app makes.
+ *
+ * `available` is a fact about the platform rather than about permission: there
+ * is no permission to speak on any of the three targets, so a `false` here means
+ * the browser has no `speechSynthesis` at all. Every method is safe to call when
+ * it is `false` — they do nothing — because the alternative is a guard at every
+ * call site that would be wrong the moment a fourth target appeared.
+ *
+ * It is deliberately NOT a queue. Queueing is a decision about which reply a
+ * reader wants next and it belongs above the platform, in `features/voice/reader.ts`;
+ * a seam that queued would make "stop everything" mean two different things on
+ * two platforms.
+ */
+export interface SpeechEngine {
+  readonly available: boolean
+  /** Say this, interrupting whatever was being said. */
+  speak(utterance: SpeechUtterance): void
+  /** Silence, now. Any `onDone` still pending is dropped rather than fired. */
+  stop(): void
+}

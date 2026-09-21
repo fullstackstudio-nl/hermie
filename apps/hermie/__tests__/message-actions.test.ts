@@ -112,3 +112,47 @@ describe('what a selection asks for', () => {
     expect(parseMessageMenuAction('regenerate', assistantItem())).toEqual({ kind: 'regenerate' })
   })
 })
+
+describe('Read aloud', () => {
+  it('is offered on what a bot said and nowhere else', () => {
+    expect(ids(assistantItem(), { canReadAloud: true })).toContain('readAloud')
+    expect(ids(userItem(), { canReadAloud: true })).not.toContain('readAloud')
+    expect(ids(assistantItem({ text: '   ' }), { canReadAloud: true })).not.toContain('readAloud')
+  })
+
+  it('is DROPPED where the platform cannot speak, not greyed', () => {
+    /*
+      The opposite call from `Regenerate`, and deliberately.
+
+      A greyed line says "not now", which is true of a turn that is running and
+      false of a browser with no synthesiser — there is no later in which one
+      appears. A line that can never be taken should not be drawn.
+    */
+    expect(ids(assistantItem(), { canReadAloud: false })).not.toContain('readAloud')
+  })
+
+  it('takes no notice of a running turn, because reading is local', () => {
+    expect(itemFor('readAloud', assistantItem(), { canReadAloud: true, turnRunning: true })?.disabled).toBeFalsy()
+  })
+
+  it('says Stop reading on the row that is in flight, under the same id', () => {
+    const idle = itemFor('readAloud', assistantItem(), { canReadAloud: true })
+    const busy = itemFor('readAloud', assistantItem(), { canReadAloud: true, reading: true })
+
+    expect(idle?.title).toBe('Read aloud')
+    expect(busy?.title).toBe('Stop reading')
+    // One id for both, because it is one intention about one row; the queue
+    // decides which way it goes. See `SpeechReader.toggle`.
+    expect(busy?.id).toBe(idle?.id)
+  })
+
+  it('hands over the MARKDOWN, read off the item at selection time', () => {
+    const grown = assistantItem({ text: 'Done. See `plain-text.ts`.' })
+
+    expect(parseMessageMenuAction('readAloud', grown)).toEqual({
+      kind: 'readAloud',
+      text: 'Done. See `plain-text.ts`.'
+    })
+    expect(parseMessageMenuAction('readAloud', userItem())).toBeNull()
+  })
+})

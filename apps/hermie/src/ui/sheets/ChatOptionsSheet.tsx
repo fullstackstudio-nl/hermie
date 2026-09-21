@@ -19,6 +19,7 @@ import { ContextMeter } from '../../chat-ui/ContextMeter'
 import { chatStrings } from '../../chat-ui/strings'
 import type { PickerOption, Verbosity } from '../../chat-ui/types'
 import { formatMuteUntil, MUTE_DURATIONS, MUTE_FOREVER, muteUntil, type MuteDuration } from '../../store/mute'
+import { RATE_STEPS } from '../../features/voice/voice-settings'
 import { strings } from '../../i18n/strings'
 import { AccentSwatches } from '../AccentSwatches'
 import { BottomSheet, SheetEyebrow, SheetPage } from '../BottomSheet'
@@ -96,6 +97,30 @@ export interface ChatOptionsSheetProps {
    */
   onExport?: (format: 'md' | 'txt') => void
 
+  /**
+   * Speaking and listening, or nothing at all.
+   *
+   * Absent removes the whole group, which is the case on a platform with no
+   * synthesiser — a browser without `speechSynthesis`. The same rule `onExport`
+   * follows: a group whose controls cannot act is worse than a missing group.
+   *
+   * The two halves are deliberately different in scope and the footer says so.
+   * `autoRead` belongs to THIS chat — a phone in a car and a Mac in an office
+   * want different answers for the same bot — while the rate is one voice for
+   * the whole app, because a reader who finds the default too slow finds it too
+   * slow everywhere.
+   */
+  voice?: {
+    autoRead: boolean
+    onChangeAutoRead: (value: boolean) => void
+    /** Engine multiplier, 1 being the platform's normal. One of `RATE_STEPS`. */
+    rate: number
+    onChangeRate: (rate: number) => void
+    /** Something is being read right now, so there is something to stop. */
+    reading: boolean
+    onStopReading: () => void
+  }
+
   verbosity: Verbosity
   onChangeVerbosity: (value: Verbosity) => void
 
@@ -128,7 +153,22 @@ export interface ChatOptionsSheetProps {
   onConfirmExpensiveModel?: () => void
 }
 
-type Pane = 'root' | 'reasoning' | 'model' | 'colour' | 'mute'
+type Pane = 'root' | 'reasoning' | 'model' | 'colour' | 'mute' | 'rate'
+
+/**
+ * The five speaking rates, named rather than numbered.
+ *
+ * "0.75×" is a number about an engine; "Slow" is what a person means. The values
+ * behind them are `RATE_STEPS` and the labels are `chatStrings.voice.rateOptions`,
+ * zipped here so the two lists cannot drift in length — a sixth step with no name
+ * would draw a row with an empty label.
+ */
+const RATE_LABELS = ['slowest', 'slow', 'normal', 'fast', 'fastest'] as const
+
+const RATE_OPTIONS: PickerOption[] = RATE_STEPS.map((value, index) => ({
+  value: String(value),
+  label: chatStrings.voice.rateOptions[RATE_LABELS[index] ?? 'normal']
+}))
 
 /**
  * The picker's id for "stop being quiet".
@@ -320,6 +360,11 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
     props.modelOptions.find(option => option.value === props.model)?.label ?? prettyModelName(props.model)
   const reasoningLabel =
     props.reasoningOptions.find(option => option.value === props.reasoningEffort)?.label ?? props.reasoningEffort
+  // The named stop, or the bare multiplier for a value no step produces — which
+  // only an older build or a hand-edited preference file can supply, and which
+  // is still better shown than silently redrawn as "Normal".
+  const rateLabel =
+    RATE_OPTIONS.find(option => option.value === String(props.voice?.rate))?.label ?? String(props.voice?.rate ?? 1)
   const muteLabel =
     props.mutedUntil === null
       ? chatStrings.options.notMuted
@@ -406,6 +451,20 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
           */}
           <AccentSwatches accent={props.accent} onSelect={props.onChangeAccent} testIDPrefix={props.botName} />
         </Page>
+      ) : pane === 'rate' ? (
+        <PickerPane
+          onBack={() => setPane('root')}
+          onPick={option => {
+            props.voice?.onChangeRate(Number(option.value))
+            setPane('root')
+          }}
+          options={RATE_OPTIONS}
+          title={chatStrings.voice.rate}
+          // Stringified, because a picker deals in ids and 1 and 1.0 are the
+          // same rate but not the same string. `RATE_STEPS` is the only source
+          // of these values, so the round trip through `String` is exact.
+          value={String(props.voice?.rate ?? 1)}
+        />
       ) : pane === 'reasoning' ? (
         <PickerPane
           onBack={() => setPane('root')}
@@ -545,6 +604,40 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
               value={props.showThinking}
             />
           </InsetGroup>
+
+          {props.voice ? (
+            <InsetGroup footer={chatStrings.voice.autoReadHint} header={chatStrings.voice.header}>
+              <SwitchRow
+                label={chatStrings.voice.autoRead}
+                onChange={props.voice.onChangeAutoRead}
+                testID="option-auto-read"
+                value={props.voice.autoRead}
+              />
+              <DisclosureRow
+                label={chatStrings.voice.rate}
+                onPress={() => setPane('rate')}
+                testID="option-voice-rate"
+                value={rateLabel}
+              />
+              {/*
+                Only while there is something to stop.
+
+                A permanently present Stop row would be a control that does
+                nothing almost all of the time, and the sheet already has a rule
+                about those — see the context row above, and `onExport`. It is
+                here rather than in the message menu because this is the one
+                surface that can stop a read the reader did not start from a
+                row: an automatic one.
+              */}
+              {props.voice.reading ? (
+                <InsetButtonRow
+                  onPress={props.voice.onStopReading}
+                  testID="option-stop-reading"
+                  title={chatStrings.menu.stopReading}
+                />
+              ) : null}
+            </InsetGroup>
+          ) : null}
 
           {props.onExport ? (
             <InsetGroup footer={chatStrings.export.hint} header={chatStrings.export.header}>

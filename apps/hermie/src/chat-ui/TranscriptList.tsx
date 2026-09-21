@@ -200,6 +200,23 @@ export interface TranscriptContext {
   lastAssistantId?: string
   /** A turn is running on this chat, so the two turn-starting lines are greyed. */
   turnRunning?: boolean
+  /**
+   * Say this reply out loud, or stop saying it.
+   *
+   * The MARKDOWN is handed over, not the words: flattening for speech is the
+   * voice feature's decision (`features/voice/speech-text.ts`) and the transcript
+   * kit has no business knowing that a code block becomes a sentence. Absent
+   * means the platform cannot speak, and the line is not drawn.
+   */
+  onReadAloud?: (id: string, markdown: string) => void
+  /**
+   * The rows that are being read or are queued to be.
+   *
+   * An array rather than a predicate because it is part of a memo key: a
+   * function prop would be a new identity on every render of the screen and
+   * would rebuild every row's menu with it.
+   */
+  readingItemIds?: readonly string[]
   /** The chat's outgoing bubble fill, from `useChatAccent`. */
   accent?: string
   /**
@@ -734,6 +751,10 @@ function useMessageMenu(
         // Both halves of the question, answered by the only thing that can:
         // the host can regenerate at all, and this row is the newest reply.
         canRegenerate: Boolean(context.onRegenerate) && context.lastAssistantId === item.id,
+        // A capability, not a preference: the host passes a handler only where
+        // the platform has a synthesiser at all.
+        canReadAloud: Boolean(context.onReadAloud),
+        reading: context.readingItemIds?.includes(item.id) ?? false,
         // A Mac question rather than a capability one. The panel renders
         // everywhere, but only where a pointer can drag across it does it offer
         // anything the long press does not already give.
@@ -750,7 +771,9 @@ function useMessageMenu(
       context.lastAssistantId,
       context.onEditResend,
       context.onOpenBot,
+      context.onReadAloud,
       context.onRegenerate,
+      context.readingItemIds,
       context.turnRunning,
       expanded,
       hasDetails,
@@ -805,6 +828,21 @@ function useMessageMenu(
           if (!context.turnRunning) {
             context.onRegenerate?.()
           }
+
+          return
+
+        /*
+          No turn guard, deliberately.
+
+          Reading is local and takes nothing from the gateway, so a reply that is
+          still being written can be read — and the id is what the queue is keyed
+          by, so a second selection on the same row stops it rather than starting
+          a second copy. The text is read off the item at SELECTION time, which
+          is what keeps a streamed reply from being spoken as the fragment its
+          menu was built from.
+        */
+        case 'readAloud':
+          context.onReadAloud?.(item.id, action.text)
 
           return
 
@@ -1143,6 +1181,27 @@ function TranscriptListBody({
       onSelectText: openSelectText,
       onOpenAttachment: openAttachment,
       ...(handlers.attachmentUri ? { attachmentUri: handlers.attachmentUri } : {}),
+      /*
+        The four MENU props, which were declared on `TranscriptContext` and never
+        copied into the object the rows are actually given.
+
+        They are listed one by one like everything else above rather than
+        spread, because `handlers` is the whole rest of the props object and is
+        new on every render — which is the note at the top of this memo. What
+        that cost was invisible in the suites and total on the screen:
+        `useMessageMenu` reads `context.onEditResend`, `context.onRegenerate`,
+        `context.turnRunning` and `context.lastAssistantId`, every one of them
+        came back `undefined`, and so `Edit and resend` and `Regenerate` were
+        never drawn on any row in the app. The unit tests call
+        `messageMenuItems` directly and passed throughout. `chat-screen` covers
+        the round trip now.
+      */
+      onEditResend: handlers.onEditResend,
+      onRegenerate: handlers.onRegenerate,
+      turnRunning: handlers.turnRunning,
+      ...(handlers.lastAssistantId ? { lastAssistantId: handlers.lastAssistantId } : {}),
+      onReadAloud: handlers.onReadAloud,
+      readingItemIds: handlers.readingItemIds,
       selfHandle: handlers.selfHandle,
       subagents: handlers.subagents ?? {},
       typingHandles: handlers.typingHandles ?? EMPTY_HANDLES
@@ -1159,6 +1218,12 @@ function TranscriptListBody({
       handlers.attachmentUri,
       handlers.onRetry,
       handlers.onRunCron,
+      handlers.onEditResend,
+      handlers.onRegenerate,
+      handlers.turnRunning,
+      handlers.lastAssistantId,
+      handlers.onReadAloud,
+      handlers.readingItemIds,
       openAttachment,
       handlers.selfHandle,
       openSelectText,

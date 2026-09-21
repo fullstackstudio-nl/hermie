@@ -19,6 +19,7 @@ import { useBotsStore } from '../../store/bots'
 import { useChatLayoutStore } from '../../store/chat-layout'
 import { useChatsStore } from '../../store/chats'
 import { OWNER_USER_ID, useDeviceContextStore } from '../../store/device-context'
+import { useVoiceSettingsStore } from '../voice/voice-settings'
 import { usePluginStore } from '../../store/plugin'
 import { usePushStore } from '../../store/push'
 import { useSettingsStore } from '../../store/settings'
@@ -106,6 +107,11 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     // memory before the first projection or the defaults would travel as though
     // they were decisions.
     void useDeviceContextStore.getState().hydrate()
+    // Before the first chat is drawn, because "read replies aloud" is armed by
+    // a transcript effect: a chat opened against an unhydrated store would take
+    // the default (off) for one pass and then start reading on the next, which
+    // reads to the owner as a reply that was skipped.
+    void useVoiceSettingsStore.getState().hydrate()
   }, [])
 
   // The list's arrangement is stored per gateway, so it is read when the

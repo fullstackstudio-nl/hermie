@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Read a reply aloud.** A reply's menu gains **Read aloud**, and **Stop reading** while it is
+  speaking. The voice is the one built into the device — `AVSpeechSynthesizer`, Android's
+  `TextToSpeech`, the browser's `speechSynthesis` — so **nothing is sent anywhere to be
+  synthesised**, which is the whole reason it is the default rather than a fallback
+  (ADR-0021). What is spoken is not what is drawn: a fenced listing is read as `Code block, 12
+  lines` unless it is short enough to be the answer itself, a table is read a row at a time, a link
+  reads its label rather than its target, and mathematics is read **as its source** — an emphasis
+  stripper turns `a_1 + b_2` into `a1 + b2`, and wrong is worse than plain. A chat can be set to
+  **read each finished reply automatically**; it never speaks while a reply is still being written,
+  it queues a reply that lands while another is being read, and switching it on does not start
+  reading the back catalogue. Speaking stops when you leave the chat, and when the app goes to the
+  background unless you say otherwise. The speaking rate is one setting for the whole app; whether a
+  reply is read on its own is per chat, because a phone in a car and a Mac in an office want
+  different answers for the same bot.
+
 - **Edit and resend, and Regenerate.** A message's own menu gains two lines that start a turn: on one
   of your own turns, **Edit and resend** puts the text back in the composer with the attachment
   references it carried — the turn already in the conversation stays exactly where it is, which is

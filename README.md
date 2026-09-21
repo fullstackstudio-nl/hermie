@@ -94,6 +94,12 @@ no third-party network call. The only address Hermie knows is the one you typed.
   through the gateway's own `/retry` where it has one, and re-sends your last
   prompt where it does not. Both are greyed rather than hidden while a turn is
   running.
+- **Read a reply aloud.** Any reply's menu will say it, using the voice built
+  into your phone, your Mac or your browser — nothing is sent anywhere to be
+  synthesised. A code listing is read as `Code block, 12 lines` rather than
+  recited, a table is read a row at a time, links read their label, and
+  mathematics is read as it was written. A chat can be set to read every finished
+  reply on its own, and it never speaks a reply that is still being written.
 - **Take the conversation with you.** Export a chat as Markdown or plain text,
   into the share sheet on a phone or the Mac and as a download in a browser. What
   you get is what is on screen: a chat you have set to Quiet exports the quiet

@@ -93,3 +93,18 @@ jest.mock('expo-notifications', () => ({
   addNotificationResponseReceivedListener: jest.fn(() => ({ remove: jest.fn() })),
   getLastNotificationResponseAsync: jest.fn(async () => null)
 }))
+
+/**
+ * `expo-speech`, which resolves a native module on its first call.
+ *
+ * The stand-in answers "this platform can speak", which is the state a phone is
+ * in and therefore the one worth covering by default. A suite that wants the
+ * other answer hands the reader its own engine: the whole point of
+ * `SpeechEngine` is that nothing above it has to know this module exists.
+ */
+jest.mock('expo-speech', () => ({
+  speak: jest.fn(),
+  stop: jest.fn(async () => undefined),
+  isSpeakingAsync: jest.fn(async () => false),
+  getAvailableVoicesAsync: jest.fn(async () => [])
+}))
