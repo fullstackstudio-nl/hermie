@@ -38,8 +38,10 @@ if (values.help) {
       'Prompts steer the built-in scenario: "approve" raises an approval request,',
       '"delegate" fans out subagent events, anything else streams a reply with a tool call.',
       '',
-      'Control endpoint (not part of the gateway contract):',
-      '  POST /__fake/inject {profile, user, assistant}   inject a turn somebody else ran'
+      'Control endpoints (not part of the gateway contract):',
+      '  POST /__fake/inject  {profile, user, assistant}  inject a turn somebody else ran',
+      '  POST /__fake/request {profile, method, params}   raise a server→client request,',
+      '                                                   e.g. method "clarify"'
     ].join('\n')
   )
   process.exit(0)

@@ -2090,6 +2090,44 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       return
     }
 
+    if (path === '/__fake/request' && method === 'POST') {
+      /*
+        The same control surface for a server→client REQUEST, and it exists for
+        one reason: `clarify` had no way in from outside the process.
+
+        A prompt keyword raises an approval and a fan-out, so both could be
+        driven from a browser by typing a sentence — a clarify could only be
+        raised by a test holding the gateway object, which left the clarify
+        sheet the one question card nobody had ever opened by hand. Every web QA
+        pass so far has listed it as not covered for exactly that reason.
+
+        It does NOT await the answer: a control call that parked until a human
+        clicked a button would hold its HTTP response open for as long as the
+        sheet stayed up, and the caller wants the request raised, not answered.
+      */
+      const body = await readBody(req)
+      const profile = String(body.profile ?? 'researcher')
+      const session = [...state.sessions.values()].find(entry => entry.profile === profile)
+
+      if (!session) {
+        json(res, 404, { detail: `No session for profile ${profile}` })
+
+        return
+      }
+
+      const requestMethod = String(body.method ?? 'clarify')
+      const params = (body.params ?? {}) as Record<string, unknown>
+
+      void requestServerSide(requestMethod, { session_id: session.id, ...params }).catch(() => {
+        // The client refusing or the socket closing is the caller's business,
+        // not this endpoint's: it has already answered.
+      })
+
+      json(res, 200, { raised: requestMethod, session_id: session.id })
+
+      return
+    }
+
     if (!httpAuthorized(req)) {
       json(res, 401, { detail: 'Unauthorized' })
 
