@@ -6773,11 +6773,12 @@ outside the app, and the gateway runs inside it — so the answer is one seam an
 
 ### What was verified here, and how
 
-There is no signed-in gateway reachable from this machine and no device attached to it, so the line
-between "tested" and "written down" matters more than usual in this section.
+Unusually for this file, most of it was. There is still no signed-in gateway reachable from this
+machine and no device attached to it, but both native toolchains are present, so the prebuild and
+both builds were run — and they found a real bug that nothing else would have.
 
-**The TypeScript is tested.** `npm run typecheck`, the full `npx vitest run` (64 files) and the full
-`npx jest` in `apps/hermie` (161 suites) pass. The new suites are:
+**The TypeScript.** `npm run typecheck`, the full `npx vitest run` and the full `npx jest` in
+`apps/hermie` both pass, and `npx expo-doctor` reports no issues. The new suites:
 
 - `__tests__/share-outbox.test.ts` — the manifest as a table, mostly the refusals: a version this
   build does not know, an id that is not a name, a path that could climb out of the entry, an item
@@ -6786,72 +6787,85 @@ between "tested" and "written down" matters more than usual in this section.
 - `__tests__/share-delivery.test.ts` — the delivery flow against faked ports: a photograph, a file
   and a link become ONE message; the chat is opened before the upload, because the upload needs the
   working directory the resume reports; the entry is cleared after the send and never before; a
-  failed send leaves it exactly where it was.
+  failed send leaves it alone, is not retried inside one pump, and IS retried on the next.
 - `__tests__/intent-queue.test.ts`, `__tests__/intent-runner.test.ts`,
   `__tests__/intent-await-reply.test.ts` — the request format, the runner's "every request is
   answered" rule, and the two races the reply watch exists for.
 - `__tests__/widget-snapshot.test.ts` — the folder projection, including the divergence recorded
   below.
 - `__tests__/ios-share-plugin.test.ts`, `__tests__/ios-intents-plugin.test.ts` — the pure halves of
-  both config plugins, plus the strings that three languages spell by hand and no compiler checks:
-  the App Group, the outbox directory, the item cap, the intent budget, the principal class name,
-  and that every Siri phrase carries `.applicationName`.
+  both config plugins, plus the strings three languages spell by hand and no compiler checks: the
+  App Group, the outbox directory, the item cap, the intent budget, the principal class name, and
+  that every Siri phrase carries `.applicationName`.
 
-**The Swift type-checks against the iOS SDK.** Not a build — a `swiftc -typecheck` of each target's
-sources against `iPhoneSimulator27.0.sdk`, which is what can be run without generating the Xcode
-project:
+**Android builds.** `npx expo prebuild --platform android` ran both plugins,
+`./gradlew :hermie-share:compileDebugKotlin` compiles `HermieShareStore`/`HermieShareModule`, and
+`./gradlew assembleDebug` produced a debug APK. The merged manifest carries both `ACTION_SEND` and
+`ACTION_SEND_MULTIPLE` on MainActivity **alongside** the launcher and `hermie://` filters it already
+had, which is the thing `applySendFilters` is additive for. `ANDROID_HOME` is not exported on this
+machine; the SDK is at `~/Library/Android/sdk` and gradle needs it passed or in `local.properties`.
 
-```
-modules/hermie-share/share/*.swift          -target arm64-apple-ios15.1-simulator   clean
-modules/hermie-intents/intents/*.swift      -target arm64-apple-ios15.1-simulator   clean
-modules/hermie-widgets/widget/*.swift       -target arm64-apple-ios17.0-simulator   clean
-```
+**iOS builds, with all three targets.**
+`xcodebuild -workspace Hermie.xcworkspace -scheme Hermie -destination 'generic/platform=iOS
+Simulator' CODE_SIGNING_ALLOWED=NO build` succeeds with no errors after `pod install`. What that
+establishes, and none of it was provable any other way:
 
-The three Expo modules (`HermieShareModule`, `HermieIntentsModule`, the amended
-`HermieSceneDelegate`) cannot be type-checked that way because they import `ExpoModulesCore`, which
-only exists once CocoaPods has built it. They were `swiftc -parse`d instead, which catches syntax
-and nothing else.
+- Both extensions are built and **embedded**: `Hermie.app/PlugIns/HermieShareExtension.appex` and
+  `HermieWidgetsExtension.appex`. That is `assertEmbedded` being right rather than merely present.
+- The share extension's four Swift files, the widget extension's eight, and the four App Intents
+  compiled into the app all type-check against the real SDK, not only against `swiftc -typecheck`.
+- **`Hermie.app/Metadata.appintents` contains all four intents**, with
+  `autoShortcutProviderMangledName` naming `HermieAppShortcuts` and all nine phrase templates with
+  their `${applicationName}` token. `HermieNeedsInputIntent` is extracted with
+  `"openAppWhenRun":false` and the other three with `true`, which is exactly the split the feature
+  is built around. This is the single most valuable thing the build proved: an `AppShortcutsProvider`
+  that is not extracted reports nothing anywhere, and the reason the intents are in the app target
+  rather than in the pod was a bet until this file existed.
 
-### What was NOT verified, and why
+### The bug the build found, which four kinds of test did not
 
-- **Nothing was built.** `apps/hermie/ios/` and `apps/hermie/android/` are generated and absent from
-  a fresh checkout (`.gitignore`), so `xcodebuild` and `./gradlew` both need `npx expo prebuild`
-  first — which for the iOS half means a full `pod install` against this tree. That was not run
-  here. The consequence is specific and worth stating: **neither config plugin has been executed**,
-  so the Xcode surgery in `with-hermie-share.js` and `with-hermie-intents.js` is unproven. Both
-  carry assertions that fail the prebuild rather than shipping silently — `assertEmbedded`,
-  `touched === 0`, `assertCompiled` — and those assertions are the thing that has not been
-  exercised. The first person to run `npm run ios` or `npm run mac` is running them for the first
-  time.
+The first `xcodebuild` failed with four `Build input files cannot be found` for
+`ios/HermieIntents/HermieIntents/*.swift` — the directory name twice.
+
+`pbxCreateGroup(GROUP, GROUP)` gives the group a `path` of `HermieIntents`, and Xcode resolves a
+child relative to its group. Passing `HermieIntents/<name>` to `addSourceFile` therefore asked for
+the file one level deeper than it is. A reference inside a group that has a path is a **basename**.
+
+The interesting part is which guard did not fire. `assertCompiled` asks whether the files are in the
+app target's Sources phase, and they were — under a path that does not exist. The assertion was
+right about its own question and useless for this one. `assertPaths` is the check that would have
+caught it, and it is in the plugin now with a test beside it; the cost of finding out was a full
+`pod install` and a fifteen-minute build.
+
+### What still needs a device
+
 - **The share sheet has not been seen.** Not on an iPhone, not in the Mac's share menu under the
-  "Designed for iPad" build, and not as a row in Android's chooser. What is covered is the manifest
-  and the delivery; what is not is whether the extension appears at all, whether its activation rule
-  admits the right things, and whether `openURL` through the responder chain still works on iOS 27.
-  That last one is an idiom rather than an API and the code says so: if it stops working the entry
-  is still in the outbox and the app still delivers it at the next launch, so what is lost is the
-  immediacy and not the share.
-- **No Siri phrase has been spoken and no action has been seen in Shortcuts.** Two things are
-  unproven and they fail differently. A phrase that Siri never matches reports nothing at all — that
-  is why every phrase is pinned to carry `.applicationName`. An App Intent that does not appear in
-  the gallery is usually metadata extraction, which is why `intents/*.swift` is compiled into the
-  APP target rather than into the pod; `assertCompiled` fails the prebuild if that ever stops being
-  true, but neither half has been watched happen.
-- **The App Group is now load-bearing for three binaries.** The app, the widget extension and the
-  share extension all name `group.dev.hermie.app`, and it has to exist under the team in the
-  Developer portal with all three bundle ids joined to it: `dev.hermie.app`,
-  `dev.hermie.app.widgets`, `dev.hermie.app.share`. A capability that is missing from a provisioning
-  profile produces a nil container and nothing else — no build failure, no crash, no log. Each
-  native module exposes `hasSharedContainer()` for the developer screen, and that is the only signal
-  there is.
+  "Designed for iPad" build, and not as a row in Android's chooser. The extension builds, embeds and
+  declares its activation rule; whether it appears where it should, and whether it admits the right
+  things, has not been looked at.
+- **`openURL` through the responder chain is an idiom, not an API.** `ShareViewController.openApp`
+  walks the responder chain and performs `openURL:` by selector, because `UIApplication.shared` is
+  unavailable to an extension. It compiles; whether iOS 27 still honours it is unknown. The code says
+  what happens if it stops: the entry is still in the outbox and the app still delivers it at the
+  next launch, so what is lost is the immediacy, not the share — which is why nothing branches on
+  the result.
+- **No Siri phrase has been spoken and no Shortcut has been run.** The metadata is right, which was
+  the failure mode that reports nothing. What a phrase actually resolves to, whether
+  `HermieBotEntityQuery.entities(matching:)` picks the bot somebody said, and whether the poll-plus-
+  deep-link handoff completes inside the budget on a real launch, all need a device.
+- **The App Group has to exist in the Developer portal.** Three bundle ids now join it —
+  `dev.hermie.app`, `dev.hermie.app.widgets`, `dev.hermie.app.share` — and a capability missing from
+  a provisioning profile produces a nil container and nothing else: no build failure, no crash, no
+  log. `CODE_SIGNING_ALLOWED=NO` is exactly what this build skipped. Each native module exposes
+  `hasSharedContainer()` for the developer screen, and that is the only signal there is.
 - **The Spotlight tap-through is written and unseen.** `HermieIntentsModule.indexBots` indexes each
   bot under its own `hermie://chat/<name>`, and `modules/hermie-scene` turns the resulting
   `CSSearchableItemActionType` activity back into that link — React Native answers only
   `NSUserActivityTypeBrowsingWeb`, so without that a result would open the app at whatever screen it
-  was last on. The conversion has a unit test on neither side; it is nine lines in the scene
-  delegate.
-- **The folder widget has not been drawn.** The projection is covered as a table. WidgetKit
-  re-reading the file, the `AppIntentConfiguration` picker listing the folders, and what the header
-  looks like at systemMedium have not been looked at.
+  was last on. Nine lines, compiled, never exercised.
+- **Nothing has been drawn.** The folder widget's header, the share sheet's list, and what either
+  looks like at the size the system gives it have not been looked at. The projections are covered as
+  tables; pixels are not.
 
 ### A folder's badge and a row's badge now disagree, on purpose
 

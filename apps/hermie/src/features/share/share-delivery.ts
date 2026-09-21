@@ -108,7 +108,16 @@ export class ShareDelivery {
    */
   private readonly notes = new Map<string, string>()
 
-  /** Ids that failed this session, so a bad one is not retried in a tight loop. */
+  /**
+   * Ids that failed during THIS pump, so one is attempted at most once per pump.
+   *
+   * Cleared at the start of every pump that is not a re-entrant one, which is
+   * what makes the retry in the module comment real: a foreground, a reconnect
+   * or a share link each start a new pump and each tries again. What it stops
+   * is the `again` loop below going round on an entry that has just failed —
+   * a gateway refusing an upload would otherwise be retried as fast as the
+   * event loop allows.
+   */
   private readonly failed = new Set<string>()
 
   private pumping = false
@@ -140,6 +149,8 @@ export class ShareDelivery {
     }
 
     this.pumping = true
+    // A new pump is a new chance. See `failed`.
+    this.failed.clear()
 
     try {
       do {
@@ -154,9 +165,9 @@ export class ShareDelivery {
   /**
    * Answer the picker: this entry goes to this bot.
    *
-   * `failed` is cleared with it, because a pick is a person saying "try again"
-   * and the commonest reason an entry failed is that it named a bot the roster
-   * no longer has.
+   * It pumps rather than delivering directly, which clears `failed` on the way
+   * — a pick is a person saying "try again", and the commonest reason an entry
+   * failed is that it named a bot the roster no longer has.
    */
   async assign(id: string, bot: string, note?: string): Promise<void> {
     this.chosen.set(id, bot)
@@ -165,7 +176,6 @@ export class ShareDelivery {
       this.notes.set(id, note)
     }
 
-    this.failed.delete(id)
     await this.pump()
   }
 
@@ -242,12 +252,6 @@ export class ShareDelivery {
     for (const id of [...this.notes.keys()]) {
       if (!sorted.some(share => share.id === id)) {
         this.notes.delete(id)
-      }
-    }
-
-    for (const id of [...this.failed]) {
-      if (!sorted.some(share => share.id === id)) {
-        this.failed.delete(id)
       }
     }
 

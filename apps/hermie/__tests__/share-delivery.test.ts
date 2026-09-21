@@ -126,20 +126,44 @@ describe('an entry that names its chat', () => {
     expect(calls.indexOf('send:b')).toBeLessThan(calls.indexOf('clear:e1'))
   })
 
-  it('leaves the entry alone when the send fails, and stops retrying in a loop', async () => {
-    const { calls, delivery } = harness([entryFor({ bot: 'b' })], {
+  /**
+   * The one thing that must not happen on a failure: somebody's file quietly
+   * discarded because a gateway answered 500.
+   */
+  it('leaves the entry alone when the send fails', async () => {
+    const { calls, delivery, waiting } = harness([entryFor({ bot: 'b' })], {
       send: async () => {
         throw new Error('gateway said no')
       }
     })
 
     await delivery.pump()
-    await delivery.pump()
 
     expect(calls.filter(call => call.startsWith('clear'))).toEqual([])
-    // Two pumps, one attempt: a failed entry is not retried until something has
-    // changed, or the badge would be a tight loop against a refusing gateway.
-    expect(calls.filter(call => call === 'open:b')).toHaveLength(1)
+    expect(waiting().map(share => share.id)).toEqual(['e1'])
+  })
+
+  /**
+   * And the other half, which is what the badge promises: a foreground, a
+   * reconnect or a share link each start a new pump, and each tries again.
+   * Within ONE pump an entry is attempted once, so a refusing gateway cannot
+   * be hammered as fast as the event loop allows.
+   */
+  it('tries again on the next pump, and only once within one', async () => {
+    let attempts = 0
+    const { delivery } = harness([entryFor({ bot: 'b' })], {
+      send: async () => {
+        attempts += 1
+
+        throw new Error('gateway said no')
+      }
+    })
+
+    await delivery.pump()
+    expect(attempts).toBe(1)
+
+    await delivery.pump()
+    expect(attempts).toBe(2)
   })
 
   it('does nothing at all while the gateway is down, but still reads the outbox', async () => {

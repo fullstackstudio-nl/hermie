@@ -113,6 +113,49 @@ function assertCompiled(project, expected) {
   )
 }
 
+/**
+ * Fails the prebuild when a file reference names a path Xcode cannot resolve.
+ *
+ * This exists because the first version of this plugin passed
+ * `HermieIntents/<name>` to `addSourceFile` while the GROUP already carried
+ * `HermieIntents` as its path, and Xcode resolves a child relative to its
+ * group — so every source resolved to `ios/HermieIntents/HermieIntents/…` and
+ * the app target failed with four "Build input files cannot be found".
+ *
+ * `assertCompiled` passed that build, and rightly: the files were in the
+ * sources phase. The thing that was wrong was the path on the reference, which
+ * is what this asks about. A reference inside a group with a path has a
+ * BASENAME and nothing else.
+ */
+function assertPaths(project, expected) {
+  const references = project.pbxFileReferenceSection()
+  const offenders = []
+
+  for (const key of Object.keys(references)) {
+    const entry = references[key]
+    const value = typeof entry === 'object' && entry !== null ? String(entry.path ?? '') : ''
+    const unquoted = value.replace(/^"|"$/g, '')
+
+    if (expected.includes(path.basename(unquoted)) && unquoted.includes('/')) {
+      offenders.push(unquoted)
+    }
+  }
+
+  if (offenders.length === 0) {
+    return
+  }
+
+  throw new Error(
+    [
+      `with-hermie-intents wrote file references with a path inside a group that already has one: ${offenders.join(', ')}.`,
+      '',
+      'Xcode resolves a child relative to its group, so these would be looked for at',
+      `ios/${GROUP}/${GROUP}/… and the app target would fail with "Build input files cannot be`,
+      'found". A reference inside a group with a path is a basename and nothing else.'
+    ].join('\n')
+  )
+}
+
 module.exports = function withHermieIntents(config) {
   const sourceDirectory = path.join(__dirname, '..', 'intents')
 
@@ -134,6 +177,7 @@ module.exports = function withHermieIntents(config) {
       // re-copied above, so their CONTENT is current; only the project's list of
       // them is frozen. See the note on idempotence.
       assertCompiled(project, sources)
+      assertPaths(project, sources)
 
       return modConfig
     }
@@ -144,13 +188,20 @@ module.exports = function withHermieIntents(config) {
     project.addToPbxGroup(group, project.getFirstProject().firstProject.mainGroup)
 
     for (const name of sources) {
-      // `addSourceFile` creates the file reference, puts it in the group AND
-      // adds it to that target's Sources phase — which is the one thing that
-      // matters here and the one thing `addPbxGroup` alone does not do.
-      project.addSourceFile(path.join(GROUP, name), { target }, group)
+      // The BASENAME, not `HermieIntents/<name>`, and this cost a build to find
+      // out. `pbxCreateGroup(GROUP, GROUP)` gives the group a `path` of
+      // `HermieIntents`, and Xcode resolves a child's path relative to its
+      // group — so joining the directory in again produced
+      // `ios/HermieIntents/HermieIntents/HermieAppIntents.swift` and four
+      // "Build input files cannot be found" errors. `assertCompiled` did not
+      // catch it and could not: the files WERE in the sources phase, under a
+      // path that does not exist. `assertPaths` below is the check that would
+      // have.
+      project.addSourceFile(name, { target }, group)
     }
 
     assertCompiled(project, sources)
+    assertPaths(project, sources)
 
     return modConfig
   })
@@ -159,3 +210,4 @@ module.exports = function withHermieIntents(config) {
 module.exports.GROUP = GROUP
 module.exports.intentSources = intentSources
 module.exports.assertCompiled = assertCompiled
+module.exports.assertPaths = assertPaths

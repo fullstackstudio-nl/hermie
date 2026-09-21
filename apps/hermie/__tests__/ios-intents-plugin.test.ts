@@ -13,7 +13,7 @@ import { join } from 'node:path'
 import { INTENT_BUDGET_MS, INTENT_QUEUE_VERSION } from '../src/features/intents/queue'
 
 const plugin = require('../modules/hermie-intents/plugin/with-hermie-intents')
-const { assertCompiled, GROUP, intentSources } = plugin
+const { assertCompiled, assertPaths, GROUP, intentSources } = plugin
 
 const MODULE_DIR = join(__dirname, '..', 'modules', 'hermie-intents')
 const read = (...parts: string[]): string => readFileSync(join(MODULE_DIR, ...parts), 'utf8')
@@ -58,6 +58,31 @@ describe('where the Swift goes', () => {
     expect(() =>
       assertCompiled(project(['HermieAppShortcuts.swift in Sources']), ['HermieAppShortcuts.swift'])
     ).not.toThrow()
+  })
+
+  /**
+   * This one is here because it actually happened, and because the assertion
+   * above did not catch it.
+   *
+   * The first version passed `HermieIntents/<name>` to `addSourceFile` while
+   * the GROUP already carried `HermieIntents` as its path. Xcode resolves a
+   * child relative to its group, so every source was looked for at
+   * `ios/HermieIntents/HermieIntents/…` and the app target failed with four
+   * "Build input files cannot be found". The files WERE in the sources phase,
+   * which is all `assertCompiled` asks, so only a real `xcodebuild` found it.
+   */
+  it('refuses a file reference that repeats the group’s own path', () => {
+    const project = (paths: string[]) => ({
+      pbxFileReferenceSection: () =>
+        Object.fromEntries(paths.map((value, index) => [`R${index}`, { path: `"${value}"` }]))
+    })
+
+    expect(() => assertPaths(project(['HermieIntents/HermieAppIntents.swift']), ['HermieAppIntents.swift'])).toThrow(
+      /group that already has one/
+    )
+    expect(() => assertPaths(project(['HermieAppIntents.swift']), ['HermieAppIntents.swift'])).not.toThrow()
+    // Somebody else's file at a nested path is not this plugin's business.
+    expect(() => assertPaths(project(['Hermie/AppDelegate.swift']), ['HermieAppIntents.swift'])).not.toThrow()
   })
 
   it('adds no target of its own', () => {
