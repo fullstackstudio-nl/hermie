@@ -68,10 +68,11 @@ import { mutedUntil as mutedUntilOf } from '../../store/mute'
 import { useChatsStore } from '../../store/chats'
 import { useCronStore } from '../../store/cron'
 import { hasChatViewOverride, useChatView, useSettingsStore } from '../../store/settings'
+import { textSizeScale } from '../../store/text-size'
 import { Appear } from '../../ui/Appear'
 import { KeyboardInset } from '../../ui/KeyboardInset'
 import { Screen, Text } from '../../ui/primitives'
-import { useTheme } from '../../ui/theme'
+import { TypeScaleProvider, useTheme } from '../../ui/theme'
 import { CONTROL_MIN_HEIGHT, TAP_SLOP } from '../../ui/tokens'
 import { DropZone } from '../../chat-ui/DropZone'
 import type { DroppedFile } from '../../platform/file-drop'
@@ -332,6 +333,15 @@ function Conversation({
   const avatar = useBotsStore(state => state.avatars[botName])
   const byName = useBotsStore(state => state.byName)
   const overridden = useSettingsStore(state => hasChatViewOverride(state, botName))
+  /*
+    The transcript's own type scale, as a factor on the theme's type tokens.
+
+    Read here and applied by a provider around the list rather than passed down:
+    the words it has to reach are in the bubbles, the markdown blocks and the
+    code blocks, and every one of those already reads `theme.type`. See
+    `TypeScaleProvider`.
+  */
+  const textSize = useSettingsStore(state => state.textSize)
   const theme = useTheme()
   // The chat's own colour: the avatar ring in the header and the outgoing bubble
   // gradient. One lookup per screen rather than one per row.
@@ -1742,9 +1752,10 @@ function Conversation({
               {...(avatar ? { avatarUri: avatar } : {})}
             />
           ) : (
-            <TranscriptList
-              canOpenCron={canOpenCron}
-              /*
+            <TypeScaleProvider scale={textSizeScale(textSize)}>
+              <TranscriptList
+                canOpenCron={canOpenCron}
+                /*
             The transcript runs UNDER the floating chrome and pads its own content
             out of the way. An inverted list's content container has its top where
             the screen's bottom is, so the padding that clears a header at the
@@ -1754,42 +1765,43 @@ function Conversation({
             laid out at, so the clearance and the thing it clears cannot drift
             apart when a subtitle wraps or a control size changes.
           */
-              contentStyle={{ paddingBottom: chromeHeight }}
-              header={
-                chat.subagents.length ? (
-                  <AgentsBar
-                    count={chat.subagents.length}
-                    onPress={openAgents}
-                    startedAtMs={oldestStart(chat.subagents)}
-                  />
-                ) : null
-              }
-              {...(highlightId ? { highlightItemId: highlightId } : {})}
-              attachmentUri={attachmentUri}
-              images={images}
-              onOpenAttachment={openAttachment}
-              items={chat.items}
-              newMessageCount={newCount}
-              loadingOlder={loadingOlder}
-              onEndReached={loadOlder}
-              {...(lastAssistantId ? { lastAssistantId } : {})}
-              onEditResend={editResend}
-              onRegenerate={regenerate}
-              turnRunning={chat.turnActive}
-              onOpenBot={openBot}
-              onOpenCron={openCron}
-              onOpenRequest={reopenRequest}
-              onOpenTranscript={openTranscript}
-              onScrolledAwayFromBottom={onScrolledAway}
-              ref={listRef}
-              selfHandle={botName}
-              subagents={subagents}
-              // The TURN is running and nothing has been said yet: three dots. Not
-              // `busy` — that also covers a tool or a child still working, and dots
-              // under a finished reply promise a sentence that is not coming.
-              typing={chat.turnActive && !hasStreamingText(chat.items)}
-              typingHandles={typing}
-            />
+                contentStyle={{ paddingBottom: chromeHeight }}
+                header={
+                  chat.subagents.length ? (
+                    <AgentsBar
+                      count={chat.subagents.length}
+                      onPress={openAgents}
+                      startedAtMs={oldestStart(chat.subagents)}
+                    />
+                  ) : null
+                }
+                {...(highlightId ? { highlightItemId: highlightId } : {})}
+                attachmentUri={attachmentUri}
+                images={images}
+                onOpenAttachment={openAttachment}
+                items={chat.items}
+                newMessageCount={newCount}
+                loadingOlder={loadingOlder}
+                onEndReached={loadOlder}
+                {...(lastAssistantId ? { lastAssistantId } : {})}
+                onEditResend={editResend}
+                onRegenerate={regenerate}
+                turnRunning={chat.turnActive}
+                onOpenBot={openBot}
+                onOpenCron={openCron}
+                onOpenRequest={reopenRequest}
+                onOpenTranscript={openTranscript}
+                onScrolledAwayFromBottom={onScrolledAway}
+                ref={listRef}
+                selfHandle={botName}
+                subagents={subagents}
+                // The TURN is running and nothing has been said yet: three dots. Not
+                // `busy` — that also covers a tool or a child still working, and dots
+                // under a finished reply promise a sentence that is not coming.
+                typing={chat.turnActive && !hasStreamingText(chat.items)}
+                typingHandles={typing}
+              />
+            </TypeScaleProvider>
           )}
 
           {/*

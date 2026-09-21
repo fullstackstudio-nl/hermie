@@ -54,6 +54,7 @@ import { mutesOf, type Mutes } from './mute'
 import { usePluginStore } from './plugin'
 import { ownRegistration, usePushStore } from './push'
 import { asThemeChoice, asUserThemes, DEFAULT_CHAT_VIEW, useSettingsStore, type ChatViewSettings } from './settings'
+import { asTextSize, type TextSize } from './text-size'
 
 /** How long the reader has to stop moving before their arrangement goes out. */
 export const UI_META_DEBOUNCE_MS = 600
@@ -96,6 +97,18 @@ export interface HermieAppShape extends HermieAppSection {
    * the smallest possible loss and the same trade ADR-0016 already made.
    */
   botNameOrder?: NameOrder
+  /**
+   * How big the words in a transcript are (`store/text-size.ts`).
+   *
+   * An ADDITIVE field, and the section version is deliberately not bumped for
+   * it, for the reason `folders` gives above: a reader that meets a `v` it does
+   * not know treats the whole section as unreadable and re-seeds it from its
+   * own local copy, so bumping would hand an older build the power to delete
+   * the arrangement rather than protecting this key. A build that does not
+   * mention the field leaves this reader on their own size, which is the
+   * smallest possible loss.
+   */
+  textSize?: TextSize
   themeChoice?: unknown
   themes?: unknown
   /** ADR-0017: every device that asked to be told, and who was last looking. */
@@ -174,6 +187,7 @@ export function snapshotFromStores(): UiMetaSnapshot {
     mutes: layout.mutes,
     defaults: settings.defaults,
     botNameOrder: settings.botNameOrder,
+    textSize: settings.textSize,
     themeChoice: settings.themeChoice,
     themes: settings.userThemes,
     // Omitted rather than empty while nobody has ever registered; see
@@ -294,6 +308,7 @@ export function applySnapshot(snapshot: UiMetaSnapshot): void {
     // predates this field leaves the reader on their own default rather than
     // being read as "they chose the other one".
     ...(asNameOrder(app?.botNameOrder) ? { botNameOrder: asNameOrder(app?.botNameOrder)! } : {}),
+    ...(asTextSize(app?.textSize) ? { textSize: asTextSize(app?.textSize)! } : {}),
     ...(asThemeChoice(app?.themeChoice) ? { themeChoice: asThemeChoice(app?.themeChoice)! } : {}),
     ...(Array.isArray(app?.themes) ? { userThemes: asUserThemes(app?.themes) } : {})
   })

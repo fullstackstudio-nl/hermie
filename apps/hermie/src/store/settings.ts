@@ -19,6 +19,7 @@ import { create } from 'zustand'
 
 import { keyValueStore } from '../platform/key-value-store'
 import { asNameOrder, DEFAULT_NAME_ORDER, type NameOrder } from './bot-names'
+import { asTextSize, DEFAULT_TEXT_SIZE, type TextSize } from './text-size'
 import {
   DEFAULT_THEME_CHOICE,
   isThemePresetName,
@@ -57,6 +58,7 @@ interface PersistedChatView {
   botNameOrder?: NameOrder
   themeChoice?: ThemeChoice
   userThemes?: UserTheme[]
+  textSize?: TextSize
   /** What Part 2 wrote before a theme was a theme. Read, never written. */
   wallpaper?: string
 }
@@ -193,6 +195,18 @@ export interface SettingsState {
   themeChoice: ThemeChoice
   /** Themes the reader made. App-wide, and ADR-0016's `hermie-app` carries them. */
   userThemes: UserTheme[]
+  /**
+   * How big the words in a transcript are (`store/text-size.ts`).
+   *
+   * One setting for the whole account rather than one per chat, and the same
+   * argument `botNameOrder` makes: it is a statement about this reader's eyes,
+   * and eyes do not change between conversations. It is reachable from two
+   * places — Settings › Appearance and the chat's own popover — because the
+   * moment a reader notices they want it is while they are reading, and a
+   * setting they have to go and look for is one they turn up once and never
+   * adjust again.
+   */
+  textSize: TextSize
   /** False until the first disk read finishes; screens paint the defaults meanwhile. */
   loaded: boolean
   hydrate: () => Promise<void>
@@ -201,6 +215,7 @@ export interface SettingsState {
   resetChatView: (botName: string) => void
   setAppearance: (appearance: Appearance) => void
   setBotNameOrder: (order: NameOrder) => void
+  setTextSize: (size: TextSize) => void
   setThemeChoice: (choice: ThemeChoice) => void
   /** Copy a preset into a theme of the reader's own, and return its id. */
   createUserTheme: (base: ThemePresetName, name: string) => string
@@ -220,6 +235,7 @@ export interface SettingsState {
     botNameOrder?: NameOrder
     themeChoice?: ThemeChoice
     userThemes?: UserTheme[]
+    textSize?: TextSize
   }) => void
   reset: () => void
 }
@@ -254,9 +270,9 @@ function newThemeId(): string {
 export const useSettingsStore = create<SettingsState>((set, get) => {
   /** Write whatever is in the store now; every setter calls this after its `set`. */
   const save = (): void => {
-    const { defaults, perChat, appearance, botNameOrder, themeChoice, userThemes } = get()
+    const { defaults, perChat, appearance, botNameOrder, themeChoice, userThemes, textSize } = get()
 
-    persist({ defaults, perChat, appearance, botNameOrder, themeChoice, userThemes })
+    persist({ defaults, perChat, appearance, botNameOrder, themeChoice, userThemes, textSize })
   }
 
   const writeThemes = (userThemes: UserTheme[]): void => {
@@ -271,6 +287,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
     botNameOrder: DEFAULT_NAME_ORDER,
     themeChoice: DEFAULT_THEME_CHOICE,
     userThemes: [],
+    textSize: DEFAULT_TEXT_SIZE,
     loaded: false,
 
     async hydrate() {
@@ -292,6 +309,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
         botNameOrder: asNameOrder(stored?.botNameOrder) ?? DEFAULT_NAME_ORDER,
         themeChoice: asThemeChoice(stored?.themeChoice, stored?.wallpaper) ?? DEFAULT_THEME_CHOICE,
         userThemes: asUserThemes(stored?.userThemes),
+        textSize: asTextSize(stored?.textSize) ?? DEFAULT_TEXT_SIZE,
         loaded: true
       })
     },
@@ -321,6 +339,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
 
     setBotNameOrder(botNameOrder) {
       set({ botNameOrder })
+      save()
+    },
+
+    setTextSize(textSize) {
+      set({ textSize })
       save()
     },
 
@@ -400,7 +423,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
         ...(patch.defaults ? { defaults: patch.defaults } : {}),
         ...(patch.botNameOrder ? { botNameOrder: patch.botNameOrder } : {}),
         ...(patch.themeChoice ? { themeChoice: patch.themeChoice } : {}),
-        ...(patch.userThemes ? { userThemes: patch.userThemes } : {})
+        ...(patch.userThemes ? { userThemes: patch.userThemes } : {}),
+        // Absent is not wrong: a section written before this field leaves the
+        // reader on their own size rather than being read as "they chose
+        // Default".
+        ...(patch.textSize ? { textSize: patch.textSize } : {})
       })
     },
 
@@ -412,6 +439,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
         botNameOrder: DEFAULT_NAME_ORDER,
         themeChoice: DEFAULT_THEME_CHOICE,
         userThemes: [],
+        textSize: DEFAULT_TEXT_SIZE,
         loaded: false
       })
     }

@@ -960,6 +960,19 @@ export const strings = {
     botNameOptions: { profile: 'Profile name', display: 'Display name' },
     botNamesHint:
       'Which name is the large one. The profile name is what the rest of the app addresses a bot by; the display name is the label set on the gateway. A bot with only one of them shows one line.',
+    /**
+     * The transcript's own type scale.
+     *
+     * Named "Chat text size" rather than "Text size" because that is what it is:
+     * a factor on the words in a conversation, on top of whatever the system's
+     * own Dynamic Type already says. The chat list, the composer and this screen
+     * stay the size the device asked for, and the footer says so — a reader who
+     * turns it up and then finds their settings unchanged should have been told
+     * to expect that.
+     */
+    chatTextSize: 'Chat text size',
+    chatTextSizeHint:
+      'Applies to the words in a conversation, on top of the device\u2019s own text size. The rest of the app follows the device.',
     preset: 'THEME',
     presetOptions: { blue: 'Blue', graphite: 'Graphite', lime: 'Lime' },
     /** Said under the cards, because a card shows the theme rather than naming it. */

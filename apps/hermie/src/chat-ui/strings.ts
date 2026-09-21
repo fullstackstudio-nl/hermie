@@ -463,7 +463,79 @@ export const chatStrings = {
      * wordings live in `strings.layout` with the row menu's, so the list and
      * the header cannot drift apart on what "Muted until" looks like.
      */
-    notMuted: 'Off'
+    notMuted: 'Off',
+
+    /**
+     * The transcript's own type scale (`store/text-size.ts`).
+     *
+     * "Chat text size" rather than "Text size", because the setting really is
+     * about the chat and not about the app: a reader who turns it up and finds
+     * their chat list unchanged has been told the truth by the label.
+     */
+    textSize: 'Chat text size',
+    textSizes: {
+      small: 'Small',
+      default: 'Default',
+      large: 'Large',
+      xlarge: 'Extra large'
+    } as Record<string, string>
+  },
+
+  /**
+   * Per-chat notification types, which are narrower than mute.
+   *
+   * Mute is "say nothing at all"; these four are "say this but not that", and
+   * the wordings name the EVENT rather than the setting — a reader deciding
+   * whether to be woken is thinking about what happened, not about a toggle.
+   */
+  notifications: {
+    label: 'Notifications',
+    title: 'Notifications',
+    subtitle: (bot: string) => `What ${bot} may notify you about`,
+    hint: 'These override the global types in Settings for this chat only.',
+    following: 'Following the types set in Settings.',
+    overridden: 'This chat has its own types.',
+    useDefault: 'Use the global types',
+    types: {
+      turnDone: 'Finished a turn',
+      turnFailed: 'A turn failed',
+      needsInput: 'Needs your answer',
+      cron: 'Scheduled runs'
+    } as Record<string, string>
+  },
+
+  /**
+   * Sessions: the branches, the retired conversations and the other visible
+   * sessions a profile has.
+   *
+   * "Conversation" throughout rather than "session", which is the gateway's
+   * word: a reader has conversations, and the one place the wire's word shows
+   * through is the developer screen.
+   */
+  sessions: {
+    branch: 'Branch from here…',
+    branchTitle: 'Branch',
+    branchFailed: 'This conversation could not be branched.',
+    branches: 'Branches',
+    pin: 'Pin',
+    unpin: 'Unpin',
+    refresh: 'Refresh',
+    refreshFailed: 'This chat could not be refreshed.',
+    past: 'Past conversations',
+    pastEmpty: 'Nothing but the current conversation.',
+    open: 'Open',
+    rename: 'Rename',
+    renameTitle: 'Rename conversation',
+    delete: 'Delete',
+    deleteTitle: 'Delete this conversation?',
+    deleteBody: (title: string) => `${title} will be removed from the gateway. This cannot be undone.`,
+    deleteConfirm: 'Delete',
+    deleteFailed: 'This conversation could not be deleted.',
+    cancel: 'Cancel',
+    /** The one chat that may never be deleted or hidden; see ADR-0007. */
+    canonical: 'Current conversation',
+    retired: 'Retired',
+    messages: (count: number) => (count === 1 ? '1 message' : `${count} messages`)
   },
   sheet: {
     close: 'Close'

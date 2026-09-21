@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Chat text size.** Settings → Appearance and the chat's own options both carry **Small /
+  Default / Large / Extra large**, and it changes the size of the words in a conversation — the
+  bubbles, the markdown and the code blocks — and of nothing else. It is a factor ON TOP of the
+  device's own text size rather than a replacement for it, which is the case Dynamic Type cannot
+  express: the chrome the size the system asked for, the conversation bigger, because the
+  conversation is the part that gets read for minutes at a time. The scale reaches the transcript
+  through a provider around it rather than through a prop on every bubble, so a component added
+  tomorrow follows it without being told to. One setting per account, carried between devices by
+  the settings sync, and a gateway section written by a build that has never heard of it leaves
+  this reader on their own size rather than resetting them to Default.
+
 ## [0.1.2] - 2026-09-22
 
 ### Added

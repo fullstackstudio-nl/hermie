@@ -353,3 +353,51 @@ export function ThemeProvider({ children, forceScheme, forcePreset }: ThemeProvi
 export function useTheme(): Theme {
   return useContext(ThemeContext)
 }
+
+/**
+ * The same theme with its type scale multiplied, for one subtree.
+ *
+ * The transcript's text size (`store/text-size.ts`) is a factor on the TYPE
+ * TOKENS and on nothing else, and this is how it reaches the words without
+ * reaching the chrome: a nested provider around the transcript, so every
+ * component under it reads the scaled tokens through the same `theme.type` it
+ * already reads — `Text`, `Markdown`, the code blocks and the bubbles all go
+ * through it — and every component outside it is untouched.
+ *
+ * A provider rather than a prop for exactly that reason. A prop would have to
+ * be threaded through every row, every bubble and every markdown block, and the
+ * first component somebody added without it would be the one that stayed 17pt
+ * while the rest of the conversation grew.
+ *
+ * Only `type` changes. Colours, glass, spacing and both accessibility flags are
+ * the outer theme's own objects, passed through by identity, so nothing that
+ * memoises on them re-renders because a reader changed the text size.
+ *
+ * A scale of exactly 1 provides the theme UNCHANGED — the same object, not a
+ * copy — so the default costs nothing at all, not even a context value that
+ * differs by identity from the one above it.
+ */
+export function TypeScaleProvider({ children, scale }: { children: ReactNode; scale: number }) {
+  const theme = useTheme()
+
+  const scaled = useMemo<Theme>(() => {
+    if (scale === 1) {
+      return theme
+    }
+
+    const type = Object.fromEntries(
+      Object.entries(theme.type).map(([token, style]) => [
+        token,
+        {
+          ...style,
+          fontSize: Math.round(style.fontSize * scale * 10) / 10,
+          lineHeight: Math.round(style.lineHeight * scale * 10) / 10
+        }
+      ])
+    ) as Theme['type']
+
+    return { ...theme, type }
+  }, [scale, theme])
+
+  return <ThemeContext.Provider value={scaled}>{children}</ThemeContext.Provider>
+}

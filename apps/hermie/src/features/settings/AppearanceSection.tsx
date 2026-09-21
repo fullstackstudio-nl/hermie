@@ -18,6 +18,8 @@ import { InsetButtonRow, InsetGroup, Text } from '../../ui/primitives'
 import { SegmentedRow } from '../../ui/sheets'
 import { useTheme } from '../../ui/theme'
 import type { NameOrder } from '../../store/bot-names'
+import { TEXT_SIZE_ORDER, type TextSize } from '../../store/text-size'
+import { chatStrings } from '../../chat-ui/strings'
 import { THEME_PRESET_ORDER } from '../../ui/themes'
 import { ThemeCard } from './ThemeCard'
 
@@ -51,6 +53,8 @@ export function AppearanceSection({ onOpenAdvanced }: AppearanceSectionProps) {
   const setAppearance = useSettingsStore(state => state.setAppearance)
   const botNameOrder = useSettingsStore(state => state.botNameOrder)
   const setBotNameOrder = useSettingsStore(state => state.setBotNameOrder)
+  const textSize = useSettingsStore(state => state.textSize)
+  const setTextSize = useSettingsStore(state => state.setTextSize)
   const themeChoice = useSettingsStore(state => state.themeChoice)
   const userThemes = useSettingsStore(state => state.userThemes)
   const setThemeChoice = useSettingsStore(state => state.setThemeChoice)
@@ -81,6 +85,24 @@ export function AppearanceSection({ onOpenAdvanced }: AppearanceSectionProps) {
           options={NAME_ORDER_OPTIONS}
           testID="settings-bot-names"
           value={botNameOrder}
+        />
+      </InsetGroup>
+
+      {/*
+        The transcript's type scale, in the same group shape as the two above it.
+
+        Its own footer, because it needs the one sentence the other two do not:
+        this multiplies the device's own text size rather than replacing it, and
+        it reaches the conversation and nothing else. Both halves of that are
+        surprising if nobody says them.
+      */}
+      <InsetGroup footer={strings.settings.chatTextSizeHint}>
+        <SegmentedRow
+          label={strings.settings.chatTextSize}
+          onChange={(value: TextSize) => setTextSize(value)}
+          options={TEXT_SIZE_ORDER.map(size => ({ label: chatStrings.options.textSizes[size] as string, value: size }))}
+          testID="settings-text-size"
+          value={textSize}
         />
       </InsetGroup>
 
