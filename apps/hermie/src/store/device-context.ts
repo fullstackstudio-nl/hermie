@@ -8,17 +8,21 @@
  * gateway — which, exactly as with the push section, have to be carried through
  * every write or they are erased ([ADR-0016](../../../docs/adr/0016-ui-meta-sync.md)).
  *
- * Three decisions are the reader's and are persisted here:
+ * Two switches are the reader's and are persisted here, and both start ON:
  *
- *  - **The name is on by default.** It is the gateway's own identity for them,
- *    which everybody with access to the gateway can already read off the roster;
- *    telling the bot who it is talking to is the whole point of the feature.
- *  - **The free text is off by default and stays off until somebody types in
- *    it.** It is the only field here that can hold something nobody else knew.
- *  - **The device facts are not a decision at all.** Model, OS, app version,
- *    timezone and locale are always sent. They are shown back verbatim in
- *    Settings instead of being described, because a fact a reader cannot see is
- *    a fact they cannot decide about.
+ *  - **The name.** It is the gateway's own identity for them, which everybody
+ *    with access to the gateway can already read off the roster; telling the
+ *    bot who it is talking to is the whole point of the feature.
+ *  - **The free text.** The switch is on and the text itself is EMPTY, which is
+ *    the distinction that makes an on-by-default switch honest here: nothing is
+ *    shared until somebody writes something, and when they do it works without
+ *    a second control to find. Turning it off is what stops an existing note
+ *    travelling.
+ *
+ * The device facts are not a switch at all. Model, OS, app version, timezone
+ * and locale are always sent, and they are shown back verbatim in Settings
+ * instead of being described, because a fact a reader cannot see is a fact they
+ * cannot decide about.
  *
  * **`updatedAt` moves only when the content does.** `ui-meta-bridge.ts` decides
  * what to send by fingerprinting the projection, so a stamp taken at projection
@@ -147,9 +151,10 @@ export const useDeviceContextStore = create<DeviceContextState>((set, get) => {
     gated: false,
     userId: '',
     displayName: '',
-    // On: see the note at the top about which of the three is a decision.
+    // Both on: see the note at the top about what an on-by-default switch over
+    // an empty field does and does not share.
     shareDisplayName: true,
-    shareAbout: false,
+    shareAbout: true,
     about: '',
     perBot: {},
     facts: EMPTY_FACTS,
@@ -168,11 +173,19 @@ export const useDeviceContextStore = create<DeviceContextState>((set, get) => {
 
       set({
         shareDisplayName: stored?.shareDisplayName !== false,
-        shareAbout: stored?.shareAbout === true,
+        shareAbout: stored?.shareAbout !== false,
         about: textOf(stored?.about, CONTEXT_LIMITS.about),
         perBot: perBotOf(stored?.perBot),
         acknowledgedFor: textOf(stored?.acknowledgedFor, 512),
         facts: readDeviceFacts(),
+        /*
+          Stamped here, and this is the only place a clock is read outside a
+          setter. Without it the FIRST row a device ever writes carries
+          `updatedAt: 0` — measured on the simulator, where the section reached
+          the gateway complete and dated 1970. The projection still never reads
+          a clock, which is what keeps the bridge from sending for ever.
+        */
+        updatedAt: Math.floor(Date.now() / 1000),
         loaded: true
       })
     },
@@ -271,7 +284,7 @@ export const useDeviceContextStore = create<DeviceContextState>((set, get) => {
         userId: '',
         displayName: '',
         shareDisplayName: true,
-        shareAbout: false,
+        shareAbout: true,
         about: '',
         perBot: {},
         facts: EMPTY_FACTS,

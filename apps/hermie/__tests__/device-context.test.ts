@@ -58,11 +58,19 @@ beforeEach(async () => {
 })
 
 describe('the defaults', () => {
-  it('share the name and withhold the free text', async () => {
+  it('share the name and open the free text, which starts empty', async () => {
     await store().hydrate()
 
     expect(store().shareDisplayName).toBe(true)
-    expect(store().shareAbout).toBe(false)
+    expect(store().shareAbout).toBe(true)
+    // The distinction that makes the switch above honest: on, over nothing.
+    expect(store().about).toBe('')
+  })
+
+  it('send no free text at all until somebody writes some', async () => {
+    await signedIn({ gated: false })
+
+    expect(ownContextRow(store())).not.toHaveProperty('about')
   })
 })
 
@@ -135,22 +143,21 @@ describe('the projection', () => {
     expect(app.context?.users['tester@example.invalid']).not.toHaveProperty('displayName')
   })
 
-  it('leaves the free text out while the switch is off, even with text in it', () => {
+  it('sends the free text once there is some, and stops when the switch goes off', () => {
     store().setAbout('I maintain three Rust services.', NOW)
-
-    expect((snapshotFromStores().app as HermieAppShape).context?.users['tester@example.invalid']).not.toHaveProperty(
-      'about'
-    )
-
-    store().setShareAbout(true, NOW)
 
     expect((snapshotFromStores().app as HermieAppShape).context?.users['tester@example.invalid']).toMatchObject({
       about: 'I maintain three Rust services.'
     })
+
+    store().setShareAbout(false, NOW)
+
+    expect((snapshotFromStores().app as HermieAppShape).context?.users['tester@example.invalid']).not.toHaveProperty(
+      'about'
+    )
   })
 
   it('cuts the free text at the cap the plugin renders with', () => {
-    store().setShareAbout(true, NOW)
     store().setAbout('a'.repeat(2000), NOW)
 
     const row = (snapshotFromStores().app as HermieAppShape).context?.users['tester@example.invalid'] as {
@@ -187,8 +194,19 @@ describe('the projection', () => {
 })
 
 describe('the stamp', () => {
+  it('is set the first time the facts are read, rather than left at the epoch', async () => {
+    // Measured on the simulator: the section reached the gateway complete and
+    // dated 1970, because nothing between `hydrate` and the first write ever
+    // stamped it. The projection still reads no clock of its own.
+    await store().hydrate()
+
+    expect(store().updatedAt).toBeGreaterThan(1_700_000_000)
+  })
+
   it('moves when the device’s own facts change, and not when they do not', async () => {
     await signedIn()
+    store().refreshFacts(NOW, { ...FACTS, model: 'iPad Pro' })
+    store().refreshFacts(NOW, FACTS)
 
     expect(store().updatedAt).toBe(NOW)
 
@@ -206,13 +224,13 @@ describe('signing out', () => {
   it('forgets the identity, keeps the switches, and keeps everybody else’s rows', async () => {
     await signedIn()
     store().acknowledge(GATEWAY)
-    store().setShareAbout(true, NOW)
+    store().setShareAbout(false, NOW)
     store().applyRemote({ others: { 'colleague@example.invalid': { displayName: 'Robin' } }, remoteDefault: '' })
 
     store().retire()
 
     expect(store().userId).toBe('')
-    expect(store().shareAbout).toBe(true)
+    expect(store().shareAbout).toBe(false)
     expect(ownContextRow(store())).toBeNull()
     /*
       Theirs stays. The write that removes this person's row goes to the gateway

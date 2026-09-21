@@ -731,7 +731,8 @@ export const strings = {
       displayNameUnknown: 'The gateway has not said who you are, so there is no name to use.',
 
       about: 'About me / this device',
-      aboutHint: 'Off by default. Anything here is added to every conversation on this gateway.',
+      aboutHint:
+        'Empty until you write something. Once you do, it is added to every conversation on this gateway — turn this off to stop sending it.',
       aboutPlaceholder: 'What a bot should know about you',
       aboutCount: (used: number, limit: number) => `${used} of ${limit} characters`,
 
