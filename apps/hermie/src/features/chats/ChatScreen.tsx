@@ -26,7 +26,7 @@ import {
   type Verbosity
 } from '@hermie/transcript'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ActivityIndicator, KeyboardAvoidingView, Pressable, View } from 'react-native'
+import { ActivityIndicator, Pressable, View } from 'react-native'
 
 import {
   AgentsBar,
@@ -53,7 +53,7 @@ import { useChatAccent, useChatLayoutStore } from '../../store/chat-layout'
 import { useChatsStore } from '../../store/chats'
 import { useCronStore } from '../../store/cron'
 import { hasChatViewOverride, useChatView, useSettingsStore } from '../../store/settings'
-import { KEYBOARD_AVOID_BEHAVIOR } from '../../ui/keyboard'
+import { KeyboardInset } from '../../ui/KeyboardInset'
 import { Screen, Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { CONTROL_MIN_HEIGHT, TAP_SLOP } from '../../ui/tokens'
@@ -1075,13 +1075,19 @@ function Conversation({
         `DropZone`, which renders its children bare when there is no native view.
       */}
       <DropZone onFiles={dropFiles} style={{ flex: 1 }} testID="chat-drop-zone">
-        <KeyboardAvoidingView
-          behavior={KEYBOARD_AVOID_BEHAVIOR}
-          // The chat header is inside this screen (the stack's own header is
-          // hidden for this route), so there is no external bar to offset past.
-          keyboardVerticalOffset={0}
-          style={{ flex: 1 }}
-        >
+        {/*
+          `KeyboardInset` rather than a bare `KeyboardAvoidingView`, and the
+          difference is 59 points of composer.
+
+          React Native compares this view's PARENT-RELATIVE layout frame with the
+          keyboard's WINDOW frame, so it only makes the right amount of room when
+          the view starts at the top of the window. `Screen` puts the safe area
+          above it on a phone and the wide layout puts a whole panel above it, and
+          the shortfall is exactly that distance — which is why the composer went
+          behind the keyboard instead of sitting on it. The distance is measured
+          rather than written down: only the window knows it.
+        */}
+        <KeyboardInset style={{ flex: 1 }} testID="chat-keyboard-inset">
           <Banner
             // The connection's own account of a terminal refusal beats the RPC
             // message it produced, which only ever says "gateway not connected".
@@ -1205,7 +1211,7 @@ function Conversation({
             value={chat.draft}
             {...(chat.queuedText ? { queuedText: chat.queuedText } : {})}
           />
-        </KeyboardAvoidingView>
+        </KeyboardInset>
       </DropZone>
 
       {/* One sheet, never four. `ChatSheetHost` decides which, and closes the
