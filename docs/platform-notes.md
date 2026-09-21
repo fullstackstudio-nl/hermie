@@ -4490,3 +4490,220 @@ theme layer has no `AppState` listener at all — the only two in the app belong
 the connection and to the chat runtime's lifecycle — and the token set reaches
 UIKit through `Appearance.setColorScheme`, which pins a trait collection rather
 than reading one.
+
+## Home-screen widgets, on three platforms (2026-09-21, later)
+
+WidgetKit on iOS, iPadOS and the Mac; `AppWidgetProvider` on Android; one JSON
+file behind all of it. `apps/hermie/modules/hermie-widgets/README.md` is the
+shape of the thing. This is what was measured getting there, and what is not.
+
+### A widget knows nothing, so the app writes everything down
+
+A widget extension is a separate process with its own sandbox and a memory
+budget strict enough that it is killed rather than paged. It has no gateway, no
+socket, no keychain and no store. So the whole of what one can show is derived
+**in the app** — by `src/features/widgets/snapshot.ts`, which is pure and is the
+only tested thing on the path — and written as one versioned document into a
+place the other process can read.
+
+`presenceOf`, `unreadCountSince` and `formatPreview` are the same functions the
+chat list calls. Not for tidiness: a widget that says Online over a row that says
+Needs input is two bugs that look like one, and there is no component test on the
+far side of a Swift and a Kotlin renderer to catch it.
+
+The container differs and the difference is the whole of what iOS needs and
+Android does not:
+
+|         | snapshot                                            | avatars                           |
+| ------- | --------------------------------------------------- | --------------------------------- |
+| Apple   | `widget-snapshot.json` in the App Group container   | `avatars/<name>.png` beside it    |
+| Android | one string in `SharedPreferences("hermie.widgets")` | `filesDir/hermie-widget-avatars/` |
+
+An `AppWidgetProvider` is a `BroadcastReceiver` in the app's **own** process and
+the launcher only ever holds the `RemoteViews` it was handed, so there is no
+second sandbox and no App Group. On Apple there is, and `group.dev.hermie.app`
+has to be on both signed binaries or they share nothing.
+
+### The App Group is spelled four times and nothing checks three of them
+
+`ios/HermieWidgetsModule.swift`, `widget/HermieWidgetSnapshot.swift`,
+`widget/HermieWidgetsExtension.entitlements`, and the plugin. A mismatch does not
+fail to build and does not fail to launch: the app writes into its own container,
+the widget reads an empty one, and the widget is simply always blank — which
+reads as "the snapshot is not being written" and sends you to the wrong half of
+the system.
+
+So the plugin throws at prebuild if the extension's entitlements name a different
+group, and `__tests__/ios-widgets-plugin.test.ts` asserts the two Swift files
+contain the same string. Neither is clever; both exist because the failure is
+silent.
+
+### Four Xcode traps, all of which were hit
+
+The extension target is added by a config plugin in the module
+(`plugin/with-hermie-widgets.js`) rather than by `@bacons/apple-targets`, which
+was considered and declined: it depends on `@expo/prebuild-config` at a major
+version above the one SDK 54 installs, which would put two copies of the prebuild
+pipeline in the tree — the exact shape of the "plugin came from a different
+@expo/config-plugins" failure, in the one step this repository cannot afford to
+have fail quietly.
+
+1. **A pod and a native target may not share a name.** The local module's pod is
+   `HermieWidgets`; the first version of the extension target was too. Both write
+   `<name>.swiftmodule` into the same products directory, the extension's is built
+   for iOS 17 and the pod's for 15.1, and the app then fails to compile its own
+   autolinking file: _"compiling for iOS 15.1, but module 'HermieWidgets' has a
+   minimum deployment target of iOS 17.0"_, naming neither the target nor the
+   plugin that created it. The target is `HermieWidgetsExtension` for that reason.
+
+2. **`xcode`'s `addTargetDependency` does nothing when the sections are absent.**
+   It ends in `if (proxySection && dependencySection)`, and a one-target project
+   has neither a `PBXTargetDependency` nor a `PBXContainerItemProxy` section. So
+   `addTarget` created the app's "Copy Files" phase for the `.appex`, returned
+   something that looked like success, and left the app with no dependency on the
+   extension — a race that copies whatever `.appex` is in the products directory,
+   which on a clean tree is none. The plugin creates the two empty sections first
+   and `assertEmbedded` fails the prebuild if the dependency did not land.
+
+3. **`pod install` re-serialises the whole pbxproj with its own quoting.** The
+   first version of the plugin found the extension's build configurations by
+   matching `PRODUCT_NAME === '"HermieWidgetsExtension"'`. That worked on a
+   project the plugin had just written and failed on the next `expo prebuild`
+   without `--clean`, because CocoaPods' writer drops quotes around a value that
+   does not need them. Configurations are addressed by uuid now; the assertion
+   that no configuration was touched is what said so.
+
+4. **The extension's `IPHONEOS_DEPLOYMENT_TARGET` is 17.0, the app's is 15.1.**
+   `AppIntentConfiguration` and `containerBackground(for:)` both start there. An
+   extension may declare a higher minimum than its app: an iOS 15 device installs
+   the app and has no widgets to add, which is better than an app that will not
+   install.
+
+The `widget/` directory is outside `ios/` on purpose. The podspec's `source_files`
+is `'*.{h,m,mm,swift}'` rather than `'**/*'` — the extension has a `@main` in it,
+and a second entry point compiled into the app binary is a link error.
+
+### Measured on the iPhone 17 Pro simulator (iOS 27.0)
+
+Debug build, ad-hoc simulator signing (`Entitlements-Simulated.plist` in the
+binary's `__entitlements` section — `codesign -d --entitlements` shows an empty
+dict for a simulator build and that is not a missing entitlement), fake gateway
+in session-token mode, dev launch arguments for the connection.
+
+- **The App Group container exists and the app writes into it.**
+  `…/data/Containers/Shared/AppGroup/<uuid>/widget-snapshot.json`, 516 bytes,
+  two bots, plus `avatars/researcher.png`.
+- **The widget gallery lists Hermie** and the small widget renders the snapshot:
+  avatar, name, bead, three lines of the last message.
+- **Adding it to the home screen works**, and the widget redraws from the file
+  the app wrote.
+- **`hermie://chat/researcher` from the widget opens that chat**, warm.
+
+### The four grey beads, twice
+
+The first widget on the home screen showed every bot **offline** within a second
+of pressing the home button, with a snapshot stamped at that exact moment.
+
+That was not a bug in presence. `attachLifecycle` tears the socket down when a
+phone backgrounds the app, `presenceOf` correctly answers `offline` for every bot
+when the gateway is not ready, and the background flush wrote that down and asked
+WidgetKit to draw it. The home screen's last word on two live agents was two grey
+beads, **caused by looking at the home screen**.
+
+A widget cannot know what a bot is doing while the app is not running. What it
+can honestly show is the last thing the app saw, with `generatedAt` in the file to
+say when. So `WidgetSync.pause()` writes once, with the foreground's answer, and
+then goes quiet until the app is back.
+
+**The first version of `pause()` did not work, and the reason is worth keeping.**
+Reading `gatewayReady` at the top of `pause()` is not enough: the write it starts
+is serialised behind a promise and then awaits the avatar pass, so it reads the
+flag several microtasks later — by which time React has re-rendered, the effect on
+`status` has run, and the flag says what backgrounding did to the socket. Measured
+again on the simulator: two grey beads, with the `pause()` already in place. The
+flag is now frozen **synchronously** inside `pause()`, and
+`__tests__/widget-sync.test.ts` drives the race directly by calling
+`setGatewayReady(false)` between `pause()` and the await.
+
+Re-measured after the fix: snapshot written at 03:57:28, home button pressed at
+03:57:3x, both bots still `online` at 03:57:44, and the bead on the home screen is
+green.
+
+### The deep link, and the third source a cold start needs
+
+`hermie://chat/<bot>` had no reader before this. The SCHEME was always registered
+— Expo writes `CFBundleURLTypes` and the Android intent filter from `scheme` in
+`app.config.ts` — so what was missing was `Linking`, not a registration. The 2026-09-20
+note that "nothing is registered with the system" was about the development launch
+arguments and is still true of those.
+
+`src/platform/deep-link.ts` is the reader, and both shells use it: the compact
+shell through the navigation container ref, the regular shell through the same
+`openBot` a tap on a row lands on. Not React Navigation's `linking` config,
+because `RegularShell` has no navigator at all — a link that only worked through
+it would work on a phone and silently do nothing on an iPad or a Mac.
+
+The grammar is one regular expression with a table of refusals, and the reason is
+that a URL scheme is registered with the SYSTEM: any app on the device and any web
+page the reader taps can send one. Opening a chat that already exists is the whole
+of what a link may do — no gateway address, no token, no screen id.
+
+**`Linking.getInitialURL()` cannot answer a cold start on iOS**, and that is what
+`modules/hermie-scene` grew a JavaScript side for. React Native reads the URL out
+of the app delegate's LAUNCH OPTIONS; under the scene life cycle a cold-start URL
+is not in them, it is in the scene's connection options, which arrive after
+`startReactNative` has already been handed the launch options. The forwarded URL
+does reach `RCTLinkingManager`, which emits a `url` event — while the bridge is
+still starting and nothing is listening.
+
+So `HermieSceneDelegate` records the URL in `scene(_:willConnectTo:)`, before it
+forwards it, and `HermieSceneModule.consumeLaunchURL()` hands it over exactly
+once. Consuming rather than reading: a launch URL is true for the life of the
+process, so a plain getter answers the same link to every caller forever, and a
+remount — or a Fast Refresh — would reopen the launch chat.
+
+That makes three sources for one question, and `useHermieLink` closes it on
+whichever arrives first: the native record (synchronous, iOS, cold start only),
+`getInitialURL()` (the one that works on Android), and the `url` event (which is
+acted on every time, because tapping the same widget twice is two requests).
+
+**A Debug build cannot be used to measure any of this.** A dev-client build that
+is not running has no bundle loaded, so `xcrun simctl openurl` against one lands
+on expo-dev-launcher's home screen and no JavaScript runs at all. The cold path
+therefore needs a Release simulator build.
+
+**And one false trail, recorded because it cost an hour.** The first Release
+attempt also landed on the dev launcher, which read as expo-dev-launcher
+intercepting deep links in Release — it does swallow an external link when the
+app is not running (`EXDevLauncherController._handleExternalDeepLink` returns
+`true` and navigates to the launcher). That was the wrong culprit. `EXDevLauncher`
+is **not** linked into the Release binary at all: it is absent from
+`Pods-Hermie.release.xcconfig`'s `OTHER_LDFLAGS` and `strings` finds zero
+occurrences of it in the built Release app. What actually happened is that this
+simulator has TWO apps claiming the `hermie` scheme — `dev.hermie.app` and
+`nl.fullstackstudio.hermie`, the identifier this project used before commit
+47c4718 — and `simctl openurl` routed to the older one, which is a dev-client
+build. A widget tap does not have this ambiguity, because a widget's URL is
+opened by its own containing app rather than by a scheme lookup.
+
+### What is NOT verified
+
+- **Android at runtime.** `./gradlew assembleDebug` succeeds with a JDK 17 from
+  Homebrew (`/opt/homebrew/opt/openjdk@17` — the 2026-09-19 note that this machine
+  has no JDK has lapsed), and both receivers are in the merged manifest. No
+  emulator was started, so no Android widget has been drawn, no
+  `AppWidgetManager` broadcast has been observed, and the Kotlin avatar
+  compositing is reasoned from the API rather than looked at.
+- **The Mac.** Where widgets appear in Notification Center rather than on a home
+  screen. Not launched; the iOS slice is the same binary, so this is inference
+  from ADR-0011 rather than an observation.
+- **A real device, and therefore real signing.** Automatic signing is what creates
+  the App Group on the team, and that has not been exercised — see the report
+  for what Sebas has to check in the Developer portal.
+- **`accessoryRectangular` and `accessoryCircular`** were built and are in the
+  bundle, but no lock-screen widget was placed on the simulator.
+- **The medium family** was built and is in the gallery; it was not placed either.
+- **The widget budget.** `.never` plus app-driven reloads is the design; whether
+  iOS throttles `reloadAllTimelines()` at the rate this app calls it (debounced to
+  1.5s, and dropped entirely when the content would be identical) is not something
+  a simulator can answer.

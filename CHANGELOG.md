@@ -10,6 +10,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Home-screen widgets, on every platform.** One chat as a small square — avatar, name, presence
+  bead and the last line — the three most recent as a medium one, and on iOS a lock-screen line that
+  says how many conversations are waiting on a person. Tapping one opens that chat through
+  `hermie://chat/<bot>`, which the app now reads: the scheme was always registered and nothing had
+  ever listened. A widget process has no gateway and no store, so everything it shows is derived
+  once, in the app, by the same `presenceOf`, `unreadCountSince` and `formatPreview` the chat list
+  uses, and written into a shared container as one versioned file. The consequence is worth stating
+  plainly: **a widget shows what Hermie last saw.** There is no push and nothing polls a gateway in
+  the background, so a phone whose Hermie has not run for a week shows a week-old widget.
+  `apps/hermie/modules/hermie-widgets/README.md` is the design; the widgets section of
+  `docs/platform-notes.md` has what was measured, including the two grey beads that came from
+  backgrounding the app and the two attempts it took to stop writing them down.
+
 - **Your arrangement follows you to a second device.** The chat list's order, its dividers, which
   bots are archived, each chat's colour, the theme and the view defaults are stored in the gateway's
   `ui_meta` — under two keys Hermie owns, per profile, guarded by the per-key compare-and-swap

@@ -82,6 +82,13 @@ no third-party network call. The only address Hermie knows is the one you typed.
   machine's bots are a different list.
 - **Offline-tolerant.** The last stretch of every conversation is cached, so a
   chat paints before the gateway answers and is still readable on a plane.
+- **Widgets.** A home-screen widget for one chat — avatar, name, bead and the
+  last line — one for the three most recent, and on iOS a lock-screen line that
+  says how many conversations are waiting on you. Tapping one opens that chat.
+  They are drawn from a snapshot the app writes as it goes, which has one
+  consequence worth knowing: a widget shows what Hermie last saw, so a phone
+  whose Hermie has not run for a week shows a week-old widget. There is no push
+  and nothing polls your gateway in the background.
 
 ## What you need
 
