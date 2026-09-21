@@ -745,6 +745,18 @@ describe('following a DM across chats', () => {
     })
   }
 
+  /**
+   * The line these tests press is the expanded one, which Quiet (the default)
+   * folds to a chip. The screen hydrates the settings store on mount, which
+   * replaces `perChat`, so the level has to be set once that has happened.
+   */
+  async function showFullDmLines() {
+    await waitFor(() => expect(useSettingsStore.getState().loaded).toBe(true))
+    act(() => {
+      useSettingsStore.getState().setChatView('researcher', { level: 'normal' })
+    })
+  }
+
   it('opens the recipient on the matching inbound message', async () => {
     const onOpenBot = jest.fn()
 
@@ -755,6 +767,7 @@ describe('following a DM across chats', () => {
     })
 
     renderScreen(<ChatScreen bot="researcher" onOpenBot={onOpenBot} />)
+    await showFullDmLines()
 
     // Tapping the LINE expands it in place and navigates nowhere (§6.6); the
     // explicit link inside is what opens the other chat, and it still lands on
@@ -777,6 +790,7 @@ describe('following a DM across chats', () => {
     })
 
     renderScreen(<ChatScreen bot="researcher" onOpenBot={onOpenBot} />)
+    await showFullDmLines()
 
     // Tapping the LINE expands it in place and navigates nowhere (§6.6); the
     // explicit link inside is what opens the other chat, and it still lands on

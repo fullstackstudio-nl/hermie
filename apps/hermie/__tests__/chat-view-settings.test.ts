@@ -11,7 +11,7 @@ const settled = () => new Promise(resolve => setTimeout(resolve, 0))
 
 describe('chat view settings', () => {
   it('starts at Normal, bot-to-bot on, thinking off', () => {
-    expect(DEFAULT_CHAT_VIEW).toEqual({ level: 'normal', showBotToBot: true, showThinking: false })
+    expect(DEFAULT_CHAT_VIEW).toEqual({ level: 'quiet', showBotToBot: true, showThinking: false })
   })
 
   it('lets a chat without an override follow the default as it moves', () => {

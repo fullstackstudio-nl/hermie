@@ -39,9 +39,10 @@ export interface ChatViewSettings {
   showThinking: boolean
 }
 
-/** The plan's defaults: Normal, bot-to-bot traffic visible, thinking folded away. */
+/** The defaults: Quiet, bot-to-bot traffic visible, thinking folded away. Quiet is what a
+ * messenger looks like; the tool cards are one tap away in the chat options. */
 export const DEFAULT_CHAT_VIEW: ChatViewSettings = {
-  level: 'normal',
+  level: 'quiet',
   showBotToBot: true,
   showThinking: false
 }
