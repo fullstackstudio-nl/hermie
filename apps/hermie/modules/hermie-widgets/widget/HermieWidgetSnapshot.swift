@@ -31,8 +31,19 @@ struct HermieSnapshot: Decodable {
   let version: Int
   let generatedAt: Double
   let bots: [HermieBot]
+  /**
+   The owner's folders, when the app that wrote this knew about them.
 
-  static let empty = HermieSnapshot(version: supportedVersion, generatedAt: 0, bots: [])
+   Optional in the Swift sense as well as the format's, and that is the whole
+   worked example of the paragraph above: a build of this extension that
+   predates folders decodes a snapshot containing them and ignores the field,
+   and this build decodes a snapshot written before folders existed and sees
+   nil. Neither needed a version bump, because nothing that already existed
+   changed meaning.
+   */
+  let folders: [HermieFolder]?
+
+  static let empty = HermieSnapshot(version: supportedVersion, generatedAt: 0, bots: [], folders: [])
 
   var isUsable: Bool {
     version == Self.supportedVersion
@@ -41,6 +52,57 @@ struct HermieSnapshot: Decodable {
   /** How many bots are waiting on a person — the whole content of the accessory widgets. */
   var needsInputCount: Int {
     bots.filter(\.needsInput).count
+  }
+
+  /** One folder by id, or nil for one that has been deleted or emptied. */
+  func folder(id: String) -> HermieFolder? {
+    (folders ?? []).first { $0.id == id }
+  }
+
+  /** The rows of one folder, in the snapshot's own recency order. */
+  func bots(in folder: HermieFolder) -> [HermieBot] {
+    folder.bots.compactMap { name in bots.first { $0.name == name } }
+  }
+}
+
+/**
+ One of the owner's folders.
+
+ Everything here was derived by `snapshot.ts` while the app still had the state
+ to derive it from — including the two counts, which follow the CHAT LIST's
+ folder rules rather than the per-bot rules the rows above follow. That
+ difference is deliberate and is explained at length on the TypeScript side:
+ a row's badge is an interruption about one chat, a folder's is a summary, and a
+ summary that drops part of what it is summarising removes information.
+
+ Nothing in this file recomputes either number. A widget that added up the rows
+ it happened to be drawing would answer a different question from the one the
+ badge is asking, and would be wrong by exactly the muted chats.
+ */
+struct HermieFolder: Decodable, Identifiable, Hashable {
+  let id: String
+  let name: String
+  /** Hex from the app's own accent table, or nil for the default tint. */
+  let colour: String?
+  /** The bots inside, most recently active first; every one is also in `bots`. */
+  let bots: [String]
+  /** Unread across the folder, muted chats INCLUDED. */
+  let unread: Int
+  /** How many inside are waiting on a person, muted chats excluded. */
+  let needsInput: Int
+  /** How many are inside in total, which is what "+N more" is counted from. */
+  let size: Int
+
+  /**
+   Where a tap on the folder's header goes.
+
+   `hermie://folder/<id>`, which opens the chat list with this folder expanded
+   and scrolled to. The id is not escaped because it is not somebody else's
+   string: `isSafeFolderId` on the other side accepts only a name, and the app
+   mints these ids itself.
+   */
+  var listURL: URL? {
+    URL(string: "hermie://folder/\(id)")
   }
 }
 

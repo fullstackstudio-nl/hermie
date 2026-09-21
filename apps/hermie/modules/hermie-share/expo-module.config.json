@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["HermieShareModule"]
+  },
+  "android": {
+    "modules": ["nl.fullstackstudio.hermie.share.HermieShareModule"]
+  }
+}

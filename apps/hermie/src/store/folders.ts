@@ -73,6 +73,24 @@ export function newFolderId(): string {
 }
 
 /**
+ * Whether a string could be one of these ids.
+ *
+ * It exists because a folder id now travels in a URL — `hermie://folder/<id>`,
+ * from a widget somebody pinned to a folder — and a URL scheme is registered
+ * with the system, so any app on the device can send one. The ids this module
+ * mints are `f` and base-36 digits; the check is a little wider than that
+ * because the arrangement also arrives from a gateway (ADR-0016), where another
+ * client may have written ids of its own shape.
+ *
+ * What it refuses is everything that is not a NAME: separators, dots, anything
+ * that could be read as a path. A link naming something else answers nothing,
+ * which is all a deep link is ever allowed to do here.
+ */
+export function isSafeFolderId(id: string): boolean {
+  return /^[A-Za-z0-9_-]{1,64}$/.test(id)
+}
+
+/**
  * The invariant, applied.
  *
  * Four things, and all four are about a list that came from somewhere this

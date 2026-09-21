@@ -178,11 +178,13 @@ describe('what the widgets count', () => {
 
   const input = (mutes: Record<string, number>): WidgetSnapshotInput => ({
     bots: [bot('writer'), bot('researcher')],
+    nameOrder: 'profile',
     chats: {},
     running: {},
     lastSeen: {},
     accents: {},
     archived: {},
+    folders: [],
     mutes,
     gatewayReady: true,
     avatars: {},

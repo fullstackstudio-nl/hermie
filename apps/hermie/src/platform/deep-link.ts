@@ -1,6 +1,5 @@
 /**
- * `hermie://chat/<bot>` — the one link this app answers, and the seam that
- * delivers it.
+ * `hermie://…` — the links this app answers, and the seam that delivers them.
  *
  * Until the widgets there was nothing to deliver: ADR-0004 keeps the sign-in
  * round trip inside a WebView precisely so that no link has to come back to the
@@ -21,12 +20,19 @@
  * system, which means any app on the device and any web page the reader taps can
  * send one. So this parses exactly one shape and answers `null` for everything
  * else: no gateway address, no token, no screen id, nothing that could make the
- * app do something the owner did not ask for. Opening a chat that already exists
- * is the whole of what a link may do.
+ * app do something the owner did not ask for. A link may name a chat that
+ * already exists, or an entry this device's own share sheet or its own
+ * Shortcuts action already wrote, and that is all — the CONTENT never travels
+ * in the URL, only the id of a file the app then reads out of its own
+ * container.
  */
 import { requireOptionalNativeModule } from 'expo'
 import { useEffect, useRef } from 'react'
 import { Linking } from 'react-native'
+
+import { isSafeIntentId } from '../features/intents/queue'
+import { isSafeShareId } from '../features/share/outbox'
+import { isSafeFolderId } from '../store/folders'
 
 /**
  * The URL this process was launched by, read once and then forgotten.
@@ -58,33 +64,76 @@ function consumeNativeLaunchURL(): string | null {
   }
 }
 
-/** What a link asked for. One kind today; a union because a second is likely. */
-export type HermieLink = { kind: 'chat'; bot: string }
+/**
+ * What a link asked for.
+ *
+ * Every member names something that ALREADY EXISTS and was put there by this
+ * app: a chat on the roster, an entry this device's own share sheet wrote, an
+ * entry its own Shortcuts action queued, a folder in the owner's own list. None
+ * of them carries an address, a token or a payload, which is the rule the module
+ * comment states and the only thing that makes a scheme any web page can invoke
+ * safe to answer.
+ */
+export type HermieLink =
+  | { kind: 'chat'; bot: string }
+  /** `hermie://share/<id>` — the share sheet wrote an outbox entry. */
+  | { kind: 'share'; id: string }
+  /** `hermie://intent/<id>` — a Shortcut queued a request and is waiting. */
+  | { kind: 'intent'; id: string }
+  /** `hermie://folder/<id>` — a widget pinned to one of the owner's folders. */
+  | { kind: 'folder'; id: string }
 
 /**
- * `hermie://chat/<bot>`, or nothing.
+ * The grammar: `hermie://<kind>/<one segment>`.
  *
  * `exp+hermie://` is accepted alongside it because that is the scheme a dev
  * client registers and uses, so a link tested in development is the same link.
- * The bot name is percent-decoded and then checked: an empty one, a path with
- * more segments than one, and anything with a slash in it after decoding are all
- * rejected, which is what keeps a name from being read as a path.
+ * A second segment is not accepted at all, for any kind, which is what keeps a
+ * name from being read as a path.
+ */
+const LINK = /^(?:exp\+)?hermie:\/\/(chat|share|intent|folder)\/([^/?#]+)\/?(?:[?#].*)?$/
+
+/**
+ * One of the four shapes, or nothing.
+ *
+ * A bot name is percent-decoded and then checked: an empty one and anything
+ * with a slash in it after decoding are rejected.
+ *
+ * An ID is NOT decoded, and that difference is deliberate rather than an
+ * omission. A bot name is somebody else's string — a profile can be called
+ * anything, including things that have to be escaped to survive a URL. Every id
+ * here is minted by this app out of a fixed alphabet, so a link carrying
+ * anything else did not come from a share sheet, a Shortcut or a widget, and the
+ * useful response to that is to answer nothing rather than to work out what it
+ * meant.
  */
 export function parseHermieLink(url: string | null | undefined): HermieLink | null {
   if (!url) {
     return null
   }
 
-  const match = url.match(/^(?:exp\+)?hermie:\/\/chat\/([^/?#]+)\/?(?:[?#].*)?$/)
+  const match = url.match(LINK)
 
-  if (!match?.[1]) {
+  if (!match?.[1] || !match[2]) {
     return null
+  }
+
+  if (match[1] === 'share') {
+    return isSafeShareId(match[2]) ? { kind: 'share', id: match[2] } : null
+  }
+
+  if (match[1] === 'intent') {
+    return isSafeIntentId(match[2]) ? { kind: 'intent', id: match[2] } : null
+  }
+
+  if (match[1] === 'folder') {
+    return isSafeFolderId(match[2]) ? { kind: 'folder', id: match[2] } : null
   }
 
   let bot: string
 
   try {
-    bot = decodeURIComponent(match[1])
+    bot = decodeURIComponent(match[2])
   } catch {
     // A stray `%` is a malformed link, not a reason to throw inside a listener.
     return null

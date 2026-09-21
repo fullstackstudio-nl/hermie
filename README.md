@@ -164,12 +164,25 @@ no third-party network call. The only address Hermie knows is the one you typed.
   does not draw them at all, which is also what the app switcher's snapshot
   gets. The setting lives on the device you made it on and is never synced.
 - **Widgets.** A home-screen widget for one chat — avatar, name, bead and the
-  last line — one for the three most recent, and on iOS a lock-screen line that
-  says how many conversations are waiting on you. Tapping one opens that chat.
-  They are drawn from a snapshot the app writes as it goes, which has one
-  consequence worth knowing: a widget shows what Hermie last saw, so a phone
-  whose Hermie has not run for a week shows a week-old widget. There is no push
-  and nothing polls your gateway in the background.
+  last line — one for the three most recent _or for one folder of your list_,
+  and on iOS a lock-screen line that says how many conversations are waiting on
+  you. Tapping one opens that chat; tapping a folder's header opens the list
+  with that folder expanded. They are drawn from a snapshot the app writes as it
+  goes, which has one consequence worth knowing: a widget shows what Hermie last
+  saw, so a phone whose Hermie has not run for a week shows a week-old widget.
+  There is no push and nothing polls your gateway in the background.
+- **Share to Hermie.** An image, a file, a link or some text from any app goes
+  straight into a chat. On iPhone, iPad and Mac a small sheet inside the other
+  app lists your bots and takes a note; on Android the system's own chooser
+  starts Hermie and it asks which chat once it is up. Nothing is sent by the
+  share sheet itself — it writes the share down, and the app delivers it when it
+  next has a gateway, so a share made on a train arrives when you are back on
+  the network.
+- **Shortcuts and Siri.** _Ask a bot_ sends a message and hands the reply back to
+  the next step of a Shortcut, _Send to a bot_ fires and forgets, _Open a chat_
+  is a Home Screen button, and _Bots needing input_ answers without opening
+  Hermie at all — so it works from an automation while the phone is locked. Your
+  bots are in Spotlight too: type a name, open the chat.
 
 ## What you need
 

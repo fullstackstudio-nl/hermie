@@ -346,7 +346,33 @@ export const strings = {
     offline: 'Offline — showing the last saved list.',
     footnote: 'Your conversations stay with your gateway.',
     sidebarHeader: 'CHATS',
-    newCron: 'New cron'
+    newCron: 'New cron',
+
+    /**
+     * A share that has arrived and cannot go yet.
+     *
+     * Said as "waiting to send" rather than "failed", because it is: the entry
+     * is on disk and the next reconnect sends it. A row that says something
+     * failed invites the reader to do the share again, which would send it
+     * twice.
+     */
+    sharePending: (count: number) => (count === 1 ? '1 share waiting to send' : `${count} shares waiting to send`)
+  },
+
+  /**
+   * Sharing INTO Hermie from another app.
+   *
+   * The wording is deliberately about the chat and not about Hermie: by the
+   * time any of this is read the reader has already chosen Hermie in the
+   * system's own sheet, and repeating the app's name back at them is a line
+   * that carries nothing.
+   */
+  share: {
+    sheetTitle: 'Send to a chat',
+    noBots: 'This gateway has no bots to send to yet.',
+    noteLabel: 'Note',
+    notePlaceholder: 'Add a note (optional)',
+    send: 'Send'
   },
 
   /**

@@ -19,6 +19,7 @@ import { ContextMenuHost, HAS_NATIVE_CONTEXT_MENU } from '../../platform/context
 import { secondaryClick } from '../../platform/secondary-click'
 import { botNames, useNameOrder } from '../../store/bot-names'
 import type { Bot } from '../../store/bots'
+import { usePendingShareCount } from '../../store/share'
 import { GlassSurface } from '../../ui/glass'
 import { Icon, ICON_SIZE } from '../../ui/Icon'
 import { PresenceBead } from '../../ui/PresenceBead'
@@ -112,6 +113,21 @@ export const BotRow = memo(function BotRow({
   const names = botNames(bot, useNameOrder())
 
   /**
+   * Shares this chat has been given that have not gone out yet.
+   *
+   * Read from the store here rather than threaded down from the list, the same
+   * way the name order is: it is a fact about the bot, not about the row's
+   * position, and a prop would have to be passed identically by the chat list,
+   * the sidebar and the search results.
+   *
+   * The commonest way to see one is not a failure. It is sharing something to
+   * Hermie while the phone has no route to the gateway — the entry sits in the
+   * outbox and this says so, which is the difference between "not yet" and the
+   * silence the first version of this feature had.
+   */
+  const pendingShares = usePendingShareCount(bot.name)
+
+  /**
    * Built here rather than by the list, so the list can keep handing every row the
    * same handler identities. The dependencies are the row's own state, which is
    * exactly what the menu's ticks and its Archive/Unarchive wording read.
@@ -159,7 +175,8 @@ export const BotRow = memo(function BotRow({
     unreadCount > 0 ? strings.bots.unreadLabel(unreadCount) : unread ? strings.bots.unread : '',
     // Said in words here rather than left to the glyph, which keeps itself out
     // of the accessibility tree like every other decorative icon.
-    mutedUntil === null ? '' : strings.layout.mutedRow
+    mutedUntil === null ? '' : strings.layout.mutedRow,
+    pendingShares > 0 ? strings.bots.sharePending(pendingShares) : ''
   ]
     .filter(Boolean)
     .join(', ')
@@ -283,6 +300,19 @@ export const BotRow = memo(function BotRow({
           testID={`bot-muted-${bot.name}`}
         />
       )}
+
+      {/*
+        A share that has arrived for this chat and has not gone out yet.
+
+        The accent rather than `textFaint`, unlike the bell: a muted chat is a
+        state the reader chose and the glyph only has to be findable, while this
+        is work of theirs that the app is still holding. It is deliberately the
+        same `queue` glyph the composer uses for a parked message, because it is
+        the same fact — something written and not yet sent.
+      */}
+      {pendingShares > 0 ? (
+        <Icon color={swatch.text} name="queue" size={ICON_SIZE.marker} testID={`bot-share-pending-${bot.name}`} />
+      ) : null}
 
       {unread || unreadCount > 0 ? <UnreadBadge accent={swatch.fill} count={unreadCount} /> : null}
     </View>

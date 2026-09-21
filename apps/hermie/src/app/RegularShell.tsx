@@ -3,10 +3,12 @@ import { StyleSheet, View } from 'react-native'
 
 import type { DevInitialView } from '../dev'
 import { ActivityScreen } from '../features/activity'
-import { BotsScreen, type BotsSection } from '../features/bots'
+import { BotsScreen, requestRevealFolder, type BotsSection } from '../features/bots'
 import { ChatScreen, type OpenChatOptions } from '../features/chats'
 import { CronScreen } from '../features/cron'
 import { SettingsScreen } from '../features/settings'
+import { requestIntentRun } from '../features/intents'
+import { requestShareDelivery } from '../features/share'
 import { strings } from '../i18n/strings'
 import { useHermieLink } from '../platform/deep-link'
 import { usePageTitle } from '../platform/page-title'
@@ -141,7 +143,35 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
   // `hermie://chat/<bot>`, from a home-screen widget. The same hook the compact
   // shell uses, landing on the same `openBot` a tap on a row lands on — so a
   // link cannot reach a state a finger could not.
-  useHermieLink(link => openBot(link.bot))
+  //
+  /**
+   * A widget pinned to a folder: show the list, with that folder open.
+   *
+   * The sidebar is always mounted here, so there is nothing to navigate to —
+   * only the panel over it to close, if one is open, since a folder somebody
+   * just tapped is not worth showing behind Settings.
+   */
+  const openFolder = useCallback((folderId: string) => {
+    useChatLayoutStore.getState().setFolderOpen(folderId, true)
+    requestRevealFolder(folderId)
+    setSection(null)
+  }, [])
+
+  // Neither the share nor the Shortcut link carries a destination of its own:
+  // each has already written its request into the shared container, and the id
+  // in the URL is only there so that the tap arrives as a pump rather than as a
+  // foreground three seconds later. Both readers work from the directory.
+  useHermieLink(link => {
+    if (link.kind === 'chat') {
+      openBot(link.bot)
+    } else if (link.kind === 'share') {
+      requestShareDelivery()
+    } else if (link.kind === 'intent') {
+      requestIntentRun()
+    } else {
+      openFolder(link.id)
+    }
+  })
 
   // And the same from a notification, through the bus, for the reason
   // `app/open-chat-bus.ts` gives.

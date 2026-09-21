@@ -81,6 +81,7 @@ import {
   type FolderCounts,
   type RowsInput
 } from './folder-rows'
+import { consumeRevealFolder, onRevealFolder } from './folder-reveal'
 import { presenceOf, type Presence } from './presence'
 import { folderMenuItems, parseFolderMenuAction, parseRowMenuAction, rowMenuItems } from './row-menu-items'
 import { RowMenu } from './RowMenu'
@@ -707,6 +708,52 @@ export function BotsScreen({
     },
     [drag]
   )
+
+  /**
+   * Scroll to the folder a widget tap named.
+   *
+   * The folder has already been OPENED by the shell that read the link — that is
+   * a write to the arrangement and works whether or not this list exists — so
+   * all that is left here is to put it in the window. Both halves are needed:
+   * an open folder twelve rows down a list somebody has scrolled is a folder
+   * they will not find.
+   *
+   * Two sources, exactly as `useHermieLink` has two. `consume` answers the cold
+   * start, where the link was read during the first mount and this list did not
+   * exist yet; the subscription answers a tap on an app that was already open.
+   * A folder id that is not in the list any more scrolls nothing rather than
+   * throwing — `scrollToIndex` on -1 is a crash on some versions.
+   *
+   * `items` is in the dependencies on purpose: on a cold start the list is
+   * empty on the first pass and the roster arrives a moment later, so the
+   * consumed id has to be re-applied once there is something to scroll to.
+   */
+  const revealed = useRef<string | null>(null)
+
+  useEffect(() => {
+    const reveal = (folderId: string): void => {
+      const index = items.findIndex(item => item.kind === 'folder' && item.folder.id === folderId)
+
+      if (index < 0) {
+        // Remembered, not dropped: the roster is very often still loading on the
+        // launch a widget tap produces, and the row appears a render later.
+        revealed.current = folderId
+
+        return
+      }
+
+      revealed.current = null
+      listRef.current?.scrollToIndex({ animated: true, index, viewPosition: 0 })
+    }
+
+    const pending = revealed.current ?? consumeRevealFolder()
+
+    if (pending) {
+      reveal(pending)
+    }
+
+    return onRevealFolder(reveal)
+  }, [items])
 
   /**
    * Hand the Mac's menu bar the same nine chats ⌘1…9 reaches, with the app's own

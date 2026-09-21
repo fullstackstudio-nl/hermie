@@ -1,5 +1,5 @@
 /**
- * `hermie://chat/<bot>` — the one link this app answers.
+ * `hermie://chat/<bot>` and `hermie://share/<id>` — the links this app answers.
  *
  * Two things are pinned here and they are not the same thing. The parser is a
  * table, because a URL scheme is registered with the SYSTEM: any app on the
@@ -60,10 +60,84 @@ describe('parseHermieLink', () => {
   ])('refuses %s', (_label, url) => {
     expect(parseHermieLink(url)).toBeNull()
   })
+
+  /**
+   * The second kind: `hermie://share/<id>`, sent by this device's OWN share
+   * extension the moment it has written an entry.
+   *
+   * The id is not decoded, unlike a bot name, and that difference is the point.
+   * A bot name is somebody else's string and can be anything a profile is
+   * called; a share id is minted here out of a fixed alphabet, so a link
+   * carrying anything else did not come from the share sheet — and the useful
+   * answer to that is nothing at all, not an attempt to work out what it meant.
+   */
+  it('reads the id out of a share link', () => {
+    expect(parseHermieLink('hermie://share/0f2a4c6e8a0c2e4f6a8c0e2f4a6c8e0f')).toEqual({
+      kind: 'share',
+      id: '0f2a4c6e8a0c2e4f6a8c0e2f4a6c8e0f'
+    })
+  })
+
+  it.each([
+    ['an id with a separator in it', 'hermie://share/a%2Fb'],
+    ['an escaped climb out of the outbox', 'hermie://share/%2E%2E'],
+    ['an id with a space', 'hermie://share/a%20b'],
+    ['no id', 'hermie://share/'],
+    ['a second segment', 'hermie://share/abc/def']
+  ])('refuses a share link with %s', (_label, url) => {
+    expect(parseHermieLink(url)).toBeNull()
+  })
+
+  /**
+   * A share link carries an id and never content. Everything a share consists
+   * of is in a file the app reads out of its own container, which is what keeps
+   * a scheme any web page can invoke from being a way to put words in somebody's
+   * chat.
+   */
+  it('carries no payload, only an id', () => {
+    expect(parseHermieLink('hermie://share/abc?text=hello')).toEqual({ kind: 'share', id: 'abc' })
+  })
+
+  /**
+   * The third kind: `hermie://intent/<id>`, opened by an App Intent the moment
+   * it has queued a request. Same alphabet, same refusals, same reason — and
+   * the same absence of a payload, because the prompt is in a file the app
+   * reads out of its own container.
+   */
+  it('reads the id out of an intent link', () => {
+    expect(parseHermieLink('hermie://intent/0f2a4c6e')).toEqual({ kind: 'intent', id: '0f2a4c6e' })
+  })
+
+  it.each([
+    ['an id with a separator in it', 'hermie://intent/a%2Fb'],
+    ['no id', 'hermie://intent/'],
+    ['a second segment', 'hermie://intent/abc/def']
+  ])('refuses an intent link with %s', (_label, url) => {
+    expect(parseHermieLink(url)).toBeNull()
+  })
+
+  /**
+   * The fourth kind: `hermie://folder/<id>`, from a widget somebody pinned to
+   * one of their folders. It names a folder in the owner's own list and carries
+   * nothing else — the widget does not tell the app what to draw, it names what
+   * to show.
+   */
+  it('reads the id out of a folder link', () => {
+    expect(parseHermieLink('hermie://folder/fm4k2a1')).toEqual({ kind: 'folder', id: 'fm4k2a1' })
+  })
+
+  it.each([
+    ['an escaped separator', 'hermie://folder/a%2Fb'],
+    ['an escaped climb out of the arrangement', 'hermie://folder/%2E%2E'],
+    ['no id', 'hermie://folder/'],
+    ['a second segment', 'hermie://folder/f1/open']
+  ])('refuses a folder link with %s', (_label, url) => {
+    expect(parseHermieLink(url)).toBeNull()
+  })
 })
 
 function Probe({ onLink }: { onLink: (bot: string) => void }) {
-  useHermieLink(link => onLink(link.bot))
+  useHermieLink(link => onLink(link.kind === 'chat' ? link.bot : `${link.kind}:${link.id}`))
 
   return <Text>probe</Text>
 }

@@ -1,0 +1,10 @@
+{
+  "name": "hermie-share",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Share to Hermie: an iOS share extension, an Android ACTION_SEND filter, and the outbox both write",
+  "license": "MIT",
+  "author": "FullStack Studio",
+  "homepage": "https://hermie.dev",
+  "main": "plugin/with-hermie-share.js"
+}

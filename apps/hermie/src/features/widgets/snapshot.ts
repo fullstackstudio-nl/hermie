@@ -34,6 +34,7 @@ import { hasOpenRequest, unreadCountSince } from '@hermie/transcript'
 import type { ChatState } from '@hermie/transcript'
 import { botLabel, type NameOrder } from '../../store/bot-names'
 import type { Bot } from '../../store/bots'
+import type { Folder } from '../../store/folders'
 import { isMuted, type Mutes } from '../../store/mute'
 import { ACCENTS, type AccentName } from '../../ui/tokens'
 import { presenceOf, type PresenceState } from '../bots/presence'
@@ -77,12 +78,74 @@ export interface WidgetBot {
   needsInput: boolean
 }
 
+/**
+ * One of the owner's folders, as a widget can be configured to show it.
+ *
+ * A folder is an arrangement the owner made, which is the one thing about the
+ * chat list a widget normally ignores — see `projectWidgetSnapshot` on why the
+ * rows are ordered by recency instead. It is here because a folder is also the
+ * only way this app lets somebody say "these bots, and not the others", and a
+ * home screen is exactly where that sentence is worth something: a widget
+ * pinned to Finance is four square centimetres about Finance, whatever happened
+ * in the other eleven chats this afternoon.
+ *
+ * The contents are still ordered by recency inside the folder, for the same
+ * reason the top-level list is.
+ */
+export interface WidgetFolder {
+  id: string
+  name: string
+  /** Hex from the app's accent table, as a bot's is. Absent for the default tint. */
+  colour?: string
+  /**
+   * The bots inside, most recently active first, archived excluded and capped.
+   *
+   * Names rather than rows: every one of them is also in `bots`, which
+   * `projectWidgetSnapshot` guarantees, so the widget looks the row up rather
+   * than the file carrying it twice.
+   */
+  bots: string[]
+  /**
+   * Unread across the whole folder, **muted chats included**.
+   *
+   * This is the chat list's folder rule (`features/bots/folder-rows.ts`) and it
+   * is deliberately NOT the per-bot rule two fields up, where a muted chat
+   * contributes nothing. The two answer different questions and the divergence
+   * is worth stating rather than discovering:
+   *
+   *  - a ROW's badge is an interruption about one chat, and a reader who
+   *    silenced that chat asked not to be interrupted about it;
+   *  - a FOLDER's badge is a summary, and a summary that silently drops part of
+   *    what it is summarising removes information rather than aggregating it —
+   *    which is the bug ADR-0019's dated note records.
+   *
+   * The consequence is real and should be seen before it is reported: a folder
+   * holding one muted chat with four unread shows 4, while that chat's own row
+   * in the same widget shows nothing. `docs/platform-notes.md` flags it as the
+   * owner's to settle.
+   */
+  unread: number
+  /** How many inside are waiting on a person, muted chats EXCLUDED. */
+  needsInput: number
+  /** How many bots are inside in total, archived excluded — for a "+N more" line. */
+  size: number
+}
+
 export interface WidgetSnapshot {
   version: number
   /** Unix MILLISECONDS, as `Date.now()`. The widget shows it as a staleness hint. */
   generatedAt: number
   /** Most recently active first, archived bots excluded. */
   bots: WidgetBot[]
+  /**
+   * The owner's folders, in the order the chat list draws them.
+   *
+   * An OPTIONAL field in the format's sense — an extension that has never heard
+   * of it decodes the snapshot and ignores it, which is why adding it needed no
+   * version bump. Empty on a gateway where nobody has made a folder, which is
+   * most of them.
+   */
+  folders: WidgetFolder[]
 }
 
 export interface WidgetSnapshotInput {
@@ -106,6 +169,14 @@ export interface WidgetSnapshotInput {
   accents: Record<string, AccentName>
   /** Bots the owner has archived. Archiving is how you stop a bot counting. */
   archived: Record<string, true>
+  /**
+   * The owner's folders, in top-level order.
+   *
+   * The arrangement's own list (`store/folders.ts`), not a projection of it: a
+   * folder that holds a bot the roster no longer has is normal and is dropped
+   * here, the same way `reconcileBots` drops it lazily in the app.
+   */
+  folders: readonly Folder[]
   /**
    * Bot name → the second its silence lapses, `0` for never.
    *
@@ -145,6 +216,26 @@ export interface WidgetSnapshotInput {
 export const WIDGET_BOT_LIMIT = 12
 
 /**
+ * The most rows one folder contributes.
+ *
+ * A medium widget draws three. Six is what it takes to draw three and say how
+ * many more there are without the file carrying a roster nobody will scroll.
+ */
+export const WIDGET_FOLDER_BOT_LIMIT = 6
+
+/**
+ * The hard ceiling on the whole file, folders included.
+ *
+ * `WIDGET_BOT_LIMIT` is the RECENCY window; this is the ceiling once a folder's
+ * members have been added back in. Both exist because they answer different
+ * questions: twelve is "how many are worth a glance", twenty-four is "how many
+ * a process that is killed for memory before anything else may be handed".
+ * Reached only by somebody with several full folders none of whose bots have
+ * been active lately.
+ */
+export const WIDGET_BOT_CAP = 24
+
+/**
  * Project the app's live state onto the file the widgets read.
  *
  * Sorted most-recently-active first rather than in the owner's list order, and
@@ -155,15 +246,99 @@ export const WIDGET_BOT_LIMIT = 12
  * an archived bot is absent, because archiving is the app's existing way of
  * saying "stop counting this one" and a widget is the loudest place a count
  * appears.
+ *
+ * ## Folders change WHICH bots are written, not the order
+ *
+ * A widget configured for one folder has to be able to draw that folder's rows,
+ * and a folder whose bots have all been quiet for a week would otherwise fall
+ * off the end of the recency window and leave it permanently empty. So the list
+ * is the twelve most recent PLUS every bot a folder names, still in recency
+ * order, still capped — see `WIDGET_BOT_CAP`.
+ *
+ * Nothing about the unconfigured widgets changes: they read from the front of
+ * the same list, which is the same twelve it always was.
  */
 export function projectWidgetSnapshot(input: WidgetSnapshotInput): WidgetSnapshot {
-  const bots = input.bots
+  const ranked = input.bots
     .filter(bot => !input.archived[bot.name])
     .map(bot => projectBot(bot, input))
     .sort((left, right) => right.lastAt - left.lastAt || left.name.localeCompare(right.name))
-    .slice(0, WIDGET_BOT_LIMIT)
 
-  return { version: WIDGET_SNAPSHOT_VERSION, generatedAt: input.now, bots }
+  const known = new Set(ranked.map(bot => bot.name))
+  const folders = input.folders
+    .map(folder => projectFolder(folder, ranked, known, input))
+    // A folder whose every bot has left the roster is not a folder any more.
+    // The app drops those lazily too (`reconcileBots`); a widget offering one
+    // in its picker would be a widget that can never fill in.
+    .filter(folder => folder.size > 0)
+
+  const keep = new Set(ranked.slice(0, WIDGET_BOT_LIMIT).map(bot => bot.name))
+
+  for (const folder of folders) {
+    for (const name of folder.bots) {
+      keep.add(name)
+    }
+  }
+
+  const bots = ranked.filter(bot => keep.has(bot.name)).slice(0, WIDGET_BOT_CAP)
+
+  return { version: WIDGET_SNAPSHOT_VERSION, generatedAt: input.now, bots, folders }
+}
+
+/**
+ * One folder, with its two numbers.
+ *
+ * `ranked` is already recency-ordered, so filtering it is what puts a folder's
+ * contents in the same order everything else here is in — there is no second
+ * sort to disagree with the first.
+ *
+ * The counts are computed over EVERY bot in the folder, not over the capped
+ * `bots` list. A folder of nine with three drawn still says nine unread; a
+ * badge that only counted what fitted would be a number nobody could check.
+ */
+function projectFolder(
+  folder: Folder,
+  ranked: readonly WidgetBot[],
+  known: ReadonlySet<string>,
+  input: WidgetSnapshotInput
+): WidgetFolder {
+  const inside = folder.bots.filter(name => known.has(name) && !input.archived[name])
+  const seconds = Math.floor(input.now / 1000)
+
+  let unread = 0
+  let needsInput = 0
+
+  for (const name of inside) {
+    const chat = input.chats[name]
+
+    if (!chat) {
+      continue
+    }
+
+    // NOT the bot's own `unread` field, and the folder's doc comment says why
+    // at length: a muted chat contributes nothing to its own badge and
+    // everything to its folder's.
+    unread += unreadCountSince(chat, input.lastSeen[name] ?? 0)
+
+    if (hasOpenRequest(chat) && !isMuted(input.mutes, name, seconds)) {
+      needsInput += 1
+    }
+  }
+
+  const colour = folder.colour ? ACCENTS[folder.colour]?.bubble : undefined
+
+  return {
+    id: folder.id,
+    name: folder.name,
+    ...(colour ? { colour } : {}),
+    bots: ranked
+      .filter(bot => inside.includes(bot.name))
+      .map(bot => bot.name)
+      .slice(0, WIDGET_FOLDER_BOT_LIMIT),
+    unread,
+    needsInput,
+    size: inside.length
+  }
 }
 
 function projectBot(bot: Bot, input: WidgetSnapshotInput): WidgetBot {
@@ -223,7 +398,15 @@ export function needsInputCount(snapshot: WidgetSnapshot): number {
  * is one `JSON.stringify` and no hand-written field list to forget to update.
  */
 export function sameWidgetContent(left: WidgetSnapshot | null, right: WidgetSnapshot): boolean {
-  return left !== null && JSON.stringify(left.bots) === JSON.stringify(right.bots)
+  return (
+    left !== null &&
+    JSON.stringify(left.bots) === JSON.stringify(right.bots) &&
+    // Folders too, and not only for completeness: a folder's badge counts muted
+    // chats, so a message into a silenced conversation moves a number no bot
+    // row shows. Comparing the rows alone would drop that write and leave a
+    // folder widget stale for exactly the case it was configured to watch.
+    JSON.stringify(left.folders) === JSON.stringify(right.folders)
+  )
 }
 
 export type { PresenceState }
