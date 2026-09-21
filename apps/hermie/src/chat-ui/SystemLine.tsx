@@ -45,18 +45,37 @@ export function isSystemLineNotice(item: NoticeItem): boolean {
   return SYSTEM_LINE_KINDS.has(item.noticeKind)
 }
 
+/** A sentence ends at `.`, `!` or `?` with whitespace or the end of the text behind it. */
+const SENTENCE_END_RE = /[.!?](?=\s|$)/u
+
 /**
- * What the line says.
+ * What the line says: the first sentence of the body.
  *
- * The BODY, because the body is the sentence the gateway wrote and the title is
- * whatever a surface decided to call the family — `Model changed` names the
- * event but does not say which model. A notice that arrived without a body keeps
- * its title, which is then the only thing it has.
+ * The BODY, because the body is what the gateway wrote and the title is whatever
+ * a surface decided to call the family — `Model changed` names the event but does
+ * not say which model. A notice that arrived without a body keeps its title,
+ * which is then the only thing it has.
+ *
+ * The FIRST sentence, because these markers are written for two readers and only
+ * the opening one is for this one. A model switch says which model is active and
+ * then tells the model what to do with that fact ("From this point forward, use
+ * this runtime metadata when answering questions about…"), which on a centred
+ * grey line is half a paragraph of instructions addressed to somebody else.
+ *
+ * A text with no sentence boundary in it is kept whole rather than guessed at —
+ * a marker that stops punctuating is a marker this trim has nothing to say
+ * about, and showing all of it beats showing none.
+ *
+ * The trim is HERE and never in `unwrapSystemNote`. That function's result is
+ * the notice body, and the body is the key two descriptions of one row are
+ * paired on; a display-side shortening that reached it would make the live and
+ * the persisted projection disagree and paint the row twice.
  */
 export function systemLineText(item: NoticeItem): string {
-  const body = item.body?.trim()
+  const full = item.body?.trim() || item.title.trim()
+  const end = SENTENCE_END_RE.exec(full)
 
-  return body || item.title.trim()
+  return end?.index === undefined ? full : full.slice(0, end.index + 1)
 }
 
 export interface SystemLineProps {

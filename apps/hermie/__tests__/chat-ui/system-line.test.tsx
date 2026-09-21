@@ -10,14 +10,18 @@
  */
 import { screen } from '@testing-library/react-native'
 
-import { NoticePill } from '../../src/chat-ui'
+import { NoticePill, systemLineText } from '../../src/chat-ui'
 import { processNoticeItem } from '../../src/chat-ui/fixtures'
 import type { NoticeItem } from '../../src/chat-ui/types'
 import { renderScreen } from '../support/render'
 
-const SENTENCE =
+/** The marker as `_append_model_switch_marker` writes it, wrapper already off. */
+const MARKER =
   'The active model for this chat has changed to k3 via provider moonshot. From this point forward, use this ' +
   'runtime metadata when answering questions about what model/provider is active.'
+
+/** Only the opening sentence is addressed to the reader; the rest is for the model. */
+const SENTENCE = 'The active model for this chat has changed to k3 via provider moonshot.'
 
 const notice = (over: Partial<NoticeItem> = {}): NoticeItem => ({
   id: 'n-sys',
@@ -27,7 +31,7 @@ const notice = (over: Partial<NoticeItem> = {}): NoticeItem => ({
   seq: 1000,
   title: 'Model changed',
   version: 0,
-  body: SENTENCE,
+  body: MARKER,
   ...over
 })
 
@@ -39,6 +43,39 @@ describe('a system line', () => {
 
     expect(line.props.children).toBe(SENTENCE)
     expect(String(line.props.children)).not.toContain('[System:')
+  })
+
+  it('stops at the first sentence, because the rest is addressed to the model', () => {
+    // A real model-switch marker says which model is active and then instructs
+    // the model what to do with that fact. Only the first half is for a reader.
+    expect(systemLineText(notice())).toBe(SENTENCE)
+    expect(systemLineText(notice())).not.toContain('From this point forward')
+  })
+
+  it('keeps a note that is one sentence exactly as it is', () => {
+    const one = 'The user has cleared the personality overlay.'
+
+    expect(systemLineText(notice({ body: one }))).toBe(one)
+    expect(systemLineText(notice({ body: 'Switched to k3' }))).toBe('Switched to k3')
+  })
+
+  it('keeps the whole text when there is no sentence boundary to cut at', () => {
+    // A full stop inside a word is not one — `v1.4` must not cut the line in two.
+    const version = 'The active model for this chat has changed to k3-v1.4-preview via provider moonshot'
+
+    expect(systemLineText(notice({ body: version }))).toBe(version)
+  })
+
+  it('cuts at a question or an exclamation as readily as at a full stop', () => {
+    expect(systemLineText(notice({ body: 'Did the run finish? I could not tell from the log.' }))).toBe(
+      'Did the run finish?'
+    )
+  })
+
+  it('leaves the body itself whole, because that is what the row is paired on', () => {
+    // The trim is a display decision. If it reached the item, the live and the
+    // persisted projection would disagree and the row would be drawn twice.
+    expect(notice().body).toBe(MARKER)
   })
 
   it('centres it and leaves it free to wrap, rather than clipping to one line', () => {
