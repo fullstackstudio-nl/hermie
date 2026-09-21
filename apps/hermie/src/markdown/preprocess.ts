@@ -2,12 +2,17 @@
  * Hermes-specific Markdown fixes, applied before the lexer sees the text.
  *
  * This is the subset of `apps/desktop/src/lib/markdown-preprocess.ts` that
- * still applies here. Deliberately dropped: everything about math. The desktop
- * app renders KaTeX; Hermie has no math renderer, so normalising `$$` fences
- * and escaping currency dollars would only churn text nobody looks at
- * differently. Dropped for the same reason: preview targets, session-ref
+ * still applies here. Deliberately dropped: preview targets, session-ref
  * linkification and the HTML nesting clamp — all three route into desktop-only
  * renderers that do not exist on this side.
+ *
+ * **Mathematics is not here either, and that is a decision rather than a gap.**
+ * There IS a math renderer now (ADR-0020), and the desktop app protects `$…$`
+ * from the lexer by rewriting it in a file like this one. Hermie does it one
+ * level down instead, as real tokens — `markdown/math/marked-math.ts` — because
+ * a mask applied here would have to survive every other rewrite below it, and
+ * each of those is a pass over the same string that does not know what it is
+ * stepping through. A tokenizer says it once, at the level that owns it.
  *
  * What is ported, and why each one matters while a reply is still streaming:
  *

@@ -11,6 +11,13 @@ export { resetBlockCache, splitBlocks } from './blocks'
 export { codeScopeColor, type CodeScheme } from './code-theme'
 export { MONO_ADVANCE, MONOSPACE, type MarkdownContext, type MarkdownImageSource, resolveImageUri } from './context'
 export { highlightToLines, isKnownLanguage, type CodeSpan } from './highlight'
+export { BlockMath, inlineMathRuns, MathLayout } from './math/Math'
+export { mathRuns, mathToPlainText, type MathRun } from './math/linear'
+export { isMathToken, MATH_BLOCK_TOKEN, MATH_INLINE_TOKEN, type MathToken } from './math/marked-math'
+export { parseMath, type MathNode } from './math/parse'
+export { MERMAID_LANGUAGE, MermaidDiagram } from './mermaid/Mermaid'
+export { layoutMermaid, type MermaidLayout } from './mermaid/layout'
+export { parseMermaid, type MermaidGraph } from './mermaid/parse'
 export {
   mediaTagValues,
   preprocessMarkdown,

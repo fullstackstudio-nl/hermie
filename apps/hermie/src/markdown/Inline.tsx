@@ -11,6 +11,8 @@ import type { Token, Tokens } from './marked-compat'
 
 import { anchorProps } from '../platform/link-anchor'
 import { isOpenableLink, MONO_ADVANCE, MONOSPACE, resolveImageUri, type MarkdownContext } from './context'
+import { inlineMathRuns, MathRunsText } from './math/Math'
+import { MATH_INLINE_TOKEN, type MathToken } from './math/marked-math'
 
 export interface InlineProps {
   tokens: Token[]
@@ -287,6 +289,25 @@ function renderToken(token: Token, index: number, context: MarkdownContext): Rea
           {padCode((token as Tokens.Codespan).text, context)}
         </Text>
       )
+
+    case MATH_INLINE_TOKEN: {
+      const math = token as MathToken
+      const runs = inlineMathRuns(math.text)
+
+      // An expression this renderer cannot draw falls back to the LaTeX in a
+      // code chip — the same construct a fenced fallback uses one level up, so a
+      // reader who meets both sees one idea rather than two. Never the raw
+      // characters: `\frac{a}{b}` set as prose reads as a typing mistake.
+      if (!runs) {
+        return (
+          <Text key={key} style={codeStyle(context)}>
+            {padCode(math.text.trim(), context)}
+          </Text>
+        )
+      }
+
+      return <MathRunsText context={context} fontSize={context.fontSize} key={key} runs={runs} />
+    }
 
     case 'br':
       return <Fragment key={key}>{'\n'}</Fragment>

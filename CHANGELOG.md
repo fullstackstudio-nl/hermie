@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Diagrams and mathematics are drawn, not printed.** A ```` ```mermaid ```` fence is a picture in
+  the bubble and `$…$` / `$$…$$` is set as mathematics, on every platform, with no web view and no
+  downloaded fonts — which is the whole of the decision rather than an implementation note. A
+  renderer that learns its own size a frame late moves the reader on an inverted list by exactly the
+  correction, so the geometry is computed from the label text and the font size before the row
+  mounts, and `$$…$$` joins tables and fenced code as a block the reading fold will not cut through.
+  The supported subset is `flowchart` / `graph` in all four directions with the common node shapes
+  and edge kinds, and the LaTeX a chat agent actually writes: symbols, scripts, fractions, roots and
+  the big operators with their limits. **Anything outside it falls back to the source in a code
+  block** — a `sequenceDiagram`, a `subgraph`, `\begin{matrix}`, or a fence that has only half
+  arrived — because a picture that quietly leaves out what the author asked for is worse than the
+  text it was made from. Mathematics also selects and copies as its source, delimiters included, so
+  an equation dragged out of a reply on a Mac pastes back into something that understands it.
+  [ADR-0020](docs/adr/0020-diagrams-and-math-without-a-webview.md).
+
 ## [0.1.1] - 2026-09-22
 
 

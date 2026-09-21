@@ -6432,3 +6432,43 @@ no movement left to shorten.
   suite. Whether a real `session.resume` fills `turn_started_at` on the top
   level, only inside `info`, or not at all decides whether the fix fires — and
   if it is absent the old behaviour is what happens, not something worse.
+
+## Rich content in a reply (2026-09-22)
+
+### A renderer that learns its own size late is a renderer that moves the reader
+
+The obvious way to draw a ` ```mermaid ` fence is the `mermaid` package, and the obvious way
+to set `$$…$$` is KaTeX. Both were rejected for one reason, and it is the same reason in both cases.
+
+`mermaid` measures text with `getBBox`, so on iOS and Android it needs a `WebView`; KaTeX positions
+every glyph from a metrics table that assumes four bundled fonts, which load asynchronously. Either
+way the final size of the box arrives **after** the row has already been laid out. The table under
+"`Show more` on the web needs LESS anchoring" above is the measurement of what that costs on this
+list: a body grown by 300 displaces everything below it by 300, at every starting offset, every
+time. A diagram that settles two frames after it mounts does exactly that, with nobody having
+touched anything — and unlike `Show more` there is no tap to hang a correction off.
+
+So the geometry is arithmetic instead. A node's box comes from its label's character count and the
+font size, the same estimate `CodeBlock.tsx` already uses for a listing's natural width; a
+fraction's height is two leadings and a rule. Nothing measures, nothing loads, and the row is its
+final height on the first frame. `react-native-svg` was already in the bundle for the icons and the
+bubble tails, so this added no dependency at all.
+
+The security question that usually comes with Mermaid disappears with the library: there is no
+script engine and no navigation here, so `securityLevel: 'strict'` has no equivalent because it has
+no equivalent problem. A label is characters in a `Text`.
+
+### What is not covered
+
+- **The subset is genuinely a subset**, and the fallback is what makes that acceptable rather than
+  what hides it. `sequenceDiagram`, `classDiagram`, `gantt`, and a `subgraph` inside a flowchart all
+  answer `null` from the parser and land in a code block. So does `\begin{…}`, and so does any LaTeX
+  command not in `math/symbols.ts`.
+- **Inline mathematics is one line, and cannot be otherwise.** React Native will not lay a `View`
+  out inside a `Text` on Android, so `$\frac{a}{b}$` is `a/b` with brackets wherever the extent would
+  be ambiguous. Only `$$…$$` gets boxes.
+- **None of it has been seen on a device.** Every claim above is jest against the real renderer and
+  the real lexer; the layout constants — a rhombus at 1.35× its box, a 46pt gap between ranks — were
+  chosen from the same character-advance estimate the tables use and have not been photographed on a
+  phone. What that can be wrong about is spacing, not stability: the numbers are wrong in the same
+  direction on every frame.
