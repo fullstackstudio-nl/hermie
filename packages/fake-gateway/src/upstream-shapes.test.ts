@@ -1281,3 +1281,178 @@ describe('profiles.configure description — tui_gateway/contracts::ProfilesConf
     expect(await descriptionOf('researcher')).toBe('Finds the sources.')
   })
 })
+
+/**
+ * Retiring a conversation and minting its successor, over the socket.
+ *
+ * Three methods this fake did not model at all until `/new` needed them, and the
+ * reason they are pinned here rather than only in the app's own suite is that
+ * two of them are mostly REFUSALS. A fake that says yes to everything would have
+ * let the obvious implementation through — create the new chat, then rename the
+ * old one — and a real gateway refuses that in a way no green suite would have
+ * predicted.
+ *
+ * Upstream: `tui_gateway/methods_session.py` for the three methods, and
+ * `hermes_state_titles.py::_set_session_title` for both title refusals.
+ */
+describe('session.title / set_hidden / close over the socket — methods_session.py', () => {
+  let live: FakeGateway
+  let socket: WebSocket
+  let nextId = 0
+
+  const pending = new Map<number, (value: Record<string, unknown>) => void>()
+
+  /** The whole frame: half of what is asserted here is the `error` half. */
+  const call = (method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> => {
+    const id = ++nextId
+
+    return new Promise(resolve => {
+      pending.set(id, resolve)
+      socket.send(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`)
+    })
+  }
+
+  const botChatOf = async (profile: string): Promise<Record<string, unknown>> => {
+    const listed = await call('session.list', { profile, title: 'Bot Chat', include_hidden: true })
+
+    return ((listed.result as { sessions: Record<string, unknown>[] }).sessions[0] ?? {}) as Record<string, unknown>
+  }
+
+  beforeAll(async () => {
+    live = await startFakeGateway({ port: 0 })
+    socket = new WebSocket(live.wsUrl, ['hermes-gateway-v1'])
+
+    socket.on('message', data => {
+      for (const line of String(data).split('\n')) {
+        if (!line.trim()) {
+          continue
+        }
+
+        const frame = JSON.parse(line) as Record<string, unknown>
+        const id = typeof frame.id === 'number' ? frame.id : null
+        const waiter = id === null ? undefined : pending.get(id)
+
+        if (waiter && id !== null) {
+          pending.delete(id)
+          waiter(frame)
+        }
+      }
+    })
+
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', () => resolve())
+      socket.once('error', reject)
+    })
+  })
+
+  afterAll(async () => {
+    socket.close()
+    await live.close()
+  })
+
+  /**
+   * A canonical chat is out of the default listing. `include_hidden` is not a
+   * convenience on this lookup — without it the bot has no chat.
+   */
+  it('keeps a hidden Bot Chat out of session.list until it is asked for', async () => {
+    const plain = await call('session.list', { profile: 'writer', title: 'Bot Chat' })
+    const asked = await call('session.list', { profile: 'writer', title: 'Bot Chat', include_hidden: true })
+
+    expect((plain.result as { sessions: unknown[] }).sessions).toHaveLength(0)
+    expect((asked.result as { sessions: unknown[] }).sessions).toHaveLength(1)
+  })
+
+  /**
+   * `session.title` is session-scoped — `_with_db(session_scoped=True)` over
+   * `_sess_nowait`, a plain lookup in the live `_sessions` map. A stored id
+   * resolves perfectly well for `session.list`, `session.resume` and REST, and
+   * comes back 4001 here.
+   */
+  it('takes the runtime id and refuses a stored one with 4001', async () => {
+    const chat = await botChatOf('writer')
+    const stored = await call('session.title', { session_id: String(chat.id), title: 'whatever' })
+
+    expect(stored.error).toMatchObject({ code: 4001 })
+  })
+
+  /**
+   * The refusal that decides the whole shape of `/new`: a HIDDEN session called
+   * `Bot Chat` may not be renamed off that title, because the title is how Bot
+   * Mode finds the conversation again.
+   */
+  it('refuses to rename a hidden Bot Chat, and takes the rename once it is visible', async () => {
+    const chat = await botChatOf('writer')
+    const resumed = await call('session.resume', { session_id: String(chat.id), omit_messages: true })
+    const runtime = String((resumed.result as { session_id: string }).session_id)
+
+    const guarded = await call('session.title', { session_id: runtime, title: 'Bot Chat · 2026-09-21 23:16' })
+
+    expect(guarded.error).toMatchObject({ code: 4022 })
+    expect(String((guarded.error as { message: string }).message)).toContain('canonical Bot Chat')
+
+    await call('session.set_hidden', { session_id: runtime, hidden: false })
+
+    const renamed = await call('session.title', { session_id: runtime, title: 'Bot Chat · 2026-09-21 23:16' })
+
+    expect(renamed.result).toMatchObject({ pending: false, title: 'Bot Chat · 2026-09-21 23:16' })
+
+    // And the title is now free, which is what a second `Bot Chat` needs.
+    const free = await call('session.list', { profile: 'writer', title: 'Bot Chat', include_hidden: true })
+
+    expect((free.result as { sessions: unknown[] }).sessions).toHaveLength(0)
+  })
+
+  /** `_set_session_title`'s other refusal: a title is unique across sessions. */
+  it('refuses a title another session already holds', async () => {
+    const chat = await botChatOf('researcher')
+    const resumed = await call('session.resume', { session_id: String(chat.id), omit_messages: true })
+    const runtime = String((resumed.result as { session_id: string }).session_id)
+
+    await call('session.set_hidden', { session_id: runtime, hidden: false })
+
+    const clash = await call('session.title', { session_id: runtime, title: 'Bot Chat · 2026-09-21 23:16' })
+
+    expect(clash.error).toMatchObject({ code: 4022 })
+    expect(String((clash.error as { message: string }).message)).toContain('already in use')
+  })
+
+  /**
+   * `session.close` pops the RUNTIME session and leaves the stored row alone.
+   * The transcript survives; the runtime id does not, and a resume of the stored
+   * id builds a new one.
+   */
+  it('closes the runtime session, keeps the transcript, and resumes under a new runtime id', async () => {
+    const chat = await botChatOf('researcher')
+    const first = await call('session.resume', { session_id: String(chat.id), omit_messages: true })
+    const runtime = String((first.result as { session_id: string }).session_id)
+
+    expect((await call('session.close', { session_id: runtime })).result).toMatchObject({ closed: true })
+
+    // Every session-scoped RPC still holding the old id is now answered 4001.
+    expect((await call('session.title', { session_id: runtime, title: 'x' })).error).toMatchObject({ code: 4001 })
+
+    const again = await call('session.resume', { session_id: String(chat.id), omit_messages: true })
+    const result = again.result as { session_id: string; message_count: number }
+
+    expect(result.session_id).not.toBe(runtime)
+    expect(result.message_count).toBeGreaterThan(0)
+  })
+
+  /**
+   * `profiles.list` resolves the canonical chat by title on every call
+   * (`methods_profiles.py::_canonical_session_row` → `get_session_by_title`),
+   * so a profile whose chat has been renamed away reports none at all. A client
+   * that leans on the roster to tell it where a bot's chat is has to survive
+   * that window; `/new` opens one every time it runs.
+   */
+  it('reports no canonical session for a profile whose Bot Chat has been renamed away', async () => {
+    const listed = await call('profiles.list', {})
+    const profiles = (listed.result as { profiles: Record<string, unknown>[] }).profiles
+    const writer = profiles.find(profile => profile.name === 'writer')
+    const researcher = profiles.find(profile => profile.name === 'researcher')
+
+    // `writer`'s chat was renamed above; `researcher`'s rename was refused.
+    expect(writer?.canonical_session).toBeUndefined()
+    expect(researcher?.canonical_session).toMatchObject({ title: 'Bot Chat' })
+  })
+})

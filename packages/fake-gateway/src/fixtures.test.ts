@@ -28,9 +28,15 @@ function call(method: string, params: Record<string, unknown> = {}): Promise<Rec
   })
 }
 
-/** One bot's Bot Chat, over the socket. */
+/**
+ * One bot's Bot Chat, over the socket.
+ *
+ * `include_hidden` is not optional: a canonical chat is created hidden, so it is
+ * out of the default listing — which is the same reason
+ * `BotsController.lookupCanonical` sends it.
+ */
 async function botChat(profile: string): Promise<{ id: string; rows: TranscriptRow[] }> {
-  const sessions = (await call('session.list', { profile })).sessions as Record<string, unknown>[]
+  const sessions = (await call('session.list', { profile, include_hidden: true })).sessions as Record<string, unknown>[]
   const id = String(sessions[0]?.id)
   const history = await call('session.history', { session_id: id })
 

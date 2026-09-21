@@ -88,12 +88,30 @@ export interface BotsState {
   running: Record<string, true>
   /** name → the `last_active` the user has already looked at. */
   lastSeen: Record<string, number>
+  /**
+   * Canonical chats this app switched a bot onto, until the roster catches up.
+   *
+   * `setBots` overwrites every bot wholesale from `profiles.list`, and that call
+   * resolves the canonical chat by TITLE server-side. Between `/new` renaming the
+   * old conversation and the gateway persisting the new one there is a window in
+   * which a poll — very possibly one that left before the switch — answers with
+   * the OLD id, or with no canonical at all because the new session has no
+   * database row yet. Either one would silently put the chat back on the
+   * conversation the owner just put away.
+   *
+   * So a switch pins the id it switched to. While a pin stands, a roster row
+   * naming anything else is ignored for that bot; the pin clears the moment the
+   * roster agrees, which is the gateway confirming the switch landed.
+   */
+  canonicalPins: Record<string, BotCanonicalSession>
   loading: boolean
   error: string | null
   /** `Date.now()` of the last successful roster read; null while only the cache is painted. */
   refreshedAt: number | null
 
   setBots: (bots: Bot[], options?: { fromCache?: boolean }) => void
+  /** Point a bot at a different canonical chat and hold it there — see `canonicalPins`. */
+  setCanonical: (name: string, canonical: BotCanonicalSession) => void
   setAvatar: (name: string, revision: number, dataUrl: string | null) => void
   setRunning: (names: readonly string[]) => void
   setLoading: (loading: boolean) => void
@@ -110,6 +128,7 @@ const INITIAL = {
   avatarsFetched: {} as Record<string, true>,
   running: {} as Record<string, true>,
   lastSeen: {} as Record<string, number>,
+  canonicalPins: {} as Record<string, BotCanonicalSession>,
   loading: false,
   error: null as string | null,
   refreshedAt: null as number | null
@@ -129,17 +148,57 @@ export const useBotsStore = create<BotsState>((set, get) => ({
   ...INITIAL,
 
   setBots(bots, options = {}) {
+    const pins = get().canonicalPins
+    const keptPins: Record<string, BotCanonicalSession> = {}
     const byName: Record<string, Bot> = {}
+    const placed: Bot[] = []
 
-    for (const bot of bots) {
+    for (const row of bots) {
+      const pinned = pins[row.name]
+      // A pin whose id the roster now reports has done its job: the gateway has
+      // resolved the canonical title to the chat we switched to, so the answer
+      // and the pin say the same thing and the pin is dropped.
+      const stale = pinned !== undefined && row.canonical?.id !== pinned.id
+      const bot = stale && pinned ? { ...row, canonical: pinned } : row
+
+      if (stale && pinned) {
+        keptPins[row.name] = pinned
+      }
+
       byName[bot.name] = bot
+      placed.push(bot)
+    }
+
+    // A pin whose bot is missing from this answer is kept: the bot did not stop
+    // existing, this list simply did not mention it.
+    for (const [name, pinned] of Object.entries(pins)) {
+      if (!(name in byName)) {
+        keptPins[name] = pinned
+      }
     }
 
     set({
-      bots,
+      bots: placed,
       byName,
+      canonicalPins: keptPins,
       ...(options.fromCache ? {} : { refreshedAt: Date.now(), error: null })
     })
+  },
+
+  setCanonical(name, canonical) {
+    const current = get().byName[name]
+
+    if (!current) {
+      return
+    }
+
+    const bot: Bot = { ...current, canonical }
+
+    set(state => ({
+      bots: state.bots.map(entry => (entry.name === name ? bot : entry)),
+      byName: { ...state.byName, [name]: bot },
+      canonicalPins: { ...state.canonicalPins, [name]: canonical }
+    }))
   },
 
   setAvatar(name, revision, dataUrl) {

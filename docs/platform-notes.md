@@ -6436,8 +6436,8 @@ no movement left to shorten.
 ## A slash command's answer, and the command that answered for nothing (2026-09-21, last)
 
 Two reports from the running app, both about a slash command and neither about
-the same thing. This section is the first: every command's answer was invisible
-at the level the app ships on. The second, `/new`, is below it.
+the same thing. One command lied about what it had done; every command's answer
+was invisible at the level the app ships on.
 
 ### A command's answer was dropped at `quiet`, and folded everywhere else
 
@@ -6485,3 +6485,101 @@ not be folded away at all.
   row through the unmount virtualisation causes, and a controller test that the
   kind is on the event. What a `quiet` transcript with a two-hundred-line `/help`
   open in it actually looks like on a phone has not been looked at.
+
+### `/new` printed "New session started!" and started nothing
+
+`slash.exec` does not run in the session you are looking at. Upstream spawns a
+SEPARATE CLI process per session for worker commands
+(`tui_gateway/methods_tools.py::_SlashWorker`), and `/new` inside that process
+(`hermes_cli/cli_session_mixin.py`) rotates the WORKER's session and prints the
+line. Nothing is mirrored back except the commands named in `_SLASH_MIRRORS`
+(`tui_gateway/methods_slash.py`: model, approvals, personality, prompt, …), and
+`new` is not among them. So the reader was told a session had started, the next
+message went to the same session with the same system prompt, and the bot itself
+confirmed as much when the owner asked it.
+
+Upstream's desktop app intercepts `/new` client-side for exactly this reason
+(`apps/desktop/src/lib/desktop-slash-commands.ts`, handler
+`prepareDefaultNewSession(); startFreshSessionDraft()`). Hermie has to intercept
+it too, but it cannot do what the desktop does — open another session — because a
+bot here has exactly ONE chat and that chat is identified by its title
+(ADR-0007). "Start fresh" therefore means: retire the conversation holding the
+title `Bot Chat`, then mint its successor under it.
+
+**Two facts in the state layer decide the whole shape of that, and neither is
+visible from the RPC surface.**
+
+The first is that a canonical chat **cannot be renamed while it is hidden**.
+`hermes_state_titles.py::_set_session_title` refuses it outright:
+
+> This is the bot's canonical Bot Chat — its name is its identity, and renaming
+> it would orphan the conversation.
+
+The straightforward reading of "retire it by renaming it" therefore fails on
+every real gateway with a 4022. What makes it work is the sentence upstream wrote
+beside the check — _"Hidden is the discriminator: canonical chats are born
+hidden; a visible session merely named 'Bot Chat' stays renameable"_ — so
+`session.set_hidden {hidden: false}` comes first. The retired conversation
+becoming an ordinary visible session is also where a reader would go looking for
+it.
+
+The second is that **`session.title` is session-scoped**: `_with_db(…,
+session_scoped=True)` over `_sess_nowait`, which is a plain lookup in the live
+`_sessions` map. The durable id — the one everything else in this app is keyed
+by, and the one that resolves for `session.list`, `session.resume` and every REST
+route — comes back `4001 session not found`. It takes the RUNTIME id, and what it
+renames is that session's `session_key`.
+
+Two smaller things came out of the same file:
+
+- **`session.create` persists no row for an empty draft.** The title rides as
+  `pending_title` until the first prompt, so a successor nobody has typed into
+  yet is invisible to `session.list` and to `profiles.list`'s canonical lookup. A
+  `session.title` call straight after the create takes the other road —
+  `_ensure_session_db_row`, which applies the queued `hidden` on the way — so the
+  new chat is a real, findable, hidden `Bot Chat` before the first message.
+  Without it, a relaunch in that window would resolve no canonical row and mint a
+  THIRD chat.
+- **The roster is the thing that would undo the switch.** `profiles.list`
+  re-resolves each bot's chat by title on every call
+  (`methods_profiles.py::_canonical_session_row` → `get_session_by_title`), and
+  `setBots` overwrites every bot wholesale. A poll that left before the rename —
+  or one that arrives during the window above and reports no canonical chat at
+  all — would put the chat back on the conversation the owner just put away. So a
+  switch PINS the id it switched to, and the pin clears the moment the roster
+  names it.
+
+The order is retire, create, title, close, and every step that can fail rolls
+back towards "nothing happened": a refused argument falls back to the dated name,
+a failed create puts `Bot Chat` back and re-hides. The one outcome worse than
+`/new` doing nothing is `/new` leaving a bot with no chat.
+
+`/new`, `/reset` and `/clear` are also answered by `knowsSlashCommand` **before
+the catalogue has loaded**, which no other command is. Every other command
+degrades harmlessly when the catalogue is late — the line goes out as a prompt
+and the gateway understands a leading slash — but a `/new` sent as a prompt is a
+request to the MODEL to start a new session, and it will happily report that it
+has.
+
+#### What is unverified here
+
+- **None of it has been seen against a real gateway.** There is no signed-in
+  gateway available from here, so every claim above about upstream is read from
+  the pinned source and every claim about behaviour is the fake gateway and the
+  suites. What needs a hand check, on a device against a real gateway: typing
+  `/new` and confirming the bot reports a NEW session id and a rebuilt system
+  prompt on the next message; that the retired conversation appears in the
+  gateway's session list under `Bot Chat · <date time>`; and that `profiles.list`
+  then resolves that bot's canonical chat to the successor rather than to nothing.
+- **The un-hide has a visible side effect nobody has looked at.** The retired
+  conversation leaves `hidden`, so it now appears in every client's session
+  browser — Hermes Desktop's sidebar, the TUI's list. That is intended, since it
+  is what keeps the conversation findable, but what a sidebar that has never held
+  a `Bot Chat · …` row looks like afterwards has not been seen.
+- **Whether a real gateway persists the successor's row on the post-create
+  `session.title`.** The path through `_ensure_session_db_row` is read from
+  source; the fake writes a row on `session.create` regardless, so no test here
+  can tell the two apart.
+- **`session.close` against a session the gateway has already reaped.** Treated
+  as best effort and swallowed, which is a guess about a 4001 rather than a
+  measurement.

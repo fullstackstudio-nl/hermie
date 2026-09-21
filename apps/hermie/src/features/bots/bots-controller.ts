@@ -65,6 +65,68 @@ export interface BotsControllerOptions {
   chats?: ChatSessionIdSource | null
 }
 
+/** What `session.create` handed back for a freshly minted canonical chat. */
+export interface CreatedCanonicalSession {
+  canonical: BotCanonicalSession
+  /**
+   * The RUNTIME id of the new session, which is the id every session-scoped RPC
+   * takes. A caller that wants to address the chat before resuming it — to write
+   * its title, say — needs this one and not the durable id beside it.
+   */
+  runtimeSessionId: string
+}
+
+export interface CreateCanonicalOptions {
+  /**
+   * The stored id of the conversation this one succeeds.
+   *
+   * Upstream keeps it on the row (`methods_session.py::session.create`), which
+   * is what lets a session list nest the new chat under the one it replaced
+   * instead of showing two unrelated rows.
+   */
+  parentSessionId?: string
+}
+
+/**
+ * Mint a bot's canonical chat.
+ *
+ * One copy of the create, because there are now two callers and they must agree
+ * on every flag: the roster resolving a bot that has none
+ * (`BotsController.runResolution`) and `/new` retiring one conversation for the
+ * next (`ChatController.startNewConversation`). A chat minted with a different
+ * `title`, `hidden` or `follow_profile_config` is not the same kind of object,
+ * and the difference would only show up weeks later as a bot that lost its
+ * memory or a chat pinned to a dead provider.
+ */
+export async function createCanonicalSession(
+  gateway: ChatGateway,
+  profile: string,
+  options: CreateCanonicalOptions = {}
+): Promise<CreatedCanonicalSession> {
+  const created = await gateway.request('session.create', {
+    profile,
+    title: CANONICAL_CHAT_TITLE,
+    hidden: true,
+    source: 'hermie',
+    cols: SESSION_COLUMNS,
+    // The chat follows the profile's current model, never a pin stored on an
+    // old row; without this a profile switch leaves DMs on a dead provider.
+    follow_profile_config: true,
+    ...(options.parentSessionId ? { parent_session_id: options.parentSessionId } : {})
+  })
+
+  const storedId = created?.stored_session_id || created?.session_id || ''
+
+  if (!storedId) {
+    throw new Error(`The gateway created a chat for ${profile} without returning its id.`)
+  }
+
+  return {
+    canonical: { id: storedId, resolvedId: storedId, preview: '', lastActive: 0, messageCount: 0 },
+    runtimeSessionId: typeof created?.session_id === 'string' ? created.session_id : ''
+  }
+}
+
 /**
  * Index every session id the app can attribute to a bot, id → bot name.
  *
@@ -214,10 +276,16 @@ export class BotsController {
       const bots = rows.map(botFromProfileRow).filter(bot => Boolean(bot.name))
 
       this.store.getState().setBots(bots)
-      void this.persist(bots)
-      void this.loadAvatars(bots)
+      // What the STORE settled on, not what the wire said: a bot whose canonical
+      // chat this app just switched keeps the pinned one (see `canonicalPins`),
+      // and caching the roster's stale answer would put the old conversation
+      // back on the next cold launch.
+      const placed = this.store.getState().bots
 
-      return bots
+      void this.persist(placed)
+      void this.loadAvatars(placed)
+
+      return placed
     } catch (error) {
       this.store.getState().setError(messageOf(error))
 
@@ -403,24 +471,7 @@ export class BotsController {
       return second
     }
 
-    const created = await this.gateway.request('session.create', {
-      profile: bot.name,
-      title: CANONICAL_CHAT_TITLE,
-      hidden: true,
-      source: 'hermie',
-      cols: SESSION_COLUMNS,
-      // The chat follows the profile's current model, never a pin stored on an
-      // old row; without this a profile switch leaves DMs on a dead provider.
-      follow_profile_config: true
-    })
-
-    const storedId = created?.stored_session_id || created?.session_id || ''
-
-    if (!storedId) {
-      throw new Error(`The gateway created a chat for ${bot.name} without returning its id.`)
-    }
-
-    return { id: storedId, resolvedId: storedId, preview: '', lastActive: 0, messageCount: 0 }
+    return (await createCanonicalSession(this.gateway, bot.name)).canonical
   }
 
   private async lookupCanonical(bot: Bot): Promise<BotCanonicalSession | null> {

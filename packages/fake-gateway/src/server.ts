@@ -188,6 +188,25 @@ export interface FakeSession {
   messages: TranscriptRow[]
   seq: number
   ring: RingEntry[]
+  /**
+   * Out of the default listing, still resumable by its owner.
+   *
+   * It is not decoration: upstream's canonical-title guard
+   * (`hermes_state_titles.py::_set_session_title`) tests exactly this flag when
+   * it decides whether a session called `Bot Chat` may be renamed, so a fake
+   * with no notion of hidden cannot reproduce either side of that rule.
+   */
+  hidden: boolean
+  /** `session.create`'s `parent_session_id`: what this conversation succeeds. */
+  parentSessionId?: string
+  /**
+   * `session.close` has popped the runtime session.
+   *
+   * The stored row lives on and resumes — with a NEW runtime id, because the
+   * gateway builds a fresh one — but the old runtime id is gone, and every
+   * session-scoped RPC addressed to it answers 4001.
+   */
+  closed?: boolean
 }
 
 export interface TranscriptRow {
@@ -1331,6 +1350,7 @@ function makeCronRunSession(
     storedId: id,
     profile,
     title: `Cron: ${jobId}`,
+    hidden: false,
     seq: 0,
     ring: [],
     messages: [
@@ -1411,6 +1431,15 @@ function historyRows(profile: string, count: number, base: number): TranscriptRo
 
   return rows
 }
+
+/**
+ * The canonical Bot Chat title.
+ *
+ * A registry key rather than a label: upstream resolves a profile's forever-chat
+ * with `db.get_session_by_title('Bot Chat')`, which answers ONE row, and guards
+ * that row against being renamed while it is hidden.
+ */
+const CANONICAL_CHAT_TITLE = 'Bot Chat'
 
 function makeSession(profile: string, title: string, history = 0): FakeSession {
   const storedId = `stored-${profile}-${randomUUID().slice(0, 8)}`
@@ -1499,6 +1528,9 @@ function makeSession(profile: string, title: string, history = 0): FakeSession {
     storedId,
     profile,
     title,
+    // Canonical chats are born hidden — `session.create {hidden: true}` on every
+    // client that mints one, this app's included.
+    hidden: title === CANONICAL_CHAT_TITLE,
     seq: 0,
     ring: [],
     messages
@@ -1507,8 +1539,8 @@ function makeSession(profile: string, title: string, history = 0): FakeSession {
 
 function initialState(options: FakeGatewayOptions): FakeGatewayState {
   const history = Math.max(0, Math.trunc(options.historyRows ?? 0))
-  const researcher = makeSession('researcher', 'Bot Chat', history)
-  const writer = makeSession('writer', 'Bot Chat', history)
+  const researcher = makeSession('researcher', CANONICAL_CHAT_TITLE, history)
+  const writer = makeSession('writer', CANONICAL_CHAT_TITLE, history)
   const sessions = new Map<string, FakeSession>()
 
   for (const session of [researcher, writer]) {
@@ -1946,12 +1978,90 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
 
   function findByRuntimeId(id: string): FakeSession | undefined {
     for (const session of state.sessions.values()) {
-      if (session.id === id) {
+      // A closed session's runtime id is GONE — `session.close` pops it out of
+      // the live map — so every session-scoped RPC still holding it answers
+      // 4001 until the client resumes the stored id.
+      if (session.id === id && !session.closed) {
         return session
       }
     }
 
     return undefined
+  }
+
+  /** The one session wearing this title, the way `get_session_by_title` answers. */
+  function titleHolder(title: string): FakeSession | undefined {
+    if (!title) {
+      return undefined
+    }
+
+    for (const session of state.sessions.values()) {
+      if (session.title === title) {
+        return session
+      }
+    }
+
+    return undefined
+  }
+
+  /**
+   * A live session, addressed the way a SESSION-SCOPED method addresses one.
+   *
+   * The runtime id and nothing else. Upstream's `_sess_nowait` is a plain
+   * `_sessions.get(session_id)` over the live map, so a stored id — which
+   * resolves perfectly well for `session.list`, `session.resume` and the REST
+   * routes — comes back 4001 here. The fake used to accept either for
+   * everything, which is exactly how a client can be written against the wrong
+   * id and still pass.
+   */
+  function requireLiveSession(id: string): FakeSession {
+    const session = findByRuntimeId(id)
+
+    if (!session) {
+      throw new RpcFault(4001, 'session not found')
+    }
+
+    return session
+  }
+
+  /**
+   * The roster, with each profile's canonical chat resolved by TITLE.
+   *
+   * `methods_profiles.py::_canonical_session_row` looks the row up with
+   * `db.get_session_by_title('Bot Chat')` on every call, so a profile whose
+   * chat has been renamed away reports no canonical session at all, and one
+   * whose title has moved to a new row reports the new row. A fixed snapshot
+   * cannot show either.
+   */
+  function profilesWithCanonical(): ProfileRow[] {
+    return state.profiles.map(profile => {
+      const holder = [...state.sessions.values()].find(
+        session => session.profile === profile.name && session.title === CANONICAL_CHAT_TITLE
+      )
+      const current = profile.canonical_session
+
+      if (!holder) {
+        const { canonical_session: _retired, ...rest } = profile
+
+        return rest
+      }
+
+      if (current?.id === holder.storedId) {
+        return profile
+      }
+
+      return {
+        ...profile,
+        canonical_session: {
+          id: holder.storedId,
+          resolved_id: holder.storedId,
+          title: holder.title,
+          preview: holder.messages[holder.messages.length - 1]?.text ?? '',
+          last_active: current?.last_active ?? nowSeconds(),
+          message_count: holder.messages.length
+        }
+      }
+    })
   }
 
   function resolveSession(id: string): FakeSession | undefined {
@@ -3044,7 +3154,7 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
         return { ok: true }
 
       case 'profiles.list':
-        return { profiles: state.profiles, bot_mode_protocol: true }
+        return { profiles: profilesWithCanonical(), bot_mode_protocol: true }
 
       /**
        * `ui_meta` and `description`, which are the two sections a bot editor
@@ -3158,9 +3268,14 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       case 'session.list': {
         const title = typeof params.title === 'string' ? params.title : null
         const profile = typeof params.profile === 'string' ? params.profile : null
+        // A hidden session leaves the default listing and comes back only when
+        // it is asked for. Canonical chats are hidden, which is why every
+        // caller that wants one sends `include_hidden: true`.
+        const includeHidden = params.include_hidden === true
         const rows = [...state.sessions.values()]
           .filter(session => (profile ? session.profile === profile : true))
           .filter(session => (title ? session.title === title : true))
+          .filter(session => includeHidden || !session.hidden)
           .map(session => ({
             id: session.storedId,
             resolved_id: session.storedId,
@@ -3174,8 +3289,26 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
 
       case 'session.create': {
         const profile = typeof params.profile === 'string' ? params.profile : 'default'
-        const session = makeSession(profile, typeof params.title === 'string' ? params.title : 'Bot Chat')
+        const wanted = typeof params.title === 'string' ? params.title : CANONICAL_CHAT_TITLE
+        /*
+          A title already held does NOT land, and the create still succeeds.
+
+          Upstream persists no row for an empty draft at all — the title rides as
+          `pending_title` until the first prompt, and the write it eventually
+          attempts goes through `_set_session_title`, which raises "Title 'Bot
+          Chat' is already in use by session …" when another row holds it. Either
+          way the new session does not get the name, so a client that creates
+          before it retires the old chat ends up with an untitled session the
+          canonical lookup cannot find — which is the failure this models.
+        */
+        const session = makeSession(profile, titleHolder(wanted) ? '' : wanted)
         session.messages = []
+        session.hidden = params.hidden === true
+
+        if (typeof params.parent_session_id === 'string' && params.parent_session_id) {
+          session.parentSessionId = params.parent_session_id
+        }
+
         state.sessions.set(session.storedId, session)
 
         return {
@@ -3187,11 +3320,98 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
         }
       }
 
+      /**
+       * `methods_session.py::session.title` — session-scoped, so the RUNTIME id.
+       *
+       * Without a `title` it reads; with one it writes, through
+       * `hermes_state_titles.py::_set_session_title`, whose two refusals are the
+       * whole reason this method is modelled at all.
+       */
+      case 'session.title': {
+        const session = requireLiveSession(String(params.session_id ?? ''))
+
+        if (!('title' in params)) {
+          return { title: session.title, session_key: session.storedId }
+        }
+
+        const title = String(params.title ?? '').trim()
+
+        if (!title) {
+          throw new RpcFault(4021, 'title required')
+        }
+
+        /*
+          The canonical guard. A HIDDEN session called `Bot Chat` may not be
+          renamed away from that title, because the title is how Bot Mode finds
+          it again — upstream raises this sentence word for word. Hidden is the
+          discriminator, and upstream says so beside the check: "a visible
+          session merely named 'Bot Chat' stays renameable". So a client that
+          wants to retire a canonical chat has to take it out of hiding first.
+        */
+        if (session.hidden && session.title === CANONICAL_CHAT_TITLE && title !== CANONICAL_CHAT_TITLE) {
+          throw new RpcFault(
+            4022,
+            "This is the bot's canonical Bot Chat — its name is its identity, and renaming it would " +
+              'orphan the conversation. To start fresh, create a new bot instead.'
+          )
+        }
+
+        const holder = titleHolder(title)
+
+        if (holder && holder !== session) {
+          throw new RpcFault(4022, `Title '${title}' is already in use by session ${holder.storedId}`)
+        }
+
+        session.title = title
+
+        return { pending: false, title, session_key: session.storedId }
+      }
+
+      /** `methods_session.py::session.set_hidden` — live runtime id first, else a stored one. */
+      case 'session.set_hidden': {
+        const wanted = String(params.session_id ?? '')
+        const session = findByRuntimeId(wanted) ?? state.sessions.get(wanted)
+
+        if (!session) {
+          throw new RpcFault(4001, 'session not found')
+        }
+
+        session.hidden = params.hidden === undefined ? true : params.hidden === true
+
+        return { hidden: session.hidden, session_key: session.storedId }
+      }
+
+      /**
+       * `methods_session.py::session.close` — pop the RUNTIME session.
+       *
+       * The stored row and its transcript are untouched; what goes is the live
+       * session and the id it was addressed by. A resume of the stored id builds
+       * a new one, which is why the runtime id changes across a close.
+       */
+      case 'session.close': {
+        const session = resolveSession(String(params.session_id ?? ''))
+
+        if (!session) {
+          return { closed: false }
+        }
+
+        session.closed = true
+
+        return { closed: true }
+      }
+
       case 'session.resume': {
         const session = resolveSession(String(params.session_id ?? ''))
 
         if (!session) {
           throw new Error(`Unknown session: ${String(params.session_id)}`)
+        }
+
+        if (session.closed) {
+          // Rebuilt, so a NEW runtime id — the gateway hands one out on every
+          // rebuild and the old one never comes back.
+          session.closed = false
+          session.id = `sid-${randomUUID().slice(0, 8)}`
         }
 
         const omit = params.omit_messages === true
@@ -4380,6 +4600,7 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       storedId: id,
       profile: 'subagent',
       title: goal,
+      hidden: false,
       seq: 0,
       ring: [],
       messages: [

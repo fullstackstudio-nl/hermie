@@ -53,7 +53,7 @@ import type { ChatCache } from '../../platform/chat-cache'
 import type { Bot, BotCanonicalSession, BotsState } from '../../store/bots'
 import type { ChatsState, QueuedMessage } from '../../store/chats'
 import { liveChatNames } from '../../store/chats'
-import type { BotsController } from '../bots/bots-controller'
+import { type BotsController, CANONICAL_CHAT_TITLE, createCanonicalSession } from '../bots/bots-controller'
 import {
   fileReferenceFor,
   FileUploadError,
@@ -177,6 +177,36 @@ export interface ChatControllerOptions {
  * is a protocol fact; the rest of it is prose upstream is free to reword.
  */
 const WANTS_DISPATCH_RE = /command\.dispatch/u
+
+/**
+ * The commands that start a fresh conversation, which this client runs ITSELF.
+ *
+ * `slash.exec` cannot do it. Upstream runs a worker command in a separate CLI
+ * process (`tui_gateway/methods_tools.py::slash.exec` → `_SlashWorker`), and
+ * `/new` there rotates THAT worker's session and prints "New session started!"
+ * — the live session this app is bound to is never touched. Only the commands
+ * in `_SLASH_MIRRORS` (`methods_slash.py`: model, approvals, personality,
+ * prompt, …) are mirrored back onto it, and `new` is not one of them. So the
+ * line arrived, the reader was told a new session had started, and the next
+ * message went to the same session with the same system prompt. Upstream's own
+ * desktop app intercepts these client-side for the same reason
+ * (`apps/desktop/src/lib/desktop-slash-commands.ts`).
+ *
+ * `new` with its upstream alias `reset`, plus `clear` — registered upstream as
+ * "Clear screen and start a new session", and a screen is not a thing this app
+ * has, so the second half is all of it that means anything here.
+ */
+const NEW_CONVERSATION_COMMANDS: ReadonlySet<string> = new Set(['new', 'reset', 'clear'])
+
+/**
+ * Which road a command takes.
+ *
+ * `local` is this client's own, and it exists so that the same catalogue lookup
+ * that tells the composer "this is a command, do not send it as prose" can also
+ * answer for a command the gateway would mishandle. See
+ * `NEW_CONVERSATION_COMMANDS`.
+ */
+export type SlashRoute = 'dispatch' | 'exec' | 'local'
 
 /** What a slash command left behind for the surface that ran it. */
 export interface SlashOutcome {
@@ -1830,6 +1860,13 @@ export class ChatController {
    * `/` and goes out as an ordinary prompt. Names, aliases and skills all count
    * — they are all things the gateway will run, though not all down the same
    * road; see `slashRouteFor`.
+   *
+   * The three conversation-starting commands answer yes whatever the catalogue
+   * says, INCLUDING before it has arrived. Every other command degrades
+   * harmlessly when the catalogue is late — the line goes out as a prompt, and
+   * the gateway understands a leading slash — but `/new` does not: sent as a
+   * prompt it becomes a message asking the MODEL to start a new session, which
+   * is the one shape of this bug worse than the bug itself.
    */
   knowsSlashCommand(botName: string, name: string): boolean {
     return this.slashRouteFor(botName, name) !== null
@@ -1846,14 +1883,21 @@ export class ChatController {
    * it. The fake gateway answered `/docx` with cheerful text, which is exactly
    * how a suite stays green over a command that cannot work.
    */
-  slashRouteFor(botName: string, name: string): 'dispatch' | 'exec' | null {
+  slashRouteFor(botName: string, name: string): SlashRoute | null {
+    const wanted = name.toLowerCase()
+
+    // Before the catalogue, and regardless of what it says: this client owns
+    // these three, and it owns them whether or not the gateway lists them.
+    if (NEW_CONVERSATION_COMMANDS.has(wanted)) {
+      return 'local'
+    }
+
     const catalog = this.slashCatalog(botName)
 
     if (!catalog || !name) {
       return null
     }
 
-    const wanted = name.toLowerCase()
     const named = (raw: string) => raw.replace(/^\//u, '').toLowerCase() === wanted
 
     if (Object.keys(catalog.skills ?? {}).some(named)) {
@@ -1899,8 +1943,19 @@ export class ChatController {
   }
 
   private async dispatchSlash(botName: string, command: string, depth: number): Promise<SlashOutcome> {
-    const sessionId = this.requireRuntime(botName)
     const { arg, name } = parseSlashCommand(command)
+
+    // BEFORE the catalogue lookup and before any round trip: a `/new` that
+    // reaches the gateway has already failed, whichever method carries it.
+    // Checked at every depth, so an alias resolving to one of these lands here
+    // too rather than on the worker.
+    if (NEW_CONVERSATION_COMMANDS.has(name)) {
+      await this.startNewConversation(botName, arg, command)
+
+      return {}
+    }
+
+    const sessionId = this.requireRuntime(botName)
     const result = await this.callSlash(botName, sessionId, command, name, arg)
     const directive = parseCommandDispatch(result)
 
@@ -1966,6 +2021,253 @@ export class ChatController {
 
         return {}
       }
+    }
+  }
+
+  /**
+   * Put this conversation away and start the next one, in place.
+   *
+   * Hermie's product model has no session browser: a bot has exactly ONE chat,
+   * the hidden session on its profile titled exactly `Bot Chat`, resolved by
+   * that title and nothing else (ADR-0007, and upstream's
+   * `methods_profiles.py::_canonical_session_row` → `get_session_by_title`).
+   * "Start fresh" therefore cannot mean "open another session" the way it does
+   * on the desktop. It means: RETIRE the conversation that holds the title, and
+   * mint the successor under it.
+   *
+   * The order is load-bearing and it is retire-then-create. The title is the
+   * registry key, so while the old row still wears it a second `Bot Chat` is
+   * either refused outright — `hermes_state_titles.py` raises "Title 'Bot Chat'
+   * is already in use by session …" — or, on a gateway that let it through,
+   * shadows the conversation it was meant to replace. Every step that can fail
+   * is rolled back towards "nothing happened", because the one outcome worse
+   * than `/new` doing nothing is `/new` leaving a bot with no chat.
+   *
+   * `arg` names the conversation being PUT AWAY, not the new one: the new one is
+   * `Bot Chat`, which is not a name this app is free to change.
+   */
+  async startNewConversation(botName: string, arg = '', command = '/new'): Promise<void> {
+    const sessionId = this.requireRuntime(botName)
+    const chat = this.chats.getState().chats[botName]
+    const storedId = chat?.storedSessionId
+    const bot = this.bots.getState().byName[botName]
+
+    if (!chat || !storedId || !bot) {
+      throw new Error(`${botName}'s chat is not attached to the gateway yet.`)
+    }
+
+    if (chat.turn.active) {
+      /*
+        A turn in flight is bound to the session it started in, and closing that
+        session underneath it would strand the answer somewhere the reader can
+        no longer see. Refusing is the honest move, and it is a refusal the
+        reader has to SEE — hence a command row rather than a thrown error the
+        composer would turn into a transient banner.
+      */
+      this.commandRow(
+        botName,
+        sessionId,
+        command,
+        'This bot is still working on the last turn. Let it finish, or stop it, and run this again — a conversation cannot be put away mid-answer.'
+      )
+
+      return
+    }
+
+    const stamped = `${CANONICAL_CHAT_TITLE} · ${localStamp(this.now())}`
+    const asked = arg.trim()
+    let retired = asked || stamped
+    let refusedName = ''
+
+    await this.unhideForRetire(botName, sessionId)
+
+    try {
+      await this.renameSession(botName, sessionId, retired)
+    } catch (error) {
+      if (!asked) {
+        await this.undoRetire(botName, sessionId, false)
+        this.commandRow(botName, sessionId, command, retireFailed(messageOf(error)))
+
+        return
+      }
+
+      /*
+        A refused title is nearly always the ARGUMENT — too long, or already
+        worn by another session — and what the owner asked for was a new
+        conversation, not that name. So the fallback runs and the notice says
+        what happened, rather than the whole command failing over a label.
+      */
+      refusedName = messageOf(error)
+      retired = stamped
+
+      try {
+        await this.renameSession(botName, sessionId, retired)
+      } catch (second) {
+        await this.undoRetire(botName, sessionId, false)
+        this.commandRow(botName, sessionId, command, retireFailed(messageOf(second)))
+
+        return
+      }
+    }
+
+    let created
+
+    try {
+      created = await createCanonicalSession(this.gateway, botName, { parentSessionId: storedId })
+    } catch (error) {
+      // Nothing was created, so the conversation now sitting under the retired
+      // name IS still this bot's chat. Its name goes back, or the next open
+      // finds no canonical row and mints a third one beside it.
+      await this.undoRetire(botName, sessionId, true)
+      this.commandRow(
+        botName,
+        sessionId,
+        command,
+        `The gateway would not start a new conversation (${messageOf(error)}). You are still in the one you were in.`
+      )
+
+      return
+    }
+
+    /*
+      Write the title onto the NEW session at once.
+
+      `session.create` deliberately persists no row for an empty draft
+      (`methods_session.py`: eagerly creating one "left an 'Untitled' empty
+      session behind for every launch the user never typed into"), so the title
+      and the hidden flag ride as `pending_title` / `pending_hidden` until the
+      first prompt. `session.title` takes the other road — `_ensure_session_db_row`,
+      which applies the queued hidden flag on the way — so the successor is a
+      real, findable, hidden `Bot Chat` before anybody has typed into it. Without
+      this, a relaunch before the first message would resolve no canonical row at
+      all and mint a third chat.
+
+      Best effort: the create landed, so the app is switching either way.
+    */
+    if (created.runtimeSessionId) {
+      try {
+        await this.renameSession(botName, created.runtimeSessionId, CANONICAL_CHAT_TITLE)
+      } catch (error) {
+        this.noteRpcFailure('session.title', error)
+      }
+    }
+
+    // A full conversation boundary, which is what upstream's own `/new` is. Best
+    // effort: a session the gateway has already reaped answers 4001, and the
+    // transcript is on disk either way.
+    try {
+      await this.gateway.request('session.close', { session_id: sessionId, profile: botName })
+    } catch (error) {
+      this.noteRpcFailure('session.close', error)
+    }
+
+    await this.switchCanonical(bot, created.canonical)
+
+    // In the NEW transcript, and last, so it is the only thing in it.
+    this.commandRow(
+      botName,
+      this.chats.getState().chats[botName]?.runtimeSessionId ?? '',
+      command,
+      newConversationNotice(retired, asked, refusedName)
+    )
+  }
+
+  /**
+   * Point this bot at a different canonical chat and open it.
+   *
+   * Everything keyed by the OLD session or by the bot is dropped and the normal
+   * open path runs again, rather than a second hydration written specially for
+   * this: `session.resume` binds the new runtime id, the empty transcript
+   * paints, the hydration states move in the order every other open moves them,
+   * and whatever was queued or parked on the old session goes with it.
+   */
+  private async switchCanonical(bot: Bot, canonical: BotCanonicalSession): Promise<void> {
+    const botName = bot.name
+    const previous = this.chats.getState().chats[botName]?.runtimeSessionId
+
+    // The roster is the one thing that would undo this, so it is told first —
+    // and told in a way a poll already in the air cannot reverse. See
+    // `canonicalPins` in the bots store.
+    this.bots.getState().setCanonical(botName, canonical)
+
+    if (previous) {
+      this.slashCatalogs.delete(previous)
+      this.parked.delete(previous)
+    }
+
+    this.windows.delete(botName)
+    this.loadingOlder.delete(botName)
+
+    /*
+      The transcript cache is keyed by BOT, not by session, so what is on disk is
+      the conversation just put away. Left there, `paintFromCache` would paint it
+      under the new session's ids and the history reconcile would merge an empty
+      live transcript into it — the new chat would open holding the old one.
+    */
+    if (this.cache) {
+      try {
+        await this.cache.forget(botName)
+      } catch {
+        // A cache that cannot be cleared is one more reason not to read it.
+      }
+    }
+
+    this.chats.getState().forget(botName)
+
+    await this.openChat({ ...bot, canonical })
+  }
+
+  /**
+   * Take the canonical chat out of hiding, so that its title can change at all.
+   *
+   * Upstream refuses to rename a HIDDEN session titled `Bot Chat` away from that
+   * title — `hermes_state_titles.py::_set_session_title` raises "This is the
+   * bot's canonical Bot Chat — its name is its identity, and renaming it would
+   * orphan the conversation." Hidden is the discriminator the guard tests, and
+   * upstream's own comment beside it says what that means: "a visible session
+   * merely named 'Bot Chat' stays renameable". So lifting the flag is the
+   * documented way past the guard rather than a trick played on it — and the
+   * retired conversation becoming an ordinary visible session is where a reader
+   * would go looking for it anyway.
+   *
+   * Best effort. A gateway without the guard does not need this, and one that
+   * refuses the call will refuse the rename next with a message worth reading.
+   */
+  private async unhideForRetire(botName: string, sessionId: string): Promise<void> {
+    try {
+      await this.gateway.request('session.set_hidden', { session_id: sessionId, profile: botName, hidden: false })
+    } catch (error) {
+      this.noteRpcFailure('session.set_hidden', error)
+    }
+  }
+
+  /**
+   * Rename the session a RUNTIME id names.
+   *
+   * The runtime id, not the durable one: `session.title` is session-scoped
+   * upstream (`_with_db(session_scoped=True)` over `_sess_nowait`), so it is
+   * looked up in the live `_sessions` map and a stored id comes back 4001
+   * "session not found". What it renames is that session's `session_key`, which
+   * IS the durable row.
+   */
+  private async renameSession(botName: string, sessionId: string, title: string): Promise<void> {
+    await this.gateway.request('session.title', { session_id: sessionId, profile: botName, title })
+  }
+
+  /** Undo a retire that could not be followed through; best effort throughout. */
+  private async undoRetire(botName: string, sessionId: string, renamed: boolean): Promise<void> {
+    if (renamed) {
+      try {
+        await this.renameSession(botName, sessionId, CANONICAL_CHAT_TITLE)
+      } catch (error) {
+        this.noteRpcFailure('session.title', error)
+      }
+    }
+
+    try {
+      await this.gateway.request('session.set_hidden', { session_id: sessionId, profile: botName, hidden: true })
+    } catch (error) {
+      this.noteRpcFailure('session.set_hidden', error)
     }
   }
 
@@ -2326,6 +2628,34 @@ export class ChatController {
 
     return chat.runtimeSessionId
   }
+}
+
+const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
+
+/** `2026-09-21 23:16`, in the reader's own zone — a retired chat is filed by when they left it. */
+function localStamp(now: number): string {
+  const at = new Date(now)
+  const pad = (value: number): string => String(value).padStart(2, '0')
+
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`
+}
+
+const retireFailed = (reason: string): string =>
+  `The gateway would not put this conversation away (${reason}), so nothing was changed.`
+
+/** What `/new` says once it has worked; the retired name is the whole point of it. */
+function newConversationNotice(retired: string, asked: string, refusedName: string): string {
+  const kept = `New conversation started. The previous one is kept as “${retired}”.`
+
+  if (refusedName) {
+    return `${kept} The gateway would not take “${asked}” (${refusedName}), so it was filed under its own name instead.`
+  }
+
+  if (asked) {
+    return `${kept} A name given to this command goes on the conversation being put away, not on the new one — a bot's chat is always called “${CANONICAL_CHAT_TITLE}”.`
+  }
+
+  return kept
 }
 
 /**
