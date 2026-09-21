@@ -7,6 +7,7 @@
 import { parseArgs } from 'node:util'
 
 import { DEFAULT_GATEWAY_URL, DEFAULT_HOST, DEFAULT_PORT, describeHost, resolveOptions } from './options'
+import { login } from './push/login'
 import { rollback } from './update'
 import { startHermieWeb } from './server'
 
@@ -24,13 +25,24 @@ const HELP = [
   '  --rollback           switch `current` back to the previous release and exit',
   '  --help',
   '',
+  'Push (ADR-0017 \u2014 docs/web.md has the whole of it):',
+  '',
+  '  --push               also watch every Bot Chat and notify registered devices',
+  '  --gateway-token <t>  the session token an ungated gateway takes (env HERMIE_GATEWAY_TOKEN)',
+  '  --state-dir <dir>    watch state, VAPID keys and any stored sign-in (env HERMIE_STATE_DIR)',
+  '  --vapid-subject <u>  mailto: or https: contact in the VAPID token (env HERMIE_VAPID_SUBJECT)',
+  '',
+  '  hermie-web login [--provider <name>] [--redirect-port <n>]',
+  '                       sign in to an OIDC-gated gateway once, for --push. Prints the',
+  '                       authorisation URL and listens on a loopback redirect port.',
+  '',
   'Binding to anything but a loopback address puts an unauthenticated port on the',
   'network. Put TLS in front of it — Caddy, nginx or Tailscale Serve; deploy/web/README.md',
   'has the configurations.'
 ].join('\n')
 
 async function main(): Promise<void> {
-  const { values } = parseArgs({
+  const { positionals, values } = parseArgs({
     options: {
       gateway: { type: 'string' },
       port: { type: 'string' },
@@ -40,8 +52,15 @@ async function main(): Promise<void> {
       'install-root': { type: 'string' },
       'no-self-update': { type: 'boolean', default: false },
       rollback: { type: 'boolean', default: false },
+      push: { type: 'boolean', default: false },
+      'gateway-token': { type: 'string' },
+      'state-dir': { type: 'string' },
+      'vapid-subject': { type: 'string' },
+      provider: { type: 'string' },
+      'redirect-port': { type: 'string' },
       help: { type: 'boolean', default: false }
-    }
+    },
+    allowPositionals: true
   })
 
   if (values.help) {
@@ -57,8 +76,31 @@ async function main(): Promise<void> {
     publicUrl: values['public-url'],
     staticDir: values.static,
     installRoot: values['install-root'],
+    gatewayToken: values['gateway-token'],
+    stateDir: values['state-dir'],
+    vapidSubject: values['vapid-subject'],
+    ...(values.push ? { push: true } : {}),
     ...(values['no-self-update'] ? { selfUpdate: false } : {})
   })
+
+  // A subcommand, not a flag: it is interactive, it exits when it is done, and
+  // it is the one thing here that never starts a server.
+  if (positionals[0] === 'login') {
+    const port = values['redirect-port'] ? Number.parseInt(values['redirect-port'], 10) : undefined
+
+    if (port !== undefined && (!Number.isInteger(port) || port < 1 || port > 65_535)) {
+      throw new Error(`--redirect-port must be a number between 1 and 65535 (got ${values['redirect-port']}).`)
+    }
+
+    await login({
+      gatewayUrl: options.gatewayUrl,
+      stateDir: options.stateDir,
+      provider: values.provider,
+      ...(port === undefined ? {} : { port })
+    })
+
+    return
+  }
 
   if (values.rollback) {
     const version = await rollback(options.installRoot)
@@ -74,13 +116,21 @@ async function main(): Promise<void> {
     publicUrl: options.publicUrl,
     staticDir: options.staticDir,
     installRoot: options.installRoot,
-    selfUpdate: options.selfUpdate
+    selfUpdate: options.selfUpdate,
+    push: options.push,
+    gatewayToken: options.gatewayToken,
+    stateDir: options.stateDir,
+    vapidSubject: options.vapidSubject
   })
 
   console.warn(`hermie-web ${options.version} on http://${describeHost(options.host)}:${server.port}`)
   console.warn(`  gateway    ${options.gatewayUrl}`)
   console.warn(`  public url ${options.publicUrl} (sent as Host and Origin)`)
   console.warn(`  static     ${options.staticDir}`)
+
+  if (options.push) {
+    console.warn(`  push       on, state in ${options.stateDir}`)
+  }
 
   const stop = () => {
     void server.close().then(() => process.exit(0))

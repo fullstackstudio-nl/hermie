@@ -21,6 +21,7 @@ import type { AddressInfo } from 'node:net'
 import type { Duplex } from 'node:stream'
 
 import { type HermieWebOptions, isGatewayPath, resolveOptions, type ResolveOptionsInput } from './options'
+import { type PushDaemon, startPushDaemon } from './push/daemon'
 import { proxyHttp, proxyUpgrade } from './proxy'
 import { serveIndex, serveStatic } from './static-files'
 import {
@@ -37,6 +38,8 @@ export interface HermieWebServer {
   url: string
   port: number
   options: HermieWebOptions
+  /** The push daemon, when `--push` asked for one. */
+  push: PushDaemon | null
   close(): Promise<void>
 }
 
@@ -45,6 +48,8 @@ export interface StartOptions extends ResolveOptionsInput {
   releaseCache?: ReleaseCache
   /** Injected by the tests so nothing exits the test runner. */
   restart?: () => void
+  /** Injected by the tests so `--push` never dials a real gateway. */
+  socketFactory?: (url: string, protocols?: string[]) => WebSocket
 }
 
 function json(response: ServerResponse, status: number, body: unknown): void {
@@ -221,12 +226,35 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
   })
 
   const port = (server.address() as AddressInfo).port
+  /*
+    The daemon is started AFTER the listener is up, and its failure is not the
+    server's. A gateway that is briefly unreachable, a state directory that is
+    not writable yet — none of those should mean the browser build stops being
+    served, because serving it is the thing this process does that nothing else
+    can do for it.
+  */
+  const push = options.push
+    ? await startPushDaemon({
+        gatewayUrl: options.gatewayUrl,
+        gatewayToken: options.gatewayToken,
+        stateDir: options.stateDir,
+        ...(input.socketFactory ? { socketFactory: input.socketFactory } : {})
+      }).catch((error: unknown) => {
+        console.error(`hermie-web: push did not start — ${String(error)}`)
+
+        return null
+      })
+    : null
 
   return {
     url: `http://${options.host.includes(':') ? `[${options.host}]` : options.host}:${port}`,
     port,
     options,
-    close: () => closeServer(server)
+    push,
+    close: async () => {
+      await push?.stop().catch(() => undefined)
+      await closeServer(server)
+    }
   }
 }
 
