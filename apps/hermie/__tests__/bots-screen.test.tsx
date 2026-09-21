@@ -8,6 +8,7 @@
 import { fireEvent, screen } from '@testing-library/react-native'
 
 import { BotsScreen } from '../src/features/bots'
+import { strings } from '../src/i18n/strings'
 import { type Bot, useBotsStore } from '../src/store/bots'
 import { useChatLayoutStore } from '../src/store/chat-layout'
 import { useChatsStore } from '../src/store/chats'
@@ -210,20 +211,48 @@ describe('BotsScreen', () => {
 describe('edit mode', () => {
   beforeEach(seedRoster)
 
-  it('reveals the move controls and the folder action, and hides them again', () => {
+  it('reveals the grab handle and the folder action, and hides them again', () => {
     renderScreen(<BotsScreen />)
 
-    expect(screen.queryByTestId('bot-move-up-writer')).toBeNull()
+    expect(screen.queryByTestId('bot-drag-handle-writer')).toBeNull()
 
     fireEvent.press(screen.getByTestId('bots-edit'))
-    expect(screen.getByTestId('bot-move-up-writer')).toBeTruthy()
+    expect(screen.getByTestId('bot-drag-handle-writer')).toBeTruthy()
     expect(screen.getByTestId('add-folder')).toBeTruthy()
 
     fireEvent.press(screen.getByTestId('bots-edit'))
-    expect(screen.queryByTestId('bot-move-up-writer')).toBeNull()
+    expect(screen.queryByTestId('bot-drag-handle-writer')).toBeNull()
   })
 
-  it('reorders a bot with the explicit control', () => {
+  /**
+   * The column is ONE thing to hold, not three things to aim at.
+   *
+   * It used to carry a pair of ↑/↓ buttons inside a 26pt handle, which put
+   * three tap targets in the space of one and made the outer one — the thing a
+   * reader is meant to grab — the hardest of the three to hit.
+   */
+  it('draws no arrows at all, on any row', () => {
+    renderScreen(<BotsScreen />)
+    fireEvent.press(screen.getByTestId('bots-edit'))
+
+    for (const name of ['researcher', 'writer']) {
+      expect(screen.queryByTestId(`bot-move-up-${name}`)).toBeNull()
+      expect(screen.queryByTestId(`bot-move-down-${name}`)).toBeNull()
+    }
+  })
+
+  it('says what the grip is for, so holding it is discoverable', () => {
+    renderScreen(<BotsScreen />)
+    fireEvent.press(screen.getByTestId('bots-edit'))
+
+    expect(screen.getByTestId('bot-drag-handle-writer').props.accessibilityLabel).toBe(strings.layout.dragHint)
+  })
+
+  /**
+   * Reordering a step at a time did not go with the arrows: it moved to the
+   * row, where VoiceOver's rotor and a keyboard both already look.
+   */
+  it('reorders a bot from the row’s accessibility actions', () => {
     renderScreen(<BotsScreen />)
     fireEvent.press(screen.getByTestId('bots-edit'))
 
@@ -232,12 +261,59 @@ describe('edit mode', () => {
       'writer'
     ])
 
-    fireEvent.press(screen.getByTestId('bot-move-up-writer'))
+    const row = screen.getByTestId('bot-row-writer')
+
+    expect(row.props.accessibilityActions).toEqual([
+      { name: 'moveUp', label: strings.layout.moveUp },
+      { name: 'moveDown', label: strings.layout.moveDown }
+    ])
+
+    fireEvent(row, 'accessibilityAction', { nativeEvent: { actionName: 'moveUp' } })
 
     expect(useChatLayoutStore.getState().entries.map(entry => entry.kind === 'chat' && entry.name)).toEqual([
       'writer',
       'researcher'
     ])
+
+    fireEvent(screen.getByTestId('bot-row-writer'), 'accessibilityAction', {
+      nativeEvent: { actionName: 'moveDown' }
+    })
+
+    expect(useChatLayoutStore.getState().entries.map(entry => entry.kind === 'chat' && entry.name)).toEqual([
+      'researcher',
+      'writer'
+    ])
+  })
+
+  it('offers no reorder actions at all while the list is not being edited', () => {
+    renderScreen(<BotsScreen />)
+
+    expect(screen.getByTestId('bot-row-writer').props.accessibilityActions).toBeUndefined()
+  })
+
+  /**
+   * A folder reorders from its own menu and its own accessibility actions.
+   *
+   * It has no grip: dragging a FOLDER is not implemented — `use-row-drag` is
+   * keyed by bot name throughout and commits through `dropBot` — and a handle
+   * labelled "Hold to drag" that cannot be dragged is a worse affordance than
+   * none. These two paths are what a folder can actually be reordered by.
+   */
+  it('reorders a folder from its accessibility actions', () => {
+    renderScreen(<BotsScreen />)
+    fireEvent.press(screen.getByTestId('bots-edit'))
+    fireEvent.press(screen.getByTestId('add-folder'))
+
+    const id = useChatLayoutStore.getState().folders[0]?.id ?? ''
+
+    expect(useChatLayoutStore.getState().entries.at(-1)).toEqual({ kind: 'folder', id })
+
+    fireEvent(screen.getByTestId(`folder-${id}`), 'accessibilityAction', {
+      nativeEvent: { actionName: 'moveUp' }
+    })
+
+    expect(useChatLayoutStore.getState().entries.at(-1)).not.toEqual({ kind: 'folder', id })
+    expect(useChatLayoutStore.getState().entries[1]).toEqual({ kind: 'folder', id })
   })
 
   it('adds a folder and keeps it on screen while it is still empty', () => {

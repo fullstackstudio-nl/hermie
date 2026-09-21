@@ -237,6 +237,9 @@ export function BotsScreen({
   const moveBot = useCallback((name: string, offset: number) => {
     useChatLayoutStore.getState().moveBy(name, offset)
   }, [])
+  const moveFolder = useCallback((folderId: string, offset: number) => {
+    useChatLayoutStore.getState().moveFolderBy(folderId, offset)
+  }, [])
 
   useEffect(() => {
     // Running state is polled only while this list is mounted; an unwatched
@@ -803,6 +806,11 @@ export function BotsScreen({
 
         return
 
+      case 'move':
+        layout.moveFolderBy(folderId, action.offset)
+
+        return
+
       case 'mute': {
         const until = muteUntil(action.duration, Math.floor(Date.now() / 1000))
 
@@ -951,6 +959,7 @@ export function BotsScreen({
                     editing={editing}
                     folder={item.folder}
                     onMenuSelect={onFolderMenuSelect}
+                    onMove={moveFolder}
                     onRename={renameFolder}
                     onToggle={toggleFolder}
                     open={item.open}
@@ -1335,6 +1344,7 @@ function FolderHeader({
   editing,
   folder,
   onMenuSelect,
+  onMove,
   onRename,
   onToggle,
   open
@@ -1344,6 +1354,8 @@ function FolderHeader({
   editing: boolean
   folder: Folder
   onMenuSelect: (folderId: string, id: string) => void
+  /** Edit mode only: one position up or down among the top-level entries. */
+  onMove?: (folderId: string, offset: number) => void
   /** Turns edit mode on with this folder's field focused; the menu's Rename. */
   onRename?: (id: string) => void
   onToggle: (id: string, open: boolean) => void
@@ -1372,8 +1384,26 @@ function FolderHeader({
     .filter(Boolean)
     .join(', ')
 
+  /* The same pair the chat rows carry, for the readers a grip does not serve. */
+  const reorderable = editing && Boolean(onMove)
+
   const heading = (
     <Pressable
+      {...(reorderable
+        ? {
+            accessibilityActions: [
+              { name: 'moveUp', label: strings.layout.moveUp },
+              { name: 'moveDown', label: strings.layout.moveDown }
+            ],
+            onAccessibilityAction: (event: { nativeEvent: { actionName: string } }) => {
+              if (event.nativeEvent.actionName === 'moveUp') {
+                onMove?.(folder.id, -1)
+              } else if (event.nativeEvent.actionName === 'moveDown') {
+                onMove?.(folder.id, 1)
+              }
+            }
+          }
+        : {})}
       accessibilityHint={open ? strings.layout.collapseFolder(folder.name) : strings.layout.expandFolder(folder.name)}
       accessibilityLabel={label}
       accessibilityRole="button"

@@ -59,6 +59,7 @@ export type IconName =
   | 'arrowUp'
   | 'queue'
   | 'bellSlash'
+  | 'grip'
 
 export interface IconProps {
   name: IconName
@@ -322,5 +323,34 @@ function Glyph({ color, name, stroke }: { color: string; name: IconName; stroke:
      */
     case 'arrowUp':
       return <Line color={color} d="M12 19.2V5.6M6.6 11L12 5.6L17.4 11" stroke={stroke} />
+
+    /**
+     * The drag handle every other list in the world draws: six dots in two
+     * columns.
+     *
+     * Filled dots rather than two stroked columns, for the same reason
+     * `ellipsis` is: at the size a handle is drawn a ring of this radius closes
+     * into a blob anyway, and a blob with a lighter middle reads as a printing
+     * fault.
+     *
+     * It replaces a pair of ↑/↓ buttons. Those were two 15pt text glyphs in a
+     * 26pt column — three tap targets stacked in the space of one, where the
+     * outer one (the column) was already the thing a reader is meant to hold —
+     * so a finger aiming at the drag got a single-step move instead. Reordering
+     * by keyboard and by screen reader did not go with them: it moved to the
+     * row's `accessibilityActions` and to its context menu, which is where
+     * assistive technology looks for it and where a mouse can reach it too.
+     */
+    case 'grip':
+      return (
+        <>
+          {[8.2, 12, 15.8].map(y => (
+            <Circle cx={9.2} cy={y} fill={color} key={`l${y}`} r={1.5} />
+          ))}
+          {[8.2, 12, 15.8].map(y => (
+            <Circle cx={14.8} cy={y} fill={color} key={`r${y}`} r={1.5} />
+          ))}
+        </>
+      )
   }
 }

@@ -23,7 +23,7 @@ import { Icon, ICON_SIZE } from '../../ui/Icon'
 import { PresenceBead } from '../../ui/PresenceBead'
 import { Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
-import { AVATAR_SIZE, ROW_HEIGHT, TAP_SLOP, type AccentName } from '../../ui/tokens'
+import { AVATAR_SIZE, ROW_HEIGHT, type AccentName } from '../../ui/tokens'
 import type { Presence } from './presence'
 import { rowMenuItems } from './row-menu-items'
 import { useRowPreview } from './row-preview'
@@ -171,23 +171,19 @@ export const BotRow = memo(function BotRow({
           // cannot mean anything else, so there is nothing for a long press to
           // disambiguate. It is `View` and not `Pressable` on purpose — a pressable
           // would claim the touch before the pan responder saw it.
+          //
+          // It used to hold a pair of ↑/↓ buttons, which put three tap targets in
+          // one 26pt column and made the outer one — the thing a reader is
+          // actually meant to hold — the hardest of the three to hit. The grip
+          // says "hold me" and nothing else; reordering a step at a time moved to
+          // the accessibility actions and the context menu below, where a
+          // keyboard and a screen reader both already look.
           accessibilityLabel={strings.layout.dragHint}
-          style={{ alignItems: 'center', gap: 2, width: 26 }}
+          style={{ alignItems: 'center', justifyContent: 'center', width: 26 }}
           testID={`bot-drag-handle-${bot.name}`}
           {...(handleHandlers ?? {})}
         >
-          <MoveButton
-            direction="up"
-            label={`${strings.layout.moveUp}: ${bot.displayName}`}
-            onPress={() => onMove?.(bot.name, -1)}
-            testID={`bot-move-up-${bot.name}`}
-          />
-          <MoveButton
-            direction="down"
-            label={`${strings.layout.moveDown}: ${bot.displayName}`}
-            onPress={() => onMove?.(bot.name, 1)}
-            testID={`bot-move-down-${bot.name}`}
-          />
+          <Icon color={theme.colors.textMuted} name="grip" size={ICON_SIZE.control} />
         </View>
       ) : null}
 
@@ -264,8 +260,40 @@ export const BotRow = memo(function BotRow({
     </View>
   )
 
+  /**
+   * Reordering without a drag, for everybody a drag does not serve.
+   *
+   * VoiceOver's rotor and a keyboard both read `accessibilityActions`, so this
+   * is where "one step up" lives now that the arrows are gone — and unlike the
+   * buttons it replaces, it is offered on the ROW rather than on a 26pt column,
+   * which is the element assistive technology is focused on anyway.
+   *
+   * Only while the list is in edit mode and the row can move: an archived chat
+   * is drawn in the drawer and has no position to move within, and advertising
+   * an action that does nothing is worse than not advertising it.
+   */
+  const reorderable = editing && !archived && Boolean(onMove)
+  const moveActions = reorderable
+    ? [
+        { name: 'moveUp', label: strings.layout.moveUp },
+        { name: 'moveDown', label: strings.layout.moveDown }
+      ]
+    : []
+
   const pressable = (
     <Pressable
+      {...(reorderable
+        ? {
+            accessibilityActions: moveActions,
+            onAccessibilityAction: (event: { nativeEvent: { actionName: string } }) => {
+              if (event.nativeEvent.actionName === 'moveUp') {
+                onMove?.(bot.name, -1)
+              } else if (event.nativeEvent.actionName === 'moveDown') {
+                onMove?.(bot.name, 1)
+              }
+            }
+          }
+        : {})}
       accessibilityLabel={label}
       accessibilityRole="button"
       aria-selected={selected}
@@ -340,32 +368,6 @@ export const BotRow = memo(function BotRow({
     </ContextMenuHost>
   )
 })
-
-function MoveButton({
-  direction,
-  label,
-  onPress,
-  testID
-}: {
-  direction: 'up' | 'down'
-  label: string
-  onPress: () => void
-  testID: string
-}) {
-  return (
-    <Pressable
-      accessibilityLabel={label}
-      accessibilityRole="button"
-      hitSlop={TAP_SLOP}
-      onPress={onPress}
-      testID={testID}
-    >
-      <Text color="textMuted" style={{ fontSize: 15, lineHeight: 17 }}>
-        {direction === 'up' ? '↑' : '↓'}
-      </Text>
-    </Pressable>
-  )
-}
 
 /**
  * A number when the app can count, a dot when it cannot.

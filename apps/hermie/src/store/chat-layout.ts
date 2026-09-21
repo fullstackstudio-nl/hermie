@@ -128,6 +128,15 @@ export interface ChatLayoutState {
   dropBot: (botName: string, folderId: string | null, index: number) => void
   /** Commit a drag of a folder itself, to `index` of the top level. */
   dropFolder: (folderId: string, index: number) => void
+  /**
+   * One step up or down among the TOP-LEVEL entries.
+   *
+   * The folder twin of `moveBy`, and it exists for the same readers: the grip
+   * is a gesture, and a keyboard and a screen reader need a way to reorder that
+   * is not one. A step counts every top-level entry — folders and loose chats
+   * alike — because that is what "up" means to somebody looking at the rows.
+   */
+  moveFolderBy: (folderId: string, offset: number) => void
   /** A new, empty folder at the end. Answers its id, for the rename field. */
   addFolder: (name: string) => string
   /** A new folder holding just this chat, so the row you asked from starts it. */
@@ -414,6 +423,38 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
 
     dropFolder(folderId, index) {
       write(moveFolderTo(arrangementOf(), folderId, index))
+    },
+
+    moveFolderBy(folderId, offset) {
+      if (offset === 0) {
+        return
+      }
+
+      const arrangement = arrangementOf()
+      const from = arrangement.entries.findIndex(entry => entry.kind === 'folder' && entry.id === folderId)
+
+      if (from === -1) {
+        return
+      }
+
+      const to = Math.max(0, Math.min(arrangement.entries.length - 1, from + offset))
+
+      if (to === from) {
+        return
+      }
+
+      /*
+        `to` unchanged, in BOTH directions, and it is worth saying why the
+        correction `moveBy` needs is absent here.
+
+        `moveFolderTo` splices into the list it has ALREADY taken the folder out
+        of. Stepping down, the entry the folder is moving past has shifted up by
+        one, so the full-list position `to` and the reduced-list insertion point
+        `to` are the same index. Stepping up, nothing above the folder moved, so
+        `to` is unchanged for the other reason. `moveBotTo` differs because it
+        is given a position in the container as the CALLER sees it.
+      */
+      write(moveFolderTo(arrangement, folderId, to))
     },
 
     addFolder(name) {

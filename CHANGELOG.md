@@ -33,6 +33,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still excludes muted chats, because that one is a summons rather than a tally. ADR-0019 said the
   wrong rule for both numbers and now states the split.
 
+### Changed
+
+- **One grip to hold, instead of two arrows to aim at.** A chat row in edit mode carried a pair of
+  ↑/↓ buttons inside its 26pt drag column, which put three tap targets in the space of one and made
+  the outer one — the thing a reader is meant to grab — the hardest of the three to hit. The column
+  is now a single six-dot grip labelled "Hold to drag", and nothing in the row is an arrow. Stepping
+  one position at a time did not go with them: it is on the row's own accessibility actions, where
+  VoiceOver's rotor and a keyboard both already look, and in the row's context menu as before. A
+  folder gains the same pair in its menu and its accessibility actions.
+
 ## [0.1.1] - 2026-09-22
 
 

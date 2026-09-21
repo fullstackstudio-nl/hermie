@@ -333,7 +333,10 @@ export const strings = {
     moveToFolderMenu: 'Move to folder',
     openChat: 'Open',
     markRead: 'Mark as read',
-    dragHint: 'Hold and drag to reorder.',
+    // The grip's own label, and the whole of what it says: hold it. The arrows
+    // that used to live in this column are gone, and stepping one position at a
+    // time is on the row's accessibility actions and in its menu instead.
+    dragHint: 'Hold to drag',
     dragging: (name: string) => `Moving ${name}`,
     archive: 'Archive',
     unarchive: 'Unarchive',

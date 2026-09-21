@@ -216,6 +216,58 @@ describe('folders', () => {
     expect(store().folders.find(folder => folder.id === id)?.bots).toEqual(['writer'])
     expect(top()).toEqual(['researcher', '#Money'])
   })
+
+  /**
+   * A folder moves a step at a time too, for the readers a grip does not serve.
+   *
+   * A step counts every top-level entry — folders and loose chats alike —
+   * because that is what "up" means to somebody looking at the rows.
+   */
+  describe('moving a folder a step at a time', () => {
+    it('steps up past a loose chat', () => {
+      const id = store().addFolder('Finance')
+
+      expect(top()).toEqual(['researcher', 'writer', '#Finance'])
+
+      store().moveFolderBy(id, -1)
+      expect(top()).toEqual(['researcher', '#Finance', 'writer'])
+
+      store().moveFolderBy(id, -1)
+      expect(top()).toEqual(['#Finance', 'researcher', 'writer'])
+    })
+
+    it('steps back down again, which is the index correction', () => {
+      const id = store().addFolder('Finance')
+
+      store().moveFolderBy(id, -2)
+      expect(top()).toEqual(['#Finance', 'researcher', 'writer'])
+
+      store().moveFolderBy(id, 1)
+      expect(top()).toEqual(['researcher', '#Finance', 'writer'])
+
+      store().moveFolderBy(id, 1)
+      expect(top()).toEqual(['researcher', 'writer', '#Finance'])
+    })
+
+    it('stops at the ends rather than wrapping', () => {
+      const id = store().addFolder('Finance')
+
+      store().moveFolderBy(id, 9)
+      expect(top()).toEqual(['researcher', 'writer', '#Finance'])
+
+      store().moveFolderBy(id, -9)
+      expect(top()).toEqual(['#Finance', 'researcher', 'writer'])
+    })
+
+    it('does nothing for a folder that is not there, and for no offset', () => {
+      const id = store().addFolder('Finance')
+
+      store().moveFolderBy('nothing', -1)
+      store().moveFolderBy(id, 0)
+
+      expect(top()).toEqual(['researcher', 'writer', '#Finance'])
+    })
+  })
 })
 
 describe('open and closed, on this device only', () => {

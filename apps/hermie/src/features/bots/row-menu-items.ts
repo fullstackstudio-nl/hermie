@@ -250,6 +250,8 @@ export type FolderMenuAction =
   | { kind: 'delete' }
   | { kind: 'mute'; duration: MuteDuration }
   | { kind: 'unmute' }
+  /** One step up or down among the top-level entries. `-1` or `1`. */
+  | { kind: 'move'; offset: number }
 
 /**
  * What a folder can do.
@@ -286,6 +288,11 @@ export function folderMenuItems(model: FolderMenuModel): MenuItem[] {
           : item
     ),
     { id: 'newFolder', title: strings.layout.newFolder, systemImage: 'folder.badge.plus' },
+    // The same pair the chat rows carry, and here for the same reason: the grip
+    // is a gesture, and a mouse, a keyboard and a screen reader all need a way
+    // to reorder that is not one.
+    { id: 'move:-1', title: strings.layout.moveUp, systemImage: 'arrow.up' },
+    { id: 'move:1', title: strings.layout.moveDown, systemImage: 'arrow.down' },
     { id: 'delete', title: strings.layout.deleteFolder, systemImage: 'trash', destructive: true }
   )
 }
@@ -303,6 +310,9 @@ export function parseFolderMenuAction(id: string): FolderMenuAction | null {
 
     case 'newFolder':
       return { kind: 'newFolder' }
+
+    case 'move':
+      return tail === '-1' || tail === '1' ? { kind: 'move', offset: Number(tail) } : null
 
     case 'accent':
       return (ACCENT_ORDER as readonly string[]).includes(tail) ? { kind: 'colour', accent: tail as AccentName } : null
