@@ -112,6 +112,7 @@ import { Button, InsetButtonRow, InsetGroup, Screen, Text } from '../../ui/primi
 import { ApprovalSheet, ChatOptionsSheet, ClarifySheet } from '../../ui/sheets'
 import { useTheme } from '../../ui/theme'
 import type { AccentName } from '../../ui/tokens'
+import { AppearanceSection } from './AppearanceSection'
 
 export interface GalleryScreenProps {
   onClose?: () => void
@@ -789,6 +790,20 @@ const SECTIONS: readonly GallerySection[] = [
     title: 'Approval sheet — answered elsewhere',
     sheet: 'approvalAnswered',
     render: () => null
+  },
+  {
+    /*
+      Settings → Appearance, mounted alone.
+
+      It is the REAL section, not a drawing of one: `AppearanceSection` is the
+      component `SettingsScreen` renders, so what is photographed here is what a
+      reader gets. It exists as a section because Appearance sits four groups
+      down a scrolling screen, and a simulator this machine can only launch
+      cannot scroll to it.
+    */
+    id: 'appearance',
+    title: 'Settings — Appearance',
+    render: () => <AppearanceSection onOpenAdvanced={() => undefined} />
   },
   { id: 'sheet-clarify', title: 'Clarify sheet', sheet: 'clarify', render: () => null },
   { id: 'sheet-agents', title: 'Agents sheet', sheet: 'agents', render: () => null },

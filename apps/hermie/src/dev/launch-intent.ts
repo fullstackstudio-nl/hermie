@@ -65,6 +65,7 @@
  * | `--hermieOpen sheet:<name>`   | shorthand for that sheet's gallery section       |
  * | `--hermieOpen chat:<handle>`  | the real chat screen for that bot                |
  * | `--hermieOpen overlay:<s>[/p]`| Activity / Crons / Settings, and a settings page |
+ * | `--hermieOpen gallery:appearance` | Settings → Appearance, alone            |
  * | `--hermieTheme light\|dark`   | pin the scheme, whatever the simulator is set to |
  * | `--hermiePreset <name>`       | pin the theme preset                             |
  * | `--hermieGateway <url>`       | seed that gateway and skip the wizard            |
@@ -95,7 +96,7 @@ import { type Scheme } from '../ui/tokens'
 export type DevOverlaySection = 'activity' | 'cron' | 'settings'
 
 /** A page Settings opens over itself; the wide layout has no navigator for it. */
-export type DevSettingsPage = 'connection' | 'gallery' | 'licences'
+export type DevSettingsPage = 'connection' | 'gallery' | 'licences' | 'themes'
 
 export type DevOpenTarget =
   | { kind: 'gallery'; section: string }
@@ -151,7 +152,8 @@ const SETTINGS_PAGES: Record<string, DevSettingsPage> = {
   'connection-test': 'connection',
   gallery: 'gallery',
   licences: 'licences',
-  licenses: 'licences'
+  licenses: 'licences',
+  themes: 'themes'
 }
 
 /** `sheet:approval` → the gallery section that holds the approval sheet. */
