@@ -236,6 +236,8 @@ export type NoticeKind =
   | 'process_complete'
   | 'async_delegation_complete'
   | 'internal_notification'
+  /** A `[System: …]` note nothing labelled, its wrapper already taken off. */
+  | 'system_note'
   | 'error'
   | 'notice'
   | 'reclaimed'

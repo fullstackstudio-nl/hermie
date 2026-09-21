@@ -11,14 +11,19 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  cronjobResponseText,
   delegationBatchText,
   kanbanNotificationText,
+  modelSwitchMarkerText,
+  personalitySwitchMarkerText,
   plainProcessText,
+  planningPreservedText,
   priorContextText,
   steerWrapperBody,
-  steerWrapperText
+  steerWrapperText,
+  todoInjectionText
 } from './__fixtures__/rows'
-import { isInjectedRow, parseInjectedRow, stripSteerWrapper } from './injected'
+import { isInjectedRow, parseInjectedRow, stripSteerWrapper, unwrapSystemNote } from './injected'
 
 describe('the headers the gateway injects', () => {
   it('reads a fan-out report as delegation work that finished', () => {
@@ -131,5 +136,92 @@ describe('the steer wrapper', () => {
   it('survives anything that is not a string', () => {
     expect(stripSteerWrapper(null)).toBeNull()
     expect(stripSteerWrapper(7)).toBeNull()
+  })
+})
+
+describe('the scaffolding that does not shout', () => {
+  it('reads a model-switch marker as a system note, without its wrapper', () => {
+    expect(parseInjectedRow(modelSwitchMarkerText)).toEqual({
+      noticeKind: 'system_note',
+      title: 'The active model for this chat has changed to k3 via provider moonshot.',
+      body:
+        'The active model for this chat has changed to k3 via provider moonshot. From this point forward, use this ' +
+        'runtime metadata when answering questions about what model/provider is active.'
+    })
+  })
+
+  it('reads the personality marker the same way, because it is the same shape', () => {
+    expect(parseInjectedRow(personalitySwitchMarkerText)).toMatchObject({
+      noticeKind: 'system_note',
+      body: 'The user has cleared the personality overlay. From this point forward, respond in your normal default style.'
+    })
+  })
+
+  it('keeps a sentence that carries a bracket of its own whole', () => {
+    // The capture runs to the LAST bracket, not the first one it meets.
+    expect(unwrapSystemNote('[System: Your previous tool call (write_file) was too large [truncated]. Retry.]')).toBe(
+      'Your previous tool call (write_file) was too large [truncated]. Retry.'
+    )
+  })
+
+  it('reads the two compaction handoffs as notifications, keeping the row whole', () => {
+    expect(parseInjectedRow(todoInjectionText)).toEqual({
+      noticeKind: 'internal_notification',
+      title: 'Your active task list was preserved across context compression',
+      body: todoInjectionText
+    })
+    expect(parseInjectedRow(planningPreservedText)).toMatchObject({
+      noticeKind: 'internal_notification',
+      title: 'Planning state preserved across context compression'
+    })
+  })
+
+  it('reads the cron platform wrapper, which carries no bracket anywhere', () => {
+    expect(parseInjectedRow(cronjobResponseText)).toMatchObject({
+      noticeKind: 'internal_notification',
+      title: 'Cronjob Response: daily-report',
+      body: cronjobResponseText
+    })
+  })
+
+  it('needs the id line and the rule, not just the two opening words', () => {
+    // Without them, "Cronjob Response:" is two words anybody may type.
+    expect(parseInjectedRow('Cronjob Response: what did the nightly job say?')).toBeNull()
+    expect(parseInjectedRow('Cronjob Response: daily-report\nThree deploys, all green.')).toBeNull()
+  })
+
+  it('does not fire on prose that merely mentions the marker', () => {
+    expect(parseInjectedRow('why does [System: ...] show up in my chat?')).toBeNull()
+    expect(parseInjectedRow('[System: note] and then here is what I actually wanted')).toBeNull()
+    expect(parseInjectedRow('[Your active task list is a mess, can you tidy it?')).toBeNull()
+  })
+
+  it('is indistinguishable from a person who types one, and says so', () => {
+    /*
+      Upstream has the same hole and documents it (`agent/title_generator.py`
+      line 141, and its tests): a row that opens with the marker and closes its
+      bracket at the end IS the convention, whoever wrote it. A person typing
+      `[System: my own note]` gets a system line rather than a bubble.
+
+      The direction is deliberate. A machine's scaffolding drawn as speech is the
+      transcript lying about who spoke; a person's bracketed note drawn as a
+      quiet centred line is only ugly. The closing-bracket test is what narrows
+      the hole — `[System: my own note] how do I ...` stays a bubble, and that is
+      the shape a person is far likelier to type.
+    */
+    expect(parseInjectedRow('[System: my own note]')).toMatchObject({ noticeKind: 'system_note' })
+  })
+
+  it('takes nothing off anything that is not a system note', () => {
+    expect(unwrapSystemNote(delegationBatchText)).toBeNull()
+    expect(unwrapSystemNote('[System: ]')).toBeNull()
+    expect(unwrapSystemNote(undefined)).toBeNull()
+    expect(unwrapSystemNote(12)).toBeNull()
+  })
+
+  it('agrees with the predicate', () => {
+    expect(isInjectedRow(modelSwitchMarkerText)).toBe(true)
+    expect(isInjectedRow(cronjobResponseText)).toBe(true)
+    expect(isInjectedRow('what is the weather')).toBe(false)
   })
 })

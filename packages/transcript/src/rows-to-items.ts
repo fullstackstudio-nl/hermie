@@ -18,7 +18,7 @@ import {
   replyFromDeliveryOutput
 } from './bot-dm'
 import { parseCronDelivery } from './cron-delivery'
-import { type InjectedRow, parseInjectedRow, stripSteerWrapper } from './injected'
+import { type InjectedRow, parseInjectedRow, stripSteerWrapper, unwrapSystemNote } from './injected'
 import {
   type AssistantItem,
   type BotDmInItem,
@@ -388,15 +388,31 @@ export function rowsToItems(rows: readonly TranscriptRow[], shape: RowShape, opt
       return
     }
 
-    const notice = (noticeKind: NoticeKind, title: string, body?: string) =>
-      push<NoticeItem>({
+    /*
+      Every notice this projection builds goes through here, and the body loses
+      its `[System: …]` wrapper on the way.
+
+      One place rather than one per `display_kind`, because the wrapper is not a
+      property of any one label: the gateway writes the same bracketed sentence
+      for a model switch, a personality change and an auto-continue, older
+      gateways wrote it with no label at all, and `parseInjectedRow` takes it off
+      on the live path. Two descriptions of one row have to SAY the same thing —
+      reconciliation pairs notices on their body — so the unwrap has to happen
+      wherever the row came from or the pairing breaks and the reader gets the
+      row twice.
+    */
+    const notice = (noticeKind: NoticeKind, title: string, body?: string) => {
+      const shown = body === undefined ? undefined : (unwrapSystemNote(body) ?? body)
+
+      return push<NoticeItem>({
         id: fallbackId,
         kind: 'notice',
         noticeKind,
         title,
-        ...(body ? { body } : {}),
+        ...(shown ? { body: shown } : {}),
         ...base
       })
+    }
 
     if (displayKind === 'model_switch' || displayKind === 'personality_switch' || displayKind === 'auto_continue') {
       notice(displayKind, displayText(row.display_metadata) ?? NOTICE_TITLES[displayKind] ?? displayKind, content)

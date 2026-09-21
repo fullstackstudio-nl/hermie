@@ -58,20 +58,57 @@
  *   in (`agent/prompt_builder.py::STEER_MARKER_OPEN`, line 535).
  *   `stripSteerWrapper` takes it off and the words stay a bubble.
  *
+ * Upstream's own list of scaffolding openers is longer than the shouting ones,
+ * and the rest of it does NOT shout (`agent/context_compressor.py`,
+ * `_SYNTHETIC_USER_ROW_PREFIXES`, lines 867–870). Those get named rules of their
+ * own below, each anchored and each as narrow as its writer allows — a prefix
+ * test on its own would catch a person typing `[System: my own note] …`, which
+ * upstream's own title generator documents as the cost of this convention
+ * (`agent/title_generator.py`, line 141). What writes them:
+ *
+ *   `tui_gateway/server.py::_append_model_switch_marker` (line 1695)
+ *     [System: The active model for this chat has changed to <model>[ via
+ *      provider <p>]. From this point forward, use this runtime metadata …]
+ *   `tui_gateway/agent_callbacks.py` (line 270)
+ *     [System: The user has changed the assistant's personality. …]
+ *   `agent/conversation_loop.py` (lines 834–880), `agent/verification_stop.py`,
+ *   `agent/surface_switch.py`, `agent/kanban_stop.py`
+ *     [System: <one instruction addressed to the model>]
+ *   `tools/todo_tool.py::TODO_INJECTION_HEADER` (line 21)
+ *     [Your active task list was preserved across context compression]
+ *     <the list>
+ *   the planning counterpart of the same handoff
+ *     [Planning state preserved …]
+ *   `cron/scheduler_delivery.py` (line 1958), the platform-delivery wrapper
+ *     Cronjob Response: <job name>
+ *     (job_id: <id>)
+ *     -------------
+ *
+ * Every `[System: …]` one is a single bracketed sentence: it opens the row and
+ * the bracket closes it at the very end. That pair is the whole test, and it is
+ * what lets `unwrapSystemNote` hand the sentence on without its wrapper —
+ * `[System: The active model for th…` is what a chat-list row was showing.
+ *
  * A cron delivery and a teammate's DM are recognised before this module runs and
  * keep their own item kinds; neither header shouts, so neither would reach here
  * in any case.
  *
  * What breaks it, in rough order of likelihood:
  *
+ * - a user who types `[System: …]` and closes the bracket at the end of their
+ *   message — indistinguishable from the convention, and drawn as a system line;
  * - a user whose message opens with an all-caps bracketed label on a line of its
  *   own and carries on underneath (`[TODO]` then the task) — drawn as a notice;
  * - an upstream header that stops shouting, or stops closing its bracket: the
  *   row is an ordinary bubble again, which is the old bug rather than a new one;
  * - a localised gateway, which no current build is.
  *
- * Nothing here is lossy: the notice body is the whole row text, header included,
- * so a card can always show exactly what the gateway wrote.
+ * Nothing here is lossy but one thing, on purpose: a notice body is the whole
+ * row text, header included, so a card can always show exactly what the gateway
+ * wrote — EXCEPT a `[System: …]` note, whose body is the sentence without its
+ * wrapper. That row has nothing under the header, so the wrapper would be all a
+ * reader gained from keeping it, and it is the part they were never meant to
+ * see.
  */
 import { isBotDmDeliveryCommand, parseProcessCompleteText } from './bot-dm'
 import type { NoticeKind, TranscriptItem } from './types'
@@ -81,7 +118,8 @@ import type { NoticeKind, TranscriptItem } from './types'
  * `rows-to-items` gives the rows a gateway DID label, so a row recognised here
  * and the same row recognised by its `display_kind` draw identically.
  */
-export type InjectedNoticeKind = 'async_delegation_complete' | 'process_complete' | 'internal_notification'
+export type InjectedNoticeKind =
+  'async_delegation_complete' | 'process_complete' | 'internal_notification' | 'system_note'
 
 export interface InjectedRow {
   noticeKind: InjectedNoticeKind
@@ -111,6 +149,71 @@ const PROCESS_HEADER_RE = /^IMPORTANT:/u
  * behind it is what keeps this off a message that merely opens with a tick.
  */
 const KANBAN_NOTIFICATION_RE = /^[✔⏸✖⏱🔄] (?:\[[^\]\r\n]+\] )?(?:@\S+ )?Kanban \S+/u
+
+/**
+ * A `[System: …]` note: the row opens with the marker and the bracket that
+ * opened it is the LAST thing on the row.
+ *
+ * The closing bracket is doing real work. Every writer of this prefix builds one
+ * bracketed sentence and appends nothing after it, so requiring the row to end
+ * there is what keeps prose out — `why does [System: …] show up in my chat?`
+ * does not open with the marker, and `[System: note] and here is the rest` does
+ * not end with it. Upstream's own guard is the bare prefix and its tests
+ * document that a person typing `[System: my own note] how do I …` is
+ * indistinguishable; this one at least narrows that to a person who also closes
+ * their bracket at the very end.
+ *
+ * The inner text is captured greedily, so the bracket that closes it is the LAST
+ * one on the row and a sentence carrying a `]` of its own keeps everything after
+ * it.
+ */
+const SYSTEM_NOTE_RE = /^\[System:\s*([\s\S]+)\]\s*$/u
+
+/**
+ * `tools/todo_tool.py::TODO_INJECTION_HEADER` and the planning handoff beside
+ * it: a bracketed header on a line of its own, then the preserved state.
+ *
+ * Anchored on the literal opening words, and the bracket has to close on that
+ * same line — these two are fixed strings upstream, so nothing wider is needed.
+ */
+const PRESERVED_STATE_RE = /^\[(?:Your active task list|Planning state preserved)[^\]\r\n]*\]/u
+
+/**
+ * `cron/scheduler_delivery.py`'s platform-delivery wrapper (line 1958): the
+ * words `Cronjob Response:`, the job name, the job id in parentheses, and a rule
+ * of dashes before the report.
+ *
+ * All three lines are matched, not just the opener. This is the one shape in
+ * this module with no bracket anywhere, so a bare prefix test would catch any
+ * message whose first line happens to start with those two words — the id line
+ * and the rule are what make it unmistakably the wrapper.
+ *
+ * It is deliberately NOT routed to the cron card: that card's contract is
+ * ADR-0013's two `[Cronjob …]` / `[Cron delivery: …]` headers, and this is a
+ * third shape with its own name/id split. It lands as a notice, which is at
+ * least not the owner's own bubble.
+ */
+const CRON_RESPONSE_RE = /^Cronjob Response: [^\r\n]+\r?\n\(job_id: [^\r\n]*\)\r?\n-{3,}\s*\r?\n/u
+
+/**
+ * The sentence inside a `[System: …]` note, or `null` when the text is not one.
+ *
+ * The wrapper is addressed to the model and none of it is the message: a chat
+ * row previewed `[System: The active model for th…` and spent its whole width
+ * on the marker. Used on both sides of the wire — by `parseInjectedRow` for a
+ * row nothing labelled, and by the history projection for the rows the gateway
+ * DID label `model_switch` / `personality_switch` / `auto_continue` — so the two
+ * descriptions of one row still say the same thing and still pair.
+ */
+export function unwrapSystemNote(text: unknown): string | null {
+  if (typeof text !== 'string' || !text) {
+    return null
+  }
+
+  const inner = SYSTEM_NOTE_RE.exec(text.trim())?.[1]?.trim()
+
+  return inner || null
+}
 
 /**
  * A steer as the gateway delivers it (`agent/prompt_builder.py`, lines 535–538):
@@ -155,6 +258,31 @@ export function parseInjectedRow(text: unknown): InjectedRow | null {
   const anchored = text.replace(/^\s+/u, '')
 
   if (KANBAN_NOTIFICATION_RE.test(anchored)) {
+    return { noticeKind: 'internal_notification', title: firstLineOf(anchored), body: text }
+  }
+
+  // The non-shouting scaffolding, each on its own named rule. They are tested
+  // before the shape test below rather than folded into it: none of them shouts,
+  // and widening the shape until they did would take half of ordinary prose with
+  // it.
+  const systemNote = unwrapSystemNote(text)
+
+  if (systemNote !== null) {
+    // The BODY is the sentence without its wrapper, on purpose. Everything else
+    // here keeps the row whole because a card may need to show exactly what the
+    // gateway wrote; a system note has nothing under the header to show, so the
+    // wrapper would be the only thing a reader gained — and it is the thing they
+    // were never meant to see.
+    return { noticeKind: 'system_note', title: titleOf(systemNote), body: systemNote }
+  }
+
+  const preserved = PRESERVED_STATE_RE.exec(anchored)?.[0]
+
+  if (preserved) {
+    return { noticeKind: 'internal_notification', title: preserved.slice(1, -1).trim(), body: text }
+  }
+
+  if (CRON_RESPONSE_RE.test(anchored)) {
     return { noticeKind: 'internal_notification', title: firstLineOf(anchored), body: text }
   }
 
@@ -218,6 +346,16 @@ const INJECTED_NOTICE_KINDS = new Set<NoticeKind>([
  * deciding what a foreign `message.start` placeholder was waiting for. The other
  * notice kinds — a model switch, an auto-continue — ride along inside a turn and
  * never start one.
+ *
+ * `system_note` is deliberately not in the set, although a few of its writers DO
+ * open a turn (`agent/conversation_loop.py`'s continuation prompts). The text
+ * cannot tell those from the model-switch and personality markers the gateway
+ * splices in MID-turn, and the two errors are not symmetrical: a continuation
+ * prompt that is not recognised as the opener costs a blank placeholder the
+ * selectors already draw as nothing, while a mid-turn marker mistaken for the
+ * opener would make every resume compare the real prompt against a marker, miss,
+ * and paint the prompt a second time — the bug `shownTurn` walks steers past to
+ * avoid.
  */
 export function isInjectedNotice(item: TranscriptItem): boolean {
   return item.kind === 'notice' && INJECTED_NOTICE_KINDS.has(item.noticeKind)
