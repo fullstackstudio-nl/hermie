@@ -26,7 +26,8 @@ new record supersedes it, and the old one gets a line at the top pointing forwar
 | [0013](0013-cron-deliveries-in-the-transcript.md) | A cron delivery is its own item kind, detected from its header | Accepted           |
 | [0014](0014-plain-http-on-private-networks.md)    | Plain http is supported on a private network                   | Accepted           |
 | [0015](0015-web-variant-on-its-own-port.md)       | The web variant is one server on its own port, same-origin     | Accepted           |
-| [0016](0016-ui-meta-sync.md)                      | Per-client settings live in `ui_meta`, one section per concern | Proposed           |
+| [0016](0016-ui-meta-sync.md)                      | Per-client settings live in `ui_meta`, one section per concern | Accepted           |
+| [0017](0017-push-through-hermie-web.md)           | Push comes from Hermie Web; a device registers in `ui_meta`    | Accepted           |
 
 ## Template
 
