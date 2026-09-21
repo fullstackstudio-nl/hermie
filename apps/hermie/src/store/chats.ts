@@ -23,9 +23,11 @@ import {
   applyServerRequest,
   answerRequest,
   beginLocalTurn,
+  beginSteer,
   type ChatState,
   confirmSubmit,
   createChatState,
+  dropSteer,
   markInterrupted,
   type ResumeSnapshot,
   prependHistory,
@@ -95,6 +97,10 @@ export interface ChatsState {
   /** `attachments` are `@file:` / `@image:` references — see `UserItem.attachments`. */
   beginTurn: (botName: string, text: string, attachments?: string[]) => void
   settleTurn: (botName: string, result: SubmitResult) => void
+  /** Paint a steer into the turn already running; it starts no turn of its own. */
+  beginSteer: (botName: string, text: string, attachments?: string[]) => void
+  /** Take that bubble back: the gateway refused the steer and it is requeued. */
+  dropSteer: (botName: string, text: string) => void
   interrupt: (botName: string) => void
 
   setDraft: (botName: string, draft: string) => void
@@ -208,6 +214,14 @@ export const useChatsStore = create<ChatsState>((set, get) => {
 
     settleTurn(botName, result) {
       patch(botName, state => confirmSubmit(state, result))
+    },
+
+    beginSteer(botName, text, attachments) {
+      patch(botName, state => beginSteer(state, text, attachments))
+    },
+
+    dropSteer(botName, text) {
+      patch(botName, state => dropSteer(state, text))
     },
 
     interrupt(botName) {

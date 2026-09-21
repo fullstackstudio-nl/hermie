@@ -14,9 +14,11 @@ import {
   applyServerRequest,
   answerRequest,
   beginLocalTurn,
+  beginSteer,
   type ChatState,
   confirmSubmit,
   createChatState,
+  dropSteer,
   reconcile,
   reconcileTail,
   rowsToItems,
@@ -49,6 +51,8 @@ interface ChatHarness {
   connection: GatewayConnection
   /** The live transcript, as the store would hold it. */
   state: () => ChatState
+  /** Put a reducer's result back, the way the store's `patch` does. */
+  apply: (next: ChatState) => void
   runtimeSessionId: string
   /** `approval` / `clarify` requests the gateway asked, with their reply handle. */
   answered: string[]
@@ -230,6 +234,7 @@ async function openBotChat(profile: string, options: FakeGatewayOptions = {}): P
     gateway,
     connection,
     state: () => state,
+    apply,
     get runtimeSessionId() {
       return runtimeSessionId
     },
@@ -425,6 +430,95 @@ describe('a Bot Chat end to end', () => {
       answer: 'once'
     })
   }, 20_000)
+
+  /**
+   * Build 176: Steer emptied the queue strip and put nothing anywhere.
+   *
+   * The RPC was never the problem, so what these three drive is the BUBBLE,
+   * over a real socket against a gateway that really answers `session.steer` —
+   * including the case the client cannot detect on its own: whether accepting a
+   * steer leaves a row behind.
+   */
+  describe('steering a parked message into the running turn', () => {
+    const steers = (state: ChatState): UserItem[] => outgoing(state).filter(item => item.displayKind === 'steer')
+
+    it('paints one bubble, and the persisted row adopts it rather than doubling it', async () => {
+      const chat = await openBotChat('researcher')
+
+      await chat.submit('take your time')
+      await chat.waitFor(state => state.turn.active, 'the turn to be running')
+
+      // What `steerQueued` does: paint, then ask.
+      chat.apply(beginSteer(chat.state(), 'use the cached copy'))
+
+      const result = await chat.connection.request('session.steer', {
+        session_id: chat.runtimeSessionId,
+        profile: 'researcher',
+        text: 'use the cached copy'
+      })
+
+      expect(result.status).toBe('queued')
+      expect(steers(chat.state())).toHaveLength(1)
+
+      // This gateway DOES write a `display_kind: "steer"` row. The sweep must
+      // pair it with the bubble already up, or the correction shows up twice.
+      await chat.waitFor(state => !state.turn.active, 'the turn to finish')
+      await chat.sweepTail()
+
+      const paired = steers(chat.state())
+
+      expect(paired).toHaveLength(1)
+      expect(paired[0]?.rowId).toBeGreaterThan(0)
+      expect(outgoing(chat.state()).filter(item => item.text === 'use the cached copy')).toHaveLength(1)
+    }, 20_000)
+
+    it('keeps the bubble when the gateway persists no row for a steer', async () => {
+      // The other gateway, and the reason the bubble is painted locally at all:
+      // with nothing persisted, this item is the only record the reader gets.
+      const chat = await openBotChat('researcher', { steerPersistsRow: false })
+
+      await chat.submit('take your time')
+      await chat.waitFor(state => state.turn.active, 'the turn to be running')
+
+      chat.apply(beginSteer(chat.state(), 'use the cached copy'))
+
+      expect(
+        (
+          await chat.connection.request('session.steer', {
+            session_id: chat.runtimeSessionId,
+            profile: 'researcher',
+            text: 'use the cached copy'
+          })
+        ).status
+      ).toBe('queued')
+
+      await chat.waitFor(state => !state.turn.active, 'the turn to finish')
+      await chat.sweepTail()
+
+      expect(steers(chat.state())).toHaveLength(1)
+    }, 20_000)
+
+    it('refuses a steer with no turn to fold it into, and the bubble comes off', async () => {
+      const chat = await openBotChat('researcher')
+
+      expect(chat.state().turn.active).toBe(false)
+
+      chat.apply(beginSteer(chat.state(), 'too late'))
+
+      const result = await chat.connection.request('session.steer', {
+        session_id: chat.runtimeSessionId,
+        profile: 'researcher',
+        text: 'too late'
+      })
+
+      expect(result.status).toBe('rejected')
+
+      chat.apply(dropSteer(chat.state(), 'too late'))
+
+      expect(steers(chat.state())).toEqual([])
+      expect(outgoing(chat.state()).some(item => item.text === 'too late')).toBe(false)
+    }, 20_000)
+  })
 
   it('shows a delegation as subagent activity, one failed child included', async () => {
     // The fan-out is deliberately slow in normal use (a delegation nobody can

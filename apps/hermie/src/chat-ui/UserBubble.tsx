@@ -18,6 +18,7 @@ import { Bubble } from './primitives/Bubble'
 import { Chip } from './primitives/Chip'
 import { MetaLine } from './primitives/MetaLine'
 import { formatClock } from './format'
+import { chatStrings } from './strings'
 import type { Presentation, Receipt, UserItem } from './types'
 
 export interface UserBubbleProps {
@@ -83,7 +84,22 @@ export function UserBubble({
         conversation rather than one per message. Painting a tick on an older
         bubble would be inventing a delivery the gateway never confirmed.
       */
-      meta={<MetaLine onAccent receipt={receipt} testID={`user-meta-${item.id}`} time={time} />}
+      meta={
+        <MetaLine
+          /*
+            A steer is a user turn that started no turn of its own: the gateway
+            handed it to the agent with its next tool result. Without this word
+            the bubble is indistinguishable from an ordinary message the bot
+            went on to ignore, because the reply it steers is already streaming
+            ABOVE it.
+          */
+          marker={item.displayKind === 'steer' ? chatStrings.queue.steeredMarker : undefined}
+          onAccent
+          receipt={receipt}
+          testID={`user-meta-${item.id}`}
+          time={time}
+        />
+      }
       side="own"
       tail={tail}
       testID={`user-${item.id}`}

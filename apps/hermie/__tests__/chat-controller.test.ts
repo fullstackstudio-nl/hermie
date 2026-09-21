@@ -1,3 +1,5 @@
+import type { UserItem } from '@hermie/transcript'
+
 import { BotsController } from '../src/features/bots/bots-controller'
 import { ChatController } from '../src/features/chats/chat-controller'
 import type { RpcFailure } from '../src/gateway/rpc-failures'
@@ -542,6 +544,77 @@ describe('the queue behind a running turn', () => {
 
     expect(await controller.steerQueued('researcher', queueOf()[0]!.id)).toBe('rejected')
     expect(queueOf()).toEqual([expect.objectContaining({ text: 'too late' })])
+  })
+
+  /*
+    Build 176: pressing Steer emptied the strip and put nothing on screen.
+
+    The words left the only place they were visible and arrived nowhere, so the
+    three tests below are about the BUBBLE rather than about the RPC — the RPC
+    was always correct.
+  */
+  const steeredBubbles = (name = 'researcher') =>
+    Object.values(chatOf(name).items).filter(
+      (item): item is UserItem => item.kind === 'user' && item.displayKind === 'steer'
+    )
+
+  it('paints the steered message as a bubble instead of letting it vanish', async () => {
+    const { gateway, controller } = await busy()
+
+    gateway.reply('session.steer', { status: 'queued', text: 'use the cached copy' })
+
+    await controller.send('researcher', 'use the cached copy')
+    await controller.steerQueued('researcher', queueOf()[0]!.id)
+
+    expect(steeredBubbles()).toEqual([
+      expect.objectContaining({ kind: 'user', text: 'use the cached copy', displayKind: 'steer', origin: 'optimistic' })
+    ])
+    // It is not `pending`: pending means "parked behind the running turn", which
+    // is what the strip already said and what this message stopped being.
+    expect(steeredBubbles()[0]).not.toHaveProperty('pending', true)
+  })
+
+  it('does not claim the turn — a steer is folded into the one already running', async () => {
+    const { gateway, controller } = await busy()
+    const before = chatOf().turn
+
+    gateway.reply('session.steer', { status: 'queued', text: 'narrower, please' })
+
+    await controller.send('researcher', 'narrower, please')
+    await controller.steerQueued('researcher', queueOf()[0]!.id)
+
+    const after = chatOf().turn
+
+    expect(after.active).toBe(before.active)
+    expect(after.startedAt).toBe(before.startedAt)
+    expect(after.local).toBe(before.local)
+  })
+
+  it('takes the bubble back off when the steer is refused', async () => {
+    const { gateway, controller } = await busy()
+
+    gateway.reply('session.steer', { status: 'rejected', text: 'too late' })
+
+    await controller.send('researcher', 'too late')
+    await controller.steerQueued('researcher', queueOf()[0]!.id)
+
+    // Back in the strip, and NOT also on screen: one message, one place.
+    expect(queueOf()).toEqual([expect.objectContaining({ text: 'too late' })])
+    expect(steeredBubbles()).toEqual([])
+  })
+
+  it('takes the bubble back off when the steer RPC throws, and rethrows', async () => {
+    const { gateway, controller } = await busy()
+
+    gateway.reply('session.steer', () => {
+      throw new Error('socket closed')
+    })
+
+    await controller.send('researcher', 'mid-flight')
+
+    await expect(controller.steerQueued('researcher', queueOf()[0]!.id)).rejects.toThrow('socket closed')
+    expect(queueOf()).toEqual([expect.objectContaining({ text: 'mid-flight' })])
+    expect(steeredBubbles()).toEqual([])
   })
 })
 

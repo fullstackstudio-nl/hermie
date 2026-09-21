@@ -280,6 +280,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Steering a queued message no longer makes it disappear.** Pressing Steer took the message out of
+  the queue strip and painted nothing anywhere, so the words left the only place they were visible
+  and arrived nowhere. The correction is now painted as the user turn it is, marked `Steered`,
+  before the round trip — and taken back off, with the message returned to the strip, when
+  `session.steer` answers `rejected` or the call fails. Whether a gateway persists a row for a steer
+  is not something a client can know, so the bubble is optimistic and the tail reconcile pairs it
+  with a persisted row on its text if one arrives; both gateways are exercised against the fake,
+  which now implements `session.steer` and `session.redirect`.
 - **A chat dragged in the list lands where the finger is, and the rows move aside to say so.** The
   drag could only ever drop a row at the very top or the very bottom, and the other rows never
   budged. Neither was a bug in the drop arithmetic: every row was measuring itself INSIDE the

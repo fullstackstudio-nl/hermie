@@ -8,7 +8,9 @@ import {
   applyServerRequest,
   applySubagentSnapshot,
   beginLocalTurn,
+  beginSteer,
   confirmSubmit,
+  dropSteer,
   markInterrupted,
   type SubagentSnapshotRow,
   type TranscriptEvent
@@ -346,6 +348,65 @@ describe('local submits', () => {
     state = confirmSubmit(state, { status: 'steered' }, NOW)
 
     expect((list(state)[0] as UserItem).displayKind).toBe('steer')
+  })
+
+  /**
+   * A steer taken out of the queue strip and handed to `session.steer`.
+   *
+   * `beginLocalTurn` cannot do this job: it claims `turn.active`,
+   * `turn.startedAt` and `turn.local`, all three of which belong to the turn the
+   * steer is being folded INTO. Painting nothing at all was the build-176 bug —
+   * the strip dropped the chip and the words were gone.
+   */
+  describe('a steer painted into the turn already running', () => {
+    it('paints the bubble and leaves the running turn alone', () => {
+      let state = beginLocalTurn(fresh(), 'go', undefined, NOW)
+
+      state = confirmSubmit(state, { status: 'streaming' }, NOW)
+
+      const turn = state.turn
+
+      state = beginSteer(state, 'use the cached copy', undefined, NOW)
+
+      const painted = list(state).at(-1) as UserItem
+
+      expect(painted).toMatchObject({ kind: 'user', text: 'use the cached copy', displayKind: 'steer' })
+      expect(painted.origin).toBe('optimistic')
+      // `pending` means "parked behind the running turn", which is what the
+      // queue strip said and what this message stopped being.
+      expect(painted.pending).toBeUndefined()
+      expect(state.turn.active).toBe(turn.active)
+      expect(state.turn.startedAt).toBe(turn.startedAt)
+      expect(state.turn.local).toBe(turn.local)
+    })
+
+    it('projects `@file:` directives out of the text, exactly as a send does', () => {
+      const reference = '@file:/srv/work/notes.md'
+      const state = beginSteer(fresh(), `look at ${reference}`, undefined, NOW)
+      const painted = list(state).at(-1) as UserItem
+
+      expect(painted.text).toBe('look at')
+      expect(painted.attachments).toEqual([reference])
+    })
+
+    it('takes the newest matching bubble back off when the gateway refuses', () => {
+      let state = beginSteer(fresh(), 'too late', undefined, NOW)
+
+      state = dropSteer(state, 'too late')
+
+      expect(list(state)).toEqual([])
+    })
+
+    it('leaves an ordinary user turn with the same words alone', () => {
+      // Only an optimistic STEER is ours to delete. A persisted row, or the
+      // prompt that opened the turn, says the same words and is not this.
+      let state = beginLocalTurn(fresh(), 'too late', undefined, NOW)
+
+      state = dropSteer(state, 'too late')
+
+      expect(list(state)).toHaveLength(1)
+      expect((list(state)[0] as UserItem).displayKind).toBeUndefined()
+    })
   })
 
   /**

@@ -173,6 +173,15 @@ export const chatStrings = {
     edit: 'Edit',
     delete: 'Delete',
     steered: 'Handed to the running turn',
+    /**
+     * The marker on a steered bubble's own metadata line.
+     *
+     * A steer is a user turn that did NOT start a turn — it was folded into the
+     * one already running — and without a word saying so it is indistinguishable
+     * from an ordinary message that the bot then ignored, because the reply it
+     * affects was already streaming above it.
+     */
+    steeredMarker: 'Steered',
     /** The parked messages the strip stack did not have room to draw. */
     more: (count: number) => `+${count} more`,
     steerRejected: 'Too late to steer — the turn was already finishing. It is back in the queue.'

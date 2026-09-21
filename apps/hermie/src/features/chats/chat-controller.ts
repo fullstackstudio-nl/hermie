@@ -1364,6 +1364,22 @@ export class ChatController {
    * can be `rejected` — a turn past its final tool batch has nothing left to
    * hand it to — and then the message goes back into the queue rather than
    * disappearing into a turn that never heard it.
+   *
+   * The bubble is painted HERE, before the round trip, for the same reason
+   * `send` paints one: taking the entry out of the queue is the only thing the
+   * reader can see, and on its own it reads as the message being deleted. That
+   * was the whole of the build-176 report — the strip dropped the chip and
+   * nothing arrived.
+   *
+   * Whether the gateway persists a row for a steer is not something this client
+   * can know: the contract says only "inject text into the next tool result",
+   * and `display_kind: "steer"` exists in the row projection without any
+   * promise that a steer produces one. So the bubble is local and optimistic,
+   * and the tail reconcile pairs it with a persisted row on its text if one
+   * ever turns up (`matchKeyOf`) rather than drawing the words twice.
+   *
+   * Refusal unwinds all of it: the bubble comes off and the entry goes back in
+   * the strip, which is where the reader will go looking for it.
    */
   async steerQueued(botName: string, id: string): Promise<CorrectionStatus> {
     const sessionId = this.requireRuntime(botName)
@@ -1373,6 +1389,8 @@ export class ChatController {
       return 'rejected'
     }
 
+    this.chats.getState().beginSteer(botName, taken.entry.text, taken.entry.attachments)
+
     try {
       const result = await this.gateway.request('session.steer', {
         session_id: sessionId,
@@ -1381,15 +1399,21 @@ export class ChatController {
       })
 
       if (result?.status === 'rejected') {
-        this.requeue(botName, taken)
+        this.unwindSteer(botName, taken)
       }
 
       return result?.status ?? 'queued'
     } catch (error) {
-      this.requeue(botName, taken)
+      this.unwindSteer(botName, taken)
 
       throw error
     }
+  }
+
+  /** A steer the gateway did not take: un-paint it, and park it again. */
+  private unwindSteer(botName: string, taken: { entry: QueuedMessage; attachments: AttachmentInput[] }): void {
+    this.chats.getState().dropSteer(botName, taken.entry.text)
+    this.requeue(botName, taken)
   }
 
   private requeue(botName: string, taken: { entry: QueuedMessage; attachments: AttachmentInput[] }): void {

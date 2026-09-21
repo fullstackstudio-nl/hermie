@@ -50,6 +50,23 @@ describe('bubbles', () => {
     expect(screen.getByLabelText(/Read$/)).toBeTruthy()
   })
 
+  /*
+    A steer is a user turn that started no turn: the gateway folded it into the
+    one already running. The reply it corrects is streaming ABOVE it, so without
+    a word saying so the bubble reads as a message the bot ignored.
+  */
+  it('marks a steered bubble as steered', () => {
+    renderScreen(<UserBubble item={{ ...userItem, displayKind: 'steer' }} />)
+
+    expect(screen.getByText('Steered')).toBeTruthy()
+  })
+
+  it('leaves an ordinary bubble unmarked', () => {
+    renderScreen(<UserBubble item={userItem} />)
+
+    expect(screen.queryByText('Steered')).toBeNull()
+  })
+
   it('renders a sent file as a chip, never as the raw @file: token', () => {
     renderScreen(
       <UserBubble item={{ ...userItem, attachments: ['@file:/srv/work/quarterly-report.xlsx'], text: 'Here it is.' }} />

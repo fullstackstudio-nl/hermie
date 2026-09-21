@@ -1720,6 +1720,83 @@ export function beginLocalTurn(
 }
 
 /**
+ * Paint a steer as the user turn it is, into the turn already running.
+ *
+ * `session.steer` is not `prompt.submit` and the difference is the whole reason
+ * this is its own function. A steer hands text to the agent with its next tool
+ * result; it starts no turn, so nothing here may touch `turn.active`,
+ * `turn.local` or `turn.startedAt` — the running turn owns all three, and
+ * claiming them made the steer look like the turn it was folded into.
+ *
+ * What it does owe the reader is the bubble. The message was taken out of the
+ * queue strip to send it, so with no bubble painted the words leave the screen
+ * and nothing arrives: on build 176 that read as "the message vanished".
+ *
+ * `pending` is deliberately NOT set. A pending bubble means "parked behind the
+ * running turn", which is what the queue strip already said and what this
+ * message stopped being. `displayKind: 'steer'` is the same value the gateway
+ * projects on a persisted steer row, so if this gateway does write one, the
+ * reconcile pairs the two on text (`matchKeyOf`) and the row simply adopts this
+ * item's id — and if it does not, the bubble stands on its own.
+ */
+export function beginSteer(
+  state: ChatState,
+  text: string,
+  attachments?: string[],
+  now: number = Date.now()
+): ChatState {
+  const next = editable(state)
+  const projected = stripUserText(text)
+  const refs = mergeAttachmentRefs(projected.attachments, attachments)
+
+  addItem<UserItem>(
+    next,
+    {
+      id: `o:${next.turn.nextSeq}`,
+      kind: 'user',
+      text: projected.text,
+      ...(refs?.length ? { attachments: refs } : {}),
+      displayKind: 'steer',
+      ts: now / 1000
+    },
+    'optimistic'
+  )
+
+  return next
+}
+
+/**
+ * Take a steer's bubble back off the screen.
+ *
+ * The gateway refused it — `rejected`, or the RPC threw — and the message is
+ * going back into the queue strip, which is where the reader will look for it.
+ * Leaving the bubble would show the same words in two places and claim a
+ * correction the agent never heard.
+ *
+ * It removes the NEWEST optimistic steer whose text matches, and nothing else:
+ * a steer that the tail reconcile has already paired with a persisted row is no
+ * longer `optimistic`, and a row the gateway wrote is not ours to delete.
+ */
+export function dropSteer(state: ChatState, text: string): ChatState {
+  const wanted = stripUserText(text).text
+
+  for (let index = state.order.length - 1; index >= 0; index -= 1) {
+    const id = state.order[index]
+    const item = id ? state.items[id] : undefined
+
+    if (item?.kind === 'user' && item.origin === 'optimistic' && item.displayKind === 'steer' && item.text === wanted) {
+      const next = editable(state)
+
+      dropItem(next, item.id)
+
+      return next
+    }
+  }
+
+  return state
+}
+
+/**
  * Every attachment a locally submitted turn carries, once.
  *
  * Two sources, because a prompt can only name one of the two kinds. A file

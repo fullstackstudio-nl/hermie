@@ -123,6 +123,15 @@ export interface FakeGatewayOptions {
   pushRegistrations?: Record<string, unknown>
   /** `push.seen`: the heartbeat a device writes while a chat is on screen. */
   pushSeen?: Record<string, number>
+  /**
+   * Whether an accepted `session.steer` writes a `display_kind: "steer"` row.
+   *
+   * Default true, because that is the harder case for a client: it has its own
+   * optimistic bubble up and must pair the row with it rather than draw the
+   * correction twice. False stages the gateway that keeps no trace of a steer,
+   * where the client's bubble is the only record there will ever be.
+   */
+  steerPersistsRow?: boolean
 }
 
 export interface FakeSession {
@@ -1527,6 +1536,7 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
   const ringSize = options.replayRingSize ?? 512
   const streamDelayMs = options.streamDelayMs ?? 2
   const subagentStepMs = options.subagentStepMs ?? 900
+  const steerPersistsRow = options.steerPersistsRow ?? true
   const version = options.version ?? '0.21.3-fake'
 
   const tickets = new Map<string, { expiresAt: number; userId: string; provider: string }>()
@@ -2897,6 +2907,52 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
         streamReply(session, typeof params.text === 'string' ? params.text : '')
 
         return { status: 'streaming' }
+      }
+
+      /*
+        A correction folded into the turn that is running.
+
+        Upstream's contract is one sentence — "inject text into the next tool
+        result without interrupting the turn" — and the whole of what a client
+        has to handle is in the status it answers with. So both branches are
+        reproduced rather than only the happy one: a session with no turn
+        running has no next tool result to hand anything to, which is exactly
+        the `rejected` a client must put back in its queue.
+
+        It also writes the row, with the `display_kind: "steer"` the history
+        projection defines for it. Whether a real gateway persists a steer is
+        NOT established (see the note beside `steerQueued`), so this is the
+        harder of the two cases for a client rather than a claim about
+        upstream: a client that paints its own optimistic bubble AND gets a row
+        back must pair the two, or the correction appears twice.
+        `steerPersistsRow: false` stages the other case.
+      */
+      case 'session.redirect':
+      case 'session.steer': {
+        const session = resolveSession(String(params.session_id ?? ''))
+
+        if (!session) {
+          throw new Error(`Unknown session: ${String(params.session_id)}`)
+        }
+
+        const text = typeof params.text === 'string' ? params.text : ''
+
+        if (!state.runningSessions.has(session.storedId)) {
+          return { status: 'rejected', text }
+        }
+
+        if (steerPersistsRow) {
+          session.messages.push({
+            role: 'user',
+            text,
+            row_id: session.messages.length + 1,
+            timestamp: nowSeconds(),
+            display_kind: 'steer'
+          })
+          publish('sessions.changed', undefined, {})
+        }
+
+        return { status: method === 'session.redirect' ? 'redirected' : 'queued', text }
       }
 
       case 'session.interrupt': {
