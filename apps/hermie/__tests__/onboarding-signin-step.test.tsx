@@ -62,7 +62,11 @@ describe('the sign-in step', () => {
 
     const field = screen.getByTestId('session-token')
     expect(field.props.secureTextEntry).toBe(true)
-    expect(screen.getByText('Paste the session token printed by `hermes serve`.')).toBeTruthy()
+    // The help line names a command, so the command is drawn as a chip and the
+    // backticks are not on screen — which is exactly where they were before.
+    expect(screen.getByText(/Paste the session token printed by\s+hermes serve\s*\./)).toBeTruthy()
+    expect(screen.getByText('\u00a0hermes serve\u00a0')).toBeTruthy()
+    expect(screen.queryByText(/`/)).toBeNull()
     expect(screen.queryByText(/^Sign in with/)).toBeNull()
 
     fireEvent.changeText(field, 'session-token-value')

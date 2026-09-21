@@ -38,7 +38,7 @@ import { directTouchPanRef } from '../../platform/pointer-drag'
 import { useSafeAreaInsets } from '../../platform/safe-area'
 import { GlassSurface, Wallpaper } from '../../ui/glass'
 import { KEYBOARD_AVOID_BEHAVIOR } from '../../ui/keyboard'
-import { Button, Text } from '../../ui/primitives'
+import { Button, CodeChipText, Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { ONBOARDING_CARD_MAX_WIDTH, WINDOW_GAP } from '../../ui/tokens'
 
@@ -132,11 +132,12 @@ export function OnboardingCard({
               )}
 
               <Text variant={cover ? 'title' : 'sheetTitle'}>{title}</Text>
-              {lead ? (
-                <Text color="textMuted" variant="preview">
-                  {lead}
-                </Text>
-              ) : null}
+              {/*
+                `CodeChipText`, not `Text`: a lead that names a command writes it
+                in backticks, as everybody does, and plain text drew the
+                backticks. The chip is the transcript's chip.
+              */}
+              {lead ? <CodeChipText>{lead}</CodeChipText> : null}
             </View>
 
             {children}

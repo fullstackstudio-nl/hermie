@@ -4,7 +4,7 @@ import { Pressable, View } from 'react-native'
 
 import { useGateway } from '../../../gateway/GatewayProvider'
 import { strings } from '../../../i18n/strings'
-import { Button, InsetGroup, InsetRow, SecretField, Text } from '../../../ui/primitives'
+import { Button, CodeChipText, InsetGroup, InsetRow, SecretField, Text } from '../../../ui/primitives'
 import { useTheme } from '../../../ui/theme'
 import { authModeOf, headerRecord, type OnboardingDraft } from '../draft'
 import { NativeSignInWebView } from '../NativeSignInWebView'
@@ -71,9 +71,9 @@ export function SignInStep({ draft, update }: SignInStepProps) {
             testID="session-token"
             value={draft.sessionToken}
           />
-          <Text color="textFaint" style={{ marginHorizontal: theme.space.xs }} variant="meta">
+          <CodeChipText color="textFaint" style={{ marginHorizontal: theme.space.xs }} variant="meta">
             {strings.onboarding.signIn.tokenHelp}
-          </Text>
+          </CodeChipText>
         </View>
       ) : !probe?.supportsNativePkce ? (
         <View style={{ gap: theme.space.xs }}>

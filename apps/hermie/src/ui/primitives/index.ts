@@ -1,4 +1,5 @@
 export { Button, type ButtonProps } from './Button'
+export { CodeChipText, type CodeChipTextProps, splitOnCode } from './CodeChipText'
 export {
   InsetButtonRow,
   type InsetButtonRowProps,
