@@ -15,13 +15,13 @@ import { NativeSignInWebView } from '../src/features/onboarding/NativeSignInWebV
 import { draftFromConfig, effectiveHeaders, emptyDraft, type OnboardingDraft } from '../src/features/onboarding'
 import { GatewayAddressStep } from '../src/features/onboarding/steps/GatewayAddressStep'
 import { clearGateway, loadGatewaySetup, saveGatewaySetup, secretKeysFor } from '../src/gateway/config'
+import { secretStore } from '../src/platform/secret-store'
+import { renderScreen } from './support/render'
 
 import { NS_A } from './support/gateway-namespace'
 
 /** Every credential belongs to one gateway; this suite writes that one's. */
 const KEYS = secretKeysFor(NS_A)
-import { secretStore } from '../src/platform/secret-store'
-import { renderScreen } from './support/render'
 
 jest.mock('@hermie/gateway-client', () => ({
   ...jest.requireActual('@hermie/gateway-client'),

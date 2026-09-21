@@ -14,14 +14,14 @@
  * principles rather than read off the ring.
  */
 import { configKeyFor, loadGatewaySetup, secretKeysFor } from '../src/gateway/config'
+import { keyValueStore } from '../src/platform/key-value-store'
+import { secretStore } from '../src/platform/secret-store'
 
 import { NS_A } from './support/gateway-namespace'
 
 /** Every credential belongs to one gateway; this suite reads that one's. */
 const KEYS = secretKeysFor(NS_A)
 const CONFIG_KEY = configKeyFor(NS_A)
-import { keyValueStore } from '../src/platform/key-value-store'
-import { secretStore } from '../src/platform/secret-store'
 
 jest.mock('../src/platform/secret-store', () => ({
   secretStore: {

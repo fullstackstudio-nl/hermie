@@ -3,6 +3,9 @@ import { fireEvent, screen, waitFor } from '@testing-library/react-native'
 
 import { connectionPayloadKey, emptyDraft, type OnboardingDraft, OnboardingNavigator } from '../src/features/onboarding'
 import { CONFIG_KEY, SECRET_KEYS } from '../src/gateway'
+import { keyValueStore } from '../src/platform/key-value-store'
+import { secretStore } from '../src/platform/secret-store'
+import { renderScreen } from './support/render'
 
 import { GATEWAY_A, NS_A } from './support/gateway-namespace'
 
@@ -15,9 +18,6 @@ const KEYS = Object.fromEntries(
   Object.entries(SECRET_KEYS).map(([slot, key]) => [slot, NS_A.key(key)])
 ) as typeof SECRET_KEYS
 const GATEWAY_CONFIG_KEY = NS_A.key(CONFIG_KEY)
-import { keyValueStore } from '../src/platform/key-value-store'
-import { secretStore } from '../src/platform/secret-store'
-import { renderScreen } from './support/render'
 
 // The sign-in step records `signin.no_refresh` on the app's auth ring, which
 // belongs to the gateway provider. The wizard itself needs nothing else from it.
