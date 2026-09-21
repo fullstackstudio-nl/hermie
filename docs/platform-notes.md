@@ -6583,3 +6583,112 @@ has.
 - **`session.close` against a session the gateway has already reaped.** Treated
   as best effort and swallowed, which is a guess about a 4001 rather than a
   measurement.
+
+## The app lock, and the two frames nobody looks at (2026-09-22)
+
+A lock on the app is mostly not a cryptography problem. It is a rendering
+problem and a lifecycle problem, and both of them are about frames a person
+never deliberately looks at: the one between the splash handing over and the
+first read off disk, and the one the operating system photographs on its way
+out.
+
+### The plate is not an overlay, and the difference is the feature
+
+The obvious shape is a full-screen view with a high z-index over the app. It is
+the wrong one, and not for a style reason. Under an overlay the transcript is
+still mounted, the chat list is still mounted, the WebSocket is still open and
+the query client is still refetching — so the lock holds a person's eyes and
+nothing else. Everything it was supposed to keep back is one `opacity: 0` bug,
+one `Modal` that fails to present, or one screenshot API away.
+
+`features/lock/AppLock.tsx` therefore does not render `children` at all while it
+is up, and it sits ABOVE `GatewayProvider` in `app/App.tsx` rather than inside
+it, so a locked app holds no connection either. The test asserts the absence
+rather than the covering — `expect(screen.toJSON()).not.toContain(SECRET)` —
+because "is the plate on top" is the kind of claim that goes quietly false.
+
+The cost is real and is the reason to write it down: unlocking re-mounts the
+provider and re-dials. The stores are module-level and survive, so what is paid
+is one trip up the reconnect ladder, not the conversation.
+
+### `immediately` has to lock on the way OUT
+
+iOS takes the app-switcher snapshot on the transition to `inactive`, not on the
+return. A lock applied when the app comes back is therefore a lock applied one
+frame after the card in the switcher has already been drawn from the transcript.
+So `background()` is what locks at `immediately`, and the store maps BOTH
+`inactive` and `background` onto it. `inactive` is also what a "Designed for
+iPad" window on a Mac reports when it loses focus, which is the transition that
+matters there.
+
+That mapping opens a trap, and it is the reason `prompting` exists on the store
+rather than being a spinner: **the Face ID sheet itself takes the app out of
+`active`.** Without the guard, asking for an unlock fires `inactive`, which locks
+the app underneath its own prompt, which on success unlocks it and on any
+subsequent lifecycle event locks it again. An unlock that cannot finish because
+asking is what breaks it. Every AppState change is ignored while a prompt is in
+flight.
+
+### The frame between the splash and the preference
+
+The threshold is in `AsyncStorage`, which is asynchronous, so there is a real
+moment where the app does not know whether it is locked. Three things can be
+drawn in it and two are wrong:
+
+| Drawn while the preference is unread | Who sees the wrong thing               |
+| ------------------------------------ | -------------------------------------- |
+| the app                              | everyone who turned the lock ON        |
+| the plate                            | everyone who did not                   |
+| a field of `elevation.e0`            | nobody — it is the splash's own colour |
+
+`AppLock` draws the third and the gate's `ready` flag is set in exactly one
+place, so the blank lasts one disk read. `__tests__/app-lock-gate.test.tsx` pins
+the first frame by holding the biometric prompt open on a deferred promise;
+without that, hydration wins the race and the assertion passes for the wrong
+reason.
+
+### `getEnrolledLevelAsync`, not `hasHardware` plus `isEnrolled`
+
+The intuitive pair answers the wrong question. `isEnrolledAsync()` is about
+BIOMETRICS, so it answers false on a phone with a passcode and no face — a phone
+this lock works perfectly well on, because `disableDeviceFallback` stays at its
+default and the platform collects the passcode itself.
+`getEnrolledLevelAsync()` distinguishes `NONE` from `SECRET` (PIN, pattern,
+passcode) from the two biometric levels, which is exactly the four-way split the
+settings screen needs: refuse, refuse with a reason, "it will ask for your
+passcode", and the ordinary case.
+
+`NONE` is split further by `hasHardwareAsync()`, because only one of the two
+sentences is actionable: "this device cannot" versus "set up a passcode first".
+
+### A cold start ignores the grace period, deliberately
+
+`15m` does not mean "unlocked for fifteen minutes after the process died". The
+grace period exists so that switching to a password manager and back does not
+cost a prompt, and a process the OS killed is not that. There is also nothing
+honest to measure against — the only record of when the app went away died with
+it — so honouring it would mean trusting a timestamp written to disk to decide
+whether to ask for a face. `start()` locks whenever the threshold is not `off`.
+
+### What is unverified here
+
+- **No real Face ID, Touch ID or BiometricPrompt has been through this.** There
+  is no device in reach from here. Everything above about the module is read from
+  `expo-local-authentication`'s own types and source; everything about behaviour
+  is the pure machine's table and a jest suite with the SEAM
+  (`platform/biometrics`) mocked, not the module. What needs a hand check: that
+  the iOS prompt appears at all with `NSFaceIDUsageDescription` set the way
+  `app.config.ts` sets it, that a cancelled prompt leaves the plate up rather
+  than dismissing it, that the passcode fallback appears after a run of failed
+  faces, and that the `prompting` guard is actually enough — i.e. that no
+  lifecycle event arrives between the guard clearing and the app becoming active
+  again.
+- **The app-switcher snapshot has not been looked at.** The claim that
+  `inactive` is the transition to lock on is Apple's documented behaviour, not
+  something measured here. What a locked Hermie's card in the switcher looks
+  like on a device is unknown.
+- **What a Mac window reports.** `client.ts` already records that the AppState
+  values a "Designed for iPad" window reports have never been measured. The lock
+  inherits that gap: whether a Mac window losing focus reports `inactive` — and
+  therefore whether `immediately` locks when you click another app — is a
+  reasonable reading of an iOS binary's behaviour and nothing more.

@@ -52,6 +52,30 @@ export const strings = {
     dismiss: 'Dismiss'
   },
 
+  /**
+   * The locked app, which says four things and deliberately not a fifth.
+   *
+   * No bot names, no counts, no "3 new messages": everything a lock screen
+   * adds beyond "this is Hermie and it is locked" is something it has given
+   * away. `features/lock/LockPlate.tsx` is built so it could not say more if
+   * the copy asked it to.
+   */
+  lock: {
+    /** The line the platform prints above its own Face ID / passcode prompt. */
+    prompt: 'Unlock Hermie',
+    plateBody: 'Hermie is locked.',
+    unlock: 'Unlock',
+    /**
+     * The one case the plate has to explain rather than just ask.
+     *
+     * Reachable only by removing the device passcode after switching the lock
+     * on — the setting refuses to go on without one — and from inside the
+     * plate there is nothing to tap that would fix it.
+     */
+    stranded:
+      'Hermie is locked, and this device has no passcode or biometric set up to unlock it. Add one in your device settings.'
+  },
+
   onboarding: {
     stepCounter: (current: number, total: number) => `Step ${current} of ${total}`,
 
@@ -964,7 +988,37 @@ export const strings = {
 
     /** The destructive half of what "Change gateway" used to be. */
     forgetGateway: 'Forget this gateway',
-    forgetGatewayHint: 'Deletes the address and the credentials from this device and starts setup empty.'
+    forgetGatewayHint: 'Deletes the address and the credentials from this device and starts setup empty.',
+
+    privacy: 'PRIVACY & SECURITY',
+
+    /**
+     * The app lock.
+     *
+     * The option labels are as short as they can be said, because five
+     * segments share one row and a phone is narrow. The hints carry the part
+     * that matters and is easy to get wrong: this setting is about THIS
+     * device, and nothing about it travels to another one.
+     */
+    lock: {
+      label: 'Require unlock',
+      options: {
+        off: 'Off',
+        immediately: 'Now',
+        '1m': '1 min',
+        '5m': '5 min',
+        '15m': '15 min'
+      } as const,
+      hint: 'Ask for Face ID, Touch ID or this device’s passcode before Hermie can be read. This setting stays on this device.',
+      hintOn:
+        'Hermie asks again after it has been away for this long, and always after it has been started fresh. This setting stays on this device.',
+      /** Hardware is there, nothing is enrolled: the one refusal that is actionable. */
+      noEnrolment:
+        'Set up a passcode, Face ID or a fingerprint in your device settings first — otherwise Hermie would lock with no way to open it.',
+      unavailable: 'This device has no unlock method Hermie can ask for.',
+      passcodeOnly: 'No biometrics are enrolled, so Hermie will ask for this device’s passcode.',
+      web: 'Hermie cannot lock itself in a browser: the page and anything enforcing a lock are the same code. Lock the screen or close the tab.'
+    }
   },
 
   connection: {

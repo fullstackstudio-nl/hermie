@@ -134,7 +134,18 @@ const config: ExpoConfig = {
        */
       NSAppTransportSecurity: {
         NSAllowsArbitraryLoads: true
-      }
+      },
+      /*
+       * The app lock. Without this string iOS refuses the Face ID request
+       * outright — and Apple requires it of any app that touches the API,
+       * whether or not the device has a face to scan.
+       *
+       * Generic on purpose. It says what the prompt is for and nothing about
+       * what is behind it: an unlock reason is read out on a device somebody
+       * else may be holding, and "unlock your chats with <gateway>" would be
+       * the one sentence the lock exists to prevent.
+       */
+      NSFaceIDUsageDescription: 'Hermie uses Face ID to unlock the app.'
     }
   },
   android: {
@@ -151,11 +162,26 @@ const config: ExpoConfig = {
       backgroundColor: ICON_BACKGROUND
     },
     edgeToEdgeEnabled: true,
-    // A chat client needs the network and the photo library, and that is the
-    // whole list. The two blocked below are pulled in by dependencies rather
-    // than asked for: nothing in the app vibrates, and nothing writes to shared
-    // storage — an attachment is read, resized in memory and sent.
-    permissions: ['android.permission.INTERNET'],
+    /*
+     * A chat client needs the network and the photo library, and the app lock
+     * needs BiometricPrompt. That is the whole list. The two blocked below are
+     * pulled in by dependencies rather than asked for: nothing in the app
+     * vibrates, and nothing writes to shared storage — an attachment is read,
+     * resized in memory and sent.
+     *
+     * `expo-local-authentication`'s own library manifest already declares the
+     * two biometric permissions, so this adds nothing to the merged manifest.
+     * It is here for the same reason the keychain access group above is: what
+     * the app asks the operating system for should be readable in this
+     * repository, not inferred from a dependency's manifest. `USE_FINGERPRINT`
+     * is deprecated and superseded by `USE_BIOMETRIC`; it is kept because the
+     * library declares it and a device on API 27 still needs it.
+     */
+    permissions: [
+      'android.permission.INTERNET',
+      'android.permission.USE_BIOMETRIC',
+      'android.permission.USE_FINGERPRINT'
+    ],
     blockedPermissions: ['android.permission.VIBRATE', 'android.permission.WRITE_EXTERNAL_STORAGE']
   },
   /*

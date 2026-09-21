@@ -41,6 +41,42 @@ export interface NetworkWatcher {
   subscribe(onChange: (online: boolean) => void): () => void
 }
 
+/**
+ * What this device can ask for before it hands the app back.
+ *
+ * A closed set rather than the module's own enums, because the only thing any
+ * caller branches on is which of four sentences to say and whether the setting
+ * may be switched on at all:
+ *
+ * - `unavailable` there is no hardware, or no module at all. The browser.
+ * - `none`        hardware, and nothing enrolled: no face, no finger, no
+ *                 passcode. The lock cannot be switched on, because switching
+ *                 it on would lock the app with nothing able to open it.
+ * - `passcode`    a device passcode and no biometric. The prompt is still
+ *                 worth offering; it simply asks for digits.
+ * - `biometric`   a face, a finger or an iris is enrolled, with the device
+ *                 passcode behind it as the platform's own fallback.
+ */
+export type BiometricEnrolment = 'unavailable' | 'none' | 'passcode' | 'biometric'
+
+/** What the platform prompt answered. `unavailable` is the module refusing to run at all. */
+export type BiometricVerdict = 'ok' | 'failed' | 'unavailable'
+
+/**
+ * The device's own "prove it is you", behind one seam.
+ *
+ * Two methods and no state: the app lock keeps every decision it makes in
+ * `features/lock/lock-state.ts`, and this only answers what the hardware can do
+ * and what the person in front of it just did.
+ */
+export interface Biometrics {
+  /** False where there is no such prompt at all, which is what the browser answers. */
+  readonly available: boolean
+  enrolment(): Promise<BiometricEnrolment>
+  /** `reason` is the line the platform prints above its own prompt. */
+  authenticate(reason: string): Promise<BiometricVerdict>
+}
+
 /** Which ink the system status bar draws its clock and indicators in. */
 export type StatusBarInk = 'light' | 'dark'
 

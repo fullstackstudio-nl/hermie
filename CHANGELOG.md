@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A lock on the app itself.** Settings → Privacy & security → **Require unlock**: off, immediately,
+  or after 1, 5 or 15 minutes in the background. It asks with Face ID, Touch ID, Optic ID or
+  Android's BiometricPrompt, and falls back to the device passcode the way the platform does; a
+  device with nothing enrolled is told to set something up first rather than being locked out of its
+  own chats. A locked Hermie does not draw the app under a plate — it does not render it at all, so
+  there is no transcript, no chat list and no connection behind the lock screen, and nothing for the
+  app switcher's snapshot to photograph. The plate is also the first thing on screen after a cold
+  start, before anything is read from the gateway. The setting stays on the device it was made on:
+  it is not carried to a second device by the settings sync, because a phone in a pocket and a Mac
+  in a locked room are not the same question. In a browser there is no lock and the screen says so —
+  a plate drawn over this app's own page is removed by the page's own devtools.
+
 ## [0.1.1] - 2026-09-22
 
 

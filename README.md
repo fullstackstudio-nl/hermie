@@ -82,6 +82,11 @@ no third-party network call. The only address Hermie knows is the one you typed.
   machine's bots are a different list.
 - **Offline-tolerant.** The last stretch of every conversation is cached, so a
   chat paints before the gateway answers and is still readable on a plane.
+- **A lock, if you want one.** Face ID, Touch ID, Optic ID or your Android
+  fingerprint, with the device passcode behind it — immediately, or after a few
+  minutes away. A locked Hermie does not draw its contents behind the plate; it
+  does not draw them at all, which is also what the app switcher's snapshot
+  gets. The setting lives on the device you made it on and is never synced.
 - **Widgets.** A home-screen widget for one chat — avatar, name, bead and the
   last line — one for the three most recent, and on iOS a lock-screen line that
   says how many conversations are waiting on you. Tapping one opens that chat.

@@ -46,6 +46,35 @@ build did ask for a sign-in again. The cause was not established — a fresh ins
 are both in the picture, and a different keychain access context is a plausible reading — so it is
 written down as something seen once, not as a known behaviour.
 
+## The app lock
+
+Settings → Privacy & security → **Require unlock** puts `expo-local-authentication` in front of the
+app: Face ID, Touch ID, Optic ID or Android's BiometricPrompt, with the device passcode as the
+platform's own fallback. Off, immediately, or after 1, 5 or 15 minutes in the background; a cold
+start always asks.
+
+What it is and is not worth stating precisely, because a lock that is described too generously is
+worse than none:
+
+- **A locked app does not render its contents.** The plate is not an overlay — the gate above the
+  gateway provider does not mount its children, so there is no live transcript, no chat list and no
+  open socket behind it. That is also what the operating system's app-switcher snapshot gets, which
+  is why "immediately" locks on the way out rather than on the way back.
+- **It does not encrypt anything.** The credentials are in the keystore either way, and the
+  transcript cache is protected by the app container and nothing more. This keeps a person who
+  picks up an unlocked phone out of your chats; it does not keep out someone with the device, its
+  passcode and time.
+- **It is per device and is never synced.** The threshold has its own key in plain key-value
+  storage and is deliberately not part of the settings section ADR-0016 carries to the gateway.
+- **It cannot be switched on with nothing enrolled.** A device with no biometric and no passcode is
+  told to set one up rather than being locked behind a prompt that cannot succeed. A prompt that
+  fails, is cancelled, or cannot run at all leaves the app locked — a broken module is not a way in.
+- **There is no app lock in a browser**, and the settings screen says so rather than offering one: a
+  plate drawn over this app's own DOM is enforced by the same JavaScript it is protecting.
+- **Notification previews are not the lock's business.** What a banner shows on a locked screen is
+  the operating system's setting and the notification's own payload; [ADR-0017](docs/adr/0017-push-through-hermie-web.md)
+  is where that payload is decided.
+
 ## Transport
 
 Hermie talks to one gateway, at an address the user types during setup, and to the identity provider

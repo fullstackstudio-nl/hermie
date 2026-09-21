@@ -4,6 +4,7 @@ import { ActivityIndicator, View } from 'react-native'
 
 import { DEV_LAUNCH_INTENT, DevGallery } from '../dev'
 import { ChatRuntimeProvider } from '../features/chats'
+import { AppLock } from '../features/lock'
 import { OnboardingNavigator } from '../features/onboarding'
 import { GatewayProvider, useGateway } from '../gateway'
 import { strings } from '../i18n/strings'
@@ -32,9 +33,24 @@ export default function App() {
           {...(DEV_LAUNCH_INTENT?.scheme ? { forceScheme: DEV_LAUNCH_INTENT.scheme } : {})}
           {...(DEV_LAUNCH_INTENT?.preset ? { forcePreset: DEV_LAUNCH_INTENT.preset } : {})}
         >
-          <GatewayProvider>
-            <Root />
-          </GatewayProvider>
+          {/*
+            The lock sits OUTSIDE the gateway provider, not inside it.
+
+            Inside, a locked app would still hold a socket, still take pushes
+            into a live store and still have a mounted transcript one z-index
+            under the plate. Outside, there is nothing to leak: `AppLock` does
+            not render its children while it is up, so the connection is not
+            merely hidden, it does not exist. The price is a re-dial on unlock,
+            which is paid by the reconnect ladder that already exists.
+
+            Inside `ThemeProvider` because the plate is themed, and the theme
+            is not a secret.
+          */}
+          <AppLock>
+            <GatewayProvider>
+              <Root />
+            </GatewayProvider>
+          </AppLock>
         </ThemeProvider>
       </QueryClientProvider>
     </SafeArea>
