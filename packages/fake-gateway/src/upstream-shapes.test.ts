@@ -17,7 +17,7 @@
  */
 import { createHash, randomBytes } from 'node:crypto'
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
 
 import { startFakeGateway, type FakeGateway } from './server'
@@ -82,6 +82,93 @@ describe('GET /api/profiles — profiles.py::_list_profiles', () => {
 
     expect(Array.isArray(body)).toBe(false)
     expect(Array.isArray(body.profiles)).toBe(true)
+  })
+})
+
+describe('PATCH /api/profiles/{name} — profiles.py::_rename_profile', () => {
+  /*
+    Its own gateway, and a fresh one per test: these cases MUTATE the profile
+    list, and the module-wide gateway above is read by every other `describe`
+    here, which would then be asserting against a roster somebody renamed.
+
+    Read out of Hermes 0.21.3. The route is `PATCH`, not `POST …/rename`, and
+    `new_name` is the only body key (`ProfileRename` in
+    `hermes_cli/web_models.py`). There is no WebSocket method that does this —
+    `groups.rename` renames a room, `pet.rename` a mascot, `session.title` a
+    session — which is why the app's only profile write that leaves the socket
+    is this one.
+  */
+  let own: FakeGateway
+
+  beforeEach(async () => {
+    own = await startFakeGateway({ port: 0 })
+  })
+
+  afterEach(async () => {
+    await own.close()
+  })
+
+  const rename = async (name: string, newName: string) =>
+    fetch(`${own.url}/api/profiles/${encodeURIComponent(name)}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ new_name: newName })
+    })
+
+  /**
+   * The `default` profile's home IS the installation root, so it cannot be
+   * renamed. Hermes turns the call into a presentation-only display name and
+   * says so by answering WITH `display_name` and an unchanged `name`.
+   */
+  it('answers the default profile with a display_name and its id unchanged', async () => {
+    const body = (await (await rename('researcher', 'Jurist')).json()) as Record<string, unknown>
+
+    expect(body.ok).toBe(true)
+    expect(body.name).toBe('researcher')
+    expect(body.display_name).toBe('Jurist')
+    expect(typeof body.path).toBe('string')
+  })
+
+  /**
+   * Any other profile is REALLY renamed — directory, wrapper script, service,
+   * active-profile pointer — and the answer carries no `display_name` at all.
+   * The app reads that absence as "the handle moved", so it is the difference
+   * between rekeying every store and rekeying none.
+   */
+  it('answers any other profile with the new id and NO display_name', async () => {
+    const body = (await (await rename('writer', 'scribe')).json()) as Record<string, unknown>
+
+    expect(body).not.toHaveProperty('display_name')
+    expect(body.name).toBe('scribe')
+    expect(body.path).toContain('scribe')
+
+    const listed = (await fetch(`${own.url}/api/profiles`).then(response => response.json())) as {
+      profiles: Record<string, unknown>[]
+    }
+
+    expect(listed.profiles.map(row => row.name)).toContain('scribe')
+    expect(listed.profiles.map(row => row.name)).not.toContain('writer')
+  })
+
+  /** `FileNotFoundError` -> 404. Not a 400, and not a silent creation. */
+  it('refuses a profile that does not exist with 404', async () => {
+    expect((await rename('nobody', 'somebody')).status).toBe(404)
+  })
+
+  /**
+   * `rename_profile` refuses an empty new name for `default` before the setter
+   * sees it, so clearing THAT one is not reachable over this route — even
+   * though `set_profile_display_name` itself treats an empty string as "remove
+   * the key".
+   */
+  it('refuses an empty name on the default profile with 400', async () => {
+    expect((await rename('researcher', '   ')).status).toBe(400)
+  })
+
+  /** `ValueError` / `FileExistsError` -> 400: over 64 characters, or a name in use. */
+  it('refuses a name over 64 characters, and one that is already taken, with 400', async () => {
+    expect((await rename('writer', 'x'.repeat(65))).status).toBe(400)
+    expect((await rename('writer', 'researcher')).status).toBe(400)
   })
 })
 

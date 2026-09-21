@@ -102,6 +102,12 @@ no third-party network call. The only address Hermie knows is the one you typed.
   context window is — a ring, the percentage and both counts — refreshed as the
   conversation grows. A gateway that does not report a window size simply does
   not show the row.
+- **Rename a bot.** The profile sheet's name is editable. On the default profile
+  that sets a display name and the profile keeps its id; on any other profile it
+  renames the profile itself, which the field says out loud before you press
+  Save — that name is the handle crons, `@`-mentions and the gateway's logs use.
+  A rename carries your colour, folder, mute, note and cached conversation over
+  with it.
 - **Offline-tolerant.** The last stretch of every conversation is cached, so a
   chat paints before the gateway answers and is still readable on a plane.
 - **A lock, if you want one.** Face ID, Touch ID, Optic ID or your Android

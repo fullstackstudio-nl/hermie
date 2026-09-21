@@ -7231,3 +7231,73 @@ The assertion now spells out the whole message; the new suite uses regexes.
 - **The landing-page detector is unchanged and still crude**: `<!doctype html`
   or `<html` in the first 2000 characters. A proxy that answers with an error
   page that opens with a comment or a BOM is not detected, and never was.
+
+## Renaming a profile, which is two routes wearing one URL (2026-09-22)
+
+`PATCH /api/profiles/{name}` is one endpoint with two behaviours, and every
+awkward thing about the field in front of it comes from that.
+
+### The answer is the only honest way to tell them apart
+
+On `default` the profile's home IS the installation root, so it cannot move.
+Hermes turns the call into a presentation-only display name, keeps the canonical
+id, and answers with `display_name` beside an unchanged `name`. On any other
+profile it really renames — directory, wrapper script, service, active-profile
+pointer — and answers with the NEW `name` and no `display_name` key at all.
+
+The app could have decided which of the two it was about to get from
+`bot.isDefault` on its own roster row. It does not, and the reason is that the
+roster's `is_default` and the gateway's idea of which profile is the launch
+profile are two different facts that a multi-profile gateway can disagree about.
+Reading the ABSENCE of `display_name` in the answer is a fact about the call
+that was actually made. `renamed` in `rename-controller.ts` is that reading, and
+it is what decides whether a single key or fourteen of them move.
+
+### A bot's name is this app's primary key, and nothing said so before
+
+| Held under the bot's name                    | Where                           |
+| -------------------------------------------- | ------------------------------- |
+| the transcript, its queue, its liveness      | `store/chats`                   |
+| the roster row, avatar, unread watermark     | `store/bots`                    |
+| list position, folder, colour, archive, mute | `store/chat-layout`             |
+| the per-bot system-prompt note               | `store/device-context`          |
+| the cached conversation                      | `platform/chat-cache`, a column |
+
+None of that follows a rename by itself. `profiles.list` replaces the roster
+wholesale, so a renamed bot arrives as a NEW bot and the old rows are simply
+dropped — the colour, the folder and the cached transcript go quietly, which is
+the worst kind of data loss because nothing reports it. `renameBot` is the
+migration, and it builds every store's next state before writing any of them so
+that the only thing that can fail before the first write is a pure function.
+
+The cache is deliberately outside that: it is async, it is SQLite or IndexedDB,
+and `FallbackChatCache` is allowed to downgrade to memory. Its failure is
+reported as a warning rather than rolled back, because the cost of a cache miss
+is one conversation re-fetched and the cost of unwinding four stores to avoid it
+is a bug nobody will ever reproduce.
+
+### The arrangement is persisted through `setAccent`, on purpose
+
+`chat-layout`'s writer is private and every public action funnels through it.
+Rather than add an action to a store three other rounds are editing, the
+migration rekeys the arrangement with `setState` and then calls the one public
+setter that always persists — which is also the setter that has to run anyway,
+because the colour is keyed on the bot's name like everything else. It is a
+seam, and it is written down here because it reads as incidental and is not.
+
+### What is unverified here
+
+- **No real gateway has renamed anything for this.** Everything is the fake's
+  route, which was written from `docs/DESIGN.md` §8 in the plugin repository —
+  itself read out of Hermes 0.21.3 — and from the status table there. What a
+  real `rename_profile` does to a RUNNING profile's service and to an attached
+  session has not been seen, and the app's assumption that the next
+  `profiles.list` simply reports the new name is exactly that.
+- **The rename is not atomic with the description and the picture.** The sheet
+  sends those first, under the old name, and renames last. A failure between the
+  two leaves a saved description on a profile that kept its name, which is the
+  benign half of the two orders; the other order fails the description against a
+  profile that no longer exists.
+- **Nothing tells the other clients.** There is no `profiles.changed` event on
+  this gateway, so a TUI or a dashboard open beside the app keeps the old name
+  until it re-reads for its own reasons.

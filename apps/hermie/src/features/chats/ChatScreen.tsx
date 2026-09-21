@@ -1920,6 +1920,7 @@ function Conversation({
                 contextUsage: chat.contextUsage,
                 gateway: profileGateway,
                 gatewayVersion: config?.version ?? '',
+                http,
                 // A saved description or picture only reaches the header, the
                 // list and every other chat once the roster has been read
                 // again; the sheet itself writes to the gateway, not the store.

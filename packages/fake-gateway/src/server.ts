@@ -659,6 +659,14 @@ export interface FakeGateway {
 const LAUNCH_PROFILE = 'default'
 
 /**
+ * The only thing `set_profile_display_name` validates besides `.strip()`.
+ *
+ * Read off `hermes_cli/profiles.py`: no character set and no uniqueness check,
+ * so a fake that refused anything else would refuse names that really work.
+ */
+const PROFILE_NAME_LIMIT = 64
+
+/**
  * The `hermie-plugin` advert, as the gateway-side plugin publishes it.
  *
  * Copied from the plugin's own `contract.py` rather than invented here: the
@@ -2481,6 +2489,14 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       return
     }
 
+    const profileMatch = /^\/api\/profiles\/([^/]+)$/.exec(path)
+
+    if (profileMatch && method === 'PATCH') {
+      await handleProfileRename(req, res, decodeURIComponent(profileMatch[1] as string))
+
+      return
+    }
+
     if (path === '/api/files/upload-stream' && method === 'POST') {
       await handleFileUpload(req, res)
 
@@ -2800,6 +2816,87 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
    * afterwards, and the result carries `path` as the RESOLVED path plus the
    * policy metadata the dashboard reads.
    */
+  /**
+   * `PATCH /api/profiles/{name}` — `profiles.py::_rename_profile`, Hermes 0.21.3.
+   *
+   * The one route that does two different things depending on which profile it
+   * is aimed at, and the app depends on telling them apart from the ANSWER
+   * rather than from its own idea of which profile is default:
+   *
+   *  - `default` cannot be renamed, because its home IS the installation root.
+   *    Hermes turns the call into a presentation-only display name, keeps the
+   *    canonical id and answers WITH `display_name`.
+   *  - Any other profile is really renamed — directory, wrapper script, service
+   *    and active-profile pointer — and answers WITHOUT `display_name`.
+   *
+   * What the setter validates is only `.strip()` and 64 characters
+   * (`profiles.py::set_profile_display_name`): no character set and no
+   * uniqueness. `rename_profile` refuses an empty new name for `default` before
+   * the setter sees it, which is the 400 below.
+   */
+  async function handleProfileRename(req: IncomingMessage, res: ServerResponse, name: string): Promise<void> {
+    const body = await readBody(req)
+    const profile = state.profiles.find(entry => entry.name === name)
+
+    if (!profile) {
+      json(res, 404, { detail: `Profile '${name}' does not exist.` })
+
+      return
+    }
+
+    const wanted = String(body.new_name ?? '').trim()
+
+    if (wanted.length > PROFILE_NAME_LIMIT) {
+      json(res, 400, { detail: 'A profile name may be at most 64 characters.' })
+
+      return
+    }
+
+    if (profile.name === LAUNCH_PROFILE || profile.is_default === true) {
+      if (!wanted) {
+        json(res, 400, { detail: 'The default profile needs a name.' })
+
+        return
+      }
+
+      profile.display_name = wanted
+      json(res, 200, { ok: true, name: profile.name, display_name: wanted, path: profile.path })
+
+      return
+    }
+
+    if (!wanted) {
+      json(res, 400, { detail: 'A profile name is required.' })
+
+      return
+    }
+
+    if (state.profiles.some(entry => entry.name === wanted)) {
+      json(res, 400, { detail: `Profile '${wanted}' already exists.` })
+
+      return
+    }
+
+    /*
+      A real rename moves the profile's own identity, so everything the fake
+      keys on the old name moves with it — otherwise the app's rekeying would be
+      asserted against a gateway that had not actually renamed anything.
+    */
+    const previous = profile.name
+
+    profile.name = wanted
+    profile.path = `/root/.hermes/profiles/${wanted}`
+    profile.display_name = wanted[0]?.toUpperCase() + wanted.slice(1)
+
+    for (const session of state.sessions.values()) {
+      if (session.profile === previous) {
+        session.profile = wanted
+      }
+    }
+
+    json(res, 200, { ok: true, name: wanted, path: profile.path })
+  }
+
   async function handleFileUpload(req: IncomingMessage, res: ServerResponse): Promise<void> {
     let form: MultipartForm
 

@@ -175,7 +175,7 @@ export function BotsScreen({
   const theme = useTheme()
   const insets = useSafeAreaInsets()
   const runtime = useChatRuntime()
-  const { config, connection, status } = useGateway()
+  const { config, connection, http, status } = useGateway()
   const bots = useBotsStore(state => state.bots)
   const byName = useBotsStore(state => state.byName)
   const running = useBotsStore(state => state.running)
@@ -1105,6 +1105,7 @@ export function BotsScreen({
           avatarUri={avatars[profileFor]}
           bot={byName[profileFor]}
           gateway={profileGateway}
+          http={http}
           gatewayVersion={config?.version ?? ''}
           onClose={() => setProfileFor(null)}
           onSaved={() => void runtime?.bots.refresh()}

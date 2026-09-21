@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Rename a bot from the app.** The bot profile sheet's name is a field now rather than a fact with
+  the sentence "Set on the gateway, in this profile." beside it. Which name it edits depends on the
+  profile, and the sheet says so instead of hiding it: the **default** profile takes a display name
+  and keeps its own id, and every other profile is genuinely RENAMED — so there the field is
+  labelled *Profile name* and carries the line "Renaming changes the profile name other tools use",
+  because that handle is what `@`-mentions, crons, DM lines and the gateway's own logs address. A
+  real rename also moves the name everywhere this app holds a bot under it: the open chat and its
+  queue, the roster, the unread watermark, the arrangement, the folder, the colour, the archive
+  flag, the mute, the per-bot context note and the cached transcript. If part of that cannot be
+  moved, the sheet says which part rather than leaving the reader to find out at the next cold
+  start. A refusal from the gateway — a name over 64 characters, a name already taken, a profile
+  that does not exist — is shown beside the field and nothing local moves.
+
 ## [0.1.2] - 2026-09-22
 
 ### Added
