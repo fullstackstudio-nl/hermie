@@ -815,6 +815,45 @@ describe('server requests', () => {
     expect(list(state).filter(item => item.kind === 'approval')).toHaveLength(2)
   })
 
+  it('lets a new question reuse the TRANSPORT id of one already answered', () => {
+    /*
+      The same rule, on the other id a question carries — and the one that was
+      missing. `srq-N` is a per-process counter that the gateway restarts at 1
+      for every process, which is the same fact `cache.ts` carries
+      `lastSeqSessionId` for. So an answered card cached from before a restart
+      sits on `srq-1`, the first question of the new session arrives as `srq-1`,
+      and the guard used to drop it: no card, no sheet, and a turn parked on an
+      answer nobody was asked for.
+    */
+    let state = applyServerRequest(fresh(), approvalRequest, NOW)
+
+    state = answerRequest(state, 'srq-7', 'once')
+    state = applyServerRequest(
+      state,
+      { id: 'srq-7', method: 'clarify', params: { question: 'Which branch?', choices: ['main', 'next'] } },
+      NOW
+    )
+
+    const clarify = list(state).find(item => item.kind === 'clarify') as ClarifyItem | undefined
+
+    expect(clarify).toMatchObject({ requestId: 'srq-7', state: 'open' })
+    // Distinct item ids, so the answered card stays where it was and the list
+    // does not lose a row to a key collision.
+    expect(new Set(list(state).map(item => item.id)).size).toBe(list(state).length)
+
+    // …and the answer goes to the LIVE card, not back to the settled one.
+    state = answerRequest(state, 'srq-7', 'next')
+
+    expect(list(state).filter(item => item.kind === 'approval')[0]).toMatchObject({ state: 'answered', answer: 'once' })
+    expect(list(state).find(item => item.kind === 'clarify')).toMatchObject({ state: 'answered' })
+  })
+
+  it('still ignores a redelivered request whose card is still open', () => {
+    const once = applyServerRequest(fresh(), approvalRequest, NOW)
+
+    expect(applyServerRequest(once, { ...approvalRequest, replayed: true }, NOW)).toBe(once)
+  })
+
   it('withdraws a cancel addressed to the approval queue id rather than the request id', () => {
     let state = applyServerRequest(fresh(), approvalRequest, NOW)
 

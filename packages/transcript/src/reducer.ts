@@ -1135,9 +1135,39 @@ function openApprovalIdOf(state: ChatState, approvalId: string): string | undefi
   return item?.kind === 'approval' && item.state === 'open' ? id : undefined
 }
 
+/**
+ * The id of the still-open card standing at this transport id, if there is one.
+ *
+ * The same rule `openApprovalIdOf` states, applied to the other id a question
+ * carries — and it was missing here, which is the bug. A resume re-delivers an
+ * OPEN request under the id it already has, and that replay must not draw a
+ * second card; an ANSWERED card must not swallow a new question that happens to
+ * arrive under the same id.
+ *
+ * Which is not hypothetical. `srq-N` is a per-process counter, and the gateway
+ * restarts it at 1 for every process — the same fact `cache.ts` already carries
+ * `lastSeqSessionId` for. So a cached "Allowed once" from before a restart sat
+ * on `srq-1`, the first question of the new session arrived as `srq-1`, and the
+ * guard dropped it: no sheet, no card, and a turn parked on an answer the
+ * reader was never asked for.
+ *
+ * `addItem` gives the new card a free item id of its own, so the two coexist
+ * and `byRequestId` points at the live one.
+ */
+function openRequestIdOf(state: ChatState, requestId: string): string | undefined {
+  const id = state.byRequestId[requestId]
+  const item = id ? state.items[id] : undefined
+
+  if (item?.kind !== 'approval' && item?.kind !== 'clarify') {
+    return undefined
+  }
+
+  return item.state === 'open' ? id : undefined
+}
+
 /** Turn an `approval` / `clarify` server request into a transcript item. */
 export function applyServerRequest(state: ChatState, request: ServerRequest, now: number = Date.now()): ChatState {
-  if (state.byRequestId[request.id]) {
+  if (openRequestIdOf(state, request.id)) {
     return state
   }
 
