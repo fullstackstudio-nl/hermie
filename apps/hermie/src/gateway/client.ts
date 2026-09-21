@@ -156,6 +156,45 @@ export interface CreateConnectionOptions {
   timeline?: AuthTimelineSink
 }
 
+/**
+ * End the session the SERVER is holding, where there is one.
+ *
+ * Signing out means deleting the credential, and on the phones and the Mac the
+ * credential is a keychain item this app owns: clearing the secret store is the
+ * whole of it. In a browser it is not. The session is the gateway's own
+ * `HttpOnly` cookie — which is the entire point of the cookie flow, because a
+ * page has nowhere safe to keep a token — and a page cannot delete it.
+ *
+ * So "Sign out" cleared a secret store that, in that mode, was already empty:
+ * the app returned to the wizard, the session stayed alive on the gateway, and
+ * the next reload signed straight back in. On a shared machine that is a sign
+ * out that did not sign out.
+ *
+ * `POST /auth/logout` is what deletes it. The gateway answers with a 302 and
+ * the `Max-Age=0` cookie deletions, which the browser applies whether or not
+ * the redirect is followed.
+ *
+ * Nothing here may throw. The caller runs this BEFORE it tears the connection
+ * down and clears its own state, so a rejection would be a sign-out that also
+ * failed to sign out locally — strictly worse than the defect being fixed. A
+ * sign-out the server never heard about still has to look like a sign-out
+ * here; the cookie lapses on its own.
+ *
+ * Nothing to do in the other two modes: there is no server-side session to
+ * end, and the credential has just been deleted from the place it lived.
+ */
+export async function endGatewaySession(config: GatewayConfig | null): Promise<void> {
+  if (config?.authMode !== 'cookie') {
+    return
+  }
+
+  try {
+    await new CookieSessionCredentials({ baseUrl: config.baseUrl }).signOut()
+  } catch {
+    // See above: local state has to come off whatever the gateway said.
+  }
+}
+
 /** Build a connection for one configured gateway. The caller owns `start()` / `stop()`. */
 export function createGatewayConnection(options: CreateConnectionOptions): GatewayConnection {
   const { config, timeline } = options

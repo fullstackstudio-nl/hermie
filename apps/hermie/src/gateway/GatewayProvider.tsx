@@ -14,7 +14,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { seedDevGateway } from '../dev/seed-gateway'
 import { retirePushRegistration } from '../features/push/runtime'
 import { createPersistentAuthTimeline } from './auth-timeline'
-import { attachLifecycle, createGatewayConnection, createTokenCoordinator } from './client'
+import { attachLifecycle, createGatewayConnection, createTokenCoordinator, endGatewaySession } from './client'
 import { clearCredentials, clearGateway, type GatewaySetup, loadGatewaySetup, type StoredGatewayConfig } from './config'
 import { useConnectionStore } from './store'
 
@@ -198,6 +198,11 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
     // for why this is a slot rather than a call on something in scope.
     await retirePushRegistration()
 
+    // Before the local state goes: in the cookie flow the credential is the
+    // gateway's own cookie and there is nothing local to clear. See
+    // `endGatewaySession`.
+    await endGatewaySession(keep)
+
     teardown()
     await clearCredentials()
     setSetup(null)
@@ -210,12 +215,16 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
     // must not inherit a row that names this one's devices.
     await retirePushRegistration()
 
+    // Same as `signOut`: the session on the gateway this app is leaving is not
+    // something the next one should inherit.
+    await endGatewaySession(setup?.config ?? null)
+
     teardown()
     await clearGateway()
     setSetup(null)
     setResumeConfig(null)
     setPhase('onboarding')
-  }, [teardown])
+  }, [setup, teardown])
 
   const recordAuth = useCallback<AuthEventRecorder['record']>(event => {
     timelineRef.current?.record(event)
