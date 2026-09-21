@@ -395,7 +395,7 @@ function ListHeader({ gatewayRunning, onCreate }: { gatewayRunning: boolean | nu
           }}
           testID="cron-create"
         >
-          <Text color="accent" variant="preview">
+          <Text color="accentText" variant="preview">
             {`+ ${cronStrings.list.add}`}
           </Text>
         </Pressable>

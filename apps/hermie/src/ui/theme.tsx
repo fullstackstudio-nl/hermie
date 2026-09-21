@@ -6,7 +6,6 @@ import { useSettingsStore } from '../store/settings'
 import {
   ACCENTS,
   DANGER_SOFT,
-  darkColors,
   darkPresence,
   darkShadows,
   EDGE,
@@ -14,7 +13,6 @@ import {
   HAIRLINE,
   HAIRLINE_SOFT,
   OK_SOFT,
-  lightColors,
   lightPresence,
   lightShadows,
   motion,
@@ -35,6 +33,7 @@ import {
 } from './tokens'
 import {
   bubblesFor,
+  colorsForFace,
   DEFAULT_THEME_CHOICE,
   glassFor,
   resolveThemeFace,
@@ -138,7 +137,7 @@ export function buildTheme({ scheme, choice, userThemes, reduceTransparency, red
 
   return {
     scheme,
-    colors: dark ? darkColors : lightColors,
+    colors: colorsForFace(scheme, face),
     elevation: face.elevation,
     glass: glassFor(scheme, face.elevation),
     bubbles: bubblesFor(scheme, face.elevation),

@@ -13,7 +13,7 @@
  * The thresholds are WCAG AA: 4.5 : 1 for anything that has to be read as text,
  * 3 : 1 for a mark that only has to be seen — a status dot, an avatar ring.
  */
-import { glassFor, bubblesFor, type ResolvedThemeFace } from './themes'
+import { glassFor, bubblesFor, colorsForFace, type ResolvedThemeFace } from './themes'
 import {
   DANGER_SOFT,
   darkColors,
@@ -37,6 +37,12 @@ export type Rgb = [number, number, number]
  * Inks that carry words. `ok` and `accent` are NOT here: they are FILLS — a status
  * dot, a button — and what has to be readable on one is `onAccent`, which is
  * measured against the outgoing bubble instead.
+ *
+ * `accentText` is in the list and is now a different colour per THEME, because
+ * `colorsForFace` derives it from the theme's accent. That is what makes this a
+ * check rather than a formality: a link, a chevron and the navigator's tint all
+ * read that role, so a preset whose accent ink is unreadable on its own glass
+ * fails here instead of in a screenshot.
  */
 export const TEXT_ROLES: readonly ColorRole[] = [
   'text',
@@ -151,7 +157,7 @@ export interface ContrastRow {
 
 /** Every ink against every surface of one theme face. */
 export function measureFace(theme: string, scheme: Scheme, face: ResolvedThemeFace): ContrastRow[] {
-  const colors = colorsFor(scheme)
+  const colors = colorsForFace(scheme, face)
   const rows: ContrastRow[] = []
 
   for (const surface of surfacesFor(scheme, face.elevation, face.background)) {
@@ -180,25 +186,18 @@ export function measureFace(theme: string, scheme: Scheme, face: ResolvedThemeFa
     studio's lime on a white one (1.14 : 1), which are the two accents the themes
     that need them were built around. Where a fill used to sit under white ink, the
     ink now comes off the bubble or is chosen against the fill; see `Composer`'s
-    send button and `AccentSwatches`.
-  */
-  const panel = over(glassFor(scheme, face.elevation).panel.fill, parseColor(face.background).rgb)
+    send button, `Button`'s primary and `AccentSwatches`.
 
+    The accent as INK has no row of its own any more, and that is a widening rather
+    than a loss: it is `accentText` in `TEXT_ROLES`, so it is measured on every
+    surface in the table instead of on the panel alone.
+  */
   rows.push({
     theme,
     scheme,
     surface: 'accent bubble',
     role: 'onAccent',
     ratio: contrastRatio(colors.onAccent, parseColor(face.accentSwatch.bubble).rgb),
-    floor: AA_TEXT
-  })
-
-  rows.push({
-    theme,
-    scheme,
-    surface: 'accent ink',
-    role: 'accent text',
-    ratio: contrastRatio(face.accentSwatch.text[scheme], panel),
     floor: AA_TEXT
   })
 
@@ -257,7 +256,7 @@ export function judgeThemeColour(
     return { ok: true }
   }
 
-  const colors = colorsFor(scheme)
+  const colors = colorsForFace(scheme, face)
   let worst = Number.POSITIVE_INFINITY
 
   for (const surface of surfacesFor(scheme, face.elevation, colour)) {

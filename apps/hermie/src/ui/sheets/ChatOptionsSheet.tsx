@@ -188,7 +188,7 @@ function PickerPane({
                   {'$$'}
                 </Text>
               ) : null}
-              {option.value === value ? <Text color="accent">{'✓'}</Text> : null}
+              {option.value === value ? <Text color="accentText">{'✓'}</Text> : null}
             </View>
           </Pressable>
         ))}

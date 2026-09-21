@@ -52,7 +52,7 @@ export function TransportNotice({ baseUrl, onUseHttps, testID }: TransportNotice
       </Text>
       {!isPrivate && onUseHttps ? (
         <Pressable accessibilityRole="button" onPress={onUseHttps} hitSlop={8}>
-          <Text variant="meta" color="accent">
+          <Text variant="meta" color="accentText">
             {strings.transport.useHttps}
           </Text>
         </Pressable>

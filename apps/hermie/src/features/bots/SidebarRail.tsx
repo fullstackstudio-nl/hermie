@@ -170,7 +170,8 @@ function UnreadBadge({ count }: { count: number }) {
       accessibilityLabel={strings.bots.unreadLabel(count)}
       style={{
         alignItems: 'center',
-        backgroundColor: theme.colors.accent,
+        // The bubble, not the fill: the count on it is `onAccent`.
+        backgroundColor: theme.accent().bubble,
         borderColor: theme.glass.panel.solid,
         borderRadius: theme.radii.pill,
         borderWidth: 1.5,

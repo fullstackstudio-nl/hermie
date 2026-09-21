@@ -200,7 +200,7 @@ export function ClarifySheet({ visible, item, onLock, onSubmit, onSkip, onClose,
                     // chat's own accent wash. Both keep a 1pt edge, so picking
                     // one never moves the row by the pixel a 2pt border costs.
                     backgroundColor: selected ? theme.accent().soft : theme.tintSunk,
-                    borderColor: selected ? theme.colors.accent : theme.hairlineSoft,
+                    borderColor: selected ? theme.colors.accentText : theme.hairlineSoft,
                     borderRadius: theme.radii.inset,
                     borderWidth: 1,
                     flexDirection: 'row',

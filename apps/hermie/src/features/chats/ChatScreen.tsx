@@ -1527,7 +1527,7 @@ function Banner({
             onPress={() => void onRetry()}
             style={{ justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT }}
           >
-            <Text color="accent" variant="preview">
+            <Text color="accentText" variant="preview">
               {strings.chat.retry}
             </Text>
           </Pressable>
@@ -1539,7 +1539,7 @@ function Banner({
               style={{ justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT }}
               testID="chat-open-settings"
             >
-              <Text color="accent" variant="preview">
+              <Text color="accentText" variant="preview">
                 {strings.chat.attach.openSettings}
               </Text>
             </Pressable>

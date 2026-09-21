@@ -339,7 +339,8 @@ function OptionPills({
               onPress={() => onChange(option.id)}
               color={selected ? 'onAccent' : 'textMuted'}
               style={{
-                backgroundColor: selected ? theme.colors.accent : theme.elevation.e2,
+                // The bubble, not the fill: the label on it is `onAccent`.
+                backgroundColor: selected ? theme.accent().bubble : theme.elevation.e2,
                 borderColor: selected ? 'transparent' : theme.hairlineSoft,
                 borderRadius: theme.radii.pill,
                 borderWidth: 1,

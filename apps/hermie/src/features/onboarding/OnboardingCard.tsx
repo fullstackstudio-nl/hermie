@@ -207,7 +207,7 @@ function StepRail({ current, total }: { current: number; total: number }) {
         <View
           key={index}
           style={{
-            backgroundColor: index <= current ? theme.colors.accent : theme.tintSunk,
+            backgroundColor: index <= current ? theme.colors.accentText : theme.tintSunk,
             borderRadius: theme.radii.pill,
             flex: 1,
             height: 4

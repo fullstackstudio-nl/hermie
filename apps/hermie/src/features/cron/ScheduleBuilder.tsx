@@ -157,7 +157,8 @@ function WeekdayChips({ weekdays, onChange }: { weekdays: number[]; onChange: (w
             onPress={() => onChange(selected ? weekdays.filter(value => value !== day) : [...weekdays, day])}
             style={{
               alignItems: 'center',
-              backgroundColor: selected ? theme.colors.accent : theme.elevation.e2,
+              // The bubble, not the fill: the initial on it is `onAccent`.
+              backgroundColor: selected ? theme.accent().bubble : theme.elevation.e2,
               borderRadius: theme.radii.pill,
               flex: 1,
               justifyContent: 'center',

@@ -172,7 +172,7 @@ function AgentRow({
               style={ACTION_STYLE}
               testID={`agent-steer-${node.id}`}
             >
-              <Text color="accent" variant="meta">
+              <Text color="accentText" variant="meta">
                 {chatStrings.subagents.steer}
               </Text>
             </Pressable>
@@ -200,7 +200,7 @@ function AgentRow({
               style={ACTION_STYLE}
               testID={`agent-transcript-${node.id}`}
             >
-              <Text color="accent" variant="meta">
+              <Text color="accentText" variant="meta">
                 {chatStrings.subagents.openTranscript}
               </Text>
             </Pressable>

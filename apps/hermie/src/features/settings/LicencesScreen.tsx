@@ -84,7 +84,7 @@ export function LicencesScreen({ onClose }: LicencesScreenProps) {
               style={{ alignItems: 'center', gap: theme.space.md, paddingVertical: theme.space.xl }}
               testID="licences-loading"
             >
-              <ActivityIndicator color={theme.colors.accent} />
+              <ActivityIndicator color={theme.colors.accentText} />
               <Text color="textMuted" variant="preview">
                 {strings.settings.licencesLoading}
               </Text>

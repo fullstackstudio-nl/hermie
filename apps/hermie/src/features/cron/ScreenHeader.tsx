@@ -39,8 +39,8 @@ export function ScreenHeader({ back, onBack, title, subtitle, action }: ScreenHe
           minHeight: CONTROL_MIN_HEIGHT
         }}
       >
-        <Icon color={theme.colors.accent} name="chevronLeft" size={ICON_SIZE.inline} />
-        <Text color="accent" variant="preview">
+        <Icon color={theme.colors.accentText} name="chevronLeft" size={ICON_SIZE.inline} />
+        <Text color="accentText" variant="preview">
           {back}
         </Text>
       </Pressable>

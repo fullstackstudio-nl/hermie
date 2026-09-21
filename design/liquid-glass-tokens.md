@@ -80,10 +80,20 @@ moved for the same reason: `textFaint` and `dangerText` cleared AA on a panel an
 failed on a dark bubble, which is precisely where a metadata line and a failed
 delivery live.
 
+`accent` and `accentText` are the one pair in this table that a THEME replaces.
+The values above are what Blue resolves to; under Graphite or Lime the same two
+roles carry that preset's accent — `accent` its fill, `accentText` its ink form —
+because a link, a chevron and the navigator's tint all read them, and a lime
+window whose links are blue is a window with one colour left over from another
+theme. The merge is `colorsForFace` in `ui/themes.ts`, and it is one function
+because the contrast check reads it too. A chat's own colour is untouched: that
+is `theme.accent(name)`.
+
 Every pair in this table is checked on the COMPOSITED surface by
 `npm run contrast:check`, which reads `apps/hermie/src/ui/tokens.ts` rather than
 a copy of it. 4.5 : 1 for ink, 3 : 1 for a mark. Change a value here and there,
-and let the check say whether it holds.
+and let the check say whether it holds. `accentText` is measured per theme, on
+every surface in the table.
 
 ### 1.2 Outgoing bubble gradient (default chat)
 

@@ -44,11 +44,14 @@
  */
 import {
   ACCENTS,
+  darkColors,
+  lightColors,
   withAlpha,
   type AccentName,
   type AccentSwatch,
   type BubbleRecipe,
   type BubbleVariant,
+  type ColorScale,
   type ElevationScale,
   type GlassRecipe,
   type GlassScale,
@@ -261,6 +264,33 @@ export function resolveThemeFace(
       bubble: face?.accentBubble ?? base.bubble,
       text: base.text
     }
+  }
+}
+
+/**
+ * The ink scale for one theme face: the scheme's roles, with the two accent roles
+ * replaced by the theme's own.
+ *
+ * `accent` and `accentText` in `tokens.ts` are one blue per scheme, and they were
+ * read directly by every `Text color="accent"`, every link, the back chevron and
+ * the navigator's tint — so under Lime the window was lime and the words in it
+ * were blue. They are not a third thing beside a preset's accent; they ARE the
+ * preset's accent, seen as a fill and as ink, which is why they are derived here
+ * rather than stored twice.
+ *
+ * It is one function because two callers need the same answer: the theme every
+ * surface reads, and the contrast check that decides whether the answer is
+ * legible. A second copy of this merge in the checker would be a checker that
+ * measures a palette the app does not draw.
+ *
+ * A chat that carries its OWN colour is untouched — that is `theme.accent(name)`,
+ * and a conversation's colour was never a function of the window it is in.
+ */
+export function colorsForFace(scheme: Scheme, face: ResolvedThemeFace): ColorScale {
+  return {
+    ...(scheme === 'dark' ? darkColors : lightColors),
+    accent: face.accentSwatch.fill,
+    accentText: face.accentSwatch.text[scheme]
   }
 }
 

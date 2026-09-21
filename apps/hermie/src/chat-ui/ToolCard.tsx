@@ -68,7 +68,7 @@ function Truncatable({ value, testID }: { value: string; testID?: string }) {
           onPress={() => setOpen(current => !current)}
           style={{ justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT }}
         >
-          <Text color="accent" variant="meta">
+          <Text color="accentText" variant="meta">
             {open ? chatStrings.tool.showLess : chatStrings.tool.showMore}
           </Text>
         </Pressable>

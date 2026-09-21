@@ -903,7 +903,7 @@ function DropLine() {
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
       style={{
-        backgroundColor: theme.colors.accent,
+        backgroundColor: theme.colors.accentText,
         borderRadius: 1,
         height: 2,
         marginHorizontal: theme.space.md

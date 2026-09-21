@@ -94,7 +94,7 @@ export function DropZone({ children, enabled = true, onFiles, style, testID = 'd
             pointerEvents="none"
             style={{
               alignItems: 'center',
-              borderColor: theme.colors.accent,
+              borderColor: theme.colors.accentText,
               borderRadius: theme.radii.sheet,
               borderStyle: 'dashed',
               borderWidth: 2,

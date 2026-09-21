@@ -157,7 +157,7 @@ export function Markdown({
       color,
       fontSize: body,
       lineHeight: markdownLeading(body),
-      linkColor: linkColor ?? theme.colors.accent,
+      linkColor: linkColor ?? theme.colors.accentText,
       mutedColor,
       mutedTextColor: theme.colors[mutedColor],
       onLinkPress: handleLink,

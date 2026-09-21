@@ -18,6 +18,7 @@ import { describe, expect, it } from '@jest/globals'
 
 import {
   bubblesFor,
+  colorsForFace,
   compositeHex,
   glassFor,
   resolveThemeFace,
@@ -25,7 +26,7 @@ import {
   THEME_PRESETS,
   type ThemePresetName
 } from '../src/ui/themes'
-import { ACCENTS, withAlpha, type ElevationRung, type Scheme } from '../src/ui/tokens'
+import { ACCENTS, darkColors, withAlpha, type ElevationRung, type Scheme } from '../src/ui/tokens'
 
 const RUNGS: ElevationRung[] = ['e0', 'e1', 'e2', 'e2s', 'e3', 'e3c', 'e3f', 'e4']
 
@@ -144,5 +145,50 @@ describe('a theme of the reader’s own', () => {
     const face = resolveThemeFace({ kind: 'user', id: 'missing' }, 'dark', [])
 
     expect(face.background).toBe(THEME_PRESETS.blue.dark.background)
+  })
+})
+
+/**
+ * The accent roles are the THEME's accent.
+ *
+ * `colors.accent` and `colors.accentText` used to be one blue per scheme however
+ * the window was coloured, and everything that draws the accent as a fill or as
+ * ink reads one of those two roles: `Text color="accentText"`, a markdown link,
+ * the back chevron, the navigator's tint. So under Lime the window was lime and
+ * the words in it were blue. These pin the derivation rather than the values, so
+ * a fourth preset is covered the day it is added.
+ */
+describe('the accent roles follow the theme', () => {
+  for (const name of THEME_PRESET_ORDER) {
+    for (const scheme of ['light', 'dark'] as Scheme[]) {
+      it(`${name} / ${scheme} resolves both accent roles from the preset's own accent`, () => {
+        const face = resolveThemeFace({ kind: 'preset', name }, scheme)
+        const colors = colorsForFace(scheme, face)
+        const swatch = ACCENTS[THEME_PRESETS[name][scheme].accent]
+
+        expect(colors.accent).toBe(swatch.fill)
+        expect(colors.accentText).toBe(swatch.text[scheme])
+      })
+    }
+  }
+
+  it('leaves every role that is not the accent alone', () => {
+    const face = resolveThemeFace({ kind: 'preset', name: 'lime' }, 'dark')
+    const colors = colorsForFace('dark', face)
+
+    for (const role of Object.keys(darkColors) as (keyof typeof darkColors)[]) {
+      if (role !== 'accent' && role !== 'accentText') {
+        expect(colors[role]).toBe(darkColors[role])
+      }
+    }
+  })
+
+  it('takes a user theme’s own accent fill, and keeps the ink readable', () => {
+    const face = resolveThemeFace({ kind: 'user', id: 'mine' }, 'light', [
+      { id: 'mine', name: 'Mine', base: 'graphite', light: { accentFill: '#123456' } }
+    ])
+
+    expect(colorsForFace('light', face).accent).toBe('#123456')
+    expect(colorsForFace('light', face).accentText).toBe(ACCENTS.graphite.text.light)
   })
 })

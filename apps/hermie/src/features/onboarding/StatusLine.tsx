@@ -38,7 +38,7 @@ export function StatusDot({ tone }: { tone: StatusTone }) {
       : tone === 'error'
         ? theme.colors.danger
         : tone === 'checking'
-          ? theme.colors.accent
+          ? theme.colors.accentText
           : theme.colors.textMuted
 
   const filled = tone === 'ok' || tone === 'error'

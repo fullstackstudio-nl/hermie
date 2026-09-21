@@ -92,7 +92,7 @@ export function SelectTextOverlay({ markdown, onClose, testID = 'select-text' }:
   const palette = {
     body: theme.type.body.fontSize,
     codeBackground: theme.tintSunk,
-    link: theme.colors.accent,
+    link: theme.colors.accentText,
     muted: theme.colors.textMuted,
     text: theme.colors.text
   }
@@ -149,11 +149,11 @@ export function SelectTextOverlay({ markdown, onClose, testID = 'select-text' }:
               onPress={() => copyToClipboard(runsToPlainText(runs))}
               testID={`${testID}-copy-all`}
             >
-              <Text color="accent">{chatStrings.selectText.copyAll}</Text>
+              <Text color="accentText">{chatStrings.selectText.copyAll}</Text>
             </Pressable>
 
             <Pressable accessibilityRole="button" hitSlop={TAP_SLOP} onPress={onClose} testID={`${testID}-done`}>
-              <Text color="accent" variant="name">
+              <Text color="accentText" variant="name">
                 {chatStrings.selectText.done}
               </Text>
             </Pressable>

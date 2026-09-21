@@ -49,7 +49,7 @@ export function RefreshNotice({ canRefresh, testID }: RefreshNoticeProps) {
         onPress={() => void Linking.openURL(REFRESH_DOCS_URL).catch(() => undefined)}
         testID={testID ? `${testID}-link` : undefined}
       >
-        <Text color="accent" variant="meta">
+        <Text color="accentText" variant="meta">
           {strings.auth.noRefreshTokenLink}
         </Text>
       </Pressable>

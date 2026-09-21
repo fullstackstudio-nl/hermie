@@ -162,7 +162,7 @@ export function CompactShell({ initial }: { initial?: DevInitialView } = {}) {
         background: 'transparent',
         border: theme.hairline,
         card: theme.elevation.e1,
-        primary: theme.colors.accent,
+        primary: theme.colors.accentText,
         text: theme.colors.text
       }
     }),

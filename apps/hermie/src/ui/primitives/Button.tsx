@@ -19,8 +19,12 @@ export function Button({ title, variant = 'primary', busy = false, disabled, sty
   // whose four answers include one saturated red block reads as a warning about
   // itself and fights its own primary; the readable ink beside the tint is
   // `dangerText`, which is the whole reason those two roles are separate.
+  // Primary is the accent's BUBBLE, not its fill. The label is `onAccent` —
+  // white — and the bubble is the one accent value white is measured against, so
+  // a theme whose fill is a brilliant ring colour (Lime) still gets a button its
+  // title can be read on. Same reasoning as the composer's send circle.
   const background =
-    variant === 'primary' ? theme.colors.accent : variant === 'danger' ? theme.dangerSoft : theme.elevation.e3c
+    variant === 'primary' ? theme.accent().bubble : variant === 'danger' ? theme.dangerSoft : theme.elevation.e3c
   const label = variant === 'primary' ? 'onAccent' : variant === 'danger' ? 'dangerText' : 'text'
   const border = variant === 'primary' ? null : variant === 'danger' ? theme.colors.danger : theme.hairline
 

@@ -47,7 +47,7 @@ export const SecretField = forwardRef<TextInput, SecretFieldProps>(function Secr
         style={({ pressed }) => ({ alignSelf: 'flex-start', opacity: pressed ? 0.6 : 1 })}
         testID={rest.testID ? `${rest.testID}-reveal` : 'secret-reveal'}
       >
-        <Text color="accent" variant="meta">
+        <Text color="accentText" variant="meta">
           {revealed ? concealLabel : revealLabel}
         </Text>
       </Pressable>

@@ -219,7 +219,7 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
             secureTextEntry={!showToken}
           />
           <Pressable accessibilityRole="button" hitSlop={8} onPress={() => setShowToken(current => !current)}>
-            <Text color="accent" variant="meta">
+            <Text color="accentText" variant="meta">
               {showToken ? strings.onboarding.signIn.hideToken : strings.onboarding.signIn.showToken}
             </Text>
           </Pressable>

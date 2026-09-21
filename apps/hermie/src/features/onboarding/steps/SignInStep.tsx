@@ -181,7 +181,7 @@ function ProviderRow({
       <InsetRow style={{ alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' }}>
         <Text variant="body">{provider.displayName}</Text>
         {selected ? (
-          <Text color="accent" style={{ marginLeft: theme.space.md }} variant="body">
+          <Text color="accentText" style={{ marginLeft: theme.space.md }} variant="body">
             ✓
           </Text>
         ) : null}
