@@ -10,5 +10,6 @@ export {
 export { BotsScreen, BotsScreenOrSignedOut, type BotsScreenProps, type OpenBotOptions } from './BotsScreen'
 export { presenceOf, type Presence, type PresenceInput, type PresenceState } from './presence'
 export { ConnectionLine } from './ConnectionLine'
+export { GatewayNameLine } from './GatewayNameLine'
 export { SidebarFooter, TABS, type BotsSection, type TabKey } from './SidebarFooter'
 export { SidebarRail, type SidebarRailProps } from './SidebarRail'

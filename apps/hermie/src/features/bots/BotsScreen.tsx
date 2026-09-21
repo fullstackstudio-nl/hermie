@@ -68,6 +68,7 @@ import { useChatRuntime } from '../chats/ChatRuntime'
 import { type MessageMatch, useMessageSearch } from '../search'
 import { BotRow } from './BotRow'
 import { ConnectionLine } from './ConnectionLine'
+import { GatewayNameLine } from './GatewayNameLine'
 import {
   committedIndex,
   dragAnchors,
@@ -1149,9 +1150,14 @@ function Head({
         paddingTop: theme.space.panel
       }}
     >
-      <Text accessibilityRole="header" aria-level={1} style={{ flex: 1 }} variant={sidebar ? 'titleWide' : 'title'}>
-        {strings.bots.title}
-      </Text>
+      <View style={{ flex: 1 }}>
+        <Text accessibilityRole="header" aria-level={1} variant={sidebar ? 'titleWide' : 'title'}>
+          {strings.bots.title}
+        </Text>
+        {/* Which gateway this list belongs to, and only once there is more
+            than one of them to tell apart. */}
+        <GatewayNameLine />
+      </View>
 
       {onNewCron ? (
         <Pressable

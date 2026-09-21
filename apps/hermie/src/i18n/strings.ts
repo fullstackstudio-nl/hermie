@@ -926,6 +926,55 @@ export const strings = {
       perBotEmpty: 'No bots on this gateway yet.'
     },
 
+    /**
+     * The gateways list, which is the primary list once there is more than one
+     * of them.
+     *
+     * The wording keeps two things apart that used to be one, because with a
+     * list they are plainly different acts: SWITCHING is stepping across to a
+     * machine this device already knows, and REMOVING is forgetting one. The
+     * old "Change gateway" survives beside them and means the third thing —
+     * editing THIS gateway's address.
+     */
+    gateways: {
+      header: 'GATEWAYS',
+      row: 'Gateways',
+      rowHint: (count: number) => (count === 1 ? 'One gateway' : `${count} gateways`),
+      title: 'Gateways',
+      /** Under the list. It says what a tap does, because a tap does a lot. */
+      hint: 'Tap a gateway to connect to it. Hermie talks to one at a time; the others keep their conversations and their notifications.',
+      active: 'Connected',
+      signedInAs: (user: string) => `Signed in as ${user}`,
+      signedOut: 'Signed out',
+      authModeToken: 'Session token',
+      manage: 'Manage',
+      add: 'Add gateway',
+      addHint: 'Runs setup for another machine. The gateway you are on now stays connected until you switch.',
+
+      /** One gateway, on its own page. */
+      detailTitle: 'Gateway',
+      name: 'Name',
+      nameHint: 'What this gateway is called on this device. It is not sent anywhere.',
+      save: 'Save',
+      connect: 'Connect to this gateway',
+      connectHint: 'Hermie disconnects from the gateway it is on and dials this one.',
+      signOut: 'Sign out of this gateway',
+      signOutHint: 'Clears its stored credentials and keeps its address.',
+      remove: 'Remove this gateway',
+      removeHint: 'Forgets its address, its credentials, its conversations and its settings on this device.',
+      removeConfirm: 'Remove this gateway and everything stored for it on this device?',
+      removeConfirmAction: 'Remove it',
+      keepIt: 'Keep it',
+      /**
+       * Said once, on the page that removes one, because it is the one thing a
+       * reader cannot find out afterwards: a gateway with no live socket has
+       * nowhere to send the "stop notifying this device" write.
+       */
+      removeNotifyNote:
+        'If this gateway is not the one Hermie is connected to, its notifications stop when it next tries to reach this device rather than straight away.',
+      back: 'Gateways'
+    },
+
     account: 'ACCOUNT',
     signOut: 'Sign out',
     signOutHint: 'Clears the stored credentials and keeps the gateway address.',

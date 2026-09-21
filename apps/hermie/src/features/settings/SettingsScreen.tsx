@@ -28,6 +28,7 @@ import { AppearanceSection } from './AppearanceSection'
 import { ContextSection } from './ContextSection'
 import { DebugConnectionScreen } from './DebugConnectionScreen'
 import { GALLERY_ROW_TITLE, GalleryScreen } from './GalleryScreen'
+import { GatewaysScreen } from './GatewaysScreen'
 import { LicencesScreen } from './LicencesScreen'
 import { PrivacySection } from './PrivacySection'
 import { ThemesScreen } from './ThemesScreen'
@@ -46,12 +47,12 @@ export interface SettingsScreenProps {
    * Development only (`--hermieOpen overlay:settings/licences`). Each of these
    * is behind a tap, and a simulator this machine can only launch cannot tap.
    */
-  initialPage?: 'connection' | 'gallery' | 'licences' | 'themes'
+  initialPage?: 'connection' | 'gallery' | 'gateways' | 'licences' | 'themes'
 }
 
 export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
   const theme = useTheme()
-  const { canRefresh, config, status, signOut, changeGateway, forgetGateway } = useGateway()
+  const { canRefresh, config, registry, status, signOut, changeGateway, forgetGateway } = useGateway()
   const runtime = useChatRuntime()
   const advert = usePluginStore(state => state.advert)
   const presence = usePluginStore(pluginPresence)
@@ -61,6 +62,7 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
   const [showGallery, setShowGallery] = useState(initialPage === 'gallery')
   const [showLicences, setShowLicences] = useState(initialPage === 'licences')
   const [showThemes, setShowThemes] = useState(initialPage === 'themes')
+  const [showGateways, setShowGateways] = useState(initialPage === 'gateways')
   const [confirmingChange, setConfirmingChange] = useState(false)
 
   // Escape goes back ONE level: out of a screen Settings opened and into
@@ -72,6 +74,8 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
       setShowLicences(false)
       setShowThemes(false)
     },
+    // The gateways page owns its own Escape and back: it has pages of its own
+    // inside it, and one of them is the setup wizard.
     showConnectionTest || showGallery || showLicences || showThemes
   )
 
@@ -87,6 +91,8 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
       setShowLicences(false)
       setShowThemes(false)
     },
+    // The gateways page owns its own Escape and back: it has pages of its own
+    // inside it, and one of them is the setup wizard.
     showConnectionTest || showGallery || showLicences || showThemes
   )
 
@@ -110,6 +116,20 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
     return <ThemesScreen onClose={() => setShowThemes(false)} />
   }
 
+  if (showGateways) {
+    return <GatewaysScreen onClose={() => setShowGateways(false)} />
+  }
+
+  /*
+    How many gateways this device knows about, for the row's subtitle.
+
+    Read through `?.` for the reason `GatewayNameLine` gives: Settings is
+    rendered by suites that stand in for the gateway context with the two or
+    three fields they care about, and a subtitle is not worth a crash in any of
+    them. One is the right answer when nothing is known, because one is what
+    every device had before this list existed.
+  */
+  const gatewayCount = registry?.gateways.length ?? 1
   const token = config?.authMode === 'session_token'
   const address = describeGatewayAddress(config?.baseUrl)
 
@@ -197,6 +217,23 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
             }
           />
         </InsetGroup>
+
+        {/*
+          The list of gateways, above the account block, because with more than
+          one configured it is the thing this section is about. In a browser
+          there is nothing to list: Hermie Web fixes the gateway and the wizard
+          there has no address step to add another one with.
+        */}
+        {WEB_GATEWAY_BASE_URL ? null : (
+          <InsetGroup>
+            <InsetButtonRow
+              detail={strings.settings.gateways.rowHint(gatewayCount)}
+              onPress={() => setShowGateways(true)}
+              testID="settings-gateways"
+              title={strings.settings.gateways.row}
+            />
+          </InsetGroup>
+        )}
 
         <InsetGroup header={strings.settings.account}>
           <InsetButtonRow

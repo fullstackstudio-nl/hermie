@@ -20,15 +20,20 @@ import { attachLifecycle, createGatewayConnection, createTokenCoordinator, endGa
 import { clearCredentials, clearGateway, type GatewaySetup, loadGatewaySetup, type StoredGatewayConfig } from './config'
 import { migrateGatewayStorage } from './migrate'
 import { namespace, type GatewayNamespace } from './namespace'
+import { purgeGatewayStorage } from './purge'
 import {
   activeGatewayOf,
+  updateGateway,
   EMPTY_REGISTRY,
   type GatewayRecord,
   type GatewayRegistry,
+  gatewayById,
   loadGatewayRegistry,
   reconcileActiveGateway,
   removeGateway,
-  saveGatewayRegistry
+  renameGateway,
+  saveGatewayRegistry,
+  setActiveGateway
 } from './registry'
 import { useConnectionStore } from './store'
 
@@ -114,6 +119,27 @@ export interface GatewayContextValue {
   changeGateway: () => Promise<void>
   /** Forget the address and the credentials, and start setup empty. */
   forgetGateway: () => Promise<void>
+  /**
+   * Make another configured gateway the live one.
+   *
+   * One live connection at a time ([ADR-0006](../../../../docs/adr/0006-single-gateway-no-relay.md)),
+   * so this is a teardown and a dial rather than a second socket. The screens
+   * paint from the new gateway's own cache while that dial is in flight, which
+   * is the same path a cold start takes and the reason the switch does not sit
+   * on a spinner.
+   *
+   * A no-op for the gateway that is already live, and for an id the list does
+   * not have.
+   */
+  switchGateway: (id: string) => Promise<void>
+  /** Rename one entry. The name is this device's; nothing is sent anywhere. */
+  renameGateway: (id: string, name: string) => Promise<void>
+  /** Sign out of one gateway, live or not: its credentials go, its address stays. */
+  signOutOf: (id: string) => Promise<void>
+  /** Remove one gateway and everything it left on this device. */
+  removeGateway: (id: string) => Promise<void>
+  /** Re-read the list after something outside this provider changed it. */
+  refreshRegistry: () => Promise<void>
 }
 
 const GatewayContext = createContext<GatewayContextValue | null>(null)
@@ -429,6 +455,96 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
     setPhase('onboarding')
   }, [registry, setup, teardown])
 
+  /**
+   * Write the list and re-read everything that hangs off it.
+   *
+   * `reload` is what actually moves the app: it re-reads the registry from
+   * disk, so the write has to land first. Going through one function rather
+   * than four keeps that order from being a thing each caller remembers.
+   */
+  const applyRegistry = useCallback(
+    async (next: GatewayRegistry, { redial = false }: { redial?: boolean } = {}) => {
+      setRegistry(next)
+      await saveGatewayRegistry(next)
+
+      if (redial) {
+        await reload()
+      }
+    },
+    [reload]
+  )
+
+  const switchGateway = useCallback(
+    async (id: string) => {
+      if (id === registry.activeGatewayId || !gatewayById(registry, id)) {
+        return
+      }
+
+      /*
+        The push registration on the gateway being LEFT stays.
+
+        Switching is not signing out: that device still wants to hear about the
+        bots on the gateway it is stepping away from, and the daemon there is
+        still running. This is the one path where keeping the row is the point
+        rather than something that could not be helped.
+      */
+      await applyRegistry(setActiveGateway(registry, id), { redial: true })
+    },
+    [applyRegistry, registry]
+  )
+
+  const rename = useCallback(
+    async (id: string, name: string) => {
+      await applyRegistry(renameGateway(registry, id, name))
+    },
+    [applyRegistry, registry]
+  )
+
+  const signOutOf = useCallback(
+    async (id: string) => {
+      // The live one goes through `signOut`, which has a socket to end the
+      // session on and a registration to retire over it.
+      if (id === registry.activeGatewayId) {
+        await signOut()
+
+        return
+      }
+
+      // Anything else has neither, so this is the keychain and nothing more.
+      // The address survives, which is what "sign out" has always meant here.
+      await clearCredentials(namespace(id))
+      await applyRegistry(updateGateway(registry, id, { signedInUser: undefined }))
+    },
+    [applyRegistry, registry, signOut]
+  )
+
+  const remove = useCallback(
+    async (id: string) => {
+      const live = id === registry.activeGatewayId
+
+      if (live) {
+        // While the socket is still up, in this order, for the reason
+        // `signOut` gives: both of these are writes to the gateway being left.
+        await retirePushRegistration()
+        await endGatewaySession(setup?.config ?? null)
+        teardown()
+      }
+
+      await purgeGatewayStorage(namespace(id))
+      // Redialled only when the gateway that went was the live one — removing
+      // a row for a machine nobody is talking to must not drop the connection
+      // somebody is reading over.
+      await applyRegistry(removeGateway(registry, id), { redial: live })
+    },
+    [applyRegistry, registry, setup, teardown]
+  )
+
+  const refreshRegistry = useCallback(async () => {
+    const { registry: stored } = await loadGatewayRegistry()
+
+    setRegistry(stored)
+  }, [])
+
   const recordAuth = useCallback<AuthEventRecorder['record']>(event => {
     timelineRef.current?.record(event)
   }, [])
@@ -481,7 +597,12 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
       retryNow,
       signOut,
       changeGateway,
-      forgetGateway
+      forgetGateway,
+      switchGateway,
+      renameGateway: rename,
+      signOutOf,
+      removeGateway: remove,
+      refreshRegistry
     }),
     [
       adoptTokens,
@@ -490,8 +611,11 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
       lastError,
       phase,
       recordAuth,
+      refreshRegistry,
       registry,
       reload,
+      remove,
+      rename,
       request,
       resumeAccess,
       resumeConfig,
@@ -499,7 +623,9 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
       retryNow,
       setup,
       signOut,
-      status
+      signOutOf,
+      status,
+      switchGateway
     ]
   )
 

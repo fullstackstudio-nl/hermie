@@ -116,6 +116,19 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
 
     const ns = namespace(gatewayId)
 
+    /*
+      Out with the previous gateway's roster and open chats FIRST.
+
+      A switch replaces the connection rather than removing it, so the
+      `!connection` branch below — which is what normally empties these — never
+      runs, and the list would paint the machine the reader has just stepped
+      away from until the new roster arrived. These stores are module-level and
+      outlive every provider, so nothing else clears them.
+    */
+    useChatsStore.getState().reset()
+    useBotsStore.getState().reset()
+    usePluginStore.getState().reset()
+
     void useSettingsStore.getState().hydrate(ns)
     void useBotsStore.getState().hydrateLastSeen(ns)
     void usePushStore.getState().hydrate(ns)
