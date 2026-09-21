@@ -4131,3 +4131,152 @@ Reported while the round was running and NOT started, with what is already known
 - **The header status should say what the bot is doing** — Thinking, Typing,
   Running <tool>, Waiting for you, Delegating — from the event stream, as a
   `turnActivity(chat)` selector in `@hermie/transcript`.
+
+## The dots, the queue, and three numbers that were measured (2026-09-21, later)
+
+Eight items in one round. The three that had been reasoned about before are the
+three the scroll trace settled, and one of them was still wrong when this round
+started fixing it.
+
+### `Show more` was still 212pt out, and the recording says why
+
+`Fold` predicts how much taller its own body is about to be, and the list held
+the reader to that prediction. Opening the long report the fake gateway streams,
+on an iPhone 17 Pro:
+
+```
+[scroll] +101310 offset=859.0   content=2103.0   ← the tap
+[row]    +108923 assistant-r:6 h=1676.7 (+1377.7)
+[scroll] +108926 offset=2024.3  content=3480.7
+```
+
+859 + 1377.7 is 2236.7 and the list went to 2024.3. The prediction was 1165.3;
+the row grew by 1377.7. **The 212.4pt between them is the table**, measuring its
+columns a layout pass after the text, and it is the number the owner reported
+the text moving by.
+
+A row's own frame cannot answer it either, and that was this round's first
+attempt: by the time a row can report anything it has already grown, so the
+first height it sends is the final one and there is no baseline to subtract. The
+CONTENT's height can — whatever the row does, in however many passes, it is in
+there. `holdTarget(from, content)` is the offset at the tap plus
+`content - contentAtTap`, replacing the prediction on every
+`onContentSizeChange`. Recorded again after the change: predicted 1865.4, landed
+1865.3.
+
+### The typing bubble is a row now, and the anchor never noticed
+
+It was pinned below the scroll view because a height that comes and goes at the
+bottom of an inverted list moves the view `maintainVisibleContentPosition`
+anchors on. That reason expired when the anchor was put behind `away`: at the
+bottom there is no anchor to move, and away from it correcting for an inserted
+row is what the reader wants. Recorded, sending with the dots on:
+
+```
+[row]    +330421 user-o:11000 h=70.0 (new)
+[scroll] +330421 offset=39.7  content=1610.0
+[scroll] +330435 offset=38.7  content=1593.0
+… 14 events, monotonically down …
+[scroll] +330702 offset=0.0   content=1765.0
+```
+
+One animated run to the end, no correction, no spike. The content grew by the
+user row AND the typing row together and nothing jumped.
+
+### Sending goes to the end, from wherever the reader was
+
+Same recording, and the case the owner reported the jump from — scrolled up in
+the history with the pill showing. `scrollToLatest` is one
+`scrollToOffset({ animated: true, offset: 0 })`, and offset 0 on an inverted
+list is the newest message. Nothing in the run above ever asks for a larger
+offset, which is the whole of "never to the top": a `scrollToIndex` can land
+anywhere through its own recovery path, and this never asks for one.
+
+### A message sent while the bot is working is ours to hold
+
+`prompt.submit` will park a prompt — it answers `queued` — and that queue is the
+one thing the client cannot use: one opaque prompt, no method to read it back,
+edit it or take it out. Steer, Edit and Delete are exactly those three. So the
+queue is client-side in `chat-controller` until `message.complete`, and only
+Steer goes to the gateway (`session.steer`); a `rejected` steer comes back into
+the queue rather than disappearing into a turn that never heard it.
+
+A queued message with an attachment offers Steer and Delete and no Edit. The
+composer cannot be handed bytes back, and dropping a file silently is the bug
+the previous round removed from the failed-send path.
+
+### Every sheet can be dismissed, and ADR-0010 is intact
+
+The `blocking` flag is gone. It read ADR-0010 one word too wide: the ADR governs
+the ANSWER — an explicit tap on a named choice — and no backdrop tap, Escape or
+drag produces one. A question put aside stays open on the gateway and stays in
+the transcript behind its own `Answer` button.
+
+The drag writes to the same `Animated` value the slide-in uses, so the finger
+and the animation are one motion. Past a third of the height or faster than
+500 pt/s it closes; otherwise it springs back. Upward is CLAMPED rather than
+rubber-banded, which is a deliberate departure: the card is square against the
+window's bottom edge, so lifting it by any amount re-opens the strip of window
+the previous round closed.
+
+### Three keys that insert nothing
+
+The composer's slash list is navigable now, and ↑, ↓ and Tab are the first
+unmodified keys on the native allow-list in `HermieMacModule.swift`. They belong
+there: the table exists so that nothing typed into a field reaches JavaScript,
+and none of those three inserts a character. **Not verified on a device** — the
+Swift side was not compiled this round; the JavaScript half is tested against
+the seam.
+
+### The sidebar, and the half of the width fix that was missed
+
+The previous round settled the width the collapse reads and the width the
+sidebar is drawn at, and left `useLayoutMode` — the breakpoint that picks the
+whole SHELL — on the live measurement. A transition reporting 690pt for a frame
+therefore swapped the regular shell for the compact stack and back, and
+everything that shell holds is state: the selection, the temporary list, the
+open panel. That is not a sidebar closing; it is all of it going at once.
+
+The settled width was also one `useState` per caller, each seeded at whatever
+the window was when that component mounted, under a comment saying the questions
+must be asked of one number. It is one module value with one timer now.
+`--hermieTraceLayout` prints every width seen, every width settled, and every
+change of the sidebar with its reason.
+
+### The composer behind the keyboard
+
+`KeyboardAvoidingView` computes `frame.y + frame.height - keyboardY`, where the
+frame is its own `onLayout` — **parent-relative** — and `keyboardY` is the
+keyboard's **window** coordinate. They agree only for a view at the top of the
+window. `Screen` puts `insets.top` above the chat on a phone and the wide layout
+puts a panel above it, so the room made was short by exactly that: 59pt on an
+iPhone 17 Pro, which is the composer.
+
+`KeyboardInset` measures its own top in the window and passes it as
+`keyboardVerticalOffset`. Photographed with the keyboard up on an iPhone 17 Pro
+and an iPad Pro 13" in the sidebar layout: the field sits on the keyboard.
+
+### Found on the way, NOT fixed
+
+- **Two children with the same key, after a gateway restart.** Restarting the
+  fake gateway under a live app and sending twice produced
+  `Encountered two children with the same key … .$o=29000` and the same user
+  bubble twice. It is a transcript item id, not a row wrapper, so it is the
+  reconciler pairing a rebuilt session's row twice — reachable only by pulling
+  the gateway out from under a session, which is how it was found.
+
+### What is verified, and what is only reasoned
+
+**Recorded on an iPhone 17 Pro against the fake gateway** (`--hermieTraceScroll`,
+`--stream-delay`): the two-stage growth and its correction, before and after;
+the send-to-end run; the typing row arriving with no correction; the composer
+sitting on the keyboard. **Photographed on an iPad Pro 13"**: the composer on
+the keyboard in the sidebar layout.
+
+**By unit test only:** the queue (controller and screen), every sheet
+dismissal's arithmetic, the slash list's key navigation, the settled width's
+flap cases.
+
+**Reasoned, not watched:** the three new key codes in the Swift allow-list — no
+native build was made this round, so the dev client on the simulator is the
+previous binary with this round's JavaScript.
