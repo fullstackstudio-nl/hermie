@@ -1,12 +1,13 @@
 import { GatewayError, type AuthTimelineSnapshot, type ConnectionStatus } from '@hermie/gateway-client'
 import { act, fireEvent, screen, waitFor } from '@testing-library/react-native'
 
-import { GatewayProvider, SignedOutPanel } from '../src/gateway'
+import { GatewayProvider, GatewayStoppedPanel } from '../src/gateway'
 import { useConnectionStore } from '../src/gateway/store'
 import { renderScreen } from './support/render'
 
 const mockStatusHandlers: ((status: ConnectionStatus, error: GatewayError | null) => void)[] = []
 const mockResume = jest.fn()
+const mockRetryNow = jest.fn()
 const mockSaveTokens = jest.fn(async () => undefined)
 
 jest.mock('../src/gateway/client', () => ({
@@ -17,6 +18,7 @@ jest.mock('../src/gateway/client', () => ({
     start: jest.fn(),
     stop: jest.fn(),
     resume: () => mockResume(),
+    retryNow: () => mockRetryNow(),
     onStatus: (handler: (status: ConnectionStatus, error: GatewayError | null) => void) => {
       mockStatusHandlers.push(handler)
       handler('disconnected', null)
@@ -32,11 +34,12 @@ jest.mock('../src/platform/key-value-store', () => ({
     set: jest.fn(async () => undefined),
     delete: jest.fn(async () => undefined),
     getJson: jest.fn(async () => ({
-      baseUrl: 'https://hermes.example.com',
+      baseUrl: 'https://hermes.example.com:8443',
       authMode: 'native_pkce',
       provider: 'self-hosted',
       providerDisplayName: 'Self-Hosted OIDC',
-      version: '2026.9.14'
+      version: '2026.9.14',
+      userDisplayName: 'tester@example.invalid'
     })),
     setJson: jest.fn(async () => undefined)
   }
@@ -82,7 +85,7 @@ describe('the signed-out card', () => {
   const renderWhenSignedOut = async (recorded?: AuthTimelineSnapshot) => {
     renderScreen(
       <GatewayProvider>
-        <SignedOutPanel />
+        <GatewayStoppedPanel />
       </GatewayProvider>
     )
 
@@ -155,5 +158,89 @@ describe('the signed-out card', () => {
     await renderWhenSignedOut()
 
     expect(screen.queryByTestId('signed-out-reason')).toBeNull()
+  })
+})
+
+/**
+ * Every other stop, on the same card.
+ *
+ * The report behind these: a fresh install inherited a stored gateway address
+ * from an earlier one, and all the app said was that the endpoint was not what
+ * it expected — no address, nothing to press. So each kind is checked for the
+ * two things that were missing, and for the sentence being the app's rather
+ * than the transport's.
+ */
+describe('a gateway that cannot be used', () => {
+  const renderWhenStopped = async (error: GatewayError) => {
+    renderScreen(
+      <GatewayProvider>
+        <GatewayStoppedPanel />
+      </GatewayProvider>
+    )
+
+    await waitFor(() => expect(mockStatusHandlers.length).toBeGreaterThan(0))
+    pushStatus('disconnected', error)
+  }
+
+  it.each([
+    [
+      'an address it does not trust',
+      new GatewayError('config', 'endpoint is not what it expects', { closeCode: 4403 })
+    ],
+    ['a takeover', new GatewayError('config', 'endpoint is not what it expects', { closeCode: 4408 })],
+    ['chat switched off', new GatewayError('config', 'endpoint is not what it expects', { closeCode: 4404 })],
+    ['a rejected certificate', new GatewayError('tls', 'endpoint is not what it expects')],
+    ['something that is not a gateway', new GatewayError('not_hermes', 'endpoint is not what it expects')]
+  ])('names the stored address and the ways out after %s', async (_label, error) => {
+    await renderWhenStopped(error)
+
+    expect(screen.getByTestId('gateway-stopped-panel')).toBeTruthy()
+
+    // The address the app is stuck on, in the parts a reader checks it by.
+    expect(screen.getByText('https://hermes.example.com:8443')).toBeTruthy()
+    expect(screen.getByText('hermes.example.com')).toBeTruthy()
+    expect(screen.getByText('8443')).toBeTruthy()
+    expect(screen.getByText('https')).toBeTruthy()
+    expect(screen.getByText('tester@example.invalid')).toBeTruthy()
+
+    expect(screen.getByTestId('gateway-stopped-recheck')).toBeTruthy()
+    expect(screen.getByTestId('signed-out-change-gateway')).toBeTruthy()
+    expect(screen.getByTestId('gateway-stopped-sign-out')).toBeTruthy()
+    // Signing in is not on offer: the credentials are not what is wrong.
+    expect(screen.queryByTestId('signed-out-sign-in')).toBeNull()
+
+    // Never the bare sentence the transport threw.
+    expect(screen.queryByText('endpoint is not what it expects')).toBeNull()
+  })
+
+  it('dials on Re-check, restarting a loop that has stopped', async () => {
+    await renderWhenStopped(new GatewayError('tls', 'rejected'))
+
+    fireEvent.press(screen.getByTestId('gateway-stopped-recheck'))
+
+    // `resume()` restarts a stopped loop; `retryNow()` resets the ladder of one
+    // that is merely waiting. Each is a no-op in the other's case.
+    expect(mockResume).toHaveBeenCalled()
+    expect(mockRetryNow).toHaveBeenCalled()
+  })
+
+  it('stays up through the dial rather than flashing the app behind it', async () => {
+    const refused = new GatewayError('config', 'refused', { closeCode: 4403 })
+    await renderWhenStopped(refused)
+
+    pushStatus('authenticating', refused)
+    expect(screen.getByTestId('gateway-stopped-panel')).toBeTruthy()
+    expect(screen.getByTestId('gateway-stopped-recheck')).toHaveTextContent('Checking…')
+
+    pushStatus('ready', null)
+    expect(screen.queryByTestId('gateway-stopped-panel')).toBeNull()
+  })
+
+  it('says nothing at all while a reconnect is still trying', async () => {
+    await renderWhenStopped(new GatewayError('network', 'dropped'))
+    pushStatus('reconnecting', new GatewayError('network', 'dropped'))
+
+    expect(screen.queryByTestId('gateway-stopped-panel')).toBeNull()
+    expect(screen.queryByTestId('signed-out-panel')).toBeNull()
   })
 })

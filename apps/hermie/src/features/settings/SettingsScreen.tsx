@@ -9,6 +9,8 @@ import { NotificationsSection } from '../push/NotificationsSection'
 import { pushPlatform } from '../push/platform'
 import { useGateway } from '../../gateway'
 import { GatewayAddressRow } from '../../gateway/GatewayAddressRow'
+import { describeGatewayAddress } from '../../gateway/gateway-stop'
+import { WEB_GATEWAY_BASE_URL } from '../../gateway/web-config'
 import { RefreshNotice } from '../../gateway/RefreshNotice'
 import { TransportNotice } from '../../gateway/TransportNotice'
 import { strings } from '../../i18n/strings'
@@ -48,7 +50,7 @@ export interface SettingsScreenProps {
 
 export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
   const theme = useTheme()
-  const { canRefresh, config, status, signOut, changeGateway } = useGateway()
+  const { canRefresh, config, status, signOut, changeGateway, forgetGateway } = useGateway()
   const runtime = useChatRuntime()
   const advert = usePluginStore(state => state.advert)
   const presence = usePluginStore(pluginPresence)
@@ -108,6 +110,7 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
   }
 
   const token = config?.authMode === 'session_token'
+  const address = describeGatewayAddress(config?.baseUrl)
 
   return (
     <Screen padded={false}>
@@ -152,6 +155,16 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
             : {})}
         >
           <GatewayAddressRow baseUrl={config?.baseUrl} />
+          {/*
+            The same parts the stopped-gateway card prints, so an address read
+            here and an address blamed by a failure read identically. Not in a
+            browser: there the row above already answers "which gateway", and
+            this app's own origin has a scheme and a port that say nothing
+            about it.
+          */}
+          {WEB_GATEWAY_BASE_URL ? null : <InsetValueRow label={strings.settings.host} value={address.host} />}
+          {WEB_GATEWAY_BASE_URL ? null : <InsetValueRow label={strings.settings.scheme} value={address.scheme} />}
+          {WEB_GATEWAY_BASE_URL ? null : <InsetValueRow label={strings.settings.port} value={address.port} />}
           <InsetValueRow
             label={strings.settings.provider}
             value={
@@ -190,21 +203,38 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
             detail={strings.settings.signOutHint}
             onPress={() => void signOut()}
           />
+          {/*
+            Two rows where there was one, because they were one thing with two
+            meanings. Changing gateway is now the ordinary, reversible act —
+            setup reopens on the address step with this address in it and
+            nothing is dropped until a different one is saved — and forgetting
+            is the destructive one that still asks.
+
+            In a browser neither applies: Hermie Web fixes the gateway, and the
+            wizard there has no address step to open.
+          */}
+          {WEB_GATEWAY_BASE_URL ? null : (
+            <InsetButtonRow
+              title={strings.settings.changeGateway}
+              detail={strings.settings.changeGatewayHint}
+              onPress={() => void changeGateway()}
+            />
+          )}
           {confirmingChange ? (
             <InsetButtonRow
               title={strings.settings.confirm}
               tone="danger"
               detail={strings.settings.changeGatewayConfirm}
-              onPress={() => void changeGateway()}
+              onPress={() => void forgetGateway()}
             />
           ) : null}
           {confirmingChange ? (
             <InsetButtonRow title={strings.settings.keepIt} tone="text" onPress={() => setConfirmingChange(false)} />
           ) : (
             <InsetButtonRow
-              title={strings.settings.changeGateway}
+              title={strings.settings.forgetGateway}
               tone="danger"
-              detail={strings.settings.changeGatewayHint}
+              detail={strings.settings.forgetGatewayHint}
               onPress={() => setConfirmingChange(true)}
             />
           )}

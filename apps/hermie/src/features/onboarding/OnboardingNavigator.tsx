@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 
-import { saveGatewaySetup, type StoredGatewayConfig } from '../../gateway/config'
+import { clearCredentials, saveGatewaySetup, type StoredGatewayConfig } from '../../gateway/config'
 import { describeConnectionError } from '../../gateway/errors'
 import { WEB_GATEWAY_BASE_URL } from '../../gateway/web-config'
 import { strings } from '../../i18n/strings'
@@ -54,6 +54,12 @@ export interface OnboardingNavigatorProps {
   /** Resuming after a sign-out: the address survives, the credentials do not. */
   resumeConfig?: StoredGatewayConfig | null
   onComplete: () => void | Promise<void>
+  /**
+   * Offered when the wizard opened over a gateway that is still configured —
+   * "Change gateway" — so that looking at the address does not commit to
+   * replacing it.
+   */
+  onCancel?: () => void | Promise<void>
   initialStep?: OnboardingStep
   initialDraft?: OnboardingDraft
   /** Passed through to the address step; tests drive it to zero. */
@@ -78,6 +84,7 @@ export interface OnboardingNavigatorProps {
 export function OnboardingNavigator({
   resumeConfig = null,
   onComplete,
+  onCancel,
   initialStep,
   initialDraft,
   probeDebounceMs
@@ -139,8 +146,25 @@ export function OnboardingNavigator({
     setSaveError(null)
 
     try {
+      const config = configFromDraft(draft)
+
+      // "Change gateway" leaves the previous gateway entirely alone so that the
+      // trip can be abandoned. This is the moment it stops being abandonable: a
+      // different address means the stored access, refresh and session tokens
+      // were minted by a gateway this app no longer talks to, and leaving them
+      // in the keychain hands the next sign-in a credential from somewhere else.
+      //
+      // The push registration on the OLD gateway is not retired here, and
+      // cannot be: retiring it is a write over a socket that was closed when
+      // the wizard opened. It names a device on a gateway this app has left,
+      // which is worth less than the sign-in that keeping the socket up would
+      // have cost — see `changeGateway` in `GatewayProvider`.
+      if (resumeConfig && resumeConfig.baseUrl !== config.baseUrl) {
+        await clearCredentials()
+      }
+
       await saveGatewaySetup({
-        config: configFromDraft(draft),
+        config,
         extraHeaders: headerRecord(draft.headers),
         tokens: draft.tokens,
         sessionToken: draft.sessionToken.trim() || null
@@ -150,7 +174,7 @@ export function OnboardingNavigator({
       setSaveError(strings.onboarding.done.saveFailed(describeConnectionError(error, draft.baseUrl ?? '')))
       setSaving(false)
     }
-  }, [draft, onComplete])
+  }, [draft, onComplete, resumeConfig])
 
   const advance = () => {
     if (step === 'done') {
@@ -226,6 +250,7 @@ export function OnboardingNavigator({
       cover={step === 'welcome'}
       lead={heading.lead}
       onBack={step === 'welcome' ? undefined : goBack}
+      {...(onCancel ? { onCancel: () => void onCancel() } : {})}
       onPrimary={advance}
       primaryBusy={saving}
       primaryDisabled={!canAdvance()}

@@ -25,7 +25,7 @@ import type { ConnectionStatus } from '@hermie/gateway-client'
 import { Pressable, View } from 'react-native'
 
 import { useGateway } from '../../gateway'
-import { useReauth } from '../../gateway/SignedOutPanel'
+import { useReauth } from '../../gateway/reauth'
 import { strings } from '../../i18n/strings'
 import { PresenceBead } from '../../ui/PresenceBead'
 import { Text } from '../../ui/primitives'

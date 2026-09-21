@@ -10,6 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A gateway that cannot be used says which gateway it is.** A fresh install inherited a stored
+  address from an earlier one, and all the app had to say was that the endpoint was not what it
+  expected: no address on screen, nothing to press, and reinstalling as the only way out. The
+  signed-out card is now the card for every stop — a gateway that does not trust the address, a
+  takeover, chat switched off, a rejected certificate, an address that is not a gateway or leads
+  somewhere else, a version too old — and it names the stored address in the parts a reader checks
+  it by (scheme, host, port), says who the gateway last reported they were, explains the failure in
+  one sentence with the connection's own hint under it where there is one, and offers **Re-check**,
+  **Change gateway** and **Sign out**. A reconnect that is still climbing keeps the chat's quiet
+  notice instead: the card is for the loop that has stopped, not for the one that is working.
+  **Change gateway** is no longer destructive — it reopens setup on the address step with the
+  address filled in, leaves everything on disk, can be cancelled, and drops the stored sign-in only
+  at the moment a different address is saved. Settings gains the same address parts and a separate,
+  confirmed **Forget this gateway**. In a browser there is nothing to change, so the card says the
+  server decides the gateway rather than offering a step the web wizard does not have.
+
 - **Push notifications, from the server you already run.** `hermie-web --push` holds one connection
   to its gateway, resumes every Bot Chat, and notifies registered devices about four things: a new
   bot message in a chat nobody is reading, an approval or clarify request opening, a bot-to-bot DM,

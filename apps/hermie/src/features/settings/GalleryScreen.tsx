@@ -96,7 +96,7 @@ import {
   type CronJob,
   type ScheduleDraft
 } from '../cron'
-import { SignedOutPanel } from '../../gateway/SignedOutPanel'
+import { GatewayStoppedPanel } from '../../gateway/GatewayStoppedPanel'
 import {
   DoneStep,
   emptyDraft,
@@ -718,7 +718,13 @@ const SECTIONS: readonly GallerySection[] = [
       </>
     )
   },
-  { id: 'signed-out', title: 'Signed out panel', full: true, needsGateway: true, render: () => <SignedOutPanel /> },
+  {
+    id: 'signed-out',
+    title: 'Stopped gateway panel',
+    full: true,
+    needsGateway: true,
+    render: () => <GatewayStoppedPanel />
+  },
   {
     id: 'cron-status-dots',
     title: 'Cron status dots',
