@@ -231,7 +231,13 @@ const config: ExpoConfig = {
     // half a directory away from the thing it installs is a plugin that goes stale. It also writes
     // the App Group onto the app's entitlements, which is why `ios.entitlements` above does not
     // name it: one plugin owns the group on both targets so the two cannot disagree.
-    './modules/hermie-widgets/plugin/with-hermie-widgets'
+    './modules/hermie-widgets/plugin/with-hermie-widgets',
+    // Share to Hermie. Beside the widget plugin and for the same reason: it
+    // installs a second target whose entire source is in its own module, and it
+    // writes the SAME App Group onto the app's entitlements — additively, so
+    // whichever of the two runs second is a no-op. It also patches Android's
+    // MainActivity, which the widget plugin has no need to.
+    './modules/hermie-share/plugin/with-hermie-share'
   ]
   // `extra.eas.projectId` used to be deliberately absent, and this comment used to
   // say so. It is set above now, because push needs a project to mint a token

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    The same group the app and the widget extension name, and the ONLY reason
+    this extension can hand anything over: a share extension is its own
+    sandboxed process that is killed the moment its sheet closes, so a file it
+    writes into its own container is a file nothing will ever read.
+
+    `plugin/with-hermie-share.js` refuses to prebuild when this string is not the
+    one the app uses. The failure it is guarding against reports itself nowhere:
+    the extension writes into a container of its own, the app looks in one with
+    nothing in it, and sharing silently does nothing at all.
+  -->
+  <key>com.apple.security.application-groups</key>
+  <array>
+    <string>group.dev.hermie.app</string>
+  </array>
+</dict>
+</plist>

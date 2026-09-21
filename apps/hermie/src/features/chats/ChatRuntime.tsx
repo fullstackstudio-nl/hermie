@@ -15,6 +15,7 @@ import { chatGatewayFor, type ChatGateway } from '../../gateway/link'
 import { useConnectionStore } from '../../gateway/store'
 import { chatCache } from '../../platform/chat-cache'
 import { RUNS_ON_MAC } from '../../platform/runs-on-mac'
+import { shareInbox } from '../../platform/share-inbox'
 import { useBotsStore } from '../../store/bots'
 import { useChatLayoutStore } from '../../store/chat-layout'
 import { useChatsStore } from '../../store/chats'
@@ -22,13 +23,21 @@ import { OWNER_USER_ID, useDeviceContextStore } from '../../store/device-context
 import { usePluginStore } from '../../store/plugin'
 import { usePushStore } from '../../store/push'
 import { useSettingsStore } from '../../store/settings'
+import { useShareStore } from '../../store/share'
 import { UiMetaBridge } from '../../store/ui-meta-bridge'
 import { BotsController } from '../bots/bots-controller'
 import { pushPlatform } from '../push/platform'
 import { PushSync } from '../push/push-sync'
 import { setPushRetire } from '../push/runtime'
 import { pushProjectId, pushVapidUrl } from '../push/where'
+// Reached by module rather than through `../share`'s barrel: that barrel also
+// exports the picker's own sheet, and a barrel imported from the module it
+// renders is how an import cycle starts.
+import { onShareRequest } from '../share/share-bus'
+import { ShareDelivery } from '../share/share-delivery'
+import { ShareTargetHost } from '../share/ShareTargetHost'
 import { WidgetSync } from '../widgets'
+import { resizeToBase64 } from './attachments'
 import { ChatController } from './chat-controller'
 
 export interface ChatRuntimeValue {
@@ -40,6 +49,8 @@ export interface ChatRuntimeValue {
   widgets: WidgetSync
   /** ADR-0017: the registration, the heartbeat, and what a tap is allowed to do. */
   push: PushSync
+  /** The share sheet's outbox, drained into real messages. No-op where there is none. */
+  share: ShareDelivery
   /** The connection, as the slice everything in here is written against. */
   gateway: ChatGateway
 }
@@ -218,6 +229,46 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     const stopPush = push.start()
 
     /*
+      What another app gave Hermie through the system's share sheet.
+
+      Built with the connection for the same reason the widget sync is, and
+      torn down with it — but the QUEUE is not: it lives in the shared container
+      and survives the app, let alone a reconnect. So nothing is lost by
+      building this late and disposing of it early, and a share that arrived
+      while the reader was signed out is delivered the moment they are back.
+
+      Every port resolves against the controller rather than against anything
+      the manifest said. `open` is deliberately both halves — resume AND
+      navigate — because the upload needs the working directory the resume
+      reports, and because a share that lands in a chat the reader cannot see is
+      not what tapping "Send" in a share sheet promised.
+    */
+    const share = new ShareDelivery({
+      inbox: shareInbox,
+      ready: () => useConnectionStore.getState().status === 'ready',
+      open: async name => {
+        const bot = useBotsStore.getState().byName[name]
+
+        if (!bot) {
+          // The picker's fallback: a manifest naming a bot this gateway does
+          // not have cannot be delivered, and guessing at a near match would
+          // send somebody's file to the wrong agent.
+          throw new Error(`${name} is not a bot on this gateway.`)
+        }
+
+        await controller.openChat(bot)
+        requestOpenChat(name)
+      },
+      upload: (name, file) => controller.uploadFile(name, file),
+      // The same resize the composer's own picker performs. A share of a 12 MB
+      // screenshot would otherwise go over the socket at full resolution, which
+      // is the one thing `attachments.ts` exists to prevent.
+      readImage: (uri, filename) => resizeToBase64(uri, filename),
+      send: (name, text, attachments) => controller.send(name, text, attachments),
+      onChange: waiting => useShareStore.getState().setWaiting(waiting)
+    })
+
+    /*
       The one thing that has to happen BEFORE this connection goes away. See
       `features/push/runtime.ts`: `GatewayProvider` tears the socket down first
       and this component is unmounted by the same change, so the removal is
@@ -236,7 +287,11 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     // READY; see below.
     void bots.paintFromCache()
 
-    const next = { controller, bots, uiMeta, widgets, push, gateway }
+    // A link that arrived at whichever shell is mounted, rather than a
+    // foreground. It only ever makes the pump EARLIER; see `share-bus.ts`.
+    const stopShareBus = onShareRequest(() => void share.pump())
+
+    const next = { controller, bots, uiMeta, widgets, push, share, gateway }
     valueRef.current = next
     setValue(next)
 
@@ -246,6 +301,9 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       stopWatching()
       stopWidgets()
       stopPush()
+      stopShareBus()
+      // The entries stay on disk; only the badge goes. See `useShareStore.reset`.
+      useShareStore.getState().reset()
       setPushRetire(null)
       valueRef.current = null
     }
@@ -328,6 +386,20 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
   }, [status, value])
 
   /**
+   * Drain the share outbox whenever there is a gateway to drain it into.
+   *
+   * On EVERY value of `status`, not only `ready`, because the first pump is
+   * also what reads the directory at all: an entry that arrived while the app
+   * was closed has to reach the badge before it can reach a chat, and a phone
+   * with no route to the gateway is exactly the case where the badge is the
+   * only thing the feature can offer. `pump` itself declines to send anything
+   * while the socket is down.
+   */
+  useEffect(() => {
+    void value?.share.pump()
+  }, [status, value])
+
+  /**
    * Reconcile again when the gateway says a profile changed.
    *
    * `ui_meta` is on the profile row, so another client writing its own section
@@ -372,6 +444,10 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
         // The reader has just come back from the home screen they were looking
         // at, so the next thing worth doing is making what they saw there true.
         runtime.widgets.resume()
+        // The other thing that can have changed while the app was away: the
+        // share sheet is a different process and can have written an entry
+        // without this one running at all.
+        void runtime.share.pump()
         // ADR-0017's freshness pass, and the heartbeat's other half: a token
         // that changed while the app was away is re-read here, and `seen` only
         // means anything while somebody is actually looking.
@@ -415,7 +491,21 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
 
   const memo = useMemo(() => value, [value])
 
-  return <ChatRuntimeContext.Provider value={memo}>{children}</ChatRuntimeContext.Provider>
+  return (
+    <ChatRuntimeContext.Provider value={memo}>
+      {children}
+      {/*
+        The share picker, mounted once and above both shells.
+
+        Here rather than in a shell because there are two of them and only one
+        is on screen: the same sheet in both would be two `Modal`s racing to ask
+        the same question. It renders nothing at all until an entry arrives with
+        no chat on it, which on iOS is never — the share extension asks there,
+        where it can read the roster without launching anything.
+      */}
+      {memo ? <ShareTargetHost share={memo.share} /> : null}
+    </ChatRuntimeContext.Provider>
+  )
 }
 
 /** The chat runtime, or `null` before the gateway connection exists. */

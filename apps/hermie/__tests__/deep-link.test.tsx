@@ -1,5 +1,5 @@
 /**
- * `hermie://chat/<bot>` — the one link this app answers.
+ * `hermie://chat/<bot>` and `hermie://share/<id>` — the links this app answers.
  *
  * Two things are pinned here and they are not the same thing. The parser is a
  * table, because a URL scheme is registered with the SYSTEM: any app on the
@@ -60,10 +60,47 @@ describe('parseHermieLink', () => {
   ])('refuses %s', (_label, url) => {
     expect(parseHermieLink(url)).toBeNull()
   })
+
+  /**
+   * The second kind: `hermie://share/<id>`, sent by this device's OWN share
+   * extension the moment it has written an entry.
+   *
+   * The id is not decoded, unlike a bot name, and that difference is the point.
+   * A bot name is somebody else's string and can be anything a profile is
+   * called; a share id is minted here out of a fixed alphabet, so a link
+   * carrying anything else did not come from the share sheet — and the useful
+   * answer to that is nothing at all, not an attempt to work out what it meant.
+   */
+  it('reads the id out of a share link', () => {
+    expect(parseHermieLink('hermie://share/0f2a4c6e8a0c2e4f6a8c0e2f4a6c8e0f')).toEqual({
+      kind: 'share',
+      id: '0f2a4c6e8a0c2e4f6a8c0e2f4a6c8e0f'
+    })
+  })
+
+  it.each([
+    ['an id with a separator in it', 'hermie://share/a%2Fb'],
+    ['an escaped climb out of the outbox', 'hermie://share/%2E%2E'],
+    ['an id with a space', 'hermie://share/a%20b'],
+    ['no id', 'hermie://share/'],
+    ['a second segment', 'hermie://share/abc/def']
+  ])('refuses a share link with %s', (_label, url) => {
+    expect(parseHermieLink(url)).toBeNull()
+  })
+
+  /**
+   * A share link carries an id and never content. Everything a share consists
+   * of is in a file the app reads out of its own container, which is what keeps
+   * a scheme any web page can invoke from being a way to put words in somebody's
+   * chat.
+   */
+  it('carries no payload, only an id', () => {
+    expect(parseHermieLink('hermie://share/abc?text=hello')).toEqual({ kind: 'share', id: 'abc' })
+  })
 })
 
 function Probe({ onLink }: { onLink: (bot: string) => void }) {
-  useHermieLink(link => onLink(link.bot))
+  useHermieLink(link => onLink(link.kind === 'chat' ? link.bot : `share:${link.id}`))
 
   return <Text>probe</Text>
 }

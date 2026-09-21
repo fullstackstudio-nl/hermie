@@ -6,7 +6,13 @@
  * `./secret-store` resolves to `secret-store.web.ts`. Every type two seams
  * share therefore lives here, where neither owns it, and each seam re-exports
  * the ones its callers expect to find next to the implementation.
+ *
+ * The one import below is the exception that proves the rule: `ShareOutboxEntry`
+ * is a FILE FORMAT, written by a process this repository does not run, and it is
+ * owned by the module that parses it. A second declaration of it here would be
+ * two spellings of somebody else's bytes.
  */
+import type { ShareOutboxEntry } from '../features/share/outbox'
 
 /**
  * Storage for values that must never land in a plain-text preference file:
@@ -108,6 +114,29 @@ export interface WidgetBridge {
   writeAvatar(botName: string, base64: string): Promise<boolean>
   /** Delete every avatar whose bot is not in `keep`. Answers how many went. */
   pruneAvatars(keep: readonly string[]): Promise<number>
+}
+
+/**
+ * The other direction through the same shared container: what another app gave
+ * Hermie through the system's share sheet.
+ *
+ * The widget bridge writes; this one only reads and deletes. That asymmetry is
+ * the whole design — the writer is a process this app does not control and
+ * cannot talk to, so the two halves meet at a directory of versioned JSON
+ * (`features/share/outbox.ts`) and nowhere else.
+ *
+ * `files` is resolved natively rather than joined here because only the native
+ * side knows where its own container is: an App Group directory on Apple
+ * platforms, the app's own files directory on Android, where `ACTION_SEND`
+ * reaches the app process directly and no group is needed.
+ */
+export interface ShareInbox {
+  /** Whether this platform can receive a share at all. */
+  readonly available: boolean
+  /** Every entry waiting, unparsed. Answers `[]` rather than throwing. */
+  list(): Promise<ShareOutboxEntry[]>
+  /** Delete one entry and its copied files. Answers whether anything went. */
+  clear(id: string): Promise<boolean>
 }
 
 /**
