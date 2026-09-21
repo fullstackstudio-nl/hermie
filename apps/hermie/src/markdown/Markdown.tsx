@@ -33,6 +33,29 @@ export interface MarkdownProps {
   /** Surface that code blocks and tables paint on. */
   surface?: string
   /**
+   * How much room a BLOCK has, in points.
+   *
+   * A table and a fenced listing are the two things in a reply that can be
+   * wider than the box they land in, and neither can find that out for itself:
+   * a bubble's body is `alignItems: 'flex-start'`, so everything under it is
+   * sized by this very content. `OverflowScroll` has the measurement and the
+   * consequence — without a number from outside, a horizontal scroll view comes
+   * out as wide as its content and does not scroll at all.
+   *
+   * A caller inside a bubble computes it from `useBubbleWidth` minus its own
+   * padding. A caller that genuinely does not know leaves it out, and the two
+   * blocks keep the behaviour they had.
+   */
+  maxContentWidth?: number
+  /**
+   * The colour BEHIND a block, for the edge fade on a table that scrolls.
+   *
+   * The same value a `Fold` takes as `fadeTo`, and for the same reason: a
+   * table's cells are transparent, so only the caller knows what its last
+   * column dissolves into. No fade without it.
+   */
+  fadeTo?: string
+  /**
    * Surface an inline code chip paints on. Defaults to the theme's sunk tint,
    * which is translucent and therefore correct on any bubble; `surface` does not
    * reach the chip, because the code-block surface is opaque and a near-black
@@ -103,6 +126,8 @@ export function Markdown({
   mutedColor = 'textMuted',
   linkColor,
   surface,
+  maxContentWidth,
+  fadeTo,
   inlineCodeBackground,
   inlineCodeBorderColor,
   borderColor,
@@ -189,15 +214,19 @@ export function Markdown({
       selectable,
       textColor: theme.colors[color],
       ...(images ? { images } : {}),
-      ...(lineWidth ? { lineWidth } : {})
+      ...(lineWidth ? { lineWidth } : {}),
+      ...(maxContentWidth ? { contentWidth: maxContentWidth } : {}),
+      ...(fadeTo ? { fadeColor: fadeTo } : {})
     }),
     [
       body,
       borderColor,
       color,
+      fadeTo,
       handleLink,
       images,
       lineWidth,
+      maxContentWidth,
       inlineCodeBackground,
       inlineCodeBorderColor,
       linkColor,

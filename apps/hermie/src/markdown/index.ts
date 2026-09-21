@@ -3,12 +3,13 @@
  *
  * Nothing here knows about chats: hand it text, it renders blocks.
  */
-export { MarkdownBlock, type MarkdownBlockProps } from './Block'
-export { CodeBlock, type CodeBlockProps } from './CodeBlock'
+export { MarkdownBlock, tableColumnWidths, tableFitsInline, tableNaturalWidth, type MarkdownBlockProps } from './Block'
+export { CodeBlock, codeNaturalWidth, type CodeBlockProps } from './CodeBlock'
+export { OverflowScroll, type OverflowScrollProps } from './OverflowScroll'
 export { Markdown, markdownLeading, type MarkdownProps } from './Markdown'
 export { resetBlockCache, splitBlocks } from './blocks'
 export { codeScopeColor, type CodeScheme } from './code-theme'
-export { MONOSPACE, type MarkdownContext, type MarkdownImageSource, resolveImageUri } from './context'
+export { MONO_ADVANCE, MONOSPACE, type MarkdownContext, type MarkdownImageSource, resolveImageUri } from './context'
 export { highlightToLines, isKnownLanguage, type CodeSpan } from './highlight'
 export {
   mediaTagValues,

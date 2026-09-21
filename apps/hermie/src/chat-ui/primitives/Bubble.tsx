@@ -116,6 +116,28 @@ export function bubblePaddingX(space: { md: number; lg: number }, reading: boole
 }
 
 /**
+ * How much room a BLOCK inside a bubble has, in points.
+ *
+ * The cap minus the padding on both sides — the width a table or a fenced
+ * listing may occupy before it has to scroll instead. It is a hook and not a
+ * measurement because it CANNOT be measured from inside: the bubble's body sits
+ * under `alignItems: 'flex-start'` so it can hand the clock its natural width,
+ * and everything below that is therefore sized by this very content. See
+ * `src/markdown/OverflowScroll.tsx` for what that costs when nobody supplies
+ * the number.
+ *
+ * The cap rather than the bubble's actual width, which is the right answer for
+ * both: a bubble narrower than the cap is narrower because its content is, and
+ * content that overflows is by definition at the cap.
+ */
+export function useBubbleContentWidth(reading: boolean): number {
+  const theme = useTheme()
+  const max = useBubbleWidth()
+
+  return Math.max(0, max - bubblePaddingX(theme.space, reading) * 2)
+}
+
+/**
  * The cap a bubble may grow to, in points.
  *
  * Both halves of §4's rule matter: the percentage keeps a short line off the far

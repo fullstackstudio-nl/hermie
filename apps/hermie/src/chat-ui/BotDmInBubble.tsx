@@ -14,7 +14,7 @@ import { View } from 'react-native'
 import { Markdown, markdownLeading } from '../markdown'
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
-import { Bubble } from './primitives/Bubble'
+import { Bubble, useBubbleContentWidth } from './primitives/Bubble'
 import { Chip } from './primitives/Chip'
 import { Fold, useFoldBlocks } from './primitives/Fold'
 import { MetaLine } from './primitives/MetaLine'
@@ -56,6 +56,9 @@ export function BotDmInBubble({
   const theme = useTheme()
   const foldBlocks = useFoldBlocks()
   const [expanded, toggle] = useExpanded(item.id)
+  // Above the early returns, because a hook cannot sit below one.
+  const reading = needsReadingTreatment(item.text)
+  const contentWidth = useBubbleContentWidth(reading)
 
   if (presentation === 'hidden-placeholder') {
     return null
@@ -80,7 +83,6 @@ export function BotDmInBubble({
   }
 
   const time = formatClock(item.ts)
-  const reading = needsReadingTreatment(item.text)
   const variant = reading ? 'dmRead' : 'dm'
   const recipe = theme.bubbles[variant]
 
@@ -122,8 +124,10 @@ export function BotDmInBubble({
         testID={`bot-dm-in-fold-${item.id}`}
       >
         <Markdown
+          fadeTo={recipe.tail}
           fontSize={theme.type.body.fontSize}
           linkColor={theme.accent().text}
+          maxContentWidth={contentWidth}
           onBlockLayout={foldBlocks.onBlockLayout}
           onLinkPress={onLinkPress}
           text={item.text}

@@ -10,7 +10,7 @@ import { Image, StyleSheet, Text, type TextStyle, View } from 'react-native'
 import type { Token, Tokens } from './marked-compat'
 
 import { anchorProps } from '../platform/link-anchor'
-import { isOpenableLink, MONOSPACE, resolveImageUri, type MarkdownContext } from './context'
+import { isOpenableLink, MONO_ADVANCE, MONOSPACE, resolveImageUri, type MarkdownContext } from './context'
 
 export interface InlineProps {
   tokens: Token[]
@@ -87,18 +87,6 @@ const CODE_JOIN = '\u2060'
  * the opportunities are between glyphs and never before the first one.
  */
 const CODE_BREAK = '\u200b'
-
-/**
- * How wide one monospace character is, as a fraction of the font size.
- *
- * Every monospace face this app can end up with — Menlo on iOS, whatever
- * `monospace` resolves to on Android, Courier as the last fallback — advances
- * at 0.6 em. That is a constant of the class rather than a guess at one member
- * of it, which is why it is written down rather than measured: measuring would
- * cost a hidden `Text` and a layout pass per chip, and it feeds a comparison
- * with a whole line's width where a few per cent either way decides nothing.
- */
-const MONO_ADVANCE = 0.6
 
 /**
  * Which join a chip gets: never break, or break anywhere.

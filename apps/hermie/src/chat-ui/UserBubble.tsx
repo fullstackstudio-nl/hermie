@@ -14,7 +14,7 @@ import { View } from 'react-native'
 import { Markdown } from '../markdown'
 import { useTheme } from '../ui/theme'
 import { FileChip } from './FileChip'
-import { Bubble } from './primitives/Bubble'
+import { Bubble, useBubbleContentWidth } from './primitives/Bubble'
 import { Chip } from './primitives/Chip'
 import { MetaLine } from './primitives/MetaLine'
 import { formatClock } from './format'
@@ -61,6 +61,10 @@ export function UserBubble({
   onLinkPress
 }: UserBubbleProps) {
   const theme = useTheme()
+  // An outgoing bubble never takes the reading treatment, so its padding — and
+  // therefore the room a block in it has — is the plain one. Above the early
+  // returns, because a hook cannot sit below one.
+  const contentWidth = useBubbleContentWidth(false)
 
   if (presentation === 'hidden-placeholder') {
     return null
@@ -109,7 +113,11 @@ export function UserBubble({
           // White on the accent. The accent link colour is the bubble's own
           // fill, so it would vanish into it.
           color="onAccent"
+          // A table's cells are transparent, so its edge dissolves into the
+          // accent the bubble is filled with.
+          fadeTo={bubble}
           linkColor={theme.colors.onAccent}
+          maxContentWidth={contentWidth}
           mutedColor="onAccent"
           onLinkPress={onLinkPress}
           // A code chip inside a white-on-accent bubble needs a light wash. The

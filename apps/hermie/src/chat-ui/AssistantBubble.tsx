@@ -28,7 +28,7 @@ import { useTheme } from '../ui/theme'
 import { ErrorCard } from './ErrorCard'
 import { ReasoningDisclosure } from './ReasoningDisclosure'
 import { TypingDots } from './TypingIndicator'
-import { Bubble, bubblePaddingX, TAIL_REACH } from './primitives/Bubble'
+import { Bubble, bubblePaddingX, TAIL_REACH, useBubbleContentWidth } from './primitives/Bubble'
 import { Fold, useFoldBlocks } from './primitives/Fold'
 import { MetaLine } from './primitives/MetaLine'
 import { useExpanded } from './expanded'
@@ -97,6 +97,10 @@ export function AssistantBubble({
   const theme = useTheme()
   const foldBlocks = useFoldBlocks()
   const [expanded, toggle] = useExpanded(item.id)
+  // Hooks run before the early return and before `reading` is known, so both
+  // paddings are asked for and the branch picks one below.
+  const readingWidth = useBubbleContentWidth(true)
+  const plainWidth = useBubbleContentWidth(false)
 
   if (presentation === 'hidden-placeholder') {
     return null
@@ -110,6 +114,7 @@ export function AssistantBubble({
   const variant = reading ? 'inRead' : 'in'
   const recipe = theme.bubbles[variant]
   const bodyInset = bubblePaddingX(theme.space, reading)
+  const contentWidth = reading ? readingWidth : plainWidth
 
   return (
     <View testID={`assistant-${item.id}`}>
@@ -184,7 +189,14 @@ export function AssistantBubble({
               <Markdown
                 fontSize={theme.type.body.fontSize}
                 {...(images ? { images } : {})}
+                // The same colour the fold fades into, for the same reason: a
+                // table's cells are transparent and only the bubble knows what
+                // is behind its last column.
+                fadeTo={recipe.tail}
                 linkColor={theme.accent().text}
+                // What a table or a listing may occupy before it has to scroll.
+                // Nothing under the bubble's body can work this out for itself.
+                maxContentWidth={contentWidth}
                 onBlockLayout={foldBlocks.onBlockLayout}
                 onLinkPress={onLinkPress}
                 text={body}
