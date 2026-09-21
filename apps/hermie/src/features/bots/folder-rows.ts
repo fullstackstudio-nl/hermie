@@ -64,6 +64,38 @@ export interface FolderCounts {
   size: number
 }
 
+/**
+ * A row's key, which is also its identity everywhere else.
+ *
+ * The keys were spelled out as template literals in five files. They are one
+ * vocabulary — `bot:<name>` and `folder:<id>` — and the drag now speaks it end
+ * to end rather than speaking bot names and building keys at the edges, so it
+ * is stated once and read back once.
+ */
+export const botRowKey = (name: string): string => `bot:${name}`
+export const folderRowKey = (id: string): string => `folder:${id}`
+
+export type ParsedRowKey = { kind: 'bot'; name: string } | { kind: 'folder'; id: string }
+
+/**
+ * What a row key means, or nothing.
+ *
+ * `folderIn:` and `folderEmpty:` are deliberately NOT parsed: they are anchors
+ * — positions — and never rows anybody drags, so a key that names one is not a
+ * row and saying so is the point.
+ */
+export function parseRowKey(key: string): ParsedRowKey | null {
+  if (key.startsWith('bot:')) {
+    return { kind: 'bot', name: key.slice('bot:'.length) }
+  }
+
+  if (key.startsWith('folder:')) {
+    return { kind: 'folder', id: key.slice('folder:'.length) }
+  }
+
+  return null
+}
+
 /** Where a drop commits: a container, and an index inside it. */
 export interface DropTarget {
   folderId: string | null
@@ -141,7 +173,7 @@ export function folderRows(input: RowsInput): FolderRow[] {
   for (const entry of input.arrangement.entries) {
     if (entry.kind === 'chat') {
       if (!input.archived[entry.name]) {
-        rows.push({ kind: 'bot', key: `bot:${entry.name}`, name: entry.name, folderId: null })
+        rows.push({ kind: 'bot', key: botRowKey(entry.name), name: entry.name, folderId: null })
       }
 
       continue
@@ -157,7 +189,7 @@ export function folderRows(input: RowsInput): FolderRow[] {
 
     rows.push({
       kind: 'folder',
-      key: `folder:${folder.id}`,
+      key: folderRowKey(folder.id),
       folder,
       open,
       counts: folderCounts(folder, input)
@@ -176,7 +208,7 @@ export function folderRows(input: RowsInput): FolderRow[] {
     }
 
     for (const name of visible) {
-      rows.push({ kind: 'bot', key: `bot:${name}`, name, folderId: folder.id })
+      rows.push({ kind: 'bot', key: botRowKey(name), name, folderId: folder.id })
     }
   }
 
@@ -199,7 +231,7 @@ export function dragAnchors(input: RowsInput): DragAnchor[] {
   entries.forEach((entry, index) => {
     if (entry.kind === 'chat') {
       if (!input.archived[entry.name]) {
-        anchors.push({ key: `bot:${entry.name}`, target: { folderId: null, index } })
+        anchors.push({ key: botRowKey(entry.name), target: { folderId: null, index } })
       }
 
       return
@@ -214,7 +246,7 @@ export function dragAnchors(input: RowsInput): DragAnchor[] {
     // The folder's own row, twice: above it is the top level, and its bottom
     // half is inside it. See the note at the top about why the second one is
     // what makes a collapsed folder reachable at all.
-    anchors.push({ key: `folder:${folder.id}`, target: { folderId: null, index } })
+    anchors.push({ key: folderRowKey(folder.id), target: { folderId: null, index } })
     anchors.push({ key: `folderIn:${folder.id}`, target: { folderId: folder.id, index: 0 } })
 
     if (input.collapsed[folder.id]) {
@@ -229,7 +261,7 @@ export function dragAnchors(input: RowsInput): DragAnchor[] {
 
     folder.bots.forEach((name, inside) => {
       if (!input.archived[name]) {
-        anchors.push({ key: `bot:${name}`, target: { folderId: folder.id, index: inside } })
+        anchors.push({ key: botRowKey(name), target: { folderId: folder.id, index: inside } })
       }
     })
   })
@@ -278,6 +310,91 @@ export function anchorBoxes(
  */
 export function dropTarget(anchors: readonly DragAnchor[], slot: number, arrangement: Arrangement): DropTarget {
   return anchors[slot]?.target ?? { folderId: null, index: arrangement.entries.length }
+}
+
+/**
+ * The TOP-LEVEL position a target stands for.
+ *
+ * Folders do not nest — an `Arrangement` is a top level and a set of folders
+ * holding chat names — so a folder dropped anywhere inside another folder has
+ * to mean something at the top level instead of meaning nothing. It means
+ * "where that folder is": dropping onto a folder's own body, or between two of
+ * its chats, reads as putting the dragged folder NEXT TO it, which is the only
+ * answer a reader can predict.
+ *
+ * A target whose container has since disappeared falls back to the end of the
+ * top level, for the same reason a drop past the last row does.
+ */
+export function topLevelIndexOf(arrangement: Arrangement, target: DropTarget): number {
+  if (target.folderId === null) {
+    return target.index
+  }
+
+  const at = arrangement.entries.findIndex(entry => entry.kind === 'folder' && entry.id === target.folderId)
+
+  return at === -1 ? arrangement.entries.length : at
+}
+
+/** Where a row currently sits in whatever container holds it, or `-1`. */
+function positionOf(arrangement: Arrangement, key: ParsedRowKey, folderId: string | null): number {
+  if (key.kind === 'folder') {
+    return arrangement.entries.findIndex(entry => entry.kind === 'folder' && entry.id === key.id)
+  }
+
+  if (folderId === null) {
+    return arrangement.entries.findIndex(entry => entry.kind === 'chat' && entry.name === key.name)
+  }
+
+  return arrangement.folders.find(folder => folder.id === folderId)?.bots.indexOf(key.name) ?? -1
+}
+
+/**
+ * Is this drop a no-op, for any row?
+ *
+ * The key generalisation of `isSamePlace`: a folder's own place is an index in
+ * the top level and a chat's is an index in whichever container holds it, and
+ * both of them are "the same arrangement" when the drop lands immediately
+ * before or immediately after the row itself.
+ */
+export function isSameRowPlace(arrangement: Arrangement, key: string, target: DropTarget): boolean {
+  const parsed = parseRowKey(key)
+
+  if (!parsed) {
+    return true
+  }
+
+  if (parsed.kind === 'folder') {
+    const index = topLevelIndexOf(arrangement, target)
+    const at = positionOf(arrangement, parsed, null)
+
+    return at !== -1 && (index === at || index === at + 1)
+  }
+
+  return isSamePlace(arrangement, parsed.name, target)
+}
+
+/**
+ * The index a move should use once the row has been taken out, for any row.
+ *
+ * The same correction `committedIndex` makes and for the same reason — both
+ * `moveBotTo` and `moveFolderTo` read their index against the container WITHOUT
+ * the moving row, and a drop line is computed against the container WITH it.
+ */
+export function committedRowIndex(arrangement: Arrangement, key: string, target: DropTarget): number {
+  const parsed = parseRowKey(key)
+
+  if (!parsed) {
+    return target.index
+  }
+
+  if (parsed.kind === 'folder') {
+    const index = topLevelIndexOf(arrangement, target)
+    const from = positionOf(arrangement, parsed, null)
+
+    return from !== -1 && index > from ? index - 1 : index
+  }
+
+  return committedIndex(arrangement, parsed.name, target)
 }
 
 /**

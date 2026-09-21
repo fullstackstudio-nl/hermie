@@ -34,7 +34,8 @@ import {
   TextInput,
   View,
   type NativeScrollEvent,
-  type NativeSyntheticEvent
+  type NativeSyntheticEvent,
+  type PanResponderInstance
 } from 'react-native'
 
 import { snippetSegments, tidySnippet } from '@hermie/gateway-client'
@@ -69,10 +70,12 @@ import { type MessageMatch, useMessageSearch } from '../search'
 import { BotRow } from './BotRow'
 import { ConnectionLine } from './ConnectionLine'
 import {
-  committedIndex,
+  committedRowIndex,
   dragAnchors,
+  folderRowKey,
   folderRows,
-  isSamePlace,
+  isSameRowPlace,
+  parseRowKey,
   type DropTarget,
   type FolderCounts,
   type RowsInput
@@ -575,16 +578,37 @@ export function BotsScreen({
       listRef.current?.scrollToOffset({ animated: false, offset: next })
     }, []),
     onCommit: useCallback(
-      (name: string, target: DropTarget) => {
+      (rowKey: string, target: DropTarget) => {
+        const row = parseRowKey(rowKey)
+
+        if (!row) {
+          return
+        }
+
         // Dropping a row immediately before or immediately after itself is the
         // same arrangement, and committing it would churn the disk and the
         // gateway for nothing. The comparison is per CONTAINER: index 2 of the
         // top level and index 2 of a folder are different places.
-        if (isSamePlace(arrangement, name, target)) {
+        if (isSameRowPlace(arrangement, rowKey, target)) {
           return
         }
 
-        useChatLayoutStore.getState().dropBot(name, target.folderId, committedIndex(arrangement, name, target))
+        const index = committedRowIndex(arrangement, rowKey, target)
+
+        if (row.kind === 'folder') {
+          /*
+            A folder only ever lands at the TOP LEVEL, because folders do not
+            nest: an arrangement is a top level and a set of folders holding
+            chat names. `committedRowIndex` has already turned a target inside
+            some other folder into the position that folder occupies, which is
+            what "drop it next to that one" means — see `topLevelIndexOf`.
+          */
+          useChatLayoutStore.getState().dropFolder(row.id, index)
+
+          return
+        }
+
+        useChatLayoutStore.getState().dropBot(row.name, target.folderId, index)
       },
       [arrangement]
     ),
@@ -592,6 +616,21 @@ export function BotsScreen({
   })
 
   dragTop.current = drag.onListTop
+
+  /** The name of whatever is currently lifted, for the live region below. */
+  const draggingLabel = useMemo(() => {
+    const row = drag.draggingKey ? parseRowKey(drag.draggingKey) : null
+
+    if (!row) {
+      return null
+    }
+
+    if (row.kind === 'folder') {
+      return folders.find(folder => folder.id === row.id)?.name || strings.layout.unnamedFolder
+    }
+
+    return byName[row.name]?.displayName ?? row.name
+  }, [byName, drag.draggingKey, folders])
 
   /**
    * What every cell has to know, and nothing more.
@@ -951,13 +990,43 @@ export function BotsScreen({
             }
 
             if (item.kind === 'folder') {
+              const liftedFolder = drag.draggingKey === item.key
+
               return (
-                <Animated.View style={{ transform: [{ translateY: drag.offsetFor(item.key) }] }}>
+                /*
+                  The same wrapper a chat row gets, and deliberately the same
+                  one: the lift, the shadow and the neighbour offset are the
+                  drag's, not the row's, so a folder that animated differently
+                  from a chat would be a second implementation of the gesture
+                  to keep in step with the first.
+                */
+                <Animated.View
+                  {...drag.rowHandlers(item.key)}
+                  style={
+                    liftedFolder
+                      ? {
+                          elevation: 8,
+                          shadowColor: '#000',
+                          shadowOffset: { height: 6, width: 0 },
+                          shadowOpacity: drag.lift.interpolate({ inputRange: [0, 1], outputRange: [0, 0.28] }),
+                          shadowRadius: 12,
+                          transform: [
+                            { translateY: drag.translateY },
+                            { scale: drag.lift.interpolate({ inputRange: [0, 1], outputRange: [1, LIFT_SCALE] }) }
+                          ]
+                        }
+                      : { transform: [{ translateY: drag.offsetFor(item.key) }] }
+                  }
+                  testID={liftedFolder ? `folder-row-lifted-${item.folder.id}` : undefined}
+                >
                   <FolderHeader
                     autoFocus={item.folder.id === addedFolderId}
                     counts={item.counts}
                     editing={editing}
                     folder={item.folder}
+                    {...(editing ? { handleHandlers: drag.handleHandlers(item.key) } : {})}
+                    onArm={drag.arm}
+                    onDisarm={drag.disarm}
                     onMenuSelect={onFolderMenuSelect}
                     onMove={moveFolder}
                     onRename={renameFolder}
@@ -978,7 +1047,7 @@ export function BotsScreen({
 
             const state = presence.get(item.bot.name) ?? ARCHIVED_PRESENCE
             const { count, unread } = unreadFor(item.bot.name)
-            const lifted = drag.draggingName === item.bot.name
+            const lifted = drag.draggingKey === item.key
 
             return (
               /*
@@ -995,7 +1064,7 @@ export function BotsScreen({
                * the cell this wrapper sits inside, which is `DragCell`.
                */
               <Animated.View
-                {...(item.archived ? {} : drag.rowHandlers(item.bot.name))}
+                {...(item.archived ? {} : drag.rowHandlers(item.key))}
                 /*
                  * Two states, one style: LIFTED reads off the drag's own `lift`
                  * value, everything else off its row offset. Neither is a boolean
@@ -1028,7 +1097,7 @@ export function BotsScreen({
                   bot={item.bot}
                   compact={!sidebar}
                   editing={editing && !item.archived}
-                  {...(editing && !item.archived ? { handleHandlers: drag.handleHandlers(item.bot.name) } : {})}
+                  {...(editing && !item.archived ? { handleHandlers: drag.handleHandlers(item.key) } : {})}
                   menuFolders={menuFolders}
                   mutedUntil={mutedUntilOf(mutes, item.bot.name, Math.floor(Date.now() / 1000))}
                   onArm={drag.arm}
@@ -1048,16 +1117,23 @@ export function BotsScreen({
           }}
           // While a row is lifted the list must not also pan: the auto-scroll at the
           // edges is what moves it, and two scrollers would fight over one finger.
-          scrollEnabled={drag.draggingName === null}
+          scrollEnabled={drag.draggingKey === null}
           scrollEventThrottle={16}
           style={{ flex: 1 }}
           testID="bots-list"
         />
       </DragCellProvider>
 
-      {drag.draggingName ? (
+      {/*
+        What is being dragged, said out loud.
+
+        It names the ROW rather than the key: a folder is announced by its own
+        name and a chat by its display name, because `folder:d3f` read out to
+        somebody who cannot see the lift is worse than saying nothing.
+      */}
+      {draggingLabel ? (
         <Text accessibilityLiveRegion="polite" style={{ height: 0, opacity: 0 }}>
-          {strings.layout.dragging(byName[drag.draggingName]?.displayName ?? drag.draggingName)}
+          {strings.layout.dragging(draggingLabel)}
         </Text>
       ) : null}
 
@@ -1343,6 +1419,9 @@ function FolderHeader({
   counts,
   editing,
   folder,
+  handleHandlers,
+  onArm,
+  onDisarm,
   onMenuSelect,
   onMove,
   onRename,
@@ -1353,6 +1432,17 @@ function FolderHeader({
   counts: FolderCounts
   editing: boolean
   folder: Folder
+  /**
+   * Edit mode only: the pan handlers the grip column carries.
+   *
+   * The same prop a chat row takes, from the same hook, keyed by this folder's
+   * row key. A folder that had a grip of its own would be a second gesture to
+   * keep in step with the first.
+   */
+  handleHandlers?: PanResponderInstance['panHandlers']
+  /** Arm the drag for this folder's row key. The header's `onLongPress`. */
+  onArm?: (rowKey: string) => void
+  onDisarm?: () => void
   onMenuSelect: (folderId: string, id: string) => void
   /** Edit mode only: one position up or down among the top-level entries. */
   onMove?: (folderId: string, offset: number) => void
@@ -1408,7 +1498,17 @@ function FolderHeader({
       accessibilityLabel={label}
       accessibilityRole="button"
       aria-expanded={open}
+      delayLongPress={300}
+      /*
+        The same split a chat row makes, for the same reason: where the platform
+        draws a context menu a long press already means that, so this arms the
+        drag and the two separate by themselves — hold still for the menu, hold
+        and move for the drag. Where there is no native menu the long press is
+        left alone and the grip in edit mode is the way in.
+      */
+      onLongPress={() => (HAS_NATIVE_CONTEXT_MENU ? onArm?.(folderRowKey(folder.id)) : undefined)}
       onPress={() => onToggle(folder.id, !open)}
+      onPressOut={onDisarm}
       style={{
         alignItems: 'center',
         backgroundColor: hover.hovered ? theme.glass.row.solid : 'transparent',
@@ -1424,6 +1524,26 @@ function FolderHeader({
       testID={`folder-${folder.id}`}
       {...hover.props}
     >
+      {/*
+        The grip, in edit mode, exactly where a chat row's is.
+
+        A `View` and not a `Pressable`, for the reason `BotRow` gives: a
+        pressable would claim the touch before the pan responder saw it. It is
+        the first thing in the row so the two columns of grips line up, which is
+        what makes "hold this and move it" read as one affordance for both kinds
+        of row rather than two.
+      */}
+      {editing && handleHandlers ? (
+        <View
+          accessibilityLabel={strings.layout.dragHint}
+          style={{ alignItems: 'center', justifyContent: 'center', width: 26 }}
+          testID={`folder-drag-handle-${folder.id}`}
+          {...handleHandlers}
+        >
+          <Icon color={theme.colors.textMuted} name="grip" size={ICON_SIZE.control} />
+        </View>
+      ) : null}
+
       {/* Decorative: the row's own expanded state is what a screen reader reads,
           and `Icon` keeps itself out of the tree so it cannot say it twice. */}
       <Icon color={swatch.fill} name={open ? 'chevronDown' : 'chevronRight'} size={ICON_SIZE.marker} />

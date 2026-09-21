@@ -1,0 +1,248 @@
+/**
+ * Dragging a FOLDER, which was the one row the gesture could not pick up.
+ *
+ * The hook was keyed by bot name end to end — `arm('finance-bot')`,
+ * `rowHandlers('finance-bot')`, and a lifted key rebuilt as `` `bot:${name}` ``
+ * in two places. `folder-rows.ts` has always described the list in row KEYS, so
+ * the one kind of row whose key the hook did not speak was the one kind it
+ * could not drag: the lookup for a folder's own anchor could only ever miss,
+ * which put the lift's origin at anchor 0 and moved every neighbour the wrong
+ * way.
+ *
+ * Two halves are tested here and they fail differently:
+ *
+ *  - the arithmetic (`isSameRowPlace`, `committedRowIndex`, `topLevelIndexOf`),
+ *    which is where a folder dropped inside another folder has to become a
+ *    top-level position rather than a nested one — folders do not nest;
+ *  - the screen, where the folder row has to carry the same grip, the same pan
+ *    handlers and the same lift as a chat row, and a drop has to reach
+ *    `dropFolder` rather than `dropBot`.
+ */
+import { act, fireEvent, screen, waitFor } from '@testing-library/react-native'
+
+import { BotsScreen } from '../src/features/bots/BotsScreen'
+import {
+  botRowKey,
+  committedRowIndex,
+  dragAnchors,
+  folderRowKey,
+  isSameRowPlace,
+  parseRowKey,
+  topLevelIndexOf,
+  type RowsInput
+} from '../src/features/bots/folder-rows'
+import { type Bot, useBotsStore } from '../src/store/bots'
+import { useChatLayoutStore } from '../src/store/chat-layout'
+import { useChatsStore } from '../src/store/chats'
+import { readArrangement, type Arrangement } from '../src/store/folders'
+import { renderScreen } from './support/render'
+
+// Two modules, because the gateway card reaches for the provider directly
+// rather than through the barrel.
+const gateway = { status: 'ready', config: { baseUrl: 'https://gateway.example.com', authMode: 'native_pkce' } }
+
+jest.mock('../src/gateway', () => ({
+  useGateway: () => gateway,
+  hostOf: (url: string) => url.replace(/^https:\/\//, '')
+}))
+
+jest.mock('../src/gateway/GatewayProvider', () => ({
+  useGateway: () => ({
+    ...gateway,
+    adoptTokens: jest.fn(),
+    signOut: jest.fn(),
+    changeGateway: jest.fn(),
+    extraHeaders: {}
+  })
+}))
+
+jest.mock('../src/features/chats/ChatRuntime', () => ({
+  useChatRuntime: () => null
+}))
+
+jest.mock('../src/platform/haptics', () => ({ haptic: jest.fn() }))
+
+/** Two loose chats around one folder holding two more. */
+function arrangement(): Arrangement {
+  return readArrangement(
+    [
+      { kind: 'chat', name: 'alpha' },
+      { kind: 'folder', id: 'f1' },
+      { kind: 'chat', name: 'omega' }
+    ],
+    [{ id: 'f1', name: 'Finance', bots: ['beta', 'gamma'] }]
+  )
+}
+
+const rowsInput = (): RowsInput => ({
+  arrangement: arrangement(),
+  archived: {},
+  collapsed: {},
+  countsFor: () => ({ needsInput: false, unread: 0 }),
+  mutes: {},
+  now: 0
+})
+
+describe('a row key says what it is', () => {
+  it('reads the two kinds of row and refuses the anchors that are not rows', () => {
+    expect(parseRowKey(botRowKey('alpha'))).toEqual({ kind: 'bot', name: 'alpha' })
+    expect(parseRowKey(folderRowKey('f1'))).toEqual({ kind: 'folder', id: 'f1' })
+    // Positions, not rows: nobody drags "inside this folder, first".
+    expect(parseRowKey('folderIn:f1')).toBeNull()
+    expect(parseRowKey('folderEmpty:f1')).toBeNull()
+    expect(parseRowKey('something-else')).toBeNull()
+  })
+})
+
+describe('where a dragged folder lands', () => {
+  it('turns a target inside another folder into that folder’s own place', () => {
+    const list = arrangement()
+
+    // Folders do not nest, so "into f1" can only mean "next to f1", which is
+    // f1's own index in the top level.
+    expect(topLevelIndexOf(list, { folderId: 'f1', index: 0 })).toBe(1)
+    expect(topLevelIndexOf(list, { folderId: 'f1', index: 2 })).toBe(1)
+    // A top-level target is already an answer.
+    expect(topLevelIndexOf(list, { folderId: null, index: 2 })).toBe(2)
+    // A container that has gone falls back to the end, like a drop past the
+    // last row.
+    expect(topLevelIndexOf(list, { folderId: 'gone', index: 0 })).toBe(3)
+  })
+
+  it('reads a drop immediately before or after itself as no move at all', () => {
+    const list = arrangement()
+
+    expect(isSameRowPlace(list, folderRowKey('f1'), { folderId: null, index: 1 })).toBe(true)
+    expect(isSameRowPlace(list, folderRowKey('f1'), { folderId: null, index: 2 })).toBe(true)
+    expect(isSameRowPlace(list, folderRowKey('f1'), { folderId: null, index: 0 })).toBe(false)
+    expect(isSameRowPlace(list, folderRowKey('f1'), { folderId: null, index: 3 })).toBe(false)
+    // And it still answers for a chat, which is the case it always answered.
+    expect(isSameRowPlace(list, botRowKey('beta'), { folderId: 'f1', index: 1 })).toBe(true)
+    expect(isSameRowPlace(list, botRowKey('beta'), { folderId: null, index: 0 })).toBe(false)
+  })
+
+  it('corrects the index for the row having been taken out', () => {
+    const list = arrangement()
+
+    // f1 sits at 1. Moving it DOWN past omega is index 3 with it still in, and
+    // index 2 once it is out.
+    expect(committedRowIndex(list, folderRowKey('f1'), { folderId: null, index: 3 })).toBe(2)
+    // Moving it UP needs no correction: nothing below it has shifted.
+    expect(committedRowIndex(list, folderRowKey('f1'), { folderId: null, index: 0 })).toBe(0)
+  })
+
+  it('offers a folder’s own row as an anchor, so there is a gap to aim at', () => {
+    expect(dragAnchors(rowsInput()).map(anchor => anchor.key)).toEqual([
+      'bot:alpha',
+      'folder:f1',
+      'folderIn:f1',
+      'bot:beta',
+      'bot:gamma',
+      'bot:omega'
+    ])
+  })
+})
+
+const BOTS: Bot[] = ['alpha', 'beta', 'gamma', 'omega'].map(name => ({
+  name,
+  displayName: name,
+  description: '',
+  model: 'example-provider/example-model',
+  provider: 'example-provider',
+  isDefault: false,
+  hasAvatar: false,
+  uiMetaRevision: 0
+}))
+
+/**
+ * A fresh gateway key per render.
+ *
+ * The layout is keyed by GATEWAY and persisted, and the key-value store lives
+ * for the whole file — so a second `load('test-gateway')` reads back the folder
+ * the first test made and the list grows one folder per test.
+ */
+let gatewayKeys = 0
+
+async function renderList() {
+  gatewayKeys += 1
+
+  useBotsStore.getState().reset()
+  useChatsStore.getState().reset()
+  useChatLayoutStore.getState().reset()
+  useBotsStore.getState().setBots(BOTS)
+
+  await act(async () => {
+    await useChatLayoutStore.getState().load(`test-gateway-${gatewayKeys}`)
+  })
+
+  act(() => {
+    useChatLayoutStore.getState().reconcile(['alpha', 'beta', 'gamma', 'omega'])
+    const id = useChatLayoutStore.getState().addFolder('Finance')
+
+    useChatLayoutStore.getState().moveToFolder('beta', id)
+    useChatLayoutStore.getState().moveToFolder('gamma', id)
+  })
+
+  renderScreen(<BotsScreen />)
+
+  await waitFor(() => expect(screen.getByTestId('bots-list')).toBeTruthy())
+
+  return useChatLayoutStore.getState().folders[0]?.id as string
+}
+
+describe('the folder row on screen', () => {
+  it('has a grip in edit mode, the way a chat row does', async () => {
+    const id = await renderList()
+
+    expect(screen.queryByTestId(`folder-drag-handle-${id}`, { includeHiddenElements: true })).toBeNull()
+
+    fireEvent.press(screen.getByTestId('bots-edit'))
+
+    await waitFor(() =>
+      expect(screen.getByTestId(`folder-drag-handle-${id}`, { includeHiddenElements: true })).toBeTruthy()
+    )
+  })
+
+  it('carries pan handlers, which is what the hook could not give it before', async () => {
+    const id = await renderList()
+
+    fireEvent.press(screen.getByTestId('bots-edit'))
+
+    const grip = await screen.findByTestId(`folder-drag-handle-${id}`, { includeHiddenElements: true })
+
+    // The grip is where the responder lives; a folder without one is a folder
+    // that can be looked at in edit mode and not moved.
+    expect(typeof grip.props.onStartShouldSetResponder).toBe('function')
+  })
+})
+
+describe('committing a folder drop', () => {
+  it('moves the folder among the top-level rows', async () => {
+    const id = await renderList()
+    const before = useChatLayoutStore.getState().entries
+
+    expect(before.map(entry => (entry.kind === 'folder' ? `folder:${entry.id}` : `bot:${entry.name}`))).toEqual([
+      'bot:alpha',
+      'bot:omega',
+      `folder:${id}`
+    ])
+
+    act(() => {
+      const state = useChatLayoutStore.getState()
+
+      state.dropFolder(
+        id,
+        committedRowIndex({ entries: state.entries, folders: state.folders }, folderRowKey(id), {
+          folderId: null,
+          index: 0
+        })
+      )
+    })
+
+    expect(
+      useChatLayoutStore
+        .getState()
+        .entries.map(entry => (entry.kind === 'folder' ? `folder:${entry.id}` : `bot:${entry.name}`))
+    ).toEqual([`folder:${id}`, 'bot:alpha', 'bot:omega'])
+  })
+})

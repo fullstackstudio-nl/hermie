@@ -20,6 +20,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Folders can be dragged.** The drag hook was keyed by bot name from end to end and rebuilt the
+  lifted row's key as `bot:<name>`, so the one row it could never pick up was a folder — the lookup
+  for its anchor could only miss, which put the lift's origin at the top of the list and moved every
+  neighbour the wrong way. It now speaks row keys (`bot:<name>` / `folder:<id>`) and nothing else,
+  and hands the key back on commit for the screen to make sense of. A folder row gets the same grip
+  in edit mode, the same long-press arming, and the identical lift, shadow, neighbour shift and
+  settle as a chat row rather than a second copy of the gesture. One rule is a folder's own: it can
+  only land at the top level, because folders do not nest, so a drop aimed inside another folder
+  means "next to that one". Dropping a chat ONTO a folder still puts it inside. ADR-0019 is amended.
+
 - **The chat's (…) menu is a popover in the chat, not a sheet that moves the chat.** The owner's
   report was one sentence — *"menu in een chat moet popover in een chat zijn. nu schuift alles"* —
   and the sheet was the reason: it dimmed the window, took the keyboard and on a phone pushed the

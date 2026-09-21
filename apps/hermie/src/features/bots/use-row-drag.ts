@@ -29,6 +29,20 @@
  * only menu there and it has Move up / Move down in it. So `armEnabled` is off
  * there, and the drag is reached through the edit-mode handle instead.
  *
+ * ## It drags a ROW, not a bot
+ *
+ * This hook was keyed by bot name from end to end: `arm('finance-bot')`,
+ * `rowHandlers('finance-bot')`, `onCommit(name, target)`, and a lifted key built
+ * back up as `` `bot:${name}` `` in two places. `folder-rows.ts` has always
+ * described the list in row KEYS — `bot:<name>` and `folder:<id>` — so the one
+ * thing the hook could never drag was the one kind of row whose key it did not
+ * speak.
+ *
+ * It now takes and reports keys and nothing else. It does not know what a bot
+ * is, it does not know what a folder is, and `onCommit` hands the key back to
+ * the caller to make sense of — which is what makes a folder draggable without
+ * a second copy of the lift, the neighbour shift and the settle.
+ *
  * ## What the caller has to provide
  *
  * The geometry, and it has to come off the right view.
@@ -117,8 +131,14 @@ export interface RowDragOptions {
    * the last folder by dragging.
    */
   fallbackTarget: DropTarget
-  /** Commit: put `botName` at this position, in this container. */
-  onCommit: (botName: string, target: DropTarget) => void
+  /**
+   * Commit: put the row with this KEY at this position, in this container.
+   *
+   * The key is `bot:<name>` or `folder:<id>`. What that means to the
+   * arrangement is the caller's business — a folder may only land at the top
+   * level, and this hook has no opinion about that.
+   */
+  onCommit: (rowKey: string, target: DropTarget) => void
   /**
    * Take a fresh reading of the list's top edge on screen, reported back through
    * `onListTop`. Called when a drag arms, which is one long press before the first
@@ -134,8 +154,8 @@ export interface RowDragOptions {
 }
 
 export interface RowDrag {
-  /** The row being dragged, or null. */
-  draggingName: string | null
+  /** The KEY of the row being dragged, or null. */
+  draggingKey: string | null
   /** Translation for the lifted row. Stable, and driven natively. */
   translateY: Animated.Value
   /**
@@ -153,18 +173,22 @@ export interface RowDrag {
    * The cell that carries it is the one that has to be drawn above its neighbours,
    * and a cell is the only view that can be: `zIndex` orders siblings, and a row is
    * not a sibling of the other rows — its cell is.
+   *
+   * The same value as `draggingKey`. It keeps its own name because `DragCell`
+   * reads it and a cell has no idea anything is being dragged — it knows only
+   * that one of its siblings has to be on top.
    */
   liftedKey: string | null
   /** A cell's measured box, in the list's CONTENT coordinates. See `DragCell`. */
   measure: (key: string, layout: RowBox) => void
-  /** Arm the drag for this row. The row's `onLongPress`. */
-  arm: (botName: string) => void
+  /** Arm the drag for this row key. The row's `onLongPress`. */
+  arm: (rowKey: string) => void
   /** Disarm without dragging. The row's `onPressOut`. */
   disarm: () => void
   /** Pan handlers for a row wrapper: claims the gesture once armed. */
-  rowHandlers: (botName: string) => PanResponderInstance['panHandlers']
+  rowHandlers: (rowKey: string) => PanResponderInstance['panHandlers']
   /** Pan handlers for an edit-mode handle: claims immediately, no long press. */
-  handleHandlers: (botName: string) => PanResponderInstance['panHandlers']
+  handleHandlers: (rowKey: string) => PanResponderInstance['panHandlers']
   /** Where the list is scrolled and how tall it is, for the edge bands. */
   onListLayout: (height: number) => void
   onListScroll: (offset: number) => void
@@ -181,7 +205,7 @@ export function useRowDrag({
   onCommit,
   reduceMotion
 }: RowDragOptions): RowDrag {
-  const [draggingName, setDraggingName] = useState<string | null>(null)
+  const [draggingKey, setDraggingKey] = useState<string | null>(null)
   const [dropKey, setDropKey] = useState<string | null>(null)
 
   const translateY = useRef(new Animated.Value(0)).current
@@ -292,7 +316,7 @@ export function useRowDrag({
    */
   const finish = useCallback(
     (commit: boolean) => {
-      const name = active.current
+      const key = active.current
       const target = slot.current
       const from = origin.current
       const { anchors: list, fallbackTarget: fallback, onCommit: commitTo, reduceMotion: reduce } = latest.current
@@ -309,15 +333,15 @@ export function useRowDrag({
         for (const value of Object.values(offsets.current)) {
           value.setValue(0)
         }
-        setDraggingName(null)
+        setDraggingKey(null)
         setDropKey(null)
 
-        if (commit && name && target !== null) {
-          commitTo(name, list[target]?.target ?? fallback)
+        if (commit && key && target !== null) {
+          commitTo(key, list[target]?.target ?? fallback)
         }
       }
 
-      if (!commit || !name || target === null) {
+      if (!commit || !key || target === null) {
         Animated.parallel([settle(translateY, 0, reduce), settle(lift, 0, reduce)]).start(done)
         shiftRows(from, null)
 
@@ -333,16 +357,21 @@ export function useRowDrag({
   )
 
   const begin = useCallback(
-    (botName: string) => {
-      active.current = botName
+    (rowKey: string) => {
+      active.current = rowKey
+      // The row's own anchor, found by the key it was handed. It used to be
+      // rebuilt as `bot:<name>` here, which is the line that made a folder row
+      // undraggable: its key is `folder:<id>` and the lookup could only ever
+      // miss, so the lift began at anchor 0 and every neighbour moved the wrong
+      // way.
       origin.current = Math.max(
         0,
-        latest.current.anchors.findIndex(anchor => anchor.key === `bot:${botName}`)
+        latest.current.anchors.findIndex(anchor => anchor.key === rowKey)
       )
       scrollAtGrant.current = listOffset.current
       lastMove.current = null
       translateY.setValue(0)
-      setDraggingName(botName)
+      setDraggingKey(rowKey)
       settle(lift, 1, latest.current.reduceMotion).start()
     },
     [lift, translateY]
@@ -425,15 +454,15 @@ export function useRowDrag({
   trackAgain.current = track
 
   const buildResponder = useCallback(
-    (botName: string, immediate: boolean): PanResponderInstance => {
+    (rowKey: string, immediate: boolean): PanResponderInstance => {
       return PanResponder.create({
         // A handle claims the touch outright; a row waits to be armed, so an
         // ordinary tap still reaches the `Pressable` underneath it.
         onStartShouldSetPanResponder: () => immediate,
         onStartShouldSetPanResponderCapture: () => immediate,
-        onMoveShouldSetPanResponder: () => immediate || armed.current === botName,
+        onMoveShouldSetPanResponder: () => immediate || armed.current === rowKey,
         onMoveShouldSetPanResponderCapture: (_event, gesture) =>
-          armed.current === botName && Math.abs(gesture.dy) > MOVE_SLOP,
+          armed.current === rowKey && Math.abs(gesture.dy) > MOVE_SLOP,
 
         onPanResponderGrant: () => {
           // A handle claims the touch outright, so nothing armed it and nothing has
@@ -444,11 +473,11 @@ export function useRowDrag({
             latest.current.measureList()
           }
 
-          begin(botName)
+          begin(rowKey)
         },
 
         onPanResponderMove: (_event, gesture) => {
-          if (active.current !== botName) {
+          if (active.current !== rowKey) {
             return
           }
 
@@ -457,8 +486,8 @@ export function useRowDrag({
 
         // While dragging, nothing else may take the gesture — least of all the
         // scroll view, which would leave a lifted row following nothing.
-        onPanResponderTerminationRequest: () => active.current !== botName,
-        onShouldBlockNativeResponder: () => active.current === botName,
+        onPanResponderTerminationRequest: () => active.current !== rowKey,
+        onShouldBlockNativeResponder: () => active.current === rowKey,
 
         onPanResponderRelease: () => finish(true),
         onPanResponderTerminate: () => finish(false)
@@ -468,16 +497,16 @@ export function useRowDrag({
   )
 
   const rowHandlers = useCallback(
-    (botName: string) => {
-      const existing = rowResponders.current[botName]
+    (rowKey: string) => {
+      const existing = rowResponders.current[rowKey]
 
       if (existing) {
         return existing.panHandlers
       }
 
-      const responder = buildResponder(botName, false)
+      const responder = buildResponder(rowKey, false)
 
-      rowResponders.current[botName] = responder
+      rowResponders.current[rowKey] = responder
 
       return responder.panHandlers
     },
@@ -485,16 +514,16 @@ export function useRowDrag({
   )
 
   const handleHandlers = useCallback(
-    (botName: string) => {
-      const existing = handleResponders.current[botName]
+    (rowKey: string) => {
+      const existing = handleResponders.current[rowKey]
 
       if (existing) {
         return existing.panHandlers
       }
 
-      const responder = buildResponder(botName, true)
+      const responder = buildResponder(rowKey, true)
 
-      handleResponders.current[botName] = responder
+      handleResponders.current[rowKey] = responder
 
       return responder.panHandlers
     },
@@ -506,12 +535,12 @@ export function useRowDrag({
   }, [])
 
   const arm = useCallback(
-    (botName: string) => {
+    (rowKey: string) => {
       if (!armEnabled) {
         return
       }
 
-      armed.current = botName
+      armed.current = rowKey
       // Where the list is can have changed since the last layout — a sidebar shown,
       // a keyboard up, a window resized — and the answer is needed before the first
       // move rather than after it.
@@ -533,11 +562,11 @@ export function useRowDrag({
     () => ({
       arm,
       disarm,
-      draggingName,
+      draggingKey,
       dropKey,
       handleHandlers,
       lift,
-      liftedKey: draggingName === null ? null : `bot:${draggingName}`,
+      liftedKey: draggingKey,
       measure,
       offsetFor,
       onListLayout: (height: number) => {
@@ -552,6 +581,6 @@ export function useRowDrag({
       rowHandlers,
       translateY
     }),
-    [arm, disarm, draggingName, dropKey, handleHandlers, lift, measure, offsetFor, rowHandlers, translateY]
+    [arm, disarm, draggingKey, dropKey, handleHandlers, lift, measure, offsetFor, rowHandlers, translateY]
   )
 }

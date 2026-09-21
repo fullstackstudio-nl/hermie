@@ -155,6 +155,30 @@ of every count.
   `divider` entries into the section will be migrated by the next reader that opens it, and its own
   next write will drop the folders — see above.
 
+## Amendment (R4): the drag is keyed by ROW, and a folder is a row
+
+The original build made folders reorderable by a menu and by two accessibility actions, and
+draggable not at all: `use-row-drag.ts` took a **bot name** everywhere — `arm(name)`,
+`rowHandlers(name)`, `onCommit(name, target)` — and rebuilt the lifted anchor as `` `bot:${name}` ``
+in two places. This file has described the list in row **keys** since the day it was written, so the
+one kind of row the hook could not speak the key of was the one kind it could not pick up: the
+lookup for a folder's own anchor could only ever miss, which put the lift's origin at anchor 0 and
+moved every neighbour the wrong way.
+
+The hook now takes and reports keys and nothing else. It does not know what a bot is and it does not
+know what a folder is; `onCommit` hands the key back and the screen decides what it means. That is
+what let the folder row get the identical lift, shadow, neighbour shift and settle rather than a
+second implementation of the gesture standing beside the first — including the z-order fix, which
+belongs to `DragCell` and reads `liftedKey`.
+
+One rule is added, and it is the only thing about a folder drag that is not a chat drag:
+
+- **A folder only ever lands at the top level, because folders do not nest.** An arrangement is a
+  top level and a set of folders holding chat names, so a drop target inside some other folder has
+  no meaning for a folder. `topLevelIndexOf` turns it into the position that folder occupies, which
+  is what "drop it next to that one" means and the only reading a reader can predict. Dropping a
+  **chat** onto a folder's row still puts it inside — that anchor (`folderIn:<id>`) is unchanged.
+
 ## What is verified
 
 `apps/hermie/__tests__/folders.test.ts` covers the invariant (a duplicate bot, one bot named by two
@@ -172,6 +196,12 @@ synthetic half-row over a folder header, and how far the neighbours move.
 gateway, and the open/closed set surviving a reload and being forgotten with the folder.
 `apps/hermie/__tests__/bots-screen.test.tsx` drives the screen: adding a folder, naming it, the empty
 folder's own row, a search narrowing past it, and moving a bot in from the row menu.
+
+`apps/hermie/__tests__/folder-drag.test.tsx` covers the amendment: what a row key parses to and
+which anchors are positions rather than rows, a folder target inside another folder becoming that
+folder's own top-level place, the no-move and index-correction arithmetic for a folder, the grip and
+the pan handlers appearing on the folder row in edit mode, and a committed drop moving the folder
+among the top-level rows.
 
 **Not verified by a test:** the gesture itself. A `PanResponder` needs a touch and the boxes it reads
 come from a real layout pass, so the drag is exercised as arithmetic and confirmed by hand.
