@@ -986,10 +986,28 @@ describe('config.set fast — methods_config_set.py::_set_fast', () => {
     expect((read.result as Record<string, unknown>).value).toBe('normal')
   })
 
-  it('leaves yolo on the boolean words it really does take', async () => {
-    const set = await call('config.set', { key: 'yolo', value: 'true', session_id: session })
+  /**
+   * The neighbour that made the defect above so easy to miss. `yolo` is parsed
+   * against `_BOOL_WORDS`, which really does take `true` — so the sheet's
+   * `true`/`false` was right here and wrong one row up.
+   */
+  it('takes every boolean word upstream takes for yolo, and reports it back switched on', async () => {
+    for (const word of ['1', 'on', 'true', 'yes']) {
+      const set = await call('config.set', { key: 'yolo', value: word, session_id: session })
+      const result = set.result as Record<string, unknown>
 
-    expect(set.error).toBeUndefined()
-    expect((set.result as Record<string, unknown>).value).toBe('true')
+      expect(set.error).toBeUndefined()
+      // The value is echoed as it was sent; what it MEANS is reported on the
+      // session, which is where a client reads it back.
+      expect(result.value).toBe(word)
+      expect((result.info as Record<string, unknown>).yolo).toBe(true)
+    }
+
+    for (const word of ['0', 'off', 'false', 'no']) {
+      const set = await call('config.set', { key: 'yolo', value: word, session_id: session })
+
+      expect(set.error).toBeUndefined()
+      expect(((set.result as Record<string, unknown>).info as Record<string, unknown>).yolo).toBe(false)
+    }
   })
 })

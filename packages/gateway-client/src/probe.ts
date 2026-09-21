@@ -79,9 +79,15 @@ function looksLikeLandingPage(body: string): boolean {
  * So the network sentence is now only written for a host `host-privacy.ts` can
  * actually place on a network of its own, and the landing-page sentence says
  * only what was seen.
+ *
+ * Loopback is excluded from "a network of its own" for the obvious reason: the
+ * device IS that network, so "make sure this device is connected to it" is
+ * advice nobody can act on. A gateway that is meant to be on `localhost` and
+ * is not is a process that is not running, not a network somebody has to join.
  */
 export function notHermesHint(baseUrl: string, body: string): string {
-  const reachableOnlyThere = classifyHost(baseUrl).isPrivate
+  const privacy = classifyHost(baseUrl).privacy
+  const reachableOnlyThere = privacy !== 'public' && privacy !== 'loopback'
   const landing = looksLikeLandingPage(body)
   const seen = landing ? 'This looks like a landing page, not a Hermes gateway.' : ''
 

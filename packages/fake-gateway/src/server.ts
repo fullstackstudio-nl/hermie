@@ -1016,6 +1016,23 @@ const FAST_MODES: Record<string, string> = {
   cold: 'cold'
 }
 
+/**
+ * `_BOOL_WORDS`: what upstream reads as yes and no for every switch that is not
+ * fast mode.
+ *
+ * Read rather than compared against one spelling. This server used to decide
+ * `yolo` with `value === 'on' || value === '1'`, so a client sending `true` —
+ * which upstream accepts, and which the options sheet sends — switched yolo on
+ * and was told in the same answer that it was still off. The app believed the
+ * answer, because believing the gateway is the whole point of a fake.
+ */
+const TRUE_WORDS = new Set(['1', 'on', 'true', 'yes'])
+
+/** Does this value mean yes? Anything unrecognised means no, as upstream has it. */
+function boolWord(value: string | undefined): boolean {
+  return TRUE_WORDS.has((value ?? '').trim().toLowerCase())
+}
+
 /** The stored mode for one `config.set` value, or a 4002 like upstream's. */
 function fastMode(value: string): string {
   const mode = FAST_MODES[value.trim().toLowerCase()]
@@ -3678,7 +3695,7 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       provider: 'example-provider',
       reasoning_effort: config.reasoning ?? 'medium',
       fast: config.fast === 'fast',
-      yolo: config.yolo === 'on' || config.yolo === '1',
+      yolo: boolWord(config.yolo),
       approval_mode: 'ask',
       title: session.title,
       profile_name: session.profile,

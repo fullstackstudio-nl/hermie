@@ -127,6 +127,18 @@ describe('"answered, but not like a Hermes gateway"', () => {
   })
 
   /**
+   * The device IS loopback, so "make sure this device is connected to it" is
+   * advice nobody can act on. A gateway meant to be on `localhost` and not
+   * answering is a process that is not running.
+   */
+  it('does not ask whether this device is on its own loopback', () => {
+    expect(notHermesHint('http://localhost:9119', '{"ok":true}')).toBe('')
+    expect(notHermesHint('http://127.0.0.1:9119', LANDING)).toBe(
+      'This looks like a landing page, not a Hermes gateway.'
+    )
+  })
+
+  /**
    * A public name answering with somebody's front page says nothing at all
    * about a tailnet. It used to be told otherwise, which sent readers to check
    * a VPN for what was a typo or a proxy's default host.
