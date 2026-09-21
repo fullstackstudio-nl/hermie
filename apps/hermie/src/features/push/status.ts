@@ -32,6 +32,14 @@ export type PushRegistrationState =
   | { kind: 'unavailable'; detail?: string }
   /** Asked and refused. Only system settings can undo it, so there is no retry. */
   | { kind: 'denied' }
+  /**
+   * On, and the platform raises no dialog: only System Settings can grant.
+   *
+   * The Mac build. Distinct from `denied` because nobody has refused anything
+   * — the question was never put — and because the answer is a pane the app can
+   * open rather than a screen the reader has to find.
+   */
+  | { kind: 'needs-system-settings' }
   /** On, granted, and an address is registered. The only working state. */
   | { kind: 'registered'; tail: string }
   /** On and granted, and this build can never mint a token. A rebuild, not a retry. */
@@ -46,6 +54,8 @@ export interface PushStatusInput {
   enabled: boolean
   permission: PushPermission
   address: PushAddress | null
+  /** `PushPlatform.needsSystemSettings`; false everywhere but the Mac build. */
+  needsSystemSettings?: boolean
   /** The last thing `obtainAddress` refused with, or `null` if it has not. */
   failure: PushAddressFailure | null
 }
@@ -79,6 +89,17 @@ export function pushRegistrationState(input: PushStatusInput): PushRegistrationS
 
   if (!input.enabled) {
     return { kind: 'off' }
+  }
+
+  /*
+    Before `denied`, and before the address, because on this platform a
+    not-granted permission is neither a refusal nor something a retry can move:
+    the dialog was never raised. It is checked before the address so that a
+    registration made while permission was on, and then turned off in System
+    Settings, reads as the instruction it is rather than as "Registered".
+  */
+  if (input.needsSystemSettings === true && input.permission !== 'granted') {
+    return { kind: 'needs-system-settings' }
   }
 
   if (input.permission === 'denied') {

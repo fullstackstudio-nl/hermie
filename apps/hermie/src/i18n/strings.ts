@@ -687,6 +687,15 @@ export const strings = {
       statusPending: 'Asking the platform for an address…',
       statusRegistered: (tail: string) => `Registered · …${tail}`,
       statusDenied: 'Permission denied. Turn notifications on for Hermie in your device settings.',
+      /*
+        The Mac build, where no dialog is ever raised. It names the pane rather
+        than describing it, and the button under it opens exactly that pane —
+        the owner had to find it by hand before this existed, and until they
+        did the switch looked broken.
+      */
+      statusSystemSettings: 'Turn on notifications for Hermie in System Settings → Notifications',
+      openSystemSettings: 'Open Notifications settings',
+      openSystemSettingsHint: 'Hermie stays switched on here and registers as soon as macOS allows it.',
       statusNoProject: 'This build has no EAS project id, so it cannot be given a push token. It needs rebuilding.',
       statusFailed: (message: string) => `Token request failed: ${message}`,
       statusUnsupported: (detail: string) => `This device cannot register: ${detail}`,

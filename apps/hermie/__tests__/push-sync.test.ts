@@ -43,6 +43,8 @@ const TOKEN: PushAddress = { transport: 'expo', token: 'ExponentPushToken[abc]' 
 interface FakePlatform extends PushPlatform {
   responses: ((response: PushResponse) => void)[]
   dropped: number
+  /** How many times the System Settings pane was asked for. */
+  settingsOpened: number
   permissionValue: PushPermission
   /** What the platform will hand over, or `null` with `failureValue` as its reason. */
   addressValue: PushAddress | null
@@ -55,12 +57,19 @@ function fakePlatform(patch: Partial<FakePlatform> = {}): FakePlatform {
   const platform: FakePlatform = {
     available: true,
     platform: 'ios',
+    needsSystemSettings: false,
     responses: [],
     dropped: 0,
+    settingsOpened: 0,
     permissionValue: 'granted',
     addressValue: TOKEN,
     failureValue: { reason: 'failed', message: 'no valid aps-environment entitlement' },
     initial: null,
+    openSystemSettings: async () => {
+      platform.settingsOpened += 1
+
+      return true
+    },
     prepare: async () => undefined,
     permission: async () => platform.permissionValue,
     requestPermission: async () => platform.permissionValue,

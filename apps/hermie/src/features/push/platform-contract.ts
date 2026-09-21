@@ -113,11 +113,38 @@ export const PUSH_ACTION_DENY = 'deny'
  */
 export const PUSH_TYPES_WITH_ACTIONS: readonly string[] = ['request']
 
+/**
+ * Where a permission dialog does not exist and only System Settings can grant.
+ *
+ * Measured on the Mac build, which is the iPad binary running under
+ * `isiOSAppOnMac` (ADR-0011): `requestPermissionsAsync` resolves without ever
+ * showing a prompt, and nothing happened until the owner turned Hermie on by
+ * hand in System Settings → Notifications — after which registration worked
+ * first time.
+ *
+ * The old code treated that resolution like any other refusal and put the
+ * switch back, so the screen said "off" about a decision nobody had been asked
+ * to make and offered a button that appeared to do nothing. Naming the
+ * condition is what lets the switch stay where the reader put it and the row
+ * say where to go.
+ */
+export const MAC_NOTIFICATION_SETTINGS_URL = 'x-apple.systempreferences:com.apple.Notifications-Settings.extension'
+
 export interface PushPlatform {
   /** False where there is no notification machinery at all, and nothing throws. */
   readonly available: boolean
   /** `ios`, `android` or `web`. Written into the registration as a label. */
   readonly platform: string
+  /**
+   * True where asking raises no dialog and only System Settings can grant.
+   *
+   * A property rather than something inferred from `Platform`, so a test can
+   * stage a Mac without a Mac and so the one place that knows stays the one
+   * place that knows.
+   */
+  readonly needsSystemSettings: boolean
+  /** Open the pane that grants it. False where there is no such pane. */
+  openSystemSettings(): Promise<boolean>
   /** Register channels and categories. Idempotent; safe to call on every launch. */
   prepare(): Promise<void>
   permission(): Promise<PushPermission>

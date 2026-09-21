@@ -21,9 +21,12 @@
  */
 import Constants from 'expo-constants'
 import * as Notifications from 'expo-notifications'
-import { Platform } from 'react-native'
+import { Linking, Platform } from 'react-native'
+
+import { RUNS_ON_MAC } from '../../platform/runs-on-mac'
 
 import {
+  MAC_NOTIFICATION_SETTINGS_URL,
   PUSH_ACTION_ALLOW,
   PUSH_ACTION_DENY,
   PUSH_CHANNEL_DEFAULT,
@@ -84,6 +87,24 @@ let prepared = false
 export const pushPlatform: PushPlatform = {
   available: true,
   platform: Platform.OS,
+  /*
+    The Designed-for-iPad build on macOS. `requestPermissionsAsync` resolves
+    there without ever raising a prompt, so an app that read that as a refusal
+    was reporting a decision nobody was asked to make.
+  */
+  needsSystemSettings: RUNS_ON_MAC,
+
+  async openSystemSettings() {
+    try {
+      await Linking.openURL(MAC_NOTIFICATION_SETTINGS_URL)
+
+      return true
+    } catch {
+      // A macOS that will not open the pane, or an iPhone where this URL means
+      // nothing. The row still says where to go; only the shortcut is missing.
+      return false
+    }
+  },
 
   async prepare() {
     if (prepared) {

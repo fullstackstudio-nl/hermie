@@ -146,6 +146,17 @@ export const pushPlatform: PushPlatform = {
     return supported()
   },
   platform: 'web',
+  /*
+    A browser raises its own prompt and, where it has been refused, offers its
+    own way back through the padlock. There is no pane for the app to open and
+    no honest shortcut to it, so the browser build says so rather than showing
+    a button that goes nowhere.
+  */
+  needsSystemSettings: false,
+
+  async openSystemSettings() {
+    return false
+  },
 
   async prepare() {
     await ensureWorker()

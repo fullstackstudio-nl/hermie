@@ -43,6 +43,8 @@ const push = () =>
     platform: {
       available: true,
       platform: 'ios',
+      needsSystemSettings: false,
+      openSystemSettings: async () => false,
       prepare: async () => undefined,
       permission: async () => 'undetermined' as const,
       requestPermission: async () => 'undetermined' as const,

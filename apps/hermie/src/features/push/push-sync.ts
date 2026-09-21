@@ -44,7 +44,12 @@ import type { PushAddressFailure, PushPermission, PushPlatform, PushResponse } f
  */
 export const PUSH_HEARTBEAT_MS = 60_000
 
-export type PushEnableOutcome = 'enabled' | 'denied' | 'unavailable'
+/**
+ * `system-settings` is the Mac build: no dialog was raised and nothing was
+ * refused, so the switch stays where the reader put it and the row says where
+ * to go. Treating it as a refusal is what made the toggle appear to do nothing.
+ */
+export type PushEnableOutcome = 'enabled' | 'denied' | 'unavailable' | 'system-settings'
 
 /**
  * The ring entry a refused address becomes.
@@ -221,12 +226,34 @@ export class PushSync {
     const permission = await this.platform.requestPermission()
 
     if (permission !== 'granted') {
+      /*
+        On a platform that raises no dialog, a not-granted answer is not a
+        refusal — the question was never put. Putting the switch back would
+        report a decision nobody made, and it is what made the Mac's toggle
+        look broken: it moved, nothing happened, and it moved back. It stays
+        on, pending, and `refresh` picks the registration up on the foreground
+        after System Settings has been visited.
+      */
+      if (this.platform.needsSystemSettings) {
+        return 'system-settings'
+      }
+
       this.store.getState().setEnabled(false)
 
       return permission === 'denied' ? 'denied' : 'unavailable'
     }
 
     return (await this.obtain()) ? 'enabled' : 'unavailable'
+  }
+
+  /** Open the pane that grants it, where the platform has one. */
+  openSystemSettings(): Promise<boolean> {
+    return this.platform.available ? this.platform.openSystemSettings() : Promise.resolve(false)
+  }
+
+  /** Whether this platform grants notifications in System Settings rather than a dialog. */
+  get needsSystemSettings(): boolean {
+    return this.platform.needsSystemSettings
   }
 
   /**
@@ -269,6 +296,18 @@ export class PushSync {
     }
 
     if ((await this.platform.permission()) !== 'granted') {
+      /*
+        On a platform with no dialog this is the PENDING state, not a
+        revocation: the reader turned the switch on, was told to visit System
+        Settings, and has not done it yet. Switching it off here would undo
+        their decision on every foreground — and this is also the retry the
+        Mac needs, because the moment they come back from System Settings is a
+        foreground and the branch below then registers.
+      */
+      if (this.platform.needsSystemSettings) {
+        return
+      }
+
       // Revoked outside the app. The switch follows the system, because a
       // switch that says ON while nothing can arrive is the one lie a settings
       // screen must not tell.

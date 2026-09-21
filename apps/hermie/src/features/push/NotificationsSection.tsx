@@ -46,6 +46,8 @@ function statusLine(state: PushRegistrationState): string {
       return text.statusFailed(state.message)
     case 'pending':
       return text.statusPending
+    case 'needs-system-settings':
+      return text.statusSystemSettings
     default:
       return state.detail ? text.statusUnsupported(state.detail) : text.unavailable
   }
@@ -156,7 +158,14 @@ export function NotificationsSection({ push, available = true, testID = 'setting
     check BEFORE something goes wrong, and "is this phone actually registered?"
     is the question the owner could not answer from inside the app.
   */
-  const registration = pushRegistrationState({ available, enabled, permission, address, failure: addressFailure })
+  const registration = pushRegistrationState({
+    available,
+    enabled,
+    permission,
+    address,
+    failure: addressFailure,
+    needsSystemSettings: push.needsSystemSettings
+  })
 
   return (
     <>
@@ -196,6 +205,15 @@ export function NotificationsSection({ push, available = true, testID = 'setting
               {statusLine(registration)}
             </Text>
           </InsetRow>
+
+          {registration.kind === 'needs-system-settings' ? (
+            <InsetButtonRow
+              detail={strings.settings.notifications.openSystemSettingsHint}
+              onPress={() => void push.openSystemSettings()}
+              testID={`${testID}-system-settings`}
+              title={strings.settings.notifications.openSystemSettings}
+            />
+          ) : null}
 
           {pushRetryable(registration) ? (
             <InsetButtonRow

@@ -29,6 +29,8 @@ function syncWith(permission: PushPermission, address = TOKEN as { transport: 'e
     platform: {
       available: true,
       platform: 'ios',
+      needsSystemSettings: false,
+      openSystemSettings: async () => false,
       prepare: async () => undefined,
       permission: async () => permission,
       requestPermission: async () => permission,
