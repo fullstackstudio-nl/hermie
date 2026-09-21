@@ -82,7 +82,7 @@ export interface SettingsState {
   defaults: ChatViewSettings
   perChat: Record<string, Partial<ChatViewSettings>>
   appearance: Appearance
-  /** Which of the three gradient wallpapers the glass floats over. */
+  /** Which of the four flat wallpapers the glass floats over. */
   wallpaper: WallpaperName
   /** False until the first disk read finishes; screens paint the defaults meanwhile. */
   loaded: boolean

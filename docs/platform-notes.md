@@ -4280,3 +4280,77 @@ flap cases.
 **Reasoned, not watched:** the three new key codes in the Swift allow-list — no
 native build was made this round, so the dev client on the simulator is the
 previous binary with this round's JavaScript.
+
+## The duplicated bubble, and where `ui_meta` turned out to be (2026-09-21, later still)
+
+### An id is not unique, and `order` is a list
+
+The `Encountered two children with the same key … .$o=29000` from the previous
+round is `o:9000` once React's key escaping is undone — a transcript item id, and
+specifically the optimistic bubble's. It was found by pulling the fake gateway
+out from under a live session and sending twice, and it reproduces end to end:
+`packages/gateway-client/src/bot-chat.test.ts` restarts the fake on the same port,
+re-hydrates and sends, and before the fix the transcript comes back holding
+`o:9000 o:9000` — and `r:4 r:4` beside it, which is the same fault by a second
+route.
+
+Three things were true at once:
+
+- **`rebuild` read the id counter off the transcript's LENGTH.** A rebuilt
+  session answers with FEWER rows than the client is holding, so
+  `nextSeq = list.length * SEQ_STEP` walked backwards onto a seq already spent on
+  an id still in the list. It is a high-water mark now; its only obligation is to
+  sit above every seq in the list, which the larger of the two still does.
+- **A persisted item's id is its gateway ROW NUMBER**, and a gateway that rebuilds
+  a session numbers it from 1 again. A freshly projected `r:4` and a live `r:4`
+  kept from the tail are two different rows wearing one id — nothing to do with
+  the counter, and the reason the fix is not only the counter.
+- **`addItem` and `rebuild` pushed straight into `order`.** `items` is a map, so
+  the second write overwrote the first; `order` is a LIST, so it grew a second
+  entry. One item, painted twice, the other gone. Both go through `freeItemId`
+  now, and only the LATER of two claimants is renamed, so nothing on screen
+  remounts.
+
+Worth keeping in mind for anything that mints an id from a number the gateway
+supplies: none of `tool_id`, `row_id` or a local counter is unique across a
+session rebuild, and the only place that can know is the transcript being written
+into.
+
+### `ui_meta` is a per-key compare-and-swap, and it is not ours alone
+
+ADR-0012 ended on "if the gateway ever grows a per-client metadata scope, this is
+the one module to change". It has had one all along. `profiles.configure` takes
+`ui_meta` with `ui_meta_expected_revisions` and answers with
+`applied.ui_meta_revisions` and `applied.ui_meta_conflicts`, and upstream's
+docstring — carried verbatim into the generated contract — says what that is:
+sections are independent, and the expected revisions are a per-key
+compare-and-swap.
+
+So the unit is the TOP-LEVEL KEY, which is the difference between the scope being
+usable and being a trap: `ui_meta: {"hermes-bots": {}}` is what makes a profile
+show up as a bot at all and it belongs to another tool. A client that stored its
+settings by replacing the bag would un-bot every profile it coloured.
+
+The fake gateway had no `profiles.configure` at all, so none of this could be
+tested. It has one now, for the `ui_meta` section only —
+`packages/fake-gateway/src/ui-meta.test.ts` pins the round trip, the untouched
+marker, the whole-key replace, the per-key revision counting from zero, the
+refused stale write with `{ expected, actual }`, and a mixed request where one key
+conflicts and the other still lands. ADR-0016 records the schema.
+
+**None of it has met a running `hermes serve`.** The semantics are read off the
+contract's shapes and upstream's docstring, which is evidence about the protocol
+and not about a box. One probe settles it before anything writes for real: write
+a single key to a profile that already carries `hermes-bots`, read `profiles.list`
+back, and look for the marker.
+
+### The theme does not follow the window's focus
+
+Checked while scoping the theme work, because it is the kind of thing that is
+easier to assert than to verify: nothing in the token set, the theme provider, the
+glass surfaces or either shell reads window focus. Every `AppState` listener in the
+app belongs to the connection (reconnect on foreground) or to the Mac keyboard
+module's HID latch; `useColorScheme` follows the SYSTEM appearance, and
+`Appearance.setColorScheme` pins the trait collection outright. There is no
+AppKit-style inactive-window treatment to inherit, because the Mac build is the
+iPad one.
