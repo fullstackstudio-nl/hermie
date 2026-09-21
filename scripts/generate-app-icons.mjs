@@ -30,12 +30,12 @@ const assetsDir = resolve(repoRoot, 'apps/hermie/assets')
  * not in `assets/` with the rest: nothing bundles them, the manifest names them
  * by URL.
  *
- * There is deliberately no `maskable` icon here. A maskable one has to sit
- * inside a circle of 80% of the canvas ON a filled backdrop, and the mark's
- * corners reach 460 of the 409 that circle allows — so it needs the backdrop at
- * full bleed and the mark shrunk, which is two transforms in one image, and
- * `render` composites every shape through one. Until the rasteriser can layer,
- * Android draws the `any` icon on a white circle of its own.
+ * The `maskable` icon here is the reason `render` learned to take a transform
+ * per SHAPE. A maskable image is cropped to whatever silhouette the launcher
+ * likes, so the backdrop has to reach every edge while the mark stays inside a
+ * circle of 80% of the canvas — two different mappings of one drawing. Without
+ * it Android put the `any` icon on a white circle of its own, which is a Hermie
+ * icon inside somebody else's badge.
  */
 const webIconsDir = resolve(repoRoot, 'apps/hermie/public/icons')
 
@@ -51,6 +51,18 @@ const webIconsDir = resolve(repoRoot, 'apps/hermie/public/icons')
  * uses, and leaves only the taper of the tail near the edge.
  */
 const ADAPTIVE_SAFE_BOX = 528
+
+/**
+ * The same question for a maskable PWA icon, which draws its own backdrop.
+ *
+ * The guaranteed area is a circle of 80% of the canvas — radius 409.6 on 1024 —
+ * and it is measured rather than assumed: fitted to a box of 1000 the furthest
+ * point of the mark (the tail's tip, not a corner) sits 607.5 from the centre,
+ * so the radius scales at 0.6075 of the box and 674 is the largest box that
+ * fits. 664 is that with six points to spare, which is the difference between
+ * a number that fits and a number that fits after somebody nudges the artwork.
+ */
+const MASKABLE_SAFE_BOX = 664
 
 /** Artwork that fills its canvas edge to edge, at whatever size is asked for. */
 function fullBleed(size, squareCorners) {
@@ -79,6 +91,26 @@ function fitted(size, shapes, box) {
   }
 }
 
+/**
+ * One image, two mappings: the backdrop edge to edge, the mark in the circle.
+ *
+ * `squareCornersOf: 'backdrop'` because the artwork's own rounded corners are
+ * exactly what a maskable icon must not have — the launcher supplies the shape,
+ * and a rounded corner inside its mask is a visible notch of nothing.
+ */
+function maskable(size, backdropShapes, markShapes) {
+  const full = fullBleed(size, true)
+  const inner = fitted(size, markShapes, MASKABLE_SAFE_BOX)
+
+  return {
+    shapes: [
+      ...backdropShapes.map(shape => ({ ...shape, transform: full.transform })),
+      ...markShapes.map(shape => ({ ...shape, transform: inner.transform }))
+    ],
+    options: full
+  }
+}
+
 const { emit, finish } = createEmitter({ repoRoot, checkOnly: process.argv.includes('--check') })
 
 const allShapes = readSvg(readFileSync(sourceSvg, 'utf8'))
@@ -103,5 +135,12 @@ emit(resolve(assetsDir, 'favicon.png'), encodePng(render(allShapes, fullBleed(64
 emit(resolve(webIconsDir, 'icon-192.png'), encodePng(render(allShapes, fullBleed(192, false))))
 emit(resolve(webIconsDir, 'icon-512.png'), encodePng(render(allShapes, fullBleed(512, false))))
 emit(resolve(webIconsDir, 'apple-touch-icon.png'), encodePng(render(allShapes, { ...fullBleed(180, true), opaque: true }))) // prettier-ignore
+
+const masked = maskable(
+  512,
+  allShapes.filter(shape => shape.group !== 'mark'),
+  markShapes
+)
+emit(resolve(webIconsDir, 'icon-maskable-512.png'), encodePng(render(masked.shapes, masked.options)))
 
 finish({ subject: 'Icons', source: 'design/icon.svg', command: 'node scripts/generate-app-icons.mjs' })

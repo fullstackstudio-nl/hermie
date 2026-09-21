@@ -442,6 +442,14 @@ function colourAt(fill, x, y) {
  * evaluated back in user units so they do not shift when the artwork is scaled,
  * and so a gradient-filled shape painted over another one lands on exactly the
  * colour underneath it.
+ *
+ * A SHAPE may carry a `transform` of its own, and then that is the one used for
+ * it — for its geometry and for the back-mapping its gradient is read through,
+ * which have to agree or the fill slides off the shape. One image needing two
+ * of them is not a general drawing feature looking for a use: a maskable PWA
+ * icon has to put the backdrop at full bleed and the mark inside a circle of
+ * 80% of the canvas, and those are two different mappings of the same artwork.
+ * Everything else passes one transform and never sees this.
  */
 export function render(shapes, { width, height, transform, squareCornersOf, opaque = false }) {
   const count = width * height
@@ -451,11 +459,12 @@ export function render(shapes, { width, height, transform, squareCornersOf, opaq
   const alpha = new Float32Array(count)
 
   for (const shape of shapes) {
+    const placement = shape.transform ?? transform
     const polygons = shapePolygons(shape, squareCornersOf).map(polygon => {
       const moved = new Array(polygon.length)
       for (let i = 0; i < polygon.length; i += 2) {
-        moved[i] = polygon[i] * transform.scale + transform.x
-        moved[i + 1] = polygon[i + 1] * transform.scale + transform.y
+        moved[i] = polygon[i] * placement.scale + placement.x
+        moved[i + 1] = polygon[i + 1] * placement.scale + placement.y
       }
       return moved
     })
@@ -466,8 +475,8 @@ export function render(shapes, { width, height, transform, squareCornersOf, opaq
       if (source <= 0) {
         continue
       }
-      const userX = ((pixel % width) + 0.5 - transform.x) / transform.scale
-      const userY = (Math.floor(pixel / width) + 0.5 - transform.y) / transform.scale
+      const userX = ((pixel % width) + 0.5 - placement.x) / placement.scale
+      const userY = (Math.floor(pixel / width) + 0.5 - placement.y) / placement.scale
       const [r, g, b] = colourAt(shape.fill, userX, userY)
       const destination = alpha[pixel] * (1 - source)
       const total = source + destination
