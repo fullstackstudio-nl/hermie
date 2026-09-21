@@ -98,7 +98,39 @@ export const strings = {
       hint: 'Leave the scheme out and Hermie tries https:// first, then http://. Type a scheme yourself to pin it.',
       advanced: 'Advanced',
       advancedHint:
-        'Extra request headers are sent with every call and with the sign-in page. An access proxy such as Cloudflare Access needs them here.',
+        'Extra request headers are sent with every call and with the sign-in page. A reverse proxy that wants a shared secret needs it here.',
+
+      /**
+       * The Advanced preset picker, and the labelled fields behind one of them.
+       *
+       * The Cloudflare wording has one job beyond naming the fields: to say, up
+       * front, the thing that only becomes visible as a 403 halfway through a
+       * sign-in. A service token gets a request past the edge; it does not get
+       * a BROWSER past it, and the sign-in page is a browser.
+       */
+      frontDoor: {
+        label: 'IN FRONT OF THE GATEWAY',
+        custom: 'Custom headers',
+        cloudflare: 'Cloudflare Access',
+        hint: 'Pick how the proxy in front of your gateway lets Hermie through. Nothing here is sent anywhere but the gateway’s own address.',
+        clientId: 'Client ID',
+        clientIdPlaceholder: 'abc123.access',
+        clientSecret: 'Client Secret',
+        cloudflareHint:
+          'A service token from your Access application. Hermie sends it with every request, the WebSocket and the sign-in page. Exempt /auth/* and /login from the Access policy: a service token cannot carry a redirect-based sign-in through the edge.',
+        /**
+         * Said instead of the hint when the gateway is reached in the clear.
+         *
+         * A service token is a long-lived credential for a whole Access
+         * tenant, and an http gateway is one this app supports on purpose
+         * (ADR-0014). Rather than refuse either, the headers are withheld and
+         * the reason is on screen — a silent withholding would surface as an
+         * unexplained 403.
+         */
+        insecure:
+          'This gateway is reached over http://, so the service token is not being sent — it is a long-lived credential for your whole Access tenant. Use https:// for the address the Access application covers.'
+      },
+
       headerName: 'Header',
       headerValue: 'Value',
       addHeader: 'Add a header',

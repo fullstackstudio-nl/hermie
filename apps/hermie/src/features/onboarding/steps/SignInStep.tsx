@@ -6,7 +6,7 @@ import { useGateway } from '../../../gateway/GatewayProvider'
 import { strings } from '../../../i18n/strings'
 import { Button, CodeChipText, InsetGroup, InsetRow, SecretField, Text } from '../../../ui/primitives'
 import { useTheme } from '../../../ui/theme'
-import { authModeOf, headerRecord, type OnboardingDraft } from '../draft'
+import { authModeOf, effectiveHeaders, type OnboardingDraft } from '../draft'
 import { NativeSignInWebView } from '../NativeSignInWebView'
 import { StatusLine } from '../StatusLine'
 
@@ -152,7 +152,8 @@ export function SignInStep({ draft, update }: SignInStepProps) {
       {draft.baseUrl && selected ? (
         <NativeSignInWebView
           baseUrl={draft.baseUrl}
-          extraHeaders={headerRecord(draft.headers)}
+          extraHeaders={effectiveHeaders(draft)}
+          frontDoor={draft.frontDoor}
           onCancel={() => setSigningIn(false)}
           onSuccess={onSuccess}
           provider={selected.name}

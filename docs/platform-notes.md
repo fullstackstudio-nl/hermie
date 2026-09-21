@@ -6692,3 +6692,110 @@ whether to ask for a face. `start()` locks whenever the threshold is not `off`.
   inherits that gap: whether a Mac window losing focus reports `inactive` — and
   therefore whether `immediately` locks when you click another app — is a
   reasonable reading of an iOS binary's behaviour and nothing more.
+
+## Cloudflare Access, and the request a web view cannot make (2026-09-22)
+
+A service token gets a REQUEST past Cloudflare Access. It does not get a
+BROWSER past it, and the sign-in page is a browser. Everything awkward about
+this feature is downstream of that one sentence.
+
+### What `source.headers` does and does not cover
+
+`react-native-webview`'s `source.headers` applies to the load the app initiates.
+It does not apply to anything the page does afterwards, and there are two
+different kinds of "afterwards":
+
+| What the page does                           | Reached by `source.headers` | Reached by a document-start script |
+| -------------------------------------------- | --------------------------- | ---------------------------------- |
+| `fetch` / XHR to the gateway (`/login` POST) | no                          | yes                                |
+| a sub-resource on the gateway origin         | no                          | no (not a scripted request)        |
+| a top-level navigation it performs           | no                          | no                                 |
+
+The middle row is why the script exists at all and the bottom row is why it is
+not enough. The gateway's `/login` form posts with `fetch`, so without the
+script a password provider behind Access is answered by the Access login page —
+inside a web view that is already showing a sign-in, which is about as confusing
+as a failure gets. `/auth/native/authorize` then navigates to the identity
+provider and the provider navigates back, and those are top-level navigations:
+no header this app sets and no wrapper this app installs is on them.
+
+So the operator instruction in ADR-0004 — exempt `/auth/*` and `/login` — is not
+a convenience. It is the only configuration in which the in-app flow completes
+on a service token, and it is now in the field's own hint rather than only in a
+decision record.
+
+### The https rule, and why it is not an inconvenience
+
+`frontDoorHeaders` returns `{}` for an `http://` or `ws://` address. A service
+token is a long-lived bearer credential for a whole Access application, and this
+app deliberately supports cleartext (ADR-0014) because a tailnet has already
+encrypted the path — those two facts do not belong on the same wire. Conduit
+applies the same rule in `Conduit/Services/CloudflareAccess.swift` and gives the
+same reason.
+
+The combination this forbids does not exist in practice: Access terminates TLS,
+so a gateway behind it is reachable over https or not at all. What the rule
+actually catches is a half-finished setup — an address typed without a scheme
+that fell back to http, a `http://` typed out of habit — and the address step
+says the token is being withheld rather than letting it look like a wrong
+secret.
+
+### `cf-access: present`, computed once
+
+The developer screen is one screenshot away from an issue tracker, so the rule
+is that it never holds a header value to begin with. `describeFrontDoor` runs at
+the provider, at connect time, and what goes into the connection store is the
+phrase. `redactHeaders` exists for anything that has to show a whole map, and it
+replaces EVERY value rather than a list of known names — the custom preset is
+there precisely so somebody can put their proxy's secret in a header this
+codebase has never heard of, and a redaction allowlist is a list somebody
+forgets to add to.
+
+### Turnstile: read, not built
+
+Conduit has a live-WebKit regression test for this,
+`ConduitTests/TurnstileSubframeBoundaryTests.swift`. What it establishes is that
+Cloudflare's Turnstile WebView requirements need the navigation delegate to
+ALLOW `about:blank` and `about:srcdoc` subframe navigations, and that cancelling
+a `srcdoc` subframe stops its document instantiating at all — measured against a
+real engine rather than reasoned about.
+
+Hermie's equivalent is `onShouldStartLoadWithRequest`, and
+`inspectSignInNavigation` returns `continue` for everything that is not the
+loopback redirect. So on the face of it the app already allows what Turnstile
+needs. Two things stop that being a claim:
+
+- **Whether the callback fires for subframes at all has not been measured**, on
+  either platform. iOS routes it through `decidePolicyForNavigationAction`,
+  which WebKit does consult for subframes; whether `react-native-webview`
+  forwards a subframe navigation to JavaScript, and what it passes as the URL
+  for `about:srcdoc`, is not something reading the prop's documentation settles.
+- **No Access policy with Turnstile has ever been put in front of this app.**
+  There is no tenant to point it at from here.
+
+Nothing was added for it. An allowance written for a callback that may never
+fire is a line of code that encodes a guess and then gets copied — and if the
+callback does fire and does cancel, the symptom is specific and findable: the
+Access challenge renders as an empty box. That is worth more than a speculative
+`if`.
+
+### What is unverified here
+
+- **No real Cloudflare Access front door has been through any of this.** There
+  is no tenant available from here. Everything is the gateway client's suites
+  against a mocked `fetch`, the app's suites against a mocked resolver, and the
+  header names read from Cloudflare's documented service-token scheme.
+- **The document-start script has never run in a web view.** It is asserted as a
+  STRING — that it is built from the values, that it pins both origins, that a
+  hostile secret cannot close the literal — and jest's web view is a stand-in
+  that renders props. Whether `injectedJavaScriptBeforeContentLoaded` actually
+  beats the gateway's own page scripts to `window.fetch` on WKWebView is the
+  prop's documented contract and not a measurement.
+- **The redirect-back behaviour is reasoned, not observed.** The claim that the
+  Access edge answers the returning top-level navigation with its own login page
+  follows from how Access works; what that looks like inside the sign-in modal,
+  and whether the interactive Access login completes there under `incognito`
+  with `sharedCookiesEnabled={false}`, has not been seen.
+- **The origin binding has never rejected a real record.** Its tests write the
+  mismatch by hand. The case it is for — a restore onto another device, or a
+  record from a build before the binding existed — cannot be produced here.

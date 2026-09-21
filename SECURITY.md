@@ -26,10 +26,10 @@ Out of scope, because they are other people's projects — report them upstream:
 
 Knowing this helps when assessing an issue:
 
-- **Secrets** — access token, refresh token, session token and any extra request headers — go in the
-  platform keystore through `SecretStore`. On iOS and Android that is the system keychain, with a
-  device-only, after-first-unlock accessibility class. A Mac runs the same iOS build (ADR-0011) and
-  therefore the same `expo-secure-store`.
+- **Secrets** — access token, refresh token, session token, any extra request headers and the
+  Cloudflare Access service token — go in the platform keystore through `SecretStore`. On iOS and
+  Android that is the system keychain, with a device-only, after-first-unlock accessibility class. A
+  Mac runs the same iOS build (ADR-0011) and therefore the same `expo-secure-store`.
 - **Non-secret configuration** — the gateway URL, display preferences — goes in plain key-value
   storage.
 - **Chat transcripts** are cached locally so the app can paint before the gateway answers. They are
@@ -45,6 +45,32 @@ One observation from the same session, recorded because it is not explained: the
 build did ask for a sign-in again. The cause was not established — a fresh install and a new wrapper
 are both in the picture, and a different keychain access context is a plausible reading — so it is
 written down as something seen once, not as a known behaviour.
+
+## Access proxies in front of the gateway
+
+Setup's **Advanced** step carries a credential for whatever stands between Hermie and the gateway:
+either arbitrary request headers, or the **Cloudflare Access** preset, which is a service token's
+Client ID and Client Secret sent as `CF-Access-Client-Id` and `CF-Access-Client-Secret`.
+
+- **Where it lives.** In the platform keystore through `SecretStore`, in its own item, **bound to
+  the gateway origin it was entered for**. A record whose origin does not match the configured
+  address is dropped rather than sent; a record with no origin counts as a mismatch. A service
+  token is issued for one Access application, and one that followed the app to another address
+  would be a tenant-wide credential handed to a host that never asked for it.
+- **Where it goes.** Every REST call, the WebSocket dial and its ticket mint, both of the probe's
+  requests, and the in-app sign-in page — where it also becomes a document-start script so the
+  page's own `fetch` carries it. That script attaches the headers only when the page's origin and
+  the request's origin are both the gateway's, so a sign-in that has navigated to the identity
+  provider does not take the token with it. On Android the in-app page is not used at all when
+  headers are configured: its WebView re-sends them across a cross-origin redirect
+  ([ADR-0004](docs/adr/0004-native-pkce-via-webview.md)).
+- **Where it does not go.** Never over `http://` or `ws://` — the headers are withheld and the
+  setup screen says so. Never into a log: header values are redacted wholesale rather than by a
+  list of known names, and the developer screen is told only `cf-access: present`.
+- **What it cannot do.** A service token authenticates a REQUEST, not a browser. A top-level
+  navigation the sign-in page performs carries no headers, so an Access policy covering `/auth/*`
+  and `/login` cannot be satisfied this way; those paths must be exempt.
+  [ADR-0020](docs/adr/0020-header-based-front-doors.md) has the reasoning and the limits.
 
 ## The app lock
 

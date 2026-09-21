@@ -1,4 +1,11 @@
-import type { GatewayAuthMode, TokenSet } from '@hermie/gateway-client'
+import {
+  type FrontDoor,
+  frontDoorHeaders,
+  type GatewayAuthMode,
+  NO_FRONT_DOOR,
+  originOf,
+  type TokenSet
+} from '@hermie/gateway-client'
 
 import { keyValueStore } from '../platform/key-value-store'
 import { secretStore } from '../platform/secret-store'
@@ -16,13 +23,22 @@ import { clearUrlCache } from '../platform/url-cache'
 /** Non-secret configuration, in the key-value store. */
 export const CONFIG_KEY = 'hermie.gateway.config'
 
-/** Secret-store keys. Signing out deletes exactly these five. */
+/**
+ * Secret-store keys. Signing out deletes exactly these six.
+ *
+ * `frontDoor` is a secret and not configuration, even though half of it — a
+ * Cloudflare Access client id — is not itself one. The pair is entered together,
+ * is useless apart, and a record split across two stores is a record that goes
+ * out of step; the keychain is also what the origin binding below is worth
+ * having in front of.
+ */
 export const SECRET_KEYS = {
   accessToken: 'hermie.auth.access_token',
   refreshToken: 'hermie.auth.refresh_token',
   tokenMeta: 'hermie.auth.token_meta',
   sessionToken: 'hermie.auth.session_token',
-  extraHeaders: 'hermie.auth.extra_headers'
+  extraHeaders: 'hermie.auth.extra_headers',
+  frontDoor: 'hermie.auth.front_door'
 } as const
 
 export interface StoredGatewayConfig {
@@ -38,7 +54,20 @@ export interface StoredGatewayConfig {
 
 export interface GatewaySetup {
   config: StoredGatewayConfig
+  /**
+   * What actually goes on the wire: the headers typed under "Custom headers"
+   * with the front door's own pair folded in on top.
+   *
+   * One map rather than two, because everything downstream — the REST client,
+   * the dial plan, the probe — takes exactly one and has no business knowing
+   * which preset produced it. Which preset DID produce it is `frontDoor`, and
+   * that is only read by the surfaces that have to show it back.
+   */
   extraHeaders: Record<string, string>
+  /** The headers as typed, so the wizard can show them again after a sign-out. */
+  customHeaders: Record<string, string>
+  /** The preset, or `{ kind: 'none' }` — including when one was dropped for the wrong origin. */
+  frontDoor: FrontDoor
   sessionToken: string | null
   /** False after a sign-out: the address is known, the credentials are not. */
   hasCredentials: boolean
@@ -68,7 +97,9 @@ export interface GatewaySetup {
 
 export interface SaveGatewaySetupInput {
   config: StoredGatewayConfig
+  /** The headers as typed under "Custom headers". The front door adds its own. */
   extraHeaders: Record<string, string>
+  frontDoor?: FrontDoor
   /** Native PKCE only. */
   tokens?: TokenSet | null
   /** Session-token gateways only. */
@@ -84,6 +115,63 @@ function isRecordOfStrings(value: unknown): value is Record<string, string> {
   )
 }
 
+/**
+ * Read a stored front door back, and refuse one that belongs to another gateway.
+ *
+ * A Cloudflare Access service token is issued for one Access application, which
+ * is one hostname. A record that survived a change of gateway would be sent to
+ * a host that never asked for it and cannot use it — a long-lived tenant
+ * credential handed to a stranger, in exchange for nothing. So the origin it
+ * was entered for rides along with it and a mismatch drops the whole record
+ * rather than trying to repair it.
+ *
+ * "Change gateway" already clears the credentials when the address changes, so
+ * this is the second line rather than the first. It is the line that holds when
+ * the address changed some other way: an edited config, a restore onto another
+ * device, a build that wrote the record before the origin was part of it — and
+ * that last case is exactly why an absent `origin` reads as a mismatch rather
+ * than as permission.
+ */
+function readFrontDoor(raw: string | null, baseUrl: string): FrontDoor {
+  if (!raw) {
+    return NO_FRONT_DOOR
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(raw)
+
+    if (!parsed || typeof parsed !== 'object') {
+      return NO_FRONT_DOOR
+    }
+
+    const record = parsed as Record<string, unknown>
+
+    if (
+      record.kind !== 'cloudflare_access' ||
+      typeof record.clientId !== 'string' ||
+      typeof record.clientSecret !== 'string' ||
+      typeof record.origin !== 'string'
+    ) {
+      return NO_FRONT_DOOR
+    }
+
+    if (record.origin.toLowerCase() !== originOf(baseUrl)) {
+      return NO_FRONT_DOOR
+    }
+
+    return {
+      kind: 'cloudflare_access',
+      clientId: record.clientId,
+      clientSecret: record.clientSecret,
+      origin: record.origin.toLowerCase()
+    }
+  } catch {
+    // A record written by an older build is not worth failing a launch over.
+    // The connection goes out without it and the resulting 403 explains itself.
+    return NO_FRONT_DOOR
+  }
+}
+
 /** Read the configured gateway, or `null` when the app has never been set up. */
 export async function loadGatewaySetup(): Promise<GatewaySetup | null> {
   const config = await keyValueStore.getJson<StoredGatewayConfig>(CONFIG_KEY)
@@ -97,25 +185,26 @@ export async function loadGatewaySetup(): Promise<GatewaySetup | null> {
   // A throwing keychain must not strand the launch. Before this, the rejection
   // escaped `reload()`'s un-awaited call and the app sat on the splash for ever
   // — the one outcome worse than asking for a sign-in.
-  const [rawHeaders, sessionToken, accessToken, refreshToken] = await Promise.all([
+  const [rawHeaders, rawFrontDoor, sessionToken, accessToken, refreshToken] = await Promise.all([
     secretStore.get(SECRET_KEYS.extraHeaders),
+    secretStore.get(SECRET_KEYS.frontDoor),
     secretStore.get(SECRET_KEYS.sessionToken),
     secretStore.get(SECRET_KEYS.accessToken),
     secretStore.get(SECRET_KEYS.refreshToken)
   ]).catch((error: unknown) => {
     credentialError = error instanceof Error ? error.message : String(error)
 
-    return [null, null, null, null] as const
+    return [null, null, null, null, null] as const
   })
 
-  let extraHeaders: Record<string, string> = {}
+  let customHeaders: Record<string, string> = {}
 
   if (rawHeaders) {
     try {
       const parsed: unknown = JSON.parse(rawHeaders)
 
       if (isRecordOfStrings(parsed)) {
-        extraHeaders = parsed
+        customHeaders = parsed
       }
     } catch {
       // A header blob written by an older build is not worth failing startup
@@ -123,6 +212,11 @@ export async function loadGatewaySetup(): Promise<GatewaySetup | null> {
       // the resulting 403 explains itself.
     }
   }
+
+  const frontDoor = readFrontDoor(rawFrontDoor, config.baseUrl)
+  // The front door goes on LAST, so a hand-typed `CF-Access-Client-Secret`
+  // under Custom headers cannot quietly shadow the one the preset holds.
+  const extraHeaders = { ...customHeaders, ...frontDoorHeaders(frontDoor, config.baseUrl) }
 
   /**
    * Is there a credential to reconnect with?
@@ -150,6 +244,8 @@ export async function loadGatewaySetup(): Promise<GatewaySetup | null> {
   return {
     config,
     extraHeaders,
+    customHeaders,
+    frontDoor,
     sessionToken,
     hasCredentials,
     canRefresh,
@@ -164,14 +260,19 @@ export async function loadGatewaySetup(): Promise<GatewaySetup | null> {
  * behind.
  */
 export async function saveGatewaySetup(input: SaveGatewaySetupInput): Promise<void> {
-  const { config, extraHeaders, tokens, sessionToken } = input
+  const { config, extraHeaders, frontDoor = NO_FRONT_DOOR, tokens, sessionToken } = input
 
   await keyValueStore.setJson(CONFIG_KEY, config)
 
   const writes: Promise<void>[] = [
     Object.keys(extraHeaders).length > 0
       ? secretStore.set(SECRET_KEYS.extraHeaders, JSON.stringify(extraHeaders))
-      : secretStore.delete(SECRET_KEYS.extraHeaders)
+      : secretStore.delete(SECRET_KEYS.extraHeaders),
+    // Bound to the address being saved rather than to whatever the record said
+    // when it was typed, so the two cannot disagree after a change of gateway.
+    frontDoor.kind === 'cloudflare_access'
+      ? secretStore.set(SECRET_KEYS.frontDoor, JSON.stringify({ ...frontDoor, origin: originOf(config.baseUrl) }))
+      : secretStore.delete(SECRET_KEYS.frontDoor)
   ]
 
   if (tokens) {

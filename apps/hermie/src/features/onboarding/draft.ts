@@ -1,6 +1,9 @@
 import {
   type AuthProvider,
+  type FrontDoor,
+  frontDoorHeaders,
   type GatewayAuthMode,
+  NO_FRONT_DOOR,
   normalizeHeader,
   type ProbeResult,
   type TokenSet
@@ -79,6 +82,16 @@ export interface OnboardingDraft {
   /** The normalized address, set only once a probe has succeeded against it. */
   baseUrl: string | null
   headers: HeaderRow[]
+  /**
+   * The Advanced preset: a named front door, or nothing.
+   *
+   * Beside `headers` rather than folded into it, because the two are edited
+   * differently and only one of them can be checked. A Cloudflare Access pair
+   * has known names, a known shape and an origin it belongs to; a custom header
+   * is whatever somebody's proxy wants and this app has no opinion about it.
+   * They travel together on the wire — see `effectiveHeaders`.
+   */
+  frontDoor: FrontDoor
   probe: ProbeResult | null
   provider: AuthProvider | null
   tokens: TokenSet | null
@@ -107,6 +120,7 @@ export function emptyDraft(): OnboardingDraft {
     rawAddress: '',
     baseUrl: null,
     headers: [],
+    frontDoor: NO_FRONT_DOOR,
     probe: null,
     provider: null,
     tokens: null,
@@ -117,16 +131,37 @@ export function emptyDraft(): OnboardingDraft {
 }
 
 /**
+ * What a resumed wizard needs that `StoredGatewayConfig` does not hold.
+ *
+ * Both halves are in the secret store, which is why they are not on the config
+ * record — and why they have to be handed in rather than read here.
+ */
+export interface ResumeAccess {
+  /** The headers as typed under "Custom headers". */
+  customHeaders: Record<string, string>
+  frontDoor: FrontDoor
+}
+
+/**
  * Resume after a sign-out. The address and the provider survive in the
  * key-value store, so the wizard can open straight on the sign-in step; the
  * probe still has to run, because whether the gateway is gated today is not
  * something an old preference file can promise.
+ *
+ * **The way in is restored with it.** A gateway behind an access proxy answers
+ * `/api/status` with a 403 to anyone who does not carry the proxy's own
+ * credential, so a wizard that reopened with the headers blank would fail the
+ * probe before it could reach the sign-in it was opened for — and would ask
+ * somebody to paste a service-token secret again to recover from an expired
+ * access token, which is two credentials for a problem with one.
  */
-export function draftFromConfig(config: StoredGatewayConfig): OnboardingDraft {
+export function draftFromConfig(config: StoredGatewayConfig, access?: ResumeAccess): OnboardingDraft {
   return {
     ...emptyDraft(),
     rawAddress: config.baseUrl,
     baseUrl: config.baseUrl,
+    headers: Object.entries(access?.customHeaders ?? {}).map(([name, value]) => newHeaderRow(name, value)),
+    frontDoor: access?.frontDoor ?? NO_FRONT_DOOR,
     provider: config.provider
       ? { name: config.provider, displayName: config.providerDisplayName ?? config.provider, supportsPassword: false }
       : null,
@@ -207,15 +242,31 @@ export function headerRecord(rows: HeaderRow[]): Record<string, string> {
 }
 
 /**
+ * Everything that goes on the wire: the typed headers with the front door's own
+ * pair on top.
+ *
+ * The one function the rest of the wizard asks. Three callers would otherwise
+ * each have to remember to fold the preset in — the navigator's save, the
+ * connection test and the sign-in web view — and the one that forgot would fail
+ * as a 403 from a proxy rather than as a missing header.
+ *
+ * The front door goes LAST so a hand-typed header of the same name cannot
+ * shadow the preset's, which is the same order `config.ts` applies on load.
+ */
+export function effectiveHeaders(draft: OnboardingDraft): Record<string, string> {
+  return { ...headerRecord(draft.headers), ...frontDoorHeaders(draft.frontDoor, draft.baseUrl ?? '') }
+}
+
+/**
  * Identity of everything a connection test actually exercised. The test result
  * carries the key it was produced for, so editing any field — the address, a
- * header, the token, the provider — invalidates the result without anyone
- * having to remember to clear it.
+ * header, the front door, the token, the provider — invalidates the result
+ * without anyone having to remember to clear it.
  */
 export function connectionPayloadKey(draft: OnboardingDraft): string {
   return JSON.stringify({
     baseUrl: draft.baseUrl ?? '',
-    headers: headerRecord(draft.headers),
+    headers: effectiveHeaders(draft),
     authMode: authModeOf(draft.probe),
     provider: draft.provider?.name ?? '',
     credential: draft.tokens?.accessToken ?? draft.cookieIdentity?.userId ?? draft.sessionToken.trim()

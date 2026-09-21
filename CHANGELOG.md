@@ -21,6 +21,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in a locked room are not the same question. In a browser there is no lock and the screen says so —
   a plate drawn over this app's own page is removed by the page's own devtools.
 
+- **Cloudflare Access, as a preset rather than as two headers you have to know the names of.**
+  Setup → Advanced now asks which proxy is in front of the gateway: **Custom headers**, which is the
+  name/value rows it has always had, or **Behind Cloudflare Access**, which is a Client ID and a
+  Client Secret. The service token rides on every REST call, the WebSocket dial, the ticket mint
+  before it and both of the probe's requests — and on the sign-in page, where a document-start
+  script also puts it on the page's own `fetch` so the gateway's `/login` form reaches the gateway
+  instead of the Access login screen. It is stored in the keystore bound to the gateway origin it
+  was entered for, so it cannot follow the app to another address, and it is withheld from an
+  `http://` gateway with the reason on screen rather than in silence. Nothing prints it: the
+  developer screen says `cf-access: present` and header values are redacted wholesale rather than by
+  a list of names. One limit is stated up front in the field's own hint rather than discovered as a
+  403 halfway through a sign-in — a service token cannot carry a redirect-based sign-in through the
+  edge, so `/auth/*` and `/login` have to be exempt from the Access policy. Setup also restores the
+  headers and the preset after a sign-out now, which it never did: a gateway behind a proxy could
+  not get past its own probe to reach the sign-in it had reopened for.
+  [ADR-0020](docs/adr/0020-header-based-front-doors.md)
+
 ## [0.1.1] - 2026-09-22
 
 

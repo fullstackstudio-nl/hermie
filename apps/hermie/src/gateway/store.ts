@@ -10,6 +10,16 @@ export interface ConnectionStoreState {
   lastError: GatewayError | null
   config: StoredGatewayConfig | null
   /**
+   * Whether a header-based front door is configured, as one redacted phrase.
+   *
+   * The PHRASE and never the headers. `describeFrontDoor` turns the header map
+   * into `cf-access: present` at the provider, and what reaches this store — and
+   * therefore the developer screen, and therefore any screenshot of it — is that
+   * sentence. Empty string when there is none, so a reader renders nothing
+   * rather than the word "none".
+   */
+  frontDoor: string
+  /**
    * The auth ring as the timeline last published it: the developer screen reads
    * the events, the signed-out card reads the reason.
    */
@@ -25,6 +35,7 @@ export interface ConnectionStoreState {
   rpcFailures: RpcFailure[]
   setStatus: (status: ConnectionStatus, error: GatewayError | null) => void
   setConfig: (config: StoredGatewayConfig | null) => void
+  setFrontDoor: (frontDoor: string) => void
   setAuthTimeline: (snapshot: AuthTimelineSnapshot) => void
   noteRpcFailure: (failure: RpcFailure) => void
   reset: () => void
@@ -41,7 +52,8 @@ export interface ConnectionStoreState {
 const INITIAL = {
   status: 'disconnected' as ConnectionStatus,
   lastError: null,
-  config: null
+  config: null,
+  frontDoor: ''
 }
 
 /**
@@ -56,6 +68,7 @@ export const useConnectionStore = create<ConnectionStoreState>(set => ({
   rpcFailures: [],
   setStatus: (status, error) => set({ status, lastError: error }),
   setConfig: config => set({ config }),
+  setFrontDoor: frontDoor => set({ frontDoor }),
   setAuthTimeline: authTimeline => set({ authTimeline }),
   noteRpcFailure: failure => set(state => ({ rpcFailures: pushRpcFailure(state.rpcFailures, failure) })),
   reset: () => set(INITIAL)

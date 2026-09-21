@@ -15,7 +15,8 @@ import {
   NUMBERED_STEPS,
   ONBOARDING_ORDER,
   type OnboardingDraft,
-  type OnboardingStep
+  type OnboardingStep,
+  type ResumeAccess
 } from './draft'
 import { OnboardingCard } from './OnboardingCard'
 import { DoneStep } from './steps/DoneStep'
@@ -40,8 +41,8 @@ const ORDER: OnboardingStep[] = ONBOARDING_ORDER
  * `draft.baseUrl`, and a wizard that skipped the address step without setting
  * it would have nothing to probe.
  */
-function initialDraftFor(resumeConfig: StoredGatewayConfig | null): OnboardingDraft {
-  const draft = resumeConfig ? draftFromConfig(resumeConfig) : emptyDraft()
+function initialDraftFor(resumeConfig: StoredGatewayConfig | null, resumeAccess: ResumeAccess | null): OnboardingDraft {
+  const draft = resumeConfig ? draftFromConfig(resumeConfig, resumeAccess ?? undefined) : emptyDraft()
 
   if (!WEB_GATEWAY_BASE_URL) {
     return draft
@@ -53,6 +54,15 @@ function initialDraftFor(resumeConfig: StoredGatewayConfig | null): OnboardingDr
 export interface OnboardingNavigatorProps {
   /** Resuming after a sign-out: the address survives, the credentials do not. */
   resumeConfig?: StoredGatewayConfig | null
+  /**
+   * The custom headers and the front door that belong to that address.
+   *
+   * Without them a resumed wizard cannot probe a gateway behind an access
+   * proxy at all — `/api/status` is the first thing such a proxy refuses — so
+   * it would ask for a service-token secret again in order to recover from an
+   * expired access token.
+   */
+  resumeAccess?: ResumeAccess | null
   onComplete: () => void | Promise<void>
   /**
    * Offered when the wizard opened over a gateway that is still configured —
@@ -83,13 +93,14 @@ export interface OnboardingNavigatorProps {
  */
 export function OnboardingNavigator({
   resumeConfig = null,
+  resumeAccess = null,
   onComplete,
   onCancel,
   initialStep,
   initialDraft,
   probeDebounceMs
 }: OnboardingNavigatorProps) {
-  const [draft, setDraft] = useState<OnboardingDraft>(() => initialDraft ?? initialDraftFor(resumeConfig))
+  const [draft, setDraft] = useState<OnboardingDraft>(() => initialDraft ?? initialDraftFor(resumeConfig, resumeAccess))
   const [step, setStep] = useState<OnboardingStep>(() => initialStep ?? (resumeConfig ? 'signin' : 'welcome'))
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -165,7 +176,11 @@ export function OnboardingNavigator({
 
       await saveGatewaySetup({
         config,
+        // As TYPED, not as sent: the front door is stored as the preset it is,
+        // origin-bound, and folded back in on load. Writing the derived pair
+        // into the header blob as well would leave two copies of one secret.
         extraHeaders: headerRecord(draft.headers),
+        frontDoor: draft.frontDoor,
         tokens: draft.tokens,
         sessionToken: draft.sessionToken.trim() || null
       })

@@ -1,8 +1,11 @@
 import {
+  accessUserScript,
   type AuthEventRecorder,
   buildAuthorizeUrl,
   createPkce,
   exchangeCode,
+  type FrontDoor,
+  NO_FRONT_DOOR,
   type Pkce,
   type TokenSet
 } from '@hermie/gateway-client'
@@ -45,6 +48,17 @@ export interface NativeSignInWebViewProps {
   provider?: string
   extraHeaders?: Record<string, string>
   /**
+   * The Advanced preset, when one is configured.
+   *
+   * Separate from `extraHeaders` — which already contains the same pair —
+   * because the two are used differently here: headers ride on the load this
+   * component initiates, and the front door additionally becomes a
+   * document-start script so the page's OWN `fetch` carries them. The gateway's
+   * `/login` form posts with `fetch`, so without the script a password provider
+   * behind Access is answered by the Access edge rather than by the gateway.
+   */
+  frontDoor?: FrontDoor
+  /**
    * Open straight on the system-browser path instead of the in-app page.
    *
    * The sign-in step offers that path up front now, because an escape hatch
@@ -81,6 +95,7 @@ export function NativeSignInWebView({
   baseUrl,
   provider,
   extraHeaders = {},
+  frontDoor = NO_FRONT_DOOR,
   startInBrowser = false,
   onCancel,
   onSuccess,
@@ -94,6 +109,20 @@ export function NativeSignInWebView({
   const [pastedUrl, setPastedUrl] = useState('')
   const exchangingRef = useRef(false)
   const headersWithheld = Object.keys(extraHeaders).length > 0 && !webViewMayCarryHeaders()
+  /*
+    The same reasoning as `headersWithheld`, applied to the script.
+
+    Android's WebView re-sends `source.headers` across an origin boundary, which
+    is why that platform never gets the in-app page at all when headers are
+    configured. The script has no such defect — it checks both origins on every
+    call — but it would be injecting a tenant credential into a page this
+    platform has already been judged unsafe to show, so it is withheld with the
+    branch rather than kept alive inside it.
+  */
+  const injected = useMemo(
+    () => (headersWithheld ? '' : accessUserScript(frontDoor, baseUrl)),
+    [baseUrl, frontDoor, headersWithheld]
+  )
 
   // Escape backs out of the sign-in page, the same as the Cancel button. It is
   // the full-screen thing on top, so it registers last and outranks anything the
@@ -288,6 +317,7 @@ export function NativeSignInWebView({
           // Belt and braces: this branch is unreachable while the headers are
           // withheld, and the source must not carry them even if that changes.
           source={{ uri: attempt.url, ...(headersWithheld ? {} : { headers: extraHeaders }) }}
+          {...(injected ? { injectedJavaScriptBeforeContentLoaded: injected } : {})}
           incognito
           sharedCookiesEnabled={false}
           thirdPartyCookiesEnabled={false}

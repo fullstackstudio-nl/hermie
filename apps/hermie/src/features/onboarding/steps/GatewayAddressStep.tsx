@@ -1,4 +1,13 @@
-import { hasExplicitScheme, isGatewayError, normalizeBaseUrl, resolveGatewayAddress } from '@hermie/gateway-client'
+import {
+  type FrontDoorKind,
+  frontDoorWithheld,
+  hasExplicitScheme,
+  isGatewayError,
+  NO_FRONT_DOOR,
+  normalizeBaseUrl,
+  originOf,
+  resolveGatewayAddress
+} from '@hermie/gateway-client'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Pressable, View } from 'react-native'
 
@@ -6,9 +15,24 @@ import { describeProbeError } from '../../../gateway/errors'
 import { TransportNotice } from '../../../gateway/TransportNotice'
 import { strings } from '../../../i18n/strings'
 import { InsetButtonRow, InsetGroup, InsetRow, SecretField, Text, TextField } from '../../../ui/primitives'
+import { SegmentedRow } from '../../../ui/sheets'
 import { useTheme } from '../../../ui/theme'
-import { headerError, headerRecord, newHeaderRow, type OnboardingDraft } from '../draft'
+import { effectiveHeaders, headerError, newHeaderRow, type OnboardingDraft } from '../draft'
 import { StatusLine } from '../StatusLine'
+
+/**
+ * The Advanced presets.
+ *
+ * Two, and the second one is named. Header-based front doors all work the same
+ * way — a pair of headers on every request — but only one of them is common
+ * enough in front of a self-hosted gateway to be worth labelled fields, a
+ * stored origin and a sentence about what it cannot do. Everything else is the
+ * first preset, which is the field pair this step has always had.
+ */
+const PRESETS: { value: FrontDoorKind; label: string }[] = [
+  { value: 'none', label: strings.onboarding.address.frontDoor.custom },
+  { value: 'cloudflare_access', label: strings.onboarding.address.frontDoor.cloudflare }
+]
 
 /** Long enough that typing an address does not fire a probe per keystroke. */
 export const PROBE_DEBOUNCE_MS = 500
@@ -22,7 +46,9 @@ export interface GatewayAddressStepProps {
 
 export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_MS }: GatewayAddressStepProps) {
   const theme = useTheme()
-  const [advanced, setAdvanced] = useState(draft.headers.length > 0)
+  // Open when there is already something in it, which after a sign-out there
+  // is: the wizard restores the way in along with the address.
+  const [advanced, setAdvanced] = useState(draft.headers.length > 0 || draft.frontDoor.kind !== 'none')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   /*
@@ -46,7 +72,10 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
   updateRef.current = update
 
   const raw = draft.rawAddress.trim()
-  const headersKey = JSON.stringify(headerRecord(draft.headers))
+  // The FRONT DOOR is in here too, so editing a service token re-probes. On a
+  // gated edge that is the only way to find out whether the pair is right:
+  // `/api/status` is the first thing Access refuses.
+  const headersKey = JSON.stringify(effectiveHeaders(draft))
   // The resolver tries https first and falls back to http only when the reader
   // left the scheme out, so which of the two is in flight is knowable here
   // without instrumenting the resolver.
@@ -147,6 +176,37 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
     [draft.headers, update]
   )
 
+  /**
+   * Switch preset.
+   *
+   * Leaving Cloudflare Access DROPS the pair rather than parking it, which is
+   * the whole reason this is a switch and not a checkbox: a secret the reader
+   * has turned off should not be sitting in the draft waiting to be saved with
+   * the next gateway.
+   */
+  const setPreset = useCallback(
+    (kind: FrontDoorKind) => {
+      update({
+        frontDoor:
+          kind === 'cloudflare_access'
+            ? { kind, clientId: '', clientSecret: '', origin: originOf(draft.baseUrl ?? draft.rawAddress) }
+            : NO_FRONT_DOOR
+      })
+    },
+    [draft.baseUrl, draft.rawAddress, update]
+  )
+
+  const setAccess = useCallback(
+    (patch: { clientId?: string; clientSecret?: string }) => {
+      if (draft.frontDoor.kind !== 'cloudflare_access') {
+        return
+      }
+
+      update({ frontDoor: { ...draft.frontDoor, ...patch, origin: originOf(draft.baseUrl ?? draft.rawAddress) } })
+    },
+    [draft.baseUrl, draft.frontDoor, draft.rawAddress, update]
+  )
+
   return (
     <View style={{ gap: theme.space.lg }}>
       <View style={{ gap: theme.space.sm }}>
@@ -218,6 +278,57 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
         </Pressable>
 
         {advanced ? (
+          <InsetGroup footer={strings.onboarding.address.frontDoor.hint}>
+            <SegmentedRow
+              label={strings.onboarding.address.frontDoor.label}
+              onChange={setPreset}
+              options={PRESETS}
+              testID="front-door-preset"
+              value={draft.frontDoor.kind}
+            />
+          </InsetGroup>
+        ) : null}
+
+        {advanced && draft.frontDoor.kind === 'cloudflare_access' ? (
+          <InsetGroup
+            footer={
+              frontDoorWithheld(draft.frontDoor, draft.baseUrl ?? '')
+                ? strings.onboarding.address.frontDoor.insecure
+                : strings.onboarding.address.frontDoor.cloudflareHint
+            }
+          >
+            <InsetRow style={{ gap: theme.space.sm }}>
+              <TextField
+                autoCapitalize="none"
+                autoCorrect={false}
+                label={strings.onboarding.address.frontDoor.clientId}
+                onChangeText={clientId => setAccess({ clientId })}
+                placeholder={strings.onboarding.address.frontDoor.clientIdPlaceholder}
+                returnKeyType="done"
+                testID="cf-access-client-id"
+                value={draft.frontDoor.clientId}
+              />
+              {/*
+                A `SecretField`, the same as a custom header's value: it is a
+                long-lived tenant credential and it is pasted in rooms with
+                other people in them.
+              */}
+              <SecretField
+                autoCapitalize="none"
+                autoCorrect={false}
+                concealLabel={strings.onboarding.address.hideValue}
+                label={strings.onboarding.address.frontDoor.clientSecret}
+                onChangeText={clientSecret => setAccess({ clientSecret })}
+                returnKeyType="done"
+                revealLabel={strings.onboarding.address.showValue}
+                testID="cf-access-client-secret"
+                value={draft.frontDoor.clientSecret}
+              />
+            </InsetRow>
+          </InsetGroup>
+        ) : null}
+
+        {advanced && draft.frontDoor.kind === 'none' ? (
           <InsetGroup footer={strings.onboarding.address.advancedHint}>
             {draft.headers.map(row => (
               <InsetRow key={row.id} style={{ gap: theme.space.sm }}>

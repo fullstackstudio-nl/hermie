@@ -41,6 +41,24 @@ export {
   type SessionTokenCredentialsOptions
 } from './credentials'
 export {
+  accessUserScript,
+  CF_ACCESS_CLIENT_ID,
+  CF_ACCESS_CLIENT_SECRET,
+  CF_ACCESS_INCOMPLETE,
+  CF_ACCESS_PRESENT,
+  type CloudflareAccessFrontDoor,
+  describeFrontDoor,
+  type FrontDoor,
+  type FrontDoorKind,
+  frontDoorHeaders,
+  frontDoorWithheld,
+  isFrontDoorComplete,
+  NO_FRONT_DOOR,
+  originOf,
+  REDACTED,
+  redactHeaders
+} from './front-door'
+export {
   DEFAULT_HTTP_TIMEOUT_MS,
   type FetchLike,
   looksLikeCertificateFailure,

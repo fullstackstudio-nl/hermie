@@ -111,6 +111,15 @@ Hermie is a client, not a server. It needs a Hermes gateway you can reach:
   is reached with the session token `hermes serve` prints at startup. Either way,
   if the gateway sits behind an access proxy, extra request headers can be added
   during setup and are then sent with everything, including the sign-in page.
+- **Behind Cloudflare Access?** Setup has a preset for it: Client ID and Client
+  Secret from a service token, kept in the device keystore and bound to that
+  gateway's address. Two things to know before you try it. The gateway must be
+  on `https://` — a service token is a long-lived credential for your whole
+  Access application, so Hermie will not put one on a cleartext connection. And
+  **`/auth/*` and `/login` have to be exempt from the Access policy**: a service
+  token gets a request past the edge, not a browser, and the sign-in page is a
+  browser. See
+  [ADR-0020](docs/adr/0020-header-based-front-doors.md).
 
 Two things about the gateway's own configuration are worth knowing before you
 start:
