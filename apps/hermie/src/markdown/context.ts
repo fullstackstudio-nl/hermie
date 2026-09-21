@@ -35,6 +35,16 @@ export interface MarkdownContext {
   inlineCodeBackground?: string
   /** Hairline around a chip. See `codeStyle` in `Inline.tsx`: likely inert. */
   inlineCodeBorderColor?: string
+  /**
+   * The width the text lays out in, once it has.
+   *
+   * Only one thing reads it and only one thing needs it: an inline code chip
+   * has to know whether it CAN fit on a line before it can decide whether it is
+   * allowed to break (`codeJoinFor` in `Inline.tsx`). Absent on the first frame
+   * and absent for good in any caller that does not measure, which is the case
+   * the chip treats as "it fits".
+   */
+  lineWidth?: number
   borderColor: string
   textColor: string
   mutedTextColor: string

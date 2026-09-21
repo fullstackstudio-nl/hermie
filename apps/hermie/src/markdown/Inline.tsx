@@ -70,30 +70,117 @@ const CODE_PAD = '\u00a0'
 const CODE_JOIN = '\u2060'
 
 /**
- * Pad the chip, and make it one unbreakable token.
+ * U+200B ZERO WIDTH SPACE: "you MAY break here", with no width of its own.
+ *
+ * The other half of the owner's rule, and the half the joiner alone could not
+ * reach. Joining every pair says "never break", and CoreText's answer to a
+ * never-breakable run that is wider than the line is to open a line, put no
+ * glyphs on it, and try again on the next one. React Native paints the
+ * background of every line fragment of a nested `Text`'s range, so that empty
+ * fragment is a full-width bar with nothing under it — which is exactly what
+ * the owner photographed above a chip too long for the bubble.
+ *
+ * A chip that cannot fit on a line is joined with THIS instead, which puts a
+ * break opportunity between every pair of characters and gets the per-letter
+ * break rule 2 asks for. Every fragment it can produce ends on a glyph, because
+ * the opportunities are between glyphs and never before the first one.
+ */
+const CODE_BREAK = '\u200b'
+
+/**
+ * How wide one monospace character is, as a fraction of the font size.
+ *
+ * Every monospace face this app can end up with — Menlo on iOS, whatever
+ * `monospace` resolves to on Android, Courier as the last fallback — advances
+ * at 0.6 em. That is a constant of the class rather than a guess at one member
+ * of it, which is why it is written down rather than measured: measuring would
+ * cost a hidden `Text` and a layout pass per chip, and it feeds a comparison
+ * with a whole line's width where a few per cent either way decides nothing.
+ */
+const MONO_ADVANCE = 0.6
+
+/**
+ * Which join a chip gets: never break, or break anywhere.
+ *
+ * The owner's rule needs a measurement, because its two halves are about
+ * different things:
+ *
+ *  1. **a chip that FITS on a line must not break at all** — it goes to the
+ *     next line whole, and joining every pair is what says so;
+ *  2. **a chip WIDER than the line has to break per letter** — and gluing it
+ *     there is what produced the empty bar, because a run that can never break
+ *     and can never fit makes the typesetter emit a line with no glyphs on it.
+ *
+ * So the comparison is against the width the paragraph lays out in, and not
+ * against the space left on the current line. The remaining space is the wrong
+ * question: a chip that does not fit in it but does fit on a line is case (1),
+ * and moving down is the whole point of case (1).
+ *
+ * With no width yet — the first frame, before the block has laid out — the
+ * answer is the unbreakable join. That is right for every chip short enough to
+ * be common and wrong only for one that is re-decided a frame later.
+ */
+export function codeJoinFor({
+  characters,
+  fontSize,
+  lineWidth
+}: {
+  /** Code points in the chip, its padding included. */
+  characters: number
+  /** The chip's own size, which is smaller than the body's. */
+  fontSize: number
+  /** The width the paragraph lays out in; absent means not measured yet. */
+  lineWidth?: number
+}): string {
+  if (!lineWidth) {
+    return CODE_JOIN
+  }
+
+  return characters * fontSize * MONO_ADVANCE > lineWidth ? CODE_BREAK : CODE_JOIN
+}
+
+/**
+ * Pad the chip and decide how it is allowed to break.
  *
  * No ASCII space survives inside a chip, at either edge or between words: any of
  * them could end up as a line's trailing whitespace and paint the bar described
  * above. A gap between words keeps its width as non-breaking spaces.
  *
- * Then a word joiner goes between every remaining pair of characters, which is
- * what stops UAX #14 finding an opportunity at the `:` in `sc-domain:hermie.dev`
- * or at the `.` before `dev`. Between EVERY pair rather than at a list of known
- * punctuation: the list would be a guess at one line-breaking implementation, and
- * the property wanted is simply "nowhere".
+ * Then a joiner goes between every remaining pair of characters, and
+ * `codeJoinFor` says which one. Between EVERY pair rather than at a list of
+ * known punctuation: the list would be a guess at one line-breaking
+ * implementation, and the property wanted is simply "nowhere" or "anywhere".
+ *
+ * The PADDING is glued either way. In the breakable case a fragment holding only
+ * the leading pad would be a bar a character wide with nothing under it — the
+ * same defect at a smaller size — so the pads ride with the first and the last
+ * glyph whatever the core is allowed to do.
  */
-function padCode(text: string): string {
+function padCode(text: string, context: MarkdownContext): string {
   const leading = /^\s*/.exec(text)?.[0] ?? ''
   const rest = text.slice(leading.length)
   const trailing = /\s*$/.exec(rest)?.[0] ?? ''
   const core = rest.slice(0, rest.length - trailing.length)
   const spaced = core.replace(/\s+/gu, gap => CODE_PAD.repeat(gap.length))
 
-  const padded = `${CODE_PAD}${CODE_PAD.repeat(leading.length)}${spaced}${CODE_PAD.repeat(trailing.length)}${CODE_PAD}`
+  const head = `${CODE_PAD}${CODE_PAD.repeat(leading.length)}`
+  const tail = `${CODE_PAD.repeat(trailing.length)}${CODE_PAD}`
 
   // By code POINT, not by UTF-16 unit: a joiner between a surrogate pair's halves
   // would be a broken character rather than a refused break.
-  return [...padded].join(CODE_JOIN)
+  const points = [...spaced]
+  const join = codeJoinFor({
+    characters: points.length + head.length + tail.length,
+    fontSize: codeFontSize(context),
+    ...(context.lineWidth ? { lineWidth: context.lineWidth } : {})
+  })
+
+  return [...head].join(CODE_JOIN) + CODE_JOIN + points.join(join) + CODE_JOIN + [...tail].join(CODE_JOIN)
+}
+
+/** The chip's size. Two things need it now, and only `codeStyle` used to know it. */
+function codeFontSize(context: MarkdownContext): number {
+  return Math.max(11, context.fontSize - 2)
 }
 
 /**
@@ -115,7 +202,7 @@ function codeStyle(context: MarkdownContext): TextStyle {
     backgroundColor: context.inlineCodeBackground ?? context.blockBackground,
     color: context.textColor,
     fontFamily: MONOSPACE,
-    fontSize: Math.max(11, context.fontSize - 2),
+    fontSize: codeFontSize(context),
     ...(border ? { borderColor: border, borderWidth: StyleSheet.hairlineWidth } : {})
   }
 }
@@ -208,7 +295,7 @@ function renderToken(token: Token, index: number, context: MarkdownContext): Rea
     case 'codespan':
       return (
         <Text key={key} style={codeStyle(context)}>
-          {padCode((token as Tokens.Codespan).text)}
+          {padCode((token as Tokens.Codespan).text, context)}
         </Text>
       )
 

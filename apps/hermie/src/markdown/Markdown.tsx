@@ -12,7 +12,7 @@
  * because the tail carried a streaming caret and rendered again when the caret
  * moved on; there is no caret now, and `Block.tsx` says why.
  */
-import { useCallback, useMemo, useRef } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { Linking, View, type LayoutChangeEvent, type ViewStyle } from 'react-native'
 
 import { HAS_NATIVE_CONTEXT_MENU } from '../platform/context-menu'
@@ -148,6 +148,32 @@ export function Markdown({
 
   const body = fontSize ?? theme.type.body.fontSize
 
+  /**
+   * How wide the text lays out, for the one decision that needs it.
+   *
+   * An inline code chip cannot tell whether it is allowed to break without
+   * knowing whether it COULD fit on a line — see `codeJoinFor`. Measured here
+   * rather than guessed, and measured only for text that has a chip in it: this
+   * is a state update on mount, which is one extra render of the block, and a
+   * transcript is mostly prose with no backtick in it at all.
+   */
+  const measures = text.includes('`')
+  const [lineWidth, setLineWidth] = useState(0)
+
+  const measure = useCallback((event: LayoutChangeEvent) => {
+    // Read OUT of the event here and not inside the updater below. React
+    // Native's layout event is pooled, so by the time a state updater runs
+    // `nativeEvent.layout` can already be null — which it was, as a render
+    // error on the first reply that contained a chip.
+    const next = event.nativeEvent.layout.width
+
+    setLineWidth(current =>
+      // Rounded, so a sub-pixel difference between two passes does not re-render
+      // every chip in the reply for a decision it cannot change.
+      Math.round(next) === Math.round(current) ? current : next
+    )
+  }, [])
+
   const context = useMemo<MarkdownContext>(
     () => ({
       blockBackground: surface ?? theme.tintSunk,
@@ -164,7 +190,8 @@ export function Markdown({
       scheme: theme.scheme,
       selectable,
       textColor: theme.colors[color],
-      ...(images ? { images } : {})
+      ...(images ? { images } : {}),
+      ...(lineWidth ? { lineWidth } : {})
     }),
     [
       body,
@@ -172,6 +199,7 @@ export function Markdown({
       color,
       handleLink,
       images,
+      lineWidth,
       inlineCodeBackground,
       inlineCodeBorderColor,
       linkColor,
@@ -207,7 +235,7 @@ export function Markdown({
   }, [])
 
   return (
-    <View style={style}>
+    <View style={style} {...(measures ? { onLayout: measure } : {})}>
       {blocks.map((raw, index) => {
         const block = <MarkdownBlock context={context} key={index} raw={raw} />
 

@@ -19,6 +19,7 @@ import { StyleSheet, type TextStyle } from 'react-native'
 import type { Token } from 'marked'
 
 import { inlineCodeRegressionItem } from '../../src/chat-ui/fixtures'
+import { codeJoinFor } from '../../src/markdown/Inline'
 import { Markdown } from '../../src/markdown/Markdown'
 import { resetBlockCache } from '../../src/markdown/blocks'
 import { MONOSPACE } from '../../src/markdown/context'
@@ -266,7 +267,7 @@ describe('inline code chips', () => {
   const TESTMAIL = 'Ik zag een testmail van gisteren naar `test@example.com`. Dat is niets om je zorgen over te maken.'
 
   /** What is actually drawn, with the invisible joiners taken out. */
-  const visible = (chip: RenderedNode) => textOf(chip).replace(/\u2060/gu, '')
+  const visible = (chip: RenderedNode) => textOf(chip).replace(/[\u2060\u200b]/gu, '')
 
   it('pads the chip with non-breaking spaces, never an ASCII one', () => {
     const chips = codeNodes(renderNodes(TESTMAIL))
@@ -331,8 +332,9 @@ describe('inline code chips', () => {
       expect(points[index]).toBe('\u2060')
     }
 
-    // And nothing that invites one: the zero-width space this used to insert is
-    // gone, because a chip is one token and goes to the next line whole.
+    // And nothing that invites one: with no measured width the chip is treated
+    // as one that fits, and one that fits is one token that goes to the next
+    // line whole.
     expect(content).not.toContain('\u200b')
   })
 
@@ -412,5 +414,48 @@ describe('inline code chip colour', () => {
 
     expect(style.fontFamily).toBe(MONOSPACE)
     expect(style.color).toBeTruthy()
+  })
+})
+
+/**
+ * The half of the owner's rule the joiner alone could not reach.
+ *
+ * Verbatim: "if the chip fits on one line, move it whole to the next line so it
+ * need not break; if it does not fit on a line, break per letter; never a
+ * background without glyphs under it."
+ *
+ * Gluing every pair says the first clause and, on a chip wider than the line,
+ * breaks the third: a run that can never break and can never fit makes the
+ * typesetter open a line, put no glyphs on it and try the next one — and React
+ * Native paints that empty fragment's background right across the line. So the
+ * join is a DECISION, and this is the decision on its own, where the numbers are
+ * visible and a test renderer's lack of text layout does not matter.
+ */
+describe('how wide a chip is allowed to be before it may break', () => {
+  // The chip's own size on a 17pt body, and roughly a phone bubble's width.
+  const fontSize = 15
+  const lineWidth = 250
+
+  it('glues a chip that fits, so it travels to the next line whole', () => {
+    expect(codeJoinFor({ characters: 20, fontSize, lineWidth })).toBe('\u2060')
+  })
+
+  it('lets a chip wider than the line break, because it has to break somewhere', () => {
+    // 0.6 em a character: 28 fit, 29 do not.
+    expect(codeJoinFor({ characters: 27, fontSize, lineWidth })).toBe('\u2060')
+    expect(codeJoinFor({ characters: 29, fontSize, lineWidth })).toBe('\u200b')
+  })
+
+  it('treats an unmeasured paragraph as one the chip fits on', () => {
+    // The first frame, and every caller that never measures. Gluing is right for
+    // every chip short enough to be common, and wrong for one frame otherwise.
+    expect(codeJoinFor({ characters: 400, fontSize })).toBe('\u2060')
+    expect(codeJoinFor({ characters: 400, fontSize, lineWidth: 0 })).toBe('\u2060')
+  })
+
+  it('scales with the type, not with the character count alone', () => {
+    // The same chip, at a size where it no longer fits.
+    expect(codeJoinFor({ characters: 25, fontSize: 15, lineWidth })).toBe('\u2060')
+    expect(codeJoinFor({ characters: 25, fontSize: 28, lineWidth })).toBe('\u200b')
   })
 })
