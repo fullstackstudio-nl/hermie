@@ -1,10 +1,10 @@
 package-lock.json
 node_modules
-# Scratch worktrees checked out inside the repo. They hold another commit of
-# this same tree, so checking them checks every file twice and reports whatever
-# that other commit happened to be mid-change on. `eslint.config.mjs` ignores
-# them for the same reason.
-.claude
+# Scratch worktrees checked out inside the repo (any hidden tool directory).
+# They hold another commit of this same tree, so checking them checks every
+# file twice and reports whatever that other commit happened to be mid-change
+# on. `eslint.config.mjs` ignores them for the same reason.
+.*/worktrees/
 dist
 coverage
 .expo
