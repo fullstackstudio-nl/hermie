@@ -23,5 +23,6 @@ export { describeConnectionError, describeProbeError, describeSignInError, hostO
 export { GatewayProvider, type GatewayContextValue, type GatewayPhase, useGateway } from './GatewayProvider'
 export { describeSignOutReason, SignedOutPanel, useReauth } from './SignedOutPanel'
 export { type ConnectionStoreState, useConnectionStore } from './store'
+export { REFRESH_DOCS_URL, RefreshNotice, type RefreshNoticeProps } from './RefreshNotice'
 export { TransportNotice, type TransportNoticeProps } from './TransportNotice'
 export { chatGatewayFor, type ChatGateway, type RestMessagesOptions } from './link'

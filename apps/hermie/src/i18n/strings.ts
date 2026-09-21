@@ -505,6 +505,21 @@ export const strings = {
     expensiveModel: (message: string) => message || 'This model costs more than the current one.'
   },
 
+  auth: {
+    /**
+     * A sign-in that produced no refresh token.
+     *
+     * One sentence, and every word of it is load-bearing: what will happen
+     * ("cannot be refreshed"), where the cause is (the gateway's provider, not
+     * this app or this device), and what fixes it (the `offline_access` scope).
+     * A vaguer version of this reads as "something is wrong" and sends people
+     * to re-install the app.
+     */
+    noRefreshToken:
+      'This sign-in cannot be refreshed \u2014 it ends when its access token expires. The gateway\u2019s provider needs the offline_access scope.',
+    noRefreshTokenLink: 'How to fix this'
+  },
+
   settings: {
     title: 'Settings',
     gateway: 'GATEWAY',

@@ -1,6 +1,7 @@
 export {
   AUTH_TIMELINE_SIZE,
   type AuthEvent,
+  type AuthEventRecorder,
   type AuthEventInput,
   type AuthEventName,
   AuthTimeline,

@@ -1,7 +1,8 @@
 import type { AuthProvider, TokenSet } from '@hermie/gateway-client'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Pressable, View } from 'react-native'
 
+import { useGateway } from '../../../gateway/GatewayProvider'
 import { strings } from '../../../i18n/strings'
 import { Button, InsetGroup, InsetRow, SecretField, Text } from '../../../ui/primitives'
 import { useTheme } from '../../../ui/theme'
@@ -27,6 +28,10 @@ export function SignInStep({ draft, update }: SignInStepProps) {
 
   // With exactly one provider there is nothing to choose, so the step should
   // read as a single "Sign in with …" button rather than as a list of one.
+  // The app's own auth ring, so a sign-in that cannot be refreshed leaves a
+  // record that outlives the wizard.
+  const { recordAuth } = useGateway()
+  const ring = useMemo(() => ({ record: recordAuth }), [recordAuth])
   const onlyProvider = providers.length === 1 ? providers[0] : undefined
   const selected = draft.provider ?? onlyProvider ?? null
 
@@ -152,6 +157,7 @@ export function SignInStep({ draft, update }: SignInStepProps) {
           onSuccess={onSuccess}
           provider={selected.name}
           startInBrowser={viaBrowser}
+          timeline={ring}
           visible={signingIn}
         />
       ) : null}

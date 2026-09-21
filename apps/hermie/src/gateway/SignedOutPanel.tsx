@@ -58,7 +58,7 @@ export function describeSignOutReason(reason: SignOutReason | null | undefined):
  * drift.
  */
 export function useReauth() {
-  const { status, config, extraHeaders, adoptTokens, signOut, changeGateway } = useGateway()
+  const { status, config, extraHeaders, adoptTokens, recordAuth, signOut, changeGateway } = useGateway()
   const [signingIn, setSigningIn] = useState(false)
   const [busy, setBusy] = useState(false)
 
@@ -104,6 +104,7 @@ export function useReauth() {
             setBusy(true)
             void adoptTokens(tokens).finally(() => setBusy(false))
           }}
+          timeline={{ record: recordAuth }}
           visible={signingIn}
           {...(config.provider ? { provider: config.provider } : {})}
         />

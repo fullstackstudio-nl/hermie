@@ -80,7 +80,7 @@ so.
 hermes config set dashboard.public_url https://GATEWAY_HOST
 hermes config set dashboard.oauth.self_hosted.issuer https://IDP_HOST/api/oidc
 hermes config set dashboard.oauth.self_hosted.client_id CLIENT_ID
-hermes config set dashboard.oauth.self_hosted.scopes "openid profile email"
+hermes config set dashboard.oauth.self_hosted.scopes "openid profile email offline_access"
 ```
 
 Two things worth knowing:
@@ -90,6 +90,29 @@ Two things worth knowing:
 - Setting `dashboard.public_url` is what engages the authentication gate, even though the server
   binds to loopback. A reverse proxy on loopback is trusted automatically, so the gate does not lock
   you out of your own proxy.
+
+### Refresh tokens and `offline_access`
+
+`offline_access` is in the scope list above because without it the provider issues an access token
+and **no refresh token**. Everything looks right: the sign-in completes, the app connects, the bots
+answer. Then the access token expires — an hour later on most providers — and there is nothing to
+rotate it with, so the app lands on the sign-in screen with no visible cause. It looks like Hermie
+lost the credential.
+
+Hermie says so at the moment it is knowable instead: the last step of setup and Settings → Gateway
+both carry a line saying the sign-in cannot be refreshed, and `signin.no_refresh` goes into the auth
+timeline on the developer screen. None of it is a failure — the session is live and correct — but it
+has an end date, and the only fix is on the provider.
+
+Two halves, and both have to agree:
+
+- the scope has to be REQUESTED, which is the `dashboard.oauth.self_hosted.scopes` line above;
+- the client registration at the identity provider has to ALLOW it. Most providers list it as a
+  per-client scope or a "refresh token" toggle; a client that was created before you added the scope
+  usually needs it enabled by hand.
+
+After changing either, sign out in Hermie and sign in again. A refresh token is issued at
+authorisation time, so an existing session does not grow one.
 
 ## 5. Install the services
 

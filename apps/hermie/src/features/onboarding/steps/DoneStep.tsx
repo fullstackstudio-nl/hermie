@@ -1,5 +1,6 @@
 import { View } from 'react-native'
 
+import { RefreshNotice } from '../../../gateway/RefreshNotice'
 import { strings } from '../../../i18n/strings'
 import { InsetGroup, InsetValueRow } from '../../../ui/primitives'
 import { useTheme } from '../../../ui/theme'
@@ -32,6 +33,14 @@ export function DoneStep({ draft, error }: DoneStepProps) {
           <InsetValueRow label={strings.settings.user} value={draft.test.userDisplayName} />
         ) : null}
       </InsetGroup>
+
+      {/*
+        Said here rather than only in Settings, because this is the last screen
+        where the owner is still thinking about the sign-in they just did. The
+        draft's own token set is what answers it — nothing has been written to
+        the keychain yet at this point in the wizard.
+      */}
+      <RefreshNotice canRefresh={!draft.tokens || Boolean(draft.tokens.refreshToken)} testID="done-no-refresh" />
 
       {error ? (
         <StatusLine testID="done-error" tone="error">

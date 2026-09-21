@@ -5,6 +5,7 @@ import { ScrollView, View } from 'react-native'
 
 import { chatStrings } from '../../chat-ui'
 import { useGateway } from '../../gateway'
+import { RefreshNotice } from '../../gateway/RefreshNotice'
 import { TransportNotice } from '../../gateway/TransportNotice'
 import { strings } from '../../i18n/strings'
 import { directTouchPanRef } from '../../platform/pointer-drag'
@@ -41,7 +42,7 @@ export interface SettingsScreenProps {
 
 export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
   const theme = useTheme()
-  const { config, status, signOut, changeGateway } = useGateway()
+  const { canRefresh, config, status, signOut, changeGateway } = useGateway()
   const defaults = useSettingsStore(state => state.defaults)
   const setDefaults = useSettingsStore(state => state.setDefaults)
   const [showConnectionTest, setShowConnectionTest] = useState(initialPage === 'connection')
@@ -121,11 +122,24 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
 
         <InsetGroup
           header={strings.settings.gateway}
-          // Only the exposed case speaks here. A tailnet gateway over http is
-          // the ordinary setup, and Settings is not where somebody wants to be
-          // told again that their own network is their own network.
-          {...(isExposedCleartext(config?.baseUrl ?? '')
-            ? { footer: <TransportNotice baseUrl={config?.baseUrl} testID="transport-notice" /> }
+          /*
+            Two notices, one footer slot, and they are about different things:
+            the transport one is about the ADDRESS and only speaks for an
+            exposed cleartext host — a tailnet gateway over http is the ordinary
+            setup, and Settings is not where somebody wants to be told again
+            that their own network is their own network. The refresh one is
+            about the CREDENTIAL, and it speaks wherever the stored sign-in has
+            nothing to rotate with.
+          */
+          {...(isExposedCleartext(config?.baseUrl ?? '') || canRefresh === false
+            ? {
+                footer: (
+                  <>
+                    <TransportNotice baseUrl={config?.baseUrl} testID="transport-notice" />
+                    <RefreshNotice canRefresh={canRefresh !== false} testID="refresh-notice" />
+                  </>
+                )
+              }
             : {})}
         >
           <InsetValueRow label={strings.settings.address} value={config?.baseUrl ?? strings.settings.unknown} />

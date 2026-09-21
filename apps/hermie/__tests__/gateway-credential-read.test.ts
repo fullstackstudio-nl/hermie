@@ -87,3 +87,39 @@ describe('reading the stored credentials', () => {
     expect(setup?.credentialError).toBeUndefined()
   })
 })
+
+describe('whether the stored sign-in can be renewed', () => {
+  it('says no when there is an access token and nothing to rotate it with', async () => {
+    // What a provider without `offline_access` leaves behind. The session works
+    // and then stops, and this is the only stored evidence of why.
+    ;(secretStore.get as jest.Mock).mockImplementation(async (key: string) =>
+      key === SECRET_KEYS.accessToken ? 'access-1' : null
+    )
+
+    const setup = await loadGatewaySetup()
+
+    expect(setup?.hasCredentials).toBe(true)
+    expect(setup?.canRefresh).toBe(false)
+  })
+
+  it('says yes when the refresh token is there', async () => {
+    ;(secretStore.get as jest.Mock).mockImplementation(async (key: string) =>
+      key === SECRET_KEYS.accessToken ? 'access-1' : key === SECRET_KEYS.refreshToken ? 'refresh-1' : null
+    )
+
+    expect((await loadGatewaySetup())?.canRefresh).toBe(true)
+  })
+
+  it('says yes for a session-token gateway, which has nothing to rotate', async () => {
+    // Answering false would warn a correctly configured gateway about a refresh
+    // token it was never going to have.
+    ;(keyValueStore.getJson as jest.Mock).mockImplementation(async (key: string) =>
+      key === CONFIG_KEY ? { ...CONFIG, authMode: 'session_token' } : null
+    )
+    ;(secretStore.get as jest.Mock).mockImplementation(async (key: string) =>
+      key === SECRET_KEYS.sessionToken ? 'token-1' : null
+    )
+
+    expect((await loadGatewaySetup())?.canRefresh).toBe(true)
+  })
+})

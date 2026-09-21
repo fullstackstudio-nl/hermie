@@ -7,6 +7,10 @@ import { keyValueStore } from '../src/platform/key-value-store'
 import { secretStore } from '../src/platform/secret-store'
 import { renderScreen } from './support/render'
 
+// The sign-in step records `signin.no_refresh` on the app's auth ring, which
+// belongs to the gateway provider. The wizard itself needs nothing else from it.
+jest.mock('../src/gateway/GatewayProvider', () => ({ useGateway: () => ({ recordAuth: jest.fn() }) }))
+
 jest.mock('../src/features/onboarding/test-connection', () => ({
   CONNECTION_TEST_TIMEOUT_MS: 30_000,
   runConnectionTest: jest.fn()

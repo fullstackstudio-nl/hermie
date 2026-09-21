@@ -42,6 +42,17 @@ export interface GatewaySetup {
   /** False after a sign-out: the address is known, the credentials are not. */
   hasCredentials: boolean
   /**
+   * Whether the stored credential can outlive its access token.
+   *
+   * Read off the secret store rather than remembered as a flag, because it is a
+   * fact about what is actually there: a provider whose client has no
+   * `offline_access` scope answers the exchange without a refresh token, and
+   * the session then ends silently when the access token expires. Only
+   * meaningful for `native_pkce` — the other two modes have nothing to rotate
+   * and answer true so nothing warns about them.
+   */
+  canRefresh: boolean
+  /**
    * Set when the secret store REFUSED rather than came back empty.
    *
    * The two are indistinguishable downstream — `expo-secure-store` resolves a
@@ -85,14 +96,15 @@ export async function loadGatewaySetup(): Promise<GatewaySetup | null> {
   // A throwing keychain must not strand the launch. Before this, the rejection
   // escaped `reload()`'s un-awaited call and the app sat on the splash for ever
   // — the one outcome worse than asking for a sign-in.
-  const [rawHeaders, sessionToken, accessToken] = await Promise.all([
+  const [rawHeaders, sessionToken, accessToken, refreshToken] = await Promise.all([
     secretStore.get(SECRET_KEYS.extraHeaders),
     secretStore.get(SECRET_KEYS.sessionToken),
-    secretStore.get(SECRET_KEYS.accessToken)
+    secretStore.get(SECRET_KEYS.accessToken),
+    secretStore.get(SECRET_KEYS.refreshToken)
   ]).catch((error: unknown) => {
     credentialError = error instanceof Error ? error.message : String(error)
 
-    return [null, null, null] as const
+    return [null, null, null, null] as const
   })
 
   let extraHeaders: Record<string, string> = {}
@@ -129,7 +141,19 @@ export async function loadGatewaySetup(): Promise<GatewaySetup | null> {
         ? Boolean(sessionToken)
         : Boolean(accessToken)
 
-  return { config, extraHeaders, sessionToken, hasCredentials, ...(credentialError ? { credentialError } : {}) }
+  // Only the PKCE flow has anything to rotate; the other two say yes so that
+  // nothing downstream warns a session-token or cookie gateway about a refresh
+  // token it was never going to have.
+  const canRefresh = config.authMode === 'native_pkce' ? Boolean(refreshToken) : true
+
+  return {
+    config,
+    extraHeaders,
+    sessionToken,
+    hasCredentials,
+    canRefresh,
+    ...(credentialError ? { credentialError } : {})
+  }
 }
 
 /**

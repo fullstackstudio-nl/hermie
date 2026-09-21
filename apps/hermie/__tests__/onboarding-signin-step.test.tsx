@@ -6,6 +6,10 @@ import { emptyDraft, type OnboardingDraft } from '../src/features/onboarding'
 import { SignInStep } from '../src/features/onboarding/steps/SignInStep'
 import { renderScreen } from './support/render'
 
+// The step records `signin.no_refresh` on the app's auth ring, which belongs to
+// the gateway provider. Nothing else here needs the connection.
+jest.mock('../src/gateway/GatewayProvider', () => ({ useGateway: () => ({ recordAuth: jest.fn() }) }))
+
 const GATED: ProbeResult = {
   version: '2026.9.14',
   authRequired: true,

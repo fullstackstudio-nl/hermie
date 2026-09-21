@@ -1,5 +1,6 @@
 import type {
   AuthTimeline,
+  AuthEventRecorder,
   ConnectionStatus,
   GatewayConnection,
   GatewayError,
@@ -34,6 +35,22 @@ export interface GatewayContextValue {
   config: StoredGatewayConfig | null
   extraHeaders: Record<string, string>
   http: GatewayHttp | null
+  /**
+   * False when the stored sign-in has no refresh token: this session ends when
+   * its access token expires and no reconnect will save it. True for every
+   * other mode and whenever nothing is configured, so only the case that needs
+   * saying says anything.
+   */
+  canRefresh: boolean
+  /**
+   * Record one event on the app's auth ring.
+   *
+   * Exposed because the two places a sign-in actually happens — the wizard and
+   * the in-place re-auth — are React, and the ring belongs to this provider.
+   * A no-op before the ring has been restored, which is a launch that has not
+   * reached the wizard yet.
+   */
+  recordAuth: AuthEventRecorder['record']
   /** One JSON-RPC call on the live connection. Throws while there is none. */
   request: GatewayConnection['request']
   /** Adopt tokens from an in-place sign-in and resume the dial loop. */
@@ -188,6 +205,10 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
     setPhase('onboarding')
   }, [teardown])
 
+  const recordAuth = useCallback<AuthEventRecorder['record']>(event => {
+    timelineRef.current?.record(event)
+  }, [])
+
   const adoptTokens = useCallback(async (tokens: TokenSet) => {
     // Through the coordinator rather than straight into the secret store: it
     // caches the token set and fences any refresh that is in flight, so a write
@@ -223,13 +244,15 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
       config: setup?.config ?? null,
       extraHeaders: setup?.extraHeaders ?? {},
       http: connectionRef.current?.http ?? null,
+      canRefresh: setup?.canRefresh ?? true,
+      recordAuth,
       request,
       adoptTokens,
       reload,
       signOut,
       changeGateway
     }),
-    [adoptTokens, changeGateway, lastError, phase, reload, request, resumeConfig, setup, signOut, status]
+    [adoptTokens, changeGateway, lastError, phase, recordAuth, reload, request, resumeConfig, setup, signOut, status]
   )
 
   return <GatewayContext.Provider value={value}>{children}</GatewayContext.Provider>

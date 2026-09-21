@@ -1,4 +1,4 @@
-import { type AuthTimelineSink, NULL_AUTH_TIMELINE } from './auth-timeline'
+import { type AuthEventRecorder, type AuthTimelineSink, NULL_AUTH_TIMELINE } from './auth-timeline'
 import { type FetchLike, parseJsonObject, requestText } from './fetch-json'
 import { apiUrl, normalizeHeaders } from './url'
 import { GatewayError, type GatewayErrorKind, isGatewayError } from './types'
@@ -26,6 +26,8 @@ export interface NativeAuthOptions {
   extraHeaders?: Record<string, string>
   fetchImpl?: FetchLike
   timeoutMs?: number
+  /** Where a sign-in that cannot be refreshed is recorded. */
+  timeline?: AuthEventRecorder
 }
 
 function toTokenSet(body: Record<string, unknown>, url: string): TokenSet {
@@ -82,7 +84,18 @@ export async function exchangeCode(
     })
   }
 
-  return toTokenSet(parseJsonObject(response.text, url, 'protocol'), url)
+  const tokens = toTokenSet(parseJsonObject(response.text, url, 'protocol'), url)
+
+  if (!tokens.refreshToken) {
+    // The gateway answered with an access token and nothing to rotate it with.
+    // That is not an error — the sign-in worked and the session is live — but
+    // it has an expiry date the owner has not been told about, and the reason
+    // is a scope on the provider's client registration rather than anything
+    // here. See `AuthEventName['signin.no_refresh']`.
+    ;(options.timeline ?? NULL_AUTH_TIMELINE).record({ event: 'signin.no_refresh', kind: 'auth' })
+  }
+
+  return tokens
 }
 
 /**

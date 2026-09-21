@@ -62,6 +62,17 @@ export type AuthEventName =
   | 'rest.unauthorized'
   /** The connection gave up and asked for a new sign-in. `reason` says why. */
   | 'signin.required'
+  /**
+   * A sign-in succeeded and produced NO refresh token.
+   *
+   * Recorded at the exchange rather than inferred later, because by the time it
+   * matters the evidence is gone: the session simply ends when the access token
+   * expires, and `token.cleared reason=no_refresh_token` an hour later reads as
+   * a keychain problem. The cause is upstream of Hermie entirely — an OIDC
+   * client registered without `offline_access` — and nothing the app does can
+   * fix it, so saying so at the moment it is knowable is the whole remedy.
+   */
+  | 'signin.no_refresh'
 
 /**
  * Why the session ended, in the terms the UI turns into one calm sentence.
@@ -280,3 +291,12 @@ export const NULL_AUTH_TIMELINE: AuthTimelineSink = { record: () => undefined, s
 
 /** What the connection and the coordinator need: recording, and nothing else. */
 export type AuthTimelineSink = Pick<AuthTimeline, 'record' | 'signOut'>
+
+/**
+ * The smaller half, for a caller that only ever writes one event.
+ *
+ * A sign-in does not end a session, so `exchangeCode` has no business being
+ * handed something that can declare one — and a React screen that wants to
+ * record one line should not have to build a whole sink to do it.
+ */
+export type AuthEventRecorder = Pick<AuthTimeline, 'record'>

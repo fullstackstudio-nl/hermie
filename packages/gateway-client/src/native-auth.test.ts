@@ -88,6 +88,44 @@ describe('exchangeCode', () => {
     ).rejects.toMatchObject({ kind: 'server' })
   })
 
+  /**
+   * The sign-in worked, and it has an end date.
+   *
+   * A provider whose client was registered without `offline_access` answers
+   * with an access token and nothing to rotate it with. That is not an error —
+   * refusing the sign-in would be wrong — but it is the only moment where the
+   * cause is still visible: an hour later all that is left is a session that
+   * stopped, and `token.cleared reason=no_refresh_token` reads as a keychain
+   * fault rather than as a scope on somebody's identity provider.
+   */
+  it('records a sign-in that cannot be refreshed, and still returns the tokens', async () => {
+    const events: AuthEvent[] = []
+    const timeline = new AuthTimeline({ sink: snapshot => events.push(...snapshot.events.slice(-1)) })
+
+    const tokens = await exchangeCode(
+      'https://example.test',
+      { code: 'c', verifier: 'v' },
+      { fetchImpl: respondWith(200, { access_token: 'at', provider: 'self-hosted' }), timeline }
+    )
+
+    expect(tokens.accessToken).toBe('at')
+    expect(tokens.refreshToken).toBe('')
+    expect(events.map(event => event.event)).toEqual(['signin.no_refresh'])
+  })
+
+  it('says nothing when the exchange did produce a refresh token', async () => {
+    const events: AuthEvent[] = []
+    const timeline = new AuthTimeline({ sink: snapshot => events.push(...snapshot.events.slice(-1)) })
+
+    await exchangeCode(
+      'https://example.test',
+      { code: 'c', verifier: 'v' },
+      { fetchImpl: respondWith(200, { access_token: 'at', refresh_token: 'rt' }), timeline }
+    )
+
+    expect(events).toEqual([])
+  })
+
   it('rejects a 200 without an access token', async () => {
     await expect(
       exchangeCode('https://example.test', { code: 'c', verifier: 'v' }, { fetchImpl: respondWith(200, { ok: true }) })

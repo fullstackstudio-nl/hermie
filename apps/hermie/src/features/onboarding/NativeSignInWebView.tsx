@@ -1,4 +1,11 @@
-import { buildAuthorizeUrl, createPkce, exchangeCode, type Pkce, type TokenSet } from '@hermie/gateway-client'
+import {
+  type AuthEventRecorder,
+  buildAuthorizeUrl,
+  createPkce,
+  exchangeCode,
+  type Pkce,
+  type TokenSet
+} from '@hermie/gateway-client'
 import { Component, type ErrorInfo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, Linking, Modal, Platform, Pressable, ScrollView, View } from 'react-native'
 import { WebView } from 'react-native-webview'
@@ -47,6 +54,15 @@ export interface NativeSignInWebViewProps {
   startInBrowser?: boolean
   onCancel: () => void
   onSuccess: (tokens: TokenSet) => void
+  /**
+   * Where a sign-in that produced no refresh token is recorded.
+   *
+   * A prop rather than a `useGateway()` call inside this component: the two
+   * callers are the wizard and the signed-out panel, both of which already have
+   * the context, and a component that reaches for a provider is a component a
+   * test has to stand one up for.
+   */
+  timeline?: AuthEventRecorder
 }
 
 type Phase = 'signing-in' | 'exchanging' | 'failed' | 'fallback'
@@ -67,7 +83,8 @@ export function NativeSignInWebView({
   extraHeaders = {},
   startInBrowser = false,
   onCancel,
-  onSuccess
+  onSuccess,
+  timeline
 }: NativeSignInWebViewProps) {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
@@ -140,7 +157,11 @@ export function NativeSignInWebView({
       setPhase('exchanging')
 
       try {
-        const tokens = await exchangeCode(baseUrl, { code, verifier }, { extraHeaders })
+        const tokens = await exchangeCode(
+          baseUrl,
+          { code, verifier },
+          { extraHeaders, ...(timeline ? { timeline } : {}) }
+        )
         onSuccess(tokens)
       } catch (exchangeError) {
         setPhase('failed')
@@ -149,7 +170,7 @@ export function NativeSignInWebView({
         exchangingRef.current = false
       }
     },
-    [baseUrl, extraHeaders, onSuccess]
+    [baseUrl, extraHeaders, onSuccess, timeline]
   )
 
   const handleNavigation = useCallback(
