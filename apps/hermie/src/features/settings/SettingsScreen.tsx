@@ -22,6 +22,7 @@ import { useHardwareBack } from '../../ui/useHardwareBack'
 import { FORM_MAX_WIDTH } from '../../ui/tokens'
 import { AboutFooter } from './AboutFooter'
 import { AppearanceSection } from './AppearanceSection'
+import { ContextSection } from './ContextSection'
 import { DebugConnectionScreen } from './DebugConnectionScreen'
 import { GALLERY_ROW_TITLE, GalleryScreen } from './GalleryScreen'
 import { LicencesScreen } from './LicencesScreen'
@@ -214,6 +215,10 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
         {/* ADR-0017, and off until the reader says otherwise: nothing here asks
             for permission or mints a token on mount. */}
         <NotificationsSection available={pushPlatform.available} push={runtime?.push ?? null} />
+
+        {/* What a bot is told about whoever is holding the device. Nothing is
+            written on a gateway with accounts until the notice is accepted. */}
+        <ContextSection />
 
         <AppearanceSection onOpenAdvanced={() => setShowThemes(true)} />
 

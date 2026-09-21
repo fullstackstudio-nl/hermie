@@ -18,6 +18,7 @@ import { RUNS_ON_MAC } from '../../platform/runs-on-mac'
 import { useBotsStore } from '../../store/bots'
 import { useChatLayoutStore } from '../../store/chat-layout'
 import { useChatsStore } from '../../store/chats'
+import { OWNER_USER_ID, useDeviceContextStore } from '../../store/device-context'
 import { usePushStore } from '../../store/push'
 import { useSettingsStore } from '../../store/settings'
 import { UiMetaBridge } from '../../store/ui-meta-bridge'
@@ -42,6 +43,43 @@ export interface ChatRuntimeValue {
   gateway: ChatGateway
 }
 
+/**
+ * The identity the context section is written under.
+ *
+ * `/api/auth/me` is the only thing that knows, and it is asked once per ready
+ * edge rather than held in the stored config: a config written by an older
+ * build has no user id in it, and a display name changes at the provider
+ * without the app being told. A refusal is not an error — it leaves the
+ * identity empty, which is exactly the state in which nothing is written.
+ */
+async function readIdentity(
+  config: { baseUrl: string; authMode: string } | null,
+  http: { authMe: () => Promise<{ userId: string; email: string; displayName: string }> } | null
+): Promise<{ baseUrl: string; gated: boolean; userId: string; displayName: string }> {
+  const baseUrl = config?.baseUrl ?? ''
+  const gated = config?.authMode !== 'session_token'
+
+  if (!gated) {
+    return { baseUrl, gated: false, userId: OWNER_USER_ID, displayName: '' }
+  }
+
+  if (!http) {
+    // Gated, and no REST half to ask. Empty rather than the owner id: writing
+    // somebody's context under a name the gateway never agreed to is worse
+    // than writing none.
+    return { baseUrl, gated: true, userId: '', displayName: '' }
+  }
+
+  const identity = await http.authMe()
+
+  return {
+    baseUrl,
+    gated: true,
+    userId: identity.userId || identity.email,
+    displayName: identity.displayName || identity.email
+  }
+}
+
 const ChatRuntimeContext = createContext<ChatRuntimeValue | null>(null)
 
 export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
@@ -55,6 +93,11 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     // Before any gateway exists, because the installation id it mints is what
     // every later write of the push section is addressed by.
     void usePushStore.getState().hydrate()
+    // Same reason, one step weaker: the context section is only written once a
+    // gateway has named somebody, but the reader's switches have to be in
+    // memory before the first projection or the defaults would travel as though
+    // they were decisions.
+    void useDeviceContextStore.getState().hydrate()
   }, [])
 
   // The list's arrangement is stored per gateway, so it is read when the
@@ -158,6 +201,9 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     */
     setPushRetire(async () => {
       await push.retire()
+      // The identity and everybody else's context rows belong to the gateway
+      // that is going away; the reader's own switches do not, and survive.
+      useDeviceContextStore.getState().retire()
       await uiMeta.sync.flush()
     })
 
@@ -209,11 +255,23 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
 
     wasReady.current = true
     void value.bots.refresh().catch(() => undefined)
+    /*
+      Who the gateway thinks this is, for the context section.
+
+      Read here rather than taken from the stored config, for two reasons: a
+      setup saved by an older build has no user id in it at all, and a display
+      name is the gateway's to change. A session-token gateway has nobody to ask
+      about — there are no accounts — so it answers with the fixed owner id that
+      makes the plugin's "the only registered person" branch a hit.
+    */
+    void readIdentity(config, http)
+      .then(identity => useDeviceContextStore.getState().setIdentity(identity))
+      .catch(() => undefined)
     // The settings reconcile rides on the same edge, and deliberately AFTER the
     // roster: `hermie-app` lives on the default profile, and which profile that
     // is comes out of `profiles.list`.
     void value.uiMeta.reconcile().catch(() => undefined)
-  }, [status, value])
+  }, [config, http, status, value])
 
   /**
    * Tell the widget sync whether the socket is usable.
@@ -279,6 +337,9 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
         // means anything while somebody is actually looking.
         runtime.push.setForeground(true)
         void runtime.push.refresh().catch(() => undefined)
+        // A new build, a flight across a timezone, a phone that was renamed
+        // while the app was away. A no-op when nothing actually moved.
+        useDeviceContextStore.getState().refreshFacts(Math.floor(Date.now() / 1000))
       } else if (state === 'background') {
         // FIRST in this branch, before anything that could tear a socket down:
         // this writes the widget file while the gateway is still the

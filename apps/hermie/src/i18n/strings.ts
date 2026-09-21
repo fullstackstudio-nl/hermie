@@ -656,6 +656,53 @@ export const strings = {
       retryHint: 'Asks for permission again and re-requests a push token.'
     },
 
+    /**
+     * The device context the gateway plugin renders into a bot's prompt.
+     *
+     * Two jobs for the wording here, and the second is the harder one. The
+     * first is to say what a bot will be told. The second is to be honest about
+     * WHERE it is kept: this is not a setting on the phone, it is a section in
+     * the gateway's own profile, and on a gateway shared with other people they
+     * can read it. So the device facts are shown back verbatim rather than
+     * described, and on a gateway with accounts nothing is written at all until
+     * the reader has read that sentence and said yes.
+     */
+    context: {
+      header: 'CONTEXT',
+      hint: 'Your bots are told who they are talking to and what you are on. It is added to the start of a conversation, not to the messages.',
+      unavailable: 'A gateway has to be connected before there is anywhere to keep this.',
+
+      noticeTitle: 'Before this is shared',
+      notice:
+        'Stored in the gateway profile; everyone with access to this gateway can read it. That includes your name, your device and anything you write below.',
+      noticeConfirm: 'I understand — share it',
+      noticeDecline: 'Not now',
+      noticePending: 'Nothing has been shared yet.',
+
+      displayName: 'Use my name',
+      displayNameHint: (name: string) => `Bots are told they are talking to ${name}.`,
+      displayNameUnknown: 'The gateway has not said who you are, so there is no name to use.',
+
+      about: 'About me / this device',
+      aboutHint: 'Off by default. Anything here is added to every conversation on this gateway.',
+      aboutPlaceholder: 'What a bot should know about you',
+      aboutCount: (used: number, limit: number) => `${used} of ${limit} characters`,
+
+      device: 'THIS DEVICE',
+      deviceHint: 'Always sent, so a bot can answer with the right time and the right language.',
+      deviceModel: 'Device',
+      deviceOs: 'System',
+      deviceApp: 'Hermie',
+      deviceTimezone: 'Timezone',
+      deviceLocale: 'Language',
+      deviceUnknown: '—',
+
+      perBot: 'PER CONVERSATION',
+      perBotHint: 'A note only that bot sees, on top of everything above.',
+      perBotPlaceholder: 'Nothing extra',
+      perBotEmpty: 'No bots on this gateway yet.'
+    },
+
     account: 'ACCOUNT',
     signOut: 'Sign out',
     signOutHint: 'Clears the stored credentials and keeps the gateway address.',

@@ -21,6 +21,12 @@
  * where ADR-0012 put it.
  */
 import {
+  contextDefaultOf,
+  contextSectionFor,
+  foreignContextUsers,
+  type ContextSectionShape
+} from '@hermie/gateway-client/context'
+import {
   foreignPushRows,
   pushSectionFor,
   pushSeenOf,
@@ -40,6 +46,7 @@ import { Platform } from 'react-native'
 
 import { ACCENTS, type AccentName } from '../ui/tokens'
 import { useChatLayoutStore, type LayoutEntry } from './chat-layout'
+import { ownContextRow, useDeviceContextStore } from './device-context'
 import { ownRegistration, usePushStore } from './push'
 import { asThemeChoice, asUserThemes, DEFAULT_CHAT_VIEW, useSettingsStore, type ChatViewSettings } from './settings'
 
@@ -56,6 +63,8 @@ export interface HermieAppShape extends HermieAppSection {
   themes?: unknown
   /** ADR-0017: every device that asked to be told, and who was last looking. */
   push?: PushSectionShape
+  /** What the gateway plugin renders into a bot's system prompt, per person. */
+  context?: ContextSectionShape
 }
 
 /**
@@ -94,6 +103,20 @@ export function snapshotFromStores(): UiMetaSnapshot {
     now: pushStampOf(Date.now())
   })
 
+  /*
+    The same whole-section rule as the push registrations, and the same
+    consequence: the rows belonging to other PEOPLE travel through every write
+    this device makes. `ownContextRow` answers `null` until the reader has been
+    told who can read this, so on a shared gateway nothing is written before
+    they say yes.
+  */
+  const context = useDeviceContextStore.getState()
+  const contextSection = contextSectionFor({
+    others: context.others,
+    own: ownContextRow(context),
+    fallbackDefault: context.remoteDefault
+  })
+
   const app: HermieAppShape = {
     v: HERMIE_APP_SECTION_VERSION,
     entries: layout.entries,
@@ -102,7 +125,8 @@ export function snapshotFromStores(): UiMetaSnapshot {
     themes: settings.userThemes,
     // Omitted rather than empty while nobody has ever registered; see
     // `pushSectionFor`.
-    ...(pushSection ? { push: pushSection } : {})
+    ...(pushSection ? { push: pushSection } : {}),
+    ...(contextSection ? { context: contextSection } : {})
   }
 
   return { app, bots }
@@ -197,6 +221,12 @@ export function applySnapshot(snapshot: UiMetaSnapshot): void {
     seen: pushSeenOf(app)
   })
 
+  /* Ours is replaced, theirs is taken — see the push section above. */
+  useDeviceContextStore.getState().applyRemote({
+    others: foreignContextUsers(app, useDeviceContextStore.getState().userId),
+    remoteDefault: contextDefaultOf(app)
+  })
+
   useSettingsStore.getState().applyAppSettings({
     ...(chatViewOf(app?.defaults) ? { defaults: chatViewOf(app?.defaults) as ChatViewSettings } : {}),
     ...(asThemeChoice(app?.themeChoice) ? { themeChoice: asThemeChoice(app?.themeChoice)! } : {}),
@@ -252,7 +282,8 @@ export class UiMetaBridge {
     this.unsubscribe = [
       useChatLayoutStore.subscribe(watch),
       useSettingsStore.subscribe(watch),
-      usePushStore.subscribe(watch)
+      usePushStore.subscribe(watch),
+      useDeviceContextStore.subscribe(watch)
     ]
 
     return () => this.stop()
