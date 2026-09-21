@@ -147,6 +147,152 @@ export interface TranscriptRow {
  * `row_id`. The fake used to answer `text` on both, so the path a real gateway
  * ALWAYS takes was the one path nothing here ever exercised.
  */
+/**
+ * One search hit, built the way `sessions.py::search_sessions` builds one.
+ *
+ * The payload is `hit_payload` (snippet, role, source, model, session_started)
+ * merged with the rich session row, and it deliberately carries NO message id
+ * and NO message timestamp: upstream's projection is
+ * `("session_id", "role", "snippet", "source", "model", "session_started")`,
+ * although `SessionDB.search_messages` can return `id` and `timestamp` too. A
+ * fake that offered them would let the app grow a dependency the real gateway
+ * cannot satisfy — which is the one failure mode this file exists to prevent.
+ */
+function searchHitRow(session: FakeSession, snippet: string, role: string | null, at: number): Record<string, unknown> {
+  const last = session.messages[session.messages.length - 1]
+
+  return {
+    snippet,
+    role,
+    source: 'hermie',
+    model: 'example-provider/example-model',
+    session_started: at,
+    session_id: session.storedId,
+    lineage_root: session.storedId,
+    id: session.storedId,
+    title: session.title,
+    started_at: at,
+    ended_at: null,
+    last_active: at,
+    is_active: true,
+    message_count: session.messages.length,
+    tool_call_count: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    preview: last?.text ?? '',
+    parent_session_id: null,
+    archived: false
+  }
+}
+
+/**
+ * The FTS5 query shapes the route actually reaches this fake with.
+ *
+ * Upstream appends `*` to every bare token before it hands the query to FTS5
+ * ("nimb" -> "nimb*"), keeps a quoted phrase whole, and joins them with FTS5's
+ * implicit AND. So: every term must hit the SAME message, a bare term matches a
+ * word that STARTS with it, and a quoted term matches that substring exactly.
+ */
+function searchTermsOf(query: string): { needle: string; phrase: boolean }[] {
+  const terms: { needle: string; phrase: boolean }[] = []
+
+  for (const raw of query.trim().match(/"[^"]*"|\S+/g) ?? []) {
+    const phrase = raw.startsWith('"')
+    const needle = (phrase ? raw.slice(1, -1) : raw.replace(/\*+$/, '')).trim().toLowerCase()
+
+    if (needle) {
+      terms.push({ needle, phrase })
+    }
+  }
+
+  return terms
+}
+
+function messageMatches(text: string, terms: readonly { needle: string; phrase: boolean }[]): boolean {
+  const haystack = text.toLowerCase()
+  const words = haystack.split(/[^\p{L}\p{N}]+/u).filter(Boolean)
+
+  return terms.every(term =>
+    term.phrase ? haystack.includes(term.needle) : words.some(word => word.startsWith(term.needle))
+  )
+}
+
+/** Where the first term lands in this message, or -1. */
+function matchOffsetOf(text: string, terms: readonly { needle: string; phrase: boolean }[]): number {
+  const first = terms[0]
+
+  return first ? text.toLowerCase().indexOf(first.needle) : -1
+}
+
+/**
+ * `snippet(messages_fts, -1, '>>>', '<<<', '...', 40)`, near enough.
+ *
+ * Near enough because the marker pair and the ellipsis are the parts the client
+ * parses; the exact token budget is FTS5's business and no test may depend on
+ * it. The matched run is wrapped where it was found, and a window that starts
+ * or ends inside the message says so with `...`, exactly as the real one does.
+ */
+function snippetFor(text: string, terms: readonly { needle: string; phrase: boolean }[]): string {
+  const at = matchOffsetOf(text, terms)
+
+  if (at < 0) {
+    return text.slice(0, 120)
+  }
+
+  const length = terms[0]?.needle.length ?? 0
+  const start = Math.max(0, at - 40)
+  const end = Math.min(text.length, at + length + 80)
+
+  return `${start > 0 ? '...' : ''}${text.slice(start, at)}>>>${text.slice(at, at + length)}<<<${text.slice(at + length, end)}${end < text.length ? '...' : ''}`
+}
+
+/**
+ * Sessions that match, one hit each, id matches before content matches.
+ *
+ * "One hit each" is the behaviour worth holding onto: upstream keys `seen` by
+ * the lineage root and lets the first hit win, so forty matching messages in a
+ * chat are ONE result. This fake has no compression lineage, so the key is the
+ * session id — the same collapse by a shorter route.
+ */
+export function searchFakeSessions(
+  sessions: readonly FakeSession[],
+  query: string,
+  limit: number
+): Record<string, unknown>[] {
+  const terms = searchTermsOf(query)
+  const needle = query.trim().toLowerCase()
+  const seen = new Map<string, Record<string, unknown>>()
+  const at = nowSeconds() - 60
+
+  for (const session of sessions) {
+    if (seen.size >= limit) {
+      break
+    }
+
+    if (session.storedId.toLowerCase().includes(needle) || session.id.toLowerCase().includes(needle)) {
+      const preview = session.messages[session.messages.length - 1]?.text ?? ''
+
+      seen.set(session.storedId, searchHitRow(session, preview || `Session ID: ${session.storedId}`, null, at))
+    }
+  }
+
+  if (terms.length) {
+    for (const session of sessions) {
+      if (seen.size >= limit || seen.has(session.storedId)) {
+        continue
+      }
+
+      const hit = session.messages.find(row => messageMatches(row.text ?? '', terms))
+
+      if (hit) {
+        seen.set(session.storedId, searchHitRow(session, snippetFor(hit.text ?? '', terms), hit.role, at))
+      }
+    }
+  }
+
+  return [...seen.values()]
+}
+
 function restMessageRow(row: TranscriptRow, index: number): Record<string, unknown> {
   return {
     id: row.row_id ?? index + 1,
@@ -1654,6 +1800,51 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
 
     if (path.startsWith('/api/cron/jobs')) {
       await handleCron(req, res, path, method, url.searchParams)
+
+      return
+    }
+
+    /*
+     * `GET /api/sessions/search` — `sessions.py::search_sessions`.
+     *
+     * Declared before the templated `/api/sessions/{id}/messages` for the same
+     * reason upstream mounts `search_router` before `manage_router`: an
+     * unconstrained `{session_id}` would otherwise swallow the literal path.
+     *
+     * Three behaviours are reproduced because the app depends on each of them,
+     * and one is deliberately NOT: there is no compression lineage in this
+     * fake, so a session is its own root and the dedup below is by session id.
+     *
+     *  - A blank or whitespace `q` answers `{"results": []}` without reading
+     *    anything, so a debounce that fires on an empty field is free.
+     *  - `limit` is clamped to 1…100.
+     *  - The search is PER PROFILE. Upstream opens that profile's own
+     *    `state.db`; an unknown profile is a 404 from `_cron_profile_home`, not
+     *    an empty result, and the app's fan-out has to survive one.
+     *  - Hits collapse to one per session, id matches first, and the snippet
+     *    wraps the matched run in `>>>`/`<<<` the way
+     *    `snippet(messages_fts, -1, '>>>', '<<<', '...', 40)` does.
+     */
+    if (path === '/api/sessions/search') {
+      const rawQuery = url.searchParams.get('q') ?? ''
+      const profile = url.searchParams.get('profile')
+
+      if (!rawQuery.trim()) {
+        json(res, 200, { results: [] })
+
+        return
+      }
+
+      if (profile && !state.profiles.some(entry => entry.name === profile)) {
+        json(res, 404, { detail: `Profile '${profile}' does not exist.` })
+
+        return
+      }
+
+      const limit = Math.max(1, Math.min(Number.parseInt(url.searchParams.get('limit') ?? '20', 10) || 20, 100))
+      const sessions = [...state.sessions.values()].filter(session => !profile || session.profile === profile)
+
+      json(res, 200, { results: searchFakeSessions(sessions, rawQuery, limit) })
 
       return
     }

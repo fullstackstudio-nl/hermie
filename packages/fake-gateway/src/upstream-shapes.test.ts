@@ -252,6 +252,55 @@ describe('GET /api/sessions/{id}/messages — sessions.py::_get_session_messages
   })
 })
 
+describe('GET /api/sessions/search — sessions.py::search_sessions', () => {
+  it('wraps the hits in `results`, and answers one for a blank query at all', async () => {
+    expect(keysOf(await get('/api/sessions/search?q=introduce'))).toEqual(['results'])
+    expect(await get('/api/sessions/search?q=')).toEqual({ results: [] })
+  })
+
+  /**
+   * The projection, and what it costs.
+   *
+   * The handler asks `SessionDB.search_messages` for exactly
+   * `("session_id", "role", "snippet", "source", "model", "session_started")`
+   * and then merges `get_session_rich_row` onto it. `search_messages` CAN
+   * return the message's `id` and `timestamp` — the field list allows both —
+   * and this route does not ask for either. So a hit names a conversation and
+   * never a message, and "open the chat at that row" is work the client has to
+   * do for itself. Running the real `search_messages` on a scratch database is
+   * what settled that; nothing in the response shape says it out loud.
+   */
+  it('names a conversation, never a message', async () => {
+    const body = (await get('/api/sessions/search?q=introduce')) as { results: Record<string, unknown>[] }
+
+    expect(body.results.length).toBeGreaterThan(0)
+
+    for (const hit of body.results) {
+      expect(typeof hit.session_id).toBe('string')
+      expect(hit.timestamp).toBeUndefined()
+      expect(hit.row_id).toBeUndefined()
+      expect(hit.message_id).toBeUndefined()
+    }
+  })
+
+  /**
+   * One `state.db` per profile, so one search per profile.
+   *
+   * `_open_session_db_for_profile` resolves the profile to its own home and
+   * opens the `state.db` there. There is no call that searches the whole
+   * gateway, and an unknown profile is a 404 out of `_cron_profile_home`
+   * rather than an empty result — which is what a fan-out over a roster has to
+   * be written to survive.
+   */
+  it('is scoped to one profile, and 404s a profile that is not there', async () => {
+    const all = (await get('/api/sessions/search?q=introduce')) as { results: unknown[] }
+    const one = (await get('/api/sessions/search?q=introduce&profile=writer')) as { results: unknown[] }
+
+    expect(all.results.length).toBeGreaterThan(one.results.length)
+    expect((await fetch(`${gateway.url}/api/sessions/search?q=introduce&profile=nobody`)).status).toBe(404)
+  })
+})
+
 /**
  * The one RPC in this file, and it earns its socket.
  *

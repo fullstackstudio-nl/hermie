@@ -97,6 +97,20 @@ export {
   resolveGatewayAddress,
   type ResolvedAddress
 } from './probe'
+export {
+  parseSessionSearch,
+  plainSnippet,
+  searchSessions,
+  SESSION_SEARCH_LIMIT_CAP,
+  type SessionSearchHit,
+  type SessionSearchHttp,
+  type SessionSearchOptions,
+  sessionSearchHitOf,
+  SNIPPET_MATCH_CLOSE,
+  SNIPPET_MATCH_OPEN,
+  type SnippetSegment,
+  snippetSegments
+} from './session-search'
 export { DialPlanSocketFactory, type SocketCloseInfo, type WebSocketConstructorLike } from './socket-factory'
 export {
   asGatewayError,
