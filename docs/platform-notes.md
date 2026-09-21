@@ -4887,3 +4887,108 @@ Capture enough that it does not have to be reproduced to be understood:
 
 Add what comes back to this file as a new dated section rather than editing this one — this one is
 the plan, and what actually happened is the finding.
+
+## The upload path, against a real gateway (2026-09-21, last)
+
+Everything about `POST /api/files/upload-stream` in this file above was read out of
+upstream's source or exercised against the fake. This is the first time the app's
+own code ran it against a real `hermes serve` — 0.21.3, ungated, session-token
+auth — with a real model at the other end. Three findings, one of them a bug in
+this repository.
+
+The scripts imported the real `uploadFile`, `withFileReferences` and
+`GatewayConnection` rather than re-implementing any of them, which is the only
+way this is evidence about the app rather than about a script.
+
+### What the app puts on the wire, verbatim
+
+```
+POST https://<gateway>/api/files/upload-stream
+header names: content-type, x-hermes-session-token
+content-type: multipart/form-data; boundary=----formdata-undici-…
+  part "path":      /root/<workspace>/uploads/hermie/2026-09-21/enna7d3m-boodschappen.txt
+  part "overwrite": true
+  part "file":      filename="boodschappen.txt", Content-Type: text/plain
+```
+
+200, with the envelope the module's `UploadedFile` already expects:
+
+```json
+{
+  "ok": true,
+  "entry": { "name": "…", "path": "/root/…", "is_directory": false, "size": 127, "mime_type": "text/plain" },
+  "path": "/root/…",
+  "root": null,
+  "locked_root": null,
+  "can_change_path": true
+}
+```
+
+`root: null` and `locked_root: null` are the "ordinary self-hosted, absolute-only"
+row of the policy table above, confirmed rather than inferred. The reference the
+app builds from `path` expands: the bot answered a prompt about the uploaded text
+file by quoting the marker word out of it **with no tool calls at all**, which is
+the gateway inlining the file rather than the agent going to fetch it. That is the
+whole path proven end to end.
+
+Size is not a problem here either. 5 MB, 25 MB and 60 MB bodies all returned 200
+through the reverse proxy in front of this gateway, so the client's 100 MB cap is
+the real limit rather than an optimistic one.
+
+### A `cwd` of `/` uploaded into the gateway's filesystem root
+
+A session created without a working directory reports `info.cwd = "/"`.
+`uploadPathFor` strips trailing slashes, so `"/"` became `""` and the file went to
+`/uploads/hermie/…` — the root of the machine the gateway runs on. It **succeeded**,
+because this gateway runs as root with nothing locked, and it created a directory
+in `/` that had to be deleted afterwards. On a gateway that is not root it would
+fail with a path error naming nothing.
+
+The module's rule was already right — refuse rather than guess — and its
+`no-workspace` message already says the right thing. The guard was simply asking
+the wrong question: `"/"` is truthy. It asks about the normalised value now, and
+`file-upload.test.ts` pins `/`, `//` and `///`.
+
+Worth recording alongside it: the question this file left open about whether
+`info.cwd` arrives populated or lazily is answered. The Bot Chats the app actually
+resumes report `info.cwd` populated **and** `lazy: true` at the same time, so the
+two are not alternatives.
+
+### An image reaches the bot as a pointer, not as a picture
+
+`stageFile` sends every picked and every dropped file down the `@file:` route,
+images included. `@file:` on a binary yields a "this file is on disk" block, so the
+model has to go and open it with a tool — and when that tool needed an approval
+nobody was there to answer, the bot said so plainly rather than guessing:
+
+> I cannot see or inspect the image contents because the tool run needed to read
+> the PNG was blocked before execution.
+
+With tools available it does get there: a five-stripe PNG came back described
+correctly, via `vision_analyze` and `terminal`. But in an earlier run the model
+**invented** "8 × 8 pixels" for a 3 × 3 image, so a plausible answer about a picture
+is not evidence that anything read it.
+
+The gateway has the right call and it works. `image.attach { session_id, path }` on
+an uploaded PNG answered `{"attached": true, "width": 500, "height": 400,
+"token_estimate": 85}` — the gateway decoded the image itself. Routing uploaded
+`image/*` through `image.attach` after the HTTP upload is therefore the obvious
+next move, and it is **not** done here: it was not proven that the pixels then
+reach the model's context rather than a tool, and a change that swaps one unproven
+path for another is not an improvement. Filed as the next thing to measure.
+
+### What this did not prove
+
+- **React Native's `FormData` with a `{uri, name, type}` part.** The browser branch
+  was the one exercised, because a standards-compliant `FormData` rejects the other
+  shape — which is exactly why the code branches. The three parts are identical
+  either way, so the risk is small, but it is read rather than watched.
+- **Gated (`native_pkce`) auth on the upload route.** Only the session-token flow
+  ran. The bearer-refresh gap recorded in `file-upload.ts` is precisely the thing a
+  gated gateway would exercise.
+- **Whether `image.attach` puts pixels in the model's context**, as above.
+
+The gateway was left clean: every session created was closed and deleted, every
+uploaded file removed, and the directories the probes made — including the one in
+`/` that the bug produced — deleted. The two canonical Bot Chats on that box were
+resumed read-only to read `info.cwd` and closed again without a prompt.

@@ -1,10 +1,19 @@
 /**
  * Getting a file onto the gateway, and telling the bot where it is.
  *
- * Upstream has no file-attach RPC — `image.attach` / `image.attach_bytes` take
- * images and nothing else — so a file travels over HTTP and the prompt
- * references the stored path. The two halves of that have constraints that do
- * not line up by default, and everything here exists to make them line up. The
+ * A file travels over HTTP and the prompt references the stored path. Upstream
+ * DOES have `file.attach` and `pdf.attach` — the sentence here used to say it
+ * did not, and 0.21.3 answers both — but they are not this. `file.attach` takes
+ * a base64 data URL over the socket, which inflates the bytes by a third and
+ * puts them through a JSON-RPC frame, and it stages the file into
+ * `$HERMES_HOME/attachments/`, which is OUTSIDE the session's workspace: the
+ * agent then needs a read tool to open it and hits the `allowed_root` refusal
+ * this whole module exists to avoid. Measured against a real gateway on
+ * 2026-09-21. So the HTTP route stays, for reasons rather than for lack of an
+ * alternative.
+ *
+ * The two halves of that have constraints that do not line up by default, and
+ * everything here exists to make them line up. The
  * long version is the 2026-09-19 section of docs/platform-notes.md; the short
  * version is two facts:
  *
@@ -192,9 +201,17 @@ export function withFileReferences(text: string, paths: readonly string[]): stri
  * networking layer reads the file off disk as it sends, so nothing larger than a
  * chunk is ever in JavaScript memory. That is also why this uses `fetch`
  * directly instead of `GatewayHttp.post` — that method serialises a JSON body,
- * and routing 100 MB through it would undo the point. The URL and the headers
- * still come from `GatewayHttp`, so the bearer, its refresh and any configured
- * extra headers behave exactly as they do everywhere else.
+ * and routing 100 MB through it would undo the point.
+ *
+ * The URL and the headers still come from `GatewayHttp`, so a configured extra
+ * header and the current bearer both travel. Its REFRESH does not:
+ * `requestHeaders()` mints nothing and refreshes nothing, and there is no 401
+ * retry on this path the way there is inside `GatewayHttp.send`. On a gated
+ * gateway with a bearer that expired a moment ago, this upload fails where every
+ * other call would have renewed and gone again. The comment here used to claim
+ * the opposite. It is a narrow window and the failure is visible rather than
+ * silent — the screen says the upload was refused — so it is recorded rather
+ * than papered over.
  */
 export async function uploadFile(options: UploadFileOptions): Promise<UploadedFile> {
   const { http, file, cwd } = options
@@ -208,7 +225,22 @@ export async function uploadFile(options: UploadFileOptions): Promise<UploadedFi
     )
   }
 
-  if (!cwd) {
+  /*
+    `"/"` is not a workspace, and it is the one value that got past this.
+
+    A session created with no cwd reports `info.cwd = "/"`. `uploadPathFor`
+    strips trailing slashes, so `"/"` became `""` and the file was uploaded to
+    `/uploads/hermie/…` — the filesystem ROOT of the machine the gateway runs on.
+    It succeeds where the gateway runs as root with nothing locked, which is the
+    worst way for it to behave: it works, it litters somebody's `/`, and on any
+    gateway that is not root it fails with a path error that names nothing. Seen
+    against a real gateway on 2026-09-21.
+
+    The module's own rule already covers it — refuse rather than guess — and the
+    `no-workspace` message is already the right thing to say. It only had to be
+    asked about the NORMALISED value, because `"/"` is truthy.
+  */
+  if (!cwd || !cwd.replace(/\/+$/u, '')) {
     throw new FileUploadError(
       'no-workspace',
       'This conversation has not told us its working directory, and a file has to be uploaded inside it to be readable.'

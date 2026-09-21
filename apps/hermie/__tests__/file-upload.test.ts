@@ -163,6 +163,20 @@ describe('uploading', () => {
     expect(fetcher.calls).toHaveLength(0)
   })
 
+  it('treats a root working directory as no working directory', async () => {
+    const fetcher = fakeFetch()
+
+    // A session created with no cwd reports `/`. It is truthy, so it used to get
+    // past the guard above, and `uploadPathFor` then strips the slash and uploads
+    // to `/uploads/hermie/…` — the filesystem root of the gateway's own machine.
+    // Seen against a real gateway on 2026-09-21.
+    for (const cwd of ['/', '//', '///']) {
+      await expect(run({ cwd }, fetcher.impl)).rejects.toMatchObject({ reason: 'no-workspace' })
+    }
+
+    expect(fetcher.calls).toHaveLength(0)
+  })
+
   it("reports a gateway refusal as refused, with the gateway's own reason", async () => {
     const fetcher = fakeFetch({ status: 403, body: { detail: 'Path outside managed files root' } })
 
