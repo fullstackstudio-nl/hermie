@@ -622,6 +622,48 @@ describe('ChatScreen', () => {
     expect(screen.queryByTestId('chat-open-settings')).toBeNull()
   })
 
+  /**
+   * The `+` menu used to be an ordinary child above the composer row, so opening
+   * it added its own height to the composer — and a composer that grows pushes
+   * the transcript up. Tapping `+` moved the conversation the reader was
+   * looking at, which is the one thing a menu must not do.
+   *
+   * What a test renderer can see is the structure that decides it: the popover
+   * is positioned absolutely off the composer's bottom edge, so it is drawn over
+   * the transcript and contributes nothing to the composer's layout, and the
+   * row's own style is untouched by it.
+   */
+  it('floats the attach menu over the transcript instead of growing the composer', () => {
+    renderChat()
+
+    const rowStyleClosed = JSON.stringify(screen.getByTestId('composer-row').props.style)
+    expect(screen.queryByTestId('composer-attach-backdrop', HIDDEN)).toBeNull()
+
+    fireEvent.press(screen.getByTestId('composer-attach'))
+
+    // The popover's wrapper takes the composer out of the question entirely.
+    const floated = screen.getByTestId('composer-attach-layer')
+    expect(flatStyle(floated.props.style)).toMatchObject({ bottom: expect.any(Number), position: 'absolute' })
+    expect(within(floated, screen.getByTestId('composer-attach-menu'))).toBe(true)
+
+    // And the row it sits over is the same row it was before the tap.
+    expect(JSON.stringify(screen.getByTestId('composer-row').props.style)).toBe(rowStyleClosed)
+  })
+
+  it('puts the attach menu away on a tap outside it', () => {
+    renderChat()
+
+    fireEvent.press(screen.getByTestId('composer-attach'))
+    expect(screen.getByTestId('composer-attach-menu')).toBeTruthy()
+
+    // Hidden from VoiceOver on purpose — it is a tap catcher, not a control, and
+    // the gesture that dismisses a popover for a screen reader is its own.
+    fireEvent.press(screen.getByTestId('composer-attach-backdrop', HIDDEN))
+
+    expect(screen.queryByTestId('composer-attach-menu')).toBeNull()
+    expect(screen.queryByTestId('composer-attach-backdrop', HIDDEN)).toBeNull()
+  })
+
   it('dismisses a controller error from the banner', async () => {
     mockController.openChat.mockRejectedValueOnce(new Error('gateway not connected'))
     renderChat()
@@ -635,6 +677,23 @@ describe('ChatScreen', () => {
     await waitFor(() => expect(screen.queryByText(/gateway not connected/u)).toBeNull())
   })
 })
+
+/** The tap catcher is hidden from accessibility, which is what this opts past. */
+const HIDDEN = { includeHiddenElements: true } as const
+
+/** Is `node` anywhere under `root`? The test renderer has no `contains`. */
+function within(root: { findAll: (predicate: (node: unknown) => boolean) => unknown[] }, node: unknown): boolean {
+  return root.findAll(candidate => candidate === node).length > 0
+}
+
+/** One object out of whatever a style prop happens to be: array, nested, or plain. */
+function flatStyle(style: unknown): Record<string, unknown> {
+  if (Array.isArray(style)) {
+    return style.reduce<Record<string, unknown>>((merged, entry) => ({ ...merged, ...flatStyle(entry) }), {})
+  }
+
+  return (style ?? {}) as Record<string, unknown>
+}
 
 describe('following a DM across chats', () => {
   /** Writer's chat, holding the inbound view of a message researcher sent. */

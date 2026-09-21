@@ -210,6 +210,17 @@ export const COMPOSER_FIELD_RADIUS = (COMPOSER_LINE_HEIGHT + 2 * COMPOSER_FIELD_
 export const ATTACH_POPOVER_MIN_WIDTH = 260
 
 /**
+ * How far above the composer the `+` menu's tap catcher reaches.
+ *
+ * A number rather than `flex: 1` because the catcher is an absolutely
+ * positioned child of the composer, which is only as tall as the composer: it
+ * has to be told how much of the screen above it to cover. Taller than any
+ * phone or tablet in portrait, and off the top of the screen costs nothing
+ * because nothing is drawn in it.
+ */
+export const MENU_BACKDROP_REACH = 4000
+
+/**
  * The line the completion list is for, or `null` while there is no list.
  *
  * A LEADING slash and nothing else: `/` in the middle of a sentence is a slash,
@@ -303,6 +314,16 @@ export function Composer({
    * it before the first layout pass, because the menu only exists after a tap.
    */
   const [rowWidth, setRowWidth] = useState(0)
+  /**
+   * The composer row's height, which is where the popover's bottom edge goes.
+   *
+   * The menu used to be an ordinary child ABOVE the row, so opening it added its
+   * own height to the composer — and a composer that grows pushes the transcript
+   * up, which is the reader's place moving because they tapped `+`. It floats
+   * over the transcript now, and floating needs one number: how far up from the
+   * composer's bottom edge its own top edge is.
+   */
+  const [rowHeight, setRowHeight] = useState(0)
 
   /**
    * Close the menu once the picker has been and gone.
@@ -703,8 +724,41 @@ export function Composer({
         </GlassSurface>
       </Appear>
 
+      {/*
+        A tap anywhere else puts the menu away, and "anywhere else" is mostly the
+        transcript — which is not this component's to listen to. So the catcher
+        is a transparent sheet of this component's own, parked above the composer
+        and reaching further up than any phone is tall.
+
+        It is rendered BEFORE the popover and behind it, so the popover's own
+        buttons are still the ones that get the tap.
+      */}
       {menuVisible ? (
-        <View style={{ paddingHorizontal: theme.space.md }}>
+        <Pressable
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          onPress={() => setMenuOpen(false)}
+          style={{ bottom: rowHeight, height: MENU_BACKDROP_REACH, left: 0, position: 'absolute', right: 0 }}
+          testID="composer-attach-backdrop"
+        />
+      ) : null}
+
+      {/*
+        Absolute, so it is drawn over the transcript rather than laid out above
+        it. `bottom` is the row's measured height, which puts the popover's lower
+        edge — and the pointer hanging off it — exactly on the row's top edge,
+        over the `+`.
+
+        `box-none` on the wrapper: it spans the whole width and would otherwise
+        swallow the taps the backdrop underneath it exists to catch.
+      */}
+      <View
+        pointerEvents="box-none"
+        style={{ bottom: rowHeight, left: 0, paddingHorizontal: theme.space.md, position: 'absolute', right: 0 }}
+        testID="composer-attach-layer"
+      >
+        {/* It comes UP out of the button it belongs to, the way the slash list drops down onto the field. */}
+        <Appear exit="cut" rise={8} visible={menuVisible}>
           <AttachMenu
             choices={choices}
             layout={menuLayout}
@@ -718,11 +772,14 @@ export function Composer({
             */
             pointerOffset={round / 2}
           />
-        </View>
-      ) : null}
+        </Appear>
+      </View>
 
       <View
-        onLayout={event => setRowWidth(event.nativeEvent.layout.width)}
+        onLayout={event => {
+          setRowWidth(event.nativeEvent.layout.width)
+          setRowHeight(event.nativeEvent.layout.height)
+        }}
         style={{ paddingBottom: theme.space.sm, paddingHorizontal: theme.space.md, paddingTop: theme.space.sm }}
         testID="composer-row"
       >
