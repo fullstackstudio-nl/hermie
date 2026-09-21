@@ -220,9 +220,11 @@ const config: ExpoConfig = {
     // name it: one plugin owns the group on both targets so the two cannot disagree.
     './modules/hermie-widgets/plugin/with-hermie-widgets'
   ]
-  // `extra.eas.projectId` is deliberately absent. `eas init` writes it, and it
-  // ties the repository to one EAS account — a fork should get its own rather
-  // than inherit ours. See docs/release.md.
+  // `extra.eas.projectId` used to be deliberately absent, and this comment used to
+  // say so. It is set above now, because push needs a project to mint a token
+  // against (ADR-0017), and it ties the repository to one EAS account — so a fork
+  // should run `eas init` and REPLACE it rather than inherit ours. See
+  // docs/release.md.
 }
 
 export default config

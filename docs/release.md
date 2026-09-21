@@ -157,19 +157,20 @@ it cost nothing but a prebuild. A build made before the change keeps its own dat
 identifier is the container, so an installed copy is a different app to the system and
 has to be signed in again once.
 
-## The two accounts this is waiting on
+## The accounts, and what is still owed on each
 
-Neither half of the store release can be rehearsed yet, and the reason is the same
-in both cases: an account with a payment behind it, which the owner is arranging.
-Written down here so the next reader does not spend an afternoon rediscovering it.
+Both halves of the store release used to be blocked on an account with a payment
+behind it. Neither is any more. What is left is one irreversible step and one thing
+this repository cannot answer. Written down here so the next reader does not spend
+an afternoon rediscovering it.
 
-- **A paid Apple Developer team.** Without one, TestFlight and the App Store listing
-  are both out of reach, and the difference shows up long before either: a free
-  Apple ID signs an app with a **7-day** provisioning profile, so a build installed
-  on a device or on a Mac stops launching a week later and has to be rebuilt. A paid
-  team's profiles last a **year**. `npm run mac` works either way — it takes whatever
-  `HERMIE_APPLE_TEAM_ID` names — so a free team is fine for developing and is the
-  reason a Mac build sometimes "breaks" after a week for no other reason.
+- **The paid Apple Developer team exists**: team id `FDGV4X8F27`, which is what
+  `HERMIE_APPLE_TEAM_ID` should name. It buys more than the listing. A free Apple ID
+  signs an app with a **7-day** provisioning profile, so a build installed on a device
+  or on a Mac stops launching a week later and has to be rebuilt; a paid team's
+  profiles last a **year**. `npm run mac` works either way — it takes whatever
+  `HERMIE_APPLE_TEAM_ID` names — which is why a Mac build made against a free team
+  still "breaks" after a week for no other reason.
   A Mac that has never built this app also has to be added to the team's device
   list first, and `-allowProvisioningUpdates` alone will not do it: it renews
   profiles for devices the team already knows, and for a new one automatic
@@ -177,10 +178,26 @@ Written down here so the next reader does not spend an afternoon rediscovering i
   `npm run mac` therefore passes `-allowProvisioningDeviceRegistration` as well,
   so a fresh machine registers itself on its first build instead of sending
   somebody to the developer portal.
-- **A Play Console account.** The upload keystore it needs now **exists** — that was
-  the other half of this item and the Android section below is about it — so a signed
-  APK and app bundle can be built today. What cannot happen yet is registering that
-  key with Play, which happens once per app and cannot be undone.
+- **The Android upload keystore exists.** A signed APK and app bundle build today —
+  done on 2026-09-21; see the Android section below and the end of
+  `docs/platform-notes.md`.
+- **Play App Signing is reported on for the app.** It is a Play Console setting, so
+  nothing in this repository can show it and this line records what the owner said
+  rather than something checked here. Follow what it implies, though: App Signing is
+  configured per app inside a Play Console account, so if it is on, that account and
+  an app entry already exist. The repository says nothing either way — `eas.json` has
+  an empty `submit.production` and no Play service-account key is referenced anywhere
+  — so the state of the Console account is **unverified here**. Confirm it with the
+  owner instead of inferring it from this bullet or the one below.
+- **Registering the upload key with Play has not happened**, as far as anything here
+  records. It happens once per app and **cannot be undone**: the key registered first
+  is the key every later upload has to be signed with, for the life of the listing.
+  It is the one step in this document worth stopping to check before doing — and the
+  check is with the owner, in the Console, not in this repository.
+- **An Expo project exists** and `extra.eas.projectId` in `app.config.ts` names it. It
+  is there for push: a device needs it to obtain a push token and the push credentials
+  live on it ([ADR-0017](adr/0017-push-through-hermie-web.md)). Nothing is built or
+  served through it.
 
 Neither the keystore nor the Apple team belongs in this repository. The keystore is
 a secret and the Apple team is an account, so both live with the owner; nothing here
@@ -188,15 +205,16 @@ should ever hold either.
 
 ## iOS: TestFlight
 
-Not in CI. It needs an EAS project, which ties the repository to one Expo
-account — `extra.eas.projectId` is deliberately absent from `app.config.ts` so
-that a fork gets its own rather than inheriting ours.
+Not in CI. It needs an EAS project, which ties the repository to one Expo account.
+`extra.eas.projectId` **is** in `app.config.ts` now — it was added for push, which
+needs a project to mint a token against ([ADR-0017](adr/0017-push-through-hermie-web.md))
+— so it names ours. A fork should run `eas init` and replace it rather than inherit it.
 
 ```sh
 npm i -g eas-cli
 eas login
 cd apps/hermie
-eas init                     # writes extra.eas.projectId; commit it
+eas init                     # a fork: replaces extra.eas.projectId with its own
 eas build --platform ios --profile production
 eas submit --platform ios --latest
 ```
@@ -316,12 +334,17 @@ them block a tagged GitHub release.
   `SYSTEM_ALERT_WINDOW` in the Android manifest. Play asks about that
   permission. Move the plugin behind a condition on the EAS profile, or accept
   the question and answer it.
-- **The Mac build has not been exercised at runtime.** The keychain, Return-to-send
-  and the missing status-bar strip are all reasoned from source and unverified in a
-  window. `docs/platform-notes.md` lists them; verify them before the listing says
-  the app runs on a Mac.
-- **The two accounts above.** A paid Apple Developer team and a Play upload keystore
-  are both prerequisites rather than polish, and both are being arranged.
+- **The Mac build has been exercised in a real window**, so this is no longer the
+  blocker it was. The three things named here before — the keychain, Return-to-send
+  and the empty strip under the title bar — were all used by hand on 2026-09-19 and
+  are answered in `docs/platform-notes.md`. Two smaller Mac questions are still open
+  in that file's summary table: what `AppState` a Mac window reports, and whether a
+  mouse drag still scrolls a list now the fix is in. Read the table before the
+  listing claims anything specific about the Mac.
+- **The accounts above.** The paid Apple team and the Android upload keystore both
+  exist, so neither blocks a submission any more. What is left out of that section is
+  registering the upload key with Play — once per app, irreversible — and confirming
+  a Play Console account, which nothing in this repository can show.
 - **Privacy answers.** App Store Connect and the Play data-safety form both ask
   what leaves the device. Hermie sends what the user types to the gateway the
   user configured, and to nothing else; there is no analytics SDK and no
