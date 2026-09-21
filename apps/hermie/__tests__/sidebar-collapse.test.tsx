@@ -20,7 +20,7 @@
  * that no screenshot can show.
  */
 import { act, fireEvent, screen, waitFor } from '@testing-library/react-native'
-import { StyleSheet, useWindowDimensions } from 'react-native'
+import { AppState, StyleSheet, Text, useWindowDimensions } from 'react-native'
 
 import { RegularShell } from '../src/app/RegularShell'
 import { setMenuBar } from '../src/platform/desktop-shortcuts'
@@ -35,6 +35,16 @@ import {
   SIDEBAR_WIDTH_NARROW
 } from '../src/ui/tokens'
 import { renderScreen, withProviders } from './support/render'
+import { resetSettledWidth, useLayoutMode, useSidebarState } from '../src/app/useLayoutMode'
+
+/**
+ * One window per test.
+ *
+ * The settled width is module state — one window, one answer, one timer for
+ * every hook that asks about it (`app/useLayoutMode.ts`). Carrying it from one
+ * test to the next would mean asking about the previous test's window.
+ */
+beforeEach(resetSettledWidth)
 
 const gateway = { status: 'ready', config: { baseUrl: 'https://gateway.example.com', authMode: 'native_pkce' } }
 
@@ -227,6 +237,95 @@ describe('the width the collapse reads', () => {
     act(() => jest.advanceTimersByTime(300))
 
     expect(sidebarWidthOf()).toBe(SIDEBAR_WIDTH_NARROW)
+  })
+})
+
+/**
+ * The report this round: it is STILL closing itself on the Mac.
+ *
+ * The previous round settled the width the collapse reads and the width the
+ * sidebar is measured at, and left the one that picks the SHELL on the live
+ * measurement. So a transition that reported 690pt for a frame swapped the whole
+ * regular shell for the compact stack and back — and everything the shell holds
+ * is state: which chat is selected, whether the temporary list is up, which
+ * panel is open. A remount is not a sidebar closing; it is all of that going at
+ * once, which is what it looks like from the outside.
+ */
+describe('a width that only passes through', () => {
+  function Probe() {
+    const mode = useLayoutMode()
+    const { collapsed, overlays } = useSidebarState()
+
+    return (
+      <Text testID="probe">{`${mode}/${collapsed ? 'collapsed' : 'open'}/${overlays ? 'overlay' : 'beside'}`}</Text>
+    )
+  }
+
+  const state = () => screen.getByTestId('probe').props.children
+
+  function widthIs(width: number, view: ReturnType<typeof renderScreen>, holdMs: number) {
+    act(() => {
+      size({ width, height: WIDE.height })
+      view.rerender(withProviders(<Probe />))
+    })
+    act(() => jest.advanceTimersByTime(holdMs))
+  }
+
+  beforeEach(() => jest.useFakeTimers())
+  afterEach(() => jest.useRealTimers())
+
+  it('leaves the shell and the sidebar alone across 1200 → 690 → 1200 inside 300ms', () => {
+    size({ width: 1200, height: WIDE.height })
+
+    const view = renderScreen(<Probe />)
+
+    expect(state()).toBe('regular/open/beside')
+
+    // 690 is under BOTH breakpoints: the shell's 700 and the collapse's 900. It
+    // is held for longer than a frame and still nowhere near long enough to be a
+    // window the owner resized.
+    widthIs(690, view, 100)
+    expect(state()).toBe('regular/open/beside')
+
+    widthIs(1200, view, 300)
+    expect(state()).toBe('regular/open/beside')
+  })
+
+  it('is unmoved by the window going away and coming back', () => {
+    size({ width: 1200, height: WIDE.height })
+
+    const view = renderScreen(<Probe />)
+
+    // A window that is not on screen measures nothing, and a Mac window has been
+    // seen to report exactly this on the way out and back.
+    act(() => {
+      AppState.currentState = 'background'
+      AppState.emit?.('change', 'background')
+    })
+    widthIs(0, view, 200)
+    expect(state()).toBe('regular/open/beside')
+
+    act(() => {
+      AppState.currentState = 'active'
+      AppState.emit?.('change', 'active')
+    })
+    widthIs(1200, view, 300)
+
+    expect(state()).toBe('regular/open/beside')
+  })
+
+  it('still follows a window the owner really did resize', () => {
+    // The guard must not become "the width never matters": dragging a Mac window
+    // narrow and leaving it there is a different thing, and it collapses.
+    size({ width: 1200, height: WIDE.height })
+
+    const view = renderScreen(<Probe />)
+
+    widthIs(834, view, 300)
+    expect(state()).toBe('regular/collapsed/overlay')
+
+    widthIs(600, view, 300)
+    expect(state()).toBe('compact/collapsed/overlay')
   })
 })
 

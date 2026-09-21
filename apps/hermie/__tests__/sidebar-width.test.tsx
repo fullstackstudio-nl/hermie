@@ -30,6 +30,16 @@ import {
   WINDOW_GAP
 } from '../src/ui/tokens'
 import { renderScreen } from './support/render'
+import { resetSettledWidth } from '../src/app/useLayoutMode'
+
+/**
+ * One window per test.
+ *
+ * The settled width is module state — one window, one answer, one timer for
+ * every hook that asks about it (`app/useLayoutMode.ts`). Carrying it from one
+ * test to the next would mean asking about the previous test's window.
+ */
+beforeEach(resetSettledWidth)
 
 const gateway = { status: 'ready', config: { baseUrl: 'https://gateway.example.com', authMode: 'native_pkce' } }
 

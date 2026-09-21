@@ -126,6 +126,15 @@ export interface DevLaunchIntent {
    * drawn — see `trace-scroll.ts` for what it prints and why it is kept.
    */
   traceScroll?: boolean
+  /**
+   * Trace every width the window reports, every width that SETTLES out of those,
+   * and every change of the sidebar's state with the reason for it.
+   *
+   * Same shape as `traceScroll` and for the same reason: the bug it exists for —
+   * the sidebar closing itself — leaves nothing behind in any state a screenshot
+   * can show, because by the time anyone looks the width is back to normal.
+   */
+  traceLayout?: boolean
 }
 
 const OVERLAY_SECTIONS: Record<string, DevOverlaySection> = {
@@ -299,6 +308,14 @@ export function parseDevLaunchArguments(argv: readonly string[]): DevLaunchInten
       return
     }
 
+    if (flag === '--hermietracelayout') {
+      const value = valueAt(index, inline).toLowerCase()
+
+      intent.traceLayout = value !== 'false' && value !== '0'
+
+      return
+    }
+
     if (flag === '--hermietoken') {
       // NOT lowercased, unlike every other value here: a session token is opaque
       // and case-sensitive, and the gateway compares it byte for byte.
@@ -313,7 +330,12 @@ export function parseDevLaunchArguments(argv: readonly string[]): DevLaunchInten
     intent.gateway = { baseUrl: gatewayUrl, ...(token ? { token } : {}) }
   }
 
-  return intent.open || intent.scheme || intent.wallpaper || intent.gateway || intent.traceScroll !== undefined
+  return intent.open ||
+    intent.scheme ||
+    intent.wallpaper ||
+    intent.gateway ||
+    intent.traceScroll !== undefined ||
+    intent.traceLayout !== undefined
     ? intent
     : null
 }
