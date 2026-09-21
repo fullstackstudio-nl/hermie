@@ -7,6 +7,7 @@ import { BotsScreen, type BotsSection } from '../features/bots'
 import { ChatScreen, type OpenChatOptions } from '../features/chats'
 import { CronScreen } from '../features/cron'
 import { SettingsScreen } from '../features/settings'
+import { requestIntentRun } from '../features/intents'
 import { requestShareDelivery } from '../features/share'
 import { strings } from '../i18n/strings'
 import { useHermieLink } from '../platform/deep-link'
@@ -143,11 +144,20 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
   // shell uses, landing on the same `openBot` a tap on a row lands on — so a
   // link cannot reach a state a finger could not.
   //
-  // A `share` link carries no destination of its own: the share sheet has
-  // already written the entry, and the id in the URL is only there so that a
-  // tap on "Send" arrives as a pump rather than as a foreground three seconds
-  // later. `ShareDelivery` reads the directory, not the link.
-  useHermieLink(link => (link.kind === 'chat' ? openBot(link.bot) : requestShareDelivery()))
+  // Neither of the other two link kinds carries a destination of its own. The
+  // share sheet and the Shortcut have each already written their request into
+  // the shared container, and the id in the URL is only there so that the tap
+  // arrives as a pump rather than as a foreground three seconds later — both
+  // readers work from the directory, not from the link.
+  useHermieLink(link => {
+    if (link.kind === 'chat') {
+      openBot(link.bot)
+    } else if (link.kind === 'share') {
+      requestShareDelivery()
+    } else {
+      requestIntentRun()
+    }
+  })
 
   // And the same from a notification, through the bus, for the reason
   // `app/open-chat-bus.ts` gives.

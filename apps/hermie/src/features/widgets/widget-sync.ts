@@ -23,6 +23,7 @@
  * It never throws and never rejects. A widget that is one turn out of date is a
  * widget; a chat that failed to render because a file write went wrong is a bug.
  */
+import { intentQueue } from '../../platform/intent-queue'
 import { widgetBridge, type WidgetBridge } from '../../platform/widgets'
 import { useBotsStore, type BotsState } from '../../store/bots'
 import { useChatLayoutStore, type ChatLayoutState } from '../../store/chat-layout'
@@ -48,11 +49,23 @@ interface Stores {
   settings: { getState: () => SettingsState; subscribe: (listener: () => void) => Unsubscribe }
 }
 
+/**
+ * The system's own search index, as the one thing it needs told.
+ *
+ * Structural rather than the whole `IntentQueue`, because this class uses one
+ * of that seam's three methods and a test should not have to stub a Shortcuts
+ * queue to prove something about a snapshot.
+ */
+export interface SpotlightIndex {
+  indexBots(bots: readonly { name: string; label: string; subtitle: string }[]): Promise<boolean>
+}
+
 export interface WidgetSyncOptions {
   bridge?: WidgetBridge
   stores?: Stores
   debounceMs?: number
   now?: () => number
+  spotlight?: SpotlightIndex
 }
 
 export class WidgetSync {
@@ -60,6 +73,7 @@ export class WidgetSync {
   private readonly stores: Stores
   private readonly debounceMs: number
   private readonly now: () => number
+  private readonly spotlight: SpotlightIndex
 
   private timer: ReturnType<typeof setTimeout> | null = null
   private running = false
@@ -95,6 +109,7 @@ export class WidgetSync {
     }
     this.debounceMs = options.debounceMs ?? WIDGET_SYNC_DEBOUNCE_MS
     this.now = options.now ?? (() => Date.now())
+    this.spotlight = options.spotlight ?? intentQueue
   }
 
   /**
@@ -277,7 +292,31 @@ export class WidgetSync {
 
     if (await this.bridge.writeSnapshot(JSON.stringify(snapshot))) {
       this.written = snapshot
+      await this.index(snapshot)
     }
+  }
+
+  /**
+   * Put the roster in the system's own search index.
+   *
+   * Hung off the widget write rather than given a schedule of its own, and the
+   * reason is that this class already answers the question Spotlight is asking.
+   * "The roster changed in a way somebody would see" is precisely what
+   * `sameWidgetContent` decides, and it is already debounced — so an index pass
+   * costs one call on exactly the edges that matter, and a streaming turn does
+   * not reindex the roster a hundred times a second.
+   *
+   * The SUBTITLE is the last line rather than the presence, because Spotlight
+   * shows one row and a reader looking for a chat is looking for what was said
+   * in it. A bot with nothing in it yet gets an empty subtitle, which the index
+   * draws as a single line, rather than the word "Offline" — which would be
+   * true of every bot on a phone whose app is not running, which is every phone
+   * where somebody is using Spotlight.
+   */
+  private async index(snapshot: WidgetSnapshot): Promise<void> {
+    await this.spotlight
+      .indexBots(snapshot.bots.map(bot => ({ name: bot.name, label: bot.displayName, subtitle: bot.lastLine })))
+      .catch(() => false)
   }
 
   /**

@@ -1,3 +1,4 @@
+import CoreSpotlight
 import UIKit
 
 /**
@@ -216,6 +217,25 @@ public class HermieSceneDelegate: UIResponder, UIWindowSceneDelegate {
   }
 
   private func `continue`(_ userActivity: NSUserActivity) {
+    // A tap on a Spotlight result is not a link and React Native does not know
+    // what to do with one: `RCTLinkingManager` answers `NSUserActivityTypeBrowsingWeb`
+    // and nothing else, so a bot found in search would open the app at whatever
+    // screen it was last on. The item's unique identifier IS the deep link —
+    // `HermieIntentsModule.indexBots` indexes each bot under its own
+    // `hermie://chat/<name>` — so it is turned back into one here, which is the
+    // only place both halves of that are visible.
+    if userActivity.activityType == CSSearchableItemActionType,
+      let identifier = userActivity.userInfo?[CSSearchableItemActivityIdentifier] as? String,
+      let url = URL(string: identifier) {
+      // Recorded as well as forwarded, for the reason `launchURL` gives: on a
+      // cold start this runs before JavaScript exists, and the forward is where
+      // the event gets lost.
+      Self.launchURL = url
+      open(url: url, options: [:])
+
+      return
+    }
+
     _ = UIApplication.shared.delegate?.application?(
       UIApplication.shared,
       continue: userActivity,

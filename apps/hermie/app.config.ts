@@ -237,7 +237,13 @@ const config: ExpoConfig = {
     // writes the SAME App Group onto the app's entitlements — additively, so
     // whichever of the two runs second is a no-op. It also patches Android's
     // MainActivity, which the widget plugin has no need to.
-    './modules/hermie-share/plugin/with-hermie-share'
+    './modules/hermie-share/plugin/with-hermie-share',
+    // Shortcuts, Siri and Spotlight. Unlike the two above it adds no target: an
+    // `AppShortcutsProvider` has to be in the APP's own sources, and App Intents
+    // metadata is extracted from the target that compiles them. The plugin says
+    // so at length; the App Group it writes into is already on the app, put
+    // there by either of the two plugins above.
+    './modules/hermie-intents/plugin/with-hermie-intents'
   ]
   // `extra.eas.projectId` used to be deliberately absent, and this comment used to
   // say so. It is set above now, because push needs a project to mint a token

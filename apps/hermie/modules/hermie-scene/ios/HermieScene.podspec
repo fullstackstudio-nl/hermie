@@ -24,7 +24,12 @@ Pod::Spec.new do |s|
   # Info.plist and nothing references at compile time) out of the linker's dead-strip.
   s.dependency 'ExpoModulesCore'
 
-  s.frameworks = 'UIKit'
+  # CoreSpotlight is here for two symbols: `CSSearchableItemActionType` and
+  # `CSSearchableItemActivityIdentifier`. A tap on a bot found in Spotlight
+  # arrives as a user activity React Native does not answer, and the scene
+  # delegate turns it back into the `hermie://chat/<bot>` link it was indexed
+  # under. See `continue(_:)`.
+  s.frameworks = 'CoreSpotlight', 'UIKit'
 
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',

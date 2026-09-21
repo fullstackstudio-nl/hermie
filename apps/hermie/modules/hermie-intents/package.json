@@ -1,0 +1,10 @@
+{
+  "name": "hermie-intents",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shortcuts, Siri and Spotlight: App Intents in the app target, and the queue they talk to",
+  "license": "MIT",
+  "author": "FullStack Studio",
+  "homepage": "https://hermie.dev",
+  "main": "plugin/with-hermie-intents.js"
+}

@@ -79,6 +79,15 @@ function bot(name: string): Bot {
 
 function harness(bridgeOverrides: Partial<WidgetBridge> = {}) {
   const fake = fakeBridge(bridgeOverrides)
+  /**
+   * Spotlight's half, which hangs off the same edge the widget write does.
+   *
+   * It is recorded rather than stubbed away because the thing worth pinning is
+   * WHEN it is called: the roster changing in a way somebody would see is
+   * exactly what this class already decides, and a streaming turn must not
+   * reindex the roster a hundred times a second.
+   */
+  const indexed: { name: string; label: string; subtitle: string }[][] = []
   const bots = fakeStore({ bots: [bot('researcher')], running: {}, lastSeen: {}, avatars: {} })
   const chats = fakeStore({ chats: {} })
   const layout = fakeStore({ accents: {}, archived: {}, mutes: {} })
@@ -88,6 +97,13 @@ function harness(bridgeOverrides: Partial<WidgetBridge> = {}) {
 
   const sync = new WidgetSync({
     bridge: fake.bridge,
+    spotlight: {
+      async indexBots(bots) {
+        indexed.push([...bots])
+
+        return true
+      }
+    },
     // The stores are structurally what the sync reads and nothing more, which
     // is the whole reason it takes them rather than importing them.
     stores: { bots, chats, layout, settings } as unknown as never,
@@ -95,7 +111,7 @@ function harness(bridgeOverrides: Partial<WidgetBridge> = {}) {
     now: () => 1_770_000_000_000
   })
 
-  return { ...fake, sync, bots, chats, layout, settings }
+  return { ...fake, sync, bots, chats, layout, settings, indexed }
 }
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 40))
@@ -304,5 +320,73 @@ describe('WidgetSync', () => {
     await settle()
 
     expect(snapshots).toHaveLength(0)
+  })
+})
+
+/**
+ * Spotlight rides on the widget write.
+ *
+ * Not a separate schedule, and the reason is that this class already answers
+ * the question the index is asking. "The roster changed in a way somebody would
+ * see" is what `sameWidgetContent` decides, and it is already debounced — so an
+ * index pass costs one call on exactly the edges that matter.
+ */
+describe('the Spotlight index', () => {
+  it('is written with the same roster the widget draws', async () => {
+    const { sync, indexed } = harness()
+    const stop = sync.start()
+
+    await settle()
+    stop()
+
+    expect(indexed).toHaveLength(1)
+    expect(indexed[0]).toEqual([{ name: 'researcher', label: 'researcher', subtitle: 'hi' }])
+  })
+
+  /**
+   * The whole point of hanging it here. An undebounced index pass on every
+   * token of every turn would be the same mistake the widget write was written
+   * to avoid, one API further down.
+   */
+  it('is not rewritten for a notification that changes nothing', async () => {
+    const { sync, indexed, chats } = harness()
+    const stop = sync.start()
+
+    await settle()
+    indexed.length = 0
+
+    for (let index = 0; index < 20; index += 1) {
+      chats.set({ chats: {} })
+    }
+
+    await settle()
+    stop()
+
+    expect(indexed).toHaveLength(0)
+  })
+
+  /**
+   * A failing index must not take the widget down with it. There is no
+   * container on the web and no CoreSpotlight on Android, and both answer
+   * `false` — but a throw from a native promise here would reject inside a
+   * store subscription, where nobody is catching.
+   */
+  it('survives an index that throws', async () => {
+    const { sync, snapshots } = harness()
+
+    // The harness's own port is replaced after construction, which is the only
+    // way to reach the failure path without a second harness.
+    Object.assign(sync as unknown as { spotlight: unknown }, {
+      spotlight: {
+        indexBots: () => Promise.reject(new Error('no index'))
+      }
+    })
+
+    const stop = sync.start()
+
+    await settle()
+    stop()
+
+    expect(snapshots).toHaveLength(1)
   })
 })

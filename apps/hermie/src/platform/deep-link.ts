@@ -21,14 +21,16 @@
  * send one. So this parses exactly one shape and answers `null` for everything
  * else: no gateway address, no token, no screen id, nothing that could make the
  * app do something the owner did not ask for. A link may name a chat that
- * already exists, or an outbox entry this device's own share sheet already
- * wrote, and that is all — the CONTENT of a share never travels in the URL,
- * only the id of a file the app then reads out of its own container.
+ * already exists, or an entry this device's own share sheet or its own
+ * Shortcuts action already wrote, and that is all — the CONTENT never travels
+ * in the URL, only the id of a file the app then reads out of its own
+ * container.
  */
 import { requireOptionalNativeModule } from 'expo'
 import { useEffect, useRef } from 'react'
 import { Linking } from 'react-native'
 
+import { isSafeIntentId } from '../features/intents/queue'
 import { isSafeShareId } from '../features/share/outbox'
 
 /**
@@ -74,6 +76,8 @@ export type HermieLink =
   | { kind: 'chat'; bot: string }
   /** `hermie://share/<id>` — the share sheet wrote an outbox entry. */
   | { kind: 'share'; id: string }
+  /** `hermie://intent/<id>` — a Shortcut queued a request and is waiting. */
+  | { kind: 'intent'; id: string }
 
 /**
  * The grammar: `hermie://<kind>/<one segment>`.
@@ -83,7 +87,7 @@ export type HermieLink =
  * A second segment is not accepted at all, for both kinds, which is what keeps
  * a name from being read as a path.
  */
-const LINK = /^(?:exp\+)?hermie:\/\/(chat|share)\/([^/?#]+)\/?(?:[?#].*)?$/
+const LINK = /^(?:exp\+)?hermie:\/\/(chat|share|intent)\/([^/?#]+)\/?(?:[?#].*)?$/
 
 /**
  * `hermie://chat/<bot>` or `hermie://share/<id>`, or nothing.
@@ -91,12 +95,13 @@ const LINK = /^(?:exp\+)?hermie:\/\/(chat|share)\/([^/?#]+)\/?(?:[?#].*)?$/
  * A bot name is percent-decoded and then checked: an empty one and anything
  * with a slash in it after decoding are rejected.
  *
- * A share id is NOT decoded, and that difference is deliberate rather than an
- * omission. A bot name is somebody else's string — a profile can be called
- * anything, including things that have to be escaped to survive a URL. A share
- * id is minted by this app's own extension out of a fixed alphabet, so a link
- * carrying anything else did not come from the share sheet, and the useful
- * response to that is to answer nothing rather than to work out what it meant.
+ * A share or intent id is NOT decoded, and that difference is deliberate rather
+ * than an omission. A bot name is somebody else's string — a profile can be
+ * called anything, including things that have to be escaped to survive a URL.
+ * An id is minted by this app's own extension out of a fixed alphabet, so a
+ * link carrying anything else did not come from the share sheet or from a
+ * Shortcut, and the useful response to that is to answer nothing rather than to
+ * work out what it meant.
  */
 export function parseHermieLink(url: string | null | undefined): HermieLink | null {
   if (!url) {
@@ -111,6 +116,10 @@ export function parseHermieLink(url: string | null | undefined): HermieLink | nu
 
   if (match[1] === 'share') {
     return isSafeShareId(match[2]) ? { kind: 'share', id: match[2] } : null
+  }
+
+  if (match[1] === 'intent') {
+    return isSafeIntentId(match[2]) ? { kind: 'intent', id: match[2] } : null
   }
 
   let bot: string

@@ -97,10 +97,28 @@ describe('parseHermieLink', () => {
   it('carries no payload, only an id', () => {
     expect(parseHermieLink('hermie://share/abc?text=hello')).toEqual({ kind: 'share', id: 'abc' })
   })
+
+  /**
+   * The third kind: `hermie://intent/<id>`, opened by an App Intent the moment
+   * it has queued a request. Same alphabet, same refusals, same reason — and
+   * the same absence of a payload, because the prompt is in a file the app
+   * reads out of its own container.
+   */
+  it('reads the id out of an intent link', () => {
+    expect(parseHermieLink('hermie://intent/0f2a4c6e')).toEqual({ kind: 'intent', id: '0f2a4c6e' })
+  })
+
+  it.each([
+    ['an id with a separator in it', 'hermie://intent/a%2Fb'],
+    ['no id', 'hermie://intent/'],
+    ['a second segment', 'hermie://intent/abc/def']
+  ])('refuses an intent link with %s', (_label, url) => {
+    expect(parseHermieLink(url)).toBeNull()
+  })
 })
 
 function Probe({ onLink }: { onLink: (bot: string) => void }) {
-  useHermieLink(link => onLink(link.kind === 'chat' ? link.bot : `share:${link.id}`))
+  useHermieLink(link => onLink(link.kind === 'chat' ? link.bot : `${link.kind}:${link.id}`))
 
   return <Text>probe</Text>
 }

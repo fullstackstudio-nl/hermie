@@ -14,6 +14,7 @@ import { BotsScreenOrSignedOut, type BotsSection } from '../features/bots'
 import { ChatScreen } from '../features/chats'
 import { CronScreen } from '../features/cron'
 import { SettingsScreen } from '../features/settings'
+import { requestIntentRun } from '../features/intents'
 import { requestShareDelivery } from '../features/share'
 import { strings } from '../i18n/strings'
 import { useHermieLink } from '../platform/deep-link'
@@ -189,11 +190,20 @@ export function CompactShell({ initial }: { initial?: DevInitialView } = {}) {
     [navigationRef]
   )
 
-  // A `share` link carries no destination of its own: the share sheet has
-  // already written the entry, and the id in the URL is only there so that a tap
-  // on "Send" arrives as a pump rather than as a foreground three seconds later.
-  // `ShareDelivery` reads the directory, not the link.
-  useHermieLink(link => (link.kind === 'chat' ? openChat(link.bot) : requestShareDelivery()))
+  // Neither of the other two link kinds carries a destination of its own. The
+  // share sheet and the Shortcut have each already written their request into
+  // the shared container, and the id in the URL is only there so that the tap
+  // arrives as a pump rather than as a foreground three seconds later — both
+  // readers work from the directory, not from the link.
+  useHermieLink(link => {
+    if (link.kind === 'chat') {
+      openChat(link.bot)
+    } else if (link.kind === 'share') {
+      requestShareDelivery()
+    } else {
+      requestIntentRun()
+    }
+  })
 
   // The same destination from a notification. `PushSync` sits beside the chat
   // controller and cannot know which shell is mounted, so it asks through the

@@ -7,11 +7,12 @@
  * share therefore lives here, where neither owns it, and each seam re-exports
  * the ones its callers expect to find next to the implementation.
  *
- * The one import below is the exception that proves the rule: `ShareOutboxEntry`
- * is a FILE FORMAT, written by a process this repository does not run, and it is
- * owned by the module that parses it. A second declaration of it here would be
- * two spellings of somebody else's bytes.
+ * The two imports below are the exception that proves the rule. Both name a
+ * FILE FORMAT written by native code — a share extension, an App Intent — and
+ * each is owned by the module that parses it. A second declaration of either
+ * here would be two spellings of somebody else's bytes.
  */
+import type { IntentQueueEntry } from '../features/intents/queue'
 import type { ShareOutboxEntry } from '../features/share/outbox'
 
 /**
@@ -137,6 +138,37 @@ export interface ShareInbox {
   list(): Promise<ShareOutboxEntry[]>
   /** Delete one entry and its copied files. Answers whether anything went. */
   clear(id: string): Promise<boolean>
+}
+
+/**
+ * What a Shortcut asked for, and where the answer goes.
+ *
+ * The third traffic through the same shared container, and the only one that
+ * runs in both directions inside one second: an App Intent writes a request,
+ * opens the app, and polls for a result while the app writes one. See
+ * `features/intents/queue.ts` for the format and for the budget both sides
+ * share.
+ *
+ * `indexBots` is the odd one out and is here rather than in a fourth seam
+ * because it answers to the same platform capability — App Intents and
+ * Spotlight are the same story from the person's side, which is "Hermie's bots
+ * are things the system knows about".
+ */
+export interface IntentQueue {
+  /** Whether this platform has Shortcuts at all. */
+  readonly available: boolean
+  /** Every request waiting, unparsed. Answers `[]` rather than throwing. */
+  list(): Promise<IntentQueueEntry[]>
+  /** Write the answer and drop the request. Answers whether anything moved. */
+  complete(id: string, result: string): Promise<boolean>
+  /**
+   * Put the roster in the system's own search index.
+   *
+   * Called when the widget snapshot changes, because that is exactly when the
+   * roster the system should know about has changed. Answers `false` where
+   * there is no index.
+   */
+  indexBots(bots: readonly { name: string; label: string; subtitle: string }[]): Promise<boolean>
 }
 
 /**

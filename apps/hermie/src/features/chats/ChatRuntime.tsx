@@ -14,6 +14,7 @@ import { useGateway } from '../../gateway'
 import { chatGatewayFor, type ChatGateway } from '../../gateway/link'
 import { useConnectionStore } from '../../gateway/store'
 import { chatCache } from '../../platform/chat-cache'
+import { intentQueue } from '../../platform/intent-queue'
 import { RUNS_ON_MAC } from '../../platform/runs-on-mac'
 import { shareInbox } from '../../platform/share-inbox'
 import { useBotsStore } from '../../store/bots'
@@ -29,6 +30,9 @@ import { BotsController } from '../bots/bots-controller'
 import { pushPlatform } from '../push/platform'
 import { PushSync } from '../push/push-sync'
 import { setPushRetire } from '../push/runtime'
+import { watchReply } from '../intents/await-reply'
+import { onIntentRequest } from '../intents/intent-bus'
+import { IntentRunner } from '../intents/intent-runner'
 import { pushProjectId, pushVapidUrl } from '../push/where'
 // Reached by module rather than through `../share`'s barrel: that barrel also
 // exports the picker's own sheet, and a barrel imported from the module it
@@ -51,6 +55,8 @@ export interface ChatRuntimeValue {
   push: PushSync
   /** The share sheet's outbox, drained into real messages. No-op where there is none. */
   share: ShareDelivery
+  /** What a Shortcut asked for, run and answered. No-op where there are none. */
+  intents: IntentRunner
   /** The connection, as the slice everything in here is written against. */
   gateway: ChatGateway
 }
@@ -269,6 +275,36 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     })
 
     /*
+      What a Shortcut asked for.
+
+      The ports are the share flow's, minus the files and plus the wait: `open`
+      is the same both-halves resume-and-navigate, because a Shortcut that
+      launched the app has already taken over the phone and landing somewhere
+      else while a message goes out is disorienting.
+
+      `watchReply` is handed the chat STORE rather than the controller, and
+      subscribes the moment it is called — which is before the prompt is sent.
+      See `intents/await-reply.ts` for the two races that ordering avoids.
+    */
+    const intents = new IntentRunner({
+      queue: intentQueue,
+      ready: () => useConnectionStore.getState().status === 'ready',
+      open: async name => {
+        const bot = useBotsStore.getState().byName[name]
+
+        if (!bot) {
+          throw new Error(`${name} is not a bot on this gateway.`)
+        }
+
+        await controller.openChat(bot)
+        requestOpenChat(name)
+      },
+      send: (name, text) => controller.send(name, text),
+      watchReply: name => watchReply({ chats: useChatsStore, botName: name }),
+      now: () => Date.now()
+    })
+
+    /*
       The one thing that has to happen BEFORE this connection goes away. See
       `features/push/runtime.ts`: `GatewayProvider` tears the socket down first
       and this component is unmounted by the same change, so the removal is
@@ -290,8 +326,10 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     // A link that arrived at whichever shell is mounted, rather than a
     // foreground. It only ever makes the pump EARLIER; see `share-bus.ts`.
     const stopShareBus = onShareRequest(() => void share.pump())
+    // The latency-critical twin: somebody is watching a Shortcut spin.
+    const stopIntentBus = onIntentRequest(() => void intents.run())
 
-    const next = { controller, bots, uiMeta, widgets, push, share, gateway }
+    const next = { controller, bots, uiMeta, widgets, push, share, intents, gateway }
     valueRef.current = next
     setValue(next)
 
@@ -302,6 +340,7 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       stopWidgets()
       stopPush()
       stopShareBus()
+      stopIntentBus()
       // The entries stay on disk; only the badge goes. See `useShareStore.reset`.
       useShareStore.getState().reset()
       setPushRetire(null)
@@ -400,6 +439,19 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
   }, [status, value])
 
   /**
+   * And the Shortcuts queue, on the same edge and for a sharper reason.
+   *
+   * A request arrives with the launch it caused, which on a cold start is
+   * before there is any socket to send on — so the link's own run finds the
+   * gateway unready and leaves the request pending, and THIS is what picks it
+   * up a second later. `IntentRunner` answers everything it cannot run, so the
+   * only request left waiting here is one still inside its budget.
+   */
+  useEffect(() => {
+    void value?.intents.run()
+  }, [status, value])
+
+  /**
    * Reconcile again when the gateway says a profile changed.
    *
    * `ui_meta` is on the profile row, so another client writing its own section
@@ -444,10 +496,12 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
         // The reader has just come back from the home screen they were looking
         // at, so the next thing worth doing is making what they saw there true.
         runtime.widgets.resume()
-        // The other thing that can have changed while the app was away: the
+        // The other things that can have changed while the app was away: the
         // share sheet is a different process and can have written an entry
-        // without this one running at all.
+        // without this one running at all, and a Shortcut can have queued a
+        // request that the link for it did not deliver.
         void runtime.share.pump()
+        void runtime.intents.run()
         // ADR-0017's freshness pass, and the heartbeat's other half: a token
         // that changed while the app was away is re-read here, and `seen` only
         // means anything while somebody is actually looking.
