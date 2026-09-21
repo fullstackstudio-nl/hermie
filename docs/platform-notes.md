@@ -5191,3 +5191,30 @@ instruction" — behaving as written, on a device rather than in a test.
 - **A revoked permission mid-session.** The "turned it off in system settings"
   path is covered by a test against a fake platform; `simctl privacy` has no
   verb for notifications, so it was not reproduced.
+
+### The browser transport is the least verified of the three
+
+`platform.web.ts` and `public/hermie-push-sw.js` were not run in a browser at
+all. What is tested is the part between the browser's answer and the row —
+the VAPID base64url decoding, the projection of a `PushSubscription` onto the
+`webpush` shape, and the gate that reports the whole feature unavailable where
+`isSecureContext` is false (`__tests__/push-web.test.ts`). What remains, and
+needs a TLS deployment of Hermie Web with `--push` to close:
+
+- **Service-worker registration and scope.** jsdom implements no
+  `navigator.serviceWorker`. That `expo export --platform web` copies
+  `public/hermie-push-sw.js` to the export root — which is what gives it a scope
+  covering the app — is read from Expo's behaviour, not watched.
+- **`pushManager.subscribe`.** No push service, no endpoint, and no
+  implementation of `applicationServerKey` to reject a key this code got wrong.
+- **`GET /push/vapid-public-key`.** The daemon does not serve it yet. The client
+  accepts either `{"key":…}` or `{"publicKey":…}` so the two halves cannot miss
+  each other on a field name, and answers "unavailable" for anything else.
+- **The worker's own two handlers.** `push` and `notificationclick` run in a
+  ServiceWorkerGlobalScope; a stand-in for `clients.matchAll`,
+  `showNotification` and the rest is a second implementation, and it is the
+  first one that would have the bug.
+- **Permission from a user activation.** Several browsers require
+  `Notification.requestPermission()` to be called inside one. The switch in
+  Settings is what calls it, which satisfies that by construction — but by
+  construction is not the same as observed.
