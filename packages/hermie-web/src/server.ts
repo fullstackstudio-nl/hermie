@@ -20,7 +20,13 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net'
 import type { Duplex } from 'node:stream'
 
-import { type HermieWebOptions, isGatewayPath, resolveOptions, type ResolveOptionsInput } from './options'
+import {
+  type HermieWebOptions,
+  isGatewayPath,
+  PUSH_PUBLIC_KEY_PATH,
+  resolveOptions,
+  type ResolveOptionsInput
+} from './options'
 import { type PushDaemon, startPushDaemon } from './push/daemon'
 import { proxyHttp, proxyUpgrade } from './proxy'
 import { serveIndex, serveStatic } from './static-files'
@@ -69,6 +75,9 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
   const shape = detectInstallShape({ selfUpdate: options.selfUpdate, installRoot: options.installRoot })
   const target = { gatewayUrl: options.gatewayUrl, publicUrl: options.publicUrl }
   let updating = false
+  // Assigned once the listener is up; the handler reads it, so it is declared
+  // here rather than beside the `await` that fills it.
+  let push: PushDaemon | null = null
 
   // Warm the release listing at startup so the first Settings visit is instant,
   // and never let its failure take the server down with it.
@@ -106,6 +115,24 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
 
     if (url.pathname === '/hermie/update') {
       await handleUpdate(request, response, method, url)
+
+      return
+    }
+
+    if (url.pathname === PUSH_PUBLIC_KEY_PATH) {
+      // The browser build needs this before it can subscribe, and it has
+      // nowhere else to get it: the key is the daemon's, generated on its first
+      // run, and the app never talks to the daemon by any other route.
+      if (!push?.vapidPublicKey) {
+        json(response, 503, {
+          error: 'push_unavailable',
+          detail: 'This Hermie Web is not running the push daemon (start it with --push).'
+        })
+
+        return
+      }
+
+      json(response, 200, { publicKey: push.vapidPublicKey, version: options.version })
 
       return
     }
@@ -233,11 +260,12 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
     served, because serving it is the thing this process does that nothing else
     can do for it.
   */
-  const push = options.push
+  push = options.push
     ? await startPushDaemon({
         gatewayUrl: options.gatewayUrl,
         gatewayToken: options.gatewayToken,
         stateDir: options.stateDir,
+        vapidSubject: options.vapidSubject,
         ...(input.socketFactory ? { socketFactory: input.socketFactory } : {})
       }).catch((error: unknown) => {
         console.error(`hermie-web: push did not start — ${String(error)}`)

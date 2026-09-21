@@ -65,6 +65,13 @@ export const DEFAULT_HOST = '127.0.0.1'
 export const DEFAULT_VAPID_SUBJECT = 'https://hermie.dev'
 
 /**
+ * Where the browser build reads the application-server key it has to subscribe
+ * against. It is PUBLIC by definition — it is the half a browser is given — and
+ * it authorises nothing on its own.
+ */
+export const PUSH_PUBLIC_KEY_PATH = '/push/vapid-public-key'
+
+/**
  * Paths that belong to the gateway rather than to the app.
  *
  * A prefix list rather than a catch-all, so an unknown path falls through to
@@ -77,7 +84,12 @@ export const DEFAULT_VAPID_SUBJECT = 'https://hermie.dev'
 export const GATEWAY_PATH_PREFIXES: readonly string[] = ['/api', '/auth', '/login', '/logout']
 
 /** Paths Hermie Web answers itself, and therefore never proxies. */
-export const LOCAL_PATHS: readonly string[] = ['/healthz', '/hermie/config.json', '/hermie/update']
+export const LOCAL_PATHS: readonly string[] = [
+  '/healthz',
+  '/hermie/config.json',
+  '/hermie/update',
+  PUSH_PUBLIC_KEY_PATH
+]
 
 export function isGatewayPath(pathname: string): boolean {
   if (LOCAL_PATHS.includes(pathname)) {

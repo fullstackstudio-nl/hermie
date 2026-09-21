@@ -35,7 +35,7 @@ describe('the state file', () => {
       seq: { 'session-a': 42 },
       sent: { 'session-a:7': 1789957143 },
       invalid: { 'dev-1': 1789957143 },
-      tickets: [{ id: 'ticket-1', installationId: 'dev-2', token: 'ExponentPushToken[x]' }],
+      tickets: [{ id: 'ticket-1', installationId: 'dev-2', token: 'ExponentPushToken[x]', at: 1789957100 }],
       vapid: { publicKey: 'pub', privateKey: 'priv' },
       oidc: { refreshToken: 'rt', provider: 'oidc', gateway: 'http://127.0.0.1:9119/' }
     })
@@ -45,7 +45,9 @@ describe('the state file', () => {
     expect(state.seq['session-a']).toBe(42)
     expect(state.sent['session-a:7']).toBe(1789957143)
     expect(state.invalid['dev-1']).toBe(1789957143)
-    expect(state.tickets).toEqual([{ id: 'ticket-1', installationId: 'dev-2', token: 'ExponentPushToken[x]' }])
+    expect(state.tickets).toEqual([
+      { id: 'ticket-1', installationId: 'dev-2', token: 'ExponentPushToken[x]', at: 1789957100 }
+    ])
     expect(state.vapid?.publicKey).toBe('pub')
     expect(state.oidc?.refreshToken).toBe('rt')
   })

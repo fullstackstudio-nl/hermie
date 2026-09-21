@@ -33,6 +33,18 @@ import path from 'node:path'
 
 import type { ExpoTicket } from './expo'
 
+/**
+ * An Expo ticket waiting for its receipt.
+ *
+ * `at` is why this is not simply an `ExpoTicket`: Expo keeps a receipt for about
+ * a day and answers nothing for an id it has not resolved, so without a
+ * timestamp a ticket that will never resolve is polled for ever.
+ */
+export interface PendingTicket extends ExpoTicket {
+  /** Unix seconds the ticket was accepted. */
+  at: number
+}
+
 /** Bumped when a reader could not safely take an older file. */
 export const PUSH_STATE_VERSION = 1
 
@@ -62,7 +74,7 @@ export interface PushState {
   /** installation id → unix seconds its address was refused for good. */
   invalid: Record<string, number>
   /** Accepted Expo tickets still waiting for a receipt. */
-  tickets: ExpoTicket[]
+  tickets: PendingTicket[]
   vapid?: VapidKeyPair
   oidc?: StoredRefreshToken
 }
@@ -106,12 +118,12 @@ const numberMap = (value: unknown): Record<string, number> => {
 
 const str = (value: unknown): string => (typeof value === 'string' ? value : '')
 
-function ticketsOf(value: unknown): ExpoTicket[] {
+function ticketsOf(value: unknown): PendingTicket[] {
   if (!Array.isArray(value)) {
     return []
   }
 
-  const out: ExpoTicket[] = []
+  const out: PendingTicket[] = []
 
   for (const entry of value as Record<string, unknown>[]) {
     const id = str(entry?.id)
@@ -120,7 +132,14 @@ function ticketsOf(value: unknown): ExpoTicket[] {
     // Only an ACCEPTED ticket is worth keeping: a receipt is read by id, and an
     // entry with no id has nothing to look up.
     if (id && installationId) {
-      out.push({ id, installationId, token: str(entry.token) })
+      const at = entry?.at
+
+      out.push({
+        id,
+        installationId,
+        token: str(entry.token),
+        at: typeof at === 'number' && Number.isFinite(at) ? at : 0
+      })
     }
   }
 

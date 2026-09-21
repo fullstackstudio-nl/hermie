@@ -203,7 +203,10 @@ export class GatewayLink {
         this.attempt = 0
         await this.waitForClose()
       } catch (error) {
-        this.log(`push: gateway connection failed — ${error instanceof Error ? error.message : String(error)}`)
+        // A failure caused by `stop()` is not news; it is what was asked for.
+        if (this.running) {
+          this.log(`push: gateway connection failed — ${error instanceof Error ? error.message : String(error)}`)
+        }
       }
 
       if (!this.running) {
