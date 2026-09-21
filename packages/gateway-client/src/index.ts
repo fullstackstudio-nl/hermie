@@ -109,7 +109,8 @@ export {
   SNIPPET_MATCH_CLOSE,
   SNIPPET_MATCH_OPEN,
   type SnippetSegment,
-  snippetSegments
+  snippetSegments,
+  tidySnippet
 } from './session-search'
 export { DialPlanSocketFactory, type SocketCloseInfo, type WebSocketConstructorLike } from './socket-factory'
 export {

@@ -205,6 +205,21 @@ export const strings = {
     section: 'MESSAGES',
     conversations: (count: number) => (count === 1 ? '1 conversation' : `${count} conversations`),
     noMatches: (query: string) => `No conversation matches “${query}”.`,
+
+    /**
+     * The second half of the search, and the one sentence that has to be right.
+     *
+     * The gateway answers one hit per conversation (see
+     * `packages/gateway-client/src/session-search.ts`), so this heading counts
+     * CHATS and never messages. "3 messages" over three rows that are three
+     * different chats would be a number nobody could check.
+     */
+    messagesHeader: 'IN MESSAGES',
+    messagesSearching: 'Searching messages…',
+    messagesNone: 'No messages match.',
+    messagesHint: 'Only the best match per chat is shown.',
+    messageOpen: (bot: string) => `Open ${bot}’s chat at this message`,
+
     unreadLabel: (count: number) => (count === 1 ? '1 unread message' : `${count} unread messages`),
     offline: 'Offline — showing the last saved list.',
     footnote: 'Your conversations stay with your gateway.',
@@ -422,6 +437,14 @@ export const strings = {
     stale: 'This conversation lost its connection to the gateway. It reattaches on the next open.',
     failed: (message: string) => `This conversation could not be opened: ${message}`,
     empty: 'Nothing has been said in this chat yet.',
+    /**
+     * A search hit opened this chat and the row is not in it.
+     *
+     * The gateway matched the conversation, not a row — it does not say which
+     * one — so this is what honesty sounds like: the chat is the right one, the
+     * message is further back than the transcript has, and the reader can scroll.
+     */
+    findMissed: (query: string) => `“${query}” is in this chat, further back than it has loaded.`,
     unknownAuthor: 'Someone else started a turn…',
     thinking: 'Thinking',
     toolRunning: 'running',

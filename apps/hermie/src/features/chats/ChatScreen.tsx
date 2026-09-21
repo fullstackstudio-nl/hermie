@@ -65,6 +65,8 @@ import { FileUploadError, MAX_UPLOAD_BYTES } from './file-upload'
 import { ChatSheetHost, type RequestItem } from './ChatSheetHost'
 import type { AttachmentInput, ModelChoice } from './chat-controller'
 import type { ManualSheet } from './sheet-host'
+import { useChatRuntime } from './ChatRuntime'
+import { findMatchingItem } from '../search'
 import { useChat, type UseChatResult } from './useChat'
 
 export interface OpenChatOptions {
@@ -76,15 +78,28 @@ export interface OpenChatOptions {
    * follow it across chats without searching for where it went.
    */
   focusItemId?: string
+  /**
+   * Land on the newest row that contains these words.
+   *
+   * Text rather than an id because the gateway's search cannot name a row: it
+   * projects no message id and no message timestamp, so a hit points at a
+   * conversation and this side has to find the row again from the same words
+   * the reader typed (`features/search/find-in-chat.ts`). When it is not in
+   * what the chat has loaded, the chat says so rather than scrolling somewhere
+   * plausible-looking.
+   */
+  findText?: string
 }
 
 export type ChatScreenProps = {
   /** The compact shell passes the bot through navigation params. */
-  route?: { params?: { bot?: string; focusItemId?: string } }
+  route?: { params?: { bot?: string; focusItemId?: string; findText?: string } }
   /** The regular shell passes it directly. */
   bot?: string
   /** Scroll here once the transcript is on screen. */
   focusItemId?: string
+  /** Scroll to the newest row containing these words; see `OpenChatOptions.findText`. */
+  findText?: string
   /** Shown as the header's back chevron; absent on the regular shell. */
   onBack?: () => void
   /** Open another bot's chat — a tapped DM card or sender chip. */
@@ -101,6 +116,9 @@ export type ChatScreenProps = {
   onToggleSidebar?: () => void
 }
 
+/** How long a found row stays lit. Long enough to see, short enough not to be a state. */
+const HIGHLIGHT_MS = 2_000
+
 const REASONING_OPTIONS: PickerOption[] = [
   { value: 'none', label: 'Off', detail: 'No extra thinking' },
   { value: 'minimal', label: 'Minimal' },
@@ -115,6 +133,7 @@ const REASONING_OPTIONS: PickerOption[] = [
 export function ChatScreen({
   route,
   bot,
+  findText,
   focusItemId,
   onBack,
   onOpenBot,
@@ -124,6 +143,7 @@ export function ChatScreen({
   const { status } = useGateway()
   const botName = bot ?? route?.params?.bot ?? ''
   const focus = focusItemId ?? route?.params?.focusItemId
+  const find = findText ?? route?.params?.findText
 
   /**
    * A dead session takes the whole screen, inside a chat as well as beside one.
@@ -148,6 +168,7 @@ export function ChatScreen({
   return (
     <Conversation
       botName={botName}
+      findText={find}
       focusItemId={focus}
       key={botName}
       onBack={onBack}
@@ -216,6 +237,7 @@ function uploadChipError(error: FileUploadError): string {
 
 function Conversation({
   botName,
+  findText,
   focusItemId,
   onBack,
   onOpenBot,
@@ -223,6 +245,7 @@ function Conversation({
   onToggleSidebar
 }: {
   botName: string
+  findText?: string
   focusItemId?: string
   onBack?: () => void
   onOpenBot?: (botName: string, options?: OpenChatOptions) => void
@@ -230,6 +253,7 @@ function Conversation({
   onToggleSidebar?: () => void
 }) {
   const chat = useChat(botName)
+  const runtime = useChatRuntime()
   const cronJobs = useCronStore(state => state.jobs)
   const { config, http, status } = useGateway()
   const view = useChatView(botName)
@@ -275,6 +299,10 @@ function Conversation({
   const [newCount, setNewCount] = useState(0)
   const [away, setAway] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  const [highlightId, setHighlightId] = useState<string | undefined>(undefined)
+  /** The query this screen has already answered, and the one it has already expanded for. */
+  const searchedFor = useRef<string | undefined>(undefined)
+  const expandedFor = useRef<string | undefined>(undefined)
   const [pendingModel, setPendingModel] = useState<{ value: string; message?: string } | null>(null)
   const [transcript, setTranscript] = useState<SubagentTranscript | null>(null)
   const [agentsNotice, setAgentsNotice] = useState<string | null>(null)
@@ -451,6 +479,76 @@ function Conversation({
       focused.current = focusItemId
     }
   }, [chat.items, focusItemId])
+
+  /**
+   * Land on the words a search hit was about.
+   *
+   * The gateway matched a CONVERSATION and cannot say which row, so the row is
+   * found here, from the same query. Three outcomes and each one is a different
+   * thing to tell the reader:
+   *
+   *  - found: scroll to it and light it up for a moment;
+   *  - not found and there is more history to read: read it (once) and look
+   *    again, which is the only paging this app has — see
+   *    `ChatController.expandHistory`;
+   *  - not found and there is nothing more: say so. Scrolling to the bottom
+   *    with no explanation is how a working search reads as a broken one.
+   *
+   * Both refs are keyed on the QUERY rather than being booleans, so opening the
+   * same chat from a second search starts the whole sequence again.
+   */
+  useEffect(() => {
+    if (!findText || searchedFor.current === findText) {
+      return
+    }
+
+    const found = findMatchingItem(chat.items, findText)
+
+    if (found) {
+      if (listRef.current?.scrollToItem(found)) {
+        searchedFor.current = findText
+        setHighlightId(found)
+      }
+
+      return
+    }
+
+    // Still arriving. A miss against a half-hydrated transcript is not a miss.
+    if (chat.hydration !== 'live' && chat.hydration !== 'stale') {
+      return
+    }
+
+    if (expandedFor.current !== findText) {
+      expandedFor.current = findText
+
+      void runtime?.controller
+        .expandHistory(botName)
+        .then(grew => {
+          if (!grew && searchedFor.current !== findText) {
+            searchedFor.current = findText
+            setNotice(strings.chat.findMissed(findText))
+          }
+        })
+        .catch(() => undefined)
+
+      return
+    }
+
+    searchedFor.current = findText
+    setNotice(strings.chat.findMissed(findText))
+  }, [botName, chat.hydration, chat.items, findText, runtime])
+
+  // The highlight is a moment, not a state: it says "here", and a row that
+  // stayed lit would read as a selection nobody made.
+  useEffect(() => {
+    if (!highlightId) {
+      return
+    }
+
+    const timer = setTimeout(() => setHighlightId(undefined), HIGHLIGHT_MS)
+
+    return () => clearTimeout(timer)
+  }, [highlightId])
 
   /**
    * Handles whose chat is live and mid-turn.
@@ -1131,6 +1229,7 @@ function Conversation({
                 />
               ) : null
             }
+            {...(highlightId ? { highlightItemId: highlightId } : {})}
             images={images}
             items={chat.items}
             newMessageCount={newCount}

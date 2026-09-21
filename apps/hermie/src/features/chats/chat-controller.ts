@@ -66,6 +66,15 @@ export const REST_HISTORY_THRESHOLD = 400
 /** Rows the REST transcript hands back for a full load. */
 export const REST_HISTORY_LIMIT = 200
 
+/**
+ * The biggest window the REST transcript will serve.
+ *
+ * `_get_session_messages` clamps every limit to 500, so this is a ceiling and
+ * not a preference: asking for more answers with 500 and no indication that it
+ * did. It is what `expandHistory` reaches for.
+ */
+export const REST_HISTORY_MAX = 500
+
 /** Rows a tail reconcile asks for. Enough to cover one foreign turn. */
 export const TAIL_ROW_LIMIT = 30
 
@@ -610,6 +619,48 @@ export class ChatController {
         return !chat.turn.active || chat.turn.foreignReconcilePending ? this.reconcileTailFor(name) : Promise.resolve()
       })
     ])
+  }
+
+  /**
+   * Load a bigger window of this chat's history, once.
+   *
+   * There is no older-history PAGING in this app: the transcript is a tail that
+   * reconciles, not a scrollback that grows at the far end, and `onEndReached`
+   * on the list is deliberately a no-op. What this does instead is re-read the
+   * same conversation at the REST route's maximum window and fold it in through
+   * the same `applyHistory` a hydration uses — so every id the screen is already
+   * painting survives, and the only change is that older rows appear above.
+   *
+   * It exists for one caller: a search hit names a conversation and never a row
+   * (see `features/search`), so the row has to be found on this side, and the
+   * loaded tail may not reach back far enough to contain it. Answering whether
+   * the transcript actually GREW is the whole contract — a caller that cannot
+   * tell the difference between "nothing more to load" and "loaded, still not
+   * there" has nothing honest to say to the reader.
+   *
+   * A gateway with no REST transcript answers false without pretending: the RPC
+   * fallback is unpaginated, so it has already handed over everything there is.
+   */
+  async expandHistory(botName: string): Promise<boolean> {
+    const chat = this.chats.getState().chats[botName]
+
+    if (!chat?.resolvedSessionId) {
+      return false
+    }
+
+    const before = chat.order.length
+    const rows = await this.gateway.fetchMessages(chat.resolvedSessionId, {
+      limit: REST_HISTORY_MAX,
+      order: 'latest'
+    })
+
+    if (!rows?.length) {
+      return false
+    }
+
+    this.chats.getState().applyHistory(botName, rowsToItems(rows, 'rest'))
+
+    return (this.chats.getState().chats[botName]?.order.length ?? 0) > before
   }
 
   /** Fetch the newest rows and fold them in: fills foreign placeholders, joins DM replies. */

@@ -201,7 +201,7 @@ export function snippetSegments(snippet: string): SnippetSegment[] {
 }
 
 /**
- * The snippet as one line of prose.
+ * The snippet tidied for display, WITH its markers.
  *
  * Two cosmetic passes, both there because of what the index holds: the FTS row
  * is the JSON-ENCODED message, so a window into it routinely opens or closes
@@ -209,13 +209,20 @@ export function snippetSegments(snippet: string): SnippetSegment[] {
  * Whitespace is collapsed because a snippet can span a fenced code block, and a
  * run of JSON punctuation is trimmed off each END only — never from the middle,
  * where it may be the message's own text.
+ *
+ * The markers survive, because the highlight is the gateway's account of what
+ * FTS5 actually matched and a client cannot re-derive it: a prefix term matches
+ * a longer word than the one that was typed.
  */
-export function plainSnippet(snippet: string): string {
-  const text = snippetSegments(snippet)
-    .map(segment => segment.text)
-    .join('')
-    .replace(/\s+/g, ' ')
-    .trim()
+export function tidySnippet(snippet: string): string {
+  const text = snippet.replace(/\s+/g, ' ').trim()
 
   return text.replace(/^[{}[\]",:\\]+\s*/, '').replace(/\s*[{}[\]",:\\]+$/, '')
+}
+
+/** The same text with the markers taken out: a snippet as one line of prose. */
+export function plainSnippet(snippet: string): string {
+  return snippetSegments(tidySnippet(snippet))
+    .map(segment => segment.text)
+    .join('')
 }

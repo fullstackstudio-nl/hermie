@@ -22,7 +22,7 @@ import { useShortcut } from '../ui/useShortcut'
 
 export type CompactStackParamList = {
   Bots: undefined
-  Chat: { bot: string; focusItemId?: string }
+  Chat: { bot: string; focusItemId?: string; findText?: string }
   Activity: undefined
   Cron: { jobId?: string } | undefined
   Settings: undefined
@@ -51,7 +51,12 @@ function BotsRoute() {
   return (
     <GlassSurface contentStyle={{ flex: 1 }} radius={0} shadow="none" style={{ flex: 1 }} variant="panel">
       <BotsScreenOrSignedOut
-        onOpenBot={bot => navigation.navigate('Chat', { bot: bot.name })}
+        onOpenBot={(bot, options) =>
+          navigation.navigate('Chat', {
+            bot: bot.name,
+            ...(options?.findText ? { findText: options.findText } : {})
+          })
+        }
         onOpenSection={section => navigation.navigate(SECTION_ROUTES[section] as 'Settings')}
       />
     </GlassSurface>
@@ -62,7 +67,7 @@ function ChatRoute({
   route,
   navigation
 }: {
-  route: { params?: { bot?: string; focusItemId?: string } }
+  route: { params?: { bot?: string; focusItemId?: string; findText?: string } }
   navigation: NativeStackNavigationProp<CompactStackParamList>
 }) {
   return (

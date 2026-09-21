@@ -91,6 +91,8 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
   const [section, setSection] = useState<BotsSection | null>(initial?.section ?? null)
   const [selectedBot, setSelectedBot] = useState<string | undefined>(initial?.bot)
   const [focusItemId, setFocusItemId] = useState<string | undefined>(undefined)
+  /** Words a search hit asked this chat to land on; see `OpenChatOptions.findText`. */
+  const [findText, setFindText] = useState<string | undefined>(undefined)
   const [cronJobId, setCronJobId] = useState<string | undefined>(undefined)
   // Showing the list temporarily is a thing this WINDOW is doing, not a thing the
   // owner has decided about their list, so it never reaches the store.
@@ -105,6 +107,7 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
     // only scrolls when the id it is handed changes, and following the same DM
     // twice should work twice.
     setFocusItemId(options?.focusItemId)
+    setFindText(options?.findText)
     setSection(null)
     // Picking a chat was the errand the temporary list was opened for.
     setListOverlay(false)
@@ -177,7 +180,7 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
   const list = (
     <BotsScreen
       currentTab={section ?? 'chats'}
-      onOpenBot={bot => openBot(bot.name)}
+      onOpenBot={(bot, options) => openBot(bot.name, options)}
       onOpenSection={openSection}
       selectedBot={section === null ? selectedBot : undefined}
       variant="sidebar"
@@ -225,7 +228,7 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
           */
           <BotsScreen
             currentTab={section ?? 'chats'}
-            onOpenBot={bot => openBot(bot.name)}
+            onOpenBot={(bot, options) => openBot(bot.name, options)}
             onOpenSection={openSection}
             onShowList={showList}
             selectedBot={section === null ? selectedBot : undefined}
@@ -300,6 +303,7 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
             >
               <ChatScreen
                 bot={selectedBot}
+                findText={findText}
                 focusItemId={focusItemId}
                 onOpenBot={openBot}
                 onOpenCron={openCron}

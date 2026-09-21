@@ -17,6 +17,7 @@ import {
   searchSessions,
   SESSION_SEARCH_LIMIT_CAP,
   snippetSegments,
+  tidySnippet,
   type SessionSearchHttp
 } from './session-search'
 
@@ -137,6 +138,10 @@ describe('the snippet', () => {
     // `>>>` is a diff conflict marker and a shell redirect. Highlighting to the
     // end of the line on one would be a bug that only ever shows up on real data.
     expect(snippetSegments('cat a >>> b')).toEqual([{ match: false, text: 'cat a >>> b' }])
+  })
+
+  it('keeps the markers when it tidies, because a prefix term matched a longer word', () => {
+    expect(tidySnippet('  the >>>invoic<<<e\n\nservice"}')).toBe('the >>>invoic<<<e service')
   })
 
   it('trims the JSON the index is built over off each end, and only off the ends', () => {

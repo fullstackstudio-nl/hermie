@@ -184,6 +184,15 @@ export interface TranscriptListProps extends Omit<TranscriptContext, 'onSelectTe
   onSteerQueued?: (id: string) => void
   onEditQueued?: (id: string) => void
   onDeleteQueued?: (id: string) => void
+  /**
+   * One row lit up for a moment, because something outside the chat pointed at it.
+   *
+   * A flat wash behind the row rather than anything on the bubble itself: the
+   * bubbles carry the chat's accent and the roles' own colours, and repainting
+   * one of those to mean "here" would say something about the message instead of
+   * about the reader's arrival at it.
+   */
+  highlightItemId?: string
   /** Messages that landed while the reader was scrolled away. */
   newMessageCount?: number
   onScrolledAwayFromBottom?: (away: boolean) => void
@@ -906,6 +915,7 @@ function TranscriptListBody({
   onSteerQueued,
   onEditQueued,
   onDeleteQueued,
+  highlightItemId,
   newMessageCount = 0,
   onScrolledAwayFromBottom,
   onEndReached,
@@ -1325,15 +1335,42 @@ function TranscriptListBody({
           <TypingIndicator />
         </View>
       ) : (
-        <TranscriptRowFrame
-          context={context}
-          {...(dmRoles[entry.item.id] ? { dmRole: dmRoles[entry.item.id] } : {})}
-          entry={entry}
-          layout={layout[entry.item.id] ?? FALLBACK_LAYOUT}
-          {...(entry.item.id === lastOwnId && receipt ? { receipt } : {})}
-        />
+        <View
+          style={
+            entry.item.id === highlightItemId
+              ? {
+                  backgroundColor: theme.glass.row.solid,
+                  borderRadius: theme.radii.card,
+                  marginHorizontal: -theme.space.sm,
+                  paddingHorizontal: theme.space.sm
+                }
+              : undefined
+          }
+          testID={entry.item.id === highlightItemId ? `${testID}-highlight` : undefined}
+        >
+          <TranscriptRowFrame
+            context={context}
+            {...(dmRoles[entry.item.id] ? { dmRole: dmRoles[entry.item.id] } : {})}
+            entry={entry}
+            layout={layout[entry.item.id] ?? FALLBACK_LAYOUT}
+            {...(entry.item.id === lastOwnId && receipt ? { receipt } : {})}
+          />
+        </View>
       ),
-    [context, dmRoles, handlers.accent, lastOwnId, layout, onDeleteQueued, onEditQueued, onSteerQueued, receipt, testID]
+    [
+      context,
+      dmRoles,
+      handlers.accent,
+      highlightItemId,
+      lastOwnId,
+      layout,
+      onDeleteQueued,
+      onEditQueued,
+      onSteerQueued,
+      receipt,
+      testID,
+      theme
+    ]
   )
 
   return (

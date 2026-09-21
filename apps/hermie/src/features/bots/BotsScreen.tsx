@@ -37,6 +37,7 @@ import {
   type NativeSyntheticEvent
 } from 'react-native'
 
+import { snippetSegments, tidySnippet } from '@hermie/gateway-client'
 import { unreadCountSince } from '@hermie/transcript'
 
 import { useGateway } from '../../gateway'
@@ -56,7 +57,9 @@ import { useTheme } from '../../ui/theme'
 import { useHover } from '../../ui/useHover'
 import { useNumberedShortcuts, useShortcut } from '../../ui/useShortcut'
 import { CONTROL_MIN_HEIGHT, TAP_SLOP, type AccentName } from '../../ui/tokens'
+import { formatListTime } from '../../chat-ui'
 import { useChatRuntime } from '../chats/ChatRuntime'
+import { type MessageMatch, useMessageSearch } from '../search'
 import { BotRow } from './BotRow'
 import { ConnectionLine } from './ConnectionLine'
 import { dragAnchors, entryIndexByKey } from './drag-order'
@@ -69,9 +72,21 @@ import { useRowDrag } from './use-row-drag'
 
 export type { BotsSection }
 
+/** What a tap on a row asks the shell for, beyond the bot itself. */
+export interface OpenBotOptions {
+  /**
+   * Words to land on rather than the bottom of the chat.
+   *
+   * It is TEXT and not a row id because the gateway's search cannot name a row
+   * — see `features/search/find-in-chat.ts`. The chat screen looks for it in
+   * what it has loaded and says so when it is not there.
+   */
+  findText?: string
+}
+
 export interface BotsScreenProps {
   /** Compact shell: navigate. Regular shell: select in place. */
-  onOpenBot?: (bot: Bot) => void
+  onOpenBot?: (bot: Bot, options?: OpenBotOptions) => void
   selectedBot?: string | undefined
   onOpenSection?: (section: BotsSection) => void
   /** Which footer tab reads as current; the wide shell drives this from its overlay. */
@@ -102,6 +117,9 @@ type ListItem =
   | { key: string; kind: 'sectionEmpty'; id: string }
   | { key: string; kind: 'bot'; bot: Bot; archived: boolean }
   | { key: string; kind: 'archiveHeader'; count: number }
+  | { key: string; kind: 'noNameMatch'; query: string }
+  | { key: string; kind: 'messagesHeader'; searching: boolean; count: number }
+  | { key: string; kind: 'message'; match: MessageMatch; bot: Bot }
 
 /** Name or description, case-insensitively — what a reader would type. */
 function matches(bot: Bot, query: string): boolean {
@@ -154,6 +172,15 @@ export function BotsScreen({
   const [archiveOpen, setArchiveOpen] = useState(false)
   const [menuFor, setMenuFor] = useState<string | null>(null)
 
+  /**
+   * The gateway half of the search.
+   *
+   * Names are matched on this device and are instant; messages are a fan-out
+   * over the gateway behind a 300 ms debounce, so they land under the rows they
+   * belong beneath rather than reordering a list somebody is already reading.
+   */
+  const messageSearch = useMessageSearch(query)
+
   const rail = variant === 'rail'
   const sidebar = variant === 'sidebar'
   const signedOut = status === 'needs_signin'
@@ -161,7 +188,14 @@ export function BotsScreen({
   // Stable identities, so that `BotRow`'s memo survives a roster refresh. A
   // fresh arrow per render would re-render forty rows because one of them
   // changed, which is the whole cost the memo is there to avoid.
-  const openBot = useCallback((bot: Bot) => onOpenBot?.(bot), [onOpenBot])
+  // The options argument is omitted rather than passed as `undefined` when there
+  // are none: a tap on a row is the same call it has always been, and every
+  // shell's handler can keep reading its second parameter as "somebody asked for
+  // something extra".
+  const openBot = useCallback(
+    (bot: Bot, options?: OpenBotOptions) => (options ? onOpenBot?.(bot, options) : onOpenBot?.(bot)),
+    [onOpenBot]
+  )
   const moveBot = useCallback((name: string, offset: number) => {
     useChatLayoutStore.getState().moveBy(name, offset)
   }, [])
@@ -308,8 +342,49 @@ export function BotsScreen({
       }
     }
 
+    /*
+     * The message matches, last.
+     *
+     * Below every row the local filter produced, because a name match is
+     * instant and certain and a message match is neither: it is one round trip
+     * per bot behind a debounce, and putting it above would shuffle the list
+     * under a finger that was already reaching for a row.
+     *
+     * The block is keyed on the query these results ANSWER rather than on the
+     * field's current value, so a stale section cannot survive a new query by
+     * looking similar enough to be reused.
+     */
+    if (narrowed) {
+      /*
+       * "No conversation matches" used to be the list's EMPTY component, and a
+       * list with a message section in it is never empty. So the line moves
+       * into the list, where it can sit above the matches rather than being
+       * switched off by them.
+       */
+      if (!out.some(item => item.kind === 'bot')) {
+        out.push({ key: 'no-name-match', kind: 'noNameMatch', query: query.trim() })
+      }
+    }
+
+    if (narrowed && messageSearch.query === query.trim()) {
+      out.push({
+        count: messageSearch.matches.length,
+        key: 'messages',
+        kind: 'messagesHeader',
+        searching: messageSearch.searching
+      })
+
+      for (const match of messageSearch.matches) {
+        const bot = byName[match.bot]
+
+        if (bot) {
+          out.push({ bot, key: `message:${match.bot}`, kind: 'message', match })
+        }
+      }
+    }
+
     return out
-  }, [archiveOpen, archivedNames, byName, editing, query, sections])
+  }, [archiveOpen, archivedNames, byName, editing, messageSearch, query, sections])
 
   const hasRows = items.some(item => item.kind === 'bot')
 
@@ -596,6 +671,32 @@ export function BotsScreen({
           if (item.kind === 'archiveHeader') {
             return (
               <ArchiveHeader count={item.count} onToggle={() => setArchiveOpen(open => !open)} open={archiveOpen} />
+            )
+          }
+
+          if (item.kind === 'noNameMatch') {
+            return (
+              <Text
+                color="textMuted"
+                style={{ paddingHorizontal: theme.space.lg, paddingVertical: theme.space.md }}
+                testID="bots-empty"
+              >
+                {strings.bots.noMatches(item.query)}
+              </Text>
+            )
+          }
+
+          if (item.kind === 'messagesHeader') {
+            return <MessagesHeader count={item.count} searching={item.searching} />
+          }
+
+          if (item.kind === 'message') {
+            return (
+              <MessageHit
+                bot={item.bot}
+                match={item.match}
+                onPress={() => openBot(item.bot, { findText: query.trim() })}
+              />
             )
           }
 
@@ -1140,6 +1241,102 @@ function EditBar({ onAddDivider }: { onAddDivider: (id: string) => void }) {
         </Text>
       </Pressable>
     </View>
+  )
+}
+
+/**
+ * The heading over the message matches.
+ *
+ * It counts CHATS, and the hint under it says why: the gateway collapses every
+ * hit in a conversation onto one result, so the number of rows here is the
+ * number of chats that contain the words, not the number of times they appear.
+ * Writing "3 messages" over it would be a count nobody could verify by opening
+ * them.
+ */
+function MessagesHeader({ count, searching }: { count: number; searching: boolean }) {
+  const theme = useTheme()
+
+  return (
+    <View
+      style={{
+        gap: 2,
+        paddingBottom: theme.space.sm,
+        paddingHorizontal: theme.space.lg,
+        paddingTop: theme.space.lg
+      }}
+      testID="message-matches-header"
+    >
+      <Text color="textMuted" style={{ fontWeight: '600', letterSpacing: 0.6 }} variant="meta">
+        {strings.bots.messagesHeader}
+      </Text>
+
+      <Text color="textFaint" variant="meta">
+        {searching
+          ? strings.bots.messagesSearching
+          : count === 0
+            ? strings.bots.messagesNone
+            : strings.bots.messagesHint}
+      </Text>
+    </View>
+  )
+}
+
+/**
+ * One chat whose transcript contains the words.
+ *
+ * The snippet is the gateway's own, markers and all: `>>>` and `<<<` wrap what
+ * FTS5 matched, which is not always what was typed — a prefix term matches a
+ * longer word — so the emphasis is worth carrying rather than re-deriving here
+ * and getting subtly wrong.
+ */
+function MessageHit({ bot, match, onPress }: { bot: Bot; match: MessageMatch; onPress: () => void }) {
+  const theme = useTheme()
+  const hover = useHover()
+  const segments = useMemo(() => snippetSegments(tidySnippet(match.snippet)), [match.snippet])
+
+  return (
+    <Pressable
+      accessibilityLabel={strings.bots.messageOpen(bot.displayName)}
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => ({
+        backgroundColor: hover.hovered ? theme.glass.row.solid : 'transparent',
+        borderRadius: theme.radii.card,
+        cursor: 'pointer',
+        gap: 2,
+        marginHorizontal: theme.space.sm,
+        opacity: pressed ? 0.7 : 1,
+        paddingHorizontal: theme.space.md,
+        paddingVertical: theme.space.md
+      })}
+      testID={`message-match-${bot.name}`}
+      {...hover.props}
+    >
+      <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.sm }}>
+        <Text numberOfLines={1} style={{ flex: 1, fontWeight: '600' }} variant="preview">
+          {bot.displayName}
+        </Text>
+
+        {match.at === undefined ? null : (
+          <Text color="textFaint" variant="meta">
+            {formatListTime(match.at)}
+          </Text>
+        )}
+      </View>
+
+      <Text color="textMuted" numberOfLines={2} variant="preview">
+        {segments.map((segment, index) => (
+          <Text
+            color={segment.match ? 'accentText' : 'textMuted'}
+            key={index}
+            style={segment.match ? { fontWeight: '600' } : undefined}
+            variant="preview"
+          >
+            {segment.text}
+          </Text>
+        ))}
+      </Text>
+    </Pressable>
   )
 }
 
