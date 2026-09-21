@@ -177,7 +177,7 @@ function ProviderRow({
   const theme = useTheme()
 
   return (
-    <Pressable accessibilityRole="radio" accessibilityState={{ selected }} onPress={onPress}>
+    <Pressable accessibilityRole="radio" aria-checked={selected} onPress={onPress}>
       <InsetRow style={{ alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' }}>
         <Text variant="body">{provider.displayName}</Text>
         {selected ? (

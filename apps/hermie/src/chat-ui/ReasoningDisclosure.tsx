@@ -93,7 +93,7 @@ export function ReasoningDisclosure({
       {openable ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityState={{ expanded }}
+          aria-expanded={expanded}
           hitSlop={TAP_SLOP}
           // Wrapped: `toggle` takes the row's height change, and a Pressable would
           // hand it a gesture event instead. This row cannot measure one, so it

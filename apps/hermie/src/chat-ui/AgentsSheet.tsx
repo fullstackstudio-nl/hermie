@@ -166,7 +166,7 @@ function AgentRow({
           {live && onSteer ? (
             <Pressable
               accessibilityRole="button"
-              accessibilityState={{ expanded: steering }}
+              aria-expanded={steering}
               hitSlop={TAP_SLOP}
               onPress={() => setSteering(current => !current)}
               style={ACTION_STYLE}

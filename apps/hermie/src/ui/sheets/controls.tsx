@@ -59,7 +59,8 @@ export function SwitchRow({ label, hint, value, onChange, disabled = false, test
     <Pressable
       accessibilityLabel={label}
       accessibilityRole="switch"
-      accessibilityState={{ checked: value, disabled }}
+      aria-checked={value}
+      aria-disabled={disabled}
       disabled={disabled}
       onPress={() => onChange(!value)}
       testID={testID}
@@ -165,7 +166,7 @@ export function SegmentedRow<T extends string>({ label, options, value, onChange
           return (
             <Pressable
               accessibilityRole="radio"
-              accessibilityState={{ selected }}
+              aria-checked={selected}
               key={option.value}
               onPress={() => onChange(option.value)}
               style={{ flex: 1 }}

@@ -334,7 +334,7 @@ function OptionPills({
           return (
             <Text
               accessibilityRole="button"
-              accessibilityState={{ selected }}
+              aria-selected={selected}
               key={option.id}
               onPress={() => onChange(option.id)}
               color={selected ? 'onAccent' : 'textMuted'}

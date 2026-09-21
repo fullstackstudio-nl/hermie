@@ -190,8 +190,13 @@ describe('Settings → Appearance', () => {
       expect(screen.getByTestId(`theme-card-${name}`)).toBeTruthy()
     }
 
-    expect(screen.getByTestId('theme-card-blue').props.accessibilityState.selected).toBe(true)
-    expect(screen.getByTestId('theme-card-lime').props.accessibilityState.selected).toBe(false)
+    // The card is authored with `aria-checked`, because react-native-web drops
+    // an `accessibilityState` object entirely and a radio's state is `checked`
+    // in ARIA rather than `selected`. React Native normalises the aria spelling
+    // back into `accessibilityState` on the host node, which is why this
+    // assertion did not have to move: the native announcement is unchanged.
+    expect(screen.getByTestId('theme-card-blue').props.accessibilityState.checked).toBe(true)
+    expect(screen.getByTestId('theme-card-lime').props.accessibilityState.checked).toBe(false)
   })
 
   it('switches the theme, and the preview follows', () => {

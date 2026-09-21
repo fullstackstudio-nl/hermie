@@ -63,7 +63,7 @@ function Truncatable({ value, testID }: { value: string; testID?: string }) {
       {long ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityState={{ expanded: open }}
+          aria-expanded={open}
           hitSlop={TAP_SLOP}
           onPress={() => setOpen(current => !current)}
           style={{ justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT }}
@@ -156,7 +156,7 @@ export function ToolCard({ item, presentation = 'collapsed', expanded, onToggleE
       <Pressable
         accessibilityLabel={`${item.name}. ${summaryLine}`}
         accessibilityRole="button"
-        accessibilityState={{ expanded: isExpanded }}
+        aria-expanded={isExpanded}
         onPress={toggle}
         style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
         testID={`tool-toggle-${item.id}`}

@@ -228,7 +228,7 @@ export const BotRow = memo(function BotRow({
     <Pressable
       accessibilityLabel={label}
       accessibilityRole="button"
-      accessibilityState={{ selected }}
+      aria-selected={selected}
       // 300ms, not the default 500: a lift the reader has to wait half a second for
       // reads as a list that did not notice them.
       delayLongPress={300}

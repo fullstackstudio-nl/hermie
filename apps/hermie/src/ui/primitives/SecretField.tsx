@@ -41,7 +41,7 @@ export const SecretField = forwardRef<TextInput, SecretFieldProps>(function Secr
       <TextField {...rest} ref={ref} secureTextEntry={!revealed} />
       <Pressable
         accessibilityRole="button"
-        accessibilityState={{ checked: revealed }}
+        aria-checked={revealed}
         hitSlop={8}
         onPress={() => setRevealed(current => !current)}
         style={({ pressed }) => ({ alignSelf: 'flex-start', opacity: pressed ? 0.6 : 1 })}

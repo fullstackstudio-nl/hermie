@@ -161,7 +161,7 @@ export function OnboardingCard({
               {onBack ? (
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityState={{ disabled: backDisabled }}
+                  aria-disabled={backDisabled}
                   disabled={backDisabled}
                   hitSlop={12}
                   onPress={onBack}

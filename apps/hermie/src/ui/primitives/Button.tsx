@@ -31,7 +31,8 @@ export function Button({ title, variant = 'primary', busy = false, disabled, sty
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityState={{ disabled: inactive, busy }}
+      aria-busy={busy}
+      aria-disabled={inactive}
       disabled={inactive}
       // Every button in the app is a button under a pointer, and a Mac says so with
       // the cursor. React Native 0.81 offers exactly two values, `auto` and

@@ -186,7 +186,8 @@ export function ClarifySheet({ visible, item, onLock, onSubmit, onSkip, onClose,
             return (
               <Pressable
                 accessibilityRole={question.multiSelect ? 'checkbox' : 'radio'}
-                accessibilityState={{ checked: selected, disabled: isLocked }}
+                aria-checked={selected}
+                aria-disabled={isLocked}
                 disabled={isLocked}
                 key={choice}
                 onPress={() => setValue(toggleValue(value, choice, question.multiSelect))}

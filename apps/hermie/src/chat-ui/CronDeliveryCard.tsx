@@ -61,7 +61,7 @@ export function CronDeliveryCard({
     <GlassSurface contentStyle={{ padding: theme.space.md }} style={{ maxWidth }} testID={testID} variant="card">
       <Pressable
         accessibilityRole="button"
-        accessibilityState={{ expanded }}
+        aria-expanded={expanded}
         hitSlop={TAP_SLOP}
         onPress={onToggle}
         style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}

@@ -759,7 +759,7 @@ export function Composer({
                 // The keyboard's own place in the list, announced rather than
                 // only drawn: the row is selected in the same sense a picker's
                 // row is.
-                accessibilityState={{ selected: index === activeIndex }}
+                aria-selected={index === activeIndex}
                 key={suggestion.name}
                 onPress={() => accept(suggestion)}
                 style={({ pressed }) => ({

@@ -249,7 +249,7 @@ export function Fold({ expanded, onToggle, fadeTo, lineHeight, blocks, bleed = 0
       {overflows ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityState={{ expanded }}
+          aria-expanded={expanded}
           hitSlop={TAP_SLOP}
           onPress={() => onToggle(expanded ? limit - natural : natural - limit)}
           style={{ justifyContent: 'center', marginTop: theme.space.xs, minHeight: 20 }}

@@ -85,8 +85,14 @@ function TabStrip({ current, onOpenSection }: { current: TabKey; onOpenSection: 
 
         return (
           <Pressable
+            // Named explicitly, although the label is right there under the mark.
+            // Name-from-content is allowed for `tab` and Chrome does compute it,
+            // and a second reader on the same page returned four tabs with no
+            // name at all. The label is the visible text, character for
+            // character, so the two can never drift apart.
+            accessibilityLabel={tab.label}
             accessibilityRole="tab"
-            accessibilityState={{ selected }}
+            aria-selected={selected}
             key={tab.key}
             onPress={() => (tab.key === 'chats' ? undefined : onOpenSection(tab.key))}
             style={{
@@ -103,9 +109,9 @@ function TabStrip({ current, onOpenSection }: { current: TabKey; onOpenSection: 
             {/*
               One drawn size for all four marks, and one SLOT around each of them
               so the labels sit on one line whatever the mark's own weight wants.
-              The icon is decorative: the label under it is what a screen reader
-              reads, and `Icon` hides itself from the tree so the tab is not
-              announced twice.
+              The icon is decorative and `Icon` hides itself from the tree — with
+              `aria-hidden` as well as the two native props, which is what makes
+              that true in a browser — so the tab is not announced twice.
             */}
             <Icon
               color={selected ? theme.colors.text : theme.colors.textMuted}

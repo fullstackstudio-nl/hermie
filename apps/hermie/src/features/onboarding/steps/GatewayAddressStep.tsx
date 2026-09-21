@@ -171,7 +171,7 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
       <View style={{ gap: theme.space.md }}>
         <Pressable
           accessibilityRole="button"
-          accessibilityState={{ expanded: advanced }}
+          aria-expanded={advanced}
           hitSlop={8}
           onPress={() => setAdvanced(current => !current)}
           style={({ pressed }) => ({ alignSelf: 'flex-start', opacity: pressed ? 0.6 : 1 })}

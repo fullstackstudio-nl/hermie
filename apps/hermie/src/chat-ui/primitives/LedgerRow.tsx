@@ -124,7 +124,7 @@ export function LedgerRow({
         <Pressable
           accessibilityLabel={accessibilityLabel}
           accessibilityRole="button"
-          accessibilityState={{ expanded }}
+          aria-expanded={expanded}
           hitSlop={TAP_SLOP}
           onPress={onToggle}
           style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}

@@ -152,7 +152,7 @@ function WeekdayChips({ weekdays, onChange }: { weekdays: number[]; onChange: (w
           <Pressable
             accessibilityRole="checkbox"
             accessibilityLabel={cronStrings.schedule.weekdayNames[day]}
-            accessibilityState={{ checked: selected }}
+            aria-checked={selected}
             key={cronStrings.schedule.weekdayNames[day]}
             onPress={() => onChange(selected ? weekdays.filter(value => value !== day) : [...weekdays, day])}
             style={{

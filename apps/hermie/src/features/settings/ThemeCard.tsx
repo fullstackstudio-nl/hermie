@@ -45,7 +45,9 @@ export function ThemeCard({ label, choice, scheme, selected, onPress, userThemes
     <Pressable
       accessibilityLabel={label}
       accessibilityRole="radio"
-      accessibilityState={{ selected }}
+      // A radio reports `aria-checked`; `aria-selected` is not a property this
+      // role has, and a browser ignores it.
+      aria-checked={selected}
       onPress={onPress}
       style={{ gap: space.sm, width: THEME_CARD.width }}
       testID={testID}

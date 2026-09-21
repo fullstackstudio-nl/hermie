@@ -132,7 +132,7 @@ function RailButton({
       <Pressable
         accessibilityLabel={label}
         accessibilityRole="button"
-        accessibilityState={{ selected }}
+        aria-selected={selected}
         hitSlop={TAP_SLOP}
         onPress={onPress}
         style={({ pressed }) => ({ cursor: 'pointer', opacity: pressed ? 0.6 : 1 })}

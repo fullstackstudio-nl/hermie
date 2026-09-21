@@ -1271,7 +1271,7 @@ function ArchiveHeader({ count, onToggle, open }: { count: number; onToggle: () 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityState={{ expanded: open }}
+      aria-expanded={open}
       onPress={onToggle}
       style={{
         alignItems: 'center',

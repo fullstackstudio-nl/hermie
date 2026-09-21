@@ -65,7 +65,7 @@ export function AccentSwatches({
           <Pressable
             accessibilityLabel={strings.layout.accents[name]}
             accessibilityRole="button"
-            accessibilityState={{ selected }}
+            aria-selected={selected}
             key={name}
             onPress={() => onSelect(name)}
             style={{

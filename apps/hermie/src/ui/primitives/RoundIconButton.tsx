@@ -71,7 +71,11 @@ export function RoundIconButton({
     <Pressable
       accessibilityLabel={label}
       accessibilityRole="button"
-      accessibilityState={{ disabled, ...(expanded === undefined ? {} : { expanded }) }}
+      aria-disabled={disabled}
+      // Absent rather than false when the button is not a disclosure: a button
+      // that reports `aria-expanded="false"` claims to control something that
+      // is currently closed, and most of these control nothing.
+      {...(expanded === undefined ? {} : { 'aria-expanded': expanded })}
       disabled={disabled}
       hitSlop={TAP_SLOP}
       onPress={onPress}

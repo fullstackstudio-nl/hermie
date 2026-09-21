@@ -162,7 +162,7 @@ function PackageRow({
     >
       <Pressable
         accessibilityRole="button"
-        accessibilityState={{ expanded }}
+        aria-expanded={expanded}
         onPress={() => onToggle(key)}
         testID={`licence-row-${key}`}
       >

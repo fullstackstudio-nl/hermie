@@ -107,7 +107,7 @@ export function AttachMenu({
         {choices.map(choice => (
           <Pressable
             accessibilityRole="button"
-            accessibilityState={{ busy: choice.busy ?? false }}
+            aria-busy={choice.busy ?? false}
             disabled={choice.busy}
             key={choice.id}
             onPress={() => onChoose(choice.id)}
@@ -149,7 +149,7 @@ export function AttachMenu({
         <Pressable
           accessibilityLabel={choice.label}
           accessibilityRole="button"
-          accessibilityState={{ busy: choice.busy ?? false }}
+          aria-busy={choice.busy ?? false}
           disabled={choice.busy}
           hitSlop={TAP_SLOP}
           key={choice.id}

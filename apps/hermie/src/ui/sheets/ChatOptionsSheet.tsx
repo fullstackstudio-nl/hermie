@@ -162,7 +162,7 @@ function PickerPane({
         {filtered.map(option => (
           <Pressable
             accessibilityRole="button"
-            accessibilityState={{ selected: option.value === value }}
+            aria-selected={option.value === value}
             key={option.value}
             onPress={() => onPick(option)}
             testID={`picker-option-${option.value}`}

@@ -141,13 +141,7 @@ export function InsetButtonRow({ title, tone = 'accent', detail, disabled, style
   const theme = useTheme()
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ disabled: Boolean(disabled) }}
-      disabled={disabled}
-      style={style}
-      {...rest}
-    >
+    <Pressable accessibilityRole="button" aria-disabled={Boolean(disabled)} disabled={disabled} style={style} {...rest}>
       {({ pressed }) => (
         <View
           style={{
