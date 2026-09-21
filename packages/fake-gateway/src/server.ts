@@ -111,6 +111,18 @@ export interface FakeGatewayOptions {
    * let alone steered. A test that only cares about the end state passes 1.
    */
   subagentStepMs?: number
+  /**
+   * Devices registered for push, seeded into `hermie-app.push` on the DEFAULT
+   * profile ([ADR-0017](../../../docs/adr/0017-push-through-hermie-web.md)).
+   *
+   * A fixture rather than a fixed shape: what the push daemon reads is a bag of
+   * JSON off a wire, and half of what it has to get right is refusing a bag it
+   * cannot address. A test that could only produce well-formed registrations
+   * could not check any of that.
+   */
+  pushRegistrations?: Record<string, unknown>
+  /** `push.seen`: the heartbeat a device writes while a chat is on screen. */
+  pushSeen?: Record<string, number>
 }
 
 export interface FakeSession {
@@ -531,6 +543,29 @@ export interface FakeGateway {
   closeSockets(code: number, reason?: string): void
   /** Kill every live socket without a close frame: the client sees 1006. */
   dropSockets(): void
+  /** Rewrite `hermie-app.push` on the default profile, the way a device would. */
+  setPushRegistrations(registrations: Record<string, unknown>, seen?: Record<string, number>): void
+  /**
+   * Deliver a cron report into a bot's chat, header and all.
+   *
+   * A cron delivery has NO wire marker: the scheduler injects it as an ordinary
+   * inbound `user` row with a header spliced in front, and that header is the
+   * whole signal. So the fake has to splice the same header, or a reader tested
+   * against it is tested against nothing.
+   */
+  deliverCron(options?: { profile?: string; job?: string; report?: string; reply?: string; failed?: boolean }): void
+  /** The same for a bot-to-bot delivery, which is recognised the same way. */
+  deliverBotDm(options?: { profile?: string; from?: string; handle?: string; body?: string; reply?: string }): void
+  /**
+   * Raise an approval on a profile's canonical chat.
+   *
+   * `queueOnly` stages the case a push daemon on its safe default has to cope
+   * with: a question that opened while nothing was attached, so there is no live
+   * server→client frame to receive and the only trace of it is the approval
+   * queue — which `session.resume` reports as `pending_approval` and
+   * `approval.pending` lists.
+   */
+  raiseApprovalOn(options?: { profile?: string; command?: string; queueOnly?: boolean }): Promise<unknown>
   close(): Promise<void>
 }
 
@@ -540,6 +575,17 @@ export interface FakeGateway {
  * with an explicit scope.
  */
 const LAUNCH_PROFILE = 'default'
+
+/**
+ * `cron/scheduler_delivery.py::_deliver_to_bot_chat`'s header, verbatim.
+ *
+ * Load-bearing text: a cron delivery carries no `display_kind` and no metadata,
+ * so this sentence is the only thing that distinguishes it from the owner
+ * typing. A fake that paraphrased it would make every reader that parses it look
+ * correct while failing on a real gateway.
+ */
+const CRON_BOT_CHAT_HEADER = (job: string): string =>
+  `[Cronjob "${job}" output — scheduled job, not the user. Review it, act on anything that needs action, and summarize for the chat.]`
 
 const WS_PATH = '/api/ws'
 const GATEWAY_WS_PROTOCOL = 'hermes-gateway-v1'
@@ -1153,7 +1199,23 @@ function initialState(options: FakeGatewayOptions): FakeGatewayState {
       last_active: nowSeconds() - 60,
       message_count: session.messages.length
     },
-    ui_meta: { 'hermes-bots': {} }
+    /*
+      `hermes-bots` is the marker another tool owns, and it sits on every
+      profile. It is here so a client that writes its own key can be caught
+      wiping it: ADR-0016's per-key compare-and-swap is the only thing that
+      stops a settings write from un-botting every profile it touches.
+    */
+    ui_meta: {
+      'hermes-bots': {},
+      ...(session.profile === researcher.profile && (options.pushRegistrations || options.pushSeen)
+        ? {
+            'hermie-app': {
+              v: 1,
+              push: { registrations: options.pushRegistrations ?? {}, seen: options.pushSeen ?? {} }
+            }
+          }
+        : {})
+    }
   })
 
   return {
@@ -1706,6 +1768,72 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       return
     }
 
+    if (path === '/__fake/push' && method === 'POST') {
+      // The other half of the control surface: who is registered for push, and
+      // which of the four events ADR-0017 names just happened. Never part of
+      // the gateway contract — a real gateway has no push machinery at all,
+      // which is the whole reason the daemon exists.
+      const body = await readBody(req)
+      const action = String(body.action ?? '')
+
+      if (action === 'registrations') {
+        setPushSection(
+          (body.registrations ?? {}) as Record<string, unknown>,
+          (body.seen ?? {}) as Record<string, number>
+        )
+        json(res, 200, { ok: true })
+
+        return
+      }
+
+      const profile = String(body.profile ?? 'researcher')
+      const session = sessionForProfile(profile)
+
+      if (!session) {
+        json(res, 404, { detail: `No Bot Chat for profile ${profile}` })
+
+        return
+      }
+
+      if (action === 'cron') {
+        injectForeignTurn(session, {
+          user: `${CRON_BOT_CHAT_HEADER(String(body.job ?? 'Morning digest'))}\n\n${String(body.report ?? 'Nothing needs your attention.')}`,
+          assistant: String(body.reply ?? 'Read it — all clear.'),
+          stream: true,
+          ...(body.failed === true ? { status: 'error', error: 'the cron run did not complete' } : {})
+        })
+        json(res, 200, { ok: true, session_id: session.id })
+
+        return
+      }
+
+      if (action === 'dm') {
+        injectForeignTurn(session, {
+          user: `Message from 🤖 ${String(body.from ?? 'Writer')} (@${String(body.handle ?? 'writer')}): ${String(body.body ?? 'the draft is ready.')}`,
+          assistant: String(body.reply ?? 'Noted — I will fold that in.'),
+          stream: true
+        })
+        json(res, 200, { ok: true, session_id: session.id })
+
+        return
+      }
+
+      if (action === 'approval') {
+        // Deliberately not awaited: an approval nobody answers is exactly the
+        // state a notification is supposed to be raised about.
+        void queueApproval(session, String(body.command ?? 'rm -rf ./build'), body.queueOnly === true).catch(
+          () => undefined
+        )
+        json(res, 200, { ok: true, session_id: session.id })
+
+        return
+      }
+
+      json(res, 400, { detail: `Unknown push action: ${action}` })
+
+      return
+    }
+
     if (path === '/__fake/inject' && method === 'POST') {
       // A control surface, never part of the gateway contract: it fakes a turn
       // somebody else ran — a teammate bot, a cron delivery, the same chat open
@@ -1724,7 +1852,9 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       injectForeignTurn(session, {
         user: String(body.user ?? 'Message from 🤖 Writer (@writer): the draft is ready.'),
         assistant: String(body.assistant ?? 'Noted — I will fold that in.'),
-        stream: body.stream !== false
+        stream: body.stream !== false,
+        ...(typeof body.status === 'string' ? { status: body.status } : {}),
+        ...(typeof body.error === 'string' ? { error: body.error } : {})
       })
 
       json(res, 200, { injected: true, session_id: session.id, stored_session_id: session.storedId })
@@ -2586,6 +2716,12 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
 
         const omit = params.omit_messages === true
 
+        // `pending_approval` is the QUEUE entry, not a live request: an approval
+        // raised before this connection existed has no `open_requests` row to
+        // carry it, and a client that never asked to receive server requests
+        // has no other way to learn it is there.
+        const pending = [...state.pendingApprovals.values()].find(entry => entry.session_id === session.storedId)
+
         return {
           session_id: session.id,
           stored_session_id: session.storedId,
@@ -2593,7 +2729,8 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
           messages: omit ? [] : session.messages,
           messages_omitted: omit,
           info: sessionInfo(session),
-          open_requests: openRequestsFor(session.id)
+          open_requests: openRequestsFor(session.id),
+          ...(pending ? { pending_approval: pending.payload } : {})
         }
       }
 
@@ -3557,7 +3694,10 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
    * turn produces, so a foreign-turn placeholder has something to reconcile
    * against.
    */
-  function injectForeignTurn(session: FakeSession, turn: { user: string; assistant: string; stream: boolean }): void {
+  function injectForeignTurn(
+    session: FakeSession,
+    turn: { user: string; assistant: string; stream: boolean; status?: string; error?: string }
+  ): void {
     const sid = session.storedId
 
     session.messages.push({
@@ -3580,9 +3720,69 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     })
 
     if (turn.stream) {
-      publish('message.complete', sid, { text: turn.assistant, status: 'ok' })
+      publish('message.complete', sid, {
+        text: turn.assistant,
+        status: turn.status ?? 'ok',
+        ...(turn.error ? { error: turn.error } : {})
+      })
     }
 
+    publish('sessions.changed', undefined, {})
+  }
+
+  /** The profile's canonical chat, which is what a Bot Chat means here. */
+  function sessionForProfile(profile: string): FakeSession | undefined {
+    return [...state.sessions.values()].find(entry => entry.profile === profile && entry.title === 'Bot Chat')
+  }
+
+  /**
+   * Put one approval on the queue, and — unless `queueOnly` — send the
+   * server→client request too.
+   *
+   * Both, because a real gateway does both: `tools/approval.py` enqueues the
+   * entry that `approval.pending` and `session.resume`'s `pending_approval`
+   * report, and the transport separately asks a client. A fake that only did
+   * the second made the queue unreachable, and the queue is the only route a
+   * client that has not asked for server requests has.
+   */
+  function queueApproval(session: FakeSession, command: string, queueOnly: boolean): Promise<unknown> {
+    const requestId = `appr-${randomUUID().slice(0, 8)}`
+    const payload = {
+      request_id: requestId,
+      command,
+      description: 'Remove the build directory',
+      tool_name: 'run_command',
+      choices: ['once', 'session', 'always', 'deny'],
+      allow_permanent: true,
+      allow_session: true
+    }
+
+    state.pendingApprovals.set(requestId, { session_id: session.storedId, payload })
+
+    if (queueOnly) {
+      return Promise.resolve(undefined)
+    }
+
+    return requestServerSide('approval', { session_id: session.id, ...payload }).finally(() => {
+      state.pendingApprovals.delete(requestId)
+    })
+  }
+
+  function setPushSection(registrations: Record<string, unknown>, seen: Record<string, number>): void {
+    const profile = state.profiles.find(row => row.is_default) ?? state.profiles[0]
+
+    if (!profile) {
+      return
+    }
+
+    const bag = { ...(profile.ui_meta ?? {}) }
+    const app = (bag['hermie-app'] ?? { v: 1 }) as Record<string, unknown>
+    bag['hermie-app'] = { ...app, v: 1, push: { ...((app.push ?? {}) as object), registrations, seen } }
+    profile.ui_meta = bag
+    profile.ui_meta_revisions = {
+      ...profile.ui_meta_revisions,
+      'hermie-app': (profile.ui_meta_revisions?.['hermie-app'] ?? 0) + 1
+    }
     publish('sessions.changed', undefined, {})
   }
 
@@ -3651,6 +3851,54 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
         // No close frame: the client observes 1006.
         socket.terminate()
       }
+    },
+    setPushRegistrations(registrations, seen = {}) {
+      setPushSection(registrations, seen)
+    },
+    deliverCron(cronOptions = {}) {
+      const profile = cronOptions.profile ?? 'researcher'
+      const session = sessionForProfile(profile)
+
+      if (!session) {
+        throw new Error(`No Bot Chat for profile ${profile}`)
+      }
+
+      const job = cronOptions.job ?? 'Morning digest'
+      const report = cronOptions.report ?? 'Nothing needs your attention.'
+
+      injectForeignTurn(session, {
+        user: `${CRON_BOT_CHAT_HEADER(job)}\n\n${report}`,
+        assistant: cronOptions.reply ?? 'Read it — all clear.',
+        stream: true,
+        ...(cronOptions.failed ? { status: 'error', error: 'the cron run did not complete' } : {})
+      })
+    },
+    deliverBotDm(dmOptions = {}) {
+      const profile = dmOptions.profile ?? 'researcher'
+      const session = sessionForProfile(profile)
+
+      if (!session) {
+        throw new Error(`No Bot Chat for profile ${profile}`)
+      }
+
+      const from = dmOptions.from ?? 'Writer'
+      const handle = dmOptions.handle ?? 'writer'
+
+      injectForeignTurn(session, {
+        user: `Message from 🤖 ${from} (@${handle}): ${dmOptions.body ?? 'the draft is ready.'}`,
+        assistant: dmOptions.reply ?? 'Noted — I will fold that in.',
+        stream: true
+      })
+    },
+    raiseApprovalOn(approvalOptions = {}) {
+      const profile = approvalOptions.profile ?? 'researcher'
+      const session = sessionForProfile(profile)
+
+      if (!session) {
+        throw new Error(`No Bot Chat for profile ${profile}`)
+      }
+
+      return queueApproval(session, approvalOptions.command ?? 'rm -rf ./build', approvalOptions.queueOnly === true)
     },
     async close() {
       for (const timer of timers) {

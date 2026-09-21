@@ -10,6 +10,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Push notifications, from the server you already run.** `hermie-web --push` holds one connection
+  to its gateway, resumes every Bot Chat, and notifies registered devices about four things: a new
+  bot message in a chat nobody is reading, an approval or clarify request opening, a bot-to-bot DM,
+  and a cron delivery or cron error. There is no hosted service, no account and **no inbound
+  endpoint** — a device registers by writing into the gateway's own `ui_meta`, so the only way into
+  the path is an authenticated write to the gateway, and the app never talks to the daemon at all.
+  An open approval is found in the snapshot a resume answers with and in a 30-second
+  `approval.pending` poll — the daemon deliberately does **not** ask the gateway to route questions to
+  it, because it would never answer one and a gateway that routes to a single peer would then have
+  taken the question away from the owner; `--push-server-requests` opts into the live route for
+  operators who know their gateway fans them out.
+  A notification carries a bot name and an event type; the message text travels only to a device
+  whose owner turned preview on, because a lock screen is not private. An approval's Allow and Deny
+  answer nothing by themselves: the app opens, re-reads the gateway's open requests, and responds
+  only if that request is still open and still says what the notification said.
+  [ADR-0017](docs/adr/0017-push-through-hermie-web.md) is the design and the threat model;
+  [docs/web.md](docs/web.md#push-notifications) and
+  [deploy/web/README.md](deploy/web/README.md#push-notifications) are what a self-hoster needs,
+  including the two costs said out loud — a watched chat is a chat the gateway will not evict, and a
+  daemon that is not running sends nothing.
+- **Both push transports, with no dependencies added.** Expo for phones, with receipts read back
+  afterwards rather than tickets trusted at send time — a sender that stops at the ticket pushes to
+  uninstalled apps for ever. Web Push for browsers, implemented from RFC 8291 and RFC 8292 out of
+  Node's own `crypto`: the payload is encrypted end to end to the key pair the browser generated, so
+  the push service forwards ciphertext it cannot read. The application-server key is generated on
+  first run into the state directory and served at `GET /push/vapid-public-key`; it must stay stable,
+  because a browser's subscription is bound to it.
+- **`hermie-web login`, for a gateway behind OIDC.** The native PKCE flow run from a terminal: it
+  prints the authorisation URL rather than opening one, listens on the loopback redirect for a single
+  callback, and stores the refresh token at `0600`. A provider that issues no refresh token is
+  refused with the `offline_access` scope named, rather than a credential that lapses in an hour
+  being quietly stored.
 - **Home-screen widgets, on every platform.** One chat as a small square — avatar, name, presence
   bead and the last line — the three most recent as a medium one, and on iOS a lock-screen line that
   says how many conversations are waiting on a person. Tapping one opens that chat through

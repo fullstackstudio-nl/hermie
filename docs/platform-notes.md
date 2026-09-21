@@ -5218,3 +5218,146 @@ needs a TLS deployment of Hermie Web with `--push` to close:
   `Notification.requestPermission()` to be called inside one. The switch in
   Settings is what calls it, which satisfies that by construction — but by
   construction is not the same as observed.
+
+## The push daemon, server-side (2026-09-21, later again)
+
+What was built this round is the half of [ADR-0017](adr/0017-push-through-hermie-web.md) that needs
+no device in the room: `hermie-web --push`, its gateway connection, the watcher, both transports,
+and the availability stamp. The app side — minting an installation id, writing a registration,
+writing the `push.seen` heartbeat, drawing a notification and re-validating an approval before
+answering it — is untouched, so **nothing below has been observed on a phone**.
+
+### Three constraints of this package decided most of the design
+
+`packages/hermie-web` ships as a self-contained CommonJS `dist/server` with **no `node_modules`
+beside it** — the Dockerfile says so and the release job zips `package.json`, `bin`, `dist` and
+nothing else. Three consequences, all of them visible in the code:
+
+- **The shared JSON-RPC client could not be imported.** `packages/hermes-shared` is ESM TypeScript
+  consumed as source, and a cross-package import would emit a `require` the released artefact cannot
+  resolve. `push/link.ts` therefore mirrors `json-rpc-gateway.ts`'s contract — request ids and a
+  pending map, `event` notifications, the `gateway.ping` heartbeat, `session.events.since` replay
+  with per-session watermarks and the epoch check — and says at the top that the shared file is
+  right where the two disagree. The same applies to the cron and bot-DM header parsers, whose
+  canonical forms are in `packages/transcript`.
+- **`ws` is a devDependency, so the transport is Node's global `WebSocket`.** Making `ws` a runtime
+  dependency would break the "installs nothing" property of the image and the zip.
+- **Web Push is hand-rolled.** RFC 8291 and RFC 8292 out of `node:crypto`: ECDH on P-256, two HKDF
+  rounds, AES-128-GCM in one `aes128gcm` record, and an ES256 JWT signed with
+  `dsaEncoding: 'ieee-p1363'` because Node's default DER signature is what every push service
+  rejects with an unhelpful 401.
+
+**If any of those constraints is ever relaxed, the first three files to revisit are
+`push/link.ts`, `push/inbound.ts` and `push/web-push.ts`** — each is a copy of something that has a
+better home.
+
+### The link refuses things rather than merely not doing them
+
+ADR-0017 says the daemon "is a reader: it never submits a prompt, answers a question, or changes a
+setting." A sentence in a document that nothing enforces is a sentence, so `GatewayLink.request`
+checks an allowlist and refuses `profiles.configure` unless `ui_meta` is all it carries. Both are
+pinned by tests against the fake gateway. `approval.pending` is on that allowlist and
+`approval.respond` is not, which is the difference between reading a queue and answering for somebody.
+
+### The unverifiable assumption was made opt-in instead of default
+
+The first cut of this advertised `client.capabilities {server_requests: true}` so approvals would
+arrive live, and then never answered one — which is safe **only** if a session's transport fans a
+request out to every peer, so the app receives the same question and answers it. ADR-0017 quotes that
+fan-out from upstream's reaper comments and the fake gateway reproduces it, but it has never been put
+to a real `hermes serve`. On a backend that routes to one peer instead, the daemon receiving an
+approval and holding it open takes the question away from the person it was for — the worst failure
+this feature could have, and one nobody would diagnose from the app.
+
+So the default is not to ask. Open questions now come from two places that cost the gateway nothing
+it was not already doing:
+
+- **`session.resume`'s snapshot** — `open_requests`, and `pending_approval`, which is the queue entry
+  and therefore the only trace of a question raised before this connection existed. The fake gateway
+  grew both: `raiseApprovalOn({ queueOnly: true })` stages exactly that case, and `session.resume`
+  now answers `pending_approval` from the queue the way the contract says it does.
+- **An `approval.pending` poll**, the same RPC and the same 30 s the app's `APPROVAL_POLL_MS` uses,
+  and only while at least one device is registered.
+
+`--push-server-requests` turns the live route back on for an operator who knows their gateway. The
+cost of the default is up to thirty seconds of latency on an approval notification; the cost of the
+flag on the wrong gateway is the approval.
+
+One thing this exposed: the same question reaches the watcher under up to three envelopes — a live
+`srq-N`, a resume's `open_requests` (a NEW `srq-N` after each reconnect) and `pending:<request_id>`
+from the snapshot or the poll. Keying dedupe on the envelope buzzes once per route and once per
+reconnect. The queue's own `request_id` is the identity, and a clarify — which has none — falls back
+to the JSON-RPC id.
+
+And an ordering trap worth recording: the link hands a resume's snapshot to its callback while the
+`session.resume` call is still settling, which is **before** the watcher knows which bot that session
+belongs to, so those notifications were silently dropped. The watcher now reads `open_requests` and
+`pending_approval` off the resume result itself, once the mapping exists.
+
+### Classifying a turn is five rows, not a transcript
+
+A cron delivery and a bot-to-bot DM arrive as an ordinary `role: "user"` row with a header spliced in
+front — no event, no `display_kind`, no metadata ([ADR-0013](adr/0013-cron-deliveries-in-the-transcript.md)).
+The only place the answer lives is that row.
+
+The first cut read it with `session.history`, which is unpaginated: on a long chat that is the whole
+transcript downloaded to look at its last row, once per finished turn. It now reads
+`GET /api/sessions/{id}/messages?limit=5&order=latest` — the same route, the same `null` contract and
+the same "newest rows last" ordering as the app's own `reconcileTailFor`, so `lastInboundRow` scans
+from the end either way. `session.history` stays as the fallback for a gateway with no REST surface,
+which is a supported gateway rather than a broken one. The guards are unchanged: it runs only when
+somebody is registered, and both routes failing degrades to "the owner typed" rather than to silence.
+
+The REST rows spell the body `content` rather than `text`, which the classifier already handled; the
+integration test lets those requests through to the real fake gateway rather than stubbing them, so
+what is exercised is the route and not a fixture.
+
+### What the integration suite actually proved
+
+Against `@hermie/fake-gateway` over a real socket, with only the two push services stubbed:
+
+- a seeded registration plus a staged cron delivery produces **one** Expo send, titled with the
+  bot's display name, bodied `cron “…” reported`, carrying no part of the report;
+- a staged bot-to-bot delivery is read as a DM and names the sender;
+- an approval produces a notification carrying the request id and the `hermie.approval` category,
+  with the command left on the gateway — including when it was raised BEFORE the daemon started
+  (resume snapshot) and when it was raised with no live frame at all (poll);
+- one question carried by a live frame, a resume snapshot and a poll at once buzzes exactly once,
+  across a reconnect;
+- nothing is polled while no device is registered, and `client.capabilities` is never sent unless
+  `--push-server-requests` asked for it;
+- a finished turn is classified from five REST rows, with `session.history` never called — and from
+  `session.history` when the REST route answers 404;
+- a `push.seen` stamp a few seconds old silences an ordinary message and a ten-minute-old one does
+  not — and neither silences the approval;
+- dropping the socket after a send, reconnecting and replaying the same turn out of the gateway's
+  ring sends nothing a second time;
+- the Web Push body is decrypted with the test subscription's own private key, so what is asserted
+  is that a browser could read it;
+- the availability stamp lands in `hermie-app.push` on the default profile while `hermes-bots` — the
+  marker another tool owns — is still there afterwards.
+
+One real race came out of writing those: the roster is read before the chats are resumed, so
+"watching" and "listening" are not the same moment, and an event arriving between the two belongs to
+no session yet. `PushWatcher.resumed` now exists so a caller can wait for the second thing.
+
+### What is NOT verified
+
+- **Anything on a device.** No phone, no browser, no service worker. Nothing has actually buzzed.
+- **A real `hermes serve`.** Every gateway interaction here is against the fake. The `ui_meta`
+  compare-and-swap it reproduces was probed against 0.21.3 for ADR-0016, but `pending_approval` on a
+  resume, the shape `approval.pending` answers with, the REST messages route's ordering, and the LRU
+  pinning the ADR warns about were not.
+- **The fan-out of server requests**, which is now the thing `--push-server-requests` is gated on
+  rather than something the default relies on. Whether a real backend sends a request to every peer
+  or to one is still unknown; the point of the change is that nobody finds out the hard way.
+- **A real Expo or push-service round trip.** Both senders are exercised against stubs. Ticket and
+  receipt shapes come from Expo's documentation; a 201 from a push service is assumed rather than
+  seen.
+- **An OIDC-gated sign-in.** `hermie-web login` is covered end to end against a stubbed token
+  endpoint and a real loopback listener, but no identity provider has been through it, and the
+  no-refresh-token refusal has never been triggered by a real provider.
+- **The LRU cost.** Nobody has run this against a gateway with `max_live_sessions` set to watch the
+  resident set behave.
+- **Long-running behaviour.** The receipt sweep, the availability heartbeat and the ticket ageing
+  are all on quarter-hour and five-minute timers that no test waits out.

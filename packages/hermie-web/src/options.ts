@@ -11,6 +11,8 @@
 import { hostname } from 'node:os'
 import path from 'node:path'
 
+import { defaultStateDir } from './push/state'
+
 export interface HermieWebOptions {
   /** The gateway to proxy to. Fixed for the life of the process. */
   gatewayUrl: string
@@ -34,11 +36,52 @@ export interface HermieWebOptions {
   selfUpdate: boolean
   /** Where releases are unpacked and the `current` link lives. */
   installRoot: string
+  /**
+   * Watch every Bot Chat and notify registered devices ([ADR-0017](../../../docs/adr/0017-push-through-hermie-web.md)).
+   *
+   * Off by default, and deliberately a separate switch from serving the app: the
+   * daemon holds a gateway connection that keeps every Bot Chat resident in the
+   * gateway's live-session list, which is a real cost a self-hoster should opt
+   * into rather than discover.
+   */
+  push: boolean
+  /** The session token an ungated gateway takes. Empty on a gated one; see `hermie-web login`. */
+  gatewayToken: string
+  /** Where the watch state, the VAPID key pair and any stored sign-in live. */
+  stateDir: string
+  /**
+   * The `sub` claim of the VAPID token (RFC 8292 §2.1): a `mailto:` or `https:`
+   * URI a push service can use to reach whoever runs this. The default names the
+   * project because it has to name something; an operator sending real volume
+   * should put their own address here.
+   */
+  vapidSubject: string
+  /**
+   * Ask the gateway to route server→client requests to the push connection.
+   *
+   * Off by default, and it should stay off unless the operator knows their
+   * gateway fans a request out to EVERY peer of a session. On one that routes
+   * to a single peer, a daemon that receives an approval and holds it open —
+   * which is the only thing it will ever do with one — has taken the question
+   * away from the person it was for. Without it, open questions are learnt from
+   * a resume's snapshot and from the `approval.pending` poll, which is what the
+   * app does too.
+   */
+  pushServerRequests: boolean
 }
 
 export const DEFAULT_GATEWAY_URL = 'http://127.0.0.1:9119'
 export const DEFAULT_PORT = 9120
 export const DEFAULT_HOST = '127.0.0.1'
+/** Named so a test can say it, and so the docs and the code cannot drift apart. */
+export const DEFAULT_VAPID_SUBJECT = 'https://hermie.dev'
+
+/**
+ * Where the browser build reads the application-server key it has to subscribe
+ * against. It is PUBLIC by definition — it is the half a browser is given — and
+ * it authorises nothing on its own.
+ */
+export const PUSH_PUBLIC_KEY_PATH = '/push/vapid-public-key'
 
 /**
  * Paths that belong to the gateway rather than to the app.
@@ -53,7 +96,12 @@ export const DEFAULT_HOST = '127.0.0.1'
 export const GATEWAY_PATH_PREFIXES: readonly string[] = ['/api', '/auth', '/login', '/logout']
 
 /** Paths Hermie Web answers itself, and therefore never proxies. */
-export const LOCAL_PATHS: readonly string[] = ['/healthz', '/hermie/config.json', '/hermie/update']
+export const LOCAL_PATHS: readonly string[] = [
+  '/healthz',
+  '/hermie/config.json',
+  '/hermie/update',
+  PUSH_PUBLIC_KEY_PATH
+]
 
 export function isGatewayPath(pathname: string): boolean {
   if (LOCAL_PATHS.includes(pathname)) {
@@ -91,6 +139,11 @@ export interface ResolveOptionsInput {
   version?: string | undefined
   selfUpdate?: boolean | undefined
   installRoot?: string | undefined
+  push?: boolean | undefined
+  gatewayToken?: string | undefined
+  stateDir?: string | undefined
+  vapidSubject?: string | undefined
+  pushServerRequests?: boolean | undefined
   env?: NodeJS.ProcessEnv
   /** Where `dist/web` sits when `--static` is not given. */
   packageRoot?: string
@@ -119,7 +172,17 @@ export function resolveOptions(input: ResolveOptionsInput = {}): HermieWebOption
     staticDir: path.resolve(input.staticDir ?? env.HERMIE_STATIC_DIR ?? path.join(packageRoot, 'dist', 'web')),
     version: input.version ?? env.HERMIE_VERSION ?? readOwnVersion(packageRoot),
     selfUpdate,
-    installRoot: path.resolve(input.installRoot ?? env.HERMIE_INSTALL_ROOT ?? path.join(packageRoot, '..'))
+    installRoot: path.resolve(input.installRoot ?? env.HERMIE_INSTALL_ROOT ?? path.join(packageRoot, '..')),
+    push: input.push ?? (env.HERMIE_PUSH === '1' || env.HERMIE_PUSH === 'true'),
+    gatewayToken: input.gatewayToken ?? env.HERMIE_GATEWAY_TOKEN ?? '',
+    // NOT the install root: a self-update replaces that, and a daemon that
+    // forgot its VAPID key after an update would orphan every browser
+    // subscription it had ever handed out.
+    stateDir: path.resolve(input.stateDir ?? defaultStateDir(env)),
+    vapidSubject: input.vapidSubject ?? env.HERMIE_VAPID_SUBJECT ?? DEFAULT_VAPID_SUBJECT,
+    pushServerRequests:
+      input.pushServerRequests ??
+      (env.HERMIE_PUSH_SERVER_REQUESTS === '1' || env.HERMIE_PUSH_SERVER_REQUESTS === 'true')
   }
 }
 

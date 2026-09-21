@@ -160,6 +160,138 @@ Meanwhile the page polls `/healthz` every second and a half until a version come
 when that version is the **new** one (an old server that never restarted would answer just as
 happily), and gives up after a minute rather than spinning for ever.
 
+## Push notifications
+
+Hermie Web has a second job it does not do unless it is asked:
+`hermie-web --push` watches every Bot Chat on its gateway and notifies devices that registered
+themselves for it. [ADR-0017](adr/0017-push-through-hermie-web.md) is the design and the threat
+model; what follows is what a self-hoster has to know.
+
+**Why it lives here.** An app that is not running has no socket — iOS suspends it within seconds of
+backgrounding and Android's Doze does the equivalent — so something that is always running has to
+watch. `hermes serve` has no push machinery and no notion of a device, and a hosted service of ours
+would put every device token and every bot's name on somebody else's server. Hermie Web is already
+next to the gateway, already a released artefact, and already the thing a self-hoster installs.
+
+**There is no inbound endpoint.** A device registers by writing into the gateway's `ui_meta` through
+the connection it already has, under the `hermie-app` key on the default profile. The app never
+talks to the daemon and nothing on the network can make a phone buzz: the only way into the path is
+an authenticated write to the gateway.
+
+### What it notifies about
+
+Four things, and nothing else:
+
+| Event                          | Suppressed while somebody is reading?                             |
+| ------------------------------ | ----------------------------------------------------------------- |
+| A new bot message              | **Yes** — see the heartbeat below.                                |
+| An approval or clarify request | No. A question with a countdown on it is worth a buzz regardless. |
+| A bot-to-bot DM                | No.                                                               |
+| A cron delivery or cron error  | No.                                                               |
+
+### How it learns that a question is open
+
+By default the daemon does **not** ask the gateway to route approval and clarify requests to it. That
+sounds like a detail and it is the one decision here that could cost somebody an answer.
+
+Asking — `client.capabilities {server_requests: true}` — is what makes a backend send them to this
+connection, and the daemon will never answer one: an approval belongs to the owner. Whether holding
+it open is harmless depends on something upstream has not promised. If a session's transport fans a
+request out to **every** peer, the app gets it too and answers it, and nothing is lost. If a backend
+routes to **one** peer, the daemon receiving the question has taken it away from the person it was
+for.
+
+So the safe behaviour is the default, and it is not a downgrade: open questions are read from the
+snapshot a `session.resume` answers with (`open_requests`, and `pending_approval` for a question that
+opened before the daemon connected) and from an `approval.pending` poll — the same RPC and the same
+30-second cadence the app itself uses, and only while at least one device is registered. One question
+that arrives by two or three of those routes still buzzes once, because the queue's own request id is
+what identifies it.
+
+`--push-server-requests` (or `HERMIE_PUSH_SERVER_REQUESTS=1`) turns the live route on. Use it only if
+you know your gateway fans server requests out to every peer of a session.
+
+"Somebody is reading" cannot be asked of the gateway: `session.active_list` answers about the calling
+connection and nobody else's. So the app writes a stamp into `push.seen` while a chat is on screen
+and the daemon reads it, after a few seconds' pause so an app that is opening can claim the chat
+first. It is a heuristic, and it fails towards a redundant notification for a chat somebody is
+already reading — which is the right direction.
+
+### What a push contains
+
+**A bot name and an event type.** No message text, no snippet, no request text. A notification is
+delivered by Apple, Google or a browser vendor and drawn on a lock screen, so the default is the
+least it can say and still be worth tapping. A device whose owner turns **preview** on for that
+device gets one short line of the text as well; that is a per-device decision made in the app.
+
+An approval notification carries Allow and Deny actions, and tapping one answers nothing by itself:
+the app opens, connects to the gateway, re-reads the open requests, and responds only if that request
+is still open and still says what the notification said it did. A notification is a hint that
+something happened, never an instruction.
+
+### Credentials
+
+The daemon needs to read every Bot Chat, so it needs a gateway credential.
+
+- **Ungated gateway** — give it the session token, with `--gateway-token` or `HERMIE_GATEWAY_TOKEN`.
+- **OIDC-gated gateway** — run `hermie-web login` once. It prints an authorisation URL (it does not
+  open one; this may be a machine with no desktop), listens on a loopback redirect port for exactly
+  one callback, exchanges the code, and stores the **refresh** token in the state directory at
+  `0600`. The daemon spends it for an access token and a single-use WebSocket ticket on every dial,
+  the same way the app does.
+
+  If the gateway's identity provider issues no refresh token, **push is not available** and the
+  command says so rather than storing an hour-long credential. The fix is the `offline_access` scope
+  on the provider's client registration — the same thing the app's sign-in warns about.
+
+This is a real trust boundary, and ADR-0017 states it plainly: the daemon's credential is a gateway
+credential, so anyone who can read its state file can read every transcript on that gateway. That is
+the same trust level as the gateway's own host, which is where the daemon is meant to run.
+
+### The state directory
+
+`--state-dir`, or `HERMIE_STATE_DIR`; by default `$XDG_STATE_HOME/hermie-web`, else
+`~/.local/state/hermie-web`. The file inside it is written `0600` in a `0700` directory and holds how
+far each chat has been read, which notifications have already gone out, which device addresses are
+finished, the VAPID key pair, and any stored sign-in.
+
+It is deliberately **not** the install root. A self-update replaces that directory, and a daemon that
+forgot its VAPID key after an update would silently orphan every browser subscription it had ever
+handed out.
+
+### VAPID, and the browser build
+
+Web Push needs an application-server key pair (RFC 8292). The daemon generates one on its first run,
+keeps it in the state directory, and serves the public half at `GET /push/vapid-public-key` — which
+is where the browser build reads it, because the app has no other route to the daemon. The key is
+public by definition and authorises nothing.
+
+Two conditions a browser imposes and nothing here can lift: a service worker and a `PushSubscription`
+need **https** and a registered scope, so Web Push only works where Hermie Web is served over TLS,
+and the key pair must stay the same for as long as the subscriptions do. Over plain http the browser
+build simply does not offer it.
+
+The payload itself is encrypted end to end to the key pair the browser generated (RFC 8291); the push
+service forwards ciphertext it cannot read.
+
+### The cost, said out loud
+
+A watcher that resumes every Bot Chat keeps every Bot Chat resident on the gateway, because upstream
+never evicts a session whose transport is alive. On a gateway with `max_live_sessions` set, the
+daemon's resumed chats count against that cap. There is also one small read per finished turn and one
+`approval.pending` per watched chat every 30 seconds, and both stop entirely when nobody is
+registered.
+
+Classifying a finished turn reads **five rows** off the gateway's REST transcript
+(`GET /api/sessions/{id}/messages?limit=5&order=latest`, the same route the app's own tail reconcile
+uses), and falls back to the unpaginated `session.history` only on a gateway that has no REST
+surface. That fallback is the expensive one — it returns the whole chat to look at its last row — so
+on a long transcript it is worth knowing which of the two your gateway is giving you.
+
+And the plainest consequence of all: **a daemon that is not running sends nothing**, and nothing on
+the device will say so beyond the liveness stamp Settings reads. Notifications are best effort and
+the app never treats their absence as information.
+
 ## Installing it
 
 The configurations are in [deploy/web/README.md](../deploy/web/README.md); in brief:
@@ -186,7 +318,9 @@ Three things, none of which a browser is going to grow:
   native by configuring those headers in the app. A page cannot send them, and cannot be made to — so
   that perimeter belongs **in front of Hermie Web**, not inside it. Put the access proxy on the
   Hermie Web port and let the gateway trust the machine behind it.
-- **No loopback redirect**, which is why the native PKCE flow is not used here at all.
+- **No loopback redirect**, which is why the native PKCE flow is not used by the page at all. The
+  `hermie-web login` subcommand above does use it — but that is a Node process opening a port on the
+  machine it runs on, which is precisely the thing a browser tab cannot do.
 
 Two behaviours change shape rather than disappear: picking a file becomes an `<input type="file">`
 whose cancel is a focus heuristic rather than an event, and haptics become a no-op. The web section

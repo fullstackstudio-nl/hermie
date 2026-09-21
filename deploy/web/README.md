@@ -54,8 +54,75 @@ A mismatch shows up as HTTP 403 on `/api/status`, or a WebSocket that refuses th
 | `--no-self-update`   | `HERMIE_SELF_UPDATE=0` | on                       | Turns `/hermie/update` into a refusal.                           |
 | `--rollback`         |                        |                          | Point `current` at the previous release and exit.                |
 
-Endpoints it answers itself: `GET /healthz`, `GET /hermie/config.json`, `GET|POST /hermie/update`.
-Everything under `/api`, `/auth`, `/login` and `/logout` is proxied; everything else is the app.
+And, for push (see below):
+
+| Flag                     | Environment                     | Default                     |                                                                              |
+| ------------------------ | ------------------------------- | --------------------------- | ---------------------------------------------------------------------------- |
+| `--push`                 | `HERMIE_PUSH=1`                 | off                         | Also watch every Bot Chat and notify registered devices.                     |
+| `--gateway-token <t>`    | `HERMIE_GATEWAY_TOKEN`          |                             | The session token an ungated gateway takes.                                  |
+| `--state-dir <dir>`      | `HERMIE_STATE_DIR`              | `~/.local/state/hermie-web` | Watch state, VAPID keys and any stored sign-in. Written `0600`.              |
+| `--vapid-subject <uri>`  | `HERMIE_VAPID_SUBJECT`          | `https://hermie.dev`        | `mailto:` or `https:` contact in the VAPID token (RFC 8292 §2.1).            |
+| `--push-server-requests` | `HERMIE_PUSH_SERVER_REQUESTS=1` | off                         | **Only if your gateway fans server requests out to every peer** — see below. |
+
+Endpoints it answers itself: `GET /healthz`, `GET /hermie/config.json`, `GET|POST /hermie/update`,
+and — with `--push` — `GET /push/vapid-public-key`. Everything under `/api`, `/auth`, `/login` and
+`/logout` is proxied; everything else is the app.
+
+## Push notifications
+
+Off by default. With `--push`, the same process holds a second connection to the same gateway,
+watches every Bot Chat, and notifies devices that registered themselves through the gateway's
+`ui_meta`. There is no inbound endpoint and nothing to expose: the app never talks to this process.
+[ADR-0017](../../docs/adr/0017-push-through-hermie-web.md) is the design;
+[docs/web.md](../../docs/web.md#push-notifications) is the self-hoster's version of it.
+
+```sh
+# Ungated gateway:
+hermie-web --gateway http://127.0.0.1:9119 --push --gateway-token "$HERMES_SESSION_TOKEN"
+
+# OIDC-gated gateway — once, interactively, then start it normally:
+hermie-web --gateway https://hermes.example.com login
+hermie-web --gateway https://hermes.example.com --push
+```
+
+`login` prints a URL rather than opening one, and listens on `127.0.0.1:38007` for the redirect. On
+a headless server, reach that port from your laptop with an SSH tunnel and open the URL there:
+
+```sh
+ssh -L 38007:127.0.0.1:38007 server
+```
+
+Use `--redirect-port` if 38007 is taken; the gateway has to accept that redirect URI.
+
+**How it hears about an approval, and the one flag worth reading twice.** By default the daemon does
+not ask the gateway to route approval and clarify requests to it. It finds open questions in the
+snapshot a resume answers with and in an `approval.pending` poll every 30 seconds — the same method
+and cadence the app uses, and only while a device is registered.
+
+`--push-server-requests` asks for the live route instead. **Only turn it on if your gateway fans a
+server request out to every peer of a session.** The daemon never answers a question — an approval is
+the owner's — so on a gateway that routes to a single peer, a daemon that receives one and holds it
+open has taken it away from you, and the app that should have shown it never will. The default costs
+you at most thirty seconds of latency on an approval notification; the flag can cost you the
+approval.
+
+**What it costs.** A watcher that resumes every Bot Chat keeps every Bot Chat resident in the
+gateway's live-session list, because upstream never evicts a session whose transport is alive. If you
+run with `max_live_sessions` set, the daemon's chats count against it. Per finished turn it also
+reads five rows off `GET /api/sessions/{id}/messages` — on a gateway with no REST transcript that
+falls back to `session.history`, which is unpaginated and returns the whole chat.
+
+**What it can read.** Everything. Watching a transcript requires reading it, so the state directory
+holds a credential with the gateway's full reach. Keep it on the gateway's own host, and keep its
+permissions — the process writes `0600` inside `0700` and will tighten a directory it finds looser.
+
+**Web Push needs TLS.** A service worker and a `PushSubscription` are https-only, which is the same
+condition this README already puts on exposing Hermie Web at all. Over plain http the browser build
+does not offer it; phones on Expo are unaffected.
+
+For systemd, add the state directory to `ReadWritePaths` (or use `StateDirectory=hermie-web`) and put
+the token in an `EnvironmentFile` rather than on the `ExecStart` line, where it would be visible in
+`ps`.
 
 ## Install from a release zip
 
@@ -227,3 +294,18 @@ The previous release directory is kept, which is what makes that possible.
 | Signed in, then signed out again on reload            | A `Secure` cookie over a plain-HTTP origin. Put TLS in front, or reach it over loopback. |
 | Every client shows up as Hermie Web's address in logs | `dashboard.trusted_proxies` does not name the machine Hermie Web runs on.                |
 | `no_web_build` from `/`                               | The static export is missing. `npm run web:build`, or point `--static` at one.           |
+
+With `--push`:
+
+| What you see                                              | What it usually is                                                                                                                      |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `push_unavailable` from `/push/vapid-public-key`          | The process was started without `--push`.                                                                                               |
+| Settings says push is not available                       | The daemon is not running, or cannot write `ui_meta` — its liveness stamp is what Settings reads.                                       |
+| `hermie-web login` refuses and names `offline_access`     | The identity provider issued no refresh token. That scope is on the provider's client registration.                                     |
+| The daemon connects, then notifies nothing                | Nobody is registered yet, or every registration has that event type switched off. A type nobody opted into is off.                      |
+| An approval notification takes up to 30 s                 | That is the poll, and it is the safe default. `--push-server-requests` makes it immediate — read what it risks first.                   |
+| An approval opens in the app and is never answerable      | `--push-server-requests` on a gateway that routes a request to one peer. Turn it off.                                                   |
+| Push is slow on a very long chat                          | The gateway has no REST transcript, so classification falls back to the unpaginated `session.history`.                                  |
+| Phones get notifications, browsers do not                 | Web Push is https-only. Over plain http the browser build never subscribes.                                                             |
+| Browser subscriptions stopped working after a reinstall   | The state directory was lost, so the VAPID key pair changed. Existing subscriptions are bound to the old one and have to be made again. |
+| Bots stay live on the gateway and hit `max_live_sessions` | That is the watcher: a resumed chat is a pinned chat. It is the price of hearing about a message as it is written.                      |
