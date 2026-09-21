@@ -7,6 +7,17 @@ export const DEFAULT_HTTP_TIMEOUT_MS = 10_000
 
 export interface JsonRequest {
   method?: string
+  /**
+   * Whether the platform's HTTP cache may answer this.
+   *
+   * Every call this package makes passes `no-store`, and it is not an
+   * optimisation. A gateway's `/api/status` is a liveness answer, its REST
+   * routes are a live session, and none of it is worth a byte of cache — while
+   * a single cached 301 outlived an app's whole installation and sent the next
+   * one to the wrong host. Left overridable so a caller with a genuine reason
+   * can say otherwise, and nothing in this package does.
+   */
+  cache?: RequestCache
   headers?: Record<string, string>
   body?: unknown
   timeoutMs?: number
@@ -24,6 +35,19 @@ export interface JsonResponse {
   status: number
   ok: boolean
   text: string
+  /**
+   * The URL the answer actually came from, after any redirects were followed.
+   *
+   * It exists because of a cache. The iOS URL cache kept a 301 from one host to
+   * another ACROSS INSTALLS of the same bundle id, so the onboarding probe
+   * quietly reached a gateway the owner had moved away from and then reported
+   * "that is not a Hermes gateway" about the address they had typed. A caller
+   * that can see where it landed can say so instead.
+   *
+   * Empty where the platform does not report it; a caller must treat that as
+   * "no redirect was observed" rather than as a redirect to nowhere.
+   */
+  url: string
 }
 
 /**
@@ -121,12 +145,21 @@ export async function requestText(url: string, request: JsonRequest = {}): Promi
     const response = await fetchImpl(url, {
       method: request.method ?? 'GET',
       headers,
+      // `no-store` unless a caller insists. React Native maps it onto
+      // `NSURLRequest.reloadIgnoringLocalCacheData`; a browser passes it to the
+      // Fetch standard's own cache mode. See the note on `JsonRequest.cache`.
+      cache: request.cache ?? 'no-store',
       ...(body === undefined ? {} : { body }),
       ...(request.credentials === undefined ? {} : { credentials: request.credentials }),
       signal: controller.signal
     })
 
-    return { status: response.status, ok: response.ok, text: await response.text() }
+    return {
+      status: response.status,
+      ok: response.ok,
+      text: await response.text(),
+      url: typeof response.url === 'string' ? response.url : ''
+    }
   } catch (error) {
     if (timedOut) {
       throw new GatewayError('timeout', `${url} did not answer within ${Math.round(timeoutMs / 1000)} seconds.`, {

@@ -1,4 +1,4 @@
-import { hasExplicitScheme, normalizeBaseUrl, resolveGatewayAddress } from '@hermie/gateway-client'
+import { hasExplicitScheme, isGatewayError, normalizeBaseUrl, resolveGatewayAddress } from '@hermie/gateway-client'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Pressable, View } from 'react-native'
 
@@ -25,6 +25,14 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
   const [advanced, setAdvanced] = useState(draft.headers.length > 0)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /*
+    The host a redirect actually reached, when one did.
+
+    Kept beside the message so the step can OFFER it rather than only describe
+    it: the address that was typed is correct as far as the reader knows, and
+    the only useful next move is to point the wizard at the host that answered.
+  */
+  const [redirectedTo, setRedirectedTo] = useState<string | null>(null)
   // Only true when the user named no scheme and https did not answer. It is
   // said out loud rather than kept: a downgrade nobody is told about is the
   // thing worth avoiding, not the downgrade.
@@ -49,6 +57,7 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
       sequence.current += 1
       setBusy(false)
       setError(null)
+      setRedirectedTo(null)
       setFoundOverHttp(false)
       updateRef.current({ probe: null, baseUrl: null })
 
@@ -90,6 +99,7 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
 
           setBusy(false)
           setError(null)
+          setRedirectedTo(null)
           setFoundOverHttp(overHttp)
           updateRef.current({ probe: result, baseUrl })
         })
@@ -100,6 +110,7 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
 
           setBusy(false)
           setFoundOverHttp(false)
+          setRedirectedTo(isGatewayError(probeError) ? (probeError.redirectedTo ?? null) : null)
           setError(describeProbeError(probeError, normalized, httpsWasPinned))
           updateRef.current({ probe: null, baseUrl: null })
         })
@@ -114,6 +125,15 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
   // Re-typing the address with the scheme spelled out is exactly what stops the
   // fallback from running again: an explicit `https://` is never downgraded.
   // The port and any path prefix come along — they are not the scheme's.
+  /** Point the wizard at the host that actually answered, scheme and all. */
+  const takeRedirectTarget = useCallback(
+    (host: string) => {
+      setRedirectedTo(null)
+      update({ rawAddress: host, probe: null, baseUrl: null })
+    },
+    [update]
+  )
+
   const useHttpsInstead = useCallback(() => {
     const current = draft.baseUrl ?? draft.rawAddress.trim()
 
@@ -161,6 +181,21 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
 
       <View style={{ gap: theme.space.sm }}>
         <ProbeLine busy={busy} draft={draft} error={error} foundOverHttp={foundOverHttp} pinnedScheme={pinnedScheme} />
+        {/*
+          The way out of a redirect, which is a change of gateway address and
+          nothing else. Offered rather than done: the host that answered is not
+          necessarily the one the owner meant, and a wizard that followed it by
+          itself is exactly what the cached 301 did.
+        */}
+        {redirectedTo ? (
+          <InsetGroup>
+            <InsetButtonRow
+              onPress={() => takeRedirectTarget(redirectedTo)}
+              testID="probe-use-redirect"
+              title={strings.errors.useRedirectTarget(redirectedTo)}
+            />
+          </InsetGroup>
+        ) : null}
         <TransportNotice
           baseUrl={busy || error ? null : draft.baseUrl}
           onUseHttps={useHttpsInstead}

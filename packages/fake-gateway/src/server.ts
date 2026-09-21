@@ -159,6 +159,17 @@ export interface FakeGatewayOptions {
    */
   plugin?: Record<string, unknown> | false
   /**
+   * Answer every request with a 301 to this origin instead of serving it.
+   *
+   * Staged because of a cache, not because a gateway does this. The iOS URL
+   * cache keeps a 301 keyed by bundle id and it outlives the app, so a gateway
+   * that moved domains once left a redirect behind that a fresh install's first
+   * probe was answered out of — reaching a host the owner had left. The only
+   * way to exercise the client's refusal to follow one silently is to have
+   * something issue one.
+   */
+  redirectTo?: string
+  /**
    * Whether an accepted `session.steer` writes a `display_kind: "steer"` row.
    *
    * Default true, because that is the harder case for a client: it has its own
@@ -1866,6 +1877,20 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
   })
 
   async function handleHttp(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    /*
+      A gateway that has moved, before anything else is read.
+
+      A 301 is what the whole origin answers, and the client has to refuse it
+      wherever it arrives rather than only on the one path a test happened to
+      use.
+    */
+    if (options.redirectTo) {
+      res.writeHead(301, { location: `${options.redirectTo.replace(/\/$/u, '')}${req.url ?? '/'}` })
+      res.end()
+
+      return
+    }
+
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`)
     const path = url.pathname
     const method = req.method ?? 'GET'

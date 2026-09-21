@@ -53,6 +53,8 @@ export function describeProbeError(error: unknown, baseUrl: string, httpsWasPinn
       return strings.errors.timeout(host)
     case 'not_hermes':
       return strings.errors.notHermes(host)
+    case 'redirect':
+      return strings.errors.redirected(host, error.redirectedTo ?? strings.settings.unknown)
     case 'auth':
       return strings.errors.authProxy(error.status ?? 401)
     case 'server':
@@ -102,6 +104,8 @@ export function describeConnectionError(error: unknown, baseUrl: string): string
       return strings.errors.timeout(hostOf(baseUrl))
     case 'not_hermes':
       return strings.errors.notHermes(hostOf(baseUrl))
+    case 'redirect':
+      return strings.errors.redirected(hostOf(baseUrl), error.redirectedTo ?? strings.settings.unknown)
     case 'server':
       return strings.errors.server(error.status ?? 500)
     case 'incompatible':

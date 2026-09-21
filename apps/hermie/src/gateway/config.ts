@@ -2,6 +2,7 @@ import type { GatewayAuthMode, TokenSet } from '@hermie/gateway-client'
 
 import { keyValueStore } from '../platform/key-value-store'
 import { secretStore } from '../platform/secret-store'
+import { clearUrlCache } from '../platform/url-cache'
 
 /**
  * Where a configured gateway lives on disk.
@@ -200,4 +201,15 @@ export async function clearCredentials(): Promise<void> {
 export async function clearGateway(): Promise<void> {
   await clearCredentials()
   await keyValueStore.delete(CONFIG_KEY)
+  /*
+    And whatever the platform cached for it.
+
+    `URLCache` is keyed by bundle identifier and survives the app being deleted,
+    so a 301 stored when a gateway moved domains was still being served to a
+    fresh install months later — the probe reached the old host and the failure
+    named the address the owner had correctly typed. Forgetting a gateway is the
+    one moment where nothing cached for it is wanted any more, and it is the
+    only moment the app has any business emptying a cache at all.
+  */
+  clearUrlCache()
 }

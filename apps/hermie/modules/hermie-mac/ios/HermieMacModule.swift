@@ -268,6 +268,28 @@ public class HermieMacModule: Module {
     }
 
     /**
+     Empty the URL cache.
+
+     There is exactly one caller and one reason. `URLCache` is keyed by bundle identifier and
+     OUTLIVES the app: deleting Hermie and installing it again leaves the cache in place, so a 301
+     stored when a gateway moved from one domain to another was still being served months later, to
+     a fresh install, on its very first probe. The owner typed a correct address, the probe silently
+     reached the host it had been redirected to, and the failure named the address they had typed.
+
+     Called when a gateway is forgotten, which is the moment nothing cached for it is wanted any
+     more. `removeAllCachedResponses` rather than a per-host removal, because a redirect is stored
+     against the request that produced it and the app has no way to enumerate those.
+
+     Foundation has no equivalent on a system with no shared cache, so the return value says whether
+     there was one to empty rather than pretending.
+     */
+    Function("clearUrlCache") { () -> Bool in
+      URLCache.shared.removeAllCachedResponses()
+
+      return true
+    }
+
+    /**
      Whether either Shift key is down right now.
 
      Polled rather than pushed, deliberately: the caller already knows a Return happened and only

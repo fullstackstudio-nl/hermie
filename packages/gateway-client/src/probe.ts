@@ -1,4 +1,11 @@
-import { type FetchLike, looksLikeCertificateFailure, parseJsonObject, requestText } from './fetch-json'
+import {
+  type FetchLike,
+  looksLikeCertificateFailure,
+  parseJsonObject,
+  requestText,
+  type JsonResponse
+} from './fetch-json'
+import { hostOfAddress } from './host-privacy'
 import { apiUrl, hasExplicitScheme, normalizeBaseUrl, normalizeHeaders } from './url'
 import { GatewayError, isGatewayError } from './types'
 
@@ -12,6 +19,33 @@ export interface AuthProvider {
   name: string
   displayName: string
   supportsPassword: boolean
+}
+
+/**
+ * Did this answer come from a different host than the one we asked?
+ *
+ * A redirect within one host is ordinary — a trailing slash, http to https on
+ * the same name — and is followed without comment. A redirect to ANOTHER host
+ * is a different server answering for an address the owner typed, and this
+ * package will not follow one silently.
+ *
+ * The reason is a measured one. The iOS URL cache keeps a 301 keyed by bundle
+ * id, and it survives deleting the app: a gateway that had moved from one
+ * domain to another left a 301 behind, and months later a fresh install's very
+ * first probe was answered out of that cache, reached the old host, and failed
+ * as "that is not a Hermes gateway" — naming the address the owner had typed,
+ * which was correct, rather than the one it had actually reached.
+ */
+function redirectedHost(response: JsonResponse, requested: string): string {
+  if (!response.url) {
+    // A platform that does not report the final URL. Nothing is claimed.
+    return ''
+  }
+
+  const landed = hostOfAddress(response.url)
+  const asked = hostOfAddress(requested)
+
+  return landed && asked && landed !== asked ? landed : ''
 }
 
 export interface ProbeResult {
@@ -41,6 +75,18 @@ export async function probeGateway(
   const headers = normalizeHeaders(extraHeaders)
   const statusUrl = apiUrl(baseUrl, '/api/status')
   const status = await requestText(statusUrl, { headers, fetchImpl, timeoutMs: PROBE_TIMEOUT_MS })
+  const landedOn = redirectedHost(status, statusUrl)
+
+  if (landedOn) {
+    // Before every other verdict, including a 404 or a 200 that parses: WHERE
+    // the answer came from decides what any of it means.
+    throw new GatewayError(
+      'redirect',
+      `${hostOfAddress(statusUrl)} redirected to ${landedOn}, which is a different host. ` +
+        'Nothing was read from it. Change the gateway address to the one you meant.',
+      { status: status.status, redirectedTo: landedOn }
+    )
+  }
 
   if (status.status === 404) {
     throw new GatewayError('not_hermes', `${statusUrl} does not exist — that address is not a Hermes gateway.`, {
@@ -128,6 +174,12 @@ function isTransportFailure(error: unknown): boolean {
     return true
   }
 
+  if (error.kind === 'redirect') {
+    // Something answered, and said where to go. Trying the other scheme would
+    // most likely reach the same redirect and bury the one fact worth reporting.
+    return false
+  }
+
   if (error.kind === 'tls') {
     return !looksLikeCertificateFailure(error.cause instanceof Error ? error.cause.message : '')
   }
@@ -170,7 +222,21 @@ export async function resolveGatewayAddress(
         baseUrl: cleartextUrl,
         foundOverHttp: true
       }
-    } catch {
+    } catch (cleartextError) {
+      /*
+        A redirect found in the clear is reported as itself.
+
+        Everything else here keeps the rule below — the https attempt is the one
+        the user implied — but a redirect is not a failure to reach the address,
+        it is the address telling us it has moved. Burying it under "could not
+        reach over https" is what left the owner reading about a port they never
+        asked about while the actual answer was "that name now points somewhere
+        else".
+      */
+      if (isGatewayError(cleartextError) && cleartextError.kind === 'redirect') {
+        throw cleartextError
+      }
+
       // The https attempt is the one the user implied, so its failure is the
       // one worth reading. Reporting the http error instead would send someone
       // chasing a port they never asked about.

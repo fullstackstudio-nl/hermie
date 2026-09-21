@@ -879,6 +879,18 @@ export const strings = {
     timeout: (host: string) => `${host} did not answer in time. It may be starting up or behind a slow link.`,
     notHermes: (host: string) =>
       `${host} answered, but not like a Hermes gateway. Check the address and any path prefix.`,
+    /**
+     * Where the answer came from.
+     *
+     * The iOS URL cache keeps a 301 keyed by bundle id and it survives deleting
+     * the app, so a gateway that moved domains once left a redirect behind that
+     * a fresh install's first probe was answered out of — silently, months
+     * later, reaching a host the owner had left. Nothing is read from it now,
+     * and the sentence names the host so the offer under it can be pressed.
+     */
+    redirected: (from: string, to: string) =>
+      `${from} redirected to ${to}, which is a different host. Nothing was read from it.`,
+    useRedirectTarget: (host: string) => `Use ${host} instead`,
     authProxy: (status: number) =>
       `An access proxy answered HTTP ${status} before the gateway did. Add its headers under Advanced, or exempt /api/status, /auth/* and /login from it.`,
     server: (status: number) => `The gateway answered HTTP ${status}. It is running but unhealthy; check its logs.`,

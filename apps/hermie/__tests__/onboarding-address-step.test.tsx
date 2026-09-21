@@ -58,6 +58,51 @@ beforeEach(() => {
   latest = emptyDraft()
 })
 
+describe('an address that redirects somewhere else', () => {
+  /*
+    The cached 301. A gateway that moved domains left one behind, the iOS URL
+    cache kept it across installs of the same bundle id, and the wizard's first
+    probe silently reached a host the owner had left — then reported "that is
+    not a Hermes gateway" about the address they had correctly typed.
+
+    Nothing is read from the host that answered. The step says where it was
+    sent and offers that host, which is the only useful next move and is a
+    change of gateway address rather than something the app does by itself.
+  */
+  it('names the host it was sent to and offers to use it', async () => {
+    resolveGatewayAddress.mockRejectedValue(
+      new GatewayError('redirect', 'redirected', { redirectedTo: 'hermes.provibr.net' })
+    )
+    renderScreen(<Harness />)
+    type('hermes.fullstackstudio.nl')
+
+    await waitFor(() => expect(screen.getByTestId('probe-error')).toBeTruthy())
+
+    expect(screen.getByTestId('probe-error')).toHaveTextContent(
+      'hermes.fullstackstudio.nl redirected to hermes.provibr.net, which is a different host. Nothing was read from it.'
+    )
+    expect(latest.probe).toBeNull()
+    expect(latest.baseUrl).toBeNull()
+
+    resolveGatewayAddress.mockResolvedValue(at('https://hermes.provibr.net'))
+    fireEvent.press(screen.getByTestId('probe-use-redirect'))
+
+    await waitFor(() => expect(screen.getByTestId('probe-result')).toBeTruthy())
+
+    expect(latest.rawAddress).toBe('hermes.provibr.net')
+  })
+
+  it('offers nothing of the sort for an ordinary failure', async () => {
+    resolveGatewayAddress.mockRejectedValue(new GatewayError('network', 'nope'))
+    renderScreen(<Harness />)
+    type('hermes.example.com')
+
+    await waitFor(() => expect(screen.getByTestId('probe-error')).toBeTruthy())
+
+    expect(screen.queryByTestId('probe-use-redirect')).toBeNull()
+  })
+})
+
 describe('the gateway address step', () => {
   it('reports a gated gateway as needing a sign-in, naming the provider', async () => {
     resolveGatewayAddress.mockResolvedValue(at('https://hermes.example.com'))
