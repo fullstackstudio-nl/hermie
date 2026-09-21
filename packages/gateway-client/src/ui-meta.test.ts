@@ -17,12 +17,13 @@
  * asked is whether this client and that protocol agree, and two stubs agreeing
  * with each other proves nothing.
  */
-import { startFakeGateway } from '@hermie/fake-gateway'
+import { PLUGIN_ADVERT, startFakeGateway } from '@hermie/fake-gateway'
 import { describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
 
 import { HERMIE_PLUGIN_KEY } from './plugin'
 import {
+  appKeyFor,
   BOT_MARKER_KEY,
   HERMIE_APP_KEY,
   HERMIE_KEY,
@@ -65,10 +66,21 @@ function callOn(socket: WebSocket): UiMetaGateway['request'] {
     })
 }
 
+/**
+ * Whoever the gateway named, for the cases that are not about two people.
+ *
+ * Every device in this suite belongs to somebody, because the app-wide key now
+ * carries a person's name and a device the gateway has named nobody on writes no
+ * arrangement at all. `owner` is what an ungated gateway answers.
+ */
+const OWNER = 'owner'
+
+const APP_KEY = appKeyFor(OWNER)
+
 interface Harness {
   request: UiMetaGateway['request']
   /** A device: its own local copy, and a sync bound to it. */
-  device: (initial?: UiMetaSnapshot) => { sync: UiMetaSync; local: UiMetaSnapshot }
+  device: (initial?: UiMetaSnapshot, userId?: string) => { sync: UiMetaSync; local: UiMetaSnapshot }
 }
 
 async function withGateway<T>(run: (harness: Harness) => Promise<T>): Promise<T> {
@@ -87,7 +99,7 @@ async function withGateway<T>(run: (harness: Harness) => Promise<T>): Promise<T>
     try {
       return await run({
         request,
-        device(initial = { app: null, bots: {} }) {
+        device(initial = { app: null, bots: {} }, userId = OWNER) {
           // The local copy is the thing the UI paints from; the sync only reads
           // it at the moment of a write and writes into it on a reconcile.
           const local: UiMetaSnapshot = { app: initial.app, bots: { ...initial.bots } }
@@ -99,6 +111,9 @@ async function withGateway<T>(run: (harness: Harness) => Promise<T>): Promise<T>
               local.bots = { ...snapshot.bots }
             }
           })
+
+          // Before anything is read, exactly as `ChatRuntime` does it.
+          sync.setUser(userId)
 
           return { sync, local }
         }
@@ -169,8 +184,8 @@ describe('one device writing', () => {
       phone.sync.markApp()
       await phone.sync.flush()
 
-      expect(await metaOf(request, 'researcher')).toHaveProperty(HERMIE_APP_KEY)
-      expect(await metaOf(request, 'writer')).not.toHaveProperty(HERMIE_APP_KEY)
+      expect(await metaOf(request, 'researcher')).toHaveProperty(APP_KEY)
+      expect(await metaOf(request, 'writer')).not.toHaveProperty(APP_KEY)
     })
   })
 })
@@ -265,7 +280,7 @@ describe('two devices at once', () => {
 
       expect(meta).toMatchObject({
         [HERMIE_KEY]: { archived: true },
-        [HERMIE_APP_KEY]: { order: ['researcher'] }
+        [APP_KEY]: { order: ['researcher'] }
       })
       expect(meta).toHaveProperty(BOT_MARKER_KEY)
     })
@@ -331,6 +346,343 @@ describe('no gateway, and then one', () => {
       await phone.sync.reconcile()
 
       expect(await metaOf(request, 'researcher')).toMatchObject({ [HERMIE_KEY]: { colour: 'lime' } })
+    })
+  })
+})
+
+/**
+ * One key per person.
+ *
+ * ADR-0016 ended on an accepted regression: "two people on one gateway now share
+ * an arrangement… if the gateway grows [a per-user scope], this is the ADR to
+ * supersede." It never grew one. What these cases pin is that the arrangement
+ * did not need it — the key is a string this client chooses, so a person's name
+ * inside it keeps two readers apart as completely as two scopes would, and the
+ * only thing standing between them is that nobody else writes these keys.
+ */
+describe('one key per person', () => {
+  it('keeps two people on one gateway out of the other one’s arrangement', async () => {
+    await withGateway(async ({ request, device }) => {
+      const alice = device({ app: null, bots: {} }, 'alice')
+      const bob = device({ app: null, bots: {} }, 'bob')
+
+      await alice.sync.reconcile()
+      alice.local.app = { v: 1, themeChoice: 'midnight', entries: [{ kind: 'chat', name: 'writer' }] }
+      alice.sync.markApp()
+      await alice.sync.flush()
+
+      await bob.sync.reconcile()
+
+      // The one that matters: Bob read the gateway and found nothing of his
+      // own. Before this change he would have been handed Alice's theme.
+      expect(bob.local.app).toBeNull()
+
+      bob.local.app = { v: 1, themeChoice: 'sand', entries: [{ kind: 'chat', name: 'researcher' }] }
+      bob.sync.markApp()
+      await bob.sync.flush()
+
+      const meta = await metaOf(request, 'researcher')
+
+      expect(meta[appKeyFor('alice')]).toMatchObject({ themeChoice: 'midnight' })
+      expect(meta[appKeyFor('bob')]).toMatchObject({ themeChoice: 'sand' })
+
+      // And neither of them wrote over the other, which is what the per-key
+      // compare-and-swap is being leaned on for.
+      await alice.sync.reconcile()
+
+      expect(alice.local.app).toMatchObject({ themeChoice: 'midnight' })
+    })
+  })
+
+  it('writes a token gateway under the owner id', async () => {
+    // A gateway with no accounts has nobody to name, and `owner` is the fixed id
+    // that makes that a hit rather than a coin toss — the same one the context
+    // section already uses.
+    await withGateway(async ({ request, device }) => {
+      const phone = device({ app: null, bots: {} }, 'owner')
+
+      await phone.sync.reconcile()
+      phone.local.app = { v: 1, themeChoice: 'midnight' }
+      phone.sync.markApp()
+      await phone.sync.flush()
+
+      expect(await metaOf(request, 'researcher')).toHaveProperty('hermie-app:owner')
+    })
+  })
+
+  it('gives a second device of the same person the same arrangement', async () => {
+    await withGateway(async ({ device }) => {
+      const phone = device({ app: null, bots: {} }, 'alice')
+
+      await phone.sync.reconcile()
+      phone.local.app = { v: 1, entries: [{ kind: 'chat', name: 'writer' }], themeChoice: 'midnight' }
+      phone.sync.markApp()
+      await phone.sync.flush()
+
+      const tablet = device({ app: null, bots: {} }, 'alice')
+
+      await tablet.sync.reconcile()
+
+      expect(tablet.local.app).toMatchObject({
+        entries: [{ kind: 'chat', name: 'writer' }],
+        themeChoice: 'midnight'
+      })
+    })
+  })
+
+  it('writes no arrangement at all while the gateway has named nobody', async () => {
+    // A gated gateway whose identity call was refused. The bot sections still
+    // sync — archived and colour are about the bot, not about who is looking —
+    // and the arrangement stays on the device, which is where ADR-0012 had it.
+    await withGateway(async ({ request, device }) => {
+      const phone = device({ app: null, bots: {} }, '')
+
+      await phone.sync.reconcile()
+      phone.local.app = { v: 1, themeChoice: 'midnight' }
+      phone.local.bots.writer = { v: 1, archived: true }
+      phone.sync.markApp()
+      phone.sync.markBot('writer')
+      await phone.sync.flush()
+
+      const meta = await metaOf(request, 'researcher')
+
+      expect(Object.keys(meta).filter(key => key.startsWith(HERMIE_APP_KEY))).toEqual([])
+      expect(await metaOf(request, 'writer')).toMatchObject({ [HERMIE_KEY]: { archived: true } })
+    })
+  })
+})
+
+describe('a gateway whose notifier cannot read the new key yet', () => {
+  /**
+   * The split write, and why it is not simply "wait for the plugin".
+   *
+   * The arrangement is read by nothing but this app, so it can move to the
+   * per-person key the moment the app ships. The registrations are read by the
+   * PLUGIN, and one written where the plugin is not looking is a phone that has
+   * silently stopped buzzing — which nobody finds out about except by not being
+   * woken up. So the two halves go to two keys until the gateway says otherwise.
+   */
+  const withoutPerUser = async (run: (harness: Harness) => Promise<void>): Promise<void> => {
+    const gateway = await startFakeGateway({
+      port: 0,
+      plugin: { ...PLUGIN_ADVERT, capabilities: ['push.expo'] }
+    })
+
+    try {
+      const socket = new WebSocket(gateway.wsUrl, ['hermes-gateway-v1'])
+
+      await new Promise<void>((resolve, reject) => {
+        socket.once('open', () => resolve())
+        socket.once('error', reject)
+      })
+
+      const request = callOn(socket)
+
+      try {
+        await run({
+          request,
+          device(initial = { app: null, bots: {} }, userId = OWNER) {
+            const local: UiMetaSnapshot = { app: initial.app, bots: { ...initial.bots } }
+            const sync = new UiMetaSync({
+              gateway: { request },
+              read: () => local,
+              apply: snapshot => {
+                local.app = snapshot.app
+                local.bots = { ...snapshot.bots }
+              }
+            })
+
+            sync.setUser(userId)
+
+            return { sync, local }
+          }
+        })
+      } finally {
+        socket.close()
+      }
+    } finally {
+      await gateway.close()
+    }
+  }
+
+  it('leaves the registrations on the bare key and moves the rest', async () => {
+    await withoutPerUser(async ({ request, device }) => {
+      const phone = device()
+
+      await phone.sync.reconcile()
+      phone.local.app = {
+        v: 1,
+        themeChoice: 'midnight',
+        push: { registrations: { 'i-phone': { v: 1, transport: 'expo', token: 'x' } }, seen: {} }
+      }
+      phone.sync.markApp()
+      await phone.sync.flush()
+
+      const meta = await metaOf(request, 'researcher')
+
+      expect(meta[APP_KEY]).toMatchObject({ themeChoice: 'midnight' })
+      expect(meta[APP_KEY]).not.toHaveProperty('push')
+      expect(meta[HERMIE_APP_KEY]).toHaveProperty('push')
+    })
+  })
+
+  it('reads its own registrations back from the bare key', async () => {
+    // The other half of the split: a second device of the same person has to
+    // find the first one's row, or it will write a section without it.
+    await withoutPerUser(async ({ device }) => {
+      const phone = device()
+
+      await phone.sync.reconcile()
+      phone.local.app = {
+        v: 1,
+        push: { registrations: { 'i-phone': { v: 1, transport: 'expo', token: 'x' } }, seen: {} }
+      }
+      phone.sync.markApp()
+      await phone.sync.flush()
+
+      const tablet = device()
+      const seenByTablet = await tablet.sync.pull()
+
+      expect(seenByTablet?.pushHome).toHaveProperty('push')
+      // And the per-person key it found there carries none, so a reader that
+      // took the neighbours out of `app` would have found nobody.
+      expect(seenByTablet?.app).not.toHaveProperty('push')
+    })
+  })
+
+  it('sends both keys in one request, because their sections are independent', async () => {
+    await withoutPerUser(async ({ device }) => {
+      const phone = device()
+
+      await phone.sync.reconcile()
+      phone.local.app = { v: 1, themeChoice: 'sand', push: { registrations: {}, seen: {} } }
+      phone.sync.markApp()
+      await phone.sync.flush()
+
+      expect(phone.sync.pending).toBe(false)
+      expect(phone.sync.mode).toBe('synced')
+    })
+  })
+})
+
+describe('inheriting the anonymous arrangement', () => {
+  /** The legacy section, as a build before this change left it behind. */
+  const seedLegacy = async (request: UiMetaGateway['request']): Promise<void> => {
+    await request('profiles.configure', {
+      name: 'researcher',
+      ui_meta: {
+        [HERMIE_APP_KEY]: {
+          v: 1,
+          themeChoice: 'midnight',
+          entries: [{ kind: 'chat', name: 'writer' }],
+          push: { registrations: { 'install-a': { v: 1, transport: 'expo', token: 'x' } } },
+          context: { users: { someone: { userId: 'someone' } } }
+        }
+      }
+    })
+  }
+
+  it('copies the arrangement into the new key on the first reconcile', async () => {
+    await withGateway(async ({ request, device }) => {
+      await seedLegacy(request)
+
+      const phone = device({ app: null, bots: {} }, 'alice')
+
+      await phone.sync.reconcile()
+
+      // Into the stores...
+      expect(phone.local.app).toMatchObject({
+        themeChoice: 'midnight',
+        entries: [{ kind: 'chat', name: 'writer' }]
+      })
+
+      // ...and back out under her name, in the same reconcile.
+      expect(await metaOf(request, 'researcher')).toHaveProperty(appKeyFor('alice'))
+    })
+  })
+
+  it('leaves the per-device and per-person maps behind', async () => {
+    // The whole reason the copy is filtered. On a shared gateway the legacy key
+    // holds everybody's push rows mixed together, and copying them into each
+    // person's key would put one phone in two sections — which a notifier
+    // reading both would send to twice.
+    await withGateway(async ({ request, device }) => {
+      await seedLegacy(request)
+
+      const phone = device({ app: null, bots: {} }, 'alice')
+
+      await phone.sync.reconcile()
+
+      expect(phone.local.app).not.toHaveProperty('push')
+      expect(phone.local.app).not.toHaveProperty('context')
+
+      const inherited = (await metaOf(request, 'researcher'))[appKeyFor('alice')] as Record<string, unknown>
+
+      expect(inherited).not.toHaveProperty('push')
+      expect(inherited).not.toHaveProperty('context')
+    })
+  })
+
+  it('copies once, and never looks at the legacy key again', async () => {
+    await withGateway(async ({ request, device }) => {
+      await seedLegacy(request)
+
+      const phone = device({ app: null, bots: {} }, 'alice')
+
+      await phone.sync.reconcile()
+
+      // She rearranges, and the anonymous section changes underneath her — an
+      // older build on somebody's other device, still writing the bare key.
+      phone.local.app = { v: 1, themeChoice: 'sand' }
+      phone.sync.markApp()
+      await phone.sync.flush()
+
+      await request('profiles.configure', {
+        name: 'researcher',
+        ui_meta: { [HERMIE_APP_KEY]: { v: 1, themeChoice: 'forest' } }
+      })
+
+      await phone.sync.reconcile()
+
+      // Hers, not the anonymous one's. A second inheritance would have put
+      // `forest` back over the top of a choice she had already made.
+      expect(phone.local.app).toMatchObject({ themeChoice: 'sand' })
+    })
+  })
+
+  it('starts a person who arrives after the copy from the app defaults', async () => {
+    await withGateway(async ({ device }) => {
+      const alice = device({ app: null, bots: {} }, 'alice')
+
+      await alice.sync.reconcile()
+      alice.local.app = { v: 1, themeChoice: 'midnight' }
+      alice.sync.markApp()
+      await alice.sync.flush()
+
+      // No legacy key was ever written here, so there is nothing to inherit and
+      // Bob must not be handed the arrangement of whoever got here first.
+      const bob = device({ app: null, bots: {} }, 'bob')
+
+      await bob.sync.reconcile()
+
+      expect(bob.local.app).toBeNull()
+    })
+  })
+
+  it('leaves the anonymous section exactly where it was', async () => {
+    await withGateway(async ({ request, device }) => {
+      await seedLegacy(request)
+
+      const phone = device({ app: null, bots: {} }, 'alice')
+
+      await phone.sync.reconcile()
+      phone.local.app = { v: 1, themeChoice: 'sand' }
+      phone.sync.markApp()
+      await phone.sync.flush()
+
+      // Still there, still saying what it said. An older build on another
+      // device goes on reading it.
+      expect((await metaOf(request, 'researcher'))[HERMIE_APP_KEY]).toMatchObject({ themeChoice: 'midnight' })
     })
   })
 })

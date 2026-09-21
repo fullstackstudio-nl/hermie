@@ -1,6 +1,6 @@
 # 0017. Push notifications come from Hermie Web, and a device registers itself in `ui_meta`
 
-- Status: Accepted, amended 2026-09-21 (push comes from the `hermie` gateway plugin; Hermie Web's `--push` is the fallback)
+- Status: Accepted, amended 2026-09-21 (push comes from the `hermie` gateway plugin; Hermie Web's `--push` is the fallback; the heartbeat names the chat and a mute is obeyed)
 - Date: 2026-09-21
 - Builds on: [0015](0015-web-variant-on-its-own-port.md), [0016](0016-ui-meta-sync.md)
 
@@ -337,6 +337,33 @@ privacy picture — ADR-0017's accepted "`ui_meta` is per profile, not per user"
 now covers a display name and free text somebody wrote about themselves, not just
 a push token and a set of toggles. On a shared gateway that is a real difference,
 and the app should say so where the field is filled in.
+
+## Amendment, 2026-09-21: the heartbeat says which chat, and the key says whose
+
+Two changes land together, because the app asks one advert about both.
+
+**`push.seen[<installation-id>]` becomes `{"bot": "<name>", "at": <unix second>}`.** A bare stamp
+said "this device is reading something". That suppressed a notification for the chat the reader had
+open — the thing it was for — and, just as effectively, for every chat they did not. A phone with
+the researcher's chat on screen was, as far as the notifier could tell, reading the whole roster.
+The chat name is the whole of the fix, and it is gated on the capability string
+`push.seen.per_chat`: a plugin that predates it reads a number and would treat an object as
+unreadable, which is a device that appears to look away for ever and therefore a notification for
+every chat it is actually reading. So the app writes the shape the gateway says it can read, and
+reads both. A bare number comes back as an entry with no name, which is precisely as much as the
+build that wrote it was able to say.
+
+**The registrations move under the per-person key, when the gateway can find them there.** See
+[ADR-0016's amendment](0016-ui-meta-sync.md): `ui_meta.per_user` gates the push half and nothing
+else, and until it is advertised the registrations stay on the bare `hermie-app` while the rest of
+the arrangement has already moved.
+
+**A third string, `push.mute`, says a muted chat is not notified about.** Mute is stored in the
+per-person section as `mutes: {"<bot>": <untilEpochSeconds>}` with `0` for forever and a second in
+the past reading as unmuted; it silences every type for that person, requests and cron deliveries
+included. That is a deliberate narrowing of this record's "requests, DMs and cron deliveries are
+**not** suppressed": the heartbeat is a guess about whether somebody is looking, and a mute is a
+decision they made. A guess should not silence a question with a countdown on it. A decision should.
 
 ### What is unchanged
 

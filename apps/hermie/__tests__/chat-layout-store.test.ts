@@ -1,15 +1,16 @@
 /**
- * The list's arrangement: order, dividers, archive, colour.
+ * The list's arrangement: order, folders, archive, colour.
  *
- * All of it is local to this device and none of it is sent to the gateway
- * (ADR-0012), so the whole contract is testable without a connection — which is
- * the point of keeping it in a plain store rather than in the controllers.
+ * The arrangement's own arithmetic lives in `store/folders.ts` and is tested in
+ * `folders.test.ts`. What is here is what the STORE adds to it: a lifetime, a
+ * disk keyed by gateway, and the open/closed set that never leaves the device.
  *
  * The cases that earn their place here are the ones where the roster and the
  * arrangement disagree: a bot that appears, a bot that vanishes, and a gateway
  * that is swapped underneath both.
  */
-import { CHAT_LAYOUT_KEY, archivedOf, dividersOf, sectionsOf, useChatLayoutStore } from '../src/store/chat-layout'
+import { CHAT_LAYOUT_KEY, archivedOf, foldersOf, useChatLayoutStore } from '../src/store/chat-layout'
+import { botsInOrder } from '../src/store/folders'
 
 const mockDisk = new Map<string, string>()
 
@@ -34,7 +35,16 @@ jest.mock('../src/platform/key-value-store', () => ({
 }))
 
 const store = () => useChatLayoutStore.getState()
-const order = () => store().entries.map(entry => (entry.kind === 'chat' ? entry.name : `#${entry.name}`))
+/** The rows in reading order, with a folder's contents indented under it. */
+const order = () => botsInOrder({ entries: store().entries, folders: store().folders })
+
+/** The top level, with folders shown by name, so a case can say where one sits. */
+const top = () =>
+  store().entries.map(entry =>
+    entry.kind === 'chat' ? entry.name : `#${store().folders.find(f => f.id === entry.id)?.name ?? '?'}`
+  )
+
+const arrangement = () => ({ entries: store().entries, folders: store().folders })
 
 /** Writes are queued, so a test that reads the disk has to let the queue drain. */
 const settle = () => new Promise<void>(resolve => setTimeout(resolve, 0))
@@ -51,26 +61,28 @@ describe('reconciling the arrangement with the roster', () => {
     expect(order()).toEqual(['researcher', 'writer', 'bookkeeper'])
   })
 
-  it('lands a new bot at the end of the unsectioned top group, not at the very end', () => {
+  it('lands a new bot before the first folder, not inside the last one', () => {
     store().reconcile(['researcher', 'writer'])
-    store().addDivider('Finance')
-    store().moveToSection('writer', dividersOf(store().entries)[0]!.id)
+    store().addFolder('Finance')
+    store().moveToFolder('writer', foldersOf(arrangement())[0]!.id)
 
     store().reconcile(['researcher', 'writer', 'postman'])
 
-    // Under the heading would bury it in a section it was never put in; the top
-    // would push it in front of whatever is being read.
-    expect(order()).toEqual(['researcher', 'postman', '#Finance', 'writer'])
+    // Inside the folder would bury it in a group it was never put in; the very
+    // top would push it in front of whatever is being read.
+    expect(top()).toEqual(['researcher', 'postman', '#Finance'])
+    expect(order()).toEqual(['researcher', 'postman', 'writer'])
   })
 
   it('drops a bot the gateway no longer has, and keeps everything around it', () => {
     store().reconcile(['researcher', 'writer', 'postman'])
-    store().addDivider('Work')
-    store().moveToSection('postman', dividersOf(store().entries)[0]!.id)
+    store().addFolder('Work')
+    store().moveToFolder('postman', foldersOf(arrangement())[0]!.id)
 
     store().reconcile(['researcher', 'postman'])
 
-    expect(order()).toEqual(['researcher', '#Work', 'postman'])
+    expect(top()).toEqual(['researcher', '#Work'])
+    expect(store().folders[0]?.bots).toEqual(['postman'])
   })
 
   it('does not rewrite the arrangement when nothing changed', () => {
@@ -102,99 +114,167 @@ describe('moving rows', () => {
   })
 
   /**
-   * The reason dividers and chats share one array: stepping past a heading is
-   * how a bot changes section, and it is the same gesture as stepping past
-   * another bot.
+   * Up and down stay INSIDE the container, which is the one thing that changed
+   * when the headings became folders.
+   *
+   * With dividers, stepping past a heading was how a bot changed section — one
+   * flat array made "past the heading" and "past another chat" the same move. A
+   * folder is a container: down means the next row inside it, and running off
+   * the end into the next folder is not a step anybody asked for. Changing
+   * folders now says which folder out loud.
    */
-  it('crosses a divider by stepping over it', () => {
-    store().addDivider('Finance')
-    expect(order()).toEqual(['researcher', 'writer', 'bookkeeper', '#Finance'])
+  it('does not walk a chat out of its folder', () => {
+    const id = store().addFolder('Finance')
 
-    store().moveBy('bookkeeper', 1)
+    store().moveToFolder('writer', id)
+    store().moveToFolder('bookkeeper', id)
 
-    expect(order()).toEqual(['researcher', 'writer', '#Finance', 'bookkeeper'])
-    expect(sectionsOf(store().entries, {})).toEqual([
-      { divider: null, bots: ['researcher', 'writer'] },
-      { divider: { id: expect.any(String), name: 'Finance' }, bots: ['bookkeeper'] }
-    ])
+    store().moveBy('bookkeeper', 5)
+
+    expect(store().folders[0]?.bots).toEqual(['writer', 'bookkeeper'])
+    expect(top()).toEqual(['researcher', '#Finance'])
   })
 
-  it('moves to the end of a named section in one step', () => {
-    const id = store().addDivider('Finance')
+  it('reorders within a folder', () => {
+    const id = store().addFolder('Finance')
 
-    store().moveToSection('researcher', id)
-    store().moveToSection('writer', id)
+    store().moveToFolder('writer', id)
+    store().moveToFolder('bookkeeper', id)
 
-    expect(order()).toEqual(['bookkeeper', '#Finance', 'researcher', 'writer'])
+    store().moveBy('bookkeeper', -1)
+
+    expect(store().folders[0]?.bots).toEqual(['bookkeeper', 'writer'])
   })
 
-  it('moves back out into the unsectioned top group', () => {
-    const id = store().addDivider('Finance')
-    store().moveToSection('researcher', id)
+  it('moves to the end of a folder in one step', () => {
+    const id = store().addFolder('Finance')
 
-    store().moveToSection('researcher', null)
+    store().moveToFolder('researcher', id)
+    store().moveToFolder('writer', id)
 
-    expect(order()).toEqual(['writer', 'bookkeeper', 'researcher', '#Finance'])
+    expect(top()).toEqual(['bookkeeper', '#Finance'])
+    expect(store().folders[0]?.bots).toEqual(['researcher', 'writer'])
+  })
+
+  it('moves back out to the loose top level', () => {
+    const id = store().addFolder('Finance')
+
+    store().moveToFolder('researcher', id)
+    store().moveToFolder('researcher', null)
+
+    expect(store().folders[0]?.bots).toEqual([])
+    expect(top()).toEqual(['writer', 'bookkeeper', 'researcher', '#Finance'])
   })
 
   it('ignores a move for a bot that is not in the arrangement', () => {
     const before = store().entries
 
     store().moveBy('nobody', 1)
-    store().moveToSection('nobody', null)
+    store().moveToFolder('nobody', null)
 
-    expect(store().entries).toBe(before)
+    // The same rows in the same order. `moveToFolder` normalises, so the array
+    // identity is not the thing to assert; what it must not do is invent a row.
+    expect(store().entries).toEqual(before)
   })
 })
 
-describe('dividers', () => {
+describe('folders', () => {
   beforeEach(() => store().reconcile(['researcher', 'writer']))
 
   it('renames in place', () => {
-    const id = store().addDivider('Finace')
+    const id = store().addFolder('Finace')
 
-    store().renameDivider(id, 'Finance')
+    store().renameFolder(id, 'Finance')
 
-    expect(dividersOf(store().entries)).toEqual([{ id, name: 'Finance' }])
+    expect(foldersOf(arrangement())).toEqual([{ id, name: 'Finance' }])
   })
 
   /**
-   * Removing a heading must never take rows with it. The rows stay where they
-   * are, which folds them into the section above — the same thing that would
-   * happen if the heading were dragged away.
+   * Deleting a folder must never take rows with it. Its chats come back to the
+   * top level at the folder's own position, which is the only outcome that
+   * never loses a chat and never quietly reorders the list as well.
    */
-  it('removes the heading and keeps its rows', () => {
-    const id = store().addDivider('Finance')
-    store().moveToSection('writer', id)
+  it('deletes the folder and keeps its chats where it stood', () => {
+    const id = store().addFolder('Finance')
 
-    store().removeDivider(id)
+    store().moveToFolder('writer', id)
+    store().removeFolder(id)
 
-    expect(order()).toEqual(['researcher', 'writer'])
+    expect(top()).toEqual(['researcher', 'writer'])
+    expect(store().folders).toEqual([])
   })
 
-  it('keeps a named section that is empty, so there is something to move into', () => {
-    store().addDivider('Finance')
+  it('keeps an empty folder, so there is something to move a chat into', () => {
+    store().addFolder('Finance')
 
-    expect(sectionsOf(store().entries, {})).toEqual([
-      { divider: null, bots: ['researcher', 'writer'] },
-      { divider: { id: expect.any(String), name: 'Finance' }, bots: [] }
-    ])
+    expect(store().folders[0]).toMatchObject({ bots: [], name: 'Finance' })
+  })
+
+  it('makes a new folder around the chat it was asked from', () => {
+    const id = store().addFolderAround('writer', 'Money')
+
+    expect(store().folders.find(folder => folder.id === id)?.bots).toEqual(['writer'])
+    expect(top()).toEqual(['researcher', '#Money'])
+  })
+})
+
+describe('open and closed, on this device only', () => {
+  beforeEach(() => store().reconcile(['researcher', 'writer']))
+
+  it('starts open, because a folder nobody has closed has nothing to hide', () => {
+    const id = store().addFolder('Finance')
+
+    expect(store().collapsed[id]).toBeUndefined()
+  })
+
+  it('remembers a folder the reader closed', () => {
+    const id = store().addFolder('Finance')
+
+    store().setFolderOpen(id, false)
+    expect(store().collapsed[id]).toBe(true)
+
+    store().setFolderOpen(id, true)
+    expect(store().collapsed[id]).toBeUndefined()
+  })
+
+  it('survives a reload of the same gateway', async () => {
+    await store().load('https://gw.test')
+    store().reconcile(['researcher', 'writer'])
+
+    const id = store().addFolder('Finance')
+
+    store().setFolderOpen(id, false)
+    await settle()
+
+    store().reset()
+    await store().load('https://gw.test')
+
+    expect(store().collapsed[id]).toBe(true)
+  })
+
+  it('forgets a folder that has been deleted', () => {
+    const id = store().addFolder('Finance')
+
+    store().setFolderOpen(id, false)
+    store().removeFolder(id)
+
+    expect(store().collapsed[id]).toBeUndefined()
   })
 })
 
 describe('archiving', () => {
   beforeEach(() => store().reconcile(['researcher', 'writer']))
 
-  it('pulls a bot out of the sections without losing its place', () => {
+  it('pulls a bot into the drawer without losing its place', () => {
     store().setArchived('writer', true)
 
-    expect(sectionsOf(store().entries, store().archived)).toEqual([{ divider: null, bots: ['researcher'] }])
-    expect(archivedOf(store().entries, store().archived)).toEqual(['writer'])
+    expect(archivedOf(arrangement(), store().archived)).toEqual(['writer'])
 
     store().setArchived('writer', false)
 
     // Back exactly where it was, because archiving never moved the entry.
-    expect(sectionsOf(store().entries, store().archived)).toEqual([{ divider: null, bots: ['researcher', 'writer'] }])
+    expect(order()).toEqual(['researcher', 'writer'])
+    expect(archivedOf(arrangement(), store().archived)).toEqual([])
   })
 })
 

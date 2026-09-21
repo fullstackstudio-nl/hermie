@@ -30,9 +30,10 @@
  *    not know draws its empty state rather than half a row.
  */
 import { formatPreview, initialFor } from '../../chat-ui'
-import { unreadCountSince } from '@hermie/transcript'
+import { hasOpenRequest, unreadCountSince } from '@hermie/transcript'
 import type { ChatState } from '@hermie/transcript'
 import type { Bot } from '../../store/bots'
+import { isMuted, type Mutes } from '../../store/mute'
 import { ACCENTS, type AccentName } from '../../ui/tokens'
 import { presenceOf, type PresenceState } from '../bots/presence'
 
@@ -94,6 +95,24 @@ export interface WidgetSnapshotInput {
   accents: Record<string, AccentName>
   /** Bots the owner has archived. Archiving is how you stop a bot counting. */
   archived: Record<string, true>
+  /**
+   * Bot name → the second its silence lapses, `0` for never.
+   *
+   * A muted bot is still HERE — it keeps its row, its colour and its last line,
+   * because a reader who silenced a chat did not ask to stop seeing it. What it
+   * loses is its numbers. A widget is the loudest place a count appears and a
+   * lock screen is where it appears loudest of all, so a chat the reader told
+   * the app to be quiet about contributes nothing to either. That is a weaker
+   * treatment than archiving, which removes the row outright, and a stronger
+   * one than the chat list, which still shows the count on the row itself.
+   *
+   * Required, deliberately. It was optional for one commit so that fixtures
+   * about colours did not have to mention it, and an optional field on a
+   * projection input is a caller that silently loses the feature by forgetting
+   * a line. There is one production caller; the compiler is a better reminder
+   * than a code review.
+   */
+  mutes: Mutes
   /** Whether the gateway socket is up and usable (`status === 'ready'`). */
   gatewayReady: boolean
   /** name → true for every avatar PNG the writer has actually put in the container. */
@@ -138,13 +157,7 @@ export function projectWidgetSnapshot(input: WidgetSnapshotInput): WidgetSnapsho
 
 function projectBot(bot: Bot, input: WidgetSnapshotInput): WidgetBot {
   const chat = input.chats[bot.name]
-  const needsInput = chat
-    ? chat.order.some(id => {
-        const item = chat.items[id]
-
-        return (item?.kind === 'approval' || item?.kind === 'clarify') && item.state === 'open'
-      })
-    : false
+  const needsInput = chat ? hasOpenRequest(chat) : false
 
   const presence = presenceOf({
     gatewayReady: input.gatewayReady,
@@ -155,6 +168,9 @@ function projectBot(bot: Bot, input: WidgetSnapshotInput): WidgetBot {
   })
 
   const accent = input.accents[bot.name] ?? 'default'
+  // Seconds here, because that is what a mute deadline is; `input.now` is
+  // `Date.now()` because that is what the snapshot stamps itself with.
+  const muted = isMuted(input.mutes, bot.name, Math.floor(input.now / 1000))
 
   return {
     name: bot.name,
@@ -165,8 +181,10 @@ function projectBot(bot: Bot, input: WidgetSnapshotInput): WidgetBot {
     presence: presence.state,
     lastLine: bot.canonical?.preview ? formatPreview(bot.canonical.preview) : '',
     lastAt: bot.canonical?.lastActive ?? 0,
-    unread: chat ? unreadCountSince(chat, input.lastSeen[bot.name] ?? 0) : 0,
-    needsInput
+    unread: muted || !chat ? 0 : unreadCountSince(chat, input.lastSeen[bot.name] ?? 0),
+    // The presence BEAD above still says `needsInput`, which is the row's own
+    // state and is not a count. This is the number.
+    needsInput: needsInput && !muted
   }
 }
 

@@ -1,6 +1,6 @@
 # 0012. The chat list's arrangement and colours are client-local
 
-- Status: Accepted, amended by [0016](0016-ui-meta-sync.md)
+- Status: Accepted, amended by [0016](0016-ui-meta-sync.md) and [0019](0019-folders-in-the-chat-list.md)
 - Date: 2026-09-19
 
 > **Amended 2026-09-21.** The last line of this record set a condition — "if the gateway ever grows a

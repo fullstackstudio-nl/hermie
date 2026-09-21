@@ -281,13 +281,29 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       about — there are no accounts — so it answers with the fixed owner id that
       makes the plugin's "the only registered person" branch a hit.
     */
-    void readIdentity(config, http)
-      .then(identity => useDeviceContextStore.getState().setIdentity(identity))
-      .catch(() => undefined)
-    // The settings reconcile rides on the same edge, and deliberately AFTER the
-    // roster: `hermie-app` lives on the default profile, and which profile that
-    // is comes out of `profiles.list`.
-    void value.uiMeta.reconcile().catch(() => undefined)
+    void (async () => {
+      const identity = await readIdentity(config, http).catch(() => null)
+
+      if (identity) {
+        useDeviceContextStore.getState().setIdentity(identity)
+      }
+
+      /*
+        AWAITED, and the settings reconcile is what waits for it.
+
+        The app-wide `ui_meta` key now carries this person's name, so a reconcile
+        that ran before the identity was known would look under no key at all,
+        hand the stores nothing, and only afterwards learn whose arrangement it
+        should have read — which on a second device is an empty list where an
+        arrangement was. A refusal leaves the id empty, and an empty id is the
+        local-only path rather than a write under a name nobody agreed to.
+      */
+      value.uiMeta.setUser(identity?.userId ?? '')
+
+      // And deliberately AFTER the roster: the key lives on the default profile,
+      // and which profile that is comes out of `profiles.list`.
+      await value.uiMeta.reconcile().catch(() => undefined)
+    })()
   }, [config, http, status, value])
 
   /**
@@ -357,6 +373,17 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
         // A new build, a flight across a timezone, a phone that was renamed
         // while the app was away. A no-op when nothing actually moved.
         useDeviceContextStore.getState().refreshFacts(Math.floor(Date.now() / 1000))
+        /*
+          And the mutes that lapsed while the phone was in a drawer.
+
+          Housekeeping, not correctness: every reader of a mute compares its
+          deadline against the clock, so one that has run out has already
+          stopped working whether or not anybody swept it. This is what stops
+          the section collecting deadlines from last spring, and it is a no-op
+          when nothing expired — otherwise every foreground would send the
+          whole arrangement again.
+        */
+        useChatLayoutStore.getState().dropExpiredMutes(Math.floor(Date.now() / 1000))
       } else if (state === 'background') {
         // FIRST in this branch, before anything that could tear a socket down:
         // this writes the widget file while the gateway is still the

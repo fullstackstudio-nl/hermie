@@ -135,7 +135,7 @@ describe('the projection', () => {
     const section = pushSectionFor({
       others: { 'i-tablet': { v: 1, transport: 'expo', token: 't' } },
       own: null,
-      seen: { 'i-tablet': NOW },
+      seen: { 'i-tablet': { bot: 'writer', at: NOW } },
       now: NOW
     })
 
@@ -160,7 +160,10 @@ describe('the projection', () => {
     const section = pushSectionFor({
       others: { 'i-tablet': { v: 1, transport: 'expo', token: 't' } },
       own: null,
-      seen: { 'i-gone': NOW - PUSH_SEEN_TTL_SECONDS - 1, 'i-tablet': NOW - 30 },
+      seen: {
+        'i-gone': { bot: 'writer', at: NOW - PUSH_SEEN_TTL_SECONDS - 1 },
+        'i-tablet': { bot: 'writer', at: NOW - 30 }
+      },
       now: NOW
     })
 
@@ -168,7 +171,12 @@ describe('the projection', () => {
   })
 
   it('keeps a stamp from the future, because that is a wrong clock and not a dead device', () => {
-    const section = pushSectionFor({ others: {}, own: registration(), seen: { 'i-phone': NOW + 5_000 }, now: NOW })
+    const section = pushSectionFor({
+      others: {},
+      own: registration(),
+      seen: { 'i-phone': { bot: 'writer', at: NOW + 5_000 } },
+      now: NOW
+    })
 
     expect(section?.seen['i-phone']).toBe(NOW + 5_000)
   })
@@ -196,7 +204,30 @@ describe('reading a section back', () => {
   })
 
   it('drops a stamp that is not a positive number', () => {
-    expect(pushSeenOf(section)).toEqual({ 'i-phone': 10, 'i-tablet': 20 })
+    // A bare number is what every build before `push.seen.per_chat` wrote, and
+    // it normalises to an entry with no chat name — which is precisely as much
+    // as it ever said.
+    expect(pushSeenOf(section)).toEqual({ 'i-phone': { bot: '', at: 10 }, 'i-tablet': { bot: '', at: 20 } })
+  })
+
+  it('reads the chat name where a newer build said one', () => {
+    expect(
+      pushSeenOf({
+        push: {
+          seen: {
+            'i-phone': { bot: 'researcher', at: 40 },
+            'i-old': 12,
+            'i-broken': { bot: 'writer' },
+            'i-zero': { bot: 'writer', at: 0 },
+            'i-unnamed': { at: 7 }
+          }
+        }
+      })
+    ).toEqual({
+      'i-phone': { bot: 'researcher', at: 40 },
+      'i-old': { bot: '', at: 12 },
+      'i-unnamed': { bot: '', at: 7 }
+    })
   })
 })
 

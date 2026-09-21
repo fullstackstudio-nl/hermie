@@ -56,7 +56,8 @@ import { strings } from '../../i18n/strings'
 import { haptic } from '../../platform/haptics'
 import { presenceOf } from '../bots/presence'
 import { useBotsStore } from '../../store/bots'
-import { useChatAccent, useChatLayoutStore } from '../../store/chat-layout'
+import { useChatAccent, useChatLayoutStore, useChatMuted } from '../../store/chat-layout'
+import { mutedUntil as mutedUntilOf } from '../../store/mute'
 import { useChatsStore } from '../../store/chats'
 import { useCronStore } from '../../store/cron'
 import { hasChatViewOverride, useChatView, useSettingsStore } from '../../store/settings'
@@ -600,6 +601,9 @@ function Conversation({
     [chat]
   )
 
+  const mutes = useChatLayoutStore(state => state.mutes)
+  const muted = useChatMuted(botName)
+
   // A reply landing is worth one buzz, and only while the chat is on screen:
   // this effect is unmounted the moment the user leaves, so a bot answering in
   // a chat nobody is looking at stays silent.
@@ -614,9 +618,15 @@ function Conversation({
 
     if (wasRunning.current) {
       wasRunning.current = false
-      haptic('complete')
+
+      // ...unless the reader silenced this chat. A mute that stopped the push
+      // and then buzzed the phone the moment they opened the app would be a
+      // mute in name only.
+      if (!muted) {
+        haptic('complete')
+      }
     }
-  }, [chat.turnActive])
+  }, [chat.turnActive, muted])
 
   // Land on the item the caller asked for, once it is actually in the list.
   // Hydration is asynchronous, so this retries as items arrive and gives up
@@ -996,7 +1006,7 @@ function Conversation({
 
   // Every question the agent is still blocked on, including one the reader put
   // aside with "Later". The header must not go quiet while the agent waits.
-  const needsInput = chat.requests.length > 0
+  const needsInput = chat.needsInput
   const subtitle = subtitleFor({
     status,
     hydration: chat.hydration,
@@ -1725,7 +1735,9 @@ function Conversation({
           fast: chat.info?.fast === true,
           model: chat.info?.model ?? '',
           modelOptions,
+          mutedUntil: mutedUntilOf(mutes, botName, Math.floor(Date.now() / 1000)),
           onCancelExpensiveModel: () => setPendingModel(null),
+          onChangeMute: (until: number | null) => useChatLayoutStore.getState().setMute(botName, until),
           /*
             The gateway's own words, not a boolean.
 

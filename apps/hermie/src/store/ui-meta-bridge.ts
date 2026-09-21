@@ -26,6 +26,7 @@ import {
   foreignContextUsers,
   type ContextSectionShape
 } from '@hermie/gateway-client/context'
+import { hasPluginCapability, PLUGIN_CAPABILITIES } from '@hermie/gateway-client/plugin'
 import {
   foreignPushRows,
   pushSectionFor,
@@ -45,8 +46,10 @@ import {
 import { Platform } from 'react-native'
 
 import { ACCENTS, type AccentName } from '../ui/tokens'
-import { useChatLayoutStore, type LayoutEntry } from './chat-layout'
+import { useChatLayoutStore } from './chat-layout'
+import { readArrangement, type Folder, type LayoutEntry } from './folders'
 import { ownContextRow, useDeviceContextStore } from './device-context'
+import { mutesOf, type Mutes } from './mute'
 import { usePluginStore } from './plugin'
 import { ownRegistration, usePushStore } from './push'
 import { asThemeChoice, asUserThemes, DEFAULT_CHAT_VIEW, useSettingsStore, type ChatViewSettings } from './settings'
@@ -57,8 +60,28 @@ export const UI_META_DEBOUNCE_MS = 600
 /** The app-wide section, as this build writes it. */
 export interface HermieAppShape extends HermieAppSection {
   v: number
-  /** Order AND dividers: one list, because that is what the store holds. */
+  /** The TOP LEVEL in order: folders by id, and loose chats. */
   entries?: LayoutEntry[]
+  /**
+   * Each folder's name, colour and contents.
+   *
+   * An ADDITIVE field, and the section version is deliberately not bumped for
+   * it. A reader that meets a `v` it does not know treats the whole section as
+   * unreadable and then re-seeds it from its own local copy, so bumping would
+   * not protect the folders from an older build — it would hand that build the
+   * power to delete them. A field it simply does not mention costs it its
+   * folders on its own next write, which is the same last-writer-wins trade
+   * ADR-0016 already made for the order.
+   */
+  folders?: Folder[]
+  /**
+   * Which chats are silent, and until when.
+   *
+   * Here rather than on each bot's own profile because a mute is about the
+   * READER: two people sharing a gateway do not share a bedtime. The gateway
+   * plugin reads it from this same place to decide whether to push.
+   */
+  mutes?: Mutes
   defaults?: ChatViewSettings
   themeChoice?: unknown
   themes?: unknown
@@ -101,7 +124,17 @@ export function snapshotFromStores(): UiMetaSnapshot {
     others: push.others,
     own: ownRegistration(push, pushPlatformName()),
     seen: push.seen,
-    now: pushStampOf(Date.now())
+    now: pushStampOf(Date.now()),
+    /*
+      The shape the GATEWAY said it can read, not the one this build prefers.
+
+      A plugin that predates `push.seen.per_chat` reads a bare number and would
+      see `{bot, at}` as unreadable — which is a device that appears to be
+      looking away for ever, and therefore a notification for every chat it is
+      actually reading. Asking first is the difference between saying more and
+      saying nothing.
+    */
+    perChat: hasPluginCapability(usePluginStore.getState().advert, PLUGIN_CAPABILITIES.pushSeenPerChat)
   })
 
   /*
@@ -121,6 +154,11 @@ export function snapshotFromStores(): UiMetaSnapshot {
   const app: HermieAppShape = {
     v: HERMIE_APP_SECTION_VERSION,
     entries: layout.entries,
+    folders: layout.folders,
+    // Always sent, empty included: a reader who unmutes their last chat has to
+    // be able to say so, and an omitted key reads as "this device knows
+    // nothing about mutes" rather than as "there are none".
+    mutes: layout.mutes,
     defaults: settings.defaults,
     themeChoice: settings.themeChoice,
     themes: settings.userThemes,
@@ -136,36 +174,6 @@ export function snapshotFromStores(): UiMetaSnapshot {
 /** Read one bot section defensively: it came off a wire another build wrote. */
 function accentOf(section: HermieBotSection): AccentName | undefined {
   return typeof section.colour === 'string' && section.colour in ACCENTS ? (section.colour as AccentName) : undefined
-}
-
-/** Read the entry list defensively, for the same reason. */
-function entriesOf(value: unknown): LayoutEntry[] | undefined {
-  if (!Array.isArray(value)) {
-    return undefined
-  }
-
-  const entries: LayoutEntry[] = []
-  const seen = new Set<string>()
-
-  for (const raw of value) {
-    if (!raw || typeof raw !== 'object') {
-      continue
-    }
-
-    const entry = raw as Record<string, unknown>
-
-    if (entry.kind === 'divider' && typeof entry.id === 'string' && entry.id) {
-      entries.push({ kind: 'divider', id: entry.id, name: typeof entry.name === 'string' ? entry.name : '' })
-      continue
-    }
-
-    if (entry.kind === 'chat' && typeof entry.name === 'string' && entry.name && !seen.has(entry.name)) {
-      seen.add(entry.name)
-      entries.push({ kind: 'chat', name: entry.name })
-    }
-  }
-
-  return entries
 }
 
 function chatViewOf(value: unknown): ChatViewSettings | undefined {
@@ -201,7 +209,16 @@ export function applySnapshot(snapshot: UiMetaSnapshot): void {
   }
 
   const app = snapshot.app as HermieAppShape | null
-  const entries = entriesOf(app?.entries)
+  /*
+    `readArrangement` reads defensively AND migrates: a section written before
+    folders carries `divider` entries inline, and each one becomes a folder
+    holding the chats below it up to the next divider. An absent list is not an
+    empty one, so the arrangement is applied only when the section actually
+    carried entries — a gateway that has never been written to has no
+    arrangement, and taking that as "no rows anywhere" would empty a list the
+    reader spent an afternoon on.
+  */
+  const arrangement = Array.isArray(app?.entries) ? readArrangement(app.entries, app.folders) : undefined
   /*
     The per-device and per-person MAPS come from the gateway's own copy, never
     from the merged one. `app` is this device's local section whenever it is
@@ -214,10 +231,11 @@ export function applySnapshot(snapshot: UiMetaSnapshot): void {
   const neighbours = (snapshot.remote ?? app) as HermieAppShape | null
 
   useChatLayoutStore.getState().applyRemote({
-    // An absent list is not an empty one. A gateway that has never been written
-    // to has no arrangement, and taking that as "no rows anywhere" would empty a
-    // list the reader spent an afternoon on.
-    ...(entries ? { entries } : {}),
+    ...(arrangement ? { arrangement } : {}),
+    // The same distinction, which is why the projection above always sends the
+    // key: a section written by a build that knows about mutes says what they
+    // are even when there are none, and one written before them says nothing.
+    ...(app?.mutes ? { mutes: mutesOf(app.mutes) } : {}),
     archived,
     accents
   })
@@ -227,9 +245,17 @@ export function applySnapshot(snapshot: UiMetaSnapshot): void {
     carried forward unread — see `foreignPushRows` — and the stamps come back so
     that a write from this device does not erase somebody else's heartbeat.
   */
+  /*
+    And the push maps come from wherever the NOTIFIER is looking, which is not
+    always the same section: a gateway whose plugin cannot read a per-person key
+    keeps the registrations on the bare `hermie-app` while the arrangement moves
+    on without them. `pushHome` is the gateway's own copy of that section.
+  */
+  const pushNeighbours = (snapshot.pushHome ?? neighbours) as HermieAppShape | null
+
   usePushStore.getState().applyRemote({
-    others: foreignPushRows(neighbours, usePushStore.getState().installationId),
-    seen: pushSeenOf(neighbours)
+    others: foreignPushRows(pushNeighbours, usePushStore.getState().installationId),
+    seen: pushSeenOf(pushNeighbours)
   })
 
   /*
@@ -318,6 +344,18 @@ export class UiMetaBridge {
     this.unsubscribe = []
     clearTimeout(this.timer)
     this.timer = undefined
+  }
+
+  /**
+   * Say who the gateway named, before the first reconcile.
+   *
+   * The app-wide key carries that person's name, so this has to be known before
+   * anything is read: a reconcile made before it would find no section, hand the
+   * stores the app's defaults, and only then discover there was an arrangement
+   * to load. `ChatRuntime` therefore awaits the identity and calls this first.
+   */
+  setUser(userId: string): void {
+    this.sync.setUser(userId)
   }
 
   /** Read the gateway's copy and send whatever this device is still holding. */

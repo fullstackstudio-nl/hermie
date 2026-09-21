@@ -167,9 +167,9 @@ function seedFixtureState(): void {
 
   const layout = useChatLayoutStore.getState()
 
-  if (!layout.entries.some(entry => entry.kind === 'divider')) {
+  if (!layout.entries.some(entry => entry.kind === 'folder')) {
     layout.reconcile(FIXTURE_ROSTER.map(bot => bot.name))
-    layout.addDividerAbove('bookkeeper', 'Money')
+    layout.addFolderAround('bookkeeper', 'Money')
     layout.setAccent('bookkeeper', 'teal')
     layout.setAccent('writer', 'violet')
   }

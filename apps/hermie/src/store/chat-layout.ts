@@ -1,9 +1,13 @@
 /**
  * How the chat list is arranged — and that is ALL it is.
  *
- * The order of the rows, the named dividers between them, which bots are
+ * The order of the rows, the FOLDERS they are grouped into, which bots are
  * archived, what colour each chat carries and whether the list is showing at all
  * on the wide layout are the owner's arrangement of their own list.
+ *
+ * The arrangement itself — the top-level order, the folders and the one-folder
+ * invariant — lives in `store/folders.ts` as a value and the functions that move
+ * it. This file is what gives it a lifetime, a disk and a gateway.
  *
  * ADR-0012 kept all of it on the device, because the only gateway scope then in
  * view was `config.set` — global settings that Hermes Desktop and the TUI read
@@ -29,21 +33,46 @@ import { create } from 'zustand'
 
 import { keyValueStore } from '../platform/key-value-store'
 import { ACCENTS, SIDEBAR_AUTO_COLLAPSE_MAX_WIDTH, type AccentName } from '../ui/tokens'
+import {
+  addFolder,
+  botsInOrder,
+  moveBotTo,
+  moveBotToFolder,
+  moveFolderTo,
+  newFolderId,
+  readArrangement,
+  reconcileBots,
+  removeFolder,
+  renameFolder,
+  setFolderColour,
+  type Arrangement,
+  type Folder,
+  type LayoutEntry
+} from './folders'
+import { isMuted, mutesOf, withoutExpired, type Mutes } from './mute'
 
 export const CHAT_LAYOUT_KEY = 'hermie.chats.layout'
 
-/**
- * One position in the list. Dividers and chats live in ONE array rather than in
- * a tree of sections, which is what makes "move this bot into that section" a
- * swap of two adjacent positions instead of a graft between two containers.
- * Everything before the first divider is the unsectioned top group.
- */
-export type LayoutEntry = { kind: 'divider'; id: string; name: string } | { kind: 'chat'; name: string }
+export type { Arrangement, Folder, LayoutEntry } from './folders'
 
 export interface PersistedLayout {
+  /** The top level, in order: folders by id and loose chats. */
   entries: LayoutEntry[]
+  /** Each folder's name, colour and contents. */
+  folders?: Folder[]
+  /**
+   * Folder ids the reader has closed, on THIS device.
+   *
+   * Local like `sidebarCollapsed`, and for the same reason: which groups are
+   * open is about the window in front of somebody, not about how their list is
+   * arranged. A Mac with everything folded away must not fold a phone's list,
+   * and the phone has the room to keep them open.
+   */
+  collapsed?: string[]
   archived: string[]
   accents: Record<string, AccentName>
+  /** Bot name -> the second its silence lapses, or 0 for forever. */
+  mutes?: Mutes
   /**
    * Whether the owner has hidden the list on the wide layout.
    *
@@ -66,8 +95,20 @@ export interface ChatLayoutState {
   /** The gateway this arrangement belongs to; null before the first load. */
   gatewayKey: string | null
   entries: LayoutEntry[]
+  folders: Folder[]
+  /** Folder ids closed on this device. Never synced; see `PersistedLayout`. */
+  collapsed: Record<string, true>
   archived: Record<string, true>
   accents: Record<string, AccentName>
+  /**
+   * Which chats are silent, and until when.
+   *
+   * Unlike `archived` and `accents` this is about the READER rather than about
+   * the bot, so it rides in the app-wide section beside the order and the theme
+   * rather than on the bot's own profile: two people sharing a gateway do not
+   * share a bedtime.
+   */
+  mutes: Mutes
   /**
    * The owner's explicit choice about the wide layout's sidebar, or `undefined`
    * while they have not made one. Read through `resolveSidebarCollapsed`, never
@@ -79,17 +120,38 @@ export interface ChatLayoutState {
 
   load: (gatewayKey: string) => Promise<void>
   reconcile: (botNames: readonly string[]) => void
+  /** One position up or down within whatever container the bot is in. */
   moveBy: (botName: string, offset: number) => void
-  moveToSection: (botName: string, dividerId: string | null) => void
-  addDivider: (name: string) => string
-  /** A new section break immediately above one chat, so that chat starts it. */
-  addDividerAbove: (botName: string, name: string) => string | null
-  renameDivider: (id: string, name: string) => void
-  /** Put a chat immediately before position `index` of the CURRENT entry list. */
-  moveToIndex: (botName: string, index: number) => void
-  removeDivider: (id: string) => void
+  /** Put a chat at the end of a folder; `null` is the loose top level. */
+  moveToFolder: (botName: string, folderId: string | null) => void
+  /** Commit a drag: `index` is read against the target container as it is. */
+  dropBot: (botName: string, folderId: string | null, index: number) => void
+  /** Commit a drag of a folder itself, to `index` of the top level. */
+  dropFolder: (folderId: string, index: number) => void
+  /** A new, empty folder at the end. Answers its id, for the rename field. */
+  addFolder: (name: string) => string
+  /** A new folder holding just this chat, so the row you asked from starts it. */
+  addFolderAround: (botName: string, name: string) => string
+  renameFolder: (id: string, name: string) => void
+  setFolderColour: (id: string, colour: AccentName) => void
+  /** Drop a folder; its bots come back to the top level where it stood. */
+  removeFolder: (id: string) => void
+  /** Open or close a folder on this device. */
+  setFolderOpen: (id: string, open: boolean) => void
   setArchived: (botName: string, archived: boolean) => void
   setAccent: (botName: string, accent: AccentName) => void
+  /** Silence one chat until `until` seconds, `0` for forever, `null` to stop. */
+  setMute: (botName: string, until: number | null) => void
+  /**
+   * Forget the mutes that have lapsed.
+   *
+   * An optimisation, never a correctness step: every reader already compares
+   * the deadline against the clock, so a mute nobody has swept is a mute that
+   * has already stopped working. This keeps the section from accumulating
+   * deadlines from last spring. A no-op when nothing expired, so it can be
+   * called on every foreground without sending the section again.
+   */
+  dropExpiredMutes: (now: number) => void
   /** Record an explicit Hide/Show. There is no "back to automatic" — see the type. */
   setSidebarCollapsed: (collapsed: boolean) => void
   /**
@@ -104,15 +166,23 @@ export interface ChatLayoutState {
    * is what the UI paints from and a copy that only lived in memory would be gone
    * on the next launch.
    */
-  applyRemote: (patch: { entries?: LayoutEntry[]; archived?: string[]; accents?: Record<string, AccentName> }) => void
+  applyRemote: (patch: {
+    arrangement?: Arrangement
+    archived?: string[]
+    accents?: Record<string, AccentName>
+    mutes?: Mutes
+  }) => void
   reset: () => void
 }
 
 const INITIAL = {
   gatewayKey: null as string | null,
   entries: [] as LayoutEntry[],
+  folders: [] as Folder[],
+  collapsed: {} as Record<string, true>,
   archived: {} as Record<string, true>,
   accents: {} as Record<string, AccentName>,
+  mutes: {} as Mutes,
   sidebarCollapsed: undefined as boolean | undefined,
   loaded: false
 }
@@ -142,27 +212,10 @@ function persist(gatewayKey: string, layout: PersistedLayout): void {
 /** Read a stored blob defensively: an older build may have written anything. */
 function asLayout(value: unknown): PersistedLayout {
   const raw = (value ?? {}) as Partial<PersistedLayout>
-  const entries: LayoutEntry[] = []
-  const seen = new Set<string>()
-
-  for (const entry of Array.isArray(raw.entries) ? raw.entries : []) {
-    if (!entry || typeof entry !== 'object') {
-      continue
-    }
-
-    if (entry.kind === 'divider' && typeof entry.id === 'string' && entry.id) {
-      entries.push({ kind: 'divider', id: entry.id, name: typeof entry.name === 'string' ? entry.name : '' })
-      continue
-    }
-
-    // A duplicated chat row would render the same bot twice and make every move
-    // ambiguous, so the first position wins and the rest are dropped.
-    if (entry.kind === 'chat' && typeof entry.name === 'string' && entry.name && !seen.has(entry.name)) {
-      seen.add(entry.name)
-      entries.push({ kind: 'chat', name: entry.name })
-    }
-  }
-
+  // `readArrangement` also migrates: a blob written before folders carries
+  // `divider` entries inline, and each one becomes a folder holding the chats
+  // below it up to the next divider.
+  const arrangement = readArrangement(raw.entries, raw.folders)
   const accents: Record<string, AccentName> = {}
 
   for (const [bot, accent] of Object.entries(raw.accents ?? {})) {
@@ -172,11 +225,16 @@ function asLayout(value: unknown): PersistedLayout {
   }
 
   return {
-    entries,
+    entries: arrangement.entries,
+    folders: arrangement.folders,
+    collapsed: (Array.isArray(raw.collapsed) ? raw.collapsed : []).filter(
+      (id): id is string => typeof id === 'string' && id.length > 0
+    ),
     archived: (Array.isArray(raw.archived) ? raw.archived : []).filter(
       (name): name is string => typeof name === 'string' && name.length > 0
     ),
     accents,
+    mutes: mutesOf(raw.mutes),
     // Only a real boolean counts. Anything else — a missing key, a string an
     // older build wrote — has to read as "never chosen", because that is the
     // value the width bands are allowed to answer for.
@@ -184,24 +242,51 @@ function asLayout(value: unknown): PersistedLayout {
   }
 }
 
-let dividerCounter = 0
+/**
+ * A loose chat's position among the LOOSE chats, as a position among entries.
+ *
+ * The top level interleaves folders and chats, so "second loose chat" and
+ * "entry 2" are only the same number on a list with no folders in it. `moveBy`
+ * thinks in loose positions, because that is what up and down mean to a reader
+ * looking at rows; everything below it thinks in entry positions.
+ *
+ * `from` is the moving chat's own loose index, and it is what turns a step DOWN
+ * into the right entry: `moveBotTo` reads its index against the list without the
+ * moving row, so landing after the chat currently below means taking that chat's
+ * entry position rather than the one after it.
+ */
+function looseToEntryIndex(arrangement: Arrangement, loose: number, from: number): number {
+  const positions: number[] = []
 
-/** Divider ids only have to be unique within one gateway's arrangement. */
-function newDividerId(): string {
-  dividerCounter += 1
+  arrangement.entries.forEach((entry, index) => {
+    if (entry.kind === 'chat') {
+      positions.push(index)
+    }
+  })
 
-  return `d${Date.now().toString(36)}${dividerCounter.toString(36)}`
+  const target = positions[loose]
+
+  if (target === undefined) {
+    return arrangement.entries.length
+  }
+
+  // Moving down: the row at `loose` keeps its entry position once ours is gone,
+  // so landing after it is that position. Moving up: land on it.
+  return loose > from ? target : target
 }
 
 export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
   const save = (): void => {
-    const { gatewayKey, entries, archived, accents, sidebarCollapsed } = get()
+    const { gatewayKey, entries, folders, collapsed, archived, accents, mutes, sidebarCollapsed } = get()
 
     if (gatewayKey) {
       persist(gatewayKey, {
         entries,
+        folders,
+        collapsed: Object.keys(collapsed),
         archived: Object.keys(archived),
         accents,
+        mutes,
         // Omitted while nobody has chosen, so that "never chosen" survives a
         // round trip as the absence it is rather than as a `false` the width
         // bands would then never get to answer for.
@@ -210,10 +295,13 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
     }
   }
 
-  const write = (entries: LayoutEntry[]): void => {
-    set({ entries })
+  /** Every arrangement edit lands here, so every one of them is persisted. */
+  const write = (arrangement: Arrangement): void => {
+    set({ entries: arrangement.entries, folders: arrangement.folders })
     save()
   }
+
+  const arrangementOf = (): Arrangement => ({ entries: get().entries, folders: get().folders })
 
   return {
     ...INITIAL,
@@ -227,11 +315,20 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
         archived[name] = true
       }
 
+      const collapsed: Record<string, true> = {}
+
+      for (const id of stored.collapsed ?? []) {
+        collapsed[id] = true
+      }
+
       set({
         gatewayKey,
         entries: stored.entries,
+        folders: stored.folders ?? [],
+        collapsed,
         archived,
         accents: stored.accents,
+        mutes: stored.mutes ?? {},
         sidebarCollapsed: stored.sidebarCollapsed,
         loaded: true
       })
@@ -240,180 +337,136 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
     /**
      * Fold the live roster into the arrangement.
      *
-     * New bots land at the end of the unsectioned top group — the end of the
-     * list would bury them under sections they were never put in, and the top
-     * would push them in front of the chat the owner is reading. Bots that no
-     * longer exist are dropped. Nothing else moves.
+     * New bots land at the end of the loose top-level run, before the first
+     * folder — the end of the list would bury them inside whatever folder is
+     * last, and the top would push them in front of the chat the owner is
+     * reading. Bots that no longer exist are dropped from wherever they were.
      */
     reconcile(botNames) {
-      const live = new Set(botNames)
-      const { entries } = get()
-      const placed = new Set<string>()
-      const kept: LayoutEntry[] = []
+      const next = reconcileBots(arrangementOf(), botNames)
 
-      for (const entry of entries) {
-        if (entry.kind === 'divider') {
-          kept.push(entry)
-          continue
-        }
-
-        if (live.has(entry.name)) {
-          placed.add(entry.name)
-          kept.push(entry)
-        }
+      if (next !== arrangementOf()) {
+        write(next)
       }
-
-      const added = botNames.filter(name => !placed.has(name)).map(name => ({ kind: 'chat' as const, name }))
-
-      if (!added.length && kept.length === entries.length) {
-        return
-      }
-
-      const firstDivider = kept.findIndex(entry => entry.kind === 'divider')
-      const at = firstDivider === -1 ? kept.length : firstDivider
-
-      write([...kept.slice(0, at), ...added, ...kept.slice(at)])
     },
 
     /**
-     * Move one chat up or down by `offset` positions.
+     * Move one chat up or down WITHIN its own container.
      *
-     * Positions, not rows of the same kind: stepping past a divider is how a bot
-     * changes section, and it is the same gesture as stepping past another bot.
-     * That is the whole reason dividers and chats share one array.
+     * Deliberately not across containers any more. When the groups were
+     * headings, stepping past one was how a bot changed section and the same
+     * gesture as stepping past another bot — one flat array made the two
+     * identical. A folder is a container: "down" inside it means the next row
+     * inside it, and running off the end into the next folder is not a step
+     * anybody asked for. Moving BETWEEN folders is `moveToFolder`, the drag, or
+     * the row menu, all of which say which folder out loud.
      */
     moveBy(botName, offset) {
-      const entries = [...get().entries]
-      const from = entries.findIndex(entry => entry.kind === 'chat' && entry.name === botName)
-
-      if (from === -1 || offset === 0) {
+      if (offset === 0) {
         return
       }
 
-      const to = Math.max(0, Math.min(entries.length - 1, from + offset))
-
-      if (to === from) {
-        return
-      }
-
-      const [moved] = entries.splice(from, 1)
-
-      if (moved) {
-        entries.splice(to, 0, moved)
-        write(entries)
-      }
-    },
-
-    /** Put one chat at the end of a section; `null` is the unsectioned top group. */
-    moveToSection(botName, dividerId) {
-      const entries = get().entries.filter(entry => !(entry.kind === 'chat' && entry.name === botName))
-
-      if (entries.length === get().entries.length) {
-        return
-      }
-
-      const start = dividerId === null ? 0 : entries.findIndex(e => e.kind === 'divider' && e.id === dividerId) + 1
-
-      if (dividerId !== null && start === 0) {
-        return
-      }
-
-      let end = start
-
-      while (end < entries.length && entries[end]?.kind !== 'divider') {
-        end += 1
-      }
-
-      entries.splice(end, 0, { kind: 'chat', name: botName })
-      write(entries)
-    },
-
-    /**
-     * Put one chat immediately before position `index` of the current entry list.
-     *
-     * The hold-and-drag reorder commits through here rather than through a run of
-     * `moveBy` calls: a drag knows where the row ended up, and expressing that as
-     * N single steps means N writes to disk and N chances for the list to
-     * re-render mid-gesture.
-     *
-     * `index` is read against the list AS IT IS, including the dragged row. That
-     * is the number the caller can actually compute — a drop line sits between two
-     * rows it can see — so the shift that removing the row causes is corrected
-     * here rather than at every call site.
-     */
-    moveToIndex(botName, index) {
-      const entries = [...get().entries]
-      const from = entries.findIndex(entry => entry.kind === 'chat' && entry.name === botName)
+      const arrangement = arrangementOf()
+      const folderId = arrangement.folders.find(folder => folder.bots.includes(botName))?.id ?? null
+      const container =
+        folderId === null
+          ? arrangement.entries.flatMap(entry => (entry.kind === 'chat' ? [entry.name] : []))
+          : (arrangement.folders.find(folder => folder.id === folderId)?.bots ?? [])
+      const from = container.indexOf(botName)
 
       if (from === -1) {
         return
       }
 
-      const target = Math.max(0, Math.min(entries.length, index))
+      const to = Math.max(0, Math.min(container.length - 1, from + offset))
 
-      // Dropping a row immediately before or immediately after itself is the same
-      // arrangement, and writing it would churn the disk for nothing.
-      if (target === from || target === from + 1) {
+      if (to === from) {
         return
       }
 
-      const [moved] = entries.splice(from, 1)
+      /*
+        `moveBotTo` reads its index against the container WITHOUT the moving
+        row, so a step down is `to + 1` before the removal and `to` after it.
+        At the top level the index counts folders too, so the loose position is
+        translated back into an entry position here.
+      */
+      const target = folderId === null ? looseToEntryIndex(arrangement, to, from) : to
 
-      if (!moved) {
-        return
-      }
-
-      entries.splice(target > from ? target - 1 : target, 0, moved)
-      write(entries)
+      write(moveBotTo(arrangement, botName, folderId, target))
     },
 
-    addDivider(name) {
-      const id = newDividerId()
+    moveToFolder(botName, folderId) {
+      write(moveBotToFolder(arrangementOf(), botName, folderId))
+    },
 
-      write([...get().entries, { kind: 'divider', id, name }])
+    /**
+     * Commit a drag.
+     *
+     * `index` is read against the target container AS IT IS, including the
+     * dragged row when it is already in that container — the number a caller
+     * can actually compute, because a drop line sits between two rows it can
+     * see. `features/bots/folder-rows.ts` does the correction for the removal,
+     * which is what keeps "same container" and "different container" one path.
+     */
+    dropBot(botName, folderId, index) {
+      write(moveBotTo(arrangementOf(), botName, folderId, index))
+    },
+
+    dropFolder(folderId, index) {
+      write(moveFolderTo(arrangementOf(), folderId, index))
+    },
+
+    addFolder(name) {
+      const id = newFolderId()
+
+      write(addFolder(arrangementOf(), name, id))
 
       return id
     },
 
     /**
-     * A new section break directly above one chat.
+     * A new folder around one chat.
      *
-     * The chat itself does not move, which is the point: "Add divider above" on the
-     * row you are looking at means that row becomes the first one under a new
-     * heading. Returns null for a bot that is not in the arrangement rather than
-     * appending a heading to the end, which would be a divider nowhere near the
-     * row the reader right-clicked.
+     * "New folder" on a row you are looking at means that row is what the folder
+     * is for, which is the same intent "Add divider above" served and a better
+     * outcome: the divider left the chat where it was and hoped, and this puts
+     * it inside.
      */
-    addDividerAbove(botName, name) {
-      const entries = [...get().entries]
-      const at = entries.findIndex(entry => entry.kind === 'chat' && entry.name === botName)
+    addFolderAround(botName, name) {
+      const id = newFolderId()
 
-      if (at === -1) {
-        return null
-      }
-
-      const id = newDividerId()
-
-      entries.splice(at, 0, { kind: 'divider', id, name })
-      write(entries)
+      write(moveBotToFolder(addFolder(arrangementOf(), name, id), botName, id))
 
       return id
     },
 
-    renameDivider(id, name) {
-      write(get().entries.map(entry => (entry.kind === 'divider' && entry.id === id ? { ...entry, name } : entry)))
+    renameFolder(id, name) {
+      write(renameFolder(arrangementOf(), id, name))
     },
 
-    /**
-     * Remove a divider, not the bots under it.
-     *
-     * Dropping the heading leaves its rows exactly where they are, which folds
-     * them into the section above — the same thing that would happen if the
-     * owner dragged the heading away, and the only reading that never loses a
-     * chat.
-     */
-    removeDivider(id) {
-      write(get().entries.filter(entry => !(entry.kind === 'divider' && entry.id === id)))
+    setFolderColour(id, colour) {
+      write(setFolderColour(arrangementOf(), id, colour))
+    },
+
+    removeFolder(id) {
+      const collapsed = { ...get().collapsed }
+
+      delete collapsed[id]
+      set({ collapsed })
+      write(removeFolder(arrangementOf(), id))
+    },
+
+    setFolderOpen(id, open) {
+      const collapsed = { ...get().collapsed }
+
+      if (open) {
+        delete collapsed[id]
+      } else {
+        collapsed[id] = true
+      }
+
+      set({ collapsed })
+      save()
     },
 
     setArchived(botName, archived) {
@@ -445,6 +498,33 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
       save()
     },
 
+    setMute(botName, until) {
+      const mutes = { ...get().mutes }
+
+      if (until === null) {
+        delete mutes[botName]
+      } else {
+        mutes[botName] = Math.floor(until)
+      }
+
+      set({ mutes })
+      save()
+    },
+
+    dropExpiredMutes(now) {
+      const swept = withoutExpired(get().mutes, now)
+
+      // `null` is "nothing had lapsed", and returning early on it is what lets
+      // this be called on every foreground: an equal copy would still count as
+      // a change to the projection and send the whole section again.
+      if (!swept) {
+        return
+      }
+
+      set({ mutes: swept })
+      save()
+    },
+
     setSidebarCollapsed(collapsed) {
       set({ sidebarCollapsed: collapsed })
       save()
@@ -458,9 +538,10 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
       }
 
       set({
-        ...(patch.entries ? { entries: patch.entries } : {}),
+        ...(patch.arrangement ? { entries: patch.arrangement.entries, folders: patch.arrangement.folders } : {}),
         ...(patch.archived ? { archived } : {}),
-        ...(patch.accents ? { accents: patch.accents } : {})
+        ...(patch.accents ? { accents: patch.accents } : {}),
+        ...(patch.mutes ? { mutes: patch.mutes } : {})
       })
       save()
     },
@@ -471,46 +552,29 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
   }
 })
 
-/**
- * The list as the sidebar renders it: dividers with their rows, the unsectioned
- * top group first, and the archived bots pulled out into their own collection.
- *
- * Pure, and derived on every read rather than stored: a second copy of the order
- * is a second thing that can be stale.
- */
-export type LayoutSection = { divider: { id: string; name: string } | null; bots: string[] }
-
-export function sectionsOf(entries: readonly LayoutEntry[], archived: Record<string, true>): LayoutSection[] {
-  const sections: LayoutSection[] = [{ divider: null, bots: [] }]
-
-  for (const entry of entries) {
-    if (entry.kind === 'divider') {
-      sections.push({ divider: { id: entry.id, name: entry.name }, bots: [] })
-      continue
-    }
-
-    if (!archived[entry.name]) {
-      sections[sections.length - 1]?.bots.push(entry.name)
-    }
-  }
-
-  // An empty top group is not a section; a named one stays even when empty, so
-  // there is something to move a row back into.
-  return sections.filter(section => section.divider !== null || section.bots.length > 0)
-}
-
 /** Archived bots, in the order they sit in the arrangement. */
-export function archivedOf(entries: readonly LayoutEntry[], archived: Record<string, true>): string[] {
-  return entries
-    .filter(entry => entry.kind === 'chat' && archived[entry.name])
-    .map(entry => (entry as { name: string }).name)
+export function archivedOf(arrangement: Arrangement, archived: Record<string, true>): string[] {
+  return botsInOrder(arrangement).filter(name => archived[name])
 }
 
-/** Every divider, for the "move to section" menu. */
-export function dividersOf(entries: readonly LayoutEntry[]): { id: string; name: string }[] {
-  return entries
-    .filter((entry): entry is Extract<LayoutEntry, { kind: 'divider' }> => entry.kind === 'divider')
-    .map(entry => ({ id: entry.id, name: entry.name }))
+/** Every folder, for the row menu's "Move to folder". */
+export function foldersOf(arrangement: Arrangement): { id: string; name: string }[] {
+  return arrangement.folders.map(folder => ({ id: folder.id, name: folder.name }))
+}
+
+/**
+ * Is this chat silent, as of now?
+ *
+ * The clock is read at render rather than subscribed to, which means a mute
+ * that lapses while the list is on screen is not noticed until something else
+ * re-renders it. That is the right trade for a feature whose whole point is
+ * that nothing happens: the cost of being late is one row that goes on looking
+ * quiet, and the alternative is a timer per row.
+ */
+export function useChatMuted(botName: string): boolean {
+  const mutes = useChatLayoutStore(state => state.mutes)
+
+  return isMuted(mutes, botName, Math.floor(Date.now() / 1000))
 }
 
 /** One chat's colour. Part 2's header and outgoing bubble read this too. */

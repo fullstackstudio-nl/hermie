@@ -222,6 +222,28 @@ export function visibleItems(state: ChatState, options: VisibilityOptions): Visi
   return out
 }
 
+/**
+ * Is a question waiting on a person in this chat?
+ *
+ * The predicate on its own, because THREE surfaces answer with it and they have
+ * to agree: the chat list's bead, the widget file's `needsInput`, and the chat
+ * header. It used to be written out three times — the same `.some(...)` over
+ * `order`, byte for byte, in `BotsScreen`, `widgets/snapshot.ts` and, as a
+ * length check, in `ChatScreen`. Three copies of a predicate is three places a
+ * new request kind has to be remembered, and the one that is forgotten is a
+ * chat that quietly stops asking for attention.
+ *
+ * It stops at the first open request rather than building the list, which is
+ * what makes it cheap enough for a roster of forty on every store notification.
+ */
+export function hasOpenRequest(state: ChatState): boolean {
+  return state.order.some(id => {
+    const item = state.items[id]
+
+    return Boolean(item) && (item!.kind === 'approval' || item!.kind === 'clarify') && item!.state === 'open'
+  })
+}
+
 /** Every unanswered question, oldest first — the bottom sheets read this. */
 export function openRequests(state: ChatState): TranscriptItem[] {
   return state.order

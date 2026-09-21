@@ -76,7 +76,8 @@ import { Animated, PanResponder, type PanResponderInstance } from 'react-native'
 
 import { haptic } from '../../platform/haptics'
 import { NATIVE_DRIVER, spring as springToken } from '../../ui/motion'
-import { dropEntryIndex, dropSlot, neighbourOffsets, rowShift, type DragAnchor, type RowBox } from './drag-order'
+import { dropSlot, neighbourOffsets, rowShift, type RowBox } from './drag-order'
+import { anchorBoxes, type DragAnchor, type DropTarget } from './folder-rows'
 
 /** Beyond this, a press has become a drag. Below it, a finger is merely resting. */
 const MOVE_SLOP = 6
@@ -107,10 +108,17 @@ function settle(value: Animated.Value, toValue: number, reduceMotion: boolean): 
 
 export interface RowDragOptions {
   anchors: readonly DragAnchor[]
-  /** How many positions the arrangement has, for a drop past the last row. */
-  entryCount: number
-  /** Commit: put `botName` immediately before entry `index`. */
-  onCommit: (botName: string, index: number) => void
+  /**
+   * Where a drop past the last row goes.
+   *
+   * The end of the TOP LEVEL, never the end of whichever folder happened to be
+   * last: dragging a row to the bottom of the list means "out of everything",
+   * which is the only reading that gives a reader a way to take a chat out of
+   * the last folder by dragging.
+   */
+  fallbackTarget: DropTarget
+  /** Commit: put `botName` at this position, in this container. */
+  onCommit: (botName: string, target: DropTarget) => void
   /**
    * Take a fresh reading of the list's top edge on screen, reported back through
    * `onListTop`. Called when a drag arms, which is one long press before the first
@@ -167,7 +175,7 @@ export interface RowDrag {
 export function useRowDrag({
   anchors,
   armEnabled,
-  entryCount,
+  fallbackTarget,
   measureList,
   onAutoScroll,
   onCommit,
@@ -202,9 +210,9 @@ export function useRowDrag({
   const trackAgain = useRef<(moveY: number, dy: number) => void>(() => undefined)
   const edgeTimer = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const latest = useRef({ anchors, entryCount, measureList, onAutoScroll, onCommit, reduceMotion })
+  const latest = useRef({ anchors, fallbackTarget, measureList, onAutoScroll, onCommit, reduceMotion })
 
-  latest.current = { anchors, entryCount, measureList, onAutoScroll, onCommit, reduceMotion }
+  latest.current = { anchors, fallbackTarget, measureList, onAutoScroll, onCommit, reduceMotion }
 
   /**
    * One value per anchor, created on demand and kept for the life of the screen.
@@ -287,7 +295,7 @@ export function useRowDrag({
       const name = active.current
       const target = slot.current
       const from = origin.current
-      const { anchors: list, entryCount: count, onCommit: commitTo, reduceMotion: reduce } = latest.current
+      const { anchors: list, fallbackTarget: fallback, onCommit: commitTo, reduceMotion: reduce } = latest.current
 
       stopEdgeScroll()
       active.current = null
@@ -305,7 +313,7 @@ export function useRowDrag({
         setDropKey(null)
 
         if (commit && name && target !== null) {
-          commitTo(name, dropEntryIndex(list, target, count))
+          commitTo(name, list[target]?.target ?? fallback)
         }
       }
 
@@ -355,7 +363,14 @@ export function useRowDrag({
       // holding it, which is the one thing a drag may never do.
       translateY.setValue(dy + listOffset.current - scrollAtGrant.current)
 
-      const next = dropSlot(latest.current.anchors, boxes.current, pointerContentY(moveY))
+      // `anchorBoxes` adds the synthetic half-rows: a folder's own header
+      // carries a second anchor over its bottom half, which is what makes
+      // "drop onto the folder" a gesture rather than a wish.
+      const next = dropSlot(
+        latest.current.anchors,
+        anchorBoxes(latest.current.anchors, boxes.current),
+        pointerContentY(moveY)
+      )
 
       if (next !== slot.current) {
         const first = slot.current === null

@@ -7,12 +7,13 @@
  * reads a selection back is a parser with a total switch rather than a pile of
  * string comparisons spread across a component.
  *
- * The ids are structured on purpose — `accent:teal`, `section:d3f` — because two
- * of the groups are open sets. Nine colours and any number of sections cannot be
+ * The ids are structured on purpose — `accent:teal`, `folder:d3f` — because two
+ * of the groups are open sets. Nine colours and any number of folders cannot be
  * enumerated in a union type, and a parser that splits on the first colon can
  * answer for both without the menu and the handler agreeing on an index.
  */
 import { strings } from '../../i18n/strings'
+import { formatMuteUntil, MUTE_DURATIONS, MUTE_FOREVER, type MuteDuration } from '../../store/mute'
 import { menuItems, type MenuItem } from '../../ui/menu'
 import { ACCENT_ORDER, type AccentName } from '../../ui/tokens'
 
@@ -23,25 +24,78 @@ export interface RowMenuModel {
   archived: boolean
   /** Greys out Mark as read for a row that has nothing unread. */
   unread: boolean
-  /** Every section the row could move to; `null` is the unsectioned top group. */
-  sections: readonly { id: string | null; name: string }[]
+  /** Every folder the row could move to; `null` is the loose top level. */
+  folders: readonly { id: string | null; name: string }[]
   /** False in the archive drawer, where up and down mean nothing. */
   movable?: boolean
+  /**
+   * When this chat's silence lapses, `MUTE_FOREVER` for never, `null` for a
+   * chat that is not muted.
+   *
+   * A deadline rather than a boolean, because the menu has to say WHEN: a
+   * reader who muted a chat two days ago on another device has no other way to
+   * find out, and "Muted" with no end is the one thing they might reasonably
+   * panic about.
+   */
+  mutedUntil?: number | null
+  /** The clock the deadline is read against. Unix seconds. */
+  now?: number
 }
 
 export type RowMenuAction =
   | { kind: 'open' }
   | { kind: 'markRead' }
   | { kind: 'accent'; accent: AccentName }
-  | { kind: 'section'; dividerId: string | null }
+  | { kind: 'folder'; folderId: string | null }
   | { kind: 'move'; offset: number }
   /** Open the bot's profile editor — the same sheet the chat header's pill opens. */
   | { kind: 'editProfile' }
   /** A toggle, not a value: the menu already says which way round it is. */
   | { kind: 'archiveToggle' }
-  | { kind: 'dividerAbove' }
+  | { kind: 'newFolder' }
+  | { kind: 'mute'; duration: MuteDuration }
+  | { kind: 'unmute' }
 
-const SECTION_TOP = 'top'
+const FOLDER_TOP = 'top'
+
+/**
+ * Mute, or the state of one, as the two or three lines it takes.
+ *
+ * A muted chat gets a DISABLED line saying when it comes back, and then Unmute.
+ * A menu saying something rather than offering it is unusual enough to justify:
+ * the deadline was set somewhere else, possibly on another device and possibly
+ * days ago, and without it "Unmute" is a button whose effect the reader cannot
+ * predict. The fallback sheet already draws a disabled item as plain faint text,
+ * and UIKit draws it as a greyed line, so both read as a caption without either
+ * being taught a new kind of row.
+ */
+function muteItems(model: { mutedUntil?: number | null; now?: number }): MenuItem[] {
+  const until = model.mutedUntil
+
+  if (until === undefined || until === null) {
+    return [
+      {
+        id: 'mute',
+        title: strings.layout.mute,
+        systemImage: 'bell.slash',
+        children: MUTE_DURATIONS.map<MenuItem>(duration => ({
+          id: `mute:${duration}`,
+          title: strings.layout.muteFor[duration]
+        }))
+      }
+    ]
+  }
+
+  const when =
+    until === MUTE_FOREVER
+      ? ''
+      : formatMuteUntil(until, model.now ?? Math.floor(Date.now() / 1000), strings.layout.muteWeekdays)
+
+  return [
+    { id: 'mutedState', title: when ? strings.layout.mutedUntil(when) : strings.layout.muted, disabled: true },
+    { id: 'unmute', title: strings.layout.unmute, systemImage: 'bell' }
+  ]
+}
 
 /**
  * The row's menu, in the order the owner asked for it.
@@ -52,9 +106,9 @@ const SECTION_TOP = 'top'
  * harmless ones.
  */
 export function rowMenuItems(model: RowMenuModel): MenuItem[] {
-  const sections = model.sections.map<MenuItem>(section => ({
-    id: `section:${section.id ?? SECTION_TOP}`,
-    title: section.name || strings.layout.unnamedSection
+  const folders = model.folders.map<MenuItem>(folder => ({
+    id: `folder:${folder.id ?? FOLDER_TOP}`,
+    title: folder.name || strings.layout.unnamedFolder
   }))
 
   return menuItems(
@@ -80,11 +134,11 @@ export function rowMenuItems(model: RowMenuModel): MenuItem[] {
         selected: name === model.accent
       }))
     },
-    sections.length > 0 && {
-      id: 'section',
-      title: strings.layout.moveToSectionMenu,
+    folders.length > 0 && {
+      id: 'folder',
+      title: strings.layout.moveToFolderMenu,
       systemImage: 'folder',
-      children: sections
+      children: folders
     },
     model.movable !== false && {
       id: 'move',
@@ -96,10 +150,11 @@ export function rowMenuItems(model: RowMenuModel): MenuItem[] {
       ]
     },
     model.movable !== false && {
-      id: 'dividerAbove',
-      title: strings.layout.addDividerAbove,
-      systemImage: 'text.insert'
+      id: 'newFolder',
+      title: strings.layout.newFolder,
+      systemImage: 'folder.badge.plus'
     },
+    ...muteItems(model),
     {
       id: 'archive',
       title: model.archived ? strings.layout.unarchive : strings.layout.archive,
@@ -127,8 +182,8 @@ export function parseRowMenuAction(id: string): RowMenuAction | null {
     case 'markRead':
       return { kind: 'markRead' }
 
-    case 'dividerAbove':
-      return { kind: 'dividerAbove' }
+    case 'newFolder':
+      return { kind: 'newFolder' }
 
     case 'editProfile':
       return { kind: 'editProfile' }
@@ -136,8 +191,8 @@ export function parseRowMenuAction(id: string): RowMenuAction | null {
     case 'accent':
       return (ACCENT_ORDER as readonly string[]).includes(tail) ? { kind: 'accent', accent: tail as AccentName } : null
 
-    case 'section':
-      return tail ? { kind: 'section', dividerId: tail === SECTION_TOP ? null : tail } : null
+    case 'folder':
+      return tail ? { kind: 'folder', folderId: tail === FOLDER_TOP ? null : tail } : null
 
     case 'move': {
       const offset = Number(tail)
@@ -147,6 +202,100 @@ export function parseRowMenuAction(id: string): RowMenuAction | null {
 
     case 'archive':
       return { kind: 'archiveToggle' }
+
+    case 'mute':
+      return (MUTE_DURATIONS as readonly string[]).includes(tail)
+        ? { kind: 'mute', duration: tail as MuteDuration }
+        : null
+
+    case 'unmute':
+      return { kind: 'unmute' }
+
+    default:
+      return null
+  }
+}
+
+/** A folder's own menu. The same closed alphabet, one level up. */
+export interface FolderMenuModel {
+  name: string
+  colour: AccentName
+  /** When every chat inside is silent until, `null` when any of them is not. */
+  mutedUntil?: number | null
+  now?: number
+}
+
+export type FolderMenuAction =
+  | { kind: 'newFolder' }
+  | { kind: 'rename' }
+  | { kind: 'colour'; accent: AccentName }
+  | { kind: 'delete' }
+  | { kind: 'mute'; duration: MuteDuration }
+  | { kind: 'unmute' }
+
+/**
+ * What a folder can do.
+ *
+ * Delete is last and destructive, and it is the only line here whose wording
+ * has to promise something: the chats inside come back to the top level, so the
+ * label says "folder" rather than naming them, and nothing in this menu offers
+ * to delete a chat because nothing in the app does.
+ *
+ * Mute is the row menu's four spans applied to every chat inside at once, which
+ * is why the ids are the same and the parser below is a near-twin. Two parsers
+ * rather than one shared switch, because the two menus answer to different
+ * handlers and a shared alphabet with two meanings is how a colour lands on the
+ * wrong thing.
+ */
+export function folderMenuItems(model: FolderMenuModel): MenuItem[] {
+  return menuItems(
+    { id: 'rename', title: strings.layout.rename, systemImage: 'pencil' },
+    {
+      id: 'colour',
+      title: strings.layout.folderColour,
+      systemImage: 'paintpalette',
+      children: ACCENT_ORDER.map<MenuItem>(name => ({
+        id: `accent:${name}`,
+        title: strings.layout.accents[name],
+        selected: name === model.colour
+      }))
+    },
+    ...muteItems(model).map<MenuItem>(item =>
+      item.id === 'mute'
+        ? { ...item, title: strings.layout.muteFolder }
+        : item.id === 'unmute'
+          ? { ...item, title: strings.layout.unmuteFolder }
+          : item
+    ),
+    { id: 'newFolder', title: strings.layout.newFolder, systemImage: 'folder.badge.plus' },
+    { id: 'delete', title: strings.layout.deleteFolder, systemImage: 'trash', destructive: true }
+  )
+}
+
+export function parseFolderMenuAction(id: string): FolderMenuAction | null {
+  const [head, ...rest] = id.split(':')
+  const tail = rest.join(':')
+
+  switch (head) {
+    case 'rename':
+      return { kind: 'rename' }
+
+    case 'delete':
+      return { kind: 'delete' }
+
+    case 'newFolder':
+      return { kind: 'newFolder' }
+
+    case 'accent':
+      return (ACCENT_ORDER as readonly string[]).includes(tail) ? { kind: 'colour', accent: tail as AccentName } : null
+
+    case 'mute':
+      return (MUTE_DURATIONS as readonly string[]).includes(tail)
+        ? { kind: 'mute', duration: tail as MuteDuration }
+        : null
+
+    case 'unmute':
+      return { kind: 'unmute' }
 
     default:
       return null

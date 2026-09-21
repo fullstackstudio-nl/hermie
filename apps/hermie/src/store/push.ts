@@ -33,6 +33,7 @@ import {
   pushTypesOf,
   type PushAddress,
   type PushRegistrationInput,
+  type PushSeenEntry,
   type PushType
 } from '@hermie/gateway-client/push'
 import { create } from 'zustand'
@@ -89,7 +90,7 @@ export interface PushState {
   /** Rows written by other installations, carried through a write untouched. */
   others: Record<string, unknown>
   /** installation id → last time that device said a chat was on screen. */
-  seen: Record<string, number>
+  seen: Record<string, PushSeenEntry>
   /** False until the first disk read finishes; nothing is projected before it. */
   loaded: boolean
   /**
@@ -112,10 +113,10 @@ export interface PushState {
   setAddressFailure: (failure: PushAddressFailure | null) => void
   /** Re-stamp without changing anything else, so a refresh is visible upstream. */
   touch: (stamp: number) => void
-  /** Note that a chat is on screen on THIS device, at `stamp` (epoch seconds). */
-  beat: (stamp: number) => void
+  /** Note WHICH chat is on screen on THIS device, at `stamp` (epoch seconds). */
+  beat: (bot: string, stamp: number) => void
   /** Fold the gateway's copy of the section in. Never written back out by itself. */
-  applyRemote: (patch: { others: Record<string, unknown>; seen: Record<string, number> }) => void
+  applyRemote: (patch: { others: Record<string, unknown>; seen: Record<string, PushSeenEntry> }) => void
   /** Forget this device's registration: sign-out, or a different gateway. */
   retire: () => void
   reset: () => void
@@ -224,11 +225,11 @@ export const usePushStore = create<PushState>((set, get) => {
       }
     },
 
-    beat(stamp) {
+    beat(bot, stamp) {
       const installationId = get().installationId
 
       if (installationId) {
-        set({ seen: { ...get().seen, [installationId]: stamp } })
+        set({ seen: { ...get().seen, [installationId]: { bot, at: stamp } } })
       }
     },
 
@@ -238,8 +239,10 @@ export const usePushStore = create<PushState>((set, get) => {
       const ours = get().seen[installationId]
 
       // Our own stamp is ours: a remote copy of it is always the older one,
-      // because this device is the only thing that ever writes it.
-      if (installationId && ours && ours > (seen[installationId] ?? 0)) {
+      // because this device is the only thing that ever writes it. It is also
+      // the only copy that knows WHICH chat, on a gateway whose plugin still
+      // stores a bare number.
+      if (installationId && ours && ours.at > (seen[installationId]?.at ?? 0)) {
         seen[installationId] = ours
       }
 

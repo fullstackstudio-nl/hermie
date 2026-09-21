@@ -82,10 +82,39 @@ export interface PushRegistrationInput {
   updatedAt: number
 }
 
+/**
+ * Who is looking at what, right now.
+ *
+ * ADR-0017 made `seen` a bare stamp meaning "this device is reading SOMETHING".
+ * That was enough to suppress a notification for the device holding the chat
+ * open and not enough to avoid suppressing one for a different chat on the same
+ * device — a phone with the researcher's chat on screen was, as far as the
+ * notifier could tell, reading every chat at once. The chat name is what closes
+ * that, and it is the whole of the change.
+ *
+ * An empty `bot` is honest rather than exceptional: it is what a bare stamp off
+ * an older build normalises to, and it means "looking at some chat", which is
+ * exactly what that build was able to say.
+ */
+export interface PushSeenEntry {
+  bot: string
+  /** Unix seconds. */
+  at: number
+}
+
 /** The section as it travels, which is a plain bag both sides read defensively. */
 export interface PushSectionShape {
   registrations: Record<string, unknown>
-  seen: Record<string, number>
+  /**
+   * Object per device where the gateway can read one, bare number otherwise.
+   *
+   * The two shapes exist at once on purpose. A plugin that predates
+   * `push.seen.per_chat` reads a number and would see an object as unreadable,
+   * which is a device that looks permanently away and therefore a notification
+   * for every chat it is actually reading. So the app writes the shape the
+   * gateway has said it can read, and reads both.
+   */
+  seen: Record<string, PushSeenEntry | number>
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -168,15 +197,30 @@ export function foreignPushRows(section: unknown, installationId: string): Recor
   return out
 }
 
-/** The `seen` stamps in a section, as numbers, dropping anything that is not one. */
-export function pushSeenOf(section: unknown): Record<string, number> {
+/**
+ * The `seen` entries in a section, dropping anything unreadable.
+ *
+ * Both shapes are accepted. A bare number is what every build before
+ * `push.seen.per_chat` wrote, and it becomes an entry with no bot name — which
+ * is precisely as much as it ever said.
+ */
+export function pushSeenOf(section: unknown): Record<string, PushSeenEntry> {
   const push = isObject(section) ? section[PUSH_SECTION_KEY] : null
   const raw = isObject(push) && isObject(push.seen) ? push.seen : {}
-  const out: Record<string, number> = {}
+  const out: Record<string, PushSeenEntry> = {}
 
   for (const [id, value] of Object.entries(raw)) {
-    if (id && typeof value === 'number' && Number.isFinite(value) && value > 0) {
-      out[id] = Math.floor(value)
+    if (!id) {
+      continue
+    }
+
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+      out[id] = { bot: '', at: Math.floor(value) }
+      continue
+    }
+
+    if (isObject(value) && typeof value.at === 'number' && Number.isFinite(value.at) && value.at > 0) {
+      out[id] = { bot: typeof value.bot === 'string' ? value.bot : '', at: Math.floor(value.at) }
     }
   }
 
@@ -199,10 +243,18 @@ export interface PushSectionInput {
   others: Record<string, unknown>
   /** This device's registration, or `null` when it is off. */
   own: PushRegistrationInput | null
-  /** Every `seen` stamp this device knows about, including its own. */
-  seen: Record<string, number>
+  /** Every `seen` entry this device knows about, including its own. */
+  seen: Record<string, PushSeenEntry>
   /** Epoch seconds. Sweeps `seen`; does NOT stamp the registration. */
   now: number
+  /**
+   * Whether the gateway said it can read the `{bot, at}` shape.
+   *
+   * False writes a bare number, which is what an older plugin understands.
+   * A device's own chat name is then simply not said, rather than said into a
+   * field nothing reads — see `PushSectionShape.seen`.
+   */
+  perChat?: boolean
 }
 
 /**
@@ -220,13 +272,13 @@ export function pushSectionFor(input: PushSectionInput): PushSectionShape | unde
     registrations[input.own.installationId] = pushRowFor(input.own)
   }
 
-  const seen: Record<string, number> = {}
+  const seen: Record<string, PushSeenEntry | number> = {}
 
-  for (const [id, at] of Object.entries(input.seen)) {
+  for (const [id, entry] of Object.entries(input.seen)) {
     // A stamp from the future is a device with a wrong clock, not a reason to
     // drop it: only the old ones are swept.
-    if (at > 0 && input.now - at <= PUSH_SEEN_TTL_SECONDS) {
-      seen[id] = at
+    if (entry.at > 0 && input.now - entry.at <= PUSH_SEEN_TTL_SECONDS) {
+      seen[id] = input.perChat ? { bot: entry.bot, at: entry.at } : entry.at
     }
   }
 

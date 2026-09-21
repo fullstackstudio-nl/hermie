@@ -257,6 +257,7 @@ export class WidgetSync {
       lastSeen: bots.lastSeen,
       accents: layout.accents,
       archived: layout.archived,
+      mutes: layout.mutes,
       gatewayReady: this.frozenGatewayReady ?? this.gatewayReady,
       avatars: Object.fromEntries([...this.avatarsWritten.keys()].map(name => [name, true as const])),
       now: this.now()

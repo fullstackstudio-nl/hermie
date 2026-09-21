@@ -1,6 +1,6 @@
 # 0016. Per-client settings live in `ui_meta`, one section per concern, last writer wins
 
-- Status: Accepted
+- Status: Accepted, amended 2026-09-21 (the app-wide key carries a person's name)
 - Date: 2026-09-21
 - Amends: [0012](0012-local-chat-list-layout.md)
 
@@ -149,3 +149,91 @@ one.
 
 The gateway was left as it was found: both keys removed, both bags back to their original contents.
 Only the revision counters moved, which they cannot be asked not to.
+
+## Amendment, 2026-09-21: the app-wide key carries a person's name
+
+### What this closes
+
+This record ended on a regression it accepted knowingly:
+
+> Two people on one gateway now share an arrangement. That is a real regression against ADR-0012's
+> reasoning and it is accepted knowingly: the gateway has no per-user scope… If the gateway grows
+> one, this is the ADR to supersede.
+
+The gateway still has no per-user scope. The arrangement turned out not to need one. The key is a
+**string this client chooses**, so a person's name inside it separates two readers exactly as
+completely as two scopes would — the separation is as strong as the fact that nothing but Hermie
+writes these keys, which was already the premise the whole decision rested on.
+
+### What is decided
+
+**The app-wide key is `hermie-app:<user_id>`.** `<user_id>` is the gateway's own identity for
+whoever is signed in — the value `/api/auth/me` answers, which the device-context store already
+reads — and `owner` on a session-token gateway, where there are no accounts and therefore nobody to
+name. An ungated gateway therefore lands on `hermie-app:owner` and keeps one arrangement, which is
+the right answer for a gateway with one person on it.
+
+Everything that is **arrangement or preference** lives there: the chat order, the folders
+([ADR-0019](0019-folders-in-the-chat-list.md)), the theme (preset and user themes), the per-bot
+settings, the mutes, and the device-context section.
+Push registrations stay keyed per installation inside it, as they already were.
+
+The per-bot key `hermie` is **unchanged**. Archived and colour are about the bot, not about who is
+looking at it, and they live on that bot's own profile as before.
+
+**A reader the gateway has named nobody on writes no arrangement at all.** Not under the legacy key,
+not under a guessed one. That is the same rule the context section already follows — writing
+somebody's settings under a name the gateway never agreed to is worse than writing none — and it
+leaves that reader exactly where ADR-0012 left them: synced per bot, arranged on the device.
+
+### The anonymous section, and the one copy out of it
+
+The bare `hermie-app` is now the **legacy** key. It is read once, when a person has no key of their
+own and an anonymous section exists, and its contents are copied into theirs. After that it is never
+read again and never written. It stays on the gateway as the anonymous default, because an older
+build on another device goes on reading it and emptying it would undo that device's list.
+
+The copy is **filtered**, and that is the part worth recording. `push` and `context` are maps keyed
+by device and by person, and on a shared gateway the legacy key holds everybody's rows mixed
+together. Copying them would put one phone in two people's sections, and a notifier that reads both
+sends to that phone twice. A registration not carried across is one connect away from being written
+again — the app re-registers this device every time it starts — and a notification delivered twice is
+not recoverable at all, so the direction to fail in is not a close call.
+
+A person who arrives **after** the copy starts from the app's defaults, never from whoever got to the
+gateway first.
+
+### What this costs
+
+- **One more round trip's worth of ordering.** The key cannot be named until the identity is known,
+  so the reconcile now waits for `/api/auth/me` rather than racing it. A reconcile that ran first
+  would find no section, paint the defaults, and only then learn there was an arrangement to load.
+- **A gateway whose identity call fails loses app-wide sync**, where before it would have shared the
+  anonymous one. That is a narrower behaviour on purpose; see above.
+- **Anything outside the app that reads `hermie-app` has to learn the new shape.** In this repo that
+  is `packages/hermie-web`'s push watcher, which now pools the registrations of every
+  `hermie-app:*` key — deduplicated by installation id, newest row winning — and falls back to the
+  bare key only while nobody has one of their own. The gateway-side `hermie` plugin reads
+  `hermie-app:<user_id>` first and `hermie-app` second, for one version, and says so with the
+  capability string `ui_meta.per_user`.
+- **The push half waits to be told, and only the push half.** The arrangement moves to the
+  per-person key the moment this app ships, because nothing but this app reads it. The
+  registrations do not: one written where the notifier is not looking is a phone that has silently
+  stopped buzzing, and nobody discovers that except by not being woken up. So on a gateway whose
+  advert lacks `ui_meta.per_user`, the app writes the arrangement to `hermie-app:<user_id>` and the
+  registrations to the bare `hermie-app`, as a read-modify-write that changes nothing else in it.
+  Both keys go out in one `profiles.configure`, whose sections are independent.
+- **The per-key compare-and-swap now guards more keys.** Two people writing at once contend on
+  nothing, which is a straight improvement; the cost is that a profile's `ui_meta` grows a key per
+  person who has ever used the gateway.
+
+### What is verified
+
+`packages/gateway-client/src/ui-meta.test.ts`, over a real socket against the fake gateway: that two
+people on one gateway do not see each other's theme or order, that a token gateway writes under
+`owner`, that a second device of the same person reads the same arrangement, that a reader with no
+identity writes no app section while its bot sections still sync, that the anonymous section is
+inherited once and only once, that `push` and `context` are left behind by the copy, that a person
+arriving afterwards starts from the defaults, and that the anonymous section itself is left exactly
+as it was. `packages/hermie-web/src/push/roster.test.ts` pins the pooling, including that a device
+named under two keys is notified once.

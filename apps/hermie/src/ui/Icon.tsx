@@ -58,6 +58,7 @@ export type IconName =
   | 'arrowRight'
   | 'arrowUp'
   | 'queue'
+  | 'bellSlash'
 
 export interface IconProps {
   name: IconName
@@ -188,6 +189,26 @@ function Glyph({ color, name, stroke }: { color: string; name: IconName; stroke:
           <Line color={color} d="M5 7H19" stroke={stroke} />
           <Line color={color} d="M5 12H15" stroke={stroke} />
           <Line color={color} d="M5 17H11" stroke={stroke} />
+        </>
+      )
+
+    /**
+     * A bell with a stroke through it: the chat is quiet on purpose.
+     *
+     * The bell is drawn small and the slash runs the full diagonal, because at
+     * the 13pt marker size the two have to be told apart at a glance and a
+     * slash that stops at the bell's edge disappears into it. The clapper is
+     * left off for the same reason — three marks in thirteen points is a smudge.
+     */
+    case 'bellSlash':
+      return (
+        <>
+          <Line
+            color={color}
+            d="M7.2 16.2V11.4A4.8 4.8 0 0 1 12 6.6A4.8 4.8 0 0 1 16.8 11.4V16.2H7.2Z"
+            stroke={stroke}
+          />
+          <Line color={color} d="M4.6 4.6L19.4 19.4" stroke={stroke} />
         </>
       )
 

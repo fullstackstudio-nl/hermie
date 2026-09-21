@@ -19,6 +19,7 @@ import { ContextMenuHost, HAS_NATIVE_CONTEXT_MENU } from '../../platform/context
 import { secondaryClick } from '../../platform/secondary-click'
 import type { Bot } from '../../store/bots'
 import { GlassSurface } from '../../ui/glass'
+import { Icon, ICON_SIZE } from '../../ui/Icon'
 import { PresenceBead } from '../../ui/PresenceBead'
 import { Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
@@ -39,11 +40,19 @@ export type BotRowProps = {
   unread: boolean
   unreadCount: number
   /**
-   * Every section the row can move to, `null` first for the unsectioned top
-   * group. Must be a stable array — it is part of the memo's key, and a fresh one
-   * per render re-renders forty rows because one of them changed.
+   * When this chat's silence lapses, `0` for never, `null` when it is not muted.
+   *
+   * The DEADLINE rather than a boolean, because the menu has to be able to say
+   * when the chat comes back. The bell glyph only needs to know that it is not
+   * null, which the list has already decided by handing one over.
    */
-  menuSections: readonly { id: string | null; name: string }[]
+  mutedUntil: number | null
+  /**
+   * Every folder the row can move to, `null` first for the loose top level.
+   * Must be a stable array — it is part of the memo's key, and a fresh one per
+   * render re-renders forty rows because one of them changed.
+   */
+  menuFolders: readonly { id: string | null; name: string }[]
   /**
    * Every callback takes what it acts on rather than closing over it. That is
    * what lets the list hand down ONE identity per handler, which is the only
@@ -77,7 +86,8 @@ export const BotRow = memo(function BotRow({
   compact,
   editing,
   handleHandlers,
-  menuSections,
+  menuFolders,
+  mutedUntil,
   onArm,
   onDisarm,
   onMenuSelect,
@@ -106,10 +116,11 @@ export const BotRow = memo(function BotRow({
         botName: bot.name,
         displayName: bot.displayName,
         movable: !archived,
-        sections: menuSections,
+        mutedUntil,
+        folders: menuFolders,
         unread
       }),
-    [accent, archived, bot.displayName, bot.name, menuSections, unread]
+    [accent, archived, bot.displayName, bot.name, menuFolders, mutedUntil, unread]
   )
 
   // The last REAL message this bot's chat holds, from the transcript when there
@@ -135,7 +146,10 @@ export const BotRow = memo(function BotRow({
   const label = [
     bot.displayName,
     strings.presence[presence.state],
-    unreadCount > 0 ? strings.bots.unreadLabel(unreadCount) : unread ? strings.bots.unread : ''
+    unreadCount > 0 ? strings.bots.unreadLabel(unreadCount) : unread ? strings.bots.unread : '',
+    // Said in words here rather than left to the glyph, which keeps itself out
+    // of the accessibility tree like every other decorative icon.
+    mutedUntil === null ? '' : strings.layout.mutedRow
   ]
     .filter(Boolean)
     .join(', ')
@@ -230,6 +244,21 @@ export const BotRow = memo(function BotRow({
           {preview}
         </Text>
       </View>
+
+      {/*
+        The bell sits BEFORE the unread pill and does not replace it. A muted
+        chat still counts on its own row — what mute stops is the buzzing and
+        the totals, not the reader's ability to see that four things arrived
+        while they were not listening.
+      */}
+      {mutedUntil === null ? null : (
+        <Icon
+          color={theme.colors.textFaint}
+          name="bellSlash"
+          size={ICON_SIZE.marker}
+          testID={`bot-muted-${bot.name}`}
+        />
+      )}
 
       {unread || unreadCount > 0 ? <UnreadBadge accent={swatch.fill} count={unreadCount} /> : null}
     </View>

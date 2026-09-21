@@ -31,7 +31,7 @@ beforeEach(async () => {
 
 describe('the projection', () => {
   it('puts a bot’s own settings in the bot key and the rest in the app key', () => {
-    useChatLayoutStore.getState().addDivider('Finance')
+    useChatLayoutStore.getState().addFolder('Finance')
     useChatLayoutStore.getState().setArchived('writer', true)
     useChatLayoutStore.getState().setAccent('researcher', 'lime')
     useSettingsStore.getState().setDefaults({ level: 'verbose' })
@@ -46,7 +46,9 @@ describe('the projection', () => {
     })
     expect(app.defaults?.level).toBe('verbose')
     expect(app.themeChoice).toEqual({ kind: 'preset', name: 'graphite' })
-    expect(app.entries?.some(entry => entry.kind === 'divider' && entry.name === 'Finance')).toBe(true)
+    // The top level names a folder by id; the folder itself carries the name.
+    expect(app.entries?.some(entry => entry.kind === 'folder')).toBe(true)
+    expect(app.folders?.some(folder => folder.name === 'Finance')).toBe(true)
   })
 
   it('leaves the sidebar out of it', () => {
@@ -80,7 +82,7 @@ describe('the projection', () => {
   it('does not read an absent arrangement as an empty one', () => {
     // A gateway nobody has written to has no arrangement. Taking that as "no
     // rows anywhere" would empty a list somebody spent an afternoon on.
-    useChatLayoutStore.getState().addDivider('Finance')
+    useChatLayoutStore.getState().addFolder('Finance')
 
     applySnapshot({ app: { v: 1 }, bots: {} })
 
@@ -95,6 +97,15 @@ describe('the projection', () => {
 })
 
 describe('the bridge', () => {
+  /**
+   * Whoever the gateway named.
+   *
+   * Every case here has one, because the app-wide key carries a person's name
+   * and a bridge that has not been told one writes no arrangement at all. On a
+   * token gateway — which is what this fake is — that name is `owner`.
+   */
+  const OWNER = 'owner'
+
   /** A gateway that records what it was asked, and answers an empty roster. */
   function recorder() {
     const calls: { method: string; params?: Record<string, unknown> }[] = []
@@ -105,8 +116,31 @@ describe('the bridge', () => {
         calls.push({ method, params })
 
         return method === 'profiles.list'
-          ? { profiles: [{ name: 'researcher', is_default: true, ui_meta: { 'hermes-bots': {} } }] }
-          : { ok: true, applied: { ui_meta: true, ui_meta_revisions: { hermie: 1, 'hermie-app': 1 } } }
+          ? {
+              profiles: [
+                {
+                  name: 'researcher',
+                  is_default: true,
+                  ui_meta: {
+                    'hermes-bots': {},
+                    /*
+                      A plugin that reads the per-person key. Without this
+                      advert the bridge would ALSO write the bare `hermie-app`
+                      to keep the registrations where an older notifier is
+                      looking, which is a different case with its own cases in
+                      `packages/gateway-client/src/ui-meta.test.ts`.
+                    */
+                    'hermie-plugin': {
+                      v: 1,
+                      version: '0.2.0',
+                      capabilities: ['ui_meta.per_user', 'push.seen.per_chat'],
+                      modules: { push: 'on' }
+                    }
+                  }
+                }
+              ]
+            }
+          : { ok: true, applied: { ui_meta: true, ui_meta_revisions: { hermie: 1, 'hermie-app:owner': 1 } } }
       }
     }
   }
@@ -114,6 +148,8 @@ describe('the bridge', () => {
   it('sends a section anybody changed, whichever setter did it', async () => {
     const gateway = recorder()
     const bridge = new UiMetaBridge({ gateway, debounceMs: 0 })
+
+    bridge.setUser(OWNER)
     const stop = bridge.start()
 
     useChatLayoutStore.getState().setAccent('researcher', 'lime')
@@ -132,6 +168,8 @@ describe('the bridge', () => {
   it('notices a section that went away', async () => {
     const gateway = recorder()
     const bridge = new UiMetaBridge({ gateway, debounceMs: 0 })
+
+    bridge.setUser(OWNER)
 
     useChatLayoutStore.getState().setArchived('writer', true)
 
@@ -154,6 +192,8 @@ describe('the bridge', () => {
     // tablet and the gateway empty, each waiting for the other to go first.
     const gateway = recorder()
     const bridge = new UiMetaBridge({ gateway, debounceMs: 0 })
+
+    bridge.setUser(OWNER)
     const stop = bridge.start()
 
     await bridge.reconcile()
@@ -174,6 +214,8 @@ describe('the bridge', () => {
     const gateway = recorder()
     const bridge = new UiMetaBridge({ gateway, debounceMs: 0 })
 
+    bridge.setUser(OWNER)
+
     await bridge.reconcile()
 
     const stop = bridge.start()
@@ -191,7 +233,7 @@ describe('the bridge', () => {
     // `researcher` is the default profile here, so both sections are its own —
     // and the protocol applies the sections of one request independently.
     expect(writes).toHaveLength(1)
-    expect(Object.keys((writes[0]?.params?.ui_meta ?? {}) as object).sort()).toEqual(['hermie', 'hermie-app'])
+    expect(Object.keys((writes[0]?.params?.ui_meta ?? {}) as object).sort()).toEqual(['hermie', 'hermie-app:owner'])
 
     stop()
   })
