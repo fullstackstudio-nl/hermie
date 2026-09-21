@@ -65,6 +65,17 @@ export type MessageMenuAction =
   | { kind: 'editResend'; text: string; attachments: string[] }
   /** Run the last reply again. The screen decides how; see `ChatScreen`. */
   | { kind: 'regenerate' }
+  /**
+   * Say this reply out loud, or stop saying it.
+   *
+   * ONE action for two menu lines, because the reader is expressing one
+   * intention about one row — "read this" and "stop reading this" are the same
+   * switch seen from its two sides, and `SpeechReader.toggle` is what settles
+   * which. The MARKDOWN travels, not the flattened text: flattening belongs to
+   * the voice feature and a menu that did it here would make the markdown
+   * stripper a dependency of the menu.
+   */
+  | { kind: 'readAloud'; text: string }
 
 /** `[text](href)` and `<https://…>`; the two forms a model actually writes. */
 const LINK_RE = /\[[^\]]*\]\(([^()\s]+)(?:\s+"[^"]*")?\)|<((?:https?|mailto):[^>\s]+)>/gu
@@ -192,16 +203,36 @@ export interface MessageMenuModel {
    * last reply in the list.
    */
   canRegenerate?: boolean
+  /**
+   * Whether this platform can speak at all.
+   *
+   * A capability rather than a preference: a browser with no `speechSynthesis`
+   * has nothing behind the line, and a menu entry that does nothing is worse
+   * than one that is absent. Unlike the two turn-starting lines, this one is
+   * DROPPED rather than disabled — "not now" is not what a missing synthesiser
+   * means, and there is no later in which it becomes available.
+   */
+  canReadAloud?: boolean
+  /**
+   * This row is being read, or is waiting its turn to be.
+   *
+   * One flag for both, because the line it produces is the same: `Stop reading`
+   * takes a queued reply back out just as it silences a speaking one. Only the
+   * host can answer it — the menu sees one item and knows nothing about a queue.
+   */
+  reading?: boolean
 }
 
 export function messageMenuItems({
   canEditResend = false,
   canOpenBot,
+  canReadAloud = false,
   canRegenerate = false,
   canSelectText = false,
   detailsOpen,
   hasDetails,
   item,
+  reading = false,
   turnRunning = false
 }: MessageMenuModel): MenuItem[] {
   const text = messageText(item)
@@ -231,6 +262,24 @@ export function messageMenuItems({
         id: 'selectText',
         title: chatStrings.menu.selectText,
         systemImage: 'selection.pin.in.out'
+      },
+    /*
+      Still the "I want these words" group, one step further along: a Copy takes
+      them somewhere else, this one says them here.
+
+      On what a BOT said, and only that. A reply and an inbound message from
+      another bot are both somebody else's words arriving, which is the case
+      where hearing them instead of reading them is worth a menu line. The
+      reader's own turn is not — they wrote it — and a tool card, a delegation
+      and a cron card are structure rather than prose, so reading one aloud
+      would be reciting a layout.
+    */
+    canReadAloud &&
+      (item.kind === 'assistant' || item.kind === 'bot_dm_in') &&
+      Boolean(text.trim()) && {
+        id: 'readAloud',
+        title: reading ? chatStrings.menu.stopReading : chatStrings.menu.readAloud,
+        systemImage: reading ? 'stop.circle' : 'speaker.wave.2'
       },
     // Under the copies and above the links, for the same reason `Select text`
     // is: these are about the message itself rather than about something it
@@ -313,6 +362,15 @@ export function parseMessageMenuAction(id: string, item: TranscriptItem): Messag
 
   if (id === 'regenerate') {
     return item.kind === 'assistant' ? { kind: 'regenerate' } : null
+  }
+
+  /*
+    Read off the item again, exactly as the copies are: a reply can still be
+    growing while its menu is open, and reading the version the menu was built
+    from would speak a truncated answer and stop mid-sentence.
+  */
+  if (id === 'readAloud') {
+    return (item.kind === 'assistant' || item.kind === 'bot_dm_in') && text.trim() ? { kind: 'readAloud', text } : null
   }
 
   if (id === 'openBot') {

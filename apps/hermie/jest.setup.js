@@ -114,3 +114,35 @@ jest.mock('expo-notifications', () => ({
   addNotificationResponseReceivedListener: jest.fn(() => ({ remove: jest.fn() })),
   getLastNotificationResponseAsync: jest.fn(async () => null)
 }))
+
+/**
+ * The two speech modules, which reach for a native module the moment they are
+ * used — `expo-speech-recognition` builds its `NativeModule` subclass at module
+ * scope, and `expo-speech` resolves its own on the first call.
+ *
+ * The stand-ins answer "this platform can speak and can listen", which is the
+ * state a phone is in and therefore the one worth covering by default. A suite
+ * that wants the other answer hands the reader or the dictation machine its own
+ * engine: the whole point of `SpeechEngine` and `RecognitionEngine` is that
+ * nothing above them has to know these modules exist.
+ */
+jest.mock('expo-speech', () => ({
+  speak: jest.fn(),
+  stop: jest.fn(async () => undefined),
+  isSpeakingAsync: jest.fn(async () => false),
+  getAvailableVoicesAsync: jest.fn(async () => [])
+}))
+
+jest.mock('expo-speech-recognition', () => ({
+  ExpoSpeechRecognitionModule: {
+    start: jest.fn(),
+    stop: jest.fn(),
+    abort: jest.fn(),
+    isRecognitionAvailable: jest.fn(() => true),
+    supportsOnDeviceRecognition: jest.fn(() => true),
+    getPermissionsAsync: jest.fn(async () => ({ granted: false, canAskAgain: true, status: 'undetermined' })),
+    requestPermissionsAsync: jest.fn(async () => ({ granted: true, canAskAgain: true, status: 'granted' })),
+    getSupportedLocales: jest.fn(async () => ({ locales: [], installedLocales: [] })),
+    addListener: jest.fn(() => ({ remove: jest.fn() }))
+  }
+}))

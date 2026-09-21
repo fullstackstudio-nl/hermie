@@ -31,6 +31,7 @@ new record supersedes it, and the old one gets a line at the top pointing forwar
 | [0018](0018-injected-rows-are-notices.md)           | A row the gateway injected is a notice, recognised by its shape              | Accepted           |
 | [0019](0019-folders-in-the-chat-list.md)            | The chat list groups into folders, and a bot is in exactly one               | Accepted           |
 | [0020](0020-diagrams-and-math-without-a-webview.md) | Diagrams and mathematics are drawn in the bundle, not in a web view          | Accepted           |
+| [0022](0022-voice-on-the-device.md)                 | Speech happens on the device; the gateway's voice RPCs are not used          | Accepted           |
 
 | #                                                 | Title                                                                        | Status             |
 | ------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------ |

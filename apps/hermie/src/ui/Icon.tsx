@@ -60,6 +60,7 @@ export type IconName =
   | 'queue'
   | 'bellSlash'
   | 'grip'
+  | 'mic'
 
 export interface IconProps {
   name: IconName
@@ -350,6 +351,24 @@ function Glyph({ color, name, stroke }: { color: string; name: IconName; stroke:
           {[8.2, 12, 15.8].map(y => (
             <Circle cx={14.8} cy={y} fill={color} key={`r${y}`} r={1.5} />
           ))}
+        </>
+      )
+
+    /**
+     * A capsule in a cradle on a stem: the microphone every platform draws.
+     *
+     * The cradle is an arc rather than a full circle, and the stem is what makes
+     * the mark read as a microphone rather than as a pill with a smile under it.
+     * All three are strokes at the same weight so the button's dimmed state
+     * fades evenly — a filled capsule beside a stroked cradle would keep its
+     * density while the rest of the mark thinned out.
+     */
+    case 'mic':
+      return (
+        <>
+          <Rect fill="none" height={10.4} rx={2.6} stroke={color} strokeWidth={stroke} width={5.2} x={9.4} y={3.2} />
+          <Line color={color} d="M5.8 11.2A6.2 6.2 0 0 0 18.2 11.2" stroke={stroke} />
+          <Line color={color} d="M12 17.4V20.8" stroke={stroke} />
         </>
       )
   }

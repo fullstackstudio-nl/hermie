@@ -116,6 +116,22 @@ no third-party network call. The only address Hermie knows is the one you typed.
   through the gateway's own `/retry` where it has one, and re-sends your last
   prompt where it does not. Both are greyed rather than hidden while a turn is
   running.
+- **Read a reply aloud.** Any reply's menu will say it, using the voice built
+  into your phone, your Mac or your browser — nothing is sent anywhere to be
+  synthesised. A code listing is read as `Code block, 12 lines` rather than
+  recited, a table is read a row at a time, links read their label, and
+  mathematics is read as it was written. A chat can be set to read every finished
+  reply on its own, and it never speaks a reply that is still being written.
+- **Dictate instead of typing.** A microphone in the composer: hold it to talk,
+  or tap it and tap again. What you say appears at the caret as you speak, so it
+  drops into a half-written message where you put it, and it is a draft like any
+  other — nothing is sent until you send it. On iPhone, iPad, Android and the Mac
+  the transcription happens on the device; a browser's speech API does not offer
+  that guarantee, and one without the API shows no microphone at all.
+- **Voice mode.** Hands-free: it listens, sends what you said, reads the answer
+  aloud and listens again. It shows what it heard for a second before sending,
+  with a cancel, and it never sends an empty message. Tap to interrupt a reply,
+  swipe down or press Escape to leave.
 - **Take the conversation with you.** Export a chat as Markdown or plain text,
   into the share sheet on a phone or the Mac and as a download in a browser. What
   you get is what is on screen: a chat you have set to Quiet exports the quiet

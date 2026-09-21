@@ -7410,3 +7410,170 @@ built:
 chat-layout store, synced in the app-wide section like the mutes, and a sort
 inside `folderRows`. It was left out because it changes the order the drag
 arithmetic reads, and this round had already changed that arithmetic once.
+
+## Voice: speaking, listening, and an RPC that does neither (2026-09-22)
+
+### The gateway's voice methods are for the gateway's own machine
+
+The round's brief said to offer "Gateway voice" when `voice.tts` answers audio, and "Gateway
+transcription" when `voice.record` advertises it. **Neither method does what that describes**, and
+the reading is short enough to put here in full because the contract does not make it obvious.
+
+`tui_gateway/methods_voice.py::voice.tts` is nine lines. It takes `text`, refuses an empty one,
+starts a thread running `_speak_text_with_barge` — which calls `speak_text` from `hermes_cli.voice`
+— and answers `_ok(rid, {"status": "speaking"})`. `speak_text` plays through **the gateway host's
+speaker**. The vendored type agrees and is the shortest possible summary of the problem:
+
+```ts
+export interface VoiceTtsResult {
+  status: string
+}
+```
+
+No bytes, no base64, no url, nowhere for any of them to go. Called from a phone against a gateway on
+somebody's laptop, the laptop starts talking.
+
+`voice.record` is the same shape pointing the other way. It calls `start_continuous(...)`, which
+opens **the gateway host's microphone**, and answers `{"status": "recording"}`; the transcript
+arrives later as a `voice.transcript` event. `VoiceRecordParams` is `{action, session_id, profile}` —
+there is no field for client audio. It also refuses with 4015 unless `HERMES_VOICE` is `1` on the
+gateway process, which a client can only change by calling `voice.toggle {action: "on"}` and
+flipping a **process-global** env flag that every other surface on that gateway shares.
+
+`wake.feed` is the only RPC in the protocol that takes a client's audio: base64 int16 mono, 16 kHz
+only, a 64 000-byte cap, and it answers `{fed: bool}`. It feeds the wake-word detector. There is no
+path from it to a transcript.
+
+So: **there is no RPC that takes audio from a client and answers with text, and none that answers
+with audio to play.** Both gateway options in the brief describe a capability that does not exist.
+Building either would have meant teaching `packages/fake-gateway` a shape the real gateway does not
+have, and going green over a feature that cannot work — which is the trap `profiles.configure` and
+its missing `display_name` set in the previous round, recorded above. ADR-0021 is the decision.
+
+### What a speech engine wants is not what a screen wants
+
+`markdown/plain-text.ts` already answers "what are the words" and it is the wrong answer for a
+speaker, in four places:
+
+- **A code block is read as its shape.** Forty lines of TypeScript spoken one character at a time is
+  ninety seconds that cannot be paused anywhere useful, so it becomes `Code block, 40 lines`. Up to
+  two short lines are read out instead, because a one-liner is often the whole answer and
+  summarising it would hide the reply.
+- **A table is read a row at a time**, cells separated by commas and rows ended with a full stop.
+  Column alignment is a fact about a screen.
+- **A link reads its label**, which is the call `plain-text.ts` already makes.
+- **Mathematics is read as its SOURCE.** This is the one that needs care rather than taste.
+  `a_1 + b_2` inside `$…$` is ordinary, and CommonMark's intraword rule does not save it: `_1 + b_`
+  is a legal emphasis run between two non-word characters, so an unmasked pass through the existing
+  stripper produces `a1 + b2` and silently deletes two subscripts. Maths is therefore masked out
+  before the inline pass and restored afterwards, exactly as written.
+
+The mask is NUL, because it is the one character neither a model nor the stripper acts on — and it
+is built with `String.fromCharCode(0)` rather than written as an escape, because **Prettier rewrites
+that escape to the raw byte** and a source file with a NUL in it is one that `grep`, `diff` and most
+editors treat as binary. That was observed here, not guessed at.
+
+### A stop is not a completion, in three separate machines
+
+The same guard appears in `SpeechReader`, `DictationMachine` and `VoiceLoop`, and it is the same
+defect in each: the platform can deliver a callback for a session that has already been replaced.
+
+- `speechSynthesis.cancel()` does not reliably suppress the `end` event, so a stop can look like a
+  finished utterance and advance the queue — which would make "stop reading" start the next reply.
+- Android's recognizer delivers `error` and then `end`; iOS can deliver `end` alone. Treating `end`
+  as the last word twice restarts a loop that had already moved on.
+- A permission dialog can be granted after the reader has let go of the button.
+
+Every one of these is answered by a generation counter captured at start and checked in each
+callback, rather than by a boolean — because the two events can arrive in either order and a flag
+cannot tell "we are stopping" from "we have already started something else".
+
+`expo-speech`'s `onStopped` is deliberately routed to nothing for the same reason: the seam calls
+`Speech.stop()` before every `speak`, so mapping `onStopped` to `onDone` would advance the queue on
+the very call that was replacing its head, and the queue would lose an item per tap.
+
+### The mic's long press was already taken
+
+The brief put voice mode behind "the composer's mic long-press menu". It is not there, because
+**press-and-hold IS dictation**: hold the mic to talk, let go to stop, which is what the platform
+keyboards' own dictation keys do and what `press-to-talk.ts` implements from two timestamps. A menu
+on the long press would take that gesture away from the feature the button exists for, on the one
+platform — a phone — where there is no other secondary gesture.
+
+So voice mode is reached from the chat options sheet, which the brief offered as the alternative,
+and from an `accessibilityAction` on the mic that VoiceOver's rotor and a secondary click both
+reach.
+
+### Four rules that make the loop usable rather than alarming
+
+All four are in `features/voice/voice-loop.ts` with every side injected, and each of them exists
+because the obvious implementation is unpleasant rather than broken:
+
+1. **An empty transcript is never sent.** Without it the loop asks the bot to answer a cleared
+   throat, and the bot obliges.
+2. **The transcript is shown for a second before it goes**, with a cancel, on by default. Voice mode
+   speaks FOR the reader; a recognizer that mishears should not be able to put words on a
+   conversation with no moment to stop it.
+3. **Silence ends the utterance** — the recognizer's own final result where it gives one, 1.5 s
+   after the last thing heard where it does not, because some recognizers in continuous mode never
+   volunteer a final. The timer is armed only once something HAS been heard, so a reader who takes
+   three seconds to start is not cut off before they begin.
+4. **A tap interrupts rather than leaves.** "Stop talking, let me speak" is the commonest thing
+   anybody wants in this mode, and a tap that also closed the overlay would lose the mode by doing
+   it. Leaving is the swipe and Escape.
+
+`no-speech` is deliberately NOT an error inside the loop: in a hands-free conversation it means the
+reader paused to think, and stopping the whole mode over it would make the feature unusable. Every
+other failure does stop, so a broken recognizer cannot spin.
+
+### Two menu lines that were never drawn
+
+Not a voice defect, but it was found by landing on it. `TranscriptList` builds each row's context by
+naming fields one at a time — the comment above that memo explains why it cannot spread `handlers` —
+and **four of the fields `TranscriptContext` declares were never named**: `onEditResend`,
+`onRegenerate`, `turnRunning` and `lastAssistantId`. Every one of them arrived `undefined` at every
+row, so `Edit and resend` and `Regenerate` were drawn nowhere in the app.
+
+`message-actions.test.ts` calls `messageMenuItems` directly and passed throughout, which is exactly
+how a gap like this survives: the unit under test was correct and nothing tested the wiring.
+`__tests__/chat-ui/transcript-menu-wiring.test.tsx` covers the round trip now, by standing in for
+`ContextMenuHost` — which renders its children bare wherever there is no native menu, so the items
+never reach the tree and no ordinary query could see them.
+
+### What is unverified here
+
+**No device audio was available for any of this.** Everything above is the suites and a reading of
+the platform APIs; what a device check has to cover:
+
+- **The iOS silent switch.** `useApplicationAudioSession: false` hands the synthesiser its own
+  session, which is what gets ducking, interruption by a call or Siri, and resumption afterwards —
+  but the CATEGORY that session takes is the platform's choice and not a parameter, so whether a
+  reply is read aloud with the ring switch set to silent is genuinely unknown. If it is silenced,
+  the fix is an `AVAudioSession` category of our own, which means adding `expo-audio` purely to
+  configure one.
+- **Ducking against music, and what happens on a phone call.** Same session, same reason.
+- **Whether on-device recognition is actually available** on a given iPhone, iPad, Mac window or
+  Android device, and what `supportsOnDeviceRecognition()` answers there. The whole capability gate
+  hangs off it, and a `false` means no microphone button at all — which is the intended behaviour
+  and still needs to be seen rather than assumed.
+- **What `getSupportedLocales().installedLocales` returns in practice.** Empty is handled (the
+  picker offers the device language alone) but whether a phone with two keyboard languages reports
+  two entries, or none, has not been looked at.
+- **The permission dialogs.** Both usage strings are asserted by `microphone-config.test.ts` and
+  neither has been seen on a device; a missing one does not produce a refusal on iOS, it terminates
+  the app.
+- **The Android `<queries>` entry.** The plugin writes it, and the failure it prevents — a release
+  build that cannot see the recognition service while a debug build can — only shows up after
+  release.
+- **Voice mode end to end against a real gateway.** The loop is covered with fake timers and fake
+  engines; nobody has spoken to a bot and heard it answer. In particular, the reply is picked as the
+  first assistant row that is new since the send and arrives after the turn ends — a chat where a
+  cron delivery or a bot-to-bot reply lands in that same window has not been watched.
+- **Haptics.** `choice` on both edges of listening, which is `selectionAsync`. Whether that reads as
+  punctuation or as noise at the rate a hands-free loop produces it is a judgement nobody has made
+  with a phone in their hand.
+- **The overlay at phone width, and the ring's gain.** `RING_GAIN` is 0.35 against a level the
+  recognizer reports in roughly −2…10 decibel-ish units, converted in the seam. Both numbers are
+  chosen rather than measured.
+- **Dictation on the web.** The Chrome and Safari path is written from the API's documented
+  behaviour; neither has been driven in a browser here.

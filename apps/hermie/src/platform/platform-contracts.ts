@@ -175,3 +175,101 @@ export interface WidgetBridge {
 export function formatPageTitle(screen: string | undefined, app = 'Hermie'): string {
   return screen && screen !== app ? `${screen} · ${app}` : app
 }
+
+/**
+ * One thing to say out loud.
+ *
+ * `language` is a BCP-47 tag or nothing; nothing means "the device's own", which
+ * every engine here already defaults to. `rate` is a multiplier where 1 is the
+ * platform's normal speaking rate — deliberately relative rather than words per
+ * minute, because none of the three engines behind this agrees on an absolute.
+ */
+export interface SpeechUtterance {
+  text: string
+  language?: string
+  rate?: number
+  /** Speaking finished on its own. Never called for an utterance that was stopped. */
+  onDone?: () => void
+  /** The engine refused or failed. The caller treats this as "move on". */
+  onError?: () => void
+}
+
+/**
+ * Speaking, as the one call the app makes.
+ *
+ * `available` is a fact about the platform rather than about permission: there
+ * is no permission to speak on any of the three targets, so a `false` here means
+ * the browser has no `speechSynthesis` at all. Every method is safe to call when
+ * it is `false` — they do nothing — because the alternative is a guard at every
+ * call site that would be wrong the moment a fourth target appeared.
+ *
+ * It is deliberately NOT a queue. Queueing is a decision about which reply a
+ * reader wants next and it belongs above the platform, in `features/voice/reader.ts`;
+ * a seam that queued would make "stop everything" mean two different things on
+ * two platforms.
+ */
+export interface SpeechEngine {
+  readonly available: boolean
+  /** Say this, interrupting whatever was being said. */
+  speak(utterance: SpeechUtterance): void
+  /** Silence, now. Any `onDone` still pending is dropped rather than fired. */
+  stop(): void
+}
+
+/** Why a recognizer stopped, in the only four shapes a caller acts on. */
+export type RecognitionFailure = 'permission' | 'no-speech' | 'unavailable' | 'failed'
+
+/** What a microphone permission request came back with. */
+export type RecognitionPermission = 'granted' | 'denied' | 'unavailable'
+
+export interface RecognitionRequest {
+  /** BCP-47. Nothing means the device's own language. */
+  language?: string
+  /**
+   * Keep listening through pauses.
+   *
+   * Off for push-to-talk, where the reader's finger is the end of the utterance;
+   * on for voice mode, where a silence IS the end and the loop wants one final
+   * result rather than a session that restarts under it.
+   */
+  continuous?: boolean
+  /** Text so far, replaced on every event. Never final. */
+  onPartial?: (text: string) => void
+  /** The recognizer's own answer. Fired at most once per session. */
+  onFinal?: (text: string) => void
+  /** Input level, roughly 0…1, where the platform reports one. */
+  onVolume?: (level: number) => void
+  onError?: (failure: RecognitionFailure) => void
+  /** The session is over, however it ended. Always the last callback. */
+  onEnd?: () => void
+}
+
+/**
+ * Listening, as the one call the app makes.
+ *
+ * `available` answers "is there a recognizer here at all" and nothing about
+ * permission — a phone whose owner has refused the microphone is still a phone
+ * with a recognizer, and the two facts drive different copy: a missing
+ * recognizer hides the button, a refused permission explains itself and offers
+ * Settings.
+ */
+export interface RecognitionEngine {
+  readonly available: boolean
+  /** Ask the platform. Safe to call repeatedly; the system only prompts once. */
+  requestPermission(): Promise<RecognitionPermission>
+  /**
+   * BCP-47 tags this device can actually recognise OFFLINE, or an empty list.
+   *
+   * Empty means "this platform will not say", not "none" — Android below API 31
+   * has no way to answer and a browser has none at all — so the caller offers
+   * the device's own language alone rather than an empty picker. Asking the
+   * platform beats a list in this repository, which would be a promise about
+   * somebody else's models that goes stale the first time one ships.
+   */
+  supportedLanguages(): Promise<string[]>
+  start(request: RecognitionRequest): void
+  /** Stop listening and ask for a final result. */
+  stop(): void
+  /** Stop listening and throw away what was heard. */
+  abort(): void
+}

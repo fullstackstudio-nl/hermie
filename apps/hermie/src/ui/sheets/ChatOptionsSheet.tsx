@@ -20,6 +20,7 @@ import { chatStrings } from '../../chat-ui/strings'
 import type { PickerOption, Verbosity } from '../../chat-ui/types'
 import type { PushType } from '@hermie/gateway-client/push'
 import { formatMuteUntil, MUTE_DURATIONS, MUTE_FOREVER, muteUntil, type MuteDuration } from '../../store/mute'
+import { DICTATION_AUTO, RATE_STEPS } from '../../features/voice/voice-settings'
 import { strings } from '../../i18n/strings'
 import { AccentSwatches } from '../AccentSwatches'
 import { BottomSheet, SheetEyebrow, SheetPage } from '../BottomSheet'
@@ -107,6 +108,63 @@ export interface ChatOptionsSheetProps {
    */
   onExport?: (format: 'md' | 'txt') => void
 
+  /**
+   * Speaking and listening, or nothing at all.
+   *
+   * Absent removes the whole group, which is the case on a platform with no
+   * synthesiser — a browser without `speechSynthesis`. The same rule `onExport`
+   * follows: a group whose controls cannot act is worse than a missing group.
+   *
+   * The two halves are deliberately different in scope and the footer says so.
+   * `autoRead` belongs to THIS chat — a phone in a car and a Mac in an office
+   * want different answers for the same bot — while the rate is one voice for
+   * the whole app, because a reader who finds the default too slow finds it too
+   * slow everywhere.
+   */
+  voice?: {
+    autoRead: boolean
+    onChangeAutoRead: (value: boolean) => void
+    /** Engine multiplier, 1 being the platform's normal. One of `RATE_STEPS`. */
+    rate: number
+    onChangeRate: (rate: number) => void
+    /** Something is being read right now, so there is something to stop. */
+    reading: boolean
+    onStopReading: () => void
+    /**
+     * Voice mode: the hands-free loop, where the platform can do both halves.
+     *
+     * This sheet is the primary way in, and deliberately so. The composer's mic
+     * cannot carry it on a long press — a long press is how you hold the mic to
+     * talk — so a row here and an accessibility action on the button are the two
+     * doors. Absent where the platform can speak but not listen, or the reverse.
+     */
+    onOpenVoiceMode?: () => void
+    /** Show what was heard for a moment before voice mode sends it. */
+    confirmBeforeSending: boolean
+    onChangeConfirmBeforeSending: (value: boolean) => void
+    /**
+     * The dictation half, or nothing where the platform cannot listen.
+     *
+     * Separate from the speaking half because the two capabilities really are
+     * separate: a browser with `speechSynthesis` and no `SpeechRecognition` is
+     * the common case, and it should get the reading rows and not a language
+     * picker for a microphone it does not have.
+     */
+    dictation?: {
+      /** `auto`, or a BCP-47 tag. */
+      language: string
+      onChangeLanguage: (language: string) => void
+      /**
+       * Tags this device can recognise offline, from the platform itself.
+       *
+       * Empty is the ordinary case rather than a failure — Android below API 31
+       * will not say and the web has no way to ask — and it means the picker
+       * offers the device's own language alone.
+       */
+      languages: readonly string[]
+    }
+  }
+
   verbosity: Verbosity
   onChangeVerbosity: (value: Verbosity) => void
 
@@ -153,7 +211,8 @@ export interface ChatOptionsSheetProps {
  * union rather than two, so a page added here cannot be a page the popover
  * quietly cannot reach.
  */
-export type ChatOptionsPane = 'reasoning' | 'model' | 'colour' | 'mute' | 'export' | 'notifications'
+export type ChatOptionsPane =
+  'reasoning' | 'model' | 'colour' | 'mute' | 'export' | 'notifications' | 'rate' | 'dictationLanguage'
 
 type Pane = 'root' | ChatOptionsPane
 
@@ -188,6 +247,37 @@ const CHAT_NOTIFICATION_TYPES: { type: PushType; label: string }[] = [
   { type: 'request', label: chatStrings.notifications.types.needsInput as string },
   { type: 'cron', label: chatStrings.notifications.types.cron as string }
 ]
+
+/**
+ * A language tag, in the reader's own words where the platform knows them.
+ *
+ * `Intl.DisplayNames` is in every engine this app runs on and is still wrapped:
+ * it throws on a tag it cannot parse, and the tags here come from the device's
+ * recognizer rather than from this repository. The tag itself is the fallback,
+ * which is worse to read and never wrong.
+ */
+export function languageLabel(tag: string): string {
+  try {
+    return new Intl.DisplayNames(undefined, { type: 'language' }).of(tag) ?? tag
+  } catch {
+    return tag
+  }
+}
+
+/**
+ * The five speaking rates, named rather than numbered.
+ *
+ * "0.75×" is a number about an engine; "Slow" is what a person means. The values
+ * behind them are `RATE_STEPS` and the labels are `chatStrings.voice.rateOptions`,
+ * zipped here so the two lists cannot drift in length — a sixth step with no name
+ * would draw a row with an empty label.
+ */
+const RATE_LABELS = ['slowest', 'slow', 'normal', 'fast', 'fastest'] as const
+
+const RATE_OPTIONS: PickerOption[] = RATE_STEPS.map((value, index) => ({
+  value: String(value),
+  label: chatStrings.voice.rateOptions[RATE_LABELS[index] ?? 'normal']
+}))
 
 /**
  * The picker's id for "stop being quiet".
@@ -409,6 +499,11 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
   const modelLabel = modelRowLabel(props.modelOptions, props.model)
   const reasoningLabel = optionRowLabel(props.reasoningOptions, props.reasoningEffort)
   const muteLabel = muteRowLabel(props.mutedUntil, nowSeconds())
+  // The named stop, or the bare multiplier for a value no step produces — which
+  // only an older build or a hand-edited preference file can supply, and which
+  // is still better shown than silently redrawn as "Normal".
+  const rateLabel =
+    RATE_OPTIONS.find(option => option.value === String(props.voice?.rate))?.label ?? String(props.voice?.rate ?? 1)
 
   if (props.pendingExpensiveModel) {
     // A confirmation replaces the sheet's body rather than stacking a second
@@ -559,6 +654,41 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
           */}
           <AccentSwatches accent={props.accent} onSelect={props.onChangeAccent} testIDPrefix={props.botName} />
         </Page>
+      ) : pane === 'rate' ? (
+        <PickerPane
+          onBack={() => setPane('root')}
+          onPick={option => {
+            props.voice?.onChangeRate(Number(option.value))
+            setPane('root')
+          }}
+          options={RATE_OPTIONS}
+          title={chatStrings.voice.rate}
+          // Stringified, because a picker deals in ids and 1 and 1.0 are the
+          // same rate but not the same string. `RATE_STEPS` is the only source
+          // of these values, so the round trip through `String` is exact.
+          value={String(props.voice?.rate ?? 1)}
+        />
+      ) : pane === 'dictationLanguage' ? (
+        <PickerPane
+          onBack={() => setPane('root')}
+          onPick={option => {
+            props.voice?.dictation?.onChangeLanguage(option.value)
+            setPane('root')
+          }}
+          options={[
+            { value: DICTATION_AUTO, label: chatStrings.voice.dictationAuto },
+            ...(props.voice?.dictation?.languages ?? []).map(tag => ({
+              value: tag,
+              label: languageLabel(tag),
+              detail: tag
+            }))
+          ]}
+          // A list of installed models can be long on a phone that has collected
+          // a few, and it is the same shape as the model list next door.
+          searchable
+          title={chatStrings.voice.dictationLanguage}
+          value={props.voice?.dictation?.language ?? DICTATION_AUTO}
+        />
       ) : pane === 'reasoning' ? (
         <PickerPane
           onBack={() => setPane('root')}
@@ -705,6 +835,73 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
               value={props.showThinking}
             />
           </InsetGroup>
+
+          {props.voice ? (
+            <InsetGroup footer={chatStrings.voice.autoReadHint} header={chatStrings.voice.header}>
+              <SwitchRow
+                label={chatStrings.voice.autoRead}
+                onChange={props.voice.onChangeAutoRead}
+                testID="option-auto-read"
+                value={props.voice.autoRead}
+              />
+              <DisclosureRow
+                label={chatStrings.voice.rate}
+                onPress={() => setPane('rate')}
+                testID="option-voice-rate"
+                value={rateLabel}
+              />
+              {/*
+                Only while there is something to stop.
+
+                A permanently present Stop row would be a control that does
+                nothing almost all of the time, and the sheet already has a rule
+                about those — see the context row above, and `onExport`. It is
+                here rather than in the message menu because this is the one
+                surface that can stop a read the reader did not start from a
+                row: an automatic one.
+              */}
+              {props.voice.dictation ? (
+                <DisclosureRow
+                  label={chatStrings.voice.dictationLanguage}
+                  onPress={() => setPane('dictationLanguage')}
+                  testID="option-dictation-language"
+                  value={
+                    props.voice.dictation.language === DICTATION_AUTO
+                      ? chatStrings.voice.dictationAuto
+                      : languageLabel(props.voice.dictation.language)
+                  }
+                />
+              ) : null}
+              {/*
+                Under the two settings it depends on, not above them: a reader
+                who has just turned the confirmation off should see the row it
+                affects rather than having already passed it.
+              */}
+              {props.voice.onOpenVoiceMode ? (
+                <>
+                  <SwitchRow
+                    hint={chatStrings.voice.confirmBeforeSendingHint}
+                    label={chatStrings.voice.confirmBeforeSending}
+                    onChange={props.voice.onChangeConfirmBeforeSending}
+                    testID="option-voice-confirm"
+                    value={props.voice.confirmBeforeSending}
+                  />
+                  <InsetButtonRow
+                    onPress={props.voice.onOpenVoiceMode}
+                    testID="option-voice-mode"
+                    title={chatStrings.voice.modeStart}
+                  />
+                </>
+              ) : null}
+              {props.voice.reading ? (
+                <InsetButtonRow
+                  onPress={props.voice.onStopReading}
+                  testID="option-stop-reading"
+                  title={chatStrings.menu.stopReading}
+                />
+              ) : null}
+            </InsetGroup>
+          ) : null}
 
           {props.onExport ? (
             <InsetGroup footer={chatStrings.export.hint} header={chatStrings.export.header}>

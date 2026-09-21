@@ -31,6 +31,7 @@ import { RUNS_ON_MAC } from '../platform/runs-on-mac'
 import { growToContent, ONE_ROW } from '../platform/text-field-web'
 import { GlassGroup, GlassSurface } from '../ui/glass'
 import { Appear } from '../ui/Appear'
+import { Icon, ICON_SIZE } from '../ui/Icon'
 import { KEYBOARD_AVOID_BEHAVIOR } from '../ui/keyboard'
 import { RoundIconButton, Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
@@ -43,7 +44,7 @@ import { FileChip } from './FileChip'
 import { QueuedChip } from './QueuedChip'
 import { shouldSend } from './send-key'
 import { chatStrings } from './strings'
-import type { AttachChoice, ComposerAttachment, SlashFailure, SlashSuggestion } from './types'
+import type { AttachChoice, ComposerAttachment, ComposerDictation, SlashFailure, SlashSuggestion } from './types'
 
 export interface ComposerProps {
   /** Controlled draft. */
@@ -115,6 +116,15 @@ export interface ComposerProps {
   queuedText?: string
   placeholder?: string
   botName?: string
+  /**
+   * The microphone, as data. Absent removes the control entirely.
+   *
+   * Everything behind it — the recognizer, the permission dialog, hold-to-talk
+   * versus tap-to-toggle, and where the words land in the draft — is
+   * `features/voice`, which may import this kit and not the other way round.
+   * What is here is a button, a lit state and one line of explanation.
+   */
+  dictation?: ComposerDictation
   /**
    * A bare Return sends instead of inserting a newline.
    *
@@ -324,6 +334,7 @@ export function Composer({
   queuedText,
   placeholder,
   botName,
+  dictation,
   hardwareKeyboard = RUNS_ON_MAC || hasHardwareKeyboard(),
   keyboardAvoiding = false,
   testID = 'composer'
@@ -662,9 +673,37 @@ export function Composer({
 
   const onSelectionChange = (event: NativeSyntheticEvent<TextInputSelectionChangeEventData>) => {
     selection.current = event.nativeEvent.selection
+    // Dictation inserts at the caret, so it needs to know where the caret is —
+    // and this is the only event that reports it. Told rather than asked,
+    // because the binding lives outside the kit.
+    dictation?.onSelection(event.nativeEvent.selection.start, event.nativeEvent.selection.end)
     // The field has reported a position of its own, so stop overriding it.
     setCaret(undefined)
   }
+
+  /*
+    Where a dictated result leaves the caret.
+
+    Applied on the OBJECT's identity rather than on its numbers: two results in
+    a row can land the caret in the same place — a revision of the same length —
+    and both are still events that have to move it back off the end of the
+    field. The binding allocates one object per result for exactly this.
+
+    It goes through the same `caret` state a Shift+Return does, so control of
+    the selection lasts one round trip and is handed back on the next
+    `onSelectionChange`. A permanently controlled selection fights the caret on
+    every keystroke.
+  */
+  const dictatedCaret = dictation?.caret
+
+  useEffect(() => {
+    if (!dictatedCaret) {
+      return
+    }
+
+    selection.current = dictatedCaret
+    setCaret(dictatedCaret)
+  }, [dictatedCaret])
 
   /**
    * The round button: send whenever there is something to send, stop otherwise.
@@ -1254,6 +1293,73 @@ export function Composer({
           </GlassSurface>
 
           {/*
+            The microphone, between the field and the send button.
+
+            LEFT of send and right of the field, which is where every messenger
+            that has one puts it: send is the last thing on the row because it
+            is the last thing you do, and a control that pushed it out of the
+            corner would move the one target this composer's muscle memory is
+            built around.
+
+            `onPressIn` / `onPressOut` rather than `onPress`, because the press
+            IS the gesture — hold to talk, tap to toggle, and the difference is
+            how long the finger stayed down (`press-to-talk.ts`). A `Pressable`
+            reports both edges; `onPress` reports neither.
+
+            It is hidden rather than disabled where there is no recognizer. The
+            same call `Read aloud` makes in the message menu, and for the same
+            reason: there is no later in which a browser grows a speech API.
+          */}
+          {dictation?.available ? (
+            <Pressable
+              accessibilityLabel={dictation.listening ? chatStrings.voice.dictateStop : chatStrings.voice.dictate}
+              accessibilityRole="button"
+              /*
+                Voice mode, for assistive technology and for a pointer.
+
+                It is NOT on a long press. A long press is how you hold the mic
+                to talk, and a menu that opened under a finger held down to
+                dictate would take the gesture away from the feature the button
+                is for. The other ways in are the chat options sheet and this
+                action, which VoiceOver's rotor and a secondary click both reach.
+              */
+              {...(dictation.onOpenVoiceMode
+                ? {
+                    accessibilityActions: [{ name: 'voiceMode', label: chatStrings.voice.modeStart }],
+                    onAccessibilityAction: (event: { nativeEvent: { actionName: string } }) => {
+                      if (event.nativeEvent.actionName === 'voiceMode') {
+                        dictation.onOpenVoiceMode?.()
+                      }
+                    }
+                  }
+                : {})}
+              aria-pressed={dictation.listening}
+              hitSlop={TAP_SLOP}
+              onPressIn={dictation.onPressIn}
+              onPressOut={dictation.onPressOut}
+              style={({ pressed }) => ({
+                alignItems: 'center',
+                // Lit while listening, glass otherwise. A microphone that is on
+                // is a thing a reader must be able to see from across the room,
+                // so it is the accent's own fill rather than a tint.
+                backgroundColor: dictation.listening ? theme.accent().bubble : 'transparent',
+                borderRadius: round / 2,
+                height: round,
+                justifyContent: 'center',
+                opacity: pressed ? 0.6 : 1,
+                width: round
+              })}
+              testID="composer-mic"
+            >
+              <Icon
+                color={dictation.listening ? theme.colors.onAccent : theme.colors.textMuted}
+                name="mic"
+                size={ICON_SIZE.control}
+              />
+            </Pressable>
+          ) : null}
+
+          {/*
             Accent while it sends, a red stop SQUARE while a turn runs.
 
             The colour is the accent's BUBBLE, not its `fill`. White sits on this
@@ -1358,6 +1464,44 @@ export function Composer({
           >
             {chatStrings.composer.keyHint}
           </Text>
+        ) : null}
+
+        {/*
+          One line, under the row, about the microphone.
+
+          Not a card and not a sheet: the thing it explains is a button two
+          centimetres above it, and a modal about a tap would be louder than the
+          tap. `Open Settings` is a link rather than a button for the same
+          reason — and it is absent on a platform with nowhere to send the
+          reader, which is a browser (see `speech-recognition.web.ts`).
+        */}
+        {dictation?.notice ? (
+          <View
+            style={{
+              alignItems: 'center',
+              flexDirection: 'row',
+              gap: theme.space.xs,
+              marginTop: theme.space.xs,
+              paddingHorizontal: theme.space.xs
+            }}
+            testID="composer-mic-notice"
+          >
+            <Text color="textMuted" style={{ flex: 1 }} variant="meta">
+              {dictation.notice.message}
+            </Text>
+            {dictation.notice.onAction && dictation.notice.actionLabel ? (
+              <Pressable
+                accessibilityRole="button"
+                hitSlop={TAP_SLOP}
+                onPress={dictation.notice.onAction}
+                testID="composer-mic-settings"
+              >
+                <Text color="accentText" variant="meta">
+                  {dictation.notice.actionLabel}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
         ) : null}
 
         {queuedText ? <QueuedChip testID="composer-queued" text={queuedText} /> : null}

@@ -57,6 +57,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Read a reply aloud.** A reply's menu gains **Read aloud**, and **Stop reading** while it is
+  speaking. The voice is the one built into the device — `AVSpeechSynthesizer`, Android's
+  `TextToSpeech`, the browser's `speechSynthesis` — so **nothing is sent anywhere to be
+  synthesised**, which is the whole reason it is the default rather than a fallback
+  (ADR-0021). What is spoken is not what is drawn: a fenced listing is read as `Code block, 12
+  lines` unless it is short enough to be the answer itself, a table is read a row at a time, a link
+  reads its label rather than its target, and mathematics is read **as its source** — an emphasis
+  stripper turns `a_1 + b_2` into `a1 + b2`, and wrong is worse than plain. A chat can be set to
+  **read each finished reply automatically**; it never speaks while a reply is still being written,
+  it queues a reply that lands while another is being read, and switching it on does not start
+  reading the back catalogue. Speaking stops when you leave the chat, and when the app goes to the
+  background unless you say otherwise. The speaking rate is one setting for the whole app; whether a
+  reply is read on its own is per chat, because a phone in a car and a Mac in an office want
+  different answers for the same bot.
+
+- **Dictate a message.** A microphone appears in the composer, left of send, wherever the platform
+  has a recognizer. **Hold it to talk** and let go, or **tap it** and tap again — one button, and
+  the rule is how long your finger stayed down, which is how the platform keyboards' own dictation
+  keys behave. What is heard streams into the field **at the caret** as you speak, so a sentence
+  dictated into the middle of a half-typed message lands where you put it; a revision replaces the
+  last guess rather than being appended to it. Nothing is sent: what you get is a draft like any
+  other, to edit and send yourself.
+
+  On iOS and Android the recognizer is asked for the **on-device** model, and a device that has no
+  offline model is refused rather than quietly falling back to the network — the words are a message
+  you are about to send to your own gateway. That guarantee does not hold in a browser, where the
+  Web Speech API transcribes on the vendor's servers and offers no switch; Firefox has no such API
+  and gets no microphone at all rather than a button that cannot work. A refused microphone says so
+  in one line under the composer, with **Open Settings** where there is a settings screen to open.
+  The dictation language follows the device by default, and the picker offers the languages the
+  device reports it has installed offline.
+
+- **Voice mode.** A full-screen overlay that runs the conversation hands-free: listen, send, read the
+  reply aloud, listen again. It is reached from the chat's options sheet, and from the composer's
+  microphone as an accessibility action — deliberately **not** from a long press on that button,
+  because a long press is how you hold the mic to talk and a menu there would take the gesture away
+  from the feature the button exists for. One ring shows what is happening: it grows with your voice
+  while the microphone is open and breathes slowly while a reply is being written or read. Under
+  Reduce Motion it does not move at all.
+
+  Four rules make it usable rather than alarming. **It never sends an empty transcript** — a pause
+  that produced nothing goes round again instead of asking the bot to answer silence. **It shows
+  what it heard for a second before sending**, with a cancel under it, and that is on by default:
+  voice mode speaks for you, and a recognizer that mishears should not be able to put words on a
+  conversation with no moment to stop it. **A silence ends the utterance** — the recognizer's own
+  final result where it gives one, and 1.5 s after the last thing heard where it does not, with the
+  timer armed only once something HAS been heard so a slow start is not cut off. And **leaving stops
+  everything**: swipe down or press Escape, from any phase. A tap does not leave — it interrupts the
+  reply being read, which is the commonest thing you want in a conversation. While voice mode is
+  running, "Read replies aloud" stands down, so one device with one speaker never reads the same
+  reply twice.
+
 - **Refresh a chat.** The chat's options carry **Refresh**: it re-reads the roster — which is where
   a chat's canonical session id comes from — and re-opens the chat against whatever that answers,
   which resumes and replays it. The case it is for is the one a pull gesture cannot express: the
