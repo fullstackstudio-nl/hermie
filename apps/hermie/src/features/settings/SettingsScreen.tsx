@@ -8,6 +8,7 @@ import { useChatRuntime } from '../chats/ChatRuntime'
 import { NotificationsSection } from '../push/NotificationsSection'
 import { pushPlatform } from '../push/platform'
 import { useGateway } from '../../gateway'
+import { GatewayAddressRow } from '../../gateway/GatewayAddressRow'
 import { RefreshNotice } from '../../gateway/RefreshNotice'
 import { TransportNotice } from '../../gateway/TransportNotice'
 import { strings } from '../../i18n/strings'
@@ -146,7 +147,7 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
               }
             : {})}
         >
-          <InsetValueRow label={strings.settings.address} value={config?.baseUrl ?? strings.settings.unknown} />
+          <GatewayAddressRow baseUrl={config?.baseUrl} />
           <InsetValueRow
             label={strings.settings.provider}
             value={

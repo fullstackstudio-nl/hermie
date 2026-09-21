@@ -561,6 +561,13 @@ export const strings = {
     title: 'Settings',
     gateway: 'GATEWAY',
     address: 'Address',
+    /**
+     * Browser build only, under the gateway's address.
+     *
+     * The row shows the GATEWAY's host while the address bar shows this app's,
+     * and without this line the two read as a contradiction.
+     */
+    viaHermieWeb: 'via Hermie Web',
     provider: 'Provider',
     version: 'Version',
     user: 'Signed in as',

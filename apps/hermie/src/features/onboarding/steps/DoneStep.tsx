@@ -1,5 +1,6 @@
 import { View } from 'react-native'
 
+import { GatewayAddressRow } from '../../../gateway/GatewayAddressRow'
 import { RefreshNotice } from '../../../gateway/RefreshNotice'
 import { strings } from '../../../i18n/strings'
 import { InsetGroup, InsetValueRow } from '../../../ui/primitives'
@@ -19,7 +20,7 @@ export function DoneStep({ draft, error }: DoneStepProps) {
   return (
     <View style={{ gap: theme.space.md }}>
       <InsetGroup header={strings.onboarding.done.gateway}>
-        <InsetValueRow label={strings.settings.address} value={draft.baseUrl ?? ''} />
+        <GatewayAddressRow baseUrl={draft.baseUrl} />
         <InsetValueRow
           label={strings.settings.provider}
           value={

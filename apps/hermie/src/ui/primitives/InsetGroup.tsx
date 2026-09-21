@@ -176,10 +176,24 @@ export function InsetButtonRow({ title, tone = 'accent', detail, disabled, style
   )
 }
 
-export type InsetValueRowProps = { label: string; value: string; mono?: boolean }
+export type InsetValueRowProps = {
+  label: string
+  value: string
+  mono?: boolean
+  /**
+   * A quieter second line under the value, for a value that needs a
+   * qualification rather than a footnote.
+   *
+   * One caller today: the browser build's gateway address, where the value is
+   * the gateway's own host and the qualification is that this page reaches it
+   * through Hermie Web. Two separate rows would read as two gateways, and a
+   * group footer is about the group rather than about the row.
+   */
+  detail?: string
+}
 
 /** A read-only label/value row, used by Settings to show the configured gateway. */
-export function InsetValueRow({ label, value, mono = false }: InsetValueRowProps) {
+export function InsetValueRow({ label, value, mono = false, detail }: InsetValueRowProps) {
   const theme = useTheme()
 
   return (
@@ -187,14 +201,16 @@ export function InsetValueRow({ label, value, mono = false }: InsetValueRowProps
       <Text variant="body" style={{ flexShrink: 0 }}>
         {label}
       </Text>
-      <Text
-        variant={mono ? 'code' : 'body'}
-        color="textMuted"
-        numberOfLines={1}
-        style={{ flex: 1, textAlign: 'right' }}
-      >
-        {value}
-      </Text>
+      <View style={{ flex: 1 }}>
+        <Text variant={mono ? 'code' : 'body'} color="textMuted" numberOfLines={1} style={{ textAlign: 'right' }}>
+          {value}
+        </Text>
+        {detail ? (
+          <Text color="textFaint" numberOfLines={1} style={{ textAlign: 'right' }} variant="micro">
+            {detail}
+          </Text>
+        ) : null}
+      </View>
     </InsetRow>
   )
 }
