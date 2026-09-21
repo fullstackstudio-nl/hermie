@@ -30,7 +30,7 @@ export default function App() {
       <QueryClientProvider client={queryClient}>
         <ThemeProvider
           {...(DEV_LAUNCH_INTENT?.scheme ? { forceScheme: DEV_LAUNCH_INTENT.scheme } : {})}
-          {...(DEV_LAUNCH_INTENT?.wallpaper ? { forceWallpaper: DEV_LAUNCH_INTENT.wallpaper } : {})}
+          {...(DEV_LAUNCH_INTENT?.preset ? { forcePreset: DEV_LAUNCH_INTENT.preset } : {})}
         >
           <GatewayProvider>
             <Root />

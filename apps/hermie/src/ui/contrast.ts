@@ -1,0 +1,270 @@
+/**
+ * Contrast on the COMPOSITED surface — the arithmetic, once.
+ *
+ * `scripts/check-contrast.ts` is the gate that fails a build; the theme editor is
+ * a guard that refuses a colour while somebody is typing it. Those have to be the
+ * same rule or one of them is lying, and the way to make them the same rule is for
+ * them to be the same code. This is that code, and it lives in the app rather than
+ * in the script because the app is the side that cannot import a script.
+ *
+ * Everything is read from the token set. A copy of the palette in a checker is a
+ * second palette, and the first thing a second palette does is disagree.
+ *
+ * The thresholds are WCAG AA: 4.5 : 1 for anything that has to be read as text,
+ * 3 : 1 for a mark that only has to be seen — a status dot, an avatar ring.
+ */
+import { glassFor, bubblesFor, type ResolvedThemeFace } from './themes'
+import {
+  DANGER_SOFT,
+  darkColors,
+  lightColors,
+  OK_SOFT,
+  TINT_SUNK,
+  type BubbleVariant,
+  type ColorRole,
+  type ColorScale,
+  type ElevationScale,
+  type GlassVariant,
+  type Scheme
+} from './tokens'
+
+export const AA_TEXT = 4.5
+export const AA_MARK = 3
+
+export type Rgb = [number, number, number]
+
+/**
+ * Inks that carry words. `ok` and `accent` are NOT here: they are FILLS — a status
+ * dot, a button — and what has to be readable on one is `onAccent`, which is
+ * measured against the outgoing bubble instead.
+ */
+export const TEXT_ROLES: readonly ColorRole[] = [
+  'text',
+  'textMuted',
+  'textFaint',
+  'accentText',
+  'dangerText',
+  'okText',
+  'warnText'
+]
+
+/** Inks that only have to be SEEN: today that is the cron status dot's fill. */
+export const MARK_ROLES: readonly ColorRole[] = ['ok']
+
+export function parseColor(color: string): { rgb: Rgb; alpha: number } {
+  const rgba = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)$/u.exec(color)
+
+  if (rgba) {
+    return {
+      rgb: [Number(rgba[1]), Number(rgba[2]), Number(rgba[3])],
+      alpha: rgba[4] === undefined ? 1 : Number(rgba[4])
+    }
+  }
+
+  const hex = color.replace('#', '')
+  const full = hex.length === 3 ? [...hex].map(char => char + char).join('') : hex
+
+  return { rgb: [0, 2, 4].map(at => parseInt(full.slice(at, at + 2), 16)) as Rgb, alpha: 1 }
+}
+
+/** `top` composited over an opaque `bottom`. */
+export function over(top: string, bottom: Rgb): Rgb {
+  const { rgb, alpha } = parseColor(top)
+
+  return rgb.map((channel, at) => channel * alpha + (bottom[at] ?? 0) * (1 - alpha)) as Rgb
+}
+
+function channelLuminance(channel: number): number {
+  const scaled = channel / 255
+
+  return scaled <= 0.03928 ? scaled / 12.92 : ((scaled + 0.055) / 1.055) ** 2.4
+}
+
+export function luminance([red, green, blue]: Rgb): number {
+  return 0.2126 * channelLuminance(red) + 0.7152 * channelLuminance(green) + 0.0722 * channelLuminance(blue)
+}
+
+/** The ratio, rounded to two places, of an ink against an opaque background. */
+export function contrastRatio(ink: string, background: Rgb): number {
+  const [lighter, darker] = [luminance(parseColor(ink).rgb), luminance(background)].sort((a, b) => b - a) as [
+    number,
+    number
+  ]
+
+  return Math.round(((lighter + 0.05) / (darker + 0.05)) * 100) / 100
+}
+
+export const colorsFor = (scheme: Scheme): ColorScale => (scheme === 'dark' ? darkColors : lightColors)
+
+export interface Surface {
+  name: string
+  /** The composited background this surface's ink actually sits on. */
+  background: Rgb
+}
+
+/**
+ * Every surface an ink is drawn on, for one theme face.
+ *
+ * The glass variants are measured BLURRED — the wash over the background itself,
+ * which is the real case on iOS and the harsher of the two; the opaque fallback is
+ * strictly easier to read on, so it cannot be what fails. A bubble is not glass
+ * (§7.4): it paints its own opaque rung, so the background never reaches its ink.
+ */
+export function surfacesFor(scheme: Scheme, elevation: ElevationScale, background: string): Surface[] {
+  const glass = glassFor(scheme, elevation)
+  const bubbles = bubblesFor(scheme, elevation)
+  const floor = parseColor(background).rgb
+  const out: Surface[] = []
+
+  for (const variant of ['panel', 'sheet', 'card', 'control'] as GlassVariant[]) {
+    out.push({ name: variant, background: over(glass[variant].fill, floor) })
+  }
+
+  for (const variant of ['in', 'inRead', 'dm', 'dmRead'] as BubbleVariant[]) {
+    const recipe = bubbles[variant]
+
+    out.push({ name: `bubble ${variant}`, background: over(recipe.fill, parseColor(recipe.solid).rgb) })
+  }
+
+  out.push({ name: 'sunk tint', background: over(TINT_SUNK[scheme], over(glass.panel.fill, floor)) })
+
+  /*
+    The two soft fills, on the surface they are actually used on: a `Deny` button,
+    a scheduler-down banner, a locked-answer chip. Each is a low-alpha wash over a
+    SHEET with `dangerText` / `okText` on it, and the wash shifts the sheet toward
+    the ink's own hue, which is the direction that costs contrast.
+  */
+  out.push({ name: 'danger tint', background: over(DANGER_SOFT[scheme], over(glass.sheet.fill, floor)) })
+  out.push({ name: 'ok tint', background: over(OK_SOFT[scheme], over(glass.sheet.fill, floor)) })
+
+  return out
+}
+
+export interface ContrastRow {
+  theme: string
+  scheme: Scheme
+  surface: string
+  role: string
+  ratio: number
+  floor: number
+}
+
+/** Every ink against every surface of one theme face. */
+export function measureFace(theme: string, scheme: Scheme, face: ResolvedThemeFace): ContrastRow[] {
+  const colors = colorsFor(scheme)
+  const rows: ContrastRow[] = []
+
+  for (const surface of surfacesFor(scheme, face.elevation, face.background)) {
+    for (const role of [...TEXT_ROLES, ...MARK_ROLES]) {
+      rows.push({
+        theme,
+        scheme,
+        surface: surface.name,
+        role,
+        ratio: contrastRatio(colors[role], surface.background),
+        floor: (TEXT_ROLES as readonly string[]).includes(role) ? AA_TEXT : AA_MARK
+      })
+    }
+  }
+
+  /*
+    White on the outgoing bubble, and the theme's accent as INK.
+
+    The bubble is the one place a fill's own readability is the question: it is the
+    chat's accent and the body on it is `onAccent`, which this round keeps as ONE
+    value rather than making it per theme.
+
+    The accent's `fill` is deliberately NOT in this table. It is a ring, a swatch
+    and a soft wash — never a background for text — and holding it to a ratio would
+    rule out both the Graphite accent on its own dark panel (1.55 : 1) and the
+    studio's lime on a white one (1.14 : 1), which are the two accents the themes
+    that need them were built around. Where a fill used to sit under white ink, the
+    ink now comes off the bubble or is chosen against the fill; see `Composer`'s
+    send button and `AccentSwatches`.
+  */
+  const panel = over(glassFor(scheme, face.elevation).panel.fill, parseColor(face.background).rgb)
+
+  rows.push({
+    theme,
+    scheme,
+    surface: 'accent bubble',
+    role: 'onAccent',
+    ratio: contrastRatio(colors.onAccent, parseColor(face.accentSwatch.bubble).rgb),
+    floor: AA_TEXT
+  })
+
+  rows.push({
+    theme,
+    scheme,
+    surface: 'accent ink',
+    role: 'accent text',
+    ratio: contrastRatio(face.accentSwatch.text[scheme], panel),
+    floor: AA_TEXT
+  })
+
+  return rows
+}
+
+/** The three colours a reader may edit on a theme of their own. */
+export type ThemeColourField = 'background' | 'accentFill' | 'accentBubble'
+
+export type ColourVerdict =
+  | { ok: true }
+  | { ok: false; reason: 'malformed' }
+  | { ok: false; reason: ThemeColourField; ratio: number; floor: number }
+
+const HEX = /^#[0-9a-f]{6}$/iu
+
+/**
+ * Would this colour survive `npm run contrast:check`?
+ *
+ * The editor asks this per keystroke and the build asks the same question of the
+ * whole table, which is why the rule is here and not in either of them. What each
+ * field is measured against:
+ *
+ *  - **background** — the floor, so every ink in `TEXT_ROLES` has to clear AA on
+ *    the panel and the sheet composited over it. That is the strictest reading
+ *    and it is the right one: a background is not a decoration, it is what all the
+ *    words are read on.
+ *  - **accentBubble** — white on it, at the text floor, because `onAccent` is one
+ *    value for the whole app.
+ *  - **accentFill** — nothing. It is a ring, a swatch and a wash, never a
+ *    background for text, so there is no AA rule that applies to it. Saying so is
+ *    better than inventing a floor: a made-up 3 : 1 here would refuse the studio's
+ *    own lime and the Graphite accent that the presets are built on.
+ */
+export function judgeThemeColour(
+  field: ThemeColourField,
+  value: string,
+  scheme: Scheme,
+  face: ResolvedThemeFace
+): ColourVerdict {
+  if (!HEX.test(value.trim())) {
+    return { ok: false, reason: 'malformed' }
+  }
+
+  const colour = value.trim()
+
+  if (field === 'accentBubble') {
+    const ratio = contrastRatio(colorsFor(scheme).onAccent, parseColor(colour).rgb)
+
+    return ratio >= AA_TEXT ? { ok: true } : { ok: false, reason: field, ratio, floor: AA_TEXT }
+  }
+
+  if (field === 'accentFill') {
+    // No ratio applies. See the note in `measureFace`: the accent's fill never
+    // carries text, and every AA floor is about something that is read.
+    return { ok: true }
+  }
+
+  const colors = colorsFor(scheme)
+  let worst = Number.POSITIVE_INFINITY
+
+  for (const surface of surfacesFor(scheme, face.elevation, colour)) {
+    for (const role of TEXT_ROLES) {
+      worst = Math.min(worst, contrastRatio(colors[role], surface.background))
+    }
+  }
+
+  return worst >= AA_TEXT ? { ok: true } : { ok: false, reason: field, ratio: worst, floor: AA_TEXT }
+}

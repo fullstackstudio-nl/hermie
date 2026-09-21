@@ -3580,6 +3580,8 @@ rather than asserted: `./gradlew assembleRelease`, installed over the debug buil
 launched with `--es hermieGateway … --es hermieTheme dark --es hermieWallpaper
 warm --es hermieOpen chat:researcher`, and the app came up on **Welcome to
 Hermie** in the light theme on the Blue wallpaper. Every argument ignored.
+(That run predates this round's rename of `--hermieWallpaper` to `--hermiePreset`;
+the command is left as it was actually typed, because the record is of a run.)
 
 The third iOS gate does not hold at all on Android and the docs now say so:
 `MainActivity` is `exported`, because a launcher activity has to be.

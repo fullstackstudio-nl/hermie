@@ -869,7 +869,12 @@ export function Composer({
             <View
               style={{
                 alignItems: 'center',
-                backgroundColor: stopping ? theme.colors.danger : theme.accent().fill,
+                // The BUBBLE, not the accent's `fill`. White sits on this circle
+                // (`onAccent`, the arrow), and `bubble` is the half of the swatch
+                // that `npm run contrast:check` measures white against — `fill` is
+                // the ring colour and may be brilliant, which on the studio's lime
+                // left a white arrow at about 1.3 : 1 on the send button.
+                backgroundColor: stopping ? theme.colors.danger : theme.accent().bubble,
                 borderRadius: round / 2,
                 height: round,
                 justifyContent: 'center',

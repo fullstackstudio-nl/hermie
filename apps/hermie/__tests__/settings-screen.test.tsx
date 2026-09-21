@@ -172,3 +172,99 @@ describe('Settings and Escape', () => {
     expect(mockEscapeListeners.size).toBe(0)
   })
 })
+
+/**
+ * The theme picker.
+ *
+ * The cards are the part worth a test, because they are the part that can
+ * silently stop being true: each one paints the theme it names, through the same
+ * `resolveThemeFace` the live window is built with. If a card ever stopped
+ * following the theme it points at, a reader would pick a window they were never
+ * shown.
+ */
+describe('Settings → Appearance', () => {
+  it('offers a card per preset, and marks the one that is on', () => {
+    renderScreen(<SettingsScreen />)
+
+    for (const name of ['blue', 'graphite', 'lime']) {
+      expect(screen.getByTestId(`theme-card-${name}`)).toBeTruthy()
+    }
+
+    expect(screen.getByTestId('theme-card-blue').props.accessibilityState.selected).toBe(true)
+    expect(screen.getByTestId('theme-card-lime').props.accessibilityState.selected).toBe(false)
+  })
+
+  it('switches the theme, and the preview follows', () => {
+    renderScreen(<SettingsScreen />)
+
+    fireEvent.press(screen.getByTestId('theme-card-lime'))
+
+    expect(useSettingsStore.getState().themeChoice).toEqual({ kind: 'preset', name: 'lime' })
+  })
+
+  it('paints each card in its own theme rather than in the app’s', () => {
+    renderScreen(<SettingsScreen />)
+
+    const backgroundOf = (name: string): unknown =>
+      // `style` is an array on a `View` with two style objects; the flat form is
+      // what the renderer hands back here.
+      screen.getByTestId(`theme-card-${name}-preview`).props.style.backgroundColor
+
+    expect(backgroundOf('blue')).not.toBe(backgroundOf('graphite'))
+    expect(backgroundOf('graphite')).not.toBe(backgroundOf('lime'))
+  })
+
+  it('shows a theme the reader made beside the presets', () => {
+    act(() => {
+      useSettingsStore.getState().createUserTheme('lime', 'Studio')
+    })
+
+    renderScreen(<SettingsScreen />)
+
+    const id = useSettingsStore.getState().userThemes[0]?.id ?? ''
+
+    expect(screen.getByTestId(`theme-card-user-${id}`)).toBeTruthy()
+  })
+
+  it('opens the advanced page and comes back with Escape', () => {
+    renderScreen(<SettingsScreen />)
+
+    fireEvent.press(screen.getByTestId('settings-themes-advanced'))
+    expect(screen.getByTestId('theme-new-lime')).toBeTruthy()
+
+    pressEscape()
+
+    expect(screen.queryByTestId('theme-new-lime')).toBeNull()
+    expect(screen.getByTestId('theme-card-blue')).toBeTruthy()
+  })
+})
+
+describe('the theme editor', () => {
+  it('keeps a colour the contrast check would refuse, and says why', () => {
+    renderScreen(<SettingsScreen />)
+
+    fireEvent.press(screen.getByTestId('settings-themes-advanced'))
+    fireEvent.press(screen.getByTestId('theme-new-blue'))
+
+    const id = useSettingsStore.getState().userThemes[0]?.id ?? ''
+    const before = useSettingsStore.getState().userThemes[0]?.light?.accentBubble
+
+    // The studio lime as a BUBBLE: white on it is about 1.3 : 1.
+    fireEvent.changeText(screen.getByTestId('theme-colour-accentBubble'), '#C7FF4A')
+
+    expect(screen.getByText(/measures 1\.\d+ : 1, and needs 4\.5/u)).toBeTruthy()
+    expect(useSettingsStore.getState().userThemes.find(theme => theme.id === id)?.light?.accentBubble).toBe(before)
+  })
+
+  it('takes one the check would pass, and writes it', () => {
+    renderScreen(<SettingsScreen />)
+
+    fireEvent.press(screen.getByTestId('settings-themes-advanced'))
+    fireEvent.press(screen.getByTestId('theme-new-blue'))
+    fireEvent.changeText(screen.getByTestId('theme-colour-accentBubble'), '#4A7F15')
+
+    const id = useSettingsStore.getState().userThemes[0]?.id ?? ''
+
+    expect(useSettingsStore.getState().userThemes.find(theme => theme.id === id)?.light?.accentBubble).toBe('#4A7F15')
+  })
+})

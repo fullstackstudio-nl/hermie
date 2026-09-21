@@ -71,38 +71,20 @@ export const darkColors: ColorScale = {
 }
 
 /**
- * The dark elevation ladder, and the light rungs that share its names.
+ * The elevation ladder's SHAPE. The rungs themselves belong to a theme.
  *
  * The first dark pass read as one flat black field. Every surface now sits on a
- * named rung of one blue-slate ramp, each a measurable step lighter than the one
- * below it. The names are shared with light so a component never branches on the
- * theme to pick a surface.
+ * named rung of one ramp, each a measurable step lighter than the one below it,
+ * and the names are shared across schemes and themes so a component never
+ * branches to pick a surface.
+ *
+ * The values moved to `themes.ts` when a theme became a thing a reader picks:
+ * a ladder is a third of what a preset IS, and a per-scheme constant here could
+ * only ever have described one of them.
  */
 export type ElevationRung = 'e0' | 'e1' | 'e2' | 'e2s' | 'e3' | 'e3c' | 'e3f' | 'e4'
 
 export type ElevationScale = Record<ElevationRung, string>
-
-export const lightElevation: ElevationScale = {
-  e0: '#DCE8FB',
-  e1: '#F4F8FE',
-  e2: '#EAF1FC',
-  e2s: '#E2EDFD',
-  e3: '#FFFFFF',
-  e3c: '#F7FAFE',
-  e3f: '#FDFEFF',
-  e4: '#FFFFFF'
-}
-
-export const darkElevation: ElevationScale = {
-  e0: '#0A1830',
-  e1: '#1C2A45',
-  e2: '#28385A',
-  e2s: '#334670',
-  e3: '#3E5480',
-  e3c: '#2F4066',
-  e3f: '#425A88',
-  e4: '#50699A'
-}
 
 /** 4pt scale. `space.md` is the default gap between unrelated blocks. */
 export const space = {
@@ -236,7 +218,7 @@ export const BEAD_SIZE = { avatar: 14, inline: 9, legend: 18 } as const
  * bubble, the lightest surface they ever sit on.
  */
 export type AccentName =
-  'default' | 'indigo' | 'violet' | 'magenta' | 'red' | 'orange' | 'teal' | 'green' | 'graphite' | 'slate'
+  'default' | 'indigo' | 'violet' | 'magenta' | 'red' | 'orange' | 'teal' | 'green' | 'graphite' | 'slate' | 'lime'
 
 export type AccentSwatch = {
   /** Solid fill: the avatar ring, the swatch itself. */
@@ -319,6 +301,25 @@ export const ACCENTS: Record<AccentName, AccentSwatch> = {
     fill: '#4F6B96',
     text: { light: '#3F5A83', dark: '#C6D8F2' },
     bubble: '#4F6B96'
+  },
+  /**
+   * Lime: the Lime theme's own accent, and the studio's colour.
+   *
+   * It is built on the same pattern as Slate — a swatch whose three halves do
+   * three different jobs — because the FullStack Studio lime, `#C7FF4A`, can only
+   * do one of them. That value is a RING colour: it is brilliant enough to find a
+   * selected row with at a glance, and white on it measures about 1.3 : 1, so an
+   * outgoing bubble painted in it would be a message nobody can read.
+   *
+   * So `fill` is the studio lime and nothing else uses it as a background for
+   * text; `bubble` is the same hue taken down until white clears AA on it, which
+   * is what `npm run contrast:check` measures; and `text` is the ink form, dark
+   * enough to read on light glass and pale enough to read on a dark bubble.
+   */
+  lime: {
+    fill: '#C7FF4A',
+    text: { light: '#3F6B12', dark: '#D6F59A' },
+    bubble: '#4A7F15'
   }
 }
 
@@ -333,123 +334,14 @@ export const ACCENT_ORDER: readonly AccentName[] = [
   'teal',
   'green',
   'graphite',
-  'slate'
+  'slate',
+  'lime'
 ]
 
 /** The soft tint a chat's colour lays under a selected row or an icon well. */
 export function accentSoft(name: AccentName, scheme: Scheme): string {
   return withAlpha(ACCENTS[name].fill, scheme === 'dark' ? 0.26 : 0.13)
 }
-
-/**
- * Wallpapers: four, each with a light and a dark variant, one flat colour each.
- *
- * No image files, and since this round no gradients either. Each spec used to be
- * a diagonal ramp plus four or five corner blooms, built to imitate the mockup's
- * radial washes. The owner's verdict on the result was that it looks generated,
- * and the benchmark he set — iPadOS 26 Messages in dark mode — is a near-black
- * field with nothing painted on it: everything that looks like depth there comes
- * from the glass in front, not from the floor.
- *
- * So each variant keeps the end of its old ramp that is FARTHEST from the ink —
- * the palest stop in light, the deepest in dark. Dark wallpapers stay COLOURED
- * rather than `#000000`; `#070F1D` is a near-black blue, and that difference is
- * still the whole point of having four of them.
- *
- * ### A wallpaper may name its own accent
- *
- * `accent` is what "Default" resolves to while that wallpaper is on. It exists for
- * exactly one reason: a wallpaper is the only setting a reader picks that is
- * supposed to change the whole COMPOSITION, and the outgoing bubble is the largest
- * saturated thing in that composition. A desaturated wallpaper with the stock blue
- * bubble on it is not a desaturated window; it is a grey window with a blue stripe
- * down one side.
- *
- * It only ever replaces the DEFAULT. A chat whose colour the reader chose keeps it,
- * because that choice is about that conversation and not about the wallpaper.
- */
-export type WallpaperName = 'blue' | 'warm' | 'graphite' | 'slate'
-
-export type WallpaperSpec = {
-  /** The whole floor. One colour — see the note above. */
-  fill: string
-  /** What "Default" resolves to while this wallpaper is on. See the note above. */
-  accent?: AccentName
-}
-
-export const WALLPAPERS: Record<WallpaperName, Record<Scheme, WallpaperSpec>> = {
-  blue: {
-    light: {
-      fill: '#EAF3FF'
-    },
-    dark: {
-      fill: '#070F1D'
-    }
-  },
-  warm: {
-    light: {
-      fill: '#FFF3E6'
-    },
-    dark: {
-      fill: '#160C05'
-    }
-  },
-  graphite: {
-    light: {
-      fill: '#EFF1F5'
-    },
-    dark: {
-      fill: '#0D0F14'
-    }
-  },
-  /**
-   * Slate: the desaturated composition.
-   *
-   * ### Why it is not Graphite
-   *
-   * Graphite was compared first, and it is a different thing. It is `#0D0F14`: a
-   * near-black wallpaper, where every panel on it is a pale shape floating in the
-   * dark and the contrast between the window and its contents is the loudest thing
-   * on screen. Slate is `#2E3640` — about three times the luminance — so the panels
-   * sit a step above their background rather than a chasm above it, and the whole
-   * window reads as one desaturated grey-blue object. That is the rendering the
-   * owner asked for, and it is the FLOOR that produces it, which is why the two
-   * cannot be tuned into each other.
-   *
-   * ### Why the panels are not listed here
-   *
-   * They are the glass recipe over this colour, which is how every surface in this app
-   * gets its colour: `panel` is a 3–10 % white wash, so over `#3B4552` it composites
-   * to about `#434D5A`, a card to about `#4B5563`, a control higher again. Those are
-   * the values the owner sampled off a desaturated window, and they fall out of the
-   * wallpaper rather than needing a second elevation ladder beside the first. The
-   * ladder in this file is the OPAQUE fallback — Android, Reduce Transparency, a test
-   * renderer — and it is scheme-wide, not per wallpaper; `design/README.md` records
-   * that Slate under Reduce Transparency therefore falls back to the shared rungs.
-   *
-   * ### The ceiling on the blooms is a contrast ceiling
-   *
-   * `npm run contrast:check` measures every ink against the BRIGHTEST point of every
-   * dark wallpaper, and the dark ink set is calibrated against a deep one. `#3B4552`
-   * is already about as bright as the Blue wallpaper's worst bloom, so nothing here
-   * may go above it — the blooms are hue shifts at the same luminance, not
-   * highlights. A brighter bloom does not look better; it fails the check.
-   */
-  slate: {
-    light: {
-      accent: 'slate',
-      fill: '#EEF0F3'
-    },
-    dark: {
-      accent: 'slate',
-      fill: '#2E3640'
-    }
-  }
-}
-
-export const WALLPAPER_ORDER: readonly WallpaperName[] = ['blue', 'warm', 'graphite', 'slate']
-
-export const DEFAULT_WALLPAPER: WallpaperName = 'blue'
 
 /**
  * Glass, as a recipe rather than as a picture.
@@ -484,113 +376,6 @@ export type GlassRecipe = {
 
 export type GlassScale = Record<GlassVariant, GlassRecipe>
 
-export const lightGlass: GlassScale = {
-  panel: {
-    fill: 'rgba(255,255,255,0.48)',
-    solid: lightElevation.e1,
-    blurIntensity: 80,
-    hairline: 'rgba(16,38,78,0.08)'
-  },
-  float: {
-    fill: 'rgba(255,255,255,0.58)',
-    solid: lightElevation.e3f,
-    blurIntensity: 60,
-    hairline: 'rgba(16,38,78,0.08)'
-  },
-  sheet: {
-    fill: 'rgba(255,255,255,0.72)',
-    solid: lightElevation.e3,
-    blurIntensity: 95,
-    hairline: 'rgba(16,38,78,0.08)'
-  },
-  card: {
-    fill: 'rgba(255,255,255,0.52)',
-    solid: lightElevation.e3c,
-    blurIntensity: 50,
-    hairline: 'rgba(16,38,78,0.08)'
-  },
-  row: {
-    fill: 'rgba(255,255,255,0.34)',
-    solid: lightElevation.e2,
-    blurIntensity: 0,
-    hairline: 'transparent'
-  },
-  rowSelected: {
-    fill: 'rgba(255,255,255,0.52)',
-    solid: lightElevation.e2s,
-    blurIntensity: 0,
-    hairline: 'rgba(16,38,78,0.08)'
-  },
-  control: {
-    fill: 'rgba(255,255,255,0.58)',
-    solid: lightElevation.e4,
-    blurIntensity: 45,
-    hairline: 'rgba(16,38,78,0.08)'
-  },
-  chip: {
-    fill: 'rgba(255,255,255,0.52)',
-    solid: lightElevation.e4,
-    blurIntensity: 0,
-    hairline: 'rgba(16,38,78,0.08)'
-  }
-}
-
-export const darkGlass: GlassScale = {
-  panel: {
-    fill: 'rgba(255,255,255,0.03)',
-    solid: darkElevation.e1,
-    blurIntensity: 80,
-    nativeTint: 'rgba(28,42,69,0.80)',
-    hairline: 'rgba(190,212,255,0.13)'
-  },
-  float: {
-    fill: 'rgba(255,255,255,0.05)',
-    solid: darkElevation.e3f,
-    blurIntensity: 60,
-    nativeTint: 'rgba(66,90,136,0.74)',
-    hairline: 'rgba(190,212,255,0.13)'
-  },
-  sheet: {
-    fill: 'rgba(255,255,255,0.04)',
-    solid: darkElevation.e2s,
-    blurIntensity: 95,
-    nativeTint: 'rgba(51,70,112,0.92)',
-    hairline: 'rgba(190,212,255,0.13)'
-  },
-  card: {
-    fill: 'rgba(255,255,255,0.035)',
-    solid: darkElevation.e3c,
-    blurIntensity: 50,
-    nativeTint: 'rgba(47,64,102,0.86)',
-    hairline: 'rgba(190,212,255,0.13)'
-  },
-  row: {
-    fill: 'rgba(255,255,255,0.07)',
-    solid: darkElevation.e2,
-    blurIntensity: 0,
-    hairline: 'transparent'
-  },
-  rowSelected: {
-    fill: 'rgba(255,255,255,0.06)',
-    solid: darkElevation.e2s,
-    blurIntensity: 0,
-    hairline: 'rgba(190,212,255,0.13)'
-  },
-  control: {
-    fill: 'rgba(255,255,255,0.05)',
-    solid: darkElevation.e4,
-    blurIntensity: 45,
-    nativeTint: 'rgba(80,105,154,0.70)',
-    hairline: 'rgba(190,212,255,0.13)'
-  },
-  chip: {
-    fill: 'rgba(255,255,255,0.12)',
-    solid: darkElevation.e4,
-    blurIntensity: 0,
-    hairline: 'rgba(190,212,255,0.13)'
-  }
-}
-
 /**
  * Bubbles.
  *
@@ -614,20 +399,6 @@ export type BubbleRecipe = {
   /** What the wash composites onto where nothing behind it shows through. */
   solid: string
   tail: string
-}
-
-export const lightBubbles: Record<BubbleVariant, BubbleRecipe> = {
-  in: { fill: 'rgba(244,248,255,0.64)', solid: '#FFFFFF', tail: '#F1F5FE' },
-  inRead: { fill: 'rgba(243,247,255,0.88)', solid: '#FFFFFF', tail: '#F5F8FE' },
-  dm: { fill: 'rgba(235,229,253,0.80)', solid: '#FFFFFF', tail: '#EFE9FC' },
-  dmRead: { fill: 'rgba(235,229,253,0.94)', solid: '#FFFFFF', tail: '#ECE6FB' }
-}
-
-export const darkBubbles: Record<BubbleVariant, BubbleRecipe> = {
-  in: { fill: 'rgba(255,255,255,0.035)', solid: darkElevation.e3, tail: '#415881' },
-  inRead: { fill: 'rgba(255,255,255,0.03)', solid: darkElevation.e3, tail: '#405780' },
-  dm: { fill: 'rgba(140,110,255,0.08)', solid: '#413470', tail: '#453977' },
-  dmRead: { fill: 'rgba(140,110,255,0.07)', solid: '#413470', tail: '#443876' }
 }
 
 /**

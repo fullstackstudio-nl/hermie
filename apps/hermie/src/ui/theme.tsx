@@ -6,10 +6,7 @@ import { useSettingsStore } from '../store/settings'
 import {
   ACCENTS,
   DANGER_SOFT,
-  darkBubbles,
   darkColors,
-  darkElevation,
-  darkGlass,
   darkPresence,
   darkShadows,
   EDGE,
@@ -17,10 +14,7 @@ import {
   HAIRLINE,
   HAIRLINE_SOFT,
   OK_SOFT,
-  lightBubbles,
   lightColors,
-  lightElevation,
-  lightGlass,
   lightPresence,
   lightShadows,
   motion,
@@ -28,7 +22,6 @@ import {
   space,
   TINT_SUNK,
   type,
-  WALLPAPERS,
   type AccentName,
   type AccentSwatch,
   type BubbleRecipe,
@@ -38,10 +31,17 @@ import {
   type GlassScale,
   type PresenceScale,
   type Scheme,
-  type ShadowScale,
-  type WallpaperName,
-  type WallpaperSpec
+  type ShadowScale
 } from './tokens'
+import {
+  bubblesFor,
+  DEFAULT_THEME_CHOICE,
+  glassFor,
+  resolveThemeFace,
+  type ThemeChoice,
+  type ThemePresetName,
+  type UserTheme
+} from './themes'
 
 /** An accent with its scheme-dependent halves already resolved. */
 export type ResolvedAccent = {
@@ -62,8 +62,16 @@ export type Theme = {
   bubbles: Record<BubbleVariant, BubbleRecipe>
   presence: PresenceScale
   shadows: ShadowScale
-  wallpaper: WallpaperSpec
-  wallpaperName: WallpaperName
+  /**
+   * The floor, as the one field every surface already reads.
+   *
+   * It keeps the name it has had since there were wallpapers rather than themes,
+   * because it is the same thing: `Wallpaper` paints it, every glass recipe
+   * composites against it and the contrast check measures against it.
+   */
+  wallpaper: { fill: string }
+  /** What is on, so a picker and a screenshot can both name it. */
+  themeChoice: ThemeChoice
   space: typeof space
   radii: typeof radii
   type: typeof type
@@ -109,25 +117,35 @@ function accentSoftValue(fill: string, scheme: Scheme): string {
   return `rgba(${r},${g},${b},${scheme === 'dark' ? 0.26 : 0.13})`
 }
 
-function buildTheme(
-  scheme: Scheme,
-  wallpaperName: WallpaperName,
-  reduceTransparency: boolean,
+export interface BuildThemeOptions {
+  scheme: Scheme
+  choice: ThemeChoice
+  userThemes: readonly UserTheme[]
+  reduceTransparency: boolean
   reduceMotion: boolean
-): Theme {
+}
+
+export function buildTheme({ scheme, choice, userThemes, reduceTransparency, reduceMotion }: BuildThemeOptions): Theme {
   const dark = scheme === 'dark'
-  const wallpaper = WALLPAPERS[wallpaperName][scheme]
+  const face = resolveThemeFace(choice, scheme, userThemes)
+  const themeAccent: ResolvedAccent = {
+    name: face.accentName,
+    fill: face.accentSwatch.fill,
+    text: face.accentSwatch.text[scheme],
+    bubble: face.accentSwatch.bubble,
+    soft: accentSoftValue(face.accentSwatch.fill, scheme)
+  }
 
   return {
     scheme,
     colors: dark ? darkColors : lightColors,
-    elevation: dark ? darkElevation : lightElevation,
-    glass: dark ? darkGlass : lightGlass,
-    bubbles: dark ? darkBubbles : lightBubbles,
+    elevation: face.elevation,
+    glass: glassFor(scheme, face.elevation),
+    bubbles: bubblesFor(scheme, face.elevation),
     presence: dark ? darkPresence : lightPresence,
     shadows: dark ? darkShadows : lightShadows,
-    wallpaper,
-    wallpaperName,
+    wallpaper: { fill: face.background },
+    themeChoice: choice,
     space,
     radii,
     type,
@@ -142,21 +160,36 @@ function buildTheme(
     reduceTransparency,
     reduceMotion,
     /*
-      "Default" is the WALLPAPER's accent where the wallpaper names one, and the
-      stock blue otherwise.
+      "Default" is the THEME's accent, and a chat's own colour is everything else.
 
-      A wallpaper is the one setting a reader picks that is meant to change the whole
+      A theme is the one setting a reader picks that is meant to change the whole
       composition, and the outgoing bubble is the largest saturated area in it — so a
-      desaturated wallpaper under the stock blue bubble is a grey window with a blue
-      stripe down one side, which is not the thing that was chosen. A chat whose
-      colour the reader picked is untouched: that choice is about the conversation,
-      not about the window it is in, and `name` arriving here at all is what says so.
+      matte grey window under the stock blue bubble is not a matte grey window; it is
+      a grey window with a blue stripe down one side. A chat whose colour the reader
+      picked is untouched: that choice is about the conversation, not about the window
+      it is in.
+
+      `'default'` is treated exactly like no argument at all, and that is a fix rather
+      than a nicety. `useChatAccent` answers `'default'` for a chat nobody has
+      coloured — never `undefined` — so the old signature quietly took the theme's
+      accent away from every caller that passed the value it was given, which is why
+      the avatar ring stayed blue on a theme whose bubbles were not.
     */
-    accent: name => resolveAccent(name ?? wallpaper.accent ?? 'default', scheme)
+    accent: name => (!name || name === 'default' ? themeAccent : resolveAccent(name, scheme))
   }
 }
 
-const ThemeContext = createContext<Theme>(buildTheme('light', 'blue', false, false))
+const EMPTY_USER_THEMES: readonly UserTheme[] = []
+
+const ThemeContext = createContext<Theme>(
+  buildTheme({
+    scheme: 'light',
+    choice: DEFAULT_THEME_CHOICE,
+    userThemes: EMPTY_USER_THEMES,
+    reduceTransparency: false,
+    reduceMotion: false
+  })
+)
 
 /**
  * Both accessibility flags, as one subscription each.
@@ -215,18 +248,19 @@ export interface ThemeProviderProps {
    * theme could not be photographed at all — see docs/platform-notes.md.
    */
   forceScheme?: Scheme
-  /** Pin the wallpaper, for the same reason (`--hermieWallpaper warm`). */
-  forceWallpaper?: WallpaperName
+  /** Pin the preset, for the same reason (`--hermiePreset lime`). */
+  forcePreset?: ThemePresetName
 }
 
-export function ThemeProvider({ children, forceScheme, forceWallpaper }: ThemeProviderProps) {
+export function ThemeProvider({ children, forceScheme, forcePreset }: ThemeProviderProps) {
   // `useColorScheme` follows the system appearance on every platform, a Mac
   // window included. The stored appearance overrides it when the user pinned
   // one, which is why the preference is read here rather than in Settings: the
   // theme is what every screen resolves through.
   const system = useColorScheme() === 'dark' ? 'dark' : 'light'
   const appearance = useSettingsStore(state => state.appearance)
-  const wallpaper = useSettingsStore(state => state.wallpaper)
+  const storedChoice = useSettingsStore(state => state.themeChoice)
+  const userThemes = useSettingsStore(state => state.userThemes)
   const loaded = useSettingsStore(state => state.loaded)
   const { reduceTransparency, reduceMotion } = useAccessibilityPreferences()
 
@@ -241,7 +275,13 @@ export function ThemeProvider({ children, forceScheme, forceWallpaper }: ThemePr
   // `null` means "let the system decide", which is also what releases a pin.
   const pinned = forceScheme ?? (appearance === 'system' ? null : appearance)
   const scheme = pinned ?? system
-  const wallpaperName = forceWallpaper ?? wallpaper
+  // Memoised because a fresh object literal on every render would rebuild the
+  // whole token set on every render, and the token set is what every surface in
+  // the app reads.
+  const choice = useMemo<ThemeChoice>(
+    () => (forcePreset ? { kind: 'preset', name: forcePreset } : storedChoice),
+    [forcePreset, storedChoice]
+  )
 
   /**
    * Tell UIKit which scheme won, because half the app is not ours to colour.
@@ -283,8 +323,8 @@ export function ThemeProvider({ children, forceScheme, forceWallpaper }: ThemePr
   }, [pinned])
 
   const theme = useMemo(
-    () => buildTheme(scheme, wallpaperName, reduceTransparency, reduceMotion),
-    [scheme, wallpaperName, reduceTransparency, reduceMotion]
+    () => buildTheme({ scheme, choice, userThemes, reduceTransparency, reduceMotion }),
+    [scheme, choice, userThemes, reduceTransparency, reduceMotion]
   )
 
   // The status bar follows the PINNED appearance, not the system's, and it is

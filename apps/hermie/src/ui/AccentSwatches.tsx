@@ -19,9 +19,26 @@
 import { Pressable, View } from 'react-native'
 
 import { strings } from '../i18n/strings'
+import { contrastRatio, parseColor } from './contrast'
 import { Text } from './primitives'
 import { useTheme } from './theme'
 import { ACCENT_ORDER, ACCENTS, CONTROL_MIN_HEIGHT, type AccentName } from './tokens'
+
+/**
+ * The mark's ink, chosen against the swatch it sits in.
+ *
+ * It used to be `onAccent` — white — for every swatch, which was true for as long
+ * as every swatch was dark enough to carry white. The studio's lime is not: it is
+ * a RING colour, brilliant on purpose, and a white check mark on it is about
+ * 1.3 : 1 and simply not there. So the mark asks which of black and white reads
+ * better on the fill, which is the same question for all eleven and needs no
+ * table to keep in step.
+ */
+function markInk(fill: string): string {
+  const rgb = parseColor(fill).rgb
+
+  return contrastRatio('#FFFFFF', rgb) >= contrastRatio('#101010', rgb) ? '#FFFFFF' : '#101010'
+}
 
 export function AccentSwatches({
   accent,
@@ -75,7 +92,10 @@ export function AccentSwatches({
               ink rather than white — there is no fill under it to read against.
             */}
             {selected ? (
-              <Text color={isDefault ? 'text' : 'onAccent'} style={{ fontWeight: '700' }} variant="meta">
+              <Text
+                style={{ color: isDefault ? theme.colors.text : markInk(ACCENTS[name].fill), fontWeight: '700' }}
+                variant="meta"
+              >
                 ✓
               </Text>
             ) : null}

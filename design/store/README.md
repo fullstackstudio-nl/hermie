@@ -108,7 +108,7 @@ adb shell am start -a android.intent.action.VIEW \
   -n dev.hermie.app/.MainActivity \
   -d 'exp+hermie://expo-development-client/?url=http%3A%2F%2F10.0.2.2%3A8081' \
   --es hermieGateway http://10.0.2.2:9119 --es hermieToken demo \
-  --es hermieTheme light --es hermieWallpaper blue \
+  --es hermieTheme light --es hermiePreset blue \
   --es hermieOpen chat:researcher
 ```
 

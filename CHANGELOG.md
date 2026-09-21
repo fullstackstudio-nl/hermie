@@ -10,6 +10,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Themes, and a theme is now a thing rather than a wallpaper.** Six of them — Blue, Graphite and
+  Lime, each with a light and a dark face — and a preset is exactly three pieces of data: a
+  background, an elevation ladder and the accent that **Default** resolves to. Everything else falls
+  out of those. Every glass surface is the scheme's wash over a rung, a native Liquid Glass tint is
+  that rung at an alpha (`withAlpha(solid, α)`, which the hand-written dark tints already satisfied
+  to the byte), and a bubble's tail is the bubble's own composite — exact now that there are no
+  gradients left, where the old tail colours were tuned by eye against stops that no longer exist.
+  Adding a theme is therefore adding eleven values, with no second place to half-add it.
+  Settings → Appearance shows them as **cards** rather than as a row of names, each painting its own
+  floor, its own panel and a bubble pair in its own accent, resolved through the same function the
+  live window is built with. `--hermieWallpaper` is `--hermiePreset`.
+- **Lime is the studio's `#C7FF4A`, and the swatch splits it three ways.** That value is a RING
+  colour: white on it measures about 1.3 : 1, so a bubble painted in it is a message nobody can
+  read. `fill` is the studio lime for rings, swatches and links' company; `bubble` is the same hue
+  taken down to `#4A7F15`, where white clears AA; `text` is the ink form. It is the pattern Slate
+  already used, and it is also why two places that used to put white on a `fill` no longer do — the
+  composer's send button takes the bubble, and a swatch's check mark picks whichever of black and
+  white reads on the colour under it.
+- **Themes of your own, under Settings → Appearance → Advanced.** Start one from a preset, edit its
+  background, its accent and its bubble per face, rename it, delete it. A colour is refused by
+  `judgeThemeColour` — the same function `npm run contrast:check` measures with, not a second copy
+  of the rule — and the refusal quotes the ratio it measured. They are stored app-wide, so they
+  travel with the reader (see ADR-0016).
+
 - **Hermie runs in a browser, served by a small process of its own.** `npx @hermie/web --gateway
   http://127.0.0.1:9119` puts the app on `http://127.0.0.1:9120` and proxies the gateway onto that
   same origin, which is the whole design rather than a deployment detail: the gateway's session is
@@ -40,6 +64,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   count, which is also where `ios.buildNumber` and `android.versionCode` now come from, so the three
   can never disagree; a checkout with no git history says `dev` rather than failing the build. A
   long press copies the line where there is a pasteboard to copy it to.
+
+- **The Warm and Slate wallpapers are gone, and the entry below is what they were.** The set is
+  three themes now. Graphite absorbs what Slate was FOR — a matte floor whose panels sit a step
+  above it rather than a chasm above it — at a neutral grey rather than a grey-blue, which is what
+  makes it Blue's counterpart instead of a second Blue; a stored `slate` reads back as Graphite and
+  a stored `warm` as Blue, so nobody's device comes back with no theme. The `slate` and `graphite`
+  ACCENT swatches are untouched: a conversation's colour was never a function of the wallpaper.
 
 - **A fourth wallpaper, Slate, and it brings its own bubble colour.** Graphite was compared first and
   measured rather than eyeballed: its dark ramp is near-black (`#171B22 → #0D0F14`), where Slate's is

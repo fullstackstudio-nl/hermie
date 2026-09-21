@@ -66,7 +66,7 @@
  * | `--hermieOpen chat:<handle>`  | the real chat screen for that bot                |
  * | `--hermieOpen overlay:<s>[/p]`| Activity / Crons / Settings, and a settings page |
  * | `--hermieTheme light\|dark`   | pin the scheme, whatever the simulator is set to |
- * | `--hermieWallpaper <name>`    | pin the wallpaper                                |
+ * | `--hermiePreset <name>`       | pin the theme preset                             |
  * | `--hermieGateway <url>`       | seed that gateway and skip the wizard            |
  * | `--hermieToken <token>`       | the session token to seed beside it               |
  * | `--hermieTraceScroll`         | log the transcript's offsets and row heights      |
@@ -88,7 +88,8 @@
 import { hasExplicitScheme, normalizeBaseUrl } from '@hermie/gateway-client'
 import { requireOptionalNativeModule } from 'expo'
 
-import { WALLPAPER_ORDER, type Scheme, type WallpaperName } from '../ui/tokens'
+import { THEME_PRESET_ORDER, type ThemePresetName } from '../ui/themes'
+import { type Scheme } from '../ui/tokens'
 
 /** The three destinations that are not the gallery. */
 export type DevOverlaySection = 'activity' | 'cron' | 'settings'
@@ -117,7 +118,7 @@ export interface DevGatewaySeed {
 export interface DevLaunchIntent {
   open?: DevOpenTarget
   scheme?: Scheme
-  wallpaper?: WallpaperName
+  preset?: ThemePresetName
   gateway?: DevGatewaySeed
   /**
    * Trace the transcript's scroll offsets and row heights to the log.
@@ -282,11 +283,11 @@ export function parseDevLaunchArguments(argv: readonly string[]): DevLaunchInten
       return
     }
 
-    if (flag === '--hermiewallpaper') {
+    if (flag === '--hermiepreset') {
       const value = valueAt(index, inline).toLowerCase()
 
-      if ((WALLPAPER_ORDER as readonly string[]).includes(value)) {
-        intent.wallpaper = value as WallpaperName
+      if ((THEME_PRESET_ORDER as readonly string[]).includes(value)) {
+        intent.preset = value as ThemePresetName
       }
 
       return
@@ -332,7 +333,7 @@ export function parseDevLaunchArguments(argv: readonly string[]): DevLaunchInten
 
   return intent.open ||
     intent.scheme ||
-    intent.wallpaper ||
+    intent.preset ||
     intent.gateway ||
     intent.traceScroll !== undefined ||
     intent.traceLayout !== undefined

@@ -272,7 +272,8 @@ export const strings = {
       teal: 'Teal',
       green: 'Green',
       graphite: 'Graphite',
-      slate: 'Slate'
+      slate: 'Slate',
+      lime: 'Lime'
     },
     rowActions: (name: string) => `Actions for ${name}`,
     close: 'Close',
@@ -526,8 +527,50 @@ export const strings = {
     appearance: 'APPEARANCE',
     theme: 'Theme',
     themeOptions: { system: 'System', light: 'Light', dark: 'Dark' },
-    wallpaper: 'Wallpaper',
-    wallpaperOptions: { blue: 'Blue', warm: 'Warm', graphite: 'Graphite', slate: 'Slate' },
+    themeHint: 'System follows the device; Light and Dark pin the app either way.',
+    preset: 'THEME',
+    presetOptions: { blue: 'Blue', graphite: 'Graphite', lime: 'Lime' },
+    /** Said under the cards, because a card shows the theme rather than naming it. */
+    presetHint: 'Each theme has a light and a dark face; the setting above picks which one is showing.',
+
+    /**
+     * Themes the reader made.
+     *
+     * Kept behind a disclosure rather than under the cards: creating a theme is a
+     * rare thing to want and a long thing to look at, and the six cards above are
+     * the answer for everybody who does not want it.
+     */
+    themes: {
+      header: 'YOUR THEMES',
+      advanced: 'Advanced',
+      advancedHint: 'Make a theme of your own from one of the six above.',
+      back: 'Back to settings',
+      create: 'New theme',
+      createFrom: (preset: string) => `From ${preset}`,
+      untitled: 'Untitled theme',
+      name: 'Name',
+      namePlaceholder: 'Theme name',
+      rename: 'Rename',
+      delete: 'Delete',
+      deleteConfirm: (name: string) => `Delete “${name || 'Untitled theme'}”?`,
+      deleteHint: 'The theme is removed everywhere this gateway is signed in.',
+      keepIt: 'Keep it',
+      empty: 'No themes of your own yet. Start one from a preset and edit its colours.',
+      editing: (scheme: string) => `Editing the ${scheme} face`,
+      editingHint: 'Switch the setting above to edit the other face.',
+      background: 'Background',
+      accentFill: 'Accent',
+      accentBubble: 'Your bubbles',
+      followPreset: 'Follow the preset',
+      colourPlaceholder: '#RRGGBB',
+      /** The contrast guard, in the reader's words. */
+      rejected: (reason: string) => `That colour is not used: ${reason}`,
+      reasonMalformed: 'a colour is six hex digits after a #.',
+      reasonBubble: (ratio: string) => `white text on it measures ${ratio} : 1, and needs 4.5 : 1.`,
+      reasonBackground: (ratio: string) => `the app’s text on it measures ${ratio} : 1, and needs 4.5 : 1.`,
+      reasonAccentFill: (ratio: string) =>
+        `it measures ${ratio} : 1 against the surface behind it, and a mark needs 3 : 1.`
+    },
     about: 'ABOUT',
     licences: 'Licences',
     licencesHint: 'The open-source packages Hermie is built from, and what each one asks for.',

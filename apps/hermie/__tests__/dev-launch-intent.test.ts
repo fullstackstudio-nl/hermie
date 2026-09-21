@@ -15,7 +15,7 @@ describe('parseDevLaunchArguments', () => {
     expect(parseDevLaunchArguments(['--initialUrl', 'http://localhost:8081'])).toBeNull()
   })
 
-  it('reads a gallery section, a theme and a wallpaper in any order', () => {
+  it('reads a gallery section, a scheme and a preset in any order', () => {
     expect(
       parseDevLaunchArguments([
         'Hermie',
@@ -25,13 +25,13 @@ describe('parseDevLaunchArguments', () => {
         'http://localhost:8081',
         '--hermieOpen',
         'gallery:sheet-options-model-page',
-        '--hermieWallpaper',
-        'warm'
+        '--hermiePreset',
+        'lime'
       ])
     ).toEqual({
       open: { kind: 'gallery', section: 'sheet-options-model-page' },
       scheme: 'dark',
-      wallpaper: 'warm'
+      preset: 'lime'
     })
   })
 
@@ -110,11 +110,11 @@ describe('parseDevLaunchArguments', () => {
     expect(parseDevLaunchArguments(['--hermieGateway', '--hermieTheme', 'dark'])).toEqual({ scheme: 'dark' })
   })
 
-  it('ignores a target, a theme or a wallpaper it does not recognise', () => {
+  it('ignores a target, a scheme or a preset it does not recognise', () => {
     expect(parseDevLaunchArguments(['--hermieOpen', 'nonsense:thing'])).toBeNull()
     expect(parseDevLaunchArguments(['--hermieOpen', 'overlay:nowhere'])).toBeNull()
     expect(parseDevLaunchArguments(['--hermieTheme', 'sepia'])).toBeNull()
-    expect(parseDevLaunchArguments(['--hermieWallpaper', 'tartan'])).toBeNull()
+    expect(parseDevLaunchArguments(['--hermiePreset', 'tartan'])).toBeNull()
   })
 
   it('names sheet shorthands that exist in the gallery', () => {
@@ -212,8 +212,8 @@ describe('which native module the arguments come from', () => {
         get HermieMac(): never {
           throw new Error('no module host')
         },
-        HermieDevLaunch: { devLaunchArguments: ['--hermieWallpaper', 'warm'] }
+        HermieDevLaunch: { devLaunchArguments: ['--hermiePreset', 'graphite'] }
       })
-    ).toEqual({ wallpaper: 'warm' })
+    ).toEqual({ preset: 'graphite' })
   })
 })

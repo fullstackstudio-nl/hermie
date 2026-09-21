@@ -165,7 +165,7 @@ changes are in flight against one Metro instance — so a Debug build reads them
 xcrun simctl launch <udid> dev.hermie.app \
   --initialUrl http://localhost:8081 \
   --hermieOpen gallery:sheet-options-model-page \
-  --hermieTheme dark --hermieWallpaper warm
+  --hermieTheme dark --hermiePreset graphite
 ```
 
 | Argument                       | Opens                                                        |
@@ -176,7 +176,7 @@ xcrun simctl launch <udid> dev.hermie.app \
 | `--hermieOpen chat:<handle>`   | the real chat screen for that bot                            |
 | `--hermieOpen overlay:<s>[/p]` | `activity`, `crons`, `settings`, and `settings/licences`     |
 | `--hermieTheme light\|dark`    | pin the scheme (a simulator's appearance cannot be set here) |
-| `--hermieWallpaper <name>`     | pin the wallpaper                                            |
+| `--hermiePreset <name>`        | pin the theme: `blue`, `graphite` or `lime`                  |
 | `--hermieGateway <url>`        | seed that gateway's configuration and skip onboarding        |
 | `--hermieToken <token>`        | the session token to seed beside it                          |
 
@@ -193,7 +193,7 @@ npm run fake-gateway -- --auth token --token demo
 xcrun simctl launch <udid> dev.hermie.app \
   --initialUrl http://localhost:8081 \
   --hermieGateway http://localhost:9119 --hermieToken demo \
-  --hermieTheme light --hermieWallpaper blue --hermieOpen chat:researcher
+  --hermieTheme light --hermiePreset blue --hermieOpen chat:researcher
 ```
 
 It writes the same two stores the wizard's Done step writes, in the same shape,
@@ -220,7 +220,7 @@ adb shell am start -a android.intent.action.VIEW \
   -n dev.hermie.app/.MainActivity \
   -d 'exp+hermie://expo-development-client/?url=http%3A%2F%2F10.0.2.2%3A8081' \
   --es hermieGateway http://10.0.2.2:9119 --es hermieToken demo \
-  --es hermieTheme light --es hermieWallpaper blue \
+  --es hermieTheme light --es hermiePreset blue \
   --es hermieOpen chat:researcher
 ```
 

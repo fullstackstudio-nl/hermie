@@ -9,16 +9,19 @@ import { TransportNotice } from '../../gateway/TransportNotice'
 import { strings } from '../../i18n/strings'
 import { directTouchPanRef } from '../../platform/pointer-drag'
 import { type Appearance, useSettingsStore } from '../../store/settings'
-import { InsetButtonRow, InsetGroup, InsetValueRow, Screen } from '../../ui/primitives'
+import { InsetButtonRow, InsetGroup, InsetValueRow, Screen, Text } from '../../ui/primitives'
 import { SegmentedRow, SwitchRow } from '../../ui/sheets'
 import { useTheme } from '../../ui/theme'
 import { useEscapeKey } from '../../ui/useEscapeKey'
 import { useHardwareBack } from '../../ui/useHardwareBack'
-import { FORM_MAX_WIDTH, WALLPAPER_ORDER, type WallpaperName } from '../../ui/tokens'
+import { THEME_PRESET_ORDER } from '../../ui/themes'
+import { FORM_MAX_WIDTH } from '../../ui/tokens'
 import { AboutFooter } from './AboutFooter'
 import { DebugConnectionScreen } from './DebugConnectionScreen'
 import { GALLERY_ROW_TITLE, GalleryScreen } from './GalleryScreen'
 import { LicencesScreen } from './LicencesScreen'
+import { ThemeCard } from './ThemeCard'
+import { ThemesScreen } from './ThemesScreen'
 import { WebUpdateRow } from './WebUpdateRow'
 
 const VERBOSITY_OPTIONS: { value: Verbosity; label: string }[] = [
@@ -33,11 +36,6 @@ const APPEARANCE_OPTIONS: { value: Appearance; label: string }[] = [
   { value: 'dark', label: strings.settings.themeOptions.dark }
 ]
 
-const WALLPAPER_OPTIONS: { value: WallpaperName; label: string }[] = WALLPAPER_ORDER.map(name => ({
-  value: name,
-  label: strings.settings.wallpaperOptions[name]
-}))
-
 export interface SettingsScreenProps {
   /**
    * Open one of the pages Settings shows over itself.
@@ -45,7 +43,7 @@ export interface SettingsScreenProps {
    * Development only (`--hermieOpen overlay:settings/licences`). Each of these
    * is behind a tap, and a simulator this machine can only launch cannot tap.
    */
-  initialPage?: 'connection' | 'gallery' | 'licences'
+  initialPage?: 'connection' | 'gallery' | 'licences' | 'themes'
 }
 
 export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
@@ -55,11 +53,13 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
   const appearance = useSettingsStore(state => state.appearance)
   const setDefaults = useSettingsStore(state => state.setDefaults)
   const setAppearance = useSettingsStore(state => state.setAppearance)
-  const wallpaper = useSettingsStore(state => state.wallpaper)
-  const setWallpaper = useSettingsStore(state => state.setWallpaper)
+  const themeChoice = useSettingsStore(state => state.themeChoice)
+  const userThemes = useSettingsStore(state => state.userThemes)
+  const setThemeChoice = useSettingsStore(state => state.setThemeChoice)
   const [showConnectionTest, setShowConnectionTest] = useState(initialPage === 'connection')
   const [showGallery, setShowGallery] = useState(initialPage === 'gallery')
   const [showLicences, setShowLicences] = useState(initialPage === 'licences')
+  const [showThemes, setShowThemes] = useState(initialPage === 'themes')
   const [confirmingChange, setConfirmingChange] = useState(false)
 
   // Escape goes back ONE level: out of a screen Settings opened and into
@@ -69,8 +69,9 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
       setShowConnectionTest(false)
       setShowGallery(false)
       setShowLicences(false)
+      setShowThemes(false)
     },
-    showConnectionTest || showGallery || showLicences
+    showConnectionTest || showGallery || showLicences || showThemes
   )
 
   // The same one level for Android's back button, which is not Escape and has
@@ -83,8 +84,9 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
       setShowConnectionTest(false)
       setShowGallery(false)
       setShowLicences(false)
+      setShowThemes(false)
     },
-    showConnectionTest || showGallery || showLicences
+    showConnectionTest || showGallery || showLicences || showThemes
   )
 
   // A screen opened from here REPLACES Settings rather than pushing onto a
@@ -101,6 +103,10 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
 
   if (showLicences) {
     return <LicencesScreen onClose={() => setShowLicences(false)} />
+  }
+
+  if (showThemes) {
+    return <ThemesScreen onClose={() => setShowThemes(false)} />
   }
 
   const token = config?.authMode === 'session_token'
@@ -198,7 +204,7 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
           />
         </InsetGroup>
 
-        <InsetGroup header={strings.settings.appearance}>
+        <InsetGroup footer={strings.settings.themeHint} header={strings.settings.appearance}>
           <SegmentedRow
             label={strings.settings.theme}
             onChange={(value: Appearance) => setAppearance(value)}
@@ -206,12 +212,58 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
             testID="settings-appearance"
             value={appearance}
           />
-          <SegmentedRow
-            label={strings.settings.wallpaper}
-            onChange={(value: WallpaperName) => setWallpaper(value)}
-            options={WALLPAPER_OPTIONS}
-            testID="settings-wallpaper"
-            value={wallpaper}
+        </InsetGroup>
+
+        {/*
+          The themes, as cards rather than as a segmented control of names.
+
+          A segment reading "Graphite" is a promise a reader cannot check, and the
+          only question in front of a theme picker is what the window will look
+          like. Each card paints its own floor, its own panel and a bubble pair in
+          its own accent, resolved through the same function the app resolves the
+          live theme with — see `ThemeCard`.
+        */}
+        <View style={{ gap: theme.space.md }}>
+          <Text color="textMuted" style={{ letterSpacing: 0.6, marginLeft: theme.space.lg }} variant="meta">
+            {strings.settings.preset}
+          </Text>
+          <View accessibilityRole="radiogroup" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.space.md }}>
+            {THEME_PRESET_ORDER.map(name => (
+              <ThemeCard
+                choice={{ kind: 'preset', name }}
+                key={name}
+                label={strings.settings.presetOptions[name]}
+                onPress={() => setThemeChoice({ kind: 'preset', name })}
+                scheme={theme.scheme}
+                selected={themeChoice.kind === 'preset' && themeChoice.name === name}
+                testID={`theme-card-${name}`}
+                userThemes={userThemes}
+              />
+            ))}
+            {userThemes.map(entry => (
+              <ThemeCard
+                choice={{ kind: 'user', id: entry.id }}
+                key={entry.id}
+                label={entry.name || strings.settings.themes.untitled}
+                onPress={() => setThemeChoice({ kind: 'user', id: entry.id })}
+                scheme={theme.scheme}
+                selected={themeChoice.kind === 'user' && themeChoice.id === entry.id}
+                testID={`theme-card-user-${entry.id}`}
+                userThemes={userThemes}
+              />
+            ))}
+          </View>
+          <Text color="textMuted" style={{ marginHorizontal: theme.space.lg }} variant="meta">
+            {strings.settings.presetHint}
+          </Text>
+        </View>
+
+        <InsetGroup>
+          <InsetButtonRow
+            detail={strings.settings.themes.advancedHint}
+            onPress={() => setShowThemes(true)}
+            testID="settings-themes-advanced"
+            title={strings.settings.themes.advanced}
           />
         </InsetGroup>
 
