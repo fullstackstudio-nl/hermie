@@ -31,10 +31,25 @@
  *
  * ## What the caller has to provide
  *
- * The geometry. This hook knows how far the finger has moved; `drag-order.ts` knows
- * what that means, and it needs each row's measured box. `measure` collects those
- * from `onLayout` into a ref — a ref rather than state because a measurement is not
- * something the list should re-render for.
+ * The geometry, and it has to come off the right view.
+ *
+ * This hook knows how far the finger has moved; `drag-order.ts` knows what that
+ * means, and it needs every row's box in the LIST's own coordinates. A `FlatList`
+ * wraps each item in a cell of its own, so an `onLayout` on the row INSIDE that cell
+ * reports `y = 0` for every row in the list — and drop arithmetic fed nothing but
+ * zeroes can only ever answer "above the first row" or "past the last one". That was
+ * the whole of the defect: the neighbours never opened a gap because the finger was
+ * never measured to be over one. The measurement belongs on the CELL, which is a
+ * direct child of the content container, and `DragCell` is that cell.
+ *
+ * The other half of the geometry is where the list starts ON SCREEN, which a floating
+ * header or a sidebar inset moves. It is not derivable from a touch — `locationY` is
+ * relative to whichever descendant received it, not to the responder — so the caller
+ * measures the scroll view in window coordinates and reports it through `onListTop`,
+ * and the hook asks for a fresh reading (`measureList`) when a drag arms.
+ *
+ * A measurement is a ref rather than state, because it is not something the list
+ * should re-render for.
  *
  * ## What makes it feel like the platform's own, rather than a row that moves
  *
@@ -61,7 +76,7 @@ import { Animated, PanResponder, type PanResponderInstance } from 'react-native'
 
 import { haptic } from '../../platform/haptics'
 import { spring as springToken } from '../../ui/motion'
-import { dropEntryIndex, dropSlot, rowShift, type DragAnchor, type RowBox } from './drag-order'
+import { dropEntryIndex, dropSlot, neighbourOffsets, rowShift, type DragAnchor, type RowBox } from './drag-order'
 
 /** Beyond this, a press has become a drag. Below it, a finger is merely resting. */
 const MOVE_SLOP = 6
@@ -96,6 +111,12 @@ export interface RowDragOptions {
   entryCount: number
   /** Commit: put `botName` immediately before entry `index`. */
   onCommit: (botName: string, index: number) => void
+  /**
+   * Take a fresh reading of the list's top edge on screen, reported back through
+   * `onListTop`. Called when a drag arms, which is one long press before the first
+   * move — early enough for an asynchronous measurement to land in time.
+   */
+  measureList: () => void
   /** Scroll the list by a delta while the finger sits near an edge. */
   onAutoScroll: (delta: number) => void
   /** Long-press arming; off where a long press already means something else. */
@@ -118,8 +139,16 @@ export interface RowDrag {
   offsetFor: (key: string) => Animated.Value
   /** The anchor key a drop line should be drawn above, or null. */
   dropKey: string | null
-  /** `onLayout` for a row wrapper; one stable function per key. */
-  measure: (key: string) => (event: { nativeEvent: { layout: { y: number; height: number } } }) => void
+  /**
+   * The anchor key of the lifted row, or null.
+   *
+   * The cell that carries it is the one that has to be drawn above its neighbours,
+   * and a cell is the only view that can be: `zIndex` orders siblings, and a row is
+   * not a sibling of the other rows — its cell is.
+   */
+  liftedKey: string | null
+  /** A cell's measured box, in the list's CONTENT coordinates. See `DragCell`. */
+  measure: (key: string, layout: RowBox) => void
   /** Arm the drag for this row. The row's `onLongPress`. */
   arm: (botName: string) => void
   /** Disarm without dragging. The row's `onPressOut`. */
@@ -131,12 +160,15 @@ export interface RowDrag {
   /** Where the list is scrolled and how tall it is, for the edge bands. */
   onListLayout: (height: number) => void
   onListScroll: (offset: number) => void
+  /** Where the list's own top edge sits in window coordinates. */
+  onListTop: (y: number) => void
 }
 
 export function useRowDrag({
   anchors,
   armEnabled,
   entryCount,
+  measureList,
   onAutoScroll,
   onCommit,
   reduceMotion
@@ -148,7 +180,6 @@ export function useRowDrag({
   const lift = useRef(new Animated.Value(0)).current
   const offsets = useRef<Record<string, Animated.Value>>({})
   const boxes = useRef<Record<string, RowBox>>({})
-  const measurers = useRef<Record<string, (event: { nativeEvent: { layout: RowBox } }) => void>>({})
   const rowResponders = useRef<Record<string, PanResponderInstance>>({})
   const handleResponders = useRef<Record<string, PanResponderInstance>>({})
 
@@ -156,17 +187,24 @@ export function useRowDrag({
   // per row and would otherwise close over the first render's values for good.
   const armed = useRef<string | null>(null)
   const active = useRef<string | null>(null)
-  const startY = useRef(0)
   const slot = useRef<number | null>(null)
   /** The lifted row's own anchor index, captured at the grant. */
   const origin = useRef(0)
   const listHeight = useRef(0)
   const listOffset = useRef(0)
+  /** The list's top edge in window coordinates; see `onListTop`. */
+  const listTop = useRef(0)
+  /** Where the list was scrolled at the grant, so an edge scroll can be undone. */
+  const scrollAtGrant = useRef(0)
+  /** The last move, so an edge tick can re-decide without waiting for a finger. */
+  const lastMove = useRef<{ dy: number; moveY: number } | null>(null)
+  /** `track`, for the edge timer that `track` itself arms. Assigned below. */
+  const trackAgain = useRef<(moveY: number, dy: number) => void>(() => undefined)
   const edgeTimer = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const latest = useRef({ anchors, entryCount, onAutoScroll, onCommit, reduceMotion })
+  const latest = useRef({ anchors, entryCount, measureList, onAutoScroll, onCommit, reduceMotion })
 
-  latest.current = { anchors, entryCount, onAutoScroll, onCommit, reduceMotion }
+  latest.current = { anchors, entryCount, measureList, onAutoScroll, onCommit, reduceMotion }
 
   /**
    * One value per anchor, created on demand and kept for the life of the screen.
@@ -202,13 +240,10 @@ export function useRowDrag({
   const shiftRows = useCallback(
     (from: number, slot: number | null) => {
       const { anchors: list, reduceMotion: reduce } = latest.current
-      const height = boxes.current[list[from]?.key ?? '']?.height ?? 0
 
-      list.forEach((anchor, index) => {
-        const shift = slot === null ? 0 : rowShift(index, from, slot)
-
-        settle(offsetFor(anchor.key), shift * height, reduce).start()
-      })
+      for (const [key, offset] of Object.entries(neighbourOffsets(list, boxes.current, from, slot))) {
+        settle(offsetFor(key), offset, reduce).start()
+      }
     },
     [offsetFor]
   )
@@ -225,12 +260,13 @@ export function useRowDrag({
   /**
    * Where the finger is, in the CONTENT's coordinates.
    *
-   * `moveY` is on the screen and the boxes were measured in the content, so the
-   * scroll offset is the difference. The list's own top is not subtracted: it
-   * cancels out because both numbers are compared against each other and not
-   * against the window.
+   * `moveY` is in the window and the cells were measured in the content, so both
+   * the list's top edge and how far it is scrolled come off it. The top edge is a
+   * measurement rather than an assumption precisely because it is not zero: on the
+   * iPad the list sits under a floating header and beside a rail, and on a Mac
+   * there is a title bar above all of it.
    */
-  const pointerContentY = (moveY: number, listTop: number): number => moveY - listTop + listOffset.current
+  const pointerContentY = (moveY: number): number => moveY - listTop.current + listOffset.current
 
   /**
    * Let go.
@@ -258,6 +294,7 @@ export function useRowDrag({
       armed.current = null
       slot.current = null
       origin.current = 0
+      lastMove.current = null
 
       const done = () => {
         translateY.setValue(0)
@@ -288,13 +325,14 @@ export function useRowDrag({
   )
 
   const begin = useCallback(
-    (botName: string, pageY: number) => {
+    (botName: string) => {
       active.current = botName
       origin.current = Math.max(
         0,
         latest.current.anchors.findIndex(anchor => anchor.key === `bot:${botName}`)
       )
-      startY.current = pageY
+      scrollAtGrant.current = listOffset.current
+      lastMove.current = null
       translateY.setValue(0)
       setDraggingName(botName)
       settle(lift, 1, latest.current.reduceMotion).start()
@@ -308,10 +346,16 @@ export function useRowDrag({
    * drag; the translation is not, because it changes every frame.
    */
   const track = useCallback(
-    (moveY: number, dy: number, listTop: number) => {
-      translateY.setValue(dy)
+    (moveY: number, dy: number) => {
+      lastMove.current = { dy, moveY }
 
-      const next = dropSlot(latest.current.anchors, boxes.current, pointerContentY(moveY, listTop))
+      // The translation is in the CONTENT's space and the finger is not, so an
+      // auto-scroll that moves the content under a still finger has to be added
+      // back — otherwise the lifted row slides out from under the finger that is
+      // holding it, which is the one thing a drag may never do.
+      translateY.setValue(dy + listOffset.current - scrollAtGrant.current)
+
+      const next = dropSlot(latest.current.anchors, boxes.current, pointerContentY(moveY))
 
       if (next !== slot.current) {
         const first = slot.current === null
@@ -330,8 +374,8 @@ export function useRowDrag({
 
       // The edge bands are measured against the list, not the window, so a sidebar
       // inset does not shift them.
-      const withinTop = moveY - listTop < EDGE_BAND
-      const withinBottom = listTop + listHeight.current - moveY < EDGE_BAND
+      const withinTop = moveY - listTop.current < EDGE_BAND
+      const withinBottom = listTop.current + listHeight.current - moveY < EDGE_BAND
 
       if (!withinTop && !withinBottom) {
         stopEdgeScroll()
@@ -345,18 +389,28 @@ export function useRowDrag({
 
       const step = withinTop ? -EDGE_STEP : EDGE_STEP
 
-      edgeTimer.current = setInterval(() => latest.current.onAutoScroll(step), EDGE_INTERVAL_MS)
+      // A finger that has stopped at the edge still means "keep going", so each tick
+      // re-decides with the same move it decided with last time. The list has
+      // scrolled since, so both the translation and the slot change even though
+      // nothing moved.
+      edgeTimer.current = setInterval(() => {
+        latest.current.onAutoScroll(step)
+
+        const last = lastMove.current
+
+        if (last) {
+          trackAgain.current(last.moveY, last.dy)
+        }
+      }, EDGE_INTERVAL_MS)
     },
     [shiftRows, stopEdgeScroll, translateY]
   )
 
+  // `track` arms the edge timer, so the timer cannot close over `track` itself.
+  trackAgain.current = track
+
   const buildResponder = useCallback(
     (botName: string, immediate: boolean): PanResponderInstance => {
-      // The list's own top on screen, captured at grant: a drag cannot resize the
-      // window, so reading it once per gesture is enough and it saves a measure
-      // per frame.
-      let listTop = 0
-
       return PanResponder.create({
         // A handle claims the touch outright; a row waits to be armed, so an
         // ordinary tap still reaches the `Pressable` underneath it.
@@ -366,10 +420,16 @@ export function useRowDrag({
         onMoveShouldSetPanResponderCapture: (_event, gesture) =>
           armed.current === botName && Math.abs(gesture.dy) > MOVE_SLOP,
 
-        onPanResponderGrant: (event, gesture) => {
-          listTop = event.nativeEvent.pageY - event.nativeEvent.locationY - (boxes.current[`bot:${botName}`]?.y ?? 0)
-          listTop += listOffset.current
-          begin(botName, gesture.y0)
+        onPanResponderGrant: () => {
+          // A handle claims the touch outright, so nothing armed it and nothing has
+          // asked where the list is. Ask now: the reading lands before the first
+          // move, and a stale one is the difference between dropping where the
+          // finger is and dropping a header's height away from it.
+          if (immediate) {
+            latest.current.measureList()
+          }
+
+          begin(botName)
         },
 
         onPanResponderMove: (_event, gesture) => {
@@ -377,7 +437,7 @@ export function useRowDrag({
             return
           }
 
-          track(gesture.moveY, gesture.dy, listTop)
+          track(gesture.moveY, gesture.dy)
         },
 
         // While dragging, nothing else may take the gesture — least of all the
@@ -426,20 +486,8 @@ export function useRowDrag({
     [buildResponder]
   )
 
-  const measure = useCallback((key: string) => {
-    const existing = measurers.current[key]
-
-    if (existing) {
-      return existing
-    }
-
-    const handler = (event: { nativeEvent: { layout: RowBox } }): void => {
-      boxes.current[key] = { height: event.nativeEvent.layout.height, y: event.nativeEvent.layout.y }
-    }
-
-    measurers.current[key] = handler
-
-    return handler
+  const measure = useCallback((key: string, layout: RowBox) => {
+    boxes.current[key] = { height: layout.height, y: layout.y }
   }, [])
 
   const arm = useCallback(
@@ -449,6 +497,10 @@ export function useRowDrag({
       }
 
       armed.current = botName
+      // Where the list is can have changed since the last layout — a sidebar shown,
+      // a keyboard up, a window resized — and the answer is needed before the first
+      // move rather than after it.
+      latest.current.measureList()
       // The only haptic in the list, and it is the one the gesture needs: a lift
       // that says nothing is a lift nobody trusts they have started.
       haptic('choice')
@@ -470,6 +522,7 @@ export function useRowDrag({
       dropKey,
       handleHandlers,
       lift,
+      liftedKey: draggingName === null ? null : `bot:${draggingName}`,
       measure,
       offsetFor,
       onListLayout: (height: number) => {
@@ -477,6 +530,9 @@ export function useRowDrag({
       },
       onListScroll: (offset: number) => {
         listOffset.current = offset
+      },
+      onListTop: (y: number) => {
+        listTop.current = y
       },
       rowHandlers,
       translateY

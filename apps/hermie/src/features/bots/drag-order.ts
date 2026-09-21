@@ -176,3 +176,35 @@ export function rowShift(anchor: number, from: number, slot: number): -1 | 0 | 1
 
   return 0
 }
+
+/**
+ * How far every visible row has moved aside, in points, by anchor key.
+ *
+ * `rowShift` says which way a row goes; this says how far, and the two are separate
+ * because the distance is not a row's own height — it is the LIFTED row's. What is
+ * opening or closing is the hole that row came out of, so a divider closing up
+ * behind a chat travels the chat's height and not its own. Shifting by each row's
+ * own height would leave a gap of the wrong size under the finger, which is exactly
+ * the gap a reader is aiming at.
+ *
+ * `slot === null` is the end of a gesture: every row goes home.
+ */
+export function neighbourOffsets(
+  anchors: readonly DragAnchor[],
+  boxes: Readonly<Record<string, RowBox>>,
+  from: number,
+  slot: number | null
+): Record<string, number> {
+  const height = boxes[anchors[from]?.key ?? '']?.height ?? 0
+  const offsets: Record<string, number> = {}
+
+  anchors.forEach((anchor, index) => {
+    const offset = (slot === null ? 0 : rowShift(index, from, slot)) * height
+
+    // `-1 * 0` is negative zero, which an animation cannot tell from zero and a
+    // test can. Nothing here has a signed nothing to express.
+    offsets[anchor.key] = offset === 0 ? 0 : offset
+  })
+
+  return offsets
+}

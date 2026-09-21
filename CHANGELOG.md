@@ -280,6 +280,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A chat dragged in the list lands where the finger is, and the rows move aside to say so.** The
+  drag could only ever drop a row at the very top or the very bottom, and the other rows never
+  budged. Neither was a bug in the drop arithmetic: every row was measuring itself INSIDE the
+  `FlatList` cell that holds it, so all of them reported the same position — the top of their own
+  cell — and a comparison against the finger had nothing to tell the rows apart with. The cell is
+  now the thing that measures and the thing that is raised, which also fixes the second half of the
+  report: a lifted row was drawn under its neighbours, because a `zIndex` set inside a cell cannot
+  lift the cell it is drawn in. The list's own top edge is measured in the window rather than
+  derived from the touch, so a floating header, a sidebar rail or a Mac title bar no longer shifts
+  the drop by a row; and an auto-scroll at the edges now keeps the lifted row under the finger
+  instead of letting the content slide it away.
 - **A tap beside a bottom sheet closes it again.** The scrim was a flex sibling ABOVE the panel in a
   column, so it covered only the space over the sheet; on the wide layout, where the panel is capped
   and parked over the content column, most of what reads as backdrop is BESIDE it — and that area

@@ -13,6 +13,7 @@ import {
   dropEntryIndex,
   dropSlot,
   entryIndexByKey,
+  neighbourOffsets,
   rowShift,
   type DragAnchor,
   type RowBox
@@ -215,5 +216,98 @@ describe('rowShift', () => {
     const shifts = [0, 1, 2, 3].map(anchor => rowShift(anchor, 1, 3))
 
     expect(shifts).toEqual([0, 0, -1, 0])
+  })
+})
+
+/**
+ * The list as it really stacks: a divider is shorter than a chat row, and a chat row
+ * on the iPad is taller than one on the phone. A uniform stack cannot tell an error
+ * in the arithmetic from an error in the assumption.
+ */
+const ragged: Record<string, RowBox> = (() => {
+  const heights: Record<string, number> = {
+    archive: 44,
+    'archived:delta': 72,
+    'bot:alpha': 72,
+    'bot:beta': 72,
+    'bot:gamma': 72,
+    'divider:d1': 32,
+    'divider:d2': 32,
+    'empty:d2': 56
+  }
+  const boxes: Record<string, RowBox> = {}
+  let y = 0
+
+  for (const item of items) {
+    boxes[item.key] = { height: heights[item.key] ?? 72, y }
+    y += heights[item.key] ?? 72
+  }
+
+  return boxes
+})()
+
+describe('which slot the finger is over, with dividers in the way', () => {
+  // alpha 0…72, beta 72…144, d1 144…176, gamma 176…248, d2 248…280, empty 280…336.
+  it.each([
+    [0, 0, 'above the first chat'],
+    [35, 0, 'the top half of the first chat'],
+    [37, 1, 'the bottom half of the first chat'],
+    [150, 2, 'the top half of a divider, which is only thirty-two points tall'],
+    [161, 3, 'the bottom half of that divider'],
+    [200, 3, 'the top half of the chat under it'],
+    [220, 4, 'the bottom half of that chat'],
+    [300, 5, 'the empty section under the second divider'],
+    [335, 6, 'past everything'],
+    [900, 6, 'well past everything']
+  ])('reads %i as slot %i (%s)', (pointerY, slot) => {
+    expect(dropSlot(anchors, ragged, pointerY)).toBe(slot)
+  })
+
+  it('does not assume a uniform row, which is what a divider in the list disproves', () => {
+    // 160 is past the divider's midpoint (144 + 16) and short of the midpoint a
+    // stack of equal rows would have put there.
+    expect(dropSlot(anchors, ragged, 160)).toBe(3)
+    expect(
+      dropSlot(anchors, Object.fromEntries(items.map((item, index) => [item.key, { height: 72, y: index * 72 }])), 160)
+    ).toBe(2)
+  })
+})
+
+describe('how far the other rows move aside', () => {
+  it('opens the gap with the LIFTED row’s height, not with each row’s own', () => {
+    // gamma, seventy-two tall, dragged up to the top of the list.
+    expect(neighbourOffsets(anchors, ragged, 3, 0)).toEqual({
+      'bot:alpha': 72,
+      'bot:beta': 72,
+      'bot:gamma': 0,
+      'divider:d1': 72,
+      'divider:d2': 0,
+      'empty:d2': 0
+    })
+  })
+
+  it('moves the rows a chat has passed on its way down, and nothing else', () => {
+    // alpha dragged down past beta and the divider, to the slot above gamma.
+    expect(neighbourOffsets(anchors, ragged, 0, 3)).toEqual({
+      'bot:alpha': 0,
+      'bot:beta': -72,
+      'bot:gamma': 0,
+      'divider:d1': -72,
+      'divider:d2': 0,
+      'empty:d2': 0
+    })
+  })
+
+  it('moves nothing while the row is over its own place', () => {
+    expect(Object.values(neighbourOffsets(anchors, ragged, 1, 1))).toEqual([0, 0, 0, 0, 0, 0])
+    expect(Object.values(neighbourOffsets(anchors, ragged, 1, 2))).toEqual([0, 0, 0, 0, 0, 0])
+  })
+
+  it('sends every row home when the gesture ends', () => {
+    expect(Object.values(neighbourOffsets(anchors, ragged, 3, null))).toEqual([0, 0, 0, 0, 0, 0])
+  })
+
+  it('shifts nothing at all when the lifted row has not been measured', () => {
+    expect(Object.values(neighbourOffsets(anchors, {}, 0, 3))).toEqual([0, 0, 0, 0, 0, 0])
   })
 })

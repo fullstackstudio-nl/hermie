@@ -68,6 +68,7 @@ import { parseRowMenuAction, rowMenuItems } from './row-menu-items'
 import { RowMenu } from './RowMenu'
 import { SidebarFooter, type BotsSection, type TabKey } from './SidebarFooter'
 import { SidebarRail } from './SidebarRail'
+import { DragCell, DragCellProvider } from './DragCell'
 import { LIFT_SCALE, useRowDrag } from './use-row-drag'
 
 export type { BotsSection }
@@ -134,6 +135,11 @@ function matches(bot: Bot, query: string): boolean {
     bot.name.toLowerCase().includes(needle) ||
     bot.description.toLowerCase().includes(needle)
   )
+}
+
+/** The part of a host component `measureListTop` needs; see its narrowing. */
+interface Measurable {
+  measureInWindow: (callback: (x: number, y: number) => void) => void
 }
 
 export function BotsScreen({
@@ -420,8 +426,36 @@ export function BotsScreen({
   )
 
   const listRef = useRef<FlatList<ListItem>>(null)
+  /**
+   * `onListTop`, held so `measureList` can report into it.
+   *
+   * The measurement is asked for by the hook and answered by this screen, and the
+   * two halves are created in the same call — so one of them has to be reached
+   * through a ref rather than through the closure.
+   */
+  const dragTop = useRef<((y: number) => void) | null>(null)
   const searchRef = useRef<TextInput>(null)
   const scrollOffset = useRef(0)
+
+  /**
+   * Where the list's top edge is, in the window.
+   *
+   * It cannot be read off a touch and it cannot be assumed: on the phone the list
+   * sits under a search field, on the iPad under a floating header and beside the
+   * rail, and in a Mac window under a title bar that is outside the app entirely.
+   * `getNativeScrollRef` is the scroll view itself, which is the view the cells were
+   * measured inside, so the two coordinate spaces meet exactly here.
+   */
+  const measureListTop = useCallback(() => {
+    // `getNativeScrollRef` is typed as the union of everything a scrollable host
+    // can be, and only one arm of it declares the measuring methods every host
+    // component actually has. The narrowing says what is being relied on.
+    const scroll = listRef.current?.getNativeScrollRef() as Measurable | null | undefined
+
+    scroll?.measureInWindow((_x: number, y: number) => {
+      dragTop.current?.(y)
+    })
+  }, [])
 
   const entryIndexes = useMemo(() => entryIndexByKey(entries), [entries])
   const anchors = useMemo(() => dragAnchors(items, entryIndexes), [entryIndexes, items])
@@ -433,6 +467,7 @@ export function BotsScreen({
     // Android the handle in edit mode is the only way in.
     armEnabled: HAS_NATIVE_CONTEXT_MENU,
     entryCount: entries.length,
+    measureList: measureListTop,
     onAutoScroll: useCallback((delta: number) => {
       const next = Math.max(0, scrollOffset.current + delta)
 
@@ -443,6 +478,20 @@ export function BotsScreen({
     }, []),
     reduceMotion: theme.reduceMotion
   })
+
+  dragTop.current = drag.onListTop
+
+  /**
+   * What every cell has to know, and nothing more.
+   *
+   * A new object here re-renders the cells, so it is memoized on the only two
+   * things they read — which means a drag costs one re-render of the list's cells
+   * when it starts and one when it ends, and none of the sixty in between.
+   */
+  const cellState = useMemo(
+    () => ({ liftedKey: drag.liftedKey, measure: drag.measure }),
+    [drag.liftedKey, drag.measure]
+  )
 
   const openIndex = useCallback(
     (index: number) => {
@@ -653,155 +702,159 @@ export function BotsScreen({
         </Text>
       ) : null}
 
-      <FlatList
-        ref={attachList}
-        ListEmptyComponent={
-          <EmptyState error={rosterError} loading={loading} query={query} searching={Boolean(query.trim())} />
-        }
-        data={items}
-        extraData={hasRows}
-        keyExtractor={item => item.key}
-        keyboardDismissMode="on-drag"
-        keyboardShouldPersistTaps="handled"
-        onLayout={event => drag.onListLayout(event.nativeEvent.layout.height)}
-        onScroll={onListScroll}
-        refreshControl={<RefreshControl onRefresh={refresh} refreshing={refreshing} />}
-        renderItem={({ item }) => {
-          if (item.kind === 'archiveHeader') {
-            return (
-              <ArchiveHeader count={item.count} onToggle={() => setArchiveOpen(open => !open)} open={archiveOpen} />
-            )
+      <DragCellProvider value={cellState}>
+        <FlatList
+          CellRendererComponent={DragCell}
+          ref={attachList}
+          ListEmptyComponent={
+            <EmptyState error={rosterError} loading={loading} query={query} searching={Boolean(query.trim())} />
           }
+          data={items}
+          extraData={hasRows}
+          keyExtractor={item => item.key}
+          keyboardDismissMode="on-drag"
+          keyboardShouldPersistTaps="handled"
+          onLayout={event => {
+            drag.onListLayout(event.nativeEvent.layout.height)
+            // A layout is the only moment the list's place in the window can have
+            // changed without anybody touching it — a rotation, the sidebar opening,
+            // a Mac window resized.
+            measureListTop()
+          }}
+          onScroll={onListScroll}
+          refreshControl={<RefreshControl onRefresh={refresh} refreshing={refreshing} />}
+          renderItem={({ item }) => {
+            if (item.kind === 'archiveHeader') {
+              return (
+                <ArchiveHeader count={item.count} onToggle={() => setArchiveOpen(open => !open)} open={archiveOpen} />
+              )
+            }
 
-          if (item.kind === 'noNameMatch') {
+            if (item.kind === 'noNameMatch') {
+              return (
+                <Text
+                  color="textMuted"
+                  style={{ paddingHorizontal: theme.space.lg, paddingVertical: theme.space.md }}
+                  testID="bots-empty"
+                >
+                  {strings.bots.noMatches(item.query)}
+                </Text>
+              )
+            }
+
+            if (item.kind === 'messagesHeader') {
+              return <MessagesHeader count={item.count} searching={item.searching} />
+            }
+
+            if (item.kind === 'message') {
+              return (
+                <MessageHit
+                  bot={item.bot}
+                  match={item.match}
+                  onPress={() => openBot(item.bot, { findText: query.trim() })}
+                />
+              )
+            }
+
+            if (item.kind === 'divider') {
+              return (
+                <Animated.View style={{ transform: [{ translateY: drag.offsetFor(item.key) }] }}>
+                  <Divider
+                    autoFocus={item.id === addedDividerId}
+                    editing={editing}
+                    id={item.id}
+                    name={item.name}
+                    onRename={renameDivider}
+                  />
+                </Animated.View>
+              )
+            }
+
+            if (item.kind === 'sectionEmpty') {
+              return (
+                <Animated.View style={{ transform: [{ translateY: drag.offsetFor(item.key) }] }}>
+                  <SectionEmpty id={item.id} />
+                </Animated.View>
+              )
+            }
+
+            const state = presence.get(item.bot.name) ?? ARCHIVED_PRESENCE
+            const { count, unread } = unreadFor(item.bot.name)
+            const lifted = drag.draggingName === item.bot.name
+
             return (
-              <Text
-                color="textMuted"
-                style={{ paddingHorizontal: theme.space.lg, paddingVertical: theme.space.md }}
-                testID="bots-empty"
-              >
-                {strings.bots.noMatches(item.query)}
-              </Text>
-            )
-          }
-
-          if (item.kind === 'messagesHeader') {
-            return <MessagesHeader count={item.count} searching={item.searching} />
-          }
-
-          if (item.kind === 'message') {
-            return (
-              <MessageHit
-                bot={item.bot}
-                match={item.match}
-                onPress={() => openBot(item.bot, { findText: query.trim() })}
-              />
-            )
-          }
-
-          if (item.kind === 'divider') {
-            return (
+              /*
+               * The wrapper carries three things a row cannot carry itself: the
+               * measurement the drop arithmetic needs, the pan responder that claims
+               * the gesture once a long press has armed it, and the lift.
+               *
+               * The lift is a TRANSFORM on the row in place rather than a separate drag
+               * layer. A portal would let the row leave the list, which nothing here
+               * needs — the drop targets are all inside it — and it would cost a second
+               * copy of the row to keep in sync with the first.
+               *
+               * What it cannot carry is the z-order or the measurement: both belong to
+               * the cell this wrapper sits inside, which is `DragCell`.
+               */
               <Animated.View
-                onLayout={drag.measure(item.key)}
-                style={{ transform: [{ translateY: drag.offsetFor(item.key) }] }}
+                {...(item.archived ? {} : drag.rowHandlers(item.bot.name))}
+                /*
+                 * Two states, one style: LIFTED reads off the drag's own `lift`
+                 * value, everything else off its row offset. Neither is a boolean
+                 * in a style object any more — a row that changed size in one frame
+                 * was the tell that this was a transform applied rather than a row
+                 * picked up.
+                 */
+                style={
+                  lifted
+                    ? {
+                        elevation: 8,
+                        shadowColor: '#000',
+                        shadowOffset: { height: 6, width: 0 },
+                        // Interpolated off the lift so the shadow arrives with the
+                        // scale and leaves with it, rather than blinking on.
+                        shadowOpacity: drag.lift.interpolate({ inputRange: [0, 1], outputRange: [0, 0.28] }),
+                        shadowRadius: 12,
+                        transform: [
+                          { translateY: drag.translateY },
+                          { scale: drag.lift.interpolate({ inputRange: [0, 1], outputRange: [1, LIFT_SCALE] }) }
+                        ]
+                      }
+                    : { transform: [{ translateY: drag.offsetFor(item.key) }] }
+                }
+                testID={lifted ? `bot-row-lifted-${item.bot.name}` : undefined}
               >
-                <Divider
-                  autoFocus={item.id === addedDividerId}
-                  editing={editing}
-                  id={item.id}
-                  name={item.name}
-                  onRename={renameDivider}
+                <BotRow
+                  accent={accents[item.bot.name] ?? 'default'}
+                  archived={item.archived}
+                  bot={item.bot}
+                  compact={!sidebar}
+                  editing={editing && !item.archived}
+                  {...(editing && !item.archived ? { handleHandlers: drag.handleHandlers(item.bot.name) } : {})}
+                  menuSections={menuSections}
+                  onArm={drag.arm}
+                  onDisarm={drag.disarm}
+                  onMenuSelect={onMenuSelect}
+                  onMove={moveBot}
+                  onOpenMenu={setMenuFor}
+                  onPress={openBot}
+                  presence={item.archived ? ARCHIVED_PRESENCE : state}
+                  selected={item.bot.name === selectedBot}
+                  unread={item.archived ? false : unread}
+                  unreadCount={item.archived ? 0 : count}
+                  {...(avatars[item.bot.name] ? { avatarUri: avatars[item.bot.name] } : {})}
                 />
               </Animated.View>
             )
-          }
-
-          if (item.kind === 'sectionEmpty') {
-            return (
-              <Animated.View
-                onLayout={drag.measure(item.key)}
-                style={{ transform: [{ translateY: drag.offsetFor(item.key) }] }}
-              >
-                <SectionEmpty id={item.id} />
-              </Animated.View>
-            )
-          }
-
-          const state = presence.get(item.bot.name) ?? ARCHIVED_PRESENCE
-          const { count, unread } = unreadFor(item.bot.name)
-          const lifted = drag.draggingName === item.bot.name
-
-          return (
-            /*
-             * The wrapper carries three things a row cannot carry itself: the
-             * measurement the drop arithmetic needs, the pan responder that claims
-             * the gesture once a long press has armed it, and the lift.
-             *
-             * The lift is a TRANSFORM on the row in place rather than a separate drag
-             * layer. A portal would let the row leave the list, which nothing here
-             * needs — the drop targets are all inside it — and it would cost a second
-             * copy of the row to keep in sync with the first.
-             */
-            <Animated.View
-              onLayout={drag.measure(item.key)}
-              {...(item.archived ? {} : drag.rowHandlers(item.bot.name))}
-              /*
-               * Two states, one style: LIFTED reads off the drag's own `lift`
-               * value, everything else off its row offset. Neither is a boolean
-               * in a style object any more — a row that changed size in one frame
-               * was the tell that this was a transform applied rather than a row
-               * picked up.
-               */
-              style={
-                lifted
-                  ? {
-                      elevation: 8,
-                      shadowColor: '#000',
-                      shadowOffset: { height: 6, width: 0 },
-                      // Interpolated off the lift so the shadow arrives with the
-                      // scale and leaves with it, rather than blinking on.
-                      shadowOpacity: drag.lift.interpolate({ inputRange: [0, 1], outputRange: [0, 0.28] }),
-                      shadowRadius: 12,
-                      transform: [
-                        { translateY: drag.translateY },
-                        { scale: drag.lift.interpolate({ inputRange: [0, 1], outputRange: [1, LIFT_SCALE] }) }
-                      ],
-                      zIndex: 2
-                    }
-                  : { transform: [{ translateY: drag.offsetFor(item.key) }] }
-              }
-              testID={lifted ? `bot-row-lifted-${item.bot.name}` : undefined}
-            >
-              <BotRow
-                accent={accents[item.bot.name] ?? 'default'}
-                archived={item.archived}
-                bot={item.bot}
-                compact={!sidebar}
-                editing={editing && !item.archived}
-                {...(editing && !item.archived ? { handleHandlers: drag.handleHandlers(item.bot.name) } : {})}
-                menuSections={menuSections}
-                onArm={drag.arm}
-                onDisarm={drag.disarm}
-                onMenuSelect={onMenuSelect}
-                onMove={moveBot}
-                onOpenMenu={setMenuFor}
-                onPress={openBot}
-                presence={item.archived ? ARCHIVED_PRESENCE : state}
-                selected={item.bot.name === selectedBot}
-                unread={item.archived ? false : unread}
-                unreadCount={item.archived ? 0 : count}
-                {...(avatars[item.bot.name] ? { avatarUri: avatars[item.bot.name] } : {})}
-              />
-            </Animated.View>
-          )
-        }}
-        // While a row is lifted the list must not also pan: the auto-scroll at the
-        // edges is what moves it, and two scrollers would fight over one finger.
-        scrollEnabled={drag.draggingName === null}
-        scrollEventThrottle={16}
-        style={{ flex: 1 }}
-        testID="bots-list"
-      />
+          }}
+          // While a row is lifted the list must not also pan: the auto-scroll at the
+          // edges is what moves it, and two scrollers would fight over one finger.
+          scrollEnabled={drag.draggingName === null}
+          scrollEventThrottle={16}
+          style={{ flex: 1 }}
+          testID="bots-list"
+        />
+      </DragCellProvider>
 
       {drag.draggingName ? (
         <Text accessibilityLiveRegion="polite" style={{ height: 0, opacity: 0 }}>
