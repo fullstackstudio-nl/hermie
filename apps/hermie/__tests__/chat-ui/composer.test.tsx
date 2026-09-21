@@ -2,7 +2,7 @@
  * The composer: send, stop, the slash popover, and the attachment tray.
  */
 import { act, fireEvent, screen } from '@testing-library/react-native'
-import { Platform, StyleSheet } from 'react-native'
+import { AccessibilityInfo, Platform, ScrollView, StyleSheet } from 'react-native'
 
 import { Composer } from '../../src/chat-ui'
 import { ATTACH_LIST_MIN_WIDTH } from '../../src/chat-ui/AttachMenu'
@@ -15,6 +15,7 @@ import {
   COMPOSER_LINE_HEIGHT,
   COMPOSER_ROUND_SIZE,
   COMPOSER_TEXT_LINE_HEIGHT,
+  SLASH_POPOVER_MAX_HEIGHT,
   SLASH_SLOW_MS
 } from '../../src/chat-ui/Composer'
 import { renderScreen, withProviders } from '../support/render'
@@ -354,6 +355,141 @@ describe('Composer', () => {
 
       expect(screen.queryByTestId('slash-loading')).toBeNull()
       expect(screen.getByTestId('slash-option-compact')).toBeTruthy()
+    })
+  })
+
+  /**
+   * The highlight has to stay on screen, or the arrow keys are driving a list
+   * the reader cannot see.
+   *
+   * ↑ and ↓ moved the selection and nothing else, and a real gateway answers a
+   * bare `/` with thirty-four commands — so the fourth press walked the
+   * highlight out of the bottom of the popover and every press after that did
+   * nothing visible at all.
+   */
+  describe('the slash list and the highlight it has to keep on screen', () => {
+    const SIX = Array.from({ length: 6 }, (_, index) => ({
+      description: `Command number ${index + 1}`,
+      name: `cmd${index + 1}`
+    }))
+
+    /** Six 50pt rows in a 220pt window: the last two are below the fold. */
+    const ROW_HEIGHT = 50
+
+    function layOutList() {
+      fireEvent(screen.getByTestId('composer-slash-list'), 'layout', {
+        nativeEvent: { layout: { height: SLASH_POPOVER_MAX_HEIGHT, width: 320, x: 0, y: 0 } }
+      })
+
+      SIX.forEach((suggestion, index) => {
+        fireEvent(screen.getByTestId(`slash-option-${suggestion.name}`), 'layout', {
+          nativeEvent: { layout: { height: ROW_HEIGHT, width: 320, x: 0, y: index * ROW_HEIGHT } }
+        })
+      })
+    }
+
+    it('scrolls the last row into view from the bottom, and the first back to zero', () => {
+      const scrollTo = jest.spyOn(ScrollView.prototype, 'scrollTo').mockImplementation(() => {})
+
+      try {
+        renderComposer({ suggestions: SIX, value: '/' })
+        layOutList()
+
+        // Down to row 6. Its bottom is at 300 in a 220pt window, so the list has
+        // to sit at 80 for the whole row to be visible.
+        for (let step = 0; step < 5; step += 1) {
+          pressKey('suggestionDown')
+        }
+
+        expect(scrollTo).toHaveBeenLastCalledWith({ animated: true, y: 6 * ROW_HEIGHT - SLASH_POPOVER_MAX_HEIGHT })
+
+        // And back to the top, which is the other edge of the same rule.
+        for (let step = 0; step < 5; step += 1) {
+          pressKey('suggestionUp')
+        }
+
+        expect(scrollTo).toHaveBeenLastCalledWith({ animated: true, y: 0 })
+      } finally {
+        scrollTo.mockRestore()
+      }
+    })
+
+    it('leaves a row that is already fully visible exactly where it is', () => {
+      const scrollTo = jest.spyOn(ScrollView.prototype, 'scrollTo').mockImplementation(() => {})
+
+      try {
+        renderComposer({ suggestions: SIX, value: '/' })
+        layOutList()
+
+        // Rows 1 to 4 all end at or before 200, inside the 220pt window, so
+        // walking down through them scrolls nothing.
+        for (let step = 0; step < 3; step += 1) {
+          pressKey('suggestionDown')
+        }
+
+        expect(scrollTo).not.toHaveBeenCalled()
+      } finally {
+        scrollTo.mockRestore()
+      }
+    })
+
+    it('asks for the destination rather than the journey under Reduce Motion', async () => {
+      /*
+        Swapped and put back by hand rather than with `spyOn`/`mockRestore`.
+
+        The preset already supplies this getter, and restoring a spy on it
+        reinstates the UNMOCKED module function, which answers `undefined` in
+        this environment — so `theme.tsx`'s `?.().then` throws for every test
+        that renders afterwards. Keeping the reference is the only restore that
+        puts back what was actually there.
+      */
+      const original = AccessibilityInfo.isReduceMotionEnabled
+      // The theme reads the preference asynchronously, so the render has to be
+      // allowed to settle before the first key: a scroll requested on the frame
+      // before the answer arrives would honestly still be animated.
+      AccessibilityInfo.isReduceMotionEnabled = () => Promise.resolve(true)
+
+      const scrollTo = jest.spyOn(ScrollView.prototype, 'scrollTo').mockImplementation(() => {})
+
+      try {
+        renderComposer({ suggestions: SIX, value: '/' })
+        await act(async () => undefined)
+        layOutList()
+
+        for (let step = 0; step < 5; step += 1) {
+          pressKey('suggestionDown')
+        }
+
+        expect(scrollTo).toHaveBeenLastCalledWith({ animated: false, y: 6 * ROW_HEIGHT - SLASH_POPOVER_MAX_HEIGHT })
+      } finally {
+        scrollTo.mockRestore()
+        AccessibilityInfo.isReduceMotionEnabled = original
+      }
+    })
+
+    it('measures again when the candidates change, rather than trusting old boxes', () => {
+      // Index 3 of `/mo` and index 3 of `/model` are different rows at
+      // different heights; a kept measurement scrolls to where a row used to be.
+      const scrollTo = jest.spyOn(ScrollView.prototype, 'scrollTo').mockImplementation(() => {})
+
+      try {
+        const { rerender } = renderComposerHandle({ suggestions: SIX, value: '/' })
+
+        layOutList()
+        for (let step = 0; step < 5; step += 1) {
+          pressKey('suggestionDown')
+        }
+        expect(scrollTo).toHaveBeenCalled()
+        scrollTo.mockClear()
+
+        // A narrower list, not yet laid out: nothing to aim at, so nothing moves.
+        rerender({ suggestions: SIX.slice(0, 2), value: '/cmd' })
+        pressKey('suggestionDown')
+
+        expect(scrollTo).not.toHaveBeenCalled()
+      } finally {
+        scrollTo.mockRestore()
+      }
     })
   })
 

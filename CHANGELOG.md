@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   distinguishable from a silent one. The catalogue refusing while `complete.slash` answers is shown
   as well, because that is the state where the list looks right and Return sends the pick as prose.
 
+- **Arrow keys keep the highlighted command on screen.** ↑ and ↓ moved the selection in the slash
+  popover and nothing else, so against a gateway that answers a bare `/` with thirty-four commands
+  the highlight walked out of the bottom of the list on the fourth press and every press after that
+  did nothing visible. The rows report their own boxes and the list scrolls the highlighted one
+  fully into view — its top when moving up, its bottom when moving down — leaving a row that is
+  already visible exactly where it is, and asking for the destination rather than the journey under
+  Reduce Motion.
+
 ## [0.1.1] - 2026-09-22
 
 

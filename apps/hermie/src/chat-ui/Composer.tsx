@@ -279,6 +279,16 @@ export const MENU_BACKDROP_REACH = 4000
 export const SLASH_SLOW_MS = 400
 
 /**
+ * How tall the completion popover is allowed to get.
+ *
+ * A constant rather than a `style` literal because the keyboard has to be able
+ * to do arithmetic with it: bringing the highlighted row into view is "where is
+ * its box, and how much of the list can I see", and the second half of that is
+ * this number until the list has been laid out and can report its own.
+ */
+export const SLASH_POPOVER_MAX_HEIGHT = 220
+
+/**
  * The line the completion list is for, or `null` while there is no list.
  *
  * A LEADING slash and nothing else: `/` in the middle of a sentence is a slash,
@@ -475,6 +485,70 @@ export function Composer({
   useEffect(() => setActive(0), [suggestions])
 
   const activeIndex = Math.min(active, Math.max(0, suggestions.length - 1))
+
+  /**
+   * Bringing the highlighted row into view, which the arrow keys could not do.
+   *
+   * ↑ and ↓ moved the highlight and nothing else, so on a real gateway's
+   * thirty-four commands the selection walked straight out of the bottom of the
+   * popover and the reader was driving a list they could no longer see. A
+   * `ScrollView` cannot be asked to scroll to a CHILD, so the rows report their
+   * own boxes and this does the arithmetic.
+   *
+   * All three are refs: nothing renders from any of them, and a measurement
+   * that re-rendered the list would re-measure it.
+   */
+  const listRef = useRef<ScrollView>(null)
+  /** Each row's `{ y, height }` inside the scrolled content, by index. */
+  const rowBoxes = useRef<Record<number, { y: number; height: number }>>({})
+  /** How much of the list is on screen, from its own layout. */
+  const listHeight = useRef(SLASH_POPOVER_MAX_HEIGHT)
+  /** Where the list is scrolled to, as the reader or this effect last left it. */
+  const listOffset = useRef(0)
+
+  /*
+    A new set of candidates is a new set of boxes.
+
+    Index 3 of `/mo` and index 3 of `/model` are different rows at different
+    heights, and keeping the old measurement would scroll to where a row used to
+    be. `setActive(0)` above already puts the highlight back to the first row on
+    the same change, so the pair is consistent: new list, first row, no boxes.
+  */
+  useEffect(() => {
+    rowBoxes.current = {}
+    listOffset.current = 0
+  }, [suggestions])
+
+  useEffect(() => {
+    const box = rowBoxes.current[activeIndex]
+
+    // Before the first layout pass there is nothing to aim at. The next
+    // keystroke has boxes, and the row it lands on is the one that matters.
+    if (!box || !showSuggestions) {
+      return
+    }
+
+    const viewport = listHeight.current
+    const offset = listOffset.current
+    /*
+      Two cases and no third. Above the fold, put the row's TOP at the top;
+      below it, put the row's BOTTOM at the bottom. A row already fully inside
+      the window is left exactly where it is, which is what keeps holding ↓
+      through the middle of a long list from scrolling on every step.
+    */
+    const next = box.y < offset ? box.y : box.y + box.height > offset + viewport ? box.y + box.height - viewport : null
+
+    if (next === null) {
+      return
+    }
+
+    const y = Math.max(0, next)
+
+    listOffset.current = y
+    // Reduce Motion asks for the destination rather than the journey, which is
+    // the same call every other animated path in the app makes.
+    listRef.current?.scrollTo({ y, animated: !theme.reduceMotion })
+  }, [activeIndex, showSuggestions, theme.reduceMotion])
 
   // The caller decides where the candidates come from (`commands.catalog`,
   // `complete.slash`, a cache); the composer only says which prefix it is on.
@@ -819,14 +893,28 @@ export function Composer({
       */}
       <Appear exit="cut" rise={-8} visible={showPopover}>
         <GlassSurface
-          contentStyle={{ maxHeight: 220 }}
+          contentStyle={{ maxHeight: SLASH_POPOVER_MAX_HEIGHT }}
           radius={theme.radii.card}
           shadow="float"
           style={{ marginBottom: theme.space.sm, marginHorizontal: theme.space.md }}
           testID="composer-slash-popover"
           variant="float"
         >
-          <ScrollView keyboardShouldPersistTaps="handled">
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            onLayout={event => {
+              listHeight.current = event.nativeEvent.layout.height
+            }}
+            // The reader's own scrolling counts too: the next arrow key has to
+            // reason from where the list actually is, not from where this
+            // component last put it.
+            onScroll={event => {
+              listOffset.current = event.nativeEvent.contentOffset.y
+            }}
+            ref={listRef}
+            scrollEventThrottle={16}
+            testID="composer-slash-list"
+          >
             {/*
               Not a `Pressable`, and deliberately so: there is nothing to accept
               here, and a row that highlighted under a finger would be offering
@@ -871,6 +959,15 @@ export function Composer({
                 // row is.
                 aria-selected={index === activeIndex}
                 key={suggestion.name}
+                // Its own box, so the keyboard can bring it into view. Measured
+                // rather than assumed: a row is a command and a description,
+                // and a description that wraps makes it taller than its
+                // neighbours.
+                onLayout={event => {
+                  const { height, y } = event.nativeEvent.layout
+
+                  rowBoxes.current[index] = { height, y }
+                }}
                 onPress={() => accept(suggestion)}
                 style={({ pressed }) => ({
                   backgroundColor: pressed || index === activeIndex ? theme.tintSunk : 'transparent',
