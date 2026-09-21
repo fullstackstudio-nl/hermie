@@ -26,6 +26,7 @@ export { QueuedStrip, type QueuedRowEntry, type QueuedStripProps, QUEUE_STRIP_LI
 export { ReasoningDisclosure, type ReasoningDisclosureProps } from './ReasoningDisclosure'
 export { StatusRow, type StatusRowProps } from './StatusRow'
 export { SubagentGroupCard, type SubagentGroupCardProps } from './SubagentGroupCard'
+export { isSystemLineNotice, SystemLine, systemLineText, type SystemLineProps } from './SystemLine'
 export { ToolCard, type ToolCardProps } from './ToolCard'
 export { shortToolName, TOOL_NAME_MAX } from './tool-label'
 export {
@@ -67,6 +68,7 @@ export {
   formatCount,
   formatDuration,
   formatListTime,
+  formatChatPreview,
   formatPreview,
   initialFor,
   middleTruncate,

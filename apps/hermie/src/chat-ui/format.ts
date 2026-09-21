@@ -1,4 +1,6 @@
 /** Small, dependency-free formatters shared by the chat components. */
+import { type ChatPreview, chatRowPreview } from '@hermie/transcript'
+
 import { plainTextPreview } from '../markdown/plain-text'
 
 /** `12:48`, in the device's locale-independent 24h-or-not default. */
@@ -244,16 +246,42 @@ export function formatListTime(unixSeconds: number | undefined, now = Date.now()
  * which starts `Message from 🤖 Writer (@writer): …`. Spelling that out in full
  * on a 40-character row buries the message itself, so it is folded to
  * `🤖 @writer: …` — the same shape the transcript's DM bubble uses.
+ *
+ * A raw string still goes through here, and it still reaches this app from the
+ * gateway unexamined, so the wrapper strip is HERE rather than only in the
+ * caller: whatever asks for a preview line gets one that is not scaffolding. The
+ * widget snapshot is the reason that matters — it shares this function and has
+ * no derivation of its own.
  */
 export function formatPreview(preview: string): string {
-  const match = preview.match(/^Message from\s+(?:🤖\s*)?([^(:]+?)(?:\s*\(@([^)]+)\))?\s*:\s*([\s\S]*)$/)
+  return formatChatPreview(chatRowPreview(undefined, preview))
+}
+
+/**
+ * The same line, from a preview the transcript derived.
+ *
+ * `chatRowPreview` decides WHAT to show — the last real message, or the
+ * gateway's string with any wrapper taken off — and this decides how it reads.
+ * The split is what lets one row prefer its own transcript while the widget,
+ * which has none, keeps working off the string.
+ */
+export function formatChatPreview(preview: ChatPreview | null): string {
+  if (!preview) {
+    return ''
+  }
+
+  if (preview.fromHandle) {
+    // The handle is ours, not the message's, so only the body is markdown.
+    return clipInline(`🤖 @${preview.fromHandle}: ${plainTextPreview(preview.text)}`)
+  }
+
+  const match = preview.text.match(/^Message from\s+(?:🤖\s*)?([^(:]+?)(?:\s*\(@([^)]+)\))?\s*:\s*([\s\S]*)$/)
 
   if (!match) {
-    return previewLine(preview)
+    return previewLine(preview.text)
   }
 
   const handle = (match[2] ?? match[1] ?? '').trim()
 
-  // The handle is ours, not the message's, so only the body is markdown.
   return clipInline(`🤖 @${handle}: ${plainTextPreview(match[3] ?? '')}`)
 }
