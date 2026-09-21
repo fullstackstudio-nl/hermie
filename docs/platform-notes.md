@@ -6347,3 +6347,39 @@ reply — which is where this one landed.
 
 `plain-text.ts`, the notification-preview stripper, already required `~{2}`. It
 has been right about this the whole time.
+
+### An interim message means a reply is no longer proof the turn ended
+
+The resume rule written under "The reported bubble was a resume projection
+landing beside its own row" above reads a durable assistant row after the
+matching prompt as proof that turn is finished — so the `inflight` describing
+the same prompt must be a NEW turn, and gets its own bubble. That is true of a
+turn that answers once.
+
+A session with interim assistant messages on does not answer once.
+`_interim_assistant_cb` seals a mid-turn note, the gateway persists it as its own
+assistant row, and the turn goes on working. Refresh at that moment and the tail
+reads prompt, reply — a finished turn by the old rule — so the still-running
+turn's `inflight.user` was projected again below the note. The report: the same
+paste at 20:54 and again minutes later, with one row for it in the gateway's
+database.
+
+What separates the two shapes is a number the gateway already sends and nothing
+read: `turn_started_at`, on `SessionLiveInfo` beside `running`, and on
+`session.resume`'s result. A reply stamped at or after the running turn began was
+written BY that turn and says nothing about the turn being over; a reply stamped
+before it belongs to the turn that ended. Both are Unix seconds off the same
+clock as the row's own `timestamp`, so the comparison needs no tolerance and no
+local clock. `resumeSnapshotOf` now forwards it — from the top level or out of
+`info`, whichever the gateway answered — and `applyResumeSnapshot` falls back to
+`state.info`, which the cold-open path has already dispatched a step earlier.
+
+**When no start is reported the old rule stands unchanged**, deliberately.
+Without a start there is nothing to place the reply against, and guessing "still
+the same turn" swallows a case `duplicate-cron-turns.test.ts` pins down: an
+hourly job whose body has not changed, delivered again after the previous run
+was answered, is a second card and not a re-description of the first.
+
+The contract question under "Worth filing upstream" above is unchanged and is
+still the real fix. `inflight.row_id` would make this whole family impossible to
+hit; `turn_started_at` only makes one more member of it decidable.

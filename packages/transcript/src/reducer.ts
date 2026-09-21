@@ -1302,6 +1302,12 @@ export function answerRequest(state: ChatState, requestId: string, answer: strin
 export interface ResumeSnapshot {
   inflight?: Record<string, unknown> | null
   running?: boolean | null
+  /**
+   * Unix seconds, and only meaningful while `running` is true: when the turn
+   * the snapshot describes began. It is what separates a reply this turn wrote
+   * from the reply that ended the previous one — see `resumeOverlap`.
+   */
+  turn_started_at?: number | null
   queued?: Record<string, unknown> | null
   pending_approval?: Record<string, unknown> | null
   todo_state?: Record<string, unknown> | null
@@ -1355,14 +1361,21 @@ function isForeignPlaceholder(item: TranscriptItem | undefined): boolean {
  * delivery, it is drawn as a card rather than as speech, which is why this
  * comparison has to know about it here and not only in `rows-to-items`.
  */
-function shownTurn(state: ChatState): { authored?: string; carried?: string; settledReply?: string } {
+function shownTurn(state: ChatState): {
+  authored?: string
+  carried?: string
+  settledReply?: string
+  settledReplyTs?: number
+} {
   let settledReply: string | undefined
+  let settledReplyTs: number | undefined
 
   for (let index = state.order.length - 1; index >= 0; index -= 1) {
     const item = state.items[state.order[index] ?? '']
 
     if (item?.kind === 'assistant' && item.rowId !== undefined && settledReply === undefined) {
       settledReply = normalizedItemText(item)
+      settledReplyTs = item.ts
 
       continue
     }
@@ -1371,12 +1384,13 @@ function shownTurn(state: ChatState): { authored?: string; carried?: string; set
       continue
     }
 
+    // One spread for both returns and the empty tail, so the reply and its
+    // stamp can never come back one without the other.
+    const reply =
+      settledReply !== undefined ? { settledReply, ...(settledReplyTs !== undefined ? { settledReplyTs } : {}) } : {}
+
     if (item && isInjectedNotice(item)) {
-      return {
-        authored: normalizedItemText(item),
-        carried: '',
-        ...(settledReply !== undefined ? { settledReply } : {})
-      }
+      return { authored: normalizedItemText(item), carried: '', ...reply }
     }
 
     if (item?.kind !== 'user' && item?.kind !== 'bot_dm_in' && item?.kind !== 'cron_delivery') {
@@ -1386,11 +1400,11 @@ function shownTurn(state: ChatState): { authored?: string; carried?: string; set
     return {
       authored: normalizedItemText(item),
       carried: item.kind === 'user' ? attachmentsMatchKey(item.attachments) : '',
-      ...(settledReply !== undefined ? { settledReply } : {})
+      ...reply
     }
   }
 
-  return settledReply !== undefined ? { settledReply } : {}
+  return settledReply !== undefined ? { settledReply, ...(settledReplyTs !== undefined ? { settledReplyTs } : {}) } : {}
 }
 
 /** The newest placeholder still waiting for an author, if the turn left one. */
@@ -1497,11 +1511,40 @@ function readInflightPrompt(userText: string): InflightPrompt {
  *
  * Matching the newest prompt is not enough on its own: the user may deliberately
  * send the same words again, and another client may have sent them while we were
- * away. What tells those apart is the reply between them. A durable reply after
+ * away. What tells those apart is the reply between them — a durable reply after
  * the matching prompt means that turn is finished, so the `inflight` is a NEW
  * turn and gets its own bubble — unless the reply is the `inflight`'s own
  * assistant text, which is the gateway holding a finished turn replayable (a
  * retained failure) and describing what the transcript already shows.
+ *
+ * ## Unless the turn WROTE that reply
+ *
+ * "A reply after the prompt ends the turn" is true of a turn that answers once.
+ * A session with interim assistant messages on does not: `_interim_assistant_cb`
+ * seals a mid-turn note, the gateway persists it as its own assistant row, and
+ * the turn goes on working. Refresh at that moment and the tail reads prompt,
+ * reply — which the rule above called a finished turn, so the still-running
+ * turn's `inflight.user` was projected a SECOND time, below the note. That is
+ * the report: a pasted terminal command in the chat twice, minutes apart, with
+ * one row for it in the gateway's database.
+ *
+ * `turnStartedAt` is what tells the two shapes apart, and it is a fact rather
+ * than a guess: a reply stamped at or after the running turn began was written
+ * BY that turn, so it says nothing about the turn being over. A reply stamped
+ * before it belongs to the turn that ended, and the `inflight` really is new.
+ * Both numbers are Unix seconds off the same gateway clock — the row's
+ * `timestamp` and `SessionLiveInfo.turn_started_at` — so the comparison needs no
+ * tolerance and no local clock.
+ *
+ * When the gateway names no start (an older one, or a turn it does not call
+ * running) the old rule stands unchanged. That is deliberate: without a start
+ * there is nothing to place the reply against, and guessing "still the same
+ * turn" would swallow the case the cron suite pins down — an hourly job whose
+ * body has not changed, delivered again after the previous run was answered.
+ *
+ * `replyPersisted` stays the narrow claim it was. A note sealed mid-turn is not
+ * the retained failure that flag means, so the turn's live text gets its own
+ * bubble under the note rather than settling onto it.
  *
  * The attachments are compared only when BOTH sides name one, which is the one
  * place in reconciliation where that tolerance is needed. `inflight.user` is the
@@ -1513,7 +1556,8 @@ function readInflightPrompt(userText: string): InflightPrompt {
 function resumeOverlap(
   state: ChatState,
   prompt: InflightPrompt,
-  assistantText: string
+  assistantText: string,
+  turnStartedAt: number | undefined
 ): { promptShown: boolean; replyPersisted: boolean } {
   const shown = shownTurn(state)
   const { raw, key: promptKey, carried } = prompt
@@ -1528,9 +1572,14 @@ function resumeOverlap(
     return { promptShown: true, replyPersisted: false }
   }
 
-  return shown.settledReply === normalizeMatchText(assistantText)
-    ? { promptShown: true, replyPersisted: true }
-    : { promptShown: false, replyPersisted: false }
+  if (shown.settledReply === normalizeMatchText(assistantText)) {
+    return { promptShown: true, replyPersisted: true }
+  }
+
+  const wroteItself =
+    turnStartedAt !== undefined && shown.settledReplyTs !== undefined && shown.settledReplyTs >= turnStartedAt
+
+  return { promptShown: wroteItself, replyPersisted: false }
 }
 
 /** The un-persisted assistant bubble this turn is filling, if it has one. */
@@ -1564,7 +1613,20 @@ export function applyResumeSnapshot(state: ChatState, snapshot: ResumeSnapshot, 
   const userText = str(inflight.user).trim()
   const assistantText = str(inflight.assistant)
   const prompt = readInflightPrompt(userText)
-  const overlap = resumeOverlap(next, prompt, assistantText)
+  // `running` is the one field the contract models as "is this turn still
+  // going", and the same one `turn.active` is set from at the bottom of this
+  // function. `inflight` carries no status a running turn ever reports —
+  // `inflight.status` only speaks up to say `interrupted` — and
+  // `inflight.streaming` is false between two segments of a turn that has not
+  // stopped.
+  const running = snapshot.running === true
+  // Only a RUNNING turn has a start worth comparing against; on a stopped one
+  // the gateway's number is the last turn's and would date rows into a turn
+  // that is over. `state.info` is the same `SessionLiveInfo` the resume carried,
+  // dispatched as `session.info` a step before this one, which is why a caller
+  // that forwards only the top-level field still gets the comparison.
+  const turnStartedAt = running ? (num(snapshot.turn_started_at) ?? num(next.info?.turn_started_at)) : undefined
+  const overlap = resumeOverlap(next, prompt, assistantText, turnStartedAt)
 
   // Either way, the resume has named the author of the newest turn, and the
   // placeholder exists only because `message.start` could not. It is filled
@@ -1707,7 +1769,7 @@ export function applyResumeSnapshot(state: ChatState, snapshot: ResumeSnapshot, 
     }
   }
 
-  if (snapshot.running === true) {
+  if (running) {
     next.turn.active = true
     next.turn.startedAt = next.turn.startedAt ?? now
   }

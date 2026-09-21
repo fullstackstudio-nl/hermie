@@ -359,6 +359,124 @@ describe('a resume while our own turn is still running', () => {
   })
 })
 
+/**
+ * The report of 2026-09-21: a pasted `stat` run, twice, after a refresh.
+ *
+ * The chat had interim assistant messages on, so the turn had already sealed a
+ * note and had it PERSISTED while it went on working. The tail therefore read
+ * prompt, reply — which the resume rule took for a finished turn, so it stood
+ * the running turn's `inflight.user` up again under the note. The rows below are
+ * that chat's, stamped the way the gateway stamps them: the prompt at 20:54:42,
+ * the interim note at 20:55:07, and a turn that started with the prompt and had
+ * not stopped when the page was reloaded.
+ */
+describe('a resume while the running turn has already persisted a note', () => {
+  /** The shell the owner pasted, which is also what he saw struck through. */
+  const PASTED = "root@hermes:~# stat -c '%u:%g %n' /usr/bin/sudo\n0:0 /usr/bin/sudo\nroot@hermes:~#"
+  const INTERIM = 'Dat bevestigt dat sudo van root is en niet te schrijven.'
+
+  /** Unix seconds, off the gateway's clock, as the rows and the turn carry them. */
+  const SUBMITTED_AT = 1_758_484_482
+  const NOTE_AT = 1_758_484_507
+
+  const midTurn = (rows: TranscriptRow[]) => reconcile(fresh(), rowsToItems(rows, 'rest'))
+
+  const promptRow: TranscriptRow = { role: 'user', row_id: 41, text: PASTED, timestamp: SUBMITTED_AT }
+  const noteRow: TranscriptRow = { role: 'assistant', row_id: 42, text: INTERIM, timestamp: NOTE_AT }
+
+  /** What `session.resume` answers while that turn is still working. */
+  const stillRunning = (assistant = '') => ({
+    inflight: { user: PASTED, assistant, streaming: assistant !== '' },
+    running: true,
+    turn_started_at: SUBMITTED_AT
+  })
+
+  it('leaves one bubble for the prompt the note was written under', () => {
+    const resumed = applyResumeSnapshot(midTurn([promptRow, noteRow]), stillRunning(), LATER)
+
+    expect(users(resumed)).toHaveLength(1)
+    expect(users(resumed)[0]).toMatchObject({ rowId: 41, text: PASTED })
+  })
+
+  it('keeps the note where it is and gives the next words their own bubble', () => {
+    const resumed = applyResumeSnapshot(midTurn([promptRow, noteRow]), stillRunning('Nu de service zelf.'), LATER)
+
+    expect(texts(resumed)).toEqual([`user:${PASTED}`, `assistant:${INTERIM}`, 'assistant:Nu de service zelf.'])
+    expect(resumed.turn.active).toBe(true)
+  })
+
+  it('holds through a second reconnect inside the same turn', () => {
+    let state = applyResumeSnapshot(midTurn([promptRow, noteRow]), stillRunning('Nu de service zelf.'), LATER)
+
+    state = applyResumeSnapshot(state, stillRunning('Nu de service zelf, en de config.'), LATER + 1_000)
+
+    expect(users(state)).toHaveLength(1)
+    expect(assistants(state)).toHaveLength(2)
+  })
+
+  /**
+   * The same shape with the note stamped BEFORE the turn began is the case the
+   * old rule was written for: a finished turn above, and a genuinely new send of
+   * the same words below it.
+   */
+  it('still gives a new send of the same words its own bubble', () => {
+    const resumed = applyResumeSnapshot(midTurn([promptRow, noteRow]), {
+      inflight: { user: PASTED, assistant: '', streaming: true },
+      running: true,
+      turn_started_at: NOTE_AT + 30
+    })
+
+    expect(users(resumed)).toHaveLength(2)
+  })
+
+  /** A re-send the gateway already persisted: two rows, and no third bubble. */
+  it('paints two when the gateway holds two rows for it', () => {
+    const resumed = applyResumeSnapshot(
+      midTurn([promptRow, noteRow, { role: 'user', row_id: 43, text: PASTED, timestamp: NOTE_AT + 30 }]),
+      { inflight: { user: PASTED, assistant: '', streaming: true }, running: true, turn_started_at: NOTE_AT + 30 },
+      LATER
+    )
+
+    expect(users(resumed)).toHaveLength(2)
+    expect(users(resumed).map(item => item.rowId)).toEqual([41, 43])
+  })
+
+  it('reads the start out of the session info when the snapshot omits it', () => {
+    const loaded = applyEvent(
+      midTurn([promptRow, noteRow]),
+      { type: 'session.info', seq: 1, payload: { running: true, turn_started_at: SUBMITTED_AT } },
+      LATER
+    )
+    const resumed = applyResumeSnapshot(loaded, { inflight: { user: PASTED, assistant: '' }, running: true }, LATER)
+
+    expect(users(resumed)).toHaveLength(1)
+  })
+
+  /**
+   * A gateway that names no start at all leaves the old rule in place, rather
+   * than guessing. The cron suite depends on that: an hourly job whose body has
+   * not changed is delivered again under exactly this shape.
+   */
+  it('falls back to the reply-ends-the-turn rule when no start is reported', () => {
+    const resumed = applyResumeSnapshot(midTurn([promptRow, noteRow]), {
+      inflight: { user: PASTED, assistant: '', streaming: true },
+      running: true
+    })
+
+    expect(users(resumed)).toHaveLength(2)
+  })
+
+  it('does not fold a matching prompt into a turn that is not running', () => {
+    const resumed = applyResumeSnapshot(midTurn([promptRow, noteRow]), {
+      inflight: { user: PASTED, assistant: '' },
+      running: false,
+      turn_started_at: SUBMITTED_AT
+    })
+
+    expect(users(resumed)).toHaveLength(2)
+  })
+})
+
 describe('a prompt the gateway parked', () => {
   /** Two more prompts typed while a turn of ours runs; the gateway queues both. */
   const burst = (): ChatState => {

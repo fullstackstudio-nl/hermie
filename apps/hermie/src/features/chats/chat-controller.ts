@@ -2415,6 +2415,11 @@ function resumeSnapshotOf(result: SessionResumeResult): ResumeSnapshot {
   return {
     inflight: asRecord(result.inflight),
     running: result.running ?? null,
+    // The gateway states this twice — once at the top level and once inside
+    // `info` — and an older one states it only in `info`. The reducer needs it
+    // to tell a reply the running turn wrote from the reply that ended the
+    // previous turn, so read whichever half answered.
+    turn_started_at: result.turn_started_at ?? result.info?.turn_started_at ?? null,
     queued: asRecord(result.queued),
     pending_approval: asRecord(result.pending_approval),
     todo_state: asRecord(result.todo_state),
