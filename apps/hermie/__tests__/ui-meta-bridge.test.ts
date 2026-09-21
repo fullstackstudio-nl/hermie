@@ -95,6 +95,15 @@ describe('the projection', () => {
 })
 
 describe('the bridge', () => {
+  /**
+   * Whoever the gateway named.
+   *
+   * Every case here has one, because the app-wide key carries a person's name
+   * and a bridge that has not been told one writes no arrangement at all. On a
+   * token gateway — which is what this fake is — that name is `owner`.
+   */
+  const OWNER = 'owner'
+
   /** A gateway that records what it was asked, and answers an empty roster. */
   function recorder() {
     const calls: { method: string; params?: Record<string, unknown> }[] = []
@@ -106,7 +115,7 @@ describe('the bridge', () => {
 
         return method === 'profiles.list'
           ? { profiles: [{ name: 'researcher', is_default: true, ui_meta: { 'hermes-bots': {} } }] }
-          : { ok: true, applied: { ui_meta: true, ui_meta_revisions: { hermie: 1, 'hermie-app': 1 } } }
+          : { ok: true, applied: { ui_meta: true, ui_meta_revisions: { hermie: 1, 'hermie-app:owner': 1 } } }
       }
     }
   }
@@ -114,6 +123,8 @@ describe('the bridge', () => {
   it('sends a section anybody changed, whichever setter did it', async () => {
     const gateway = recorder()
     const bridge = new UiMetaBridge({ gateway, debounceMs: 0 })
+
+    bridge.setUser(OWNER)
     const stop = bridge.start()
 
     useChatLayoutStore.getState().setAccent('researcher', 'lime')
@@ -132,6 +143,8 @@ describe('the bridge', () => {
   it('notices a section that went away', async () => {
     const gateway = recorder()
     const bridge = new UiMetaBridge({ gateway, debounceMs: 0 })
+
+    bridge.setUser(OWNER)
 
     useChatLayoutStore.getState().setArchived('writer', true)
 
@@ -154,6 +167,8 @@ describe('the bridge', () => {
     // tablet and the gateway empty, each waiting for the other to go first.
     const gateway = recorder()
     const bridge = new UiMetaBridge({ gateway, debounceMs: 0 })
+
+    bridge.setUser(OWNER)
     const stop = bridge.start()
 
     await bridge.reconcile()
@@ -174,6 +189,8 @@ describe('the bridge', () => {
     const gateway = recorder()
     const bridge = new UiMetaBridge({ gateway, debounceMs: 0 })
 
+    bridge.setUser(OWNER)
+
     await bridge.reconcile()
 
     const stop = bridge.start()
@@ -191,7 +208,7 @@ describe('the bridge', () => {
     // `researcher` is the default profile here, so both sections are its own —
     // and the protocol applies the sections of one request independently.
     expect(writes).toHaveLength(1)
-    expect(Object.keys((writes[0]?.params?.ui_meta ?? {}) as object).sort()).toEqual(['hermie', 'hermie-app'])
+    expect(Object.keys((writes[0]?.params?.ui_meta ?? {}) as object).sort()).toEqual(['hermie', 'hermie-app:owner'])
 
     stop()
   })

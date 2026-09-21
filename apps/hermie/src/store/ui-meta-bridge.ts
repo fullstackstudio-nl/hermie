@@ -47,6 +47,7 @@ import { Platform } from 'react-native'
 import { ACCENTS, type AccentName } from '../ui/tokens'
 import { useChatLayoutStore, type LayoutEntry } from './chat-layout'
 import { ownContextRow, useDeviceContextStore } from './device-context'
+import { mutesOf, type Mutes } from './mute'
 import { usePluginStore } from './plugin'
 import { ownRegistration, usePushStore } from './push'
 import { asThemeChoice, asUserThemes, DEFAULT_CHAT_VIEW, useSettingsStore, type ChatViewSettings } from './settings'
@@ -59,6 +60,14 @@ export interface HermieAppShape extends HermieAppSection {
   v: number
   /** Order AND dividers: one list, because that is what the store holds. */
   entries?: LayoutEntry[]
+  /**
+   * Which chats are silent, and until when.
+   *
+   * Here rather than on each bot's own profile because a mute is about the
+   * READER: two people sharing a gateway do not share a bedtime. The gateway
+   * plugin reads it from this same place to decide whether to push.
+   */
+  mutes?: Mutes
   defaults?: ChatViewSettings
   themeChoice?: unknown
   themes?: unknown
@@ -121,6 +130,10 @@ export function snapshotFromStores(): UiMetaSnapshot {
   const app: HermieAppShape = {
     v: HERMIE_APP_SECTION_VERSION,
     entries: layout.entries,
+    // Always sent, empty included: a reader who unmutes their last chat has to
+    // be able to say so, and an omitted key reads as "this device knows
+    // nothing about mutes" rather than as "there are none".
+    mutes: layout.mutes,
     defaults: settings.defaults,
     themeChoice: settings.themeChoice,
     themes: settings.userThemes,
@@ -218,6 +231,10 @@ export function applySnapshot(snapshot: UiMetaSnapshot): void {
     // to has no arrangement, and taking that as "no rows anywhere" would empty a
     // list the reader spent an afternoon on.
     ...(entries ? { entries } : {}),
+    // The same distinction, which is why the projection above always sends the
+    // key: a section written by a build that knows about mutes says what they
+    // are even when there are none, and one written before them says nothing.
+    ...(app?.mutes ? { mutes: mutesOf(app.mutes) } : {}),
     archived,
     accents
   })

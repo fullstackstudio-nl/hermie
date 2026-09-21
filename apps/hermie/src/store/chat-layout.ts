@@ -29,6 +29,7 @@ import { create } from 'zustand'
 
 import { keyValueStore } from '../platform/key-value-store'
 import { ACCENTS, SIDEBAR_AUTO_COLLAPSE_MAX_WIDTH, type AccentName } from '../ui/tokens'
+import { isMuted, mutesOf, withoutExpired, type Mutes } from './mute'
 
 export const CHAT_LAYOUT_KEY = 'hermie.chats.layout'
 
@@ -44,6 +45,8 @@ export interface PersistedLayout {
   entries: LayoutEntry[]
   archived: string[]
   accents: Record<string, AccentName>
+  /** Bot name -> the second its silence lapses, or 0 for forever. */
+  mutes?: Mutes
   /**
    * Whether the owner has hidden the list on the wide layout.
    *
@@ -69,6 +72,15 @@ export interface ChatLayoutState {
   archived: Record<string, true>
   accents: Record<string, AccentName>
   /**
+   * Which chats are silent, and until when.
+   *
+   * Unlike `archived` and `accents` this is about the READER rather than about
+   * the bot, so it rides in the app-wide section beside the order and the theme
+   * rather than on the bot's own profile: two people sharing a gateway do not
+   * share a bedtime.
+   */
+  mutes: Mutes
+  /**
    * The owner's explicit choice about the wide layout's sidebar, or `undefined`
    * while they have not made one. Read through `resolveSidebarCollapsed`, never
    * directly: on its own it does not say what the shell should draw.
@@ -90,6 +102,18 @@ export interface ChatLayoutState {
   removeDivider: (id: string) => void
   setArchived: (botName: string, archived: boolean) => void
   setAccent: (botName: string, accent: AccentName) => void
+  /** Silence one chat until `until` seconds, `0` for forever, `null` to stop. */
+  setMute: (botName: string, until: number | null) => void
+  /**
+   * Forget the mutes that have lapsed.
+   *
+   * An optimisation, never a correctness step: every reader already compares
+   * the deadline against the clock, so a mute nobody has swept is a mute that
+   * has already stopped working. This keeps the section from accumulating
+   * deadlines from last spring. A no-op when nothing expired, so it can be
+   * called on every foreground without sending the section again.
+   */
+  dropExpiredMutes: (now: number) => void
   /** Record an explicit Hide/Show. There is no "back to automatic" — see the type. */
   setSidebarCollapsed: (collapsed: boolean) => void
   /**
@@ -104,7 +128,12 @@ export interface ChatLayoutState {
    * is what the UI paints from and a copy that only lived in memory would be gone
    * on the next launch.
    */
-  applyRemote: (patch: { entries?: LayoutEntry[]; archived?: string[]; accents?: Record<string, AccentName> }) => void
+  applyRemote: (patch: {
+    entries?: LayoutEntry[]
+    archived?: string[]
+    accents?: Record<string, AccentName>
+    mutes?: Mutes
+  }) => void
   reset: () => void
 }
 
@@ -113,6 +142,7 @@ const INITIAL = {
   entries: [] as LayoutEntry[],
   archived: {} as Record<string, true>,
   accents: {} as Record<string, AccentName>,
+  mutes: {} as Mutes,
   sidebarCollapsed: undefined as boolean | undefined,
   loaded: false
 }
@@ -177,6 +207,7 @@ function asLayout(value: unknown): PersistedLayout {
       (name): name is string => typeof name === 'string' && name.length > 0
     ),
     accents,
+    mutes: mutesOf(raw.mutes),
     // Only a real boolean counts. Anything else — a missing key, a string an
     // older build wrote — has to read as "never chosen", because that is the
     // value the width bands are allowed to answer for.
@@ -195,13 +226,14 @@ function newDividerId(): string {
 
 export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
   const save = (): void => {
-    const { gatewayKey, entries, archived, accents, sidebarCollapsed } = get()
+    const { gatewayKey, entries, archived, accents, mutes, sidebarCollapsed } = get()
 
     if (gatewayKey) {
       persist(gatewayKey, {
         entries,
         archived: Object.keys(archived),
         accents,
+        mutes,
         // Omitted while nobody has chosen, so that "never chosen" survives a
         // round trip as the absence it is rather than as a `false` the width
         // bands would then never get to answer for.
@@ -232,6 +264,7 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
         entries: stored.entries,
         archived,
         accents: stored.accents,
+        mutes: stored.mutes ?? {},
         sidebarCollapsed: stored.sidebarCollapsed,
         loaded: true
       })
@@ -445,6 +478,33 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
       save()
     },
 
+    setMute(botName, until) {
+      const mutes = { ...get().mutes }
+
+      if (until === null) {
+        delete mutes[botName]
+      } else {
+        mutes[botName] = Math.floor(until)
+      }
+
+      set({ mutes })
+      save()
+    },
+
+    dropExpiredMutes(now) {
+      const swept = withoutExpired(get().mutes, now)
+
+      // `null` is "nothing had lapsed", and returning early on it is what lets
+      // this be called on every foreground: an equal copy would still count as
+      // a change to the projection and send the whole section again.
+      if (!swept) {
+        return
+      }
+
+      set({ mutes: swept })
+      save()
+    },
+
     setSidebarCollapsed(collapsed) {
       set({ sidebarCollapsed: collapsed })
       save()
@@ -460,7 +520,8 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
       set({
         ...(patch.entries ? { entries: patch.entries } : {}),
         ...(patch.archived ? { archived } : {}),
-        ...(patch.accents ? { accents: patch.accents } : {})
+        ...(patch.accents ? { accents: patch.accents } : {}),
+        ...(patch.mutes ? { mutes: patch.mutes } : {})
       })
       save()
     },
@@ -511,6 +572,21 @@ export function dividersOf(entries: readonly LayoutEntry[]): { id: string; name:
   return entries
     .filter((entry): entry is Extract<LayoutEntry, { kind: 'divider' }> => entry.kind === 'divider')
     .map(entry => ({ id: entry.id, name: entry.name }))
+}
+
+/**
+ * Is this chat silent, as of now?
+ *
+ * The clock is read at render rather than subscribed to, which means a mute
+ * that lapses while the list is on screen is not noticed until something else
+ * re-renders it. That is the right trade for a feature whose whole point is
+ * that nothing happens: the cost of being late is one row that goes on looking
+ * quiet, and the alternative is a timer per row.
+ */
+export function useChatMuted(botName: string): boolean {
+  const mutes = useChatLayoutStore(state => state.mutes)
+
+  return isMuted(mutes, botName, Math.floor(Date.now() / 1000))
 }
 
 /** One chat's colour. Part 2's header and outgoing bubble read this too. */

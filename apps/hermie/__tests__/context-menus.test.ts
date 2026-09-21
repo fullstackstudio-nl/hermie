@@ -38,7 +38,21 @@ const assistant: AssistantItem = {
 
 describe('a chat row’s menu', () => {
   it('offers every id its parser understands, and no others', () => {
-    for (const leaf of menuLeaves(rowMenuItems(model))) {
+    /*
+      Selectable leaves only. A disabled line is drawn as a caption — UIKit
+      greys it and never fires it, the fallback sheet renders it as plain text
+      with nothing to press — so it carries no intention for the parser to
+      understand. `Muted until 14:30` is the first such line; `Mark as read`
+      is disabled some of the time and still parses, which is why the rule is
+      about what can be chosen rather than about what is offered.
+    */
+    for (const leaf of menuLeaves(rowMenuItems(model)).filter(item => !item.disabled)) {
+      expect(parseRowMenuAction(leaf.id)).not.toBeNull()
+    }
+  })
+
+  it('offers every id its parser understands when the chat is muted too', () => {
+    for (const leaf of menuLeaves(rowMenuItems({ ...model, mutedUntil: 0 })).filter(item => !item.disabled)) {
       expect(parseRowMenuAction(leaf.id)).not.toBeNull()
     }
   })

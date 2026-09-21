@@ -369,7 +369,39 @@ export const strings = {
      */
     showSidebar: 'Show sidebar',
     /** The rail's own name, for the reader who lands on it with VoiceOver. */
-    sidebarRail: 'Sidebar, hidden'
+    sidebarRail: 'Sidebar, hidden',
+
+    /**
+     * Silencing one chat.
+     *
+     * `mute` is the submenu's heading and `muteFor` the lines inside it, so the
+     * lines can be bare spans rather than repeating the verb six words apart —
+     * the same split `moveToSection` / `moveToSectionMenu` already makes.
+     *
+     * `muted` and `mutedUntil` are STATUS rather than actions. They are drawn as
+     * a disabled line above Unmute, which is the one place a menu is allowed to
+     * say something instead of offering something: a reader who muted a chat on
+     * their phone last Tuesday cannot otherwise find out when it comes back.
+     */
+    mute: 'Mute',
+    muteFor: {
+      '1h': 'For 1 hour',
+      '8h': 'For 8 hours',
+      '1w': 'For 1 week',
+      forever: 'Until I turn it back on'
+    },
+    unmute: 'Unmute',
+    muted: 'Muted',
+    mutedUntil: (when: string) => `Muted until ${when}`,
+    /**
+     * Short day names, for a deadline that is not today.
+     *
+     * Indexed by `Date.getDay()`, so Sunday first — the order that index is in,
+     * not the order a week reads in.
+     */
+    muteWeekdays: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+    /** What the row's bell glyph says to a reader who cannot see it. */
+    mutedRow: 'Muted'
   },
 
   /**

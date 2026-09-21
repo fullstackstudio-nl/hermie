@@ -374,7 +374,7 @@ function ScheduleBuilderBody() {
 /** Which sheet a section wants open the moment it mounts. */
 type SheetName = 'agents' | 'approval' | 'approvalAnswered' | 'clarify' | 'options' | 'cronEditor'
 
-type OptionsPane = 'reasoning' | 'model' | 'colour'
+type OptionsPane = 'reasoning' | 'model' | 'colour' | 'mute'
 
 interface GalleryContext {
   theme: ReturnType<typeof useTheme>
@@ -1075,6 +1075,7 @@ export function GalleryScreen({ onClose, section }: GalleryScreenProps) {
   const [clarifyOpen, setClarifyOpen] = useState(false)
   const [optionsOpen, setOptionsOpen] = useState(false)
   const [optionsPane, setOptionsPane] = useState<OptionsPane | undefined>(undefined)
+  const [mutedUntil, setMutedUntil] = useState<number | null>(null)
   const [cronEditorOpen, setCronEditorOpen] = useState(false)
   const [transcriptOpen, setTranscriptOpen] = useState(section === GALLERY_CHAT_SECTION)
   const [cronExpanded, setCronExpanded] = useState(false)
@@ -1291,7 +1292,9 @@ export function GalleryScreen({ onClose, section }: GalleryScreenProps) {
         initialPane={optionsPane}
         model={model}
         modelOptions={MODEL_OPTIONS}
+        mutedUntil={mutedUntil}
         onChangeAccent={setAccent}
+        onChangeMute={setMutedUntil}
         onChangeFast={setFast}
         onChangeModel={setModel}
         onChangeReasoningEffort={setReasoning}

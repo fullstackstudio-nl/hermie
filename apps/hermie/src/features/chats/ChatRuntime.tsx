@@ -373,6 +373,17 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
         // A new build, a flight across a timezone, a phone that was renamed
         // while the app was away. A no-op when nothing actually moved.
         useDeviceContextStore.getState().refreshFacts(Math.floor(Date.now() / 1000))
+        /*
+          And the mutes that lapsed while the phone was in a drawer.
+
+          Housekeeping, not correctness: every reader of a mute compares its
+          deadline against the clock, so one that has run out has already
+          stopped working whether or not anybody swept it. This is what stops
+          the section collecting deadlines from last spring, and it is a no-op
+          when nothing expired — otherwise every foreground would send the
+          whole arrangement again.
+        */
+        useChatLayoutStore.getState().dropExpiredMutes(Math.floor(Date.now() / 1000))
       } else if (state === 'background') {
         // FIRST in this branch, before anything that could tear a socket down:
         // this writes the widget file while the gateway is still the

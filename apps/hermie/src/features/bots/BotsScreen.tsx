@@ -49,6 +49,7 @@ import { directTouchPanRef } from '../../platform/pointer-drag'
 import { useSafeAreaInsets } from '../../platform/safe-area'
 import { isUnread, useBotsStore, type Bot } from '../../store/bots'
 import { archivedOf, dividersOf, sectionsOf, useChatLayoutStore } from '../../store/chat-layout'
+import { isMuted, muteUntil, mutedUntil as mutedUntilOf } from '../../store/mute'
 import { useChatsStore } from '../../store/chats'
 import { GlassSurface } from '../../ui/glass'
 import { Icon, ICON_SIZE } from '../../ui/Icon'
@@ -175,6 +176,7 @@ export function BotsScreen({
   const entries = useChatLayoutStore(state => state.entries)
   const archivedSet = useChatLayoutStore(state => state.archived)
   const accents = useChatLayoutStore(state => state.accents)
+  const mutes = useChatLayoutStore(state => state.mutes)
   const reconcile = useChatLayoutStore(state => state.reconcile)
 
   const [refreshing, setRefreshing] = useState(false)
@@ -424,8 +426,19 @@ export function BotsScreen({
    * sidebar is collapsed would leave nothing at all on screen to say so.
    */
   const unreadTotal = useMemo(
-    () => visibleBots.reduce((total, bot) => total + unreadFor(bot.name).count, 0),
-    [unreadFor, visibleBots]
+    // Muted chats are left out. The rail's badge is the one number a reader who
+    // has hidden the list is going to react to, and a chat they told the app to
+    // be quiet about has no business pulling them back to it. The row itself
+    // still carries its own count, for when they do look.
+    () => {
+      const now = Math.floor(Date.now() / 1000)
+
+      return visibleBots.reduce(
+        (total, bot) => total + (isMuted(mutes, bot.name, now) ? 0 : unreadFor(bot.name).count),
+        0
+      )
+    },
+    [mutes, unreadFor, visibleBots]
   )
 
   /** One stable array for every row's menu; see `BotRow.menuSections`. */
@@ -625,6 +638,16 @@ export function BotsScreen({
 
         case 'archiveToggle':
           layout.setArchived(name, !layout.archived[name])
+
+          return
+
+        case 'mute':
+          layout.setMute(name, muteUntil(action.duration, Math.floor(Date.now() / 1000)))
+
+          return
+
+        case 'unmute':
+          layout.setMute(name, null)
 
           return
 
@@ -841,6 +864,7 @@ export function BotsScreen({
                   editing={editing && !item.archived}
                   {...(editing && !item.archived ? { handleHandlers: drag.handleHandlers(item.bot.name) } : {})}
                   menuSections={menuSections}
+                  mutedUntil={mutedUntilOf(mutes, item.bot.name, Math.floor(Date.now() / 1000))}
                   onArm={drag.arm}
                   onDisarm={drag.disarm}
                   onMenuSelect={onMenuSelect}
@@ -893,6 +917,7 @@ export function BotsScreen({
             botName: menuFor,
             displayName: byName[menuFor]?.displayName ?? menuFor,
             movable: !archivedSet[menuFor],
+            mutedUntil: mutedUntilOf(mutes, menuFor, Math.floor(Date.now() / 1000)),
             sections: menuSections,
             unread: unreadFor(menuFor).unread
           })}

@@ -13,6 +13,7 @@
  * answer for both without the menu and the handler agreeing on an index.
  */
 import { strings } from '../../i18n/strings'
+import { formatMuteUntil, MUTE_DURATIONS, MUTE_FOREVER, type MuteDuration } from '../../store/mute'
 import { menuItems, type MenuItem } from '../../ui/menu'
 import { ACCENT_ORDER, type AccentName } from '../../ui/tokens'
 
@@ -27,6 +28,18 @@ export interface RowMenuModel {
   sections: readonly { id: string | null; name: string }[]
   /** False in the archive drawer, where up and down mean nothing. */
   movable?: boolean
+  /**
+   * When this chat's silence lapses, `MUTE_FOREVER` for never, `null` for a
+   * chat that is not muted.
+   *
+   * A deadline rather than a boolean, because the menu has to say WHEN: a
+   * reader who muted a chat two days ago on another device has no other way to
+   * find out, and "Muted" with no end is the one thing they might reasonably
+   * panic about.
+   */
+  mutedUntil?: number | null
+  /** The clock the deadline is read against. Unix seconds. */
+  now?: number
 }
 
 export type RowMenuAction =
@@ -38,8 +51,49 @@ export type RowMenuAction =
   /** A toggle, not a value: the menu already says which way round it is. */
   | { kind: 'archiveToggle' }
   | { kind: 'dividerAbove' }
+  | { kind: 'mute'; duration: MuteDuration }
+  | { kind: 'unmute' }
 
 const SECTION_TOP = 'top'
+
+/**
+ * Mute, or the state of one, as the two or three lines it takes.
+ *
+ * A muted chat gets a DISABLED line saying when it comes back, and then Unmute.
+ * A menu saying something rather than offering it is unusual enough to justify:
+ * the deadline was set somewhere else, possibly on another device and possibly
+ * days ago, and without it "Unmute" is a button whose effect the reader cannot
+ * predict. The fallback sheet already draws a disabled item as plain faint text,
+ * and UIKit draws it as a greyed line, so both read as a caption without either
+ * being taught a new kind of row.
+ */
+function muteItems(model: RowMenuModel): MenuItem[] {
+  const until = model.mutedUntil
+
+  if (until === undefined || until === null) {
+    return [
+      {
+        id: 'mute',
+        title: strings.layout.mute,
+        systemImage: 'bell.slash',
+        children: MUTE_DURATIONS.map<MenuItem>(duration => ({
+          id: `mute:${duration}`,
+          title: strings.layout.muteFor[duration]
+        }))
+      }
+    ]
+  }
+
+  const when =
+    until === MUTE_FOREVER
+      ? ''
+      : formatMuteUntil(until, model.now ?? Math.floor(Date.now() / 1000), strings.layout.muteWeekdays)
+
+  return [
+    { id: 'mutedState', title: when ? strings.layout.mutedUntil(when) : strings.layout.muted, disabled: true },
+    { id: 'unmute', title: strings.layout.unmute, systemImage: 'bell' }
+  ]
+}
 
 /**
  * The row's menu, in the order the owner asked for it.
@@ -93,6 +147,7 @@ export function rowMenuItems(model: RowMenuModel): MenuItem[] {
       title: strings.layout.addDividerAbove,
       systemImage: 'text.insert'
     },
+    ...muteItems(model),
     {
       id: 'archive',
       title: model.archived ? strings.layout.unarchive : strings.layout.archive,
@@ -137,6 +192,14 @@ export function parseRowMenuAction(id: string): RowMenuAction | null {
 
     case 'archive':
       return { kind: 'archiveToggle' }
+
+    case 'mute':
+      return (MUTE_DURATIONS as readonly string[]).includes(tail)
+        ? { kind: 'mute', duration: tail as MuteDuration }
+        : null
+
+    case 'unmute':
+      return { kind: 'unmute' }
 
     default:
       return null

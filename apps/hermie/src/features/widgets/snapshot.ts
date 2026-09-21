@@ -33,6 +33,7 @@ import { formatPreview, initialFor } from '../../chat-ui'
 import { unreadCountSince } from '@hermie/transcript'
 import type { ChatState } from '@hermie/transcript'
 import type { Bot } from '../../store/bots'
+import { isMuted, type Mutes } from '../../store/mute'
 import { ACCENTS, type AccentName } from '../../ui/tokens'
 import { presenceOf, type PresenceState } from '../bots/presence'
 
@@ -94,6 +95,22 @@ export interface WidgetSnapshotInput {
   accents: Record<string, AccentName>
   /** Bots the owner has archived. Archiving is how you stop a bot counting. */
   archived: Record<string, true>
+  /**
+   * Bot name → the second its silence lapses, `0` for never.
+   *
+   * A muted bot is still HERE — it keeps its row, its colour and its last line,
+   * because a reader who silenced a chat did not ask to stop seeing it. What it
+   * loses is its numbers. A widget is the loudest place a count appears and a
+   * lock screen is where it appears loudest of all, so a chat the reader told
+   * the app to be quiet about contributes nothing to either. That is a weaker
+   * treatment than archiving, which removes the row outright, and a stronger
+   * one than the chat list, which still shows the count on the row itself.
+   *
+   * Optional, and absent reads as "no mutes". A caller that knows nothing about
+   * them is a caller that has none, which is the only reading that lets the
+   * widget projection go on being callable from a test that is about colours.
+   */
+  mutes?: Mutes
   /** Whether the gateway socket is up and usable (`status === 'ready'`). */
   gatewayReady: boolean
   /** name → true for every avatar PNG the writer has actually put in the container. */
@@ -155,6 +172,9 @@ function projectBot(bot: Bot, input: WidgetSnapshotInput): WidgetBot {
   })
 
   const accent = input.accents[bot.name] ?? 'default'
+  // Seconds here, because that is what a mute deadline is; `input.now` is
+  // `Date.now()` because that is what the snapshot stamps itself with.
+  const muted = isMuted(input.mutes ?? {}, bot.name, Math.floor(input.now / 1000))
 
   return {
     name: bot.name,
@@ -165,8 +185,10 @@ function projectBot(bot: Bot, input: WidgetSnapshotInput): WidgetBot {
     presence: presence.state,
     lastLine: bot.canonical?.preview ? formatPreview(bot.canonical.preview) : '',
     lastAt: bot.canonical?.lastActive ?? 0,
-    unread: chat ? unreadCountSince(chat, input.lastSeen[bot.name] ?? 0) : 0,
-    needsInput
+    unread: muted || !chat ? 0 : unreadCountSince(chat, input.lastSeen[bot.name] ?? 0),
+    // The presence BEAD above still says `needsInput`, which is the row's own
+    // state and is not a count. This is the number.
+    needsInput: needsInput && !muted
   }
 }
 

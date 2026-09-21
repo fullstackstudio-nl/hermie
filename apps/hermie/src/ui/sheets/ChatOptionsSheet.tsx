@@ -17,6 +17,7 @@ import { prettyModelName } from '@hermie/transcript'
 
 import { chatStrings } from '../../chat-ui/strings'
 import type { PickerOption, Verbosity } from '../../chat-ui/types'
+import { formatMuteUntil, MUTE_DURATIONS, MUTE_FOREVER, muteUntil, type MuteDuration } from '../../store/mute'
 import { strings } from '../../i18n/strings'
 import { AccentSwatches } from '../AccentSwatches'
 import { BottomSheet, SheetEyebrow, SheetPage } from '../BottomSheet'
@@ -63,6 +64,16 @@ export interface ChatOptionsSheetProps {
   accent: AccentName
   onChangeAccent: (value: AccentName) => void
 
+  /**
+   * When this chat's silence lapses, `0` for never, `null` when it is not muted.
+   *
+   * The same value the row menu reads, from the same store, so muting from the
+   * header and muting from the list are one decision with one home.
+   */
+  mutedUntil: number | null
+  /** `null` unmutes; a number is the second the silence lapses, `0` for never. */
+  onChangeMute: (until: number | null) => void
+
   verbosity: Verbosity
   onChangeVerbosity: (value: Verbosity) => void
 
@@ -87,7 +98,7 @@ export interface ChatOptionsSheetProps {
    * can only launch — see `src/dev/launch-intent.ts`. A tap still navigates
    * normally from wherever it puts you.
    */
-  initialPane?: 'reasoning' | 'model' | 'colour'
+  initialPane?: 'reasoning' | 'model' | 'colour' | 'mute'
 
   pendingExpensiveModel?: string | null
   confirmMessage?: string
@@ -95,7 +106,18 @@ export interface ChatOptionsSheetProps {
   onConfirmExpensiveModel?: () => void
 }
 
-type Pane = 'root' | 'reasoning' | 'model' | 'colour'
+type Pane = 'root' | 'reasoning' | 'model' | 'colour' | 'mute'
+
+/**
+ * The picker's id for "stop being quiet".
+ *
+ * Not one of `MUTE_DURATIONS`, and deliberately not a value the duration parser
+ * would take: the picker hands back one string and this is the one that means
+ * the opposite of the other four.
+ */
+const UNMUTE = 'unmute'
+
+const nowSeconds = (): number => Math.floor(Date.now() / 1000)
 
 /**
  * A page inside the sheet.
@@ -240,6 +262,12 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
     props.modelOptions.find(option => option.value === props.model)?.label ?? prettyModelName(props.model)
   const reasoningLabel =
     props.reasoningOptions.find(option => option.value === props.reasoningEffort)?.label ?? props.reasoningEffort
+  const muteLabel =
+    props.mutedUntil === null
+      ? chatStrings.options.notMuted
+      : props.mutedUntil === MUTE_FOREVER
+        ? strings.layout.muted
+        : strings.layout.mutedUntil(formatMuteUntil(props.mutedUntil, nowSeconds(), strings.layout.muteWeekdays))
 
   if (props.pendingExpensiveModel) {
     // A confirmation replaces the sheet's body rather than stacking a second
@@ -283,7 +311,32 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
       testID="chat-options-sheet"
       visible={props.visible}
     >
-      {pane === 'colour' ? (
+      {pane === 'mute' ? (
+        /*
+          The four spans, and Unmute when there is something to undo.
+
+          A picker rather than a switch, because "mute" is not a boolean the
+          reader is toggling — it is a span they are choosing. Nothing is
+          ticked: the stored value is a DEADLINE, and a deadline cannot say
+          which of the four buttons produced it once an hour has passed.
+        */
+        <PickerPane
+          onBack={() => setPane('root')}
+          onPick={option => {
+            props.onChangeMute(option.value === UNMUTE ? null : muteUntil(option.value as MuteDuration, nowSeconds()))
+            setPane('root')
+          }}
+          options={[
+            ...MUTE_DURATIONS.map(duration => ({
+              value: duration,
+              label: strings.layout.muteFor[duration]
+            })),
+            ...(props.mutedUntil === null ? [] : [{ value: UNMUTE, label: strings.layout.unmute }])
+          ]}
+          title={strings.layout.mute}
+          value=""
+        />
+      ) : pane === 'colour' ? (
         <Page onBack={() => setPane('root')} title={strings.layout.colour}>
           <Text color="textMuted" variant="preview">
             {chatStrings.options.colourHint}
@@ -379,6 +432,17 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
               onPress={() => setPane('colour')}
               testID="option-colour"
               value={strings.layout.accents[props.accent]}
+            />
+            {/*
+              The row says the STATE, not the action: "Muted until Thu 09:00" is
+              the only place a reader who set this on another device two days
+              ago can find out when the chat comes back.
+            */}
+            <DisclosureRow
+              label={strings.layout.mute}
+              onPress={() => setPane('mute')}
+              testID="option-mute"
+              value={muteLabel}
             />
           </InsetGroup>
 

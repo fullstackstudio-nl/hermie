@@ -351,7 +351,17 @@ export const chatStrings = {
     usingOverride: 'This conversation has its own view.',
     expensiveTitle: 'This model costs more',
     expensiveConfirm: 'Use it anyway',
-    cancel: 'Cancel'
+    cancel: 'Cancel',
+
+    /**
+     * The mute row's value while there is nothing to say.
+     *
+     * "Off" rather than an empty cell, because a disclosure row with no value
+     * reads as a setting nobody has got round to implementing. The muted
+     * wordings live in `strings.layout` with the row menu's, so the list and
+     * the header cannot drift apart on what "Muted until" looks like.
+     */
+    notMuted: 'Off'
   },
   sheet: {
     close: 'Close'
