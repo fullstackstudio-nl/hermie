@@ -20,7 +20,7 @@ import { useTheme } from '../ui/theme'
 import type { ColorRole } from '../ui/tokens'
 import { MarkdownBlock } from './Block'
 import { splitBlocks } from './blocks'
-import type { MarkdownContext, MarkdownImageSource } from './context'
+import { isOpenableLink, type MarkdownContext, type MarkdownImageSource } from './context'
 import { preprocessMarkdown } from './preprocess'
 
 export interface MarkdownProps {
@@ -68,8 +68,6 @@ export interface MarkdownProps {
    */
   onBlockLayout?: (block: { index: number; top: number; height: number; atomic: boolean }) => void
 }
-
-const OPENABLE = /^(https?|mailto|tel):/i
 
 /**
  * The body leading, from the body size. 1.45 × the font size, rounded.
@@ -140,8 +138,8 @@ export function Markdown({
     }
 
     // A path on the gateway's disk is not something this device can open; the
-    // link stays inert rather than throwing.
-    if (OPENABLE.test(href)) {
+    // link stays inert rather than throwing. See `isOpenableLink`.
+    if (isOpenableLink(href)) {
       void Linking.openURL(href).catch(() => undefined)
     }
   }, [])

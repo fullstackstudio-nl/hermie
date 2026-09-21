@@ -94,6 +94,26 @@ export function resolveImageUri(href: string, baseUrl?: string): string {
 }
 
 /**
+ * The schemes a link is allowed to leave the app through.
+ *
+ * An agent writes `/home/you/notes.md` and `file:///var/log/hermes.log` into
+ * replies as often as it writes a URL, and a path on the GATEWAY's disk is not
+ * something this device can open. A link outside this list stays inert: it is
+ * still coloured and still underlined, because it is still a link in the
+ * source, but nothing happens when it is pressed and — on the web — it renders
+ * without an `href`, so the browser never offers to navigate to it either.
+ *
+ * Shared because two renderers need the same answer: `Markdown.tsx` guards its
+ * `Linking.openURL` with it, and `Inline.tsx` decides from it whether the token
+ * gets an anchor.
+ */
+const OPENABLE = /^(https?|mailto|tel):/i
+
+export function isOpenableLink(href: string): boolean {
+  return OPENABLE.test(href)
+}
+
+/**
  * Android has no Menlo and iOS has no family called `monospace`; naming
  * a font that does not exist falls back to the UI face, which is precisely what
  * a command or a diff must not render in.

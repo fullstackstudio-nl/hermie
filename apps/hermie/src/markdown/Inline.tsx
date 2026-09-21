@@ -9,7 +9,8 @@ import { Fragment, useState, type ReactNode } from 'react'
 import { Image, StyleSheet, Text, type TextStyle, View } from 'react-native'
 import type { Token, Tokens } from './marked-compat'
 
-import { MONOSPACE, resolveImageUri, type MarkdownContext } from './context'
+import { anchorProps } from '../platform/link-anchor'
+import { isOpenableLink, MONOSPACE, resolveImageUri, type MarkdownContext } from './context'
 
 export interface InlineProps {
   tokens: Token[]
@@ -305,12 +306,25 @@ function renderToken(token: Token, index: number, context: MarkdownContext): Rea
     case 'link': {
       const link = token as Tokens.Link
 
+      /**
+       * An anchor where the platform has one, a press where it does not.
+       *
+       * The two are exclusive on purpose. Leaving `onPress` on an element that
+       * already carries an `href` opens the destination twice — once because the
+       * browser followed the link and once because `Linking.openURL` did — and
+       * RNW's click handler does not `preventDefault`, so both would happen.
+       *
+       * The scheme is checked HERE rather than inside the seam: which schemes
+       * this app is willing to leave through is a markdown decision, and whether
+       * a link can be an element is a platform one.
+       */
+      const anchor = isOpenableLink(link.href) ? anchorProps(link.href) : null
+
       return (
         <Text
-          accessibilityRole="link"
           key={key}
-          onPress={() => context.onLinkPress(link.href)}
           style={{ color: context.linkColor, textDecorationLine: 'underline' }}
+          {...(anchor ?? { accessibilityRole: 'link' as const, onPress: () => context.onLinkPress(link.href) })}
         >
           {link.tokens?.length ? link.tokens.map((child, at) => renderToken(child, at, context)) : link.text}
         </Text>
