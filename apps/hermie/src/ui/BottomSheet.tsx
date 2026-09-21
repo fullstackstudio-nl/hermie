@@ -32,6 +32,7 @@ import {
   PanResponder,
   Pressable,
   ScrollView,
+  StyleSheet,
   useWindowDimensions,
   View,
   type GestureResponderEvent,
@@ -51,6 +52,7 @@ import { useTheme } from './theme'
 import { Icon, ICON_SIZE } from './Icon'
 import { REGULAR_LAYOUT_MIN_WIDTH, SCRIM_COLOR, SHEET_MAX_WIDTH, SIDEBAR_WIDTH, TAP_SLOP, WINDOW_GAP } from './tokens'
 import { useEscapeKey } from './useEscapeKey'
+import { useShortcutScope } from './useShortcut'
 
 export interface BottomSheetProps {
   visible: boolean
@@ -292,6 +294,16 @@ export function BottomSheet({
    */
   useEscapeKey(onRequestClose, mounted)
 
+  /**
+   * And while it is up, a shortcut that would switch SURFACE does nothing.
+   *
+   * Escape's stack answers "who closes"; this answers "is the chat list even
+   * reachable from here". ⌘K under an open sheet used to put the caret in a
+   * search field behind it — the reader then typed into something they could not
+   * see. ⌘W is not affected: leaving is what it is for.
+   */
+  useShortcutScope(mounted)
+
   const { left, maxHeight, maxWidth } = sheetBox(window.width, window.height)
 
   /**
@@ -378,18 +390,48 @@ export function BottomSheet({
       {/* `flex: 1` and `justifyContent: 'flex-end'` are what park the panel at
           the bottom of the modal's root. */}
       <View style={{ flex: 1, justifyContent: 'flex-end' }} testID={testID}>
-        <Animated.View style={{ flex: 1, opacity: progress }}>
+        {/*
+          The scrim is the WHOLE modal, underneath everything.
+
+          It used to be a `flex: 1` sibling ABOVE the column in this column
+          layout, which made it exactly the space the panel did not take — so it
+          covered the gap over the sheet and nothing else. On a phone that is the
+          whole of the backdrop and the defect is invisible. On the wide layout
+          the panel is capped at `SHEET_MAX_WIDTH` and parked over the content
+          column, so most of what a reader sees as "outside the sheet" is BESIDE
+          it, and a tap there landed on the column below — a plain transparent
+          `View`, which absorbs a touch as readily as an opaque one. The owner's
+          report is the whole of that: on a Mac and on an iPad the backdrop does
+          not close the sheet.
+
+          `absoluteFill` under the flow children is the fix, and it is also the
+          simpler tree: one layer that means "anywhere but the panel" rather than
+          a layer whose meaning depends on how tall the panel happens to be.
+        */}
+        <Animated.View style={[StyleSheet.absoluteFill, { opacity: progress }]}>
           <Pressable
             accessibilityLabel="Dismiss"
             accessibilityRole="button"
             onPress={onRequestClose}
-            style={{ backgroundColor: SCRIM_COLOR, flex: 1 }}
+            style={[StyleSheet.absoluteFill, { backgroundColor: SCRIM_COLOR }]}
             testID={testID ? `${testID}-backdrop` : 'sheet-backdrop'}
           />
         </Animated.View>
 
         <KeyboardAvoidingView
           behavior={KEYBOARD_AVOID_BEHAVIOR}
+          /*
+            `box-none`: the column lays the panel out and takes no touch of its
+            own.
+
+            It spans the window's full width so that the panel can be centred in
+            the content column, which means the strip to either side of a capped
+            sheet is this view and not the scrim. `auto` there is a transparent
+            view swallowing the tap the reader aimed at the backdrop; `box-none`
+            lets it through to the scrim below while the panel — a child — keeps
+            receiving everything aimed at it.
+          */
+          pointerEvents="box-none"
           // The column inset lives here rather than on the root so it travels with
           // the sheet when the keyboard pushes it up.
           // `paddingBottom: 0` is explicit rather than assumed: this is a
