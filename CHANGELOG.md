@@ -26,6 +26,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   already visible exactly where it is, and asking for the destination rather than the journey under
   Reduce Motion.
 
+- **A collapsed folder counts a muted chat's unread messages.** It did not, and closing a folder
+  therefore deleted information: four messages visible on a muted row while the folder was open, and
+  no badge at all once it was shut. Mute stops the buzzing, not the counting — the same rule a single
+  row already followed by drawing the bell and the unread pill side by side. The needs-input dot
+  still excludes muted chats, because that one is a summons rather than a tally. ADR-0019 said the
+  wrong rule for both numbers and now states the split.
+
 ## [0.1.1] - 2026-09-22
 
 

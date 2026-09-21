@@ -107,10 +107,22 @@ Name, an optional colour on its chevron, and — **only while it is closed** —
 count and a needs-input dot. Open, every row inside is on screen carrying its own count, and a total
 above them would be the same information twice.
 
-The aggregate **respects mute** ([ADR-0017's amendment](0017-push-through-hermie-web.md)): a muted
-chat contributes nothing to either number. A folder is an aggregate, and an aggregate is exactly the
-kind of number a reader who silenced a chat asked to stop seeing. Archived chats are excluded for the
-reason they always were.
+The two numbers treat mute **differently**, and the difference is the point.
+
+The unread count includes muted chats. Closing a folder hides rows that were each carrying their own
+badge, so a count that skipped the muted ones would make collapsing a folder _delete_ information —
+four messages visible while the folder is open and nothing at all while it is shut. Mute is about not
+being interrupted, and a badge on a list somebody opened on purpose is not an interruption; it is the
+same call `BotRow` already makes when it draws the bell and the unread pill side by side.
+
+The needs-input dot excludes them ([ADR-0017's amendment](0017-push-through-hermie-web.md)). That dot
+is a summons — a bot is blocked and stays blocked until this reader answers — and summoning somebody
+to a conversation they silenced is exactly what mute is for.
+
+Archived chats are excluded from both, for the reason they always were.
+
+_Corrected 2026-09-22._ This paragraph previously said a muted chat contributes nothing to either
+number, and `folder-rows.ts` implemented that for both. The owner's rule is the split above.
 
 Its menu is New folder, Rename, Colour, Mute folder and Delete. **Mute fans out** — a folder has no
 mute of its own, it applies the chosen span to every chat inside at once. A mute stored on the folder

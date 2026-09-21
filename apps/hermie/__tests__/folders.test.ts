@@ -281,12 +281,26 @@ describe('what a closed folder says', () => {
     expect(counts().needsInput).toBe(true)
   })
 
-  it('leaves a muted chat out of both, because an aggregate is a count', () => {
-    expect(counts({ mutes: { writer: MUTE_FOREVER } }).unread).toBe(3)
-    expect(counts({ mutes: { writer: MUTE_FOREVER, bookkeeper: NOW + 60 } }).needsInput).toBe(false)
+  /**
+   * The two numbers part company over mute, and the owner's rule is the split.
+   *
+   * Closing a folder hides rows that were each carrying their own badge, so an
+   * unread count that skipped the muted ones would make collapsing a folder
+   * DELETE information. The needs-input dot is a summons and does skip them.
+   */
+  it('counts a muted chat’s unread, because collapsing a folder must not hide it', () => {
+    expect(counts({ mutes: { writer: MUTE_FOREVER } }).unread).toBe(6)
+    expect(counts({ mutes: { writer: MUTE_FOREVER, bookkeeper: MUTE_FOREVER } }).unread).toBe(6)
   })
 
-  it('counts a chat again once its mute has lapsed', () => {
+  it('leaves a muted chat out of the needs-input dot, which is a summons', () => {
+    expect(counts({ mutes: { writer: MUTE_FOREVER, bookkeeper: NOW + 60 } }).needsInput).toBe(false)
+    // One of the two still unmuted is still a bot waiting on this reader.
+    expect(counts({ mutes: { writer: MUTE_FOREVER } }).needsInput).toBe(true)
+  })
+
+  it('summons again once a mute has lapsed', () => {
+    expect(counts({ mutes: { writer: NOW - 1, bookkeeper: NOW - 1 } }).needsInput).toBe(true)
     expect(counts({ mutes: { writer: NOW - 1, bookkeeper: NOW - 1 } }).unread).toBe(6)
   })
 

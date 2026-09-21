@@ -47,7 +47,16 @@ export type FolderRow =
 
 /** What a closed folder says about what is inside it. */
 export interface FolderCounts {
-  /** Unread messages across its bots, muted ones excluded. */
+  /**
+   * Unread messages across its bots, MUTED ONES INCLUDED.
+   *
+   * A mute silences the buzzing, not the counting. An unread badge is the
+   * reader looking at the list on purpose and asking what arrived while they
+   * were not watching — and a muted chat's four messages are exactly the thing
+   * they came to find out about. The same rule the individual row already
+   * follows: `BotRow` draws the bell AND the pill, because "this chat is quiet"
+   * and "four things arrived in it" are two different facts.
+   */
   unread: number
   /** True when any bot inside has a question waiting, muted ones excluded. */
   needsInput: boolean
@@ -81,10 +90,21 @@ export interface RowsInput {
 /**
  * What a folder is holding, for the badge it wears while it is closed.
  *
- * Muted bots contribute nothing, which is the same rule the rail's total and
- * the widgets follow: a folder is an aggregate, and an aggregate is exactly the
- * kind of number a reader who silenced a chat asked to stop seeing. Archived
- * bots are excluded too — archiving already takes a chat out of every count.
+ * **The two numbers follow different rules about mute, and that is the point.**
+ *
+ * `unread` counts a muted bot like any other. A closed folder hides rows the
+ * reader would otherwise see carrying their own badges, so a count that skipped
+ * the muted ones would make collapsing a folder DELETE information — four
+ * messages visible while it is open and nothing at all while it is shut. Mute
+ * is about not being interrupted; a badge on a list somebody opened on purpose
+ * is not an interruption.
+ *
+ * `needsInput` does skip them. That dot is a summons — it says a bot is blocked
+ * and will stay blocked until this reader answers — and summoning somebody to a
+ * conversation they silenced is exactly what mute is for.
+ *
+ * Archived bots are excluded from both, for the reason they always were:
+ * archiving already takes a chat out of every count.
  */
 export function folderCounts(folder: Folder, input: RowsInput): FolderCounts {
   let unread = 0
@@ -98,14 +118,11 @@ export function folderCounts(folder: Folder, input: RowsInput): FolderCounts {
 
     size += 1
 
-    if (isMuted(input.mutes, name, input.now)) {
-      continue
-    }
-
     const counts = input.countsFor(name)
+    const muted = isMuted(input.mutes, name, input.now)
 
     unread += counts.unread
-    needsInput = needsInput || counts.needsInput
+    needsInput = needsInput || (counts.needsInput && !muted)
   }
 
   return { unread, needsInput, size }
