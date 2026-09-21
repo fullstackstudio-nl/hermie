@@ -154,16 +154,78 @@ function isAction(value: unknown): value is ShortcutAction {
 }
 
 /**
+ * How close together two reports of one chord have to be to be the same press.
+ *
+ * On a Mac both halves of the seam are live at once, and ⌘W is in both: the menu
+ * bar's `UIKeyCommand` and GameController's `keyChangedHandler` each report it,
+ * so one press arrived as two events and `closeTopmost()` closed two levels.
+ *
+ * **Suppressing one of the two paths is the fix that does not work**, and it is
+ * worth writing down beside the one that does. The obvious move is to ignore the
+ * keyboard path for anything the menu also provides — and the menu path is a
+ * responder-chain path, which is precisely the thing a presented `Modal` takes
+ * the app out of. ⌘W's whole job is closing a sheet. Suppressing the keyboard
+ * path would leave it working everywhere except the one place it is for.
+ *
+ * So both paths stay live and the DISPATCHER collapses the pair. Fifty
+ * milliseconds is chosen against what it has to separate: the two reports of one
+ * press are the same run loop turn apart, and the fastest a person can press the
+ * same chord twice on purpose is an order of magnitude slower than a key repeat
+ * delay. Nothing legitimate lives in this window.
+ */
+export const DOUBLE_FIRE_MS = 50
+
+/**
+ * Is this report the second half of a press already dispatched?
+ *
+ * Exported for its own test, because the thing it decides is invisible from
+ * outside: both paths produce an identical `action`, and the only difference
+ * between "one press seen twice" and "two presses" is the clock.
+ *
+ * The FIRST report wins. Which of the two paths that is depends on the OS and is
+ * not something this side can pin down, which is the honest reason it is not
+ * chosen: what matters is that exactly one survives, and both carry the same
+ * action. They can disagree about `typing` — the menu path always reports false,
+ * because a `UIKeyCommand` is in the responder chain and the focused field was
+ * offered the keystroke first and declined it — so the survivor's answer is
+ * whichever arrived first, and for ⌘W nothing reads it.
+ */
+export function isDoubleFire(
+  previous: { action: ShortcutAction; at: number } | null,
+  next: { action: ShortcutAction; at: number }
+): boolean {
+  if (!previous || previous.action !== next.action) {
+    return false
+  }
+
+  return next.at - previous.at < DOUBLE_FIRE_MS
+}
+
+/**
  * Every shortcut, while the app is in front. Returns the unsubscribe.
  *
  * Callers should go through `useShortcut`, which keeps one native subscription and
  * decides which of several registered screens an action belongs to.
+ *
+ * One press is dispatched once, whichever of the Mac's two seams reports it —
+ * see `isDoubleFire`.
  */
 export function subscribeToShortcuts(handler: (event: ShortcutEvent) => void): () => void {
+  let last: { action: ShortcutAction; at: number } | null = null
+
   const subscription = mac?.addListener?.('onShortcut', payload => {
-    if (isAction(payload?.action)) {
-      handler({ action: payload.action, typing: payload?.typing === true })
+    if (!isAction(payload?.action)) {
+      return
     }
+
+    const now = { action: payload.action, at: Date.now() }
+
+    if (isDoubleFire(last, now)) {
+      return
+    }
+
+    last = now
+    handler({ action: payload.action, typing: payload?.typing === true })
   })
 
   return () => subscription?.remove()
