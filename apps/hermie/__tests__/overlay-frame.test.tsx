@@ -166,6 +166,18 @@ describe('the dim', () => {
     expect(screen.getByTestId('overlay-frame').props.pointerEvents).toBe('box-none')
   })
 
+  /*
+    Jest's five seconds are not enough for this one, and that is about the
+    machine rather than the assertions.
+
+    It is the only case in this file that renders the shell, opens a panel,
+    closes it, opens a second one and closes that — two full mount-and-settle
+    cycles with a `waitFor` after each. On an idle machine it finishes in well
+    under a second. On a busy one — the whole suite in parallel, or vitest
+    running beside it — it went over the limit roughly one run in four and failed
+    with a timeout, never with a wrong value. A flake that only ever says "too
+    slow" is a budget problem, so it gets a bigger budget rather than a rewrite.
+  */
   it('closes one level from either panel’s dim', async () => {
     openSettings()
     fireEvent.press(screen.getByTestId('overlay-scrim-sidebar'))
@@ -176,7 +188,7 @@ describe('the dim', () => {
     fireEvent.press(screen.getByTestId('overlay-scrim'))
 
     await waitFor(() => expect(screen.queryByTestId('overlay-panel')).toBeNull())
-  })
+  }, 15_000)
 
   it('takes the taps the sidebar would have taken, so it is not interactive under a dim', () => {
     openSettings()
