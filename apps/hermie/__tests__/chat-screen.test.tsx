@@ -821,7 +821,7 @@ describe('a line that starts with a slash', () => {
 })
 
 describe('a message sent while the bot is working', () => {
-  it('stands at the end of the transcript as your own bubble, with its three actions', async () => {
+  it('stands over the composer as a strip, with its three actions', async () => {
     renderChat()
 
     act(() => {
@@ -829,8 +829,10 @@ describe('a message sent while the bot is working', () => {
       useChatsStore.getState().enqueue('researcher', { id: 'q:1', text: 'and one more thing' })
     })
 
-    await waitFor(() => expect(screen.getByTestId('queued-q:1')).toBeTruthy())
-    expect(screen.getByTestId('queued-label-q:1')).toHaveTextContent('Queued')
+    await waitFor(() => expect(screen.getByTestId('queued-strip')).toBeTruthy())
+    // NOT in the transcript: a parked message has not happened yet, and a
+    // bubble is a thing that did.
+    expect(screen.queryByTestId('queued-q:1')).toBeNull()
     expect(screen.getByText('and one more thing')).toBeTruthy()
 
     // Steer: into the turn that is running, now.
@@ -855,11 +857,13 @@ describe('a message sent while the bot is working', () => {
         .enqueue('researcher', { id: 'q:2', text: 'look at this', attachments: ['@image:shot.png'] })
     })
 
-    await waitFor(() => expect(screen.getByTestId('queued-q:2')).toBeTruthy())
+    await waitFor(() => expect(screen.getByTestId('queued-strip')).toBeTruthy())
 
     expect(screen.getByTestId('queued-steer-q:2')).toBeTruthy()
     expect(screen.getByTestId('queued-delete-q:2')).toBeTruthy()
     expect(screen.queryByTestId('queued-edit-q:2')).toBeNull()
+    // The file travels with the message, so the strip names it beside the text.
+    expect(screen.getByText(/look at this · shot\.png/)).toBeTruthy()
   })
 
   it('can be sent at all while a turn runs, which the round button used to refuse', async () => {

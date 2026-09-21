@@ -497,7 +497,7 @@ export function Composer({
    * field — so the only way to say something mid-turn was the Return key, and
    * the button under the words you had just typed threw away the reply instead.
    * Sending is always possible; the message is parked behind the running turn
-   * (see `QueuedRow`) and the stop square is what an EMPTY field offers.
+   * (see `QueuedStrip`) and the stop square is what an EMPTY field offers.
    */
   const press = () => {
     if (running && !canSend) {

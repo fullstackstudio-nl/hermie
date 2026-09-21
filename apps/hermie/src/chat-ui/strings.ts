@@ -173,6 +173,8 @@ export const chatStrings = {
     edit: 'Edit',
     delete: 'Delete',
     steered: 'Handed to the running turn',
+    /** The parked messages the strip stack did not have room to draw. */
+    more: (count: number) => `+${count} more`,
     steerRejected: 'Too late to steer — the turn was already finishing. It is back in the queue.'
   },
 

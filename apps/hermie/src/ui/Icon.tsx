@@ -56,6 +56,7 @@ export type IconName =
   | 'chevronDown'
   | 'ellipsis'
   | 'arrowRight'
+  | 'queue'
 
 export interface IconProps {
   name: IconName
@@ -163,6 +164,22 @@ function Glyph({ color, name, stroke }: { color: string; name: IconName; stroke:
         <>
           <Circle cx={12} cy={12} fill="none" r={8} stroke={color} strokeWidth={stroke} />
           <Line color={color} d="M12 7.2V12.2L15.6 14.4" stroke={stroke} />
+        </>
+      )
+
+    /**
+     * Three bars waiting their turn, shortest at the front.
+     *
+     * Not a clock and not a list. A clock is what a cron wears, and a list says
+     * "these are items" where the fact is "these have not gone yet" — the
+     * shortening towards the front is the queue moving.
+     */
+    case 'queue':
+      return (
+        <>
+          <Line color={color} d="M5 7H19" stroke={stroke} />
+          <Line color={color} d="M5 12H15" stroke={stroke} />
+          <Line color={color} d="M5 17H11" stroke={stroke} />
         </>
       )
 

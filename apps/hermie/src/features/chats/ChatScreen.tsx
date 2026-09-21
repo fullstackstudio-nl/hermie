@@ -37,6 +37,7 @@ import {
   type PickerOption,
   SidebarToggleButton,
   type SlashSuggestion,
+  QueuedStrip,
   type SubagentTranscript,
   TranscriptList,
   type TranscriptListHandle
@@ -1428,10 +1429,6 @@ function Conversation({
               // The TURN is running and nothing has been said yet: three dots. Not
               // `busy` — that also covers a tool or a child still working, and dots
               // under a finished reply promise a sentence that is not coming.
-              onDeleteQueued={chat.deleteQueued}
-              onEditQueued={editQueued}
-              onSteerQueued={steerQueued}
-              queued={chat.queued}
               typing={chat.turnActive && !hasStreamingText(chat.items)}
               typingHandles={typing}
             />
@@ -1481,6 +1478,16 @@ function Conversation({
             list loses the pill's height and an inverted list keeps its bottom
             pinned, so the newest message does not move when it arrives.
           */}
+          {/*
+            The messages parked behind the running turn, over the composer where
+            the reader left them rather than as bubbles in the history. See
+            `QueuedStrip`, and `TranscriptList` for what taking them out of the
+            list did to the scroll anchor.
+          */}
+          <View style={{ paddingHorizontal: theme.space.md }}>
+            <QueuedStrip onDelete={chat.deleteQueued} onEdit={editQueued} onSteer={steerQueued} queued={chat.queued} />
+          </View>
+
           <Appear
             rise={6}
             style={{ paddingBottom: theme.space.xs, paddingHorizontal: theme.space.md }}

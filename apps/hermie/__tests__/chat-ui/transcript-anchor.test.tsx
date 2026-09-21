@@ -159,21 +159,21 @@ describe('the list’s anchor', () => {
     expect(anchorProp()).toEqual({ minIndexForVisible: 0 })
   })
 
-  it('counts the rows parked in front of the transcript when it names that row', () => {
+  it('counts the dots in front of the transcript when it names that row', () => {
     renderScreen(
       <TranscriptList
         items={[...visible([userItem]), { item: thinking, presentation: 'full' }]}
-        queued={[
-          { id: 'q-1', text: 'first' },
-          { id: 'q-2', text: 'second' }
-        ]}
         subagents={subagentMap}
+        typing
       />
     )
 
-    // Two parked messages sit at 0 and 1, the streaming reply at 2.
+    // Parked messages used to be rows 0 and 1 here; they are a strip over the
+    // composer now, so the only thing in front of the transcript is the dots —
+    // except that a streaming reply already carries its own, which stands the
+    // dots down. Nothing leads, and the row after the streaming one is 1.
     scrollTo(400)
-    expect(anchorProp()).toEqual({ minIndexForVisible: 3 })
+    expect(anchorProp()).toEqual({ minIndexForVisible: 1 })
   })
 
   it('never carries an autoscroll threshold, which is what animated the jump back', () => {

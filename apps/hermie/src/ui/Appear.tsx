@@ -58,6 +58,16 @@ export interface AppearProps {
    * thing — the same rule `PanelScrim` follows for the same reason.
    */
   pointerEvents?: 'auto' | 'box-none' | 'none'
+  /**
+   * The exit has finished and nothing is on screen any more.
+   *
+   * For the one caller that has to OUTLIVE its own data: a queued message stops
+   * being queued the moment it is sent, so the strip that showed it has to be
+   * kept alive by whoever draws it until this says the animation is over.
+   * Without it there is no exit to watch — the row is simply not in the next
+   * render.
+   */
+  onExited?: () => void
   testID?: string
   children: ReactNode
 }
@@ -65,6 +75,7 @@ export interface AppearProps {
 export function Appear({
   children,
   exit = 'fade',
+  onExited,
   pointerEvents = 'auto',
   rise = 8,
   style,
@@ -73,7 +84,11 @@ export function Appear({
   visible
 }: AppearProps) {
   const theme = useTheme()
-  const { present, progress } = usePresence(visible, { reduceMotion: theme.reduceMotion, token })
+  const { present, progress } = usePresence(visible, {
+    reduceMotion: theme.reduceMotion,
+    token,
+    ...(onExited ? { onExited } : {})
+  })
 
   if (!present || (exit === 'cut' && !visible)) {
     return null
