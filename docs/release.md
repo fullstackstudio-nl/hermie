@@ -205,26 +205,149 @@ should ever hold either.
 
 ## iOS: TestFlight
 
-Not in CI. It needs an EAS project, which ties the repository to one Expo account.
-`extra.eas.projectId` **is** in `app.config.ts` now — it was added for push, which
-needs a project to mint a token against ([ADR-0017](adr/0017-push-through-hermie-web.md))
-— so it names ours. A fork should run `eas init` and replace it rather than inherit it.
+**Not EAS.** The route is Xcode's own two steps — `xcodebuild archive` and
+`xcodebuild -exportArchive` — run against a checkout that has been prebuilt.
+EAS was the obvious alternative and is not used: it ties the repository to one
+Expo account, keeps the signing certificates on Expo's servers, and puts a
+second build number source next to the one `app.config.ts` derives from git.
+`extra.eas.projectId` stays where it is — it is for push and nothing else
+([ADR-0017](adr/0017-push-through-hermie-web.md)).
+
+Nothing here runs in CI. It needs a signed-in Xcode and an account someone owns,
+which is the same reason the Play half is written out rather than automated.
+
+### What has to exist first
+
+- The paid Apple team, `FDGV4X8F27`, and an Xcode signed in to it. Automatic
+  signing mints what it needs from the developer portal: the App IDs
+  `dev.hermie.app` and `dev.hermie.app.widgets`, the App Group
+  `group.dev.hermie.app`, and an **Apple Distribution** certificate. A machine
+  that has only ever built for development has only an Apple Development
+  certificate; `-allowProvisioningUpdates` creates the distribution one on the
+  first archive, and that needs the Apple ID to hold **Account Holder, Admin or
+  App Manager** on the team.
+- **An app record in App Store Connect**, with bundle id `dev.hermie.app`. The
+  archive and the export do not need it — they only talk to the developer
+  portal — but the upload does, and it fails with a bundle-id error that does
+  not say "create the app first". Make it under **Apps → +** with name `Hermie`,
+  primary language English (U.S.), SKU `hermie`.
+- **An App Store Connect API key** for the upload, created under **Users and
+  Access → Integrations → App Store Connect API → Team keys**, role **App
+  Manager**. The `.p8` downloads exactly once. `altool` looks for it at
+  `~/.appstoreconnect/private_keys/AuthKey_<KEYID>.p8`.
+
+- **The account's own paperwork.** The **Free Apps Agreement** has to be Active
+  under **Business → Agreements** — it is the one a free app and TestFlight need;
+  the Paid Apps Agreement is only for charging money and can stay unsigned. The
+  EU **trader status** under the same section is separate and is not optional:
+  the Digital Services Act makes Apple verify and display trader contact details
+  for anyone distributing in the EU, and an account that has not answered it
+  cannot distribute there — external TestFlight included. It is a legal
+  declaration about the company, so it is the owner's to fill in and nothing
+  here can do it.
+
+The key, its Key ID and the Issuer ID are credentials and live with the owner,
+outside every checkout, the same way the Android keystore does.
+
+### Building and uploading
 
 ```sh
-npm i -g eas-cli
-eas login
 cd apps/hermie
-eas init                     # a fork: replaces extra.eas.projectId with its own
-eas build --platform ios --profile production
-eas submit --platform ios --latest
+npm ci                                              # from the repository root
+npx expo prebuild --platform ios --clean
+cd ios && LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pod install && cd ..
 ```
 
-`eas build` asks for the Apple credentials the first time and keeps them. The
-`production` profile has `autoIncrement` on, so the build number rises per
-build; the marketing version is whatever `set-version` put in `app.config.ts`.
+`prebuild --clean` matters for the same reason it does on Android: `ios/` is a
+gitignored prebuild output, and `ios.buildNumber` is the commit count, so a tree
+that prebuilt at 193 and archived at 196 produces an archive carrying 193 —
+which App Store Connect refuses if it has seen it, and which silently misreports
+the commit in Settings if it has not.
 
-For a build on somebody's device before that, `preview` is an internal
-distribution build; for a build that runs on a simulator, `development`.
+```sh
+cd apps/hermie/ios
+xcodebuild -workspace Hermie.xcworkspace -scheme Hermie -configuration Release \
+  -destination 'generic/platform=iOS' archive \
+  -archivePath "$BUILD/Hermie.xcarchive" \
+  DEVELOPMENT_TEAM=FDGV4X8F27 \
+  -allowProvisioningUpdates -allowProvisioningDeviceRegistration
+```
+
+Then export, with an `ExportOptions.plist` beside it:
+
+```xml
+<plist version="1.0"><dict>
+  <key>method</key>            <string>app-store-connect</string>
+  <key>destination</key>       <string>export</string>
+  <key>signingStyle</key>      <string>automatic</string>
+  <key>teamID</key>            <string>FDGV4X8F27</string>
+  <key>uploadSymbols</key>     <true/>
+  <key>manageAppVersionAndBuildNumber</key> <false/>
+</dict></plist>
+```
+
+`method` is `app-store-connect` on Xcode 15 and later; it was `app-store`
+before, and an old value on a new Xcode is a hard error rather than a warning.
+`manageAppVersionAndBuildNumber` is **false** on purpose: left at its default,
+the export helpfully renumbers the build, which throws away the commit count
+and breaks the promise that the number in Settings names the tree it came from.
+
+```sh
+xcodebuild -exportArchive \
+  -archivePath "$BUILD/Hermie.xcarchive" \
+  -exportOptionsPlist ExportOptions.plist \
+  -exportPath "$BUILD/export" \
+  -allowProvisioningUpdates
+```
+
+Check the two things that are wrong more often than the build is, before
+uploading anything:
+
+```sh
+codesign -d --entitlements :- "$BUILD/export/Hermie.ipa"   # after unzipping, on the .app
+```
+
+- **`aps-environment` must read `production`.** The entitlements file in the
+  tree says `development`, because that is what a development build needs;
+  the App Store profile carries `production` and the export is what swaps it.
+  A build that ships `development` registers against the APNs sandbox and every
+  push to a TestFlight tester is silently dropped.
+- **Both bundles are signed** — `Hermie.app` and the `HermieWidgetsExtension`
+  inside it — and both carry `group.dev.hermie.app`. Two sandboxes that
+  disagree about the group share nothing, and the failure is a widget that is
+  permanently empty rather than an error anybody sees.
+
+Upload with `altool`, validating first because a validation failure costs
+seconds and a rejected upload costs a build number:
+
+```sh
+xcrun altool --validate-app -f "$BUILD/export/Hermie.ipa" -t ios \
+  --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+xcrun altool --upload-app   -f "$BUILD/export/Hermie.ipa" -t ios \
+  --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+```
+
+Processing takes a few minutes to half an hour. It is done when the build
+appears under TestFlight with a state of `VALID`.
+
+### Export compliance
+
+`ITSAppUsesNonExemptEncryption` is already `false` in `app.config.ts`, so the
+upload carries the answer and App Store Connect does not ask again per build.
+Nothing to click.
+
+### The first external tester
+
+Internal testers are anyone on the team and need no review. The first **external**
+build triggers **Beta App Review**, which is a real review with a real wait, and
+it needs three things filled in before it will accept the submission:
+
+- **What to test** — one paragraph, per build.
+- **Beta App Review Information** — a contact, and sign-in details if the app
+  cannot be used without an account. Hermie cannot: it talks to a gateway the
+  user runs. So the review gets a reachable gateway and a token, the same way
+  the App Transport Security note below explains the architecture.
+- **The ATS note**, below. It is the one thing a reviewer actively asks about.
 
 **This is also the Mac release.** Check App Store Connect → Pricing and
 Availability and leave "Make this app available on Mac" on; a TestFlight tester on
