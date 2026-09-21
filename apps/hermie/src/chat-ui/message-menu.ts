@@ -17,10 +17,26 @@
  *    three links has three things a reader might want, and a submenu of them is
  *    what every mail client does. Capped, because a menu taller than the window is
  *    not a menu.
- *  - **Nothing here reaches the gateway.** Every action is local: a copy, a
- *    disclosure, or opening a chat this app already has. A context menu that could
- *    send something would need a confirmation, and ADR-0010 says a question is
- *    answered by an explicit tap rather than by a menu line.
+ *  - **Almost nothing here reaches the gateway.** Every action but one is local: a
+ *    copy, a disclosure, opening a chat this app already has, or putting text back
+ *    in the composer. The exception is `Regenerate`, and it is the shape ADR-0010
+ *    asks for rather than an exception to it — the menu line does not answer a
+ *    question the agent asked, it repeats a turn the reader started, and the
+ *    reader's own tap is what starts it. Nothing here can answer an approval.
+ *
+ * ## Two of the lines are about a turn rather than about a message
+ *
+ * `Edit and resend` and `Regenerate` both put a new turn on the gateway, so both
+ * are offered ONLY where they would be honest:
+ *
+ *  - **Never while a turn is running.** They are drawn disabled rather than
+ *    removed, which is the difference between "not now" and "not here": a line
+ *    that vanishes for the duration of every turn is a line the reader stops
+ *    believing exists.
+ *  - **`Regenerate` only on the LAST reply.** Regenerating an older one would
+ *    either rewrite history or append an answer to a question three turns back;
+ *    the gateway's `/retry` does the second, and a menu line that quietly did
+ *    that to the middle of a conversation would be worse than no line.
  */
 import type { TranscriptItem } from '@hermie/transcript'
 
@@ -38,6 +54,17 @@ export type MessageMenuAction =
   | { kind: 'openBot'; handle: string }
   | { kind: 'selectText'; text: string }
   | { kind: 'toggleDetails' }
+  /**
+   * Put this turn back in the composer.
+   *
+   * The attachment REFERENCES travel with it, not the files: a reference is what
+   * the turn holds and what the gateway understands (`UserItem.attachments`), and
+   * the bytes are long gone from this device. The composer decides what to draw
+   * for one — see `attachmentName`.
+   */
+  | { kind: 'editResend'; text: string; attachments: string[] }
+  /** Run the last reply again. The screen decides how; see `ChatScreen`. */
+  | { kind: 'regenerate' }
 
 /** `[text](href)` and `<https://…>`; the two forms a model actually writes. */
 const LINK_RE = /\[[^\]]*\]\(([^()\s]+)(?:\s+"[^"]*")?\)|<((?:https?|mailto):[^>\s]+)>/gu
@@ -147,14 +174,35 @@ export interface MessageMenuModel {
    * exactly that reason, and `TranscriptList` passes `RUNS_ON_MAC`.
    */
   canSelectText?: boolean
+  /**
+   * A turn is running on this chat right now.
+   *
+   * Both turn-starting lines are DISABLED by it rather than dropped. A reader
+   * who opens the menu mid-turn should be told the action exists and is not
+   * available, which is what a greyed line says and what a missing one does not.
+   */
+  turnRunning?: boolean
+  /** Whether the host can put text back in the composer. */
+  canEditResend?: boolean
+  /**
+   * Whether the host can run a reply again AND this row is the one to run.
+   *
+   * One flag rather than two because the caller is the only thing that can
+   * answer either half: the menu sees one item and has no idea whether it is the
+   * last reply in the list.
+   */
+  canRegenerate?: boolean
 }
 
 export function messageMenuItems({
+  canEditResend = false,
   canOpenBot,
+  canRegenerate = false,
   canSelectText = false,
   detailsOpen,
   hasDetails,
-  item
+  item,
+  turnRunning = false
 }: MessageMenuModel): MenuItem[] {
   const text = messageText(item)
   const links = messageLinks(text)
@@ -183,6 +231,24 @@ export function messageMenuItems({
         id: 'selectText',
         title: chatStrings.menu.selectText,
         systemImage: 'selection.pin.in.out'
+      },
+    // Under the copies and above the links, for the same reason `Select text`
+    // is: these are about the message itself rather than about something it
+    // happens to contain.
+    canEditResend &&
+      item.kind === 'user' &&
+      Boolean(text.trim()) && {
+        id: 'editResend',
+        title: chatStrings.menu.editResend,
+        systemImage: 'pencil',
+        disabled: turnRunning
+      },
+    canRegenerate &&
+      item.kind === 'assistant' && {
+        id: 'regenerate',
+        title: chatStrings.menu.regenerate,
+        systemImage: 'arrow.clockwise',
+        disabled: turnRunning
       },
     links.length > 0 && {
       id: 'links',
@@ -231,6 +297,22 @@ export function parseMessageMenuAction(id: string, item: TranscriptItem): Messag
 
   if (id === 'toggleDetails') {
     return { kind: 'toggleDetails' }
+  }
+
+  /*
+    Read off the item again rather than off the menu, exactly as the copies are
+    and for the same reason: the row holds the text NOW. A queued turn that was
+    edited between the menu opening and the tap would otherwise be resent as the
+    version the menu was built from.
+  */
+  if (id === 'editResend') {
+    return item.kind === 'user' && item.text.trim()
+      ? { kind: 'editResend', text: item.text, attachments: item.attachments ?? [] }
+      : null
+  }
+
+  if (id === 'regenerate') {
+    return item.kind === 'assistant' ? { kind: 'regenerate' } : null
   }
 
   if (id === 'openBot') {

@@ -17,8 +17,10 @@
  *    ends up answering the wrong one.
  */
 import {
+  exportTranscript,
   findDmCounterpart,
   normalizeAgentTarget,
+  transcriptFileName,
   type ApprovalItem,
   type ClarifyItem,
   type TranscriptItem,
@@ -34,6 +36,7 @@ import {
   ChatHeader,
   chatStrings,
   Composer,
+  formatClock,
   type ComposerAttachment,
   type PickerOption,
   SidebarToggleButton,
@@ -46,6 +49,7 @@ import {
   type TranscriptListHandle
 } from '../../chat-ui'
 import { shareFile } from '../../platform/share-file'
+import { shareText } from '../../platform/share-text'
 import { lastMessageAt, prettyModelName } from '@hermie/transcript'
 import type { ConnectionStatus } from '@hermie/gateway-client'
 import { looksLikeSlashCommand, parseSlashCommand } from '@hermes/shared/slash'
@@ -81,6 +85,7 @@ import { useChatRuntime } from './ChatRuntime'
 import { findMatchingItem } from '../search'
 import { connectionNotice, RETRY_OFFER_MS } from './connection-notice'
 import { countsAsRead, readWatermark } from './read-watermark'
+import { regenerateLastTurn } from './regenerate'
 import { ChatConnectingState, ReconnectPill } from './ConnectionState'
 import { useChat, type UseChatResult } from './useChat'
 
@@ -1438,6 +1443,111 @@ function Conversation({
   const display = names.primary
 
   /**
+   * The newest reply in what the reader is looking at.
+   *
+   * Computed once here rather than by each row: a row is one item and cannot see
+   * what came after it, and `Regenerate` is offered on exactly one row. Off
+   * `chat.items` — the VISIBLE list — because the menu is opened on a row in that
+   * list, and a hidden reply the filter removed is not a row anybody can ask to
+   * run again.
+   */
+  const lastAssistantId = useMemo(() => {
+    for (let at = chat.items.length - 1; at >= 0; at -= 1) {
+      const entry = chat.items[at]
+
+      if (entry?.item.kind === 'assistant') {
+        return entry.item.id
+      }
+    }
+
+    return undefined
+  }, [chat.items])
+
+  /**
+   * Put one of the reader's own turns back in the composer.
+   *
+   * The turn already in the conversation is left exactly where it is — this
+   * starts a NEW one from the same words, which is why the menu line says "and
+   * resend" rather than "Edit". The attachment references travel with the text
+   * because they are what the turn holds and what the gateway understands; the
+   * bytes are long gone from this device, so a picture comes back as a chip.
+   */
+  const editResend = useCallback(
+    (text: string, references: readonly string[]) => {
+      chat.setDraft(references.length ? `${text}\n${references.join(' ')}`.trim() : text)
+    },
+    [chat]
+  )
+
+  /**
+   * Ask for the last reply again.
+   *
+   * The decision — `/retry` where the gateway has it, the previous prompt again
+   * where it does not, and a refusal in the two cases where neither is honest —
+   * is `regenerate.ts`, which has its own suite. This is the half that belongs
+   * to the screen: turning an outcome into a notice.
+   */
+  const regenerate = useCallback(() => {
+    void regenerateLastTurn(chat)
+      .then(outcome => {
+        if (outcome.kind === 'busy') {
+          setNotice(openFailed(chatStrings.menu.turnRunning))
+
+          return
+        }
+
+        if (outcome.kind === 'nothing') {
+          setNotice(openFailed(chatStrings.menu.nothingToRegenerate))
+        }
+      })
+      .catch(error => setNotice(openFailed(messageOf(error))))
+  }, [chat])
+
+  /**
+   * Write the conversation out and hand it to the platform.
+   *
+   * `chat.items` is what the reader is looking at — the verbosity filter, the
+   * bot-to-bot toggle and the thinking toggle have already been applied — and
+   * that is deliberately what is exported. A chat set to Quiet exports the quiet
+   * conversation; carrying the rows the screen is hiding would hand somebody a
+   * file they have not read.
+   *
+   * Nothing about the serialization is here. `exportTranscript` is a pure
+   * function in `@hermie/transcript` with its own suite; this supplies the two
+   * things the package cannot know — what a clock looks like on this device, and
+   * how a file reaches the rest of the system.
+   */
+  const exportChat = useCallback(
+    (format: 'md' | 'txt') => {
+      const now = Date.now()
+      const { markdown, text } = exportTranscript(
+        chat.items.map(entry => entry.item),
+        {
+          botName: display,
+          exportedAt: Math.floor(now / 1000),
+          // The device's own clock, which is the whole reason the formatter is
+          // passed in: a file saved on this phone should read in this phone's
+          // time, and the transcript package has no business knowing what that
+          // is.
+          formatTime: seconds => `${new Date(seconds * 1000).toLocaleDateString()} ${formatClock(seconds)}`.trim(),
+          selfName: chatStrings.export.self
+        }
+      )
+
+      const name = transcriptFileName(display, format, new Date(now).toISOString().slice(0, 10))
+
+      void shareText(name, format === 'md' ? markdown : text, format === 'md' ? 'text/markdown' : 'text/plain').then(
+        shared => {
+          if (!shared) {
+            setNotice(openFailed(chatStrings.export.failed))
+          }
+        }
+      )
+    },
+    [chat.items, display]
+  )
+
+  /**
    * Stable callbacks for the transcript.
    *
    * `TranscriptRow` is memoized on `(id, version, presentation, receipt,
@@ -1450,8 +1560,29 @@ function Conversation({
   }, [])
 
   const openAgents = useCallback(() => setSheet('agents'), [])
-  const openOptions = useCallback(() => setSheet('options'), [])
-  const openProfile = useCallback(() => setSheet('profile'), [])
+  /*
+    Opening either sheet asks the gateway for the context reading once.
+
+    Nearly always a no-op: the reducer already follows the live `session.usage`
+    ticks and the usage on `message.complete`, so a chat that has run a turn
+    since it was opened is current. It covers the chat that was resumed and not
+    yet spoken to, whose `session.resume` answered without `info.usage` — which
+    is the first thing a reader sees after a cold start, and the one moment the
+    row would otherwise be missing for no reason the reader can act on.
+
+    Fire and forget, deliberately: the sheet opens now. A gateway without the
+    method answers nothing and the row stays absent, which is what
+    `refreshUsage` promises.
+  */
+  const refreshUsage = chat.refreshUsage
+  const openOptions = useCallback(() => {
+    void refreshUsage()
+    setSheet('options')
+  }, [refreshUsage])
+  const openProfile = useCallback(() => {
+    void refreshUsage()
+    setSheet('profile')
+  }, [refreshUsage])
 
   /*
     The profile sheet's own connection.
@@ -1641,6 +1772,10 @@ function Conversation({
               newMessageCount={newCount}
               loadingOlder={loadingOlder}
               onEndReached={loadOlder}
+              {...(lastAssistantId ? { lastAssistantId } : {})}
+              onEditResend={editResend}
+              onRegenerate={regenerate}
+              turnRunning={chat.turnActive}
               onOpenBot={openBot}
               onOpenCron={openCron}
               onOpenRequest={reopenRequest}
@@ -1782,6 +1917,7 @@ function Conversation({
               profile: {
                 avatarUri: avatar,
                 bot: byName[botName],
+                contextUsage: chat.contextUsage,
                 gateway: profileGateway,
                 gatewayVersion: config?.version ?? '',
                 // A saved description or picture only reaches the header, the
@@ -1801,6 +1937,8 @@ function Conversation({
           accent,
           botName: display,
           confirmMessage: pendingModel?.message ?? '',
+          contextUsage: chat.contextUsage,
+          onExport: exportChat,
           fast: chat.info?.fast === true,
           model: chat.info?.model ?? '',
           modelOptions,

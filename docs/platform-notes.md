@@ -6763,3 +6763,164 @@ shape as `botNameOrder`; the only new decision is whether the scale multiplies
 the `type` tokens in the theme — which markdown would inherit for free, and
 which needs no edits under `src/markdown` at all — or is threaded through the
 bubble components one at a time. The theme is almost certainly the right seam.
+
+## Rich content in a reply (2026-09-22)
+
+### A renderer that learns its own size late is a renderer that moves the reader
+
+The obvious way to draw a ` ```mermaid ` fence is the `mermaid` package, and the obvious way
+to set `$$…$$` is KaTeX. Both were rejected for one reason, and it is the same reason in both cases.
+
+`mermaid` measures text with `getBBox`, so on iOS and Android it needs a `WebView`; KaTeX positions
+every glyph from a metrics table that assumes four bundled fonts, which load asynchronously. Either
+way the final size of the box arrives **after** the row has already been laid out. The table under
+"`Show more` on the web needs LESS anchoring" above is the measurement of what that costs on this
+list: a body grown by 300 displaces everything below it by 300, at every starting offset, every
+time. A diagram that settles two frames after it mounts does exactly that, with nobody having
+touched anything — and unlike `Show more` there is no tap to hang a correction off.
+
+So the geometry is arithmetic instead. A node's box comes from its label's character count and the
+font size, the same estimate `CodeBlock.tsx` already uses for a listing's natural width; a
+fraction's height is two leadings and a rule. Nothing measures, nothing loads, and the row is its
+final height on the first frame. `react-native-svg` was already in the bundle for the icons and the
+bubble tails, so this added no dependency at all.
+
+The security question that usually comes with Mermaid disappears with the library: there is no
+script engine and no navigation here, so `securityLevel: 'strict'` has no equivalent because it has
+no equivalent problem. A label is characters in a `Text`.
+
+### What is not covered
+
+- **The subset is genuinely a subset**, and the fallback is what makes that acceptable rather than
+  what hides it. `sequenceDiagram`, `classDiagram`, `gantt`, and a `subgraph` inside a flowchart all
+  answer `null` from the parser and land in a code block. So does `\begin{…}`, and so does any LaTeX
+  command not in `math/symbols.ts`.
+- **Inline mathematics is one line, and cannot be otherwise.** React Native will not lay a `View`
+  out inside a `Text` on Android, so `$\frac{a}{b}$` is `a/b` with brackets wherever the extent would
+  be ambiguous. Only `$$…$$` gets boxes.
+- **None of it has been seen on a device.** Every claim above is jest against the real renderer and
+  the real lexer; the layout constants — a rhombus at 1.35× its box, a 46pt gap between ranks — were
+  chosen from the same character-advance estimate the tables use and have not been photographed on a
+  phone. What that can be wrong about is spacing, not stability: the numbers are wrong in the same
+  direction on every frame.
+
+### The context ring has no table of model context sizes behind it
+
+The brief for this round said `CONTEXT_LIMITS` in `@hermie/gateway-client/context` "already knows
+model context sizes". It does not: that constant is the per-field character caps for the `ui_meta`
+context section the gateway plugin renders into a system prompt — `displayName: 80`, `about: 600` —
+and it has nothing to do with a model's window. Nothing else in the tree knows a window size either.
+
+That turned out to be the right shape rather than a gap to fill. The only two numbers a ring can
+honestly be drawn from are `usage.context_used` and `usage.context_max`, both of which the gateway
+already sends, and **without the second there is no ring**. A local table keyed off `usage.model`
+would be a promise about somebody else's product: it is right until a provider ships a longer window
+or a gateway reserves part of one, and when it is wrong it is wrong in the direction that tells a
+reader they have room they do not have. `contextUsageOf` answers `null` and every surface hides.
+
+`usage.context_percent` is ignored for a smaller version of the same reason. The contract does not
+say whether it is a fraction or a hundredth, and the two cannot be told apart for any session under
+one per cent — which is every session for its first few turns. The percentage is derived from the
+same division that draws the arc, so the label and the ring cannot disagree.
+
+The capability gate is the gateway's own refusal rather than a version test: one `session.usage`
+call per connection, and a failure turns it off for the life of that connection. It is recorded in
+the RPC failure ring, because a swallowed error nothing anywhere admits to is the defect
+`rpc-failures.ts` was written for.
+
+### What is not covered
+
+- **Not seen against a real gateway.** Every case is the fake, which now answers `session.usage` and
+  carries the same reading inside `session.resume`'s `info`. Whether a real `hermes serve` fills
+  `context_max` for every provider, or only for the ones whose catalogue it has, decides how often
+  the row appears — and if it never does, the behaviour is the absent row rather than anything worse.
+- **The row does not animate.** A `session.usage` tick lands several times a second during a turn and
+  the ring simply redraws; nothing was measured about whether that reads as motion or as noise on a
+  sheet the reader has open while a turn runs.
+
+### An export is a file, not a `message`
+
+`Share.share({ message })` needs no file and no dependency, and it was the wrong answer. A share
+sheet handed a bare string can only reach a destination that TAKES text — Messages, Mail's body, a
+note — and cannot save. Somebody who asked to export a conversation wants to keep it, so the one
+destination that matters most is the one a string cannot reach.
+
+So `platform/share-text.ts` writes into the cache directory with `expo-file-system` and hands the
+resulting `file://` to the existing `shareFile` seam. `expo-file-system` was already in
+`node_modules` as a dependency of `expo` itself, which means it is already in the native build; it
+has been added to `apps/hermie/package.json` explicitly anyway, because a module reached through
+somebody else's dependency edge is a module that disappears the day they drop it.
+
+The cache directory rather than `document`, deliberately: an export is a hand-off, the system copies
+what it needs the moment a destination is picked, and what is left behind is a duplicate of a
+conversation the gateway already has. `document` is backed up and, with file sharing on, visible in
+Files for ever.
+
+The browser half makes a `Blob`, hands its object URL to the same seam, and revokes it on a timer
+rather than in the same tick — revoking immediately races Safari's own read of the blob and lands as
+a download of zero bytes.
+
+### What is exported is what is on screen
+
+`chat.items` has already been through the verbosity filter, the bot-to-bot toggle and the thinking
+toggle, and that list is what the serializer is handed. A chat set to Quiet exports the quiet
+conversation. The alternative — exporting the full state — would hand somebody a file containing
+rows their own settings have been hiding from them, which is a worse surprise than a short file.
+
+The serializer itself is pure and lives in `@hermie/transcript`, so it is vitest rather than jest.
+Two things it deliberately does not do: it does not strip a reply's Markdown for the `.txt` file,
+because those are the author's characters and an export must not edit what it preserves; and it does
+not format a timestamp, because a file saved on this device should read in this device's clock and
+the package has no business knowing what that is — the caller passes a formatter in.
+
+### What is not covered
+
+- **Neither seam has been run on a device or in a browser.** The jest cases drive the rows and the
+  verb; whether an iPad's share sheet accepts a `text/markdown` file from the cache directory, and
+  whether a browser's download honours the name for an object URL, are both unverified here.
+- **There is no entry in the message context menu.** The brief offered "message menu / chat options";
+  the options sheet is where a whole-conversation action belongs, and a per-message row that exported
+  the whole chat would be a menu line about something other than the message it was opened on.
+
+### A disabled menu line says something a missing one cannot
+
+`Edit and resend` and `Regenerate` both put a new turn on the gateway, so neither can be taken while
+one is already running. The obvious implementation is to leave them out of the menu for the
+duration — and it is wrong for the same reason a control that appears and disappears is worse than
+one that greys: a reader who opens the menu mid-turn and sees nothing learns that the feature does
+not exist on this row, and stops looking. A greyed line says "not now".
+
+So `turnRunning` disables rather than filters, and the guard is repeated at the tap. Three paths meet
+there and only one of them is UIKit's: a `UIMenu` will not fire a disabled item, but the fallback
+sheet draws a flat list, a keyboard can reach a row, and the turn can start between the menu opening
+and the selection landing.
+
+### `Regenerate` takes the gateway's road where there is one
+
+`/retry` goes down `chat-controller.runSlash`, the same path every other command takes — same
+directive handling, same notices, same failure reporting. The gateway knows what the turn was and
+re-runs it, so the conversation gains a reply and not a second copy of the prompt that produced it.
+
+Where the catalogue does not carry `/retry` — an older gateway, a profile without the command — the
+fallback sends the reader's previous prompt again. Not the newest row: a cron delivery and an inbound
+bot message both land on the user role, and repeating one of those would be repeating somebody else's
+words. A conversation with no prompt of the reader's own in the visible list refuses and says so,
+which is better than sending something that was never asked for.
+
+The catalogue is the one the composer's autocomplete already reads, and a catalogue that has not
+arrived yet answers "no" — the safe direction, because the fallback works everywhere and `/retry` is
+an optimisation on it.
+
+### What is not covered
+
+- **Neither line has been selected against a real gateway.** `/retry` exists in the vendored contract
+  and in upstream's command list; whether a given profile's catalogue carries it, and what its
+  directive answers with, is unverified here. If it answers with a `send` directive the slash path
+  already handles that — but nobody has watched it.
+- **`Edit and resend` puts the references back as TEXT.** A turn holds `@file:` and `@image:`
+  directives and `stripUserText` lifts them out of the body, so appending them to the draft is the
+  round trip. It has not been driven through the composer's own chip rendering, and an image comes
+  back as a chip rather than a thumbnail because the bytes are long gone from this device.
+- **`Copy as Markdown` was already there** and is unchanged. It is still hidden on a message whose
+  markdown and whose words are the same string, which is deliberate — two identical Copy lines read
+  as a bug — and the brief's "add it next to the existing copy" was already satisfied.

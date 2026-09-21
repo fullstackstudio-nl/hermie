@@ -39,8 +39,19 @@
  *
  * That one is marked being faithful to GFM, and GFM being wrong for a chat app.
  * See `restrictStrikethroughToDoubleTilde` below.
+ *
+ * ## 3. Mathematics, which the lexer would otherwise eat
+ *
+ * `$…$` and `$$…$$` are registered as real tokens here rather than masked in
+ * `preprocess.ts`, so `a_i` stops opening emphasis and `\\` stops being an
+ * escape. `math/marked-math.ts` holds the two tokenizers and the rules that keep
+ * a price out of them; this is only where they are attached, because attaching
+ * them anywhere else would put a second import of `marked` in front of the two
+ * rewrites above.
  */
 import { Lexer, marked } from 'marked'
+
+import { mathExtensions } from './math/marked-math'
 
 /**
  * marked's code-run construct: an opening run of backticks, content, the SAME
@@ -171,8 +182,24 @@ export function restrictStrikethroughToDoubleTilde(): void {
   }
 }
 
+/**
+ * Attach the two math tokenizers to the default instance.
+ *
+ * The default instance is what `marked.lexer` reads, and `marked.lexer` is what
+ * every surface in this folder calls — the renderer, the block splitter and the
+ * selectable flattening — so one registration covers all three and they cannot
+ * disagree about where an expression begins.
+ *
+ * Idempotent in the only sense that matters here: this module is evaluated once,
+ * and `marked.use` appends, so it must not be called from anywhere else.
+ */
+export function registerMathTokenizers(): void {
+  marked.use({ extensions: mathExtensions as never })
+}
+
 patchBackreferencedCodeRuns()
 restrictStrikethroughToDoubleTilde()
+registerMathTokenizers()
 
 export { marked }
 export type { Token, Tokens } from 'marked'

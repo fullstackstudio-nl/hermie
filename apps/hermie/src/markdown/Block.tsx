@@ -14,6 +14,9 @@ import { CodeBlock } from './CodeBlock'
 import { Inline } from './Inline'
 import { OverflowScroll } from './OverflowScroll'
 import { MONOSPACE, type MarkdownContext } from './context'
+import { BlockMath } from './math/Math'
+import { MATH_BLOCK_TOKEN, type MathToken } from './math/marked-math'
+import { MERMAID_LANGUAGE, MermaidDiagram } from './mermaid/Mermaid'
 
 const HEADING_SCALE = [1.5, 1.32, 1.18, 1.08, 1, 0.94]
 
@@ -233,9 +236,21 @@ function BlockToken({ token, context }: { token: Token; context: MarkdownContext
 
     case 'code': {
       const code = token as Tokens.Code
+      const language = code.lang?.split(/\s/)[0] || undefined
 
-      return <CodeBlock code={code.text} context={context} language={code.lang?.split(/\s/)[0] || undefined} />
+      // A `mermaid` fence is a picture rather than a listing. The diagram
+      // renderer answers with the same fenced listing when it cannot draw the
+      // source, so an unsupported or malformed diagram is still readable — see
+      // ADR-0020.
+      if (language?.toLowerCase() === MERMAID_LANGUAGE) {
+        return <MermaidDiagram context={context} source={code.text} />
+      }
+
+      return <CodeBlock code={code.text} context={context} {...(language ? { language } : {})} />
     }
+
+    case MATH_BLOCK_TOKEN:
+      return <BlockMath context={context} source={(token as MathToken).text} />
 
     case 'blockquote':
       return (

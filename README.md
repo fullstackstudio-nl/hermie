@@ -60,6 +60,14 @@ no third-party network call. The only address Hermie knows is the one you typed.
   and — if you ask for it — the arguments and the result. Three verbosity levels
   decide how much of that is on screen, and it is a view setting, so switching it
   never changes what the gateway does.
+- **Diagrams and mathematics in the reply.** A ` ```mermaid ` flowchart is
+  drawn as a picture in the bubble, and `$…$` / `$$…$$` is set as mathematics
+  rather than printed as LaTeX. Both are drawn in the app itself — no web view,
+  no fonts to download — so a diagram never resizes its own row after you have
+  started reading around it. A diagram type or a command outside the supported
+  subset falls back to the source in a code block, which is still readable and
+  still copyable. [ADR-0020](docs/adr/0020-diagrams-and-math-without-a-webview.md)
+  says which subset, and why it is one.
 - **Bot-to-bot, visible.** A message one bot sends another shows up in both
   conversations, the reply is folded into the message that caused it, and
   **Activity** is one timeline of all of it across every bot.
@@ -80,6 +88,20 @@ no third-party network call. The only address Hermie knows is the one you typed.
   chats archive, and each one can carry its own colour. None of it is sent to the
   gateway: the arrangement is yours and it is per gateway, because a different
   machine's bots are a different list.
+- **Every message has a menu.** Copy the words or the Markdown, copy any link in
+  it, open the other bot's chat, and — on one of your own turns — put it back in
+  the composer to send again. On the newest reply, ask for it again: that goes
+  through the gateway's own `/retry` where it has one, and re-sends your last
+  prompt where it does not. Both are greyed rather than hidden while a turn is
+  running.
+- **Take the conversation with you.** Export a chat as Markdown or plain text,
+  into the share sheet on a phone or the Mac and as a download in a browser. What
+  you get is what is on screen: a chat you have set to Quiet exports the quiet
+  conversation.
+- **How much room is left.** The chat's options say how full the session's
+  context window is — a ring, the percentage and both counts — refreshed as the
+  conversation grows. A gateway that does not report a window size simply does
+  not show the row.
 - **Offline-tolerant.** The last stretch of every conversation is cached, so a
   chat paints before the gateway answers and is still readable on a plane.
 - **Widgets.** A home-screen widget for one chat — avatar, name, bead and the

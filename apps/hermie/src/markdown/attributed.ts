@@ -47,6 +47,7 @@
  * mapping without a renderer.
  */
 import { marked, type Token, type Tokens } from './marked-compat'
+import { MATH_BLOCK_TOKEN, MATH_INLINE_TOKEN, type MathToken } from './math/marked-math'
 import { preprocessMarkdown } from './preprocess'
 
 /**
@@ -206,6 +207,20 @@ function walkInline(tokens: Token[] | undefined, block: RunBlock, inherited: Inh
         out.push((token as Tokens.Codespan).text, block, { ...inherited, mono: true })
         break
 
+      /*
+        Mathematics selects as its SOURCE, in the monospace run a code span gets.
+
+        The drawn expression is glyphs chosen by `linear.ts` — `x²` for `x^2`,
+        `(a+b)/c` for a fraction — and a reader who selects an equation out of a
+        reply is nearly always taking it somewhere that speaks LaTeX. Handing
+        them `x²` there would be handing them something they cannot paste back.
+        The delimiters are kept for the same reason: `$x^2$` round-trips into
+        another document and `x^2` does not.
+      */
+      case MATH_INLINE_TOKEN:
+        out.push((token as MathToken).raw, block, { ...inherited, mono: true })
+        break
+
       case 'link': {
         const link = token as Tokens.Link
 
@@ -315,8 +330,19 @@ function walkBlocks(tokens: Token[], inheritedBlock: RunBlock, out: RunBuilder, 
       case 'code':
         // Verbatim, with its own newlines: the whole point of a fence is that
         // what is inside it is not markup, and a copy has to give it back
-        // character for character.
+        // character for character. A `mermaid` fence is drawn as a picture in
+        // the bubble and there is no picture on this surface, so it selects as
+        // the diagram source — which is the one thing a reader could paste into
+        // a tool that draws it.
         out.push((token as Tokens.Code).text, 'code')
+        out.break('code', separator)
+        break
+
+      // A block expression, as the LaTeX between its delimiters. `code` rather
+      // than `body` for the same reason a fence is: it is source, and it is read
+      // character by character.
+      case MATH_BLOCK_TOKEN:
+        out.push((token as MathToken).text.trim(), 'code')
         out.break('code', separator)
         break
 

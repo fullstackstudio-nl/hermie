@@ -42,7 +42,8 @@ import type {
   PendingApproval,
   SessionLiveInfo,
   SessionResumeResult,
-  SlashExecResult
+  SlashExecResult,
+  Usage
 } from '@hermes/shared/gateway-contract'
 import type { ServerRequest as GatewayServerRequest } from '@hermes/shared/json-rpc-channel'
 import { parseCommandDispatch, parseSlashCommand } from '@hermes/shared/slash'
@@ -253,6 +254,17 @@ export class ChatController {
   /** The gateway's model inventory, read once per connection. */
   private models: ModelChoice[] | null = null
   private modelsInFlight: Promise<ModelChoice[]> | null = null
+
+  /**
+   * Whether `session.usage` is worth calling on this connection.
+   *
+   * Set false by the gateway's own refusal and never set back: a method a
+   * gateway does not have is not going to appear while the socket is up, and
+   * asking again per chat would turn one absent capability into one failed RPC
+   * per conversation the reader opens. A fresh connection builds a fresh
+   * controller, which is where it becomes true again.
+   */
+  private usageSupported = true
 
   /** Live server→client requests, by JSON-RPC request id, so a card can answer. */
   private readonly pending = new Map<string, PendingRequest>()
@@ -2525,6 +2537,59 @@ export class ChatController {
     })
 
     return info
+  }
+
+  /**
+   * Ask the gateway how full this session's context window is.
+   *
+   * Nearly always unnecessary, and that is the shape of it: the reducer already
+   * folds `session.usage` ticks and the `usage` on `message.complete` into
+   * `ChatState.usage`, so a chat that has run a turn since it was opened is
+   * already current. This covers the other case — a chat resumed and not yet
+   * spoken to, whose `session.resume` answered without `info.usage`.
+   *
+   * **Capability-gated by the gateway's own refusal**, not by a version test. A
+   * gateway that does not know the method answers an error once, that is
+   * remembered for the life of the connection, and nothing asks again; the
+   * caller sees `null` and the surfaces draw nothing. A missing method is not a
+   * fault a reader should be told about, which is why this answers `null` rather
+   * than throwing — but it is still recorded in the RPC failure ring, because a
+   * swallowed error that nothing anywhere admits to is the defect
+   * `rpc-failures.ts` was written for.
+   */
+  async refreshUsage(botName: string): Promise<Usage | null> {
+    const chat = this.chats.getState().chats[botName]
+    const sessionId = chat?.runtimeSessionId
+
+    if (!sessionId || !this.usageSupported) {
+      return null
+    }
+
+    let usage: Usage
+
+    try {
+      usage = (await this.gateway.request('session.usage', {
+        session_id: sessionId,
+        profile: botName
+      })) as Usage
+    } catch (error) {
+      this.usageSupported = false
+      this.noteRpcFailure('session.usage', error)
+
+      return null
+    }
+
+    if (!usage || typeof usage !== 'object') {
+      return null
+    }
+
+    this.chats.getState().dispatchEvent(botName, {
+      type: 'session.usage',
+      session_id: sessionId,
+      payload: { usage } as unknown as Record<string, unknown>
+    })
+
+    return usage
   }
 
   // ── approvals while a turn runs ────────────────────────────────────────────

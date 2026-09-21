@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Edit and resend, and Regenerate.** A message's own menu gains two lines that start a turn: on one
+  of your own turns, **Edit and resend** puts the text back in the composer with the attachment
+  references it carried — the turn already in the conversation stays exactly where it is, which is
+  why the line says "and resend" rather than "Edit"; and on the newest reply, **Regenerate** asks for
+  it again. Regenerate takes the gateway's own `/retry` down the ordinary slash path where the
+  catalogue has it, so the conversation gains a reply rather than a second copy of the prompt, and
+  falls back to sending the previous prompt again where it does not — which is what a reader would do
+  by hand, and honest about there now being two turns. Both are **drawn disabled while a turn is
+  running** rather than disappearing, because a line that vanishes for the length of every turn is a
+  line nobody believes in, and both refuse at the tap as well. Regenerate is offered on the last
+  reply only: appending an answer to a question three turns back would be worse than no line at all.
+
+- **Export a conversation.** The chat's options sheet offers the transcript as a Markdown file or as
+  plain text, handed to the share sheet on the phones and the Mac and downloaded in a browser. Both
+  formats are offered because neither is a default: a `.md` is for somewhere that renders it and a
+  `.txt` is for somewhere that does not. **What is exported is what is on screen** — the verbosity
+  filter, the bot-to-bot toggle and the thinking toggle have already been applied, so a chat set to
+  Quiet exports the quiet conversation rather than handing somebody rows they have not read. Tool
+  calls, notices, permission requests and bot-to-bot lines are written as asides rather than
+  attributed to a speaker; the transient one-liners are left out, because a file of things that are
+  no longer true is not a record. A reply's own Markdown survives into the plain-text file untouched:
+  those are the author's characters, and an export must not quietly edit what it is preserving.
+
+- **How full the context window is, in the chat.** The options sheet gains a read-only row with a
+  ring, the percentage and both counts — `82% · 164k / 200k` — and the bot profile's read-only block
+  says the same thing in words. It follows the live `session.usage` ticks and the usage on
+  `message.complete`, so it is current after every turn without anything polling, and opening either
+  sheet asks the gateway once for the chat that resumed and has not been spoken to yet.
+  **A gateway that does not report a window size gets one fewer row and nothing else** — no error, no
+  ring at zero, and one refused call per connection rather than one per conversation. There is
+  deliberately no table of model context sizes behind the figure: a table like that is a promise
+  about somebody else's product, and when it goes stale it tells a reader they have room they do not
+  have.
+
+- **Diagrams and mathematics are drawn, not printed.** A ```` ```mermaid ```` fence is a picture in
+  the bubble and `$…$` / `$$…$$` is set as mathematics, on every platform, with no web view and no
+  downloaded fonts — which is the whole of the decision rather than an implementation note. A
+  renderer that learns its own size a frame late moves the reader on an inverted list by exactly the
+  correction, so the geometry is computed from the label text and the font size before the row
+  mounts, and `$$…$$` joins tables and fenced code as a block the reading fold will not cut through.
+  The supported subset is `flowchart` / `graph` in all four directions with the common node shapes
+  and edge kinds, and the LaTeX a chat agent actually writes: symbols, scripts, fractions, roots and
+  the big operators with their limits. **Anything outside it falls back to the source in a code
+  block** — a `sequenceDiagram`, a `subgraph`, `\begin{matrix}`, or a fence that has only half
+  arrived — because a picture that quietly leaves out what the author asked for is worse than the
+  text it was made from. Mathematics also selects and copies as its source, delimiters included, so
+  an equation dragged out of a reply on a Mac pastes back into something that understands it.
+  [ADR-0020](docs/adr/0020-diagrams-and-math-without-a-webview.md).
+
 ### Fixed
 
 - **A slash list that cannot load says so instead of showing nothing.** Typing `/` against a gateway

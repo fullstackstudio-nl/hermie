@@ -104,15 +104,22 @@ export function markdownLeading(fontSize: number): number {
 }
 
 /**
- * A block a fold must not cut through: a fenced code block, or a table.
+ * A block a fold must not cut through: a fenced code block, a table, or a
+ * displayed equation.
  *
  * Cheap and deliberately shallow — it runs per block, not per delta, and the
  * cost of a false positive is one block faded whole instead of clipped.
+ *
+ * A `$$…$$` block is here for the same reason the other two are, and it is the
+ * strongest case of the three: half a fraction under a gradient is not a fraction
+ * that fades out, it is a numerator with no denominator — which SAYS something,
+ * and says the wrong thing. A `mermaid` fence is already covered by the fence
+ * test above, because a diagram is still a fenced block in the source.
  */
 function isAtomicBlock(raw: string): boolean {
   const text = raw.trim()
 
-  if (text.startsWith('```') || text.startsWith('~~~')) {
+  if (text.startsWith('```') || text.startsWith('~~~') || text.startsWith('$$')) {
     return true
   }
 

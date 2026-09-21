@@ -210,6 +210,22 @@ export const chatStrings = {
      * see `SelectTextOverlay` and `src/markdown/attributed.ts`.
      */
     selectText: 'Select text',
+    /**
+     * On your own turn: put it back in the field, cursor and all.
+     *
+     * "and resend" rather than "Edit": nothing is edited in place. The turn that
+     * is already in the conversation stays exactly where it is, and what this
+     * does is start a new one from the same words — which is the whole
+     * difference between this and what a reader might reasonably expect from a
+     * line called "Edit".
+     */
+    editResend: 'Edit and resend',
+    /** On the last reply: ask for it again. */
+    regenerate: 'Regenerate',
+    /** A turn is running, so neither turn-starting line can be taken. */
+    turnRunning: 'Wait for the current turn to finish.',
+    /** Regenerate was asked for in a conversation with no prompt to repeat. */
+    nothingToRegenerate: 'There is no message here to send again.',
     /** What a screen reader announces the menu itself as. */
     message: 'Message actions'
   },
@@ -372,6 +388,45 @@ export const chatStrings = {
     previous: 'Back',
     multiSelectHint: 'Choose as many as apply'
   },
+  /**
+   * The context-window reading, wherever it is shown.
+   *
+   * Its own group rather than a corner of `options`, because two surfaces draw
+   * it — the chat's options sheet and the bot profile's read-only block — and a
+   * string that lives under one of them would read as belonging to that one.
+   */
+  context: {
+    /** The row's label in a sheet. */
+    label: 'Context used',
+    /** Under the label: what the number is actually measuring. */
+    hint: 'How much of this session\u2019s context window the conversation fills.',
+    percent: (percent: number) => `${percent}%`,
+    counts: (used: string, limit: string) => `${used} / ${limit}`,
+    /** Appended when the gateway flagged its own count as approximate. */
+    estimated: '(estimated)'
+  },
+
+  /** Taking the conversation out of the app as a file. */
+  export: {
+    /** The group's heading in the options sheet. */
+    header: 'EXPORT',
+    /**
+     * Two verbs, because the action really is two things: a phone opens the
+     * share sheet and a browser can only download. The same rule the image
+     * viewer's button already follows.
+     */
+    shareMarkdown: 'Share as Markdown',
+    downloadMarkdown: 'Download as Markdown',
+    shareText: 'Share as plain text',
+    downloadText: 'Download as plain text',
+    /** Under the two rows: what a file will and will not contain. */
+    hint: 'The conversation as it is on screen, with whatever this chat\u2019s view settings hide left out.',
+    /** How the reader's own turns are labelled in the file. */
+    self: 'You',
+    /** The file could not be written or the sheet would not open. */
+    failed: 'The conversation could not be exported.'
+  },
+
   options: {
     eyebrow: 'This chat',
     colourHint: 'Tints this chat\u2019s avatar ring, its row in the list and the messages you send.',

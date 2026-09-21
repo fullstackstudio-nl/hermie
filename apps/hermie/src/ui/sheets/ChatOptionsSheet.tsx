@@ -13,15 +13,17 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Pressable, View } from 'react-native'
 
-import { prettyModelName } from '@hermie/transcript'
+import { prettyModelName, type ContextUsage } from '@hermie/transcript'
 
+import { ContextMeter } from '../../chat-ui/ContextMeter'
 import { chatStrings } from '../../chat-ui/strings'
 import type { PickerOption, Verbosity } from '../../chat-ui/types'
 import { formatMuteUntil, MUTE_DURATIONS, MUTE_FOREVER, muteUntil, type MuteDuration } from '../../store/mute'
 import { strings } from '../../i18n/strings'
 import { AccentSwatches } from '../AccentSwatches'
 import { BottomSheet, SheetEyebrow, SheetPage } from '../BottomSheet'
-import { Button, InsetGroup, Text, TextField } from '../primitives'
+import { SHARE_FILE_VERB } from '../../platform/share-text'
+import { Button, InsetButtonRow, InsetGroup, Text, TextField } from '../primitives'
 import { useTheme } from '../theme'
 import { TAP_SLOP, type AccentName } from '../tokens'
 import { useEscapeKey } from '../useEscapeKey'
@@ -73,6 +75,26 @@ export interface ChatOptionsSheetProps {
   mutedUntil: number | null
   /** `null` unmutes; a number is the second the silence lapses, `0` for never. */
   onChangeMute: (until: number | null) => void
+
+  /**
+   * How full this session's context window is, or nothing.
+   *
+   * Absent means the gateway did not report a window size, and the row is then
+   * not drawn at all — not drawn empty, and never drawn as an error. A gateway
+   * without `session.usage` is a gateway with one fewer row in this sheet, which
+   * is the whole of the capability gate.
+   */
+  contextUsage?: ContextUsage | null
+
+  /**
+   * Write the conversation out as a file and hand it to the platform.
+   *
+   * The sheet does not build the file: it has the transcript nowhere near it,
+   * and the serializer is a pure function in `@hermie/transcript` that the
+   * screen owns. Absent removes the group, which is what a surface with no
+   * transcript behind it — the developer gallery — gets.
+   */
+  onExport?: (format: 'md' | 'txt') => void
 
   verbosity: Verbosity
   onChangeVerbosity: (value: Verbosity) => void
@@ -218,6 +240,42 @@ function PickerPane({
         ))}
       </InsetGroup>
     </Page>
+  )
+}
+
+/**
+ * The context-window row.
+ *
+ * Not a `DisclosureRow` and not pressable: there is nowhere for it to go. A row
+ * that looks like the four above it and does nothing when tapped is worse than a
+ * row that plainly does not invite one, so it carries no chevron and no press
+ * state.
+ */
+function ContextRow({ usage }: { usage: ContextUsage }) {
+  const theme = useTheme()
+
+  return (
+    <View
+      style={{
+        alignItems: 'center',
+        flexDirection: 'row',
+        gap: theme.space.sm,
+        minHeight: 44,
+        paddingHorizontal: theme.space.lg,
+        paddingVertical: theme.space.sm
+      }}
+      testID="option-context"
+    >
+      <View style={{ flex: 1 }}>
+        <Text>{chatStrings.context.label}</Text>
+        {usage.estimated ? (
+          <Text color="textMuted" variant="meta">
+            {chatStrings.context.estimated}
+          </Text>
+        ) : null}
+      </View>
+      <ContextMeter detail usage={usage} />
+    </View>
   )
 }
 
@@ -444,6 +502,13 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
               testID="option-mute"
               value={muteLabel}
             />
+            {/*
+              Read-only, and the only row here that is. Everything else in this
+              group is a decision the reader makes; this is a fact they check one
+              of those decisions against — whether there is room for another long
+              turn before the session has to compact.
+            */}
+            {props.contextUsage ? <ContextRow usage={props.contextUsage} /> : null}
           </InsetGroup>
 
           {/*
@@ -480,6 +545,32 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
               value={props.showThinking}
             />
           </InsetGroup>
+
+          {props.onExport ? (
+            <InsetGroup footer={chatStrings.export.hint} header={chatStrings.export.header}>
+              {/*
+                Two formats rather than one, and neither is a default. A
+                Markdown file is for somewhere that renders it and a .txt is for
+                somewhere that does not, and guessing which a reader meant is
+                the same mistake offering only one Copy line would be — which is
+                the argument `message-menu.ts` already makes about exactly this.
+              */}
+              <InsetButtonRow
+                onPress={() => props.onExport?.('md')}
+                testID="option-export-markdown"
+                title={
+                  SHARE_FILE_VERB === 'download'
+                    ? chatStrings.export.downloadMarkdown
+                    : chatStrings.export.shareMarkdown
+                }
+              />
+              <InsetButtonRow
+                onPress={() => props.onExport?.('txt')}
+                testID="option-export-text"
+                title={SHARE_FILE_VERB === 'download' ? chatStrings.export.downloadText : chatStrings.export.shareText}
+              />
+            </InsetGroup>
+          ) : null}
 
           {props.viewOverridden && props.onResetView ? (
             <Button
