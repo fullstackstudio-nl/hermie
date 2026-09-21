@@ -59,3 +59,28 @@ export interface PickedFileSource {
   mimeType: string | null
   body: unknown
 }
+
+/**
+ * The shared container the home-screen widgets read out of.
+ *
+ * A widget is a separate process with its own sandbox, so nothing the app
+ * writes into its own container is visible to one. Everything below writes into
+ * the place both sides can reach — an App Group container on Apple platforms, a
+ * named `SharedPreferences` file plus the app's files directory on Android —
+ * and then asks the platform to redraw.
+ *
+ * Every method answers `false` rather than throwing when there is nowhere to
+ * write. A home screen with no widget on it is the normal case, the web and the
+ * Jest environment have no container at all, and none of that is a reason for a
+ * message not to arrive.
+ */
+export interface WidgetBridge {
+  /** Whether this platform has a shared container at all. */
+  readonly available: boolean
+  /** Replace the snapshot file and ask the platform to reload every timeline. */
+  writeSnapshot(json: string): Promise<boolean>
+  /** Put one PNG in the container, as raw base64 with no data-URL prefix. */
+  writeAvatar(botName: string, base64: string): Promise<boolean>
+  /** Delete every avatar whose bot is not in `keep`. Answers how many went. */
+  pruneAvatars(keep: readonly string[]): Promise<number>
+}

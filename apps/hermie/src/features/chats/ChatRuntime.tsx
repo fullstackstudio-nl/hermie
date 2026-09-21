@@ -19,6 +19,7 @@ import { useChatsStore } from '../../store/chats'
 import { useSettingsStore } from '../../store/settings'
 import { UiMetaBridge } from '../../store/ui-meta-bridge'
 import { BotsController } from '../bots/bots-controller'
+import { WidgetSync } from '../widgets'
 import { ChatController } from './chat-controller'
 
 export interface ChatRuntimeValue {
@@ -26,6 +27,8 @@ export interface ChatRuntimeValue {
   bots: BotsController
   /** ADR-0016's settings sync. Local-only until a gateway takes a write. */
   uiMeta: UiMetaBridge
+  /** Writes the file the home-screen widgets read. No-op where there is none. */
+  widgets: WidgetSync
   /** The connection, as the slice everything in here is written against. */
   gateway: ChatGateway
 }
@@ -80,6 +83,13 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       gateway: { request: (method, params) => gateway.request(method as 'profiles.list', params) }
     })
     const stopWatching = uiMeta.start()
+    // Built with the connection for the same reason the bridge above is: the
+    // roster and the open chats are emptied when a connection goes, and a sync
+    // that outlived one would keep writing the previous gateway's bots onto the
+    // home screen. It reads stores rather than the socket, so it needs no
+    // gateway of its own — only to be told when that socket is usable.
+    const widgets = new WidgetSync()
+    const stopWidgets = widgets.start()
 
     const controller = new ChatController({
       gateway,
@@ -97,7 +107,7 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     // READY; see below.
     void bots.paintFromCache()
 
-    const next = { controller, bots, uiMeta, gateway }
+    const next = { controller, bots, uiMeta, widgets, gateway }
     valueRef.current = next
     setValue(next)
 
@@ -105,6 +115,7 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       controller.stop()
       bots.dispose()
       stopWatching()
+      stopWidgets()
       valueRef.current = null
     }
     // `http` is built with the connection and handed out as a ref, like the
@@ -141,6 +152,20 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     // roster: `hermie-app` lives on the default profile, and which profile that
     // is comes out of `profiles.list`.
     void value.uiMeta.reconcile().catch(() => undefined)
+  }, [status, value])
+
+  /**
+   * Tell the widget sync whether the socket is usable.
+   *
+   * Its own effect rather than a line in the one above, because that one fires
+   * on the RISING edge only — it guards on `wasReady` so a reconnect does not
+   * re-read the roster twice — and a widget has to hear about the falling edge
+   * as well. `presenceOf` turns an unusable gateway into `offline` for every
+   * bot, and four green dots for a gateway the phone cannot reach is the one
+   * lie a surface nobody can tap through is not allowed to tell.
+   */
+  useEffect(() => {
+    value?.widgets.setGatewayReady(status === 'ready')
   }, [status, value])
 
   /**
@@ -185,7 +210,16 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
 
       if (state === 'active') {
         void runtime.controller.onForeground()
+        // The reader has just come back from the home screen they were looking
+        // at, so the next thing worth doing is making what they saw there true.
+        runtime.widgets.resume()
       } else if (state === 'background') {
+        // FIRST in this branch, before anything that could tear a socket down:
+        // this writes the widget file while the gateway is still the
+        // foreground's, and then stops writing. See `WidgetSync.pause` for the
+        // four grey beads that cost.
+        runtime.widgets.pause()
+
         if (!RUNS_ON_MAC) {
           runtime.controller.onBackground()
         }
