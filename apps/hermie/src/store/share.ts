@@ -52,9 +52,23 @@ export function pendingSharesFor(waiting: readonly PendingShare[], botName: stri
   return waiting.filter(share => share.bot === botName).length
 }
 
-/** The entries nobody has picked a chat for yet — Android's `ACTION_SEND` path. */
+/**
+ * The entries the picker has to ask about.
+ *
+ * Two shapes, and the second was added by ADR-0026:
+ *
+ *  - **No bot.** Android's `ACTION_SEND` path: the system's chooser picked
+ *    Hermie, not a chat, so nobody has said where this goes.
+ *  - **A claim.** An entry a share extension got as far as submitting without
+ *    hearing back. It names a bot, and it still needs a person — see
+ *    `SHARE_CLAIM_FILE` for why neither sending nor dropping it is safe.
+ *
+ * Both are "this is waiting on a human", which is what the picker means, and
+ * folding them together here rather than at the sheet keeps the sheet
+ * presentational.
+ */
 export function unassignedShares(waiting: readonly PendingShare[]): PendingShare[] {
-  return waiting.filter(share => !share.bot)
+  return waiting.filter(share => !share.bot || share.claim)
 }
 
 /** The badge's number for one row. Selected as a number so a row re-renders once. */

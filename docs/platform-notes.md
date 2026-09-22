@@ -8355,6 +8355,140 @@ the owner's call rather than a build agent's.
   would drop that write and leave a folder widget stale for exactly the case it was configured to
   watch.
 
+### The share sheet now delivers by itself (2026-09-22, round R25b)
+
+The first version of this feature did exactly what ADR-0023 said: write the entry, ask the system to
+open the app, deliver at the next launch. The owner tested it and rejected it in one sentence — _the
+agent only does something with it once the app is open_ — so the extension now attempts the delivery
+itself. [ADR-0026](adr/0026-the-share-sheet-may-deliver.md) is the successor record ADR-0023 asked
+for if this ever became necessary; this is the contract, which is the part somebody debugging a share
+that did not arrive needs.
+
+**The ladder, in order, and who owns the entry at each moment.**
+
+| Step | Owner         | What happens                                                                | If it fails                                            |
+| ---- | ------------- | --------------------------------------------------------------------------- | ------------------------------------------------------ |
+| 1    | the extension | `share-outbox/<id>/` is written: files, then `manifest.json`, atomically    | The share is abandoned and reported as a cancellation  |
+| 2    | the app       | `hermie.share.delivery` is read from the keychain                           | Queue. Nothing has been touched                        |
+| 3    | the app       | `share-targets.json` gives the bot's session id; its gateway key must match | Queue                                                  |
+| 4    | the gateway   | `POST /api/auth/ws-ticket`, gated gateways only, background `URLSession`    | Queue                                                  |
+| 5    | the gateway   | `session.resume` on that session id, for the runtime id and `info.cwd`      | Queue                                                  |
+| 6    | the gateway   | `POST /api/files/upload-stream` per file, background `URLSession`           | Queue. Uploaded bytes are orphaned; see below          |
+| 7    | the extension | `claim.json` is written inside the entry                                    | Queue, and the pre-ADR-0026 gap is back for this share |
+| 8    | the gateway   | `prompt.submit` with the note, the links and the `@file:` tokens            | The entry stays CLAIMED; the app asks a person         |
+| 9    | the extension | The entry is removed                                                        | The entry stays claimed; the app asks a person         |
+
+"Queue" means one thing everywhere in that table: the entry is left exactly as step 1 wrote it, the
+sheet says _Will send when Hermie opens_, and the extension asks the system to open the app — the
+behaviour this feature had before, unchanged. On success the app is **not** opened; the message is
+already in the chat.
+
+**Who owns the entry.** The extension owns it from step 1 until step 9, and the app never looks while
+a sheet is up because the two processes do not run at once — the app is not running, which is the
+whole point. After the sheet closes the entry is the app's, and the claim is the only thing that
+changes what the app does with it: `ShareDelivery` delivers an unclaimed entry and refuses a claimed
+one, whatever bot it names. A claimed entry goes to the in-app picker with _This may already have
+been sent to <bot>_ and two buttons, because the claim records that the gateway was handed the
+message and says nothing about whether it took it. Sending it again would duplicate; dropping it
+would lose. Neither is a program's decision.
+
+**The auth matrix, which is the honest limit of this feature.**
+
+| Gateway                 | From the share sheet                               | Why                                                                                                 |
+| ----------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Session token (ungated) | Works indefinitely                                 | The token is revoked or it is not. Nothing expires, so nothing has to be refreshed                  |
+| OIDC / native PKCE      | Works while the stored access token is still valid | The extension must not refresh, for the reason below. `expiresAt` is checked with a minute of slack |
+| Cookie (web)            | Not applicable                                     | The credential is an `HttpOnly` cookie in a browser's jar, and the web build has no extension       |
+
+The OIDC gap is the one to know about, and it is not a bug that can be fixed here. **An extension
+that could refresh would be an extension that can sign the app out**: on a provider with
+refresh-token rotation the app's stored refresh token dies the moment another process spends it, and
+on one with reuse detection presenting the dead one revokes the session. So the record the app
+publishes carries the access token and never the refresh token, and a share made more than an hour
+after the app last ran or refreshed is queued. On a gateway whose provider issues a long-lived access
+token the window is correspondingly longer; nothing in the client decides that.
+
+**What the app had to start writing.** Two things, and the split between them is the point:
+
+- `share-targets.json`, in the App Group container: `{bot, session}` per bot, the active gateway's
+  key, and the sheet's two sentences already translated. Written by `useShareTargetSync`, mounted
+  inside `ShareTargetHost` — the one component that exists for the whole life of the app and is
+  mounted exactly once. Nothing in it is secret, and the session id is the DURABLE registry id the
+  app itself resolved, so the extension never has to work out which conversation a bot is.
+- `hermie.share.delivery`, in the keychain: address, extra headers (front door included), auth mode,
+  the credential and its deadline. In the keychain and not the container because the container is a
+  plain directory every binary in the group can read. It is written at the end of
+  `saveGatewayRegistry`, republished at the end of every token rotation, and deleted by
+  `clearCredentials` — guarded by gateway id, so signing out of a gateway nobody is using cannot
+  silently stop the active one's sheet from sending.
+
+**Two things the sheet will not attempt.**
+
+- **An image.** A shared image travels as resized bytes over the socket, which is what puts it in the
+  transcript; resizing a photograph is the work a share extension is killed for, and an image
+  uploaded as a file and referenced with `@file:` is a binary the agent cannot read. An entry
+  carrying one is queued, with the same sentence as every other queue. A link or a document sends.
+- **A retry.** One attempt, then the entry is the app's. A share sheet that retried would be a share
+  sheet holding somebody's phone.
+
+**An orphan is possible and is harmless.** If step 8 fails after step 6 succeeded, the uploaded bytes
+are on the gateway under `<cwd>/uploads/hermie/<date>/` and nothing references them; the app then
+uploads its own copies when it delivers the entry. That is a few kilobytes in a dated folder that can
+be cleared by age, against the alternative of deleting a file this process cannot prove nothing else
+is using.
+
+**There is no Android half of this.** Android's chooser starts `MainActivity` with an `ACTION_SEND`
+intent, so the app is already coming up by the time the share exists and the owner's complaint has no
+equivalent — what Android has instead is that the app takes over the screen. Matching iOS would mean
+a transparent share activity of our own taking the intent filters off `MainActivity`, a WorkManager
+job, and a WebSocket client in Kotlin, because there is no REST route that submits a prompt and a
+worker therefore cannot finish over HTTP. That is a second platform's UI decision rather than a port
+of this one and it is not built. `writeShareTargets` answers `false` there and `HermieShareStore`
+reads a claim it never writes, so the file format means one thing on both platforms.
+
+### The share delivery could not be verified here; these are the steps
+
+Nothing in the ladder above has run against a gateway. There is no signed-in gateway reachable from
+this machine and no device attached to it, and neither `xcodebuild` nor jest can exercise a keychain
+read across an access group, a background `URLSession` in an extension, or a WebSocket. What IS
+established: the TypeScript halves are unit-tested (`__tests__/share-targets.test.ts`,
+`__tests__/share-delivery-credential.test.ts`, the claim table in `__tests__/share-outbox.test.ts`,
+the claim semantics in `__tests__/share-delivery.test.ts`), and the strings the two binaries spell by
+hand are pinned in `__tests__/ios-share-plugin.test.ts` — the keychain account, the service
+`expo-secure-store` stores it under, both group names and both new file names.
+
+The steps, in the order that isolates a failure:
+
+1. **Install and open the app once**, signed in to a session-token gateway. Anything before this is
+   expected to queue: nothing has written the targets file or the credential yet.
+2. **Check both writes landed.** `share-targets.json` should be in the App Group container beside
+   `widget-snapshot.json`, with one entry per bot whose chat has been opened at least once — a bot
+   with no resolved canonical chat is deliberately absent. The keychain item cannot be inspected from
+   the app; its absence shows up as step 4 below.
+3. **Share a link from Safari to a bot.** Expect _Sent to <bot>_ and no app launch, and expect the
+   message in that chat when the app is next opened. This is the whole feature in one gesture.
+4. **Share a link with the app force-quit, on a device that has been rebooted and unlocked once.**
+   Same result. The keychain item is `AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY`, so a share before the
+   first unlock is the one case that must queue.
+5. **Share a PDF.** Expect _Sent to <bot>_, a prompt containing an `@file:` token, and the file under
+   `<cwd>/uploads/hermie/<today>/` on the gateway. This is the only step that exercises the
+   background session and the multipart envelope written by hand.
+6. **Share a photo.** Expect _Will send when Hermie opens_ — correct, not a failure.
+7. **Turn the gateway off and share.** Expect _Will send when Hermie opens_ within a few seconds
+   rather than a spinner, and the entry still in the outbox with the app delivering it afterwards.
+8. **On an OIDC gateway, wait out the access token, then share.** Expect a queue. Then open the app,
+   let it refresh, and share again: expect a send. That pair is the only way to prove the republish
+   at the end of the token rotation is wired.
+9. **Sign out and share.** Expect a queue, which is what proves the record was deleted rather than
+   left holding a credential the owner has revoked.
+10. **The claim, which cannot be produced on purpose.** Kill the extension between the submit and the
+    removal — in practice only reachable by putting a sleep before `HermieShareOutbox.remove` in a
+    debug build. Expect the app to show the picker with _This may already have been sent_, and expect
+    neither button to have run before it was tapped.
+
+Also unseen: the sheet's new state. The spinner, the tick and one line of text at the size a share
+sheet gives them have been reasoned about and never rendered.
+
 ## Desktop parity, part one: bots, capabilities, MCP and skills
 
 Four surfaces that Hermes Desktop has and Hermie did not: making a bot, switching one bot's

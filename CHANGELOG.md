@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A share now reaches the bot without opening Hermie.** Sharing a link or a document into
+  Hermie from another app wrote the share down and waited for the next launch to send it — so
+  nothing happened until you opened the app, which is not what tapping Send in a share sheet
+  promises. The share sheet now delivers it itself: it reads the address, the credential and the
+  bot's own conversation from what the app wrote down beforehand, uploads any files, sends the
+  message, and tells you which of the two happened — **Sent to <bot>**, or **Will send when
+  Hermie opens**. Everything it cannot do is unchanged rather than lost: with no credential, an
+  expired one, no network or a gateway that refuses, the share stays where it was and the app
+  sends it exactly as before. Two things are always left for the app — a photograph, which has to
+  be resized to go in a transcript, and a gateway signed in through a provider whose access token
+  has expired, because an extension that could refresh a token could sign you out of the app. A
+  share that was handed over at the moment the sheet was killed is not guessed about: it comes
+  back in Hermie as a question, with Send again and a way to discard it.
+  [ADR-0026](docs/adr/0026-the-share-sheet-may-deliver.md) records the decision and what it costs;
+  Android is unchanged, because its share already opens the app.
+
 - **Bot-to-bot messages are asides, not chat bubbles.** Both directions — the message this
   bot sent a teammate and the teammate's answer — now read as a muted line on the left with
   a chevron, the same shape a reply's thoughts have: no bubble, no tail, no card. An inbound

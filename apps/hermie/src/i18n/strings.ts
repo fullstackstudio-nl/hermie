@@ -393,7 +393,45 @@ const stringsEn = {
     noBots: 'This gateway has no bots to send to yet.',
     noteLabel: 'Note',
     notePlaceholder: 'Add a note (optional)',
-    send: 'Send'
+    send: 'Send',
+
+    /*
+      The three lines the iOS share sheet says, and the only strings in this file
+      that are read by a process this bundle is not running in.
+
+      They travel to the extension inside `share-targets.json` — see
+      `features/share/targets.ts` — because a share extension is a separate
+      binary with no access to these translations and the alternative was
+      hard-coded English in Swift. So they are written for a sheet that is one
+      line tall, with no room for a second sentence, and `sentTo` takes the bot's
+      label rather than naming the app: by the time this is read the reader has
+      already chosen Hermie in the system's own sheet.
+    */
+    sending: 'Sending…',
+    sentTo: (bot: string) => `Sent to ${bot}`,
+    /*
+      What is true when the extension could not deliver: no credential, an
+      expired one, a gateway that refused, or no network. Deliberately a promise
+      about the app rather than an apology — the entry is on disk and the next
+      launch sends it, which is exactly what this feature did before it could
+      send anything itself.
+    */
+    willSendLater: 'Will send when Hermie opens',
+
+    /*
+      The picker's line for an entry somebody else got as far as submitting.
+
+      It is the one state in this feature that needs a person: the claim says the
+      gateway was handed the message and says nothing about whether it took it,
+      so sending it again might duplicate and dropping it might lose. Both
+      answers are offered and neither is taken automatically. See
+      `SHARE_CLAIM_FILE`.
+    */
+    maybeSent: (bot: string) =>
+      bot
+        ? `This may already have been sent to ${bot}. Send it again, or discard it.`
+        : 'This may already have been sent. Send it again, or discard it.',
+    sendAgain: 'Send again'
   },
 
   /**

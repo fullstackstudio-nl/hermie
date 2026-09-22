@@ -16,6 +16,12 @@
  * It answers one entry at a time, oldest first. Somebody who shared three
  * things to Hermie in a row is answering three questions, and three stacked
  * sheets is not how anyone would like to be asked.
+ *
+ * It also keeps `share-targets.json` current, which is the file that lets the iOS
+ * share extension deliver without opening the app at all (ADR-0026). That is a
+ * second job for one component and it is deliberate: both are "the app's side of
+ * sharing, for as long as the app is alive", and there is nowhere else that is
+ * mounted exactly once and never unmounted.
  */
 import { useEffect, useMemo, useState } from 'react'
 
@@ -25,10 +31,23 @@ import { useSettingsStore } from '../../store/settings'
 import { useUnassignedShare } from '../../store/share'
 import type { ShareDelivery } from './share-delivery'
 import { ShareTargetSheet, type ShareTargetBot } from './ShareTargetSheet'
+import { useShareTargetSync } from './target-sync'
 
 export function ShareTargetHost({ share: delivery }: { share: ShareDelivery }) {
   const share = useUnassignedShare()
   const bots = useBotsStore(state => state.bots)
+
+  /*
+    The file the iOS share extension needs in order to send something itself.
+
+    Here, and not in a shell, for the same two reasons this component is here:
+    it is mounted exactly once and it is mounted for the whole life of the app.
+    A sync in both shells would write the file twice on every roster change, and
+    a sync inside a screen would stop writing the moment somebody navigated —
+    which would be a share sheet quietly falling back to queueing, with nothing
+    on screen to say why.
+  */
+  useShareTargetSync()
 
   /**
    * The entry the sheet is SHOWING, which outlives the one that is waiting.

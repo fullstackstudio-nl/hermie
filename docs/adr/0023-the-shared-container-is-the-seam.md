@@ -1,7 +1,14 @@
 # 0023. The shared container is the seam for every system surface
 
-- Status: Accepted
+- Status: Accepted, amended by [0026](0026-the-share-sheet-may-deliver.md)
 - Date: 2026-09-22
+
+> **Amended by [0026](0026-the-share-sheet-may-deliver.md).** The last consequence below asked for a
+> successor if a surface ever genuinely needed a live connection, and the iOS share extension turned
+> out to be one: it now makes a single network attempt with a destination and a credential this app
+> resolved and wrote down. Everything else here still holds — the container entry is the fallback, a
+> link still names a thing and carries nothing, and the app still decides everything the extension
+> acts on.
 
 ## Context
 

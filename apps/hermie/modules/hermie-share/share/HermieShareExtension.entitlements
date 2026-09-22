@@ -17,5 +17,28 @@
   <array>
     <string>group.dev.hermie.app</string>
   </array>
+  <!--
+    And the keychain group the app writes its delivery credential into.
+
+    This is what ADR-0026 needed that ADR-0023 did not: the container above
+    carries what a bot is CALLED, and a bearer token has no business in a plain
+    directory every binary in the group can read. So the credential is a keychain
+    item, and an item is only readable by a binary that declares the group it was
+    written into.
+
+    `$(AppIdentifierPrefix)dev.hermie.app` is the app's FIRST group — it is what
+    `ios.entitlements` in app.config.ts names, and `expo-secure-store` writes
+    without an explicit access group, which means writes land in the first entry.
+    A read searches every declared group, so naming the app's here is enough and
+    nothing has to name a group on the write side.
+
+    Same silence as the App Group if it is wrong: the lookup finds nothing, the
+    extension queues every share, and nothing anywhere says why. The plugin
+    asserts the pairing for that reason.
+  -->
+  <key>keychain-access-groups</key>
+  <array>
+    <string>$(AppIdentifierPrefix)dev.hermie.app</string>
+  </array>
 </dict>
 </plist>

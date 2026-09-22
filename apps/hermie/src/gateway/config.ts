@@ -7,6 +7,7 @@ import {
   type TokenSet
 } from '@hermie/gateway-client'
 
+import { dropShareDeliveryRecordFor } from '../features/share/delivery-credential'
 import { keyValueStore } from '../platform/key-value-store'
 import { secretStore } from '../platform/secret-store'
 import { clearUrlCache } from '../platform/url-cache'
@@ -393,9 +394,24 @@ export async function saveGatewaySetup(ns: GatewayNamespace, input: SaveGatewayS
   await keyValueStore.setJson(configKeyFor(ns), config)
 }
 
-/** Sign out of ONE gateway: forget its credentials, keep its address. */
+/**
+ * Sign out of ONE gateway: forget its credentials, keep its address.
+ *
+ * The seventh delete is the share extension's copy, and it is here rather than at
+ * the callers because a sign-out that left it behind would leave the one part of
+ * the install that can still reach the gateway outside the app: an access token
+ * stays good at the identity provider for whatever it has left, so a share sheet
+ * would keep sending on a session its owner has ended. Guarded by gateway id, so
+ * signing out of a gateway nobody is using does not silently stop the active
+ * one's sheet from sending.
+ *
+ * `dropShareDeliveryRecordFor` rather than the publisher in
+ * `share-credential.ts`: this file is imported by that one, and the drop needs
+ * nothing from it — only the record and the store.
+ */
 export async function clearCredentials(ns: GatewayNamespace): Promise<void> {
   await Promise.all(Object.values(secretKeysFor(ns)).map(key => secretStore.delete(key)))
+  await dropShareDeliveryRecordFor(secretStore, ns.id)
 }
 
 /** Forget ONE gateway: its credentials and its address. */

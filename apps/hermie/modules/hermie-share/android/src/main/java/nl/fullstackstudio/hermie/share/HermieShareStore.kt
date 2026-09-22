@@ -47,6 +47,17 @@ object HermieShareStore {
   /** Also spelled in `outbox.ts` as `SHARE_MANIFEST_FILE`. */
   const val MANIFEST = "manifest.json"
 
+  /**
+   * `SHARE_CLAIM_FILE`.
+   *
+   * Nothing on this platform writes one — the iOS share extension does, because
+   * only it delivers a share itself (ADR-0026, and see the Android note there for
+   * why there is no counterpart here yet). It is read anyway, so that the file
+   * format has one meaning on both platforms rather than two: an entry carrying a
+   * claim is an entry the app must ask about, whoever wrote it.
+   */
+  const val CLAIM = "claim.json"
+
   /** `SHARE_MANIFEST_VERSION`. Bumped on both sides or neither. */
   const val VERSION = 1
 
@@ -173,10 +184,29 @@ object HermieShareStore {
 
       val files =
         (directory.listFiles() ?: emptyArray())
-          .filter { it.isFile && it.name != MANIFEST }
+          .filter { it.isFile && it.name != MANIFEST && it.name != CLAIM }
           .associate { it.name to Uri.fromFile(it).toString() }
 
-      entries.add(mapOf("id" to directory.name, "manifest" to json, "files" to files))
+      val claimFile = File(directory, CLAIM)
+      val entry = mutableMapOf<String, Any>("id" to directory.name, "manifest" to json, "files" to files)
+
+      if (claimFile.isFile) {
+        // An unreadable claim is still a claim: its existence is the load-bearing
+        // fact, and `parseShareClaim` reads an empty string as one. Dropping it
+        // would turn an ambiguous entry back into one the app sends unasked.
+        entry["claim"] =
+          if (claimFile.length() in 1..MAX_MANIFEST_BYTES) {
+            try {
+              claimFile.readText()
+            } catch (error: Exception) {
+              ""
+            }
+          } else {
+            ""
+          }
+      }
+
+      entries.add(entry)
     }
 
     return entries

@@ -1,7 +1,8 @@
 import ExpoModulesCore
 
 /**
- The app's half of "Share to Hermie": pick up what another process left behind.
+ The app's half of "Share to Hermie": pick up what another process left behind,
+ and leave it what it needs to send by itself.
 
  The exact mirror of `HermieWidgetsModule`, and deliberately just as dumb. That
  one puts bytes where a widget can read them; this one reads bytes a share
@@ -42,6 +43,12 @@ public class HermieShareModule: Module {
 
   /** Also spelled in `outbox.ts` as `SHARE_MANIFEST_FILE`. */
   private static let manifestFile = "manifest.json"
+
+  /** `SHARE_CLAIM_FILE`. Written by the share extension, read here, never written here. */
+  private static let claimFile = "claim.json"
+
+  /** `SHARE_TARGETS_FILE`. The one file this module WRITES. */
+  private static let targetsFile = "share-targets.json"
 
   /**
    A ceiling on how much of somebody else's JSON is read into memory.
@@ -100,16 +107,49 @@ public class HermieShareModule: Module {
         }
 
         var files: [String: String] = [:]
+        var claim: String?
 
         for file in (try? manager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? [] {
           let name = file.lastPathComponent
 
-          if name != Self.manifestFile {
-            files[name] = file.absoluteString
+          if name == Self.manifestFile {
+            continue
           }
+
+          /*
+            The claim is reported, not listed.
+
+            It is bookkeeping the share extension wrote about ITSELF — "I handed
+            this to the gateway and did not live to hear the answer" — so an entry
+            whose `files` contained it would send it to a bot as an attachment.
+            Read with the same ceiling as the manifest, for the same reason.
+          */
+          if name == Self.claimFile {
+            if let size = (try? manager.attributesOfItem(atPath: file.path))?[.size] as? Int,
+              size > 0, size <= Self.maxManifestBytes,
+              let data = try? Data(contentsOf: file) {
+              claim = String(data: data, encoding: .utf8) ?? ""
+            } else {
+              // A claim that cannot be read is STILL a claim: its existence is the
+              // load-bearing fact and `parseShareClaim` treats an empty string as
+              // one. Skipping it here would turn an ambiguous entry back into one
+              // the app sends without asking.
+              claim = ""
+            }
+
+            continue
+          }
+
+          files[name] = file.absoluteString
         }
 
-        entries.append(["id": directory.lastPathComponent, "manifest": manifest, "files": files])
+        var entry: [String: Any] = ["id": directory.lastPathComponent, "manifest": manifest, "files": files]
+
+        if let claim {
+          entry["claim"] = claim
+        }
+
+        entries.append(entry)
       }
 
       return entries
@@ -144,6 +184,31 @@ public class HermieShareModule: Module {
       }
 
       return (try? manager.removeItem(at: target)) != nil
+    }
+
+    /**
+     Put `share-targets.json` where the share extension can read it.
+
+     The one call in this module that writes, and the mirror of
+     `HermieWidgetsModule.writeSnapshot` down to the atomic replace: a reader in
+     another process may be halfway through the file, and a rename is the only way
+     to swap bytes without ever showing it half of two versions.
+
+     What the bytes SAY is decided in `src/features/share/targets.ts` and is not
+     this module's business. What they let the extension do is send a share without
+     the app — see ADR-0026 — and the reason they are a file rather than a request
+     is the same reason the widget snapshot is one: the extension has three seconds
+     and no gateway.
+
+     The directory is created rather than assumed: on a fresh install the container
+     exists and nothing in it does.
+     */
+    AsyncFunction("writeShareTargets") { (json: String) -> Bool in
+      guard let container = Self.container(), let data = json.data(using: .utf8) else {
+        return false
+      }
+
+      return (try? data.write(to: container.appendingPathComponent(Self.targetsFile), options: .atomic)) != nil
     }
 
     /**

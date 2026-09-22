@@ -30,9 +30,14 @@ interface HermieShareModule {
    * natively because only that side knows which container the entry is in — an
    * App Group directory on Apple platforms, the app's files directory on
    * Android.
+   *
+   * `claim` is the entry's `claim.json`, when it has one — a share a previous
+   * sender got as far as submitting. It rides beside the manifest rather than
+   * inside `files` because it is bookkeeping and not something anybody shared.
    */
-  listShares(): Promise<{ id: string; manifest: string; files: Record<string, string> }[]>
+  listShares(): Promise<{ id: string; manifest: string; claim?: string; files: Record<string, string> }[]>
   clearShare(id: string): Promise<boolean>
+  writeShareTargets(json: string): Promise<boolean>
 }
 
 function native(): HermieShareModule | null {
@@ -61,6 +66,17 @@ export const shareInbox: ShareInbox = {
     try {
       return (await module_?.clearShare(id)) === true
     } catch {
+      return false
+    }
+  },
+
+  async writeTargets(json) {
+    try {
+      return (await module_?.writeShareTargets(json)) === true
+    } catch {
+      // A write that failed is a sheet that queues rather than sends, which is
+      // the behaviour this whole feature had before ADR-0026. It is not a reason
+      // to reject inside a store subscription.
       return false
     }
   }

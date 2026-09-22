@@ -33,9 +33,10 @@ new record supersedes it, and the old one gets a line at the top pointing forwar
 | [0020](0020-diagrams-and-math-without-a-webview.md) | Diagrams and mathematics are drawn in the bundle, not in a web view          | Accepted           |
 | [0021](0021-header-based-front-doors.md)            | Header-based front doors: Cloudflare Access                                  | Accepted           |
 | [0022](0022-voice-on-the-device.md)                 | Speech happens on the device; the gateway's voice RPCs are not used          | Accepted           |
-| [0023](0023-the-shared-container-is-the-seam.md)    | The shared container is the seam for every system surface                    | Accepted           |
+| [0023](0023-the-shared-container-is-the-seam.md)    | The shared container is the seam for every system surface                    | Amended by 0026    |
 | [0024](0024-a-list-of-gateways.md)                  | A list of gateways, one live at a time, storage keyed by which               | Accepted           |
 | [0025](0025-hermie-web-is-a-service-layer.md)       | Hermie Web is a service layer, not only a proxy                              | Accepted           |
+| [0026](0026-the-share-sheet-may-deliver.md)         | The share sheet may deliver, once, with the app's own answers                | Accepted           |
 
 ## Template
 

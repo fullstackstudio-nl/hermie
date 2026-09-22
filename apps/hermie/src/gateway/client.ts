@@ -20,6 +20,7 @@ import { secretStore } from '../platform/secret-store'
 import { PlatformWebSocket } from '../platform/socket'
 import { secretKeysFor } from './config'
 import type { GatewayNamespace } from './namespace'
+import { refreshShareDeliveryCredential } from './share-credential'
 
 interface TokenMeta {
   expiresAt: number
@@ -88,6 +89,21 @@ export function createSecretTokenStore(ns: GatewayNamespace): TokenStore {
         secretStore.set(keys.accessToken, tokens.accessToken),
         secretStore.set(keys.tokenMeta, JSON.stringify(meta))
       ])
+      /*
+        And the share extension's copy of it.
+
+        This is the one seam a rotated access token passes through, which makes
+        it the only place the extension's credential can be kept alive. Without
+        it, sharing without opening the app would work for as long as the token
+        the app launched with — an hour on most providers — and then queue
+        everything for ever, which is the worst shape a feature can have: it
+        works while you are testing it.
+
+        LAST, and it cannot throw. The app's own credential is already safely
+        down; a keychain that refuses this one means the extension queues rather
+        than sends. See `share-credential.ts`.
+      */
+      await refreshShareDeliveryCredential(ns)
     },
     async clear() {
       await Promise.all([
@@ -95,6 +111,12 @@ export function createSecretTokenStore(ns: GatewayNamespace): TokenStore {
         secretStore.delete(keys.refreshToken),
         secretStore.delete(keys.tokenMeta)
       ])
+      // The same republish as `save`, which for an emptied store resolves to a
+      // delete: `buildShareDeliveryRecord` has nothing to build from and the
+      // extension's copy goes with the app's. `clearCredentials` does this too,
+      // and the two paths do not always both run — a coordinator cleared by a
+      // 401 ladder never touches `config.ts`.
+      await refreshShareDeliveryCredential(ns)
     }
   }
 }

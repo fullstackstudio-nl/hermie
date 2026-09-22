@@ -19,6 +19,13 @@
  * normal case; on the rare entry that already carries a note — a share replayed
  * after a failed delivery — the field shows it rather than silently dropping
  * what somebody wrote.
+ *
+ * **It also asks the one question ADR-0026 created.** An entry whose sender got
+ * as far as submitting and did not live to see the answer carries a claim, and
+ * an entry with a claim is never delivered on its own: it arrives here with a
+ * line saying it may already have gone and a button that says "Send again"
+ * rather than "Send". Nothing else in this feature needs a person; this does,
+ * because both of the answers a program could pick are wrong some of the time.
  */
 import { useEffect, useState } from 'react'
 import { Pressable, ScrollView, View } from 'react-native'
@@ -93,6 +100,22 @@ export function ShareTargetSheet({ share, bots, onCancel, onClosed, onSend }: Sh
               {shareSummary(share)}
             </Text>
           ) : null}
+          {/*
+            Named in `warning` rather than in the muted colour the summary uses,
+            because it is the one line here that changes what the buttons mean:
+            "Send" below is a second send, and the reader has to have been told
+            so before they reach it. `warnText` rather than `dangerText`: nothing
+            has gone wrong, something is merely unknown.
+
+            The bot is the CLAIM's and only falls back to the manifest's — it
+            says where it may already have gone, which is a fact about the past
+            and not about the row somebody is about to tap.
+          */}
+          {share?.claim ? (
+            <Text color="warnText" testID="share-maybe-sent" variant="meta">
+              {strings.share.maybeSent(share.claim.bot || share.bot || '')}
+            </Text>
+          ) : null}
         </View>
 
         {bots.length === 0 ? (
@@ -155,7 +178,7 @@ export function ShareTargetSheet({ share, bots, onCancel, onClosed, onSend }: Sh
             onPress={() => picked && onSend(picked, note)}
             style={{ flex: 1 }}
             testID="share-send"
-            title={strings.share.send}
+            title={share?.claim ? strings.share.sendAgain : strings.share.send}
           />
         </View>
       </View>

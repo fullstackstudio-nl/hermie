@@ -252,7 +252,15 @@ export const app: Translation<typeof strings> = {
     noBots: 'Deze gateway heeft nog geen bots om naartoe te sturen.',
     noteLabel: 'Notitie',
     notePlaceholder: 'Voeg een notitie toe (optioneel)',
-    send: 'Sturen'
+    send: 'Sturen',
+    sending: 'Versturen…',
+    sentTo: (bot: string) => `Verstuurd naar ${bot}`,
+    willSendLater: 'Wordt verstuurd zodra Hermie opengaat',
+    maybeSent: (bot: string) =>
+      bot
+        ? `Dit is misschien al naar ${bot} verstuurd. Stuur het opnieuw, of gooi het weg.`
+        : 'Dit is misschien al verstuurd. Stuur het opnieuw, of gooi het weg.',
+    sendAgain: 'Opnieuw sturen'
   },
 
   presence: {

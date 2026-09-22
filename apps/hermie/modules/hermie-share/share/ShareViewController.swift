@@ -21,6 +21,20 @@ import UniformTypeIdentifiers
  entry with fewer files in it than the person selected — which is the one
  failure that looks like it worked.
 
+ ## It now sends, and the order that makes that safe
+
+ ADR-0026: after "Send" this process writes the entry and then TRIES to deliver
+ it, over HTTP for the uploads and a short-lived socket for the message. The
+ order is the whole of what makes that safe and it is not negotiable — the entry
+ goes down FIRST, unconditionally, before any credential is read and before
+ anything touches the network. Every way the attempt can fail therefore ends in
+ the state this extension used to leave behind on purpose: an entry on disk, and
+ an app that delivers it at its next launch.
+
+ The sheet then says which of the two happened, and the app is only asked to open
+ on the queued path. A share that has already arrived has no reason to pull
+ somebody out of the application they were reading.
+
  ## Why the files are copied twice
 
  `NSItemProvider` hands over a URL that is valid only inside its completion
@@ -37,6 +51,20 @@ class ShareViewController: UIViewController {
   private var payloads: [HermieShareOutbox.Payload] = []
   private var loading = true
   private var hosting: UIHostingController<HermieShareSheet>?
+
+  /** The one line the sheet shows once "Send" has been tapped. See the sheet. */
+  private var status: String?
+  private var busy = false
+
+  /**
+   The sessions and the two sentences, read once.
+
+   Read here rather than at the moment "Send" is tapped so that the wording is
+   already in hand when it is needed: the file is small, the read is a few
+   hundred microseconds, and a `Task` that had to load it before it could say
+   "Sending…" would show the empty sheet for that long.
+   */
+  private let targets = HermieShareTargets.load()
 
   override func viewDidLoad() {
     super.viewDidLoad()
@@ -55,6 +83,8 @@ class ShareViewController: UIViewController {
       bots: bots,
       summary: summaryText,
       loading: loading,
+      status: status,
+      busy: busy,
       onSend: { [weak self] bot, note in self?.send(to: bot, note: note) },
       onCancel: { [weak self] in self?.cancel() }
     )
@@ -269,13 +299,13 @@ class ShareViewController: UIViewController {
   // MARK: - finishing
 
   /**
-   Write the entry, ask the system to open the app, and get out of the way.
+   Write the entry, try to deliver it, and say which of the two happened.
 
-   The extension's request is completed whether or not the app could be opened,
-   and that order matters: the entry is already on disk, so the share has
-   HAPPENED — the app will find it at its next launch either way. Holding the
-   sheet open to report that an `openURL` did not work would be reporting a
-   latency problem as a failure.
+   The ordering is the contract and it reads in one direction: the entry is on
+   disk before anything else is attempted, so every failure below leaves the
+   pre-ADR-0026 behaviour exactly as it was. Nothing here can lose a share and
+   nothing here can send one twice — the claim inside `HermieShareSender` is what
+   holds the second half of that.
    */
   private func send(to bot: HermieShareBot, note: String) {
     guard let identifier = HermieShareOutbox.write(bot: bot.name, note: note, payloads: payloads) else {
@@ -287,11 +317,173 @@ class ShareViewController: UIViewController {
       return
     }
 
+    /*
+      A share carrying an image is the app's to deliver, and that is a decision
+      about roads rather than about capability.
+
+      The app resizes an image and attaches its BYTES over the socket, which is
+      what puts it in the transcript. Resizing a photograph is the work a share
+      extension is killed for, and the HTTP road this process has — upload, then
+      reference with `@file:` — hands the agent a binary it cannot read. So an
+      image queues, and the sheet says so in the same words as every other queue.
+    */
+    let hasImage = payloads.contains { payload in
+      if case .file(_, _, true) = payload {
+        return true
+      }
+
+      return false
+    }
+
+    guard !hasImage else {
+      queue(identifier: identifier)
+
+      return
+    }
+
+    status = targets.sending
+    busy = true
+    present(bots: HermieShareRoster.load())
+
+    let text = messageText(note: note)
+    let attachments = deliverableAttachments()
+
+    Task { @MainActor [weak self] in
+      let outcome = await HermieShareSender.deliver(
+        entry: identifier,
+        bot: bot.name,
+        text: text,
+        attachments: attachments
+      )
+
+      guard let self else {
+        return
+      }
+
+      switch outcome {
+      case .sent:
+        // No `openApp`. The message is in the chat; pulling somebody out of the
+        // application they were reading to show them that is the behaviour the
+        // owner rejected.
+        self.finish(line: self.targets.sentLine(bot: bot.displayName))
+
+      case .queued:
+        self.queue(identifier: identifier)
+      }
+    }
+  }
+
+  /**
+   The queued path: say so, and ask the system to open the app.
+
+   The `openURL` is what makes "will send when Hermie opens" happen now rather
+   than at some later launch, and it is the same best-effort call this extension
+   has always made — see `openApp`. Its result is deliberately not branched on:
+   the entry is on disk either way, and reporting a failed `openURL` as a failed
+   share would be reporting a latency problem as data loss.
+   */
+  private func queue(identifier: String) {
     if let url = URL(string: "hermie://share/\(identifier)") {
       openApp(url)
     }
 
-    extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
+    finish(line: targets.queued)
+  }
+
+  /**
+   Draw the verdict, then complete the request.
+
+   The pause is the point and it is short. A sheet that reported an outcome and
+   vanished in the same frame reports nothing; a sheet that lingers is a share
+   extension holding up whatever the person was doing. Nine hundred milliseconds
+   is long enough to read four words and short enough not to be waited on.
+   */
+  private func finish(line: String) {
+    status = line
+    busy = false
+    present(bots: HermieShareRoster.load())
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in
+      self?.extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
+    }
+  }
+
+  /**
+   The message's words, in the order `shareMessageText` puts them.
+
+   The note first, because it is what the person typed, then each URL and each
+   piece of shared text one paragraph apart. A URL is not wrapped in anything: the
+   prompt is plain text, the bot reads it, and decorating it would be this
+   extension inventing syntax the far side has never agreed to.
+
+   Spelled here as well as in TypeScript for the reason every rule in this module
+   is spelled twice — the two targets share no sources. What they share is the
+   shape of the message, and a test on the app side is what pins it.
+   */
+  private func messageText(note: String) -> String {
+    var lines: [String] = []
+    let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    if !trimmedNote.isEmpty {
+      lines.append(trimmedNote)
+    }
+
+    for payload in payloads {
+      switch payload {
+      case let .url(value), let .text(value):
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !trimmed.isEmpty {
+          lines.append(trimmed)
+        }
+
+      case .file:
+        continue
+      }
+    }
+
+    return lines.joined(separator: "\n\n")
+  }
+
+  /**
+   The files this process will upload: everything that is not an image.
+
+   Read from the STAGED copies rather than from the entry the outbox just wrote,
+   because these are the URLs this process owns and their names are the ones the
+   sheet counted. The entry's own copies may have been renamed to keep two
+   `IMG_0001.jpg` apart, which matters to the app and not to an upload.
+   */
+  private func deliverableAttachments() -> [HermieShareSender.Attachment] {
+    payloads.compactMap { payload in
+      guard case let .file(url, name, isImage) = payload, !isImage else {
+        return nil
+      }
+
+      return HermieShareSender.Attachment(url: url, name: name, mimeType: Self.mimeType(for: url))
+    }
+  }
+
+  /**
+   A hint for the multipart part's `Content-Type`, and never more than that.
+
+   The gateway sniffs the bytes it is given, so a wrong answer costs nothing. It is
+   sent because a multipart part with no type at all is a part some proxies rewrite.
+   The same table `HermieShareOutbox` keeps for the manifest, which is private to
+   that file — one more duplication in a module whose two halves share no sources.
+   */
+  private static func mimeType(for url: URL) -> String {
+    let byExtension: [String: String] = [
+      "pdf": "application/pdf",
+      "txt": "text/plain",
+      "md": "text/markdown",
+      "json": "application/json",
+      "csv": "text/csv",
+      "zip": "application/zip",
+      "mp4": "video/mp4",
+      "mov": "video/quicktime"
+    ]
+
+    return byExtension[url.pathExtension.lowercased()] ?? "application/octet-stream"
   }
 
   private func cancel() {

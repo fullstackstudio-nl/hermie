@@ -10,8 +10,9 @@ const {
 } = require('expo/config-plugins')
 
 /**
- * Adds the share extension to the generated Xcode project, puts the App Group on
- * both sides of it, and teaches Android's MainActivity to answer `ACTION_SEND`.
+ * Adds the share extension to the generated Xcode project, puts the App Group and
+ * the keychain group on both sides of it, and teaches Android's MainActivity to
+ * answer `ACTION_SEND`.
  *
  * ## It is the widget plugin's twin, and deliberately so
  *
@@ -23,7 +24,7 @@ const {
  * binary but not the other. Every one of those comments applies here word for
  * word and is not repeated; read that file first.
  *
- * What differs is worth stating, and it is three things:
+ * What differs is worth stating, and it is four things:
  *
  *  1. **The extension point.** A share extension is `com.apple.share-services`
  *     and its activation rule is in its own checked-in `Info.plist`. Nothing
@@ -32,7 +33,11 @@ const {
  *  2. **The bundle identifier is `<app>.share`**, which is what the App Store's
  *     provisioning expects of an extension and what
  *     `docs/platform-notes.md` names for the person adding it in the portal.
- *  3. **There is an ANDROID half.** The widget's Android side needs no patch to
+ *  3. **It writes a KEYCHAIN group as well as an App Group.** ADR-0026 lets the
+ *     extension deliver a share itself, which needs a credential, which may not
+ *     live in a plain directory — so the app's keychain group goes onto both
+ *     binaries and the pairing is asserted the same way the App Group's is.
+ *  4. **There is an ANDROID half.** The widget's Android side needs no patch to
  *     the app's project at all — a library manifest merges its receivers in —
  *     but an intent filter has to go on the app's OWN MainActivity, which is
  *     generated. So it is written here, additively, and checked for duplicates
@@ -66,7 +71,27 @@ const TARGET = 'HermieShareExtension'
  */
 const APP_GROUP = 'group.dev.hermie.app'
 
+/**
+ * The keychain group the app's delivery credential is written into, spelled here
+ * and in `ios.entitlements` in app.config.ts and in the extension's own
+ * entitlements.
+ *
+ * ADR-0026 needed one thing the App Group could not give it: somewhere to put a
+ * bearer token that is not a plain directory. `$(AppIdentifierPrefix)dev.hermie.app`
+ * is the app's FIRST keychain group, which is where `expo-secure-store` writes
+ * when no access group is passed — and a keychain READ searches every group the
+ * reading binary declares, so the extension declaring this one is the whole of
+ * what makes the item reachable. Nothing has to change on the write side.
+ *
+ * `$(AppIdentifierPrefix)` is expanded by the build from the signing team, so the
+ * same string is correct in every fork and no team identifier enters this
+ * repository.
+ */
+const KEYCHAIN_GROUP = '$(AppIdentifierPrefix)dev.hermie.app'
+
 const ENTITLEMENTS_KEY = 'com.apple.security.application-groups'
+
+const KEYCHAIN_KEY = 'keychain-access-groups'
 
 /**
  * The app's own floor, not the widget's 17.0.
@@ -100,6 +125,26 @@ function applyAppGroup(entitlements) {
 }
 
 /**
+ * The same, for the keychain group — and with one rule the App Group does not
+ * have: it is appended, never prepended.
+ *
+ * `expo-secure-store` writes without an access group, and a keychain write with
+ * no group lands in the binary's FIRST declared one. So the order of this array
+ * decides where every credential this app has ever stored goes. app.config.ts
+ * already names `$(AppIdentifierPrefix)dev.hermie.app` first and explains at
+ * length why; this function exists to make that a thing the share extension's
+ * plugin asserts rather than assumes, and appending is what keeps it from
+ * silently moving somebody's stored sign-in to a new group on the next prebuild.
+ */
+function applyKeychainGroup(entitlements) {
+  const existing = Array.isArray(entitlements[KEYCHAIN_KEY]) ? entitlements[KEYCHAIN_KEY] : []
+
+  return existing.includes(KEYCHAIN_GROUP)
+    ? entitlements
+    : { ...entitlements, [KEYCHAIN_KEY]: [...existing, KEYCHAIN_GROUP] }
+}
+
+/**
  * Fails the prebuild when the extension's entitlements name a different group
  * from the app's.
  *
@@ -110,19 +155,24 @@ function applyAppGroup(entitlements) {
  * does nothing at all — which reads as the extension not running.
  */
 function assertExtensionEntitlements(contents) {
-  if (contents.includes(`<string>${APP_GROUP}</string>`)) {
+  const missing = [APP_GROUP, KEYCHAIN_GROUP].filter(group => !contents.includes(`<string>${group}</string>`))
+
+  if (missing.length === 0) {
     return
   }
 
   throw new Error(
     [
-      `modules/hermie-share/share/${TARGET}.entitlements does not name the App Group the app uses.`,
+      `modules/hermie-share/share/${TARGET}.entitlements does not name every group the app uses.`,
       '',
-      `Expected: <string>${APP_GROUP}</string>`,
+      ...missing.map(group => `Expected: <string>${group}</string>`),
       '',
       'The app and the share extension share a container only when both entitlements name the SAME',
-      'group. A mismatch is invisible: nothing fails to build and nothing fails to launch, sharing',
-      'just never delivers anything. Change both sides, or neither.'
+      'App Group, and the extension can read the delivery credential only when it declares the SAME',
+      'keychain group. Both failures are invisible: nothing fails to build and nothing fails to',
+      'launch. A wrong App Group means sharing never delivers anything at all; a wrong keychain group',
+      'means every share is queued for the next launch of the app, which is what ADR-0026 exists to',
+      'stop. Change both sides, or neither.'
     ].join('\n')
   )
 }
@@ -297,7 +347,7 @@ module.exports = function withHermieShare(config) {
   ])
 
   const withGroup = withEntitlementsPlist(withSources, modConfig => {
-    modConfig.modResults = applyAppGroup(modConfig.modResults)
+    modConfig.modResults = applyKeychainGroup(applyAppGroup(modConfig.modResults))
 
     return modConfig
   })
@@ -357,11 +407,13 @@ module.exports = function withHermieShare(config) {
 }
 
 module.exports.APP_GROUP = APP_GROUP
+module.exports.KEYCHAIN_GROUP = KEYCHAIN_GROUP
 module.exports.DEPLOYMENT_TARGET = DEPLOYMENT_TARGET
 module.exports.TARGET = TARGET
 module.exports.SEND_ACTIONS = SEND_ACTIONS
 module.exports.SEND_MIME_TYPE = SEND_MIME_TYPE
 module.exports.applyAppGroup = applyAppGroup
+module.exports.applyKeychainGroup = applyKeychainGroup
 module.exports.applySendFilters = applySendFilters
 module.exports.applyTargetSettings = applyTargetSettings
 module.exports.configurationUuidsFor = configurationUuidsFor

@@ -3,9 +3,15 @@
  *
  * A share sheet is not the app. On iOS it is a separate process with its own
  * sandbox and a few seconds to live; on Android it is an intent that arrives
- * before anything here is signed in. Neither can reach a gateway, so neither
- * may send anything — all they can do is write down what was shared and ask the
- * app to deal with it. This module is that writing-down step, read back.
+ * before anything here is signed in. Both write down what was shared, and this
+ * module is that writing-down step, read back.
+ *
+ * Since ADR-0026 the iOS sheet may also SEND what it wrote, over the network,
+ * before it goes away — which is the one sentence in this file's history that
+ * changed. It does not change the format or who owns it: the entry is written
+ * first and it is still the app that delivers everything the extension could
+ * not. What it adds is the claim below, which is the only way an entry can now
+ * be ambiguous rather than merely waiting.
  *
  * It is the exact mirror of `features/widgets/snapshot.ts`, and for the same
  * reason: one versioned JSON file in a container both sandboxes can reach,
@@ -48,6 +54,25 @@ export const SHARE_OUTBOX_DIRECTORY = 'share-outbox'
 
 /** The file inside one entry's directory. Also spelled in Swift and in Kotlin. */
 export const SHARE_MANIFEST_FILE = 'manifest.json'
+
+/**
+ * The second file an entry can hold: "somebody is sending this RIGHT NOW".
+ *
+ * It exists because the share extension may now deliver an entry itself
+ * (ADR-0026) and there is a window between the gateway accepting the message
+ * and the extension unlinking the entry. A process torn down inside that
+ * window leaves an entry that may or may not have been sent, and the two ways
+ * of guessing are both wrong: sending it produces a duplicate, dropping it
+ * loses somebody's words.
+ *
+ * So the sender writes this file immediately BEFORE it submits and the app
+ * treats an entry that has one as a question rather than as work. Nobody
+ * guesses; the person who shared it decides, and they are shown what is known.
+ */
+export const SHARE_CLAIM_FILE = 'claim.json'
+
+/** Bumped with `SHARE_MANIFEST_VERSION`'s rules. An unreadable claim is still a claim. */
+export const SHARE_CLAIM_VERSION = 1
 
 /**
  * The most items one share is allowed to carry.
@@ -118,11 +143,65 @@ export interface ShareManifest {
   items: ShareItem[]
 }
 
+/**
+ * "This was handed to the gateway and the answer was not seen."
+ *
+ * Written by whichever process was about to submit, and read by the app as a
+ * reason NOT to submit the same thing again. It carries a bot and a moment
+ * rather than a verdict, because a verdict is exactly what the writer did not
+ * live long enough to learn.
+ */
+export interface ShareClaim {
+  version: number
+  /** Which chat it was being sent to. Shown, so the question can be answered. */
+  bot: string
+  /** Unix SECONDS, from the claiming process's clock. */
+  at: number
+}
+
+/**
+ * Read a claim, or answer `null`.
+ *
+ * Much more forgiving than `parseShareManifest`, and deliberately: the existence
+ * of the file is the load-bearing fact and its contents are only there to make
+ * the question answerable. A claim whose JSON is broken still means "something
+ * may have been sent", so it parses to a claim with an empty bot rather than to
+ * nothing — the alternative is a corrupt byte turning an ambiguous entry back
+ * into one the app sends without asking.
+ */
+export function parseShareClaim(json: string): ShareClaim | null {
+  if (!json.trim()) {
+    return null
+  }
+
+  let raw: unknown
+
+  try {
+    raw = JSON.parse(json)
+  } catch {
+    return { version: SHARE_CLAIM_VERSION, bot: '', at: 0 }
+  }
+
+  if (!isObject(raw)) {
+    return { version: SHARE_CLAIM_VERSION, bot: '', at: 0 }
+  }
+
+  return { version: num(raw.version) || SHARE_CLAIM_VERSION, bot: str(raw.bot), at: num(raw.at) }
+}
+
 /** One entry as the bridge hands it over: the manifest, and where its files went. */
 export interface ShareOutboxEntry {
   id: string
   /** The manifest file's bytes, exactly as the sharing process wrote them. */
   manifest: string
+  /**
+   * The claim file's bytes, when the entry has one. Absent is the ordinary case.
+   *
+   * Reported separately rather than left in `files` for the same reason the
+   * manifest is: it is not something somebody shared, it is bookkeeping, and an
+   * entry whose `files` contained it would send it as an attachment.
+   */
+  claim?: string
   /**
    * `path` → a local URI the upload can stream from.
    *
@@ -142,6 +221,14 @@ export interface PendingShare {
   note: string
   createdAt: number
   items: ResolvedShareItem[]
+  /**
+   * Set when a previous sender got as far as submitting and did not report back.
+   *
+   * The app never delivers one of these on its own — see `share-delivery.ts`.
+   * It is the one state in this feature that needs a person, and the picker is
+   * where they are asked.
+   */
+  claim?: ShareClaim
 }
 
 /** A `ShareItem` whose file, if it has one, exists. */
@@ -324,12 +411,15 @@ export function parseShareEntry(entry: ShareOutboxEntry): PendingShare | null {
     return null
   }
 
+  const claim = entry.claim === undefined ? null : parseShareClaim(entry.claim)
+
   return {
     id: manifest.id,
     ...(manifest.bot ? { bot: manifest.bot } : {}),
     note: manifest.note,
     createdAt: manifest.createdAt,
-    items
+    items,
+    ...(claim ? { claim } : {})
   }
 }
 

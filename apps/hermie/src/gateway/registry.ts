@@ -39,6 +39,7 @@ import {
   type StoredGatewayConfig
 } from './config'
 import { namespace, NAMESPACE_SEPARATOR } from './namespace'
+import { publishShareDeliveryCredential } from './share-credential'
 
 /** The registry itself. Device-level: never namespaced, never synced. */
 export const GATEWAY_REGISTRY_KEY = 'hermie.gateways'
@@ -362,6 +363,21 @@ export async function loadGatewayRegistry(now: number = Date.now()): Promise<Loa
 
 export async function saveGatewayRegistry(registry: GatewayRegistry): Promise<void> {
   await keyValueStore.setJson(GATEWAY_REGISTRY_KEY, registry)
+  /*
+    And the share extension's copy of the active gateway's credential.
+
+    Here rather than at each caller, because this is the ONE place every change
+    of "which gateway is live" passes through — onboarding, the switcher, the
+    removal of the active entry. A publish written at the call sites instead
+    would be a publish somebody forgets at the fourth one, and what that costs
+    is a share sheet quietly sending to the gateway the reader switched away
+    from an hour ago.
+
+    Awaited, and it cannot throw: it is the last thing this function does, the
+    registry is already down, and every failure inside it means the extension
+    queues instead of sending. See `share-credential.ts`.
+  */
+  await publishShareDeliveryCredential(registry.activeGatewayId)
 }
 
 /** The prefix every namespaced gateway configuration key starts with. */

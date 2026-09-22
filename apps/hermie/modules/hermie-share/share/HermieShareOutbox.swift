@@ -18,6 +18,13 @@ import Foundation
  the manifest leaves something inert rather than something that claims to have
  files it does not have.
 
+ ## It now also marks and removes
+
+ `claim` and `remove` arrived with ADR-0026, which lets this extension deliver a
+ share itself. They are here rather than in the sender because they are writes
+ into the entry this file created, and the two names they spell — the claim file
+ and the entry directory — are already spelled here.
+
  ## The app never sees a name this extension did not sanitise
 
  A filename comes from whichever app is sharing, and it ends up as a directory
@@ -36,6 +43,12 @@ enum HermieShareOutbox {
 
   /** Also spelled in `outbox.ts` as `SHARE_MANIFEST_FILE`. */
   static let manifestName = "manifest.json"
+
+  /** `SHARE_CLAIM_FILE`. Written by `HermieShareSender` and read by the app. */
+  static let claimName = "claim.json"
+
+  /** `SHARE_CLAIM_VERSION`. */
+  static let claimVersion = 1
 
   /** `SHARE_MANIFEST_VERSION`. Bumped on both sides or neither. */
   static let version = 1
@@ -188,6 +201,71 @@ enum HermieShareOutbox {
     }
 
     return identifier
+  }
+
+  /**
+   Mark an entry as handed over, immediately before it is handed over.
+
+   The one write in this file that is not about copying bytes, and the reason
+   ADR-0026 is safe: between a gateway accepting a message and this process
+   unlinking the entry there is a window, and a share extension is exactly the
+   kind of process that is killed inside one. An entry that still has a claim on
+   it when the app next looks is an entry the app must NOT send and must not drop
+   — it asks instead. See `SHARE_CLAIM_FILE` in `src/features/share/outbox.ts`.
+
+   Atomic, so a half-written claim cannot exist: the app treats an unreadable
+   claim as a claim anyway, which makes a torn file harmless, but a rename costs
+   nothing and removes the question.
+
+   Failures are ignored on purpose. A claim that could not be written leaves this
+   feature exactly where it was before there was one — the gap fails towards
+   "sent twice, visibly", which is the trade ADR-0023 already made and is still
+   better than refusing to send at all.
+   */
+  static func claim(entry: String, bot: String) {
+    guard let directory = entryURL(entry) else {
+      return
+    }
+
+    let claim: [String: Any] = ["version": claimVersion, "bot": bot, "at": Int(Date().timeIntervalSince1970)]
+
+    guard let data = try? JSONSerialization.data(withJSONObject: claim, options: []) else {
+      return
+    }
+
+    try? data.write(to: directory.appendingPathComponent(claimName), options: .atomic)
+  }
+
+  /** Delete one entry and everything in it: the files, the manifest, the claim. */
+  static func remove(entry: String) {
+    guard let directory = entryURL(entry) else {
+      return
+    }
+
+    try? FileManager.default.removeItem(at: directory)
+  }
+
+  /**
+   One entry's directory, or nil.
+
+   The id is one this process minted a moment ago, so it cannot be hostile — but
+   it is checked against the outbox's own listing rather than joined onto the
+   path, because that makes the check total and because the same function will one
+   day be called with an id that came from somewhere else.
+   */
+  private static func entryURL(_ entry: String) -> URL? {
+    guard let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup) else {
+      return nil
+    }
+
+    let outbox = container.appendingPathComponent(directoryName, isDirectory: true)
+    let contents = try? FileManager.default.contentsOfDirectory(
+      at: outbox,
+      includingPropertiesForKeys: nil,
+      options: [.skipsHiddenFiles]
+    )
+
+    return contents?.first { $0.lastPathComponent == entry }
   }
 
   /**

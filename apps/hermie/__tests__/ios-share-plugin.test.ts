@@ -20,10 +20,12 @@ const plugin = require('../modules/hermie-share/plugin/with-hermie-share')
 const {
   APP_GROUP,
   applyAppGroup,
+  applyKeychainGroup,
   applySendFilters,
   applyTargetSettings,
   assertExtensionEntitlements,
   buildSettingsFor,
+  KEYCHAIN_GROUP,
   SEND_ACTIONS,
   TARGET
 } = plugin
@@ -57,7 +59,56 @@ describe('the App Group', () => {
 
   it('refuses an extension entitlements file that names a different group', () => {
     expect(() => assertExtensionEntitlements('<plist><dict></dict></plist>')).toThrow(/App Group/)
-    expect(() => assertExtensionEntitlements(`<string>${APP_GROUP}</string>`)).not.toThrow()
+    expect(() =>
+      assertExtensionEntitlements(`<string>${APP_GROUP}</string><string>${KEYCHAIN_GROUP}</string>`)
+    ).not.toThrow()
+  })
+})
+
+/**
+ * The keychain group, which ADR-0026 made load-bearing.
+ *
+ * It is the one thing standing between "the share sheet sends" and "the share
+ * sheet queues every time", and it fails as silently as the App Group does: the
+ * extension's keychain lookup finds nothing, every share is written for the app
+ * to deliver, and no log anywhere says why.
+ */
+describe('the keychain group', () => {
+  it('is added to the app entitlements and is idempotent', () => {
+    expect(applyKeychainGroup({})).toEqual({ 'keychain-access-groups': [KEYCHAIN_GROUP] })
+
+    const existing = { 'keychain-access-groups': [KEYCHAIN_GROUP] }
+
+    expect(applyKeychainGroup(existing)).toBe(existing)
+  })
+
+  /**
+   * `expo-secure-store` writes with no access group, which lands the item in the
+   * binary's FIRST declared one. So an entry appended here can never move where
+   * the app's existing credentials live; one prepended would move all of them,
+   * and the symptom would be a sign-out on the next launch with nothing to say
+   * why.
+   */
+  it('appends rather than prepends, so the first group stays first', () => {
+    expect(applyKeychainGroup({ 'keychain-access-groups': ['$(AppIdentifierPrefix)other'] })).toEqual({
+      'keychain-access-groups': ['$(AppIdentifierPrefix)other', KEYCHAIN_GROUP]
+    })
+  })
+
+  it('leaves the App Group key alone', () => {
+    expect(applyKeychainGroup({ 'com.apple.security.application-groups': [APP_GROUP] })).toEqual({
+      'com.apple.security.application-groups': [APP_GROUP],
+      'keychain-access-groups': [KEYCHAIN_GROUP]
+    })
+  })
+
+  it('is the same string app.config.ts puts on the app', () => {
+    expect(read('..', '..', 'app.config.ts')).toContain('`$(AppIdentifierPrefix)${BUNDLE_ID}`')
+    expect(KEYCHAIN_GROUP).toBe('$(AppIdentifierPrefix)dev.hermie.app')
+  })
+
+  it('is named in the extension entitlements', () => {
+    expect(read('share', `${TARGET}.entitlements`)).toContain(`<string>${KEYCHAIN_GROUP}</string>`)
   })
 })
 
@@ -93,6 +144,39 @@ describe('the strings the three languages share', () => {
   it('exposes the principal class under the name Info.plist uses', () => {
     expect(read('share', 'Info.plist')).toContain('<string>ShareViewController</string>')
     expect(read('share', 'ShareViewController.swift')).toContain('@objc(ShareViewController)')
+  })
+
+  /**
+   * The two names ADR-0026 added, and the three files that have to agree on them.
+   *
+   * `claim.json` is written by the extension and read by both native modules;
+   * `share-targets.json` is written by the app's module and read by the extension.
+   * A disagreement in either is silent in the same way everything else in this
+   * file is: a claim nobody reads is a share that is sent twice, and a targets
+   * file nobody reads is a share sheet that queues for ever.
+   */
+  it('names the same claim and targets files on both sides', () => {
+    expect(read('share', 'HermieShareOutbox.swift')).toContain('claim.json')
+    expect(read('ios', 'HermieShareModule.swift')).toContain('claim.json')
+    expect(
+      read('android', 'src', 'main', 'java', 'nl', 'fullstackstudio', 'hermie', 'share', 'HermieShareStore.kt')
+    ).toContain('claim.json')
+
+    expect(read('share', 'HermieShareTargets.swift')).toContain('share-targets.json')
+    expect(read('ios', 'HermieShareModule.swift')).toContain('share-targets.json')
+  })
+
+  /**
+   * The keychain account the app writes and the extension reads, plus the service
+   * `expo-secure-store` stores it under. Both are spelled by hand on the Swift
+   * side because there is no shared code, and a typo in either is a lookup that
+   * finds nothing.
+   */
+  it('reads the keychain item the app writes', () => {
+    const swift = read('share', 'HermieShareCredentials.swift')
+
+    expect(swift).toContain('hermie.share.delivery')
+    expect(swift).toContain('app:no-auth')
   })
 
   /** The item cap is applied by three writers and one reader; it has to be one number. */

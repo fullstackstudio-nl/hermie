@@ -19,6 +19,7 @@ type Call = string
 
 function entryFor(over: Record<string, unknown> = {}, files: Record<string, string> = {}): ShareOutboxEntry {
   const id = (over.id as string) ?? 'e1'
+  const { claim, ...manifest } = over
 
   return {
     id,
@@ -28,11 +29,15 @@ function entryFor(over: Record<string, unknown> = {}, files: Record<string, stri
       note: 'have a look',
       createdAt: 10,
       items: [],
-      ...over
+      ...manifest
     }),
+    ...(claim === undefined ? {} : { claim: claim as string }),
     files
   }
 }
+
+/** What a share extension writes immediately before it submits. */
+const claimed = (bot: string): string => JSON.stringify({ version: 1, bot, at: 42 })
 
 function harness(entries: ShareOutboxEntry[], over: Partial<ShareDeliveryPorts> = {}) {
   const calls: Call[] = []
@@ -51,6 +56,14 @@ function harness(entries: ShareOutboxEntry[], over: Partial<ShareDeliveryPorts> 
       async clear(id) {
         calls.push(`clear:${id}`)
         remaining = remaining.filter(entry => entry.id !== id)
+
+        return true
+      },
+      // Outward traffic, which this flow never uses: the targets file is written
+      // by `useShareTargetSync` and read by a share extension. Here so the port
+      // is the real one rather than a narrower shape this test invented.
+      async writeTargets() {
+        calls.push('writeTargets')
 
         return true
       }
@@ -302,5 +315,74 @@ describe('two shares at once', () => {
     await Promise.all([delivery.pump(), delivery.pump()])
 
     expect(calls.filter(call => call === 'send:b')).toHaveLength(1)
+  })
+})
+
+/**
+ * An entry a share extension got as far as submitting.
+ *
+ * This is the half of ADR-0026 that lives in TypeScript, and the only part of the
+ * new path that can be tested without a phone. The rule is one sentence and both
+ * directions of it are wrong: an entry whose claim is still there may have
+ * arrived, so sending it can duplicate a message in somebody's chat, and dropping
+ * it can lose what they shared. So it is neither sent nor dropped until a person
+ * has answered.
+ */
+describe('a claimed entry', () => {
+  it('is not delivered, however complete it looks', async () => {
+    const { calls, delivery, waiting } = harness([entryFor({ bot: 'b', claim: claimed('b') })])
+
+    await delivery.pump()
+
+    expect(calls).toEqual(['list'])
+    expect(waiting().map(share => share.id)).toEqual(['e1'])
+    expect(waiting()[0]?.claim).toEqual({ version: 1, bot: 'b', at: 42 })
+  })
+
+  it('is not cleared either, so nothing is lost while it waits to be asked about', async () => {
+    const { calls, delivery } = harness([entryFor({ bot: 'b', claim: claimed('b') })])
+
+    await delivery.pump()
+    await delivery.pump()
+
+    expect(calls.filter(call => call.startsWith('clear'))).toEqual([])
+  })
+
+  it('goes once the person says to send it again', async () => {
+    const { calls, delivery, waiting } = harness([entryFor({ bot: 'b', claim: claimed('b') })])
+
+    await delivery.pump()
+    await delivery.assign('e1', 'b')
+
+    expect(calls).toContain('send:b')
+    expect(calls).toContain('clear:e1')
+    expect(waiting()).toEqual([])
+  })
+
+  it('goes for good when the person discards it instead', async () => {
+    const { calls, delivery, waiting } = harness([entryFor({ bot: 'b', claim: claimed('b') })])
+
+    await delivery.pump()
+    await delivery.discard('e1')
+
+    expect(calls).not.toContain('send:b')
+    expect(calls).toContain('clear:e1')
+    expect(waiting()).toEqual([])
+  })
+
+  /**
+   * One claimed entry must not hold up an unclaimed one behind it. They are
+   * separate shares and the question about the first is not a question about the
+   * second.
+   */
+  it('does not block the entries around it', async () => {
+    const { calls, delivery } = harness([
+      entryFor({ id: 'asked', bot: 'b', createdAt: 10, claim: claimed('b') }),
+      entryFor({ id: 'plain', bot: 'b', createdAt: 20 })
+    ])
+
+    await delivery.pump()
+
+    expect(calls.filter(call => call.startsWith('clear'))).toEqual(['clear:plain'])
   })
 })

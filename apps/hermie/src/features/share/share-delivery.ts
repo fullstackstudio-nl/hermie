@@ -42,6 +42,27 @@
  * The one thing that is NOT retried is an entry that cannot be read at all. A
  * manifest from a version this build does not understand, or one whose files
  * the system has reclaimed, would be retried forever and is cleared instead.
+ *
+ * ## The one entry this will not touch
+ *
+ * Since ADR-0026 the iOS share extension may deliver an entry itself, and it
+ * writes a CLAIM immediately before it submits. An entry that still has a claim
+ * on it is one where the gateway was handed a message and the answer was never
+ * seen — the sending process was torn down inside that window — so both of the
+ * things this flow could do are wrong: sending produces a duplicate in somebody's
+ * chat, and clearing loses what they shared.
+ *
+ * So a claimed entry is never delivered automatically, whatever bot it names. It
+ * goes to the picker, which says it may already have gone and offers "Send
+ * again" and a discard. That is the ONE place in this feature where a person is
+ * asked, and it is asked because the alternative is a program guessing on
+ * somebody's behalf about a message it cannot see.
+ *
+ * Note which way this reverses the gap above. Before delivery this flow still
+ * fails towards "sent twice, visibly", because nothing else knows anything. The
+ * extension's path cannot afford that — it has no badge, no screen and no next
+ * launch — so it buys the same safety by writing down that it tried, and the
+ * ambiguity becomes a question instead of a duplicate.
  */
 import type { AttachmentInput } from '../chats/chat-controller'
 import type { UploadableFile, UploadedFile } from '../chats/file-upload'
@@ -168,6 +189,11 @@ export class ShareDelivery {
    * It pumps rather than delivering directly, which clears `failed` on the way
    * — a pick is a person saying "try again", and the commonest reason an entry
    * failed is that it named a bot the roster no longer has.
+   *
+   * It is also the only thing that overrides a claim. A person who has been told
+   * "this may already have been sent" and tapped "Send again" has answered the
+   * one question this flow cannot answer itself, and their answer stands for as
+   * long as the entry does.
    */
   async assign(id: string, bot: string, note?: string): Promise<void> {
     this.chosen.set(id, bot)
@@ -205,6 +231,19 @@ export class ShareDelivery {
       const bot = this.chosen.get(share.id) ?? share.bot
 
       if (!bot || this.failed.has(share.id)) {
+        continue
+      }
+
+      /*
+        A claim without a pick is a question, not work. See the module comment:
+        the entry was handed to a gateway by a process that did not survive to
+        hear the answer, so sending it here might duplicate it.
+
+        `chosen` is what clears it, and only a person puts anything in `chosen` —
+        so this reads as "nobody has answered the question yet" rather than as a
+        second flag to keep in step.
+      */
+      if (share.claim && !this.chosen.has(share.id)) {
         continue
       }
 

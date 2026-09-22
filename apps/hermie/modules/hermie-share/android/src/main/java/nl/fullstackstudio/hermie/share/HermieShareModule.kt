@@ -60,6 +60,18 @@ class HermieShareModule : Module() {
     }
 
     /**
+     * The counterpart of the iOS module's targets write, and a deliberate no-op.
+     *
+     * `share-targets.json` exists so that an out-of-process share sheet can send
+     * without the app (ADR-0026). Android has no such process: the system's
+     * chooser starts MainActivity, so by the time a share exists the app is
+     * running and the file would have no reader. Answering false rather than
+     * omitting the function keeps `src/platform/share-inbox.ts` free of a platform
+     * branch, which is the same reason `hasSharedContainer` below exists.
+     */
+    AsyncFunction("writeShareTargets") { _: String -> false }
+
+    /**
      * The counterpart of the iOS module's container question.
      *
      * Always true here: there is no App Group to be missing and no entitlement

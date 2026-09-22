@@ -189,6 +189,18 @@ export interface ShareInbox {
   list(): Promise<ShareOutboxEntry[]>
   /** Delete one entry and its copied files. Answers whether anything went. */
   clear(id: string): Promise<boolean>
+  /**
+   * Put `share-targets.json` where the share extension can read it.
+   *
+   * The one call in this seam that goes OUTWARDS, and it is here rather than in a
+   * seam of its own because it answers to the same platform capability: a
+   * platform that cannot receive a share has nothing to tell a sheet either. See
+   * `features/share/targets.ts` for what the bytes say and ADR-0026 for why an
+   * extension needs them.
+   *
+   * Answers false where there is no container, which is every platform but iOS.
+   */
+  writeTargets(json: string): Promise<boolean>
 }
 
 /**

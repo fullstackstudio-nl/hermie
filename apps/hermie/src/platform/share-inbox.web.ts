@@ -22,5 +22,8 @@ export const shareInbox: ShareInbox = {
   },
   async clear() {
     return false
+  },
+  async writeTargets() {
+    return false
   }
 }

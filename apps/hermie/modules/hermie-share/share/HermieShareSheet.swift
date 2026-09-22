@@ -9,13 +9,20 @@ import SwiftUI
  — so this is a list, a note field and a button, and nothing that needs a round
  trip to exist.
 
- ## What it is NOT allowed to do
+ ## What it says when it has finished
 
- Send. There is no gateway here and there cannot be: the socket, the
- credentials and the session live in the app. "Send" writes the entry and asks
- the system to open the app; the app is what talks to a gateway. That split is
- the whole architecture of this feature and it is why the outbox is a durable
- directory rather than a handoff.
+ "Send" used to write the entry, ask the system to open the app and get out of
+ the way — and the owner's verdict on that was that the agent only does something
+ with a share once the app is open. Since ADR-0026 the extension attempts the
+ delivery itself, so this sheet has a second half: one line, in the reader's own
+ language, saying which of the two things happened. "Sent to Ada" or "Will send
+ when Hermie opens", and nothing in between — a share sheet has one line of
+ attention and the difference between nine reasons is not what anybody is
+ standing there wondering about.
+
+ Those two sentences are NOT written here. They arrive in
+ `share-targets.json`, already translated, because this is a separate binary with
+ no access to the app's i18n — see `HermieShareTargets`.
 
  ## The list is the roster the app last saw
 
@@ -29,6 +36,18 @@ struct HermieShareSheet: View {
   let summary: String
   /** Whether the attachments have finished loading; "Send" waits for them. */
   let loading: Bool
+  /**
+   The one line this sheet says once "Send" has been tapped, or nil while asking.
+
+   Three states in one optional, which is fewer than an enum and says the same
+   thing: nil is "still asking", a line with `busy` is "sending", a line without
+   it is the verdict. The sheet is on screen for perhaps a second after the
+   verdict, which is the whole reason the verdict exists — a sheet that dismissed
+   itself would have nothing to report to.
+   */
+  let status: String?
+  /** Whether the line above is an attempt in flight rather than its outcome. */
+  let busy: Bool
   let onSend: (_ bot: HermieShareBot, _ note: String) -> Void
   let onCancel: () -> Void
 
@@ -38,7 +57,9 @@ struct HermieShareSheet: View {
   var body: some View {
     NavigationView {
       Group {
-        if bots.isEmpty {
+        if let status {
+          outcome(status)
+        } else if bots.isEmpty {
           empty
         } else {
           list
@@ -47,24 +68,56 @@ struct HermieShareSheet: View {
       .navigationTitle("Send to Hermie")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
-        ToolbarItem(placement: .cancellationAction) {
-          Button("Cancel", action: onCancel)
-        }
-
-        ToolbarItem(placement: .confirmationAction) {
-          Button("Send") {
-            if let bot = bots.first(where: { $0.name == selected }) {
-              onSend(bot, note)
-            }
+        // Both buttons go the moment an attempt starts. There is nothing left to
+        // cancel — the entry is already on disk and the share has HAPPENED,
+        // whichever way the attempt ends — and a "Cancel" that could not undo
+        // anything would be a button that lies.
+        if status == nil {
+          ToolbarItem(placement: .cancellationAction) {
+            Button("Cancel", action: onCancel)
           }
-          // Both conditions, and the second is the one that is easy to forget:
-          // a share of four photographs is still copying bytes for a moment
-          // after the sheet appears, and an entry written before the loads
-          // finish is an entry with fewer files than the person selected.
-          .disabled(selected == nil || loading)
+
+          ToolbarItem(placement: .confirmationAction) {
+            Button("Send") {
+              if let bot = bots.first(where: { $0.name == selected }) {
+                onSend(bot, note)
+              }
+            }
+            // Both conditions, and the second is the one that is easy to forget:
+            // a share of four photographs is still copying bytes for a moment
+            // after the sheet appears, and an entry written before the loads
+            // finish is an entry with fewer files than the person selected.
+            .disabled(selected == nil || loading)
+          }
         }
       }
     }
+  }
+
+  /**
+   The finished state: a spinner or a tick, and one sentence.
+
+   No colour distinction between the two outcomes and no icon for the queued one.
+   Both are successes from where the person is standing — they shared something
+   and it is going to arrive — and painting the second one as a warning would
+   invite them to share it again, which is the one thing that produces a duplicate
+   in somebody's chat.
+   */
+  private func outcome(_ line: String) -> some View {
+    VStack(spacing: 12) {
+      if busy {
+        ProgressView()
+      } else {
+        Image(systemName: "checkmark.circle")
+          .font(.system(size: 28))
+          .foregroundColor(.accentColor)
+      }
+
+      Text(line)
+        .font(.headline)
+        .multilineTextAlignment(.center)
+    }
+    .padding()
   }
 
   private var empty: some View {

@@ -10,6 +10,7 @@
 import {
   isSafeShareFileName,
   isSafeShareId,
+  parseShareClaim,
   parseShareEntry,
   parseShareManifest,
   shareFiles,
@@ -236,5 +237,69 @@ describe('the two name rules, which Swift and Kotlin also implement', () => {
     expect(isSafeShareId('0f2a4c6e8a0c2e4f6a8c0e2f4a6c8e0f')).toBe(true)
     expect(isSafeShareId('.leading')).toBe(false)
     expect(isSafeShareId('has space')).toBe(false)
+  })
+})
+
+/**
+ * The claim, which is the one field in this format whose EXISTENCE is the fact.
+ *
+ * It is written by a share extension immediately before it hands a message to a
+ * gateway, so an entry that still has one is an entry that may or may not have
+ * been sent. Every reading of it therefore errs towards "there is a claim": a
+ * broken one still means somebody tried, and treating a corrupt byte as "no
+ * claim" would turn an ambiguous entry back into one the app sends unasked.
+ */
+describe('the claim', () => {
+  it('reads what the sender wrote', () => {
+    expect(parseShareClaim(JSON.stringify({ version: 1, bot: 'ada', at: 42 }))).toEqual({
+      version: 1,
+      bot: 'ada',
+      at: 42
+    })
+  })
+
+  it('reads a broken one as a claim with nothing in it', () => {
+    for (const json of ['{', 'null', '[]', '"words"']) {
+      expect(parseShareClaim(json)).toEqual({ version: 1, bot: '', at: 0 })
+    }
+  })
+
+  it('answers nothing only when there is nothing there', () => {
+    expect(parseShareClaim('')).toBeNull()
+    expect(parseShareClaim('   ')).toBeNull()
+  })
+
+  it('rides on the entry when the bridge reports one', () => {
+    const entry = {
+      id: 'e1',
+      manifest: JSON.stringify({
+        version: SHARE_MANIFEST_VERSION,
+        id: 'e1',
+        bot: 'ada',
+        note: 'have a look',
+        createdAt: 10,
+        items: []
+      }),
+      claim: JSON.stringify({ version: 1, bot: 'ada', at: 42 }),
+      files: {}
+    }
+
+    expect(parseShareEntry(entry)?.claim).toEqual({ version: 1, bot: 'ada', at: 42 })
+  })
+
+  it('is absent on an ordinary entry', () => {
+    const entry = {
+      id: 'e1',
+      manifest: JSON.stringify({
+        version: SHARE_MANIFEST_VERSION,
+        id: 'e1',
+        note: 'have a look',
+        createdAt: 10,
+        items: []
+      }),
+      files: {}
+    }
+
+    expect(parseShareEntry(entry)).not.toHaveProperty('claim')
   })
 })
