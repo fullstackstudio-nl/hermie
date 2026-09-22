@@ -36,8 +36,8 @@ import type { PushMessage } from './expo'
 import { lastInboundRow } from './inbound'
 import type { LinkEvent, LinkServerRequest } from './link'
 import { gatewayKeyOf } from './gateway-key'
-import { type NotifiableEvent, pushMessageFor, typeForInbound } from './payload'
-import { type PushRegistration, type PushType, registrationsFor, someoneAttached } from './registrations'
+import { type NotifiableEvent, pushMessageFor, typeForTurn } from './payload'
+import { type PushRegistration, type PushType, registrationsForAny, someoneAttached } from './registrations'
 import { readRoster, type Roster, type WatchedBot } from './roster'
 import type { PushState } from './state'
 
@@ -413,6 +413,9 @@ export class PushWatcher {
           bot: session.name,
           botLabel: session.label,
           sessionId: session.sessionId,
+          // This daemon resumes canonical Bot Chats only, so it can say which
+          // kind of conversation this is as a fact rather than as a guess.
+          sessionKind: 'canonical',
           requestId: queueId || request.id,
           requestMethod: request.method,
           preview: previewOfRequest(request.params)
@@ -529,23 +532,45 @@ export class PushWatcher {
     }
 
     const inbound = await this.classifyTurn(session)
-    const type: PushType = typeForInbound(inbound.kind)
     const failed = payload.status === 'error' || typeof payload.error === 'string'
+    const type: PushType = typeForTurn(inbound.kind, failed)
+    const cron = inbound.kind === 'cron'
 
     const notifiable: NotifiableEvent = {
       type,
       bot: session.name,
       botLabel: session.label,
       sessionId: session.sessionId,
+      // Canonical, for the reason the request path above gives: the only
+      // sessions this daemon watches are the ones it resumed off the roster.
+      sessionKind: 'canonical',
       ...(inbound.name ? { name: inbound.name } : {}),
-      ...(type === 'cron' && failed ? { failed: true } : {}),
+      /*
+        A FACT here, and said so rather than left out.
+
+        This daemon recognises a cron run by matching one of two headers the
+        scheduler writes, word for word — see `inbound.ts` — so the answer is
+        as certain as the transcript it read. A notifier whose only signal is a
+        free-text platform string cannot say this, and the app words that case
+        as an ordinary message instead of claiming a scheduled run.
+      */
+      ...(cron ? { cron: true, cronCertain: true } : {}),
+      ...(cron && failed ? { failed: true } : {}),
       preview: typeof payload.text === 'string' ? payload.text : ''
     }
 
     await this.notify(notifiable, `${session.sessionId}:${type}:${String(seq)}`, {
       // Only an ordinary message defers to the heartbeat. A DM, a cron report
       // and a failed run are worth a buzz whether or not a chat is on screen.
-      suppressWhenAttached: type === 'message'
+      suppressWhenAttached: type === 'message',
+      /*
+        A scheduled run answers to two switches at once. The payload names the
+        finer one — `cron_done` or `cron_failed` — and the coarse `cron` is
+        added to the audience so that every device which was being told about
+        scheduled runs before these types existed goes on being told. Adding a
+        type must never be how somebody's phone goes quiet.
+      */
+      ...(cron ? { audience: [type, 'cron' as const] } : {})
     })
   }
 
@@ -595,7 +620,11 @@ export class PushWatcher {
   private async notify(
     input: NotifiableEvent,
     dedupeKey: string,
-    options: { suppressWhenAttached: boolean }
+    options: {
+      suppressWhenAttached: boolean
+      /** Every switch this one fact answers to. Defaults to the payload's own type. */
+      audience?: readonly PushType[]
+    }
   ): Promise<void> {
     const state = this.options.state
     // Stamped here rather than at each of the four places an event is built:
@@ -638,7 +667,7 @@ export class PushWatcher {
       return
     }
 
-    const audience = registrationsFor(this.roster.push, event.type).filter(
+    const audience = registrationsForAny(this.roster.push, options.audience ?? [event.type]).filter(
       registration =>
         !state.invalid[registration.installationId] &&
         this.allow(registration.installationId) &&

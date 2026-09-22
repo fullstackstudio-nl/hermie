@@ -191,9 +191,30 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
     }
   })
 
+  /**
+   * One of a bot's OTHER conversations: the chat column selects the bot and
+   * then shows that conversation over it.
+   *
+   * `openBot` first, deliberately. It clears the detour, the section panel and
+   * the temporary list — everything a tap from a lock screen should arrive
+   * without — and then the conversation is put back on, so the Back inside it
+   * lands on the bot's own list of conversations rather than on whatever was
+   * open before the phone buzzed.
+   */
+  const openConversation = useCallback(
+    (name: string, storedId: string) => {
+      openBot(name)
+      setConversations({ bot: name, id: storedId })
+    },
+    [openBot]
+  )
+
   // And the same from a notification, through the bus, for the reason
   // `app/open-chat-bus.ts` gives.
-  useEffect(() => onOpenChatRequest(openBot), [openBot])
+  useEffect(
+    () => onOpenChatRequest((bot, sessionId) => (sessionId ? openConversation(bot, sessionId) : openBot(bot))),
+    [openBot, openConversation]
+  )
 
   // A cron card in the transcript opens the crons panel ON that cron. Opening
   // the panel any other way clears the target, so the next visit lands on the

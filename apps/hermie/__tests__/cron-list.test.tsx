@@ -14,7 +14,7 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react-native'
 
 import { renderScreen } from './support/render'
-import { CronScreen } from '../src/features/cron'
+import { type CronJob, cronJobFor, cronJobName, CronScreen } from '../src/features/cron'
 import { useBotsStore } from '../src/store/bots'
 import { useCronStore } from '../src/store/cron'
 
@@ -343,6 +343,38 @@ describe('the editor chooses a profile on create', () => {
  * thing and delivers the page that thing lives on. It is the same button on
  * every platform, so this is not a browser defect; it was found in a browser.
  */
+describe('naming a job from an id alone', () => {
+  /*
+    The inverse of the transcript's own lookup, which goes from a cron card's
+    NAME to an id. This direction is what an id arriving from outside the list
+    needs — a notification payload's `jobId`, a route parameter — and it has to
+    be able to answer "nothing", because the crons list is read by the Crons
+    screen's own controller and before that screen has been opened once this app
+    genuinely does not know what the id refers to.
+  */
+  const jobs = [
+    { id: 'job-1', name: 'Morning digest' },
+    { id: 'job-2', name: 'Nightly backup' }
+  ] as CronJob[]
+
+  it('finds the job an id names', () => {
+    expect(cronJobFor(jobs, 'job-2')?.name).toBe('Nightly backup')
+    expect(cronJobName(jobs, 'job-1')).toBe('Morning digest')
+  })
+
+  it('answers nothing rather than something for an id it cannot place', () => {
+    // Empty, and NOT the id: a caller that printed what came back would put
+    // `job-9` on a lock screen, which says less than "a scheduled run" would.
+    expect(cronJobName(jobs, 'job-9')).toBe('')
+    expect(cronJobFor(jobs, 'job-9')).toBeNull()
+  })
+
+  it('answers nothing before the list has been read at all', () => {
+    expect(cronJobName([], 'job-1')).toBe('')
+    expect(cronJobName(jobs, '')).toBe('')
+  })
+})
+
 describe('opening the crons screen on a new job', () => {
   it('has the editor up on the first render', () => {
     renderScreen(<CronScreen initialCreate />)

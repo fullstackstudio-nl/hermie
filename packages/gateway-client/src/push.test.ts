@@ -18,9 +18,12 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  adoptedPushTypes,
+  effectivePushTypes,
   foreignPushRows,
   noPushTypes,
   PUSH_SEEN_TTL_SECONDS,
+  PUSH_TYPES,
   pushRowFor,
   pushSectionFor,
   pushSeenOf,
@@ -35,7 +38,7 @@ const registration = (patch: Partial<PushRegistrationInput> = {}): PushRegistrat
   installationId: 'i-phone',
   address: { transport: 'expo', token: 'ExponentPushToken[abc]' },
   platform: 'ios',
-  types: { message: true, request: true, cron: false, turn_done: false, turn_failed: false },
+  types: { ...noPushTypes(), message: true, request: true },
   preview: false,
   updatedAt: NOW,
   ...patch
@@ -75,7 +78,15 @@ describe('one row', () => {
       transport: 'expo',
       token: 'ExponentPushToken[abc]',
       platform: 'ios',
-      types: { message: true, request: true, cron: false, turn_done: false, turn_failed: false },
+      types: {
+        message: true,
+        request: true,
+        cron: false,
+        cron_done: false,
+        cron_failed: false,
+        turn_done: false,
+        turn_failed: false
+      },
       preview: false,
       updatedAt: NOW
     })
@@ -98,7 +109,7 @@ describe('one row', () => {
   })
 
   it('copies the types rather than aliasing the caller’s object', () => {
-    const types = { message: true, request: false, cron: false, turn_done: false, turn_failed: false }
+    const types = { ...noPushTypes(), message: true }
     const row = pushRowFor(registration({ types })) as { types: Record<string, boolean> }
 
     types.message = false
@@ -231,15 +242,72 @@ describe('reading a section back', () => {
   })
 })
 
+describe('the seven types', () => {
+  it('names every event the notifier can raise, in the order the switches are drawn', () => {
+    // Pinned rather than counted: this array is the wire's list AND the running
+    // order of Settings → Notifications, so a reordering is a visible change
+    // and a silent removal is a device that stops asking about something.
+    expect([...PUSH_TYPES]).toEqual([
+      'message',
+      'request',
+      'cron',
+      'cron_done',
+      'cron_failed',
+      'turn_done',
+      'turn_failed'
+    ])
+  })
+
+  it('folds a per-chat override over all seven, and leaves the rest following the global', () => {
+    const global = { ...noPushTypes(), cron: true, cron_done: true, cron_failed: true }
+
+    expect(effectivePushTypes(global, { cron_done: false })).toEqual({
+      ...global,
+      cron_done: false
+    })
+  })
+
+  it('lets a chat keep the failures and lose the chatter, which is why the two are separate', () => {
+    const global = { ...noPushTypes(), cron: true, cron_done: true, cron_failed: true }
+    const quiet = effectivePushTypes(global, { cron: false, cron_done: false })
+
+    expect(quiet.cron).toBe(false)
+    expect(quiet.cron_done).toBe(false)
+    expect(quiet.cron_failed).toBe(true)
+  })
+})
+
+describe('a device that upgrades into a new type', () => {
+  const defaults = { ...noPushTypes(), message: true, cron: true, cron_done: true, cron_failed: true }
+
+  it('takes the default for a type it was never offered a switch for', () => {
+    // The bag on disk predates `cron_done` and `cron_failed`. Read by the
+    // WIRE's rule they would be off, and the owner's phone would silently never
+    // mention the routine that stopped running — with both switches looking on.
+    const stored = { message: true, request: true, cron: true, turn_done: true, turn_failed: true }
+
+    expect(adoptedPushTypes(stored, defaults)).toMatchObject({ cron_done: true, cron_failed: true })
+  })
+
+  it('never re-opens a type the reader switched off', () => {
+    expect(adoptedPushTypes({ cron: false }, defaults).cron).toBe(false)
+  })
+
+  it('leaves the wire’s rule alone, where an absent type means off', () => {
+    // The two functions differ on purpose and this is the difference: a
+    // registration that does not name a type never agreed to it.
+    expect(pushTypesOf({ message: true }).cron_done).toBe(false)
+  })
+
+  it('reads nothing at all as the defaults, which is what a fresh install gets', () => {
+    expect(adoptedPushTypes(null, defaults)).toEqual(defaults)
+    expect(adoptedPushTypes('nonsense', defaults)).toEqual(defaults)
+  })
+})
+
 describe('the small pieces', () => {
   it('reads absent as off, exactly as the daemon does', () => {
-    expect(pushTypesOf({ message: true, request: 'yes' })).toEqual({
-      message: true,
-      request: false,
-      cron: false,
-      turn_done: false,
-      turn_failed: false
-    })
+    expect(pushTypesOf({ message: true, request: 'yes' })).toEqual({ ...noPushTypes(), message: true })
     expect(pushTypesOf(null)).toEqual(noPushTypes())
   })
 

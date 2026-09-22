@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Two more things to be told about: a scheduled run that finished, and one that failed.**
+  Settings → Notifications now has a switch for each, on by default like the rest, and so does a
+  chat's own notifications page — which is the point of splitting them out of **Routines**. A bot
+  whose nightly digest is chatter is exactly the bot whose digest *not running* is worth a buzz, and
+  until now switching off the one switched off the other. A device that upgrades adopts both as on
+  without anybody touching a switch; a type somebody had already turned off stays off, because that
+  was a decision. The coarse **Routines** switch keeps meaning what it always meant, so a device
+  that only ever asked for that one goes on being told about scheduled runs.
+
+- **A notification opens the conversation it was about.** A bot has branches now, and a conversation
+  `/new` put away, so a turn can happen in a session nobody is looking at — and a tap that always
+  opened the bot's chat landed on a transcript with nothing in it about the thing that just buzzed.
+  The notifier says which session and what kind it was, and a branch or a retired conversation opens
+  there instead. A notification that says nothing about a session behaves exactly as it always did.
+  A tap into one of those other conversations opens it and answers nothing: an **Allow** belongs to
+  the session that asked, so the reader lands on the request and answers it there. In a browser, two
+  conversations of one bot no longer replace each other on the lock screen.
+
+- **A notification only claims a scheduled run when it knows there was one.** A notifier recognises
+  a cron run by whatever signal it has, and not all of them are facts — the last resort is the
+  session's platform string, which is free text. Where the notifier says its answer was a guess, the
+  line reads as an ordinary message from the bot instead of naming a routine that may not have run,
+  because a lock screen gives the reader no way to tell a guessed sentence from a certain one. A job
+  id is carried but never printed: `a cron run failed` says more than the id would.
+
 - **A chat of your own with every bot, beside the one everybody shares.** On a gateway that knows
   who you are, each bot's (…) menu and its Conversations page carry one switch: **Shared Bot Chat**
   or **My chat**. The shared one is what it has always been — the same conversation Hermes Desktop,

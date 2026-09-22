@@ -19,10 +19,15 @@ import type { PushAddress } from '@hermie/gateway-client/push'
 export interface PushPayloadData {
   /** The bot whose chat this is about. */
   bot?: unknown
-  /** `message`, `request`, `dm` or `cron`, as the daemon named it. */
+  /** `message`, `request`, `cron`, `cron_done`, `cron_failed`, `turn_done`, `turn_failed`. */
   type?: unknown
   /** The approval or clarify this notification was raised for. */
   requestId?: unknown
+  /** The session it happened in. `session` is Hermie Web's older spelling of it. */
+  sessionId?: unknown
+  session?: unknown
+  /** `canonical`, `branch` or `other`; absent where the notifier could not read a title. */
+  sessionKind?: unknown
   [key: string]: unknown
 }
 

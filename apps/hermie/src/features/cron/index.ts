@@ -15,7 +15,9 @@ export {
 export {
   type CronDeliveryTarget,
   type CronJob,
+  cronJobFor,
   cronJobFromRow,
+  cronJobName,
   type CronRun,
   cronRunFromRow,
   cronStatusLabel,

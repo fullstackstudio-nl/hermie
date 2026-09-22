@@ -199,7 +199,7 @@ describe('a registration, an event, one push', () => {
     expect(body.to).toBe('ExponentPushToken[phone]')
     expect(body.title).toBe('Researcher')
     expect(body.body).toBe('cron “Morning digest” reported')
-    expect((body.data as Record<string, string>).type).toBe('cron')
+    expect((body.data as Record<string, string>).type).toBe('cron_done')
     // Preview is off: the report itself never leaves the gateway.
     expect(JSON.stringify(body)).not.toContain('overnight numbers')
   })

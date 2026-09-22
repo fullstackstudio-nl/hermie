@@ -47,6 +47,8 @@ export interface NotificationsStepProps {
 
 const NO_PORTS = {
   showChat: async (): Promise<void> => undefined,
+  showConversation: async (): Promise<void> => undefined,
+  canonicalSessionIds: (): readonly string[] => [],
   openApprovals: async (): Promise<[]> => [],
   respondApproval: async (): Promise<void> => undefined,
   // There is no list to switch within and no chat to open: this object exists

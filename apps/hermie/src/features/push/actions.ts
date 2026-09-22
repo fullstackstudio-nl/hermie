@@ -29,6 +29,23 @@ export interface OpenApproval {
   [key: string]: unknown
 }
 
+/**
+ * Which conversation a payload says it is about.
+ *
+ * The gateway's word, not ours. It reads the session's title — `Bot Chat` is
+ * the canonical one, `Branch` or `Branch · …` is a branch, anything else is
+ * `other` — and says NOTHING at all when it cannot read one. So an empty kind
+ * here is "the notifier did not say", which is also what every notification
+ * sent before this field existed looks like, and it is read the same way.
+ *
+ * `other` rather than the app's own `past`, because `past` is "everything else
+ * this app decided to list" and a gateway cannot know that. What it can say is
+ * "not the canonical chat and not a branch".
+ */
+export type PushSessionKind = 'canonical' | 'branch' | 'other' | ''
+
+const SESSION_KINDS: readonly string[] = ['canonical', 'branch', 'other']
+
 /** What the app should do once it has asked the gateway. */
 export type PushIntent =
   { kind: 'open-chat'; bot: string } | { kind: 'respond'; bot: string; requestId: string; choice: string }
@@ -49,6 +66,85 @@ export interface PushTap {
    * unresolvable field here gets.
    */
   gatewayKey: string
+  /**
+   * The session the notified thing happened in, or empty.
+   *
+   * A bot used to have exactly one conversation, so naming the bot named the
+   * destination. It branches now, and `/new` retires the one it puts away, so a
+   * turn can happen in a session nobody is looking at — and a tap that always
+   * opened the canonical chat would land on a transcript with nothing in it
+   * about the thing that just buzzed.
+   *
+   * Like the bot name beside it, this is a LOOKUP and never an instruction:
+   * every screen it can reach resolves the id against the gateway before it
+   * paints anything.
+   */
+  sessionId: string
+  /** What the notifier called that session. Empty when it did not say. */
+  sessionKind: PushSessionKind
+}
+
+/** Where a tap should land. */
+export type PushDestination =
+  /** The bot's own chat — what every tap did before conversations existed. */
+  | { kind: 'chat' }
+  /** One named conversation of that bot, through R4b's viewer. */
+  | { kind: 'conversation'; sessionId: string }
+
+export interface DestinationOptions {
+  tap: PushTap
+  /**
+   * Every id this app currently knows the bot's canonical chat by.
+   *
+   * Both of them, in practice: the STORED id a listing hands out and the
+   * RESOLVED id a live session is stamped with are different strings for the
+   * same conversation, and a notifier may carry either. Empty where the roster
+   * has not been read yet, which is a real state on a cold start from a
+   * notification and is handled rather than guessed at.
+   */
+  canonicalIds: readonly string[]
+}
+
+/**
+ * The conversation a tap opens.
+ *
+ * Three inputs and one rule, and the rule errs towards the chat every time,
+ * because the chat is where the app can always say something true:
+ *
+ *  - the notifier SAID which kind — `branch` and `other` open that
+ *    conversation, `canonical` opens the chat. Its answer wins outright: it
+ *    read the session's own title, and this app second-guessing it from an id
+ *    is how a tap lands on the wrong screen.
+ *  - the notifier said nothing, but named a session this app can compare — an
+ *    id that is neither of the bot's canonical ids is some other conversation,
+ *    so open it.
+ *  - anything else — no id, no canonical id to compare against, an unreadable
+ *    kind — opens the chat, which is exactly what every notification did before
+ *    any of these fields existed.
+ */
+export function pushDestinationOf(options: DestinationOptions): PushDestination {
+  const { tap, canonicalIds } = options
+  const chat: PushDestination = { kind: 'chat' }
+
+  if (tap.sessionKind === 'canonical') {
+    return chat
+  }
+
+  if (!tap.sessionId) {
+    return chat
+  }
+
+  if (tap.sessionKind === 'branch' || tap.sessionKind === 'other') {
+    return { kind: 'conversation', sessionId: tap.sessionId }
+  }
+
+  // The kind is absent. An id nothing can be compared against says nothing, so
+  // it is not a reason to leave the chat.
+  if (!canonicalIds.length || canonicalIds.includes(tap.sessionId)) {
+    return chat
+  }
+
+  return { kind: 'conversation', sessionId: tap.sessionId }
 }
 
 const stringOf = (value: unknown): string => (typeof value === 'string' ? value.trim() : '')
@@ -79,6 +175,7 @@ export function pushTapOf(response: PushResponse): PushTap | null {
   // which is the kind of guess that answers the wrong one.
   const requestId = stringOf(response.data.requestId)
   const key = stringOf(response.data.gatewayKey)
+  const kind = stringOf(response.data.sessionKind)
 
   return {
     bot,
@@ -87,7 +184,17 @@ export function pushTapOf(response: PushResponse): PushTap | null {
     // Checked rather than trusted: anything that is not the shape this project
     // produces is read as no key at all, so a payload cannot make the app
     // search its list for something that was never a key.
-    gatewayKey: isGatewayKey(key) ? key : ''
+    gatewayKey: isGatewayKey(key) ? key : '',
+    /*
+      `sessionId` is the plugin's spelling and `session` is what Hermie Web's
+      own daemon has always written. Both are read, because both notifiers are
+      supported and a payload from the older one is not a payload with no
+      session in it.
+    */
+    sessionId: stringOf(response.data.sessionId) || stringOf(response.data.session),
+    // A kind this build does not recognise is read as no kind at all, which
+    // falls through to the id comparison rather than to a guess.
+    sessionKind: SESSION_KINDS.includes(kind) ? (kind as PushSessionKind) : ''
   }
 }
 

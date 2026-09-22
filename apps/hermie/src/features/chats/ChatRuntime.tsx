@@ -372,6 +372,28 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
             await controller.openChat(bot).catch(() => undefined)
           }
         },
+        /*
+          A branch, or a conversation `/new` put away. R4b's viewer is read-only
+          and resumes the stored id itself, so there is nothing to open on the
+          controller — the bus is the whole of it, and the shell that is mounted
+          decides whether that is a pushed screen or a panel.
+        */
+        showConversation: async (name, sessionId) => {
+          requestOpenChat(name, sessionId)
+        },
+        /*
+          Both ids, because they are different strings for the same
+          conversation: a listing hands out the STORED id and a live session is
+          stamped with the RESOLVED one, and a notifier may carry either. An
+          empty answer is the honest one on a cold start from a notification,
+          where the roster has not been read yet — `pushDestinationOf` opens the
+          chat rather than guessing when it has nothing to compare against.
+        */
+        canonicalSessionIds: name => {
+          const canonical = useBotsStore.getState().byName[name]?.canonical
+
+          return canonical ? [...new Set([canonical.id, canonical.resolvedId].filter(Boolean))] : []
+        },
         openApprovals: name => controller.openApprovals(name),
         respondApproval: (name, requestId, choice) => controller.respondApproval(name, requestId, choice),
         /*
@@ -384,7 +406,7 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
           did not exist when the notification was tapped. The bus is read by
           whichever shell is mounted, which by then is the new one.
         */
-        switchToGateway: async (key, bot) => {
+        switchToGateway: async (key, bot, sessionId) => {
           const target = gatewayForKey(registryRef.current, key)
 
           if (!target || target.id === gatewayId) {
@@ -392,7 +414,10 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
           }
 
           await switchGateway(target.id)
-          requestOpenChat(bot)
+          // The conversation only where the NOTIFIER classified it as one. An
+          // id it did not classify cannot be placed without the other
+          // gateway's roster, and this side has never read it.
+          requestOpenChat(bot, sessionId || undefined)
 
           return true
         }

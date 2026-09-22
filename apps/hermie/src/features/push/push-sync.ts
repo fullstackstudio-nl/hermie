@@ -32,7 +32,7 @@ import { pushStampOf } from '@hermie/gateway-client/push'
 import type { GatewayNamespace } from '../../gateway/namespace'
 import type { RpcFailure } from '../../gateway/rpc-failures'
 import { usePushStore, type PushState } from '../../store/push'
-import { pushTapOf, resolvePushTap, type OpenApproval } from './actions'
+import { pushDestinationOf, pushTapOf, resolvePushTap, type OpenApproval } from './actions'
 import type { PushAddressFailure, PushPermission, PushPlatform, PushResponse } from './platform-contract'
 
 /**
@@ -86,6 +86,24 @@ export interface PushSyncPorts {
    * exists lands somewhere honest rather than on an empty screen.
    */
   showChat(bot: string): Promise<void>
+  /**
+   * Bring ONE of that bot's other conversations to the front, by its stored id.
+   *
+   * R4b's viewer, which is read-only and resolves the id against the gateway
+   * like every other entry point here — so an id that names nothing lands on a
+   * screen that says so rather than on an empty transcript.
+   */
+  showConversation(bot: string, sessionId: string): Promise<void>
+  /**
+   * Every id this app currently knows that bot's canonical chat by, or none.
+   *
+   * Two of them where the roster has been read: the STORED id and the RESOLVED
+   * id are different strings for the same conversation and a notifier may carry
+   * either. It is a question rather than a lookup table because the roster is
+   * empty on a cold start from a notification, and `pushDestinationOf` has to
+   * be able to tell "not the canonical one" from "nothing to compare against".
+   */
+  canonicalSessionIds(bot: string): readonly string[]
   /** What `approval.pending` says is open for that bot, asked just now. */
   openApprovals(bot: string): Promise<OpenApproval[]>
   respondApproval(bot: string, requestId: string, choice: string): Promise<void>
@@ -101,8 +119,14 @@ export interface PushSyncPorts {
    * switch tears this object's own connection down, so the chat controller
    * these ports are bound to is stopped by the time it returns. Whatever opens
    * the chat has to be on the other side of that teardown.
+   *
+   * `sessionId` is the conversation to land on when the payload named one the
+   * notifier itself classified as not the canonical chat. Empty otherwise —
+   * including for a payload that named an id without saying what it was, because
+   * the only thing that could tell those apart is the OTHER gateway's roster and
+   * this side of the switch has never seen it.
    */
-  switchToGateway(gatewayKey: string, bot: string): Promise<boolean>
+  switchToGateway(gatewayKey: string, bot: string, sessionId: string): Promise<boolean>
 }
 
 export interface PushSyncOptions {
@@ -489,7 +513,42 @@ export class PushSync {
       has finished. The reader lands on the request and answers it there, which
       is the direction this feature is built to fail in.
     */
-    if (await this.ports.switchToGateway(tap.gatewayKey, tap.bot)) {
+    /*
+      What the NOTIFIER said, without asking this gateway anything.
+
+      Computed before the switch because it is the only part of the destination
+      that survives one: a payload that says `branch` says it about the gateway
+      it came from, while an id with no kind can only be placed against a roster
+      this side has not read. So the switch is told about the first and nothing
+      about the second, and the tap lands on that gateway's chat — which is what
+      a cross-gateway tap did before conversations existed.
+    */
+    const stated = pushDestinationOf({ tap, canonicalIds: [] })
+
+    if (
+      await this.ports.switchToGateway(tap.gatewayKey, tap.bot, stated.kind === 'conversation' ? stated.sessionId : '')
+    ) {
+      return
+    }
+
+    const destination =
+      stated.kind === 'conversation'
+        ? stated
+        : pushDestinationOf({ tap, canonicalIds: this.ports.canonicalSessionIds(tap.bot) })
+
+    /*
+      A conversation that is not the bot's chat opens, and nothing else happens.
+
+      The same rule the cross-gateway tap above follows, and for the same
+      reason: an Allow has to be re-validated against `approval.pending` for the
+      session that ASKED, and that session is not the one this controller
+      resumed. Answering the canonical chat's oldest open request instead would
+      be answering a different question than the one on the lock screen. The
+      reader lands on the request and answers it there.
+    */
+    if (destination.kind === 'conversation') {
+      await this.ports.showConversation(tap.bot, destination.sessionId)
+
       return
     }
 

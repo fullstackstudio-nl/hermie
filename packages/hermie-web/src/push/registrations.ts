@@ -31,8 +31,21 @@ export const PUSH_SECTION_KEY = 'push'
  */
 export const HERMIE_APP_KEY = 'hermie-app'
 
-/** Every event a device can ask about. A registration that names none is off. */
-export const PUSH_TYPES = ['message', 'request', 'dm', 'cron'] as const
+/**
+ * Every event a device can ask about. A registration that names none is off.
+ *
+ * `dm` is still here although the app no longer offers a switch for it: this
+ * daemon CAN produce one — it reads the inbound row itself and a bot-to-bot
+ * header is right there in it — and a registration written by a build that
+ * still asked for it is a device that still wants it.
+ *
+ * `cron_done` and `cron_failed` are the finer grain of `cron`, and they exist
+ * for the case `cron` alone cannot say: a routine whose chatter is noise but
+ * whose failure is not. `cron` stays the coarse switch and keeps meaning what
+ * it always meant, so a device that asked only for it goes on being told about
+ * scheduled runs — see `watcher.ts`, where the two audiences are joined.
+ */
+export const PUSH_TYPES = ['message', 'request', 'dm', 'cron', 'cron_done', 'cron_failed'] as const
 
 export type PushType = (typeof PUSH_TYPES)[number]
 
@@ -194,6 +207,22 @@ export function readPushSection(section: unknown, owner = ''): PushSection {
 /** The registrations that asked about this kind of event. */
 export function registrationsFor(section: PushSection, type: PushType): PushRegistration[] {
   return section.registrations.filter(registration => registration.types[type])
+}
+
+/**
+ * The registrations that asked about ANY of these, each named once.
+ *
+ * One fact can answer to two switches. A scheduled run that finished is both
+ * "the routine reported" (`cron`) and "the run ended" (`cron_done`), and the
+ * two exist precisely so that somebody can want one without the other — so the
+ * audience is the union and not the intersection, or adding the finer type
+ * would have silenced the coarse one for every device that had it on.
+ *
+ * Deduped by installation, because the union is where one device would
+ * otherwise be sent the same notification twice for the same event.
+ */
+export function registrationsForAny(section: PushSection, types: readonly PushType[]): PushRegistration[] {
+  return section.registrations.filter(registration => types.some(type => registration.types[type]))
 }
 
 /**

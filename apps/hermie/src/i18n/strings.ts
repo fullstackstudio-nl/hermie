@@ -903,10 +903,12 @@ export const strings = {
       typeMessage: 'New message',
       typeRequest: 'Needs input',
       typeCron: 'Routines',
+      typeCronDone: 'A routine finished',
+      typeCronFailed: 'A routine failed',
       typeTurnDone: 'Finished working',
       typeTurnFailed: 'Something went wrong',
       typesHint:
-        'A bot answering, a bot asking permission, a routine’s delivery, and a long task reaching its end either way. A turn you stopped yourself is never one of these.',
+        'A bot answering, a bot asking permission, a routine’s delivery, how a scheduled run ended, and a long task reaching its end either way. A turn you stopped yourself is never one of these.',
       preview: 'Show a preview',
       previewHint:
         'Off, a notification says which bot and what happened. On, it carries the message as well — and a lock screen is where it will be read.',

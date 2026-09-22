@@ -238,6 +238,32 @@ export function cronStatusLabel(status: CronStatus): string {
   return cronStrings.status[status]
 }
 
+/**
+ * The job one id names, or nothing.
+ *
+ * The inverse of the chat transcript's own lookup, which goes from a cron
+ * card's NAME to an id. This direction is what an id arriving from outside the
+ * list needs — a notification payload's `jobId`, a route parameter — and
+ * `nothing` is a real answer rather than a failure: the crons list is read by
+ * the Crons screen's own controller, so before that screen has been opened once
+ * this app genuinely does not know what the id refers to.
+ */
+export function cronJobFor(jobs: readonly CronJob[], jobId: string): CronJob | null {
+  return jobId ? (jobs.find(job => job.id === jobId) ?? null) : null
+}
+
+/**
+ * What to CALL a job, given its id.
+ *
+ * Empty where the id resolves to nothing, and the callers are expected to say
+ * something general rather than print the id: an id is not a name, and a line
+ * reading `cron "8f3a-…" failed` has told the reader less than "a scheduled run
+ * failed" would have.
+ */
+export function cronJobName(jobs: readonly CronJob[], jobId: string): string {
+  return cronJobFor(jobs, jobId)?.name ?? ''
+}
+
 // The scheduler stores `last_error` as raw exception text, e.g.
 // "RuntimeError: Cron job 'x' has no model configured (job.model=None, …)".
 // A row needs the first plain sentence; the detail screen still shows the rest.

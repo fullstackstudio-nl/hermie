@@ -17,7 +17,12 @@
  * reader has just left.
  */
 
-type Handler = (bot: string) => void
+/**
+ * `sessionId` names one of that bot's OTHER conversations — a branch, or one
+ * `/new` put away. Absent means the bot's own chat, which is what every
+ * request through this bus meant before a bot had more than one.
+ */
+type Handler = (bot: string, sessionId?: string) => void
 
 const handlers = new Set<Handler>()
 
@@ -30,11 +35,18 @@ export function onOpenChatRequest(handler: Handler): () => void {
   }
 }
 
-/** Ask whichever shell is mounted to show that bot's chat. */
-export function requestOpenChat(bot: string): void {
+/**
+ * Ask whichever shell is mounted to show that bot's chat, or one conversation
+ * of it.
+ *
+ * The id is the STORED one, which is what a listing hands out and what the
+ * conversation viewer resumes by. The shell resolves it against the gateway
+ * like every other entry point; nothing here checks that it names anything.
+ */
+export function requestOpenChat(bot: string, sessionId?: string): void {
   for (const handler of [...handlers]) {
     try {
-      handler(bot)
+      handler(bot, sessionId)
     } catch {
       // One shell throwing must not stop another, and a navigation that failed
       // is not a reason to lose the notification's other work.

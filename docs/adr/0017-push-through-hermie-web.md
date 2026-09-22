@@ -372,3 +372,93 @@ talking to the notifier, the payload saying who rather than what, `preview` bein
 per device, `seen` being a heartbeat rather than a protocol fact, requests and
 cron deliveries never being suppressed, and every action being re-validated
 against the gateway's own open requests before it is answered.
+
+## Amendment, 2026-09-22: seven types, and `cron` becomes the coarse one
+
+**The type list becomes seven.** `cron` was one switch doing two jobs: "the
+routine reported" and "the run ended". They are not the same question, and the
+person who wants the second rarely wants the first — a nightly digest whose
+chatter is noise is precisely the routine whose _failure to run_ is worth
+waking a phone for. Folding them together meant that silencing the chatter also
+silenced the alarm, which is the wrong way round.
+
+So `cron_done` and `cron_failed` join `message`, `request`, `cron`, `turn_done`
+and `turn_failed`. The plugin already raises them (`on_session_end` inside a
+cron run, and its `[CRON_FAILURE]` marker); what changes here is that the app
+offers a switch for each, globally and per chat, and that the registration
+written to `ui_meta` carries all seven.
+
+**`cron` stays the coarse switch and keeps its old meaning.** A notification
+raised by a scheduled run answers to the fine type AND to `cron`, so a
+registration written before these types existed goes on being notified exactly
+as it was. Adding a type must never be how somebody's phone goes quiet, and the
+audience is therefore a union rather than a replacement — `registrationsForAny`
+in Hermie Web's daemon, one notification per device however many of its switches
+matched.
+
+**A device that upgrades adopts a new type as ON; a type it had switched off
+stays off.** ADR-0017's wire rule is that an absent type means off, and that is
+still right for a REGISTRATION read off a gateway: a device that never named a
+type cannot have agreed to it. It is the wrong rule for this device's own
+stored preferences, where an absent key is not a refusal but a switch nobody
+has been shown. The two rules are `pushTypesOf` and `adoptedPushTypes`, and the
+difference between them is stated in both. The upgraded row reaches the
+notifier on the address refresh the app already makes on every launch and every
+foreground; nothing new has to be written.
+
+## Amendment, 2026-09-22: a tap names its conversation
+
+ADR-0017 was written when a bot had exactly one chat, so naming the bot named
+the destination. Round R4b gave a bot branches and retired conversations, and a
+turn can now happen in a session nobody is looking at.
+
+**A payload carries `sessionId` and `sessionKind` (`canonical` | `branch` |
+`other`), and a tap opens that conversation.** `branch` and `other` open the
+non-canonical viewer; `canonical`, an absent kind, and a session id that is the
+bot's own canonical one all open the chat, which is exactly what every
+notification did before this. A payload that says nothing is therefore read the
+way it always was.
+
+The classification is the gateway's, from the session's title, and the app does
+not re-derive it: an id it cannot place is not a reason to guess. Where the kind
+is absent but the id is present, the app compares it against the canonical id it
+already holds for that bot — and where it holds none, it opens the chat rather
+than inventing a destination.
+
+**A tap into a non-canonical conversation opens it and answers nothing.** This
+is the same rule the cross-gateway tap already follows, for the same reason: an
+Allow has to be re-validated against `approval.pending` for the session that
+asked, and that session is not the one this connection resumed. The reader
+lands on the request and answers it there, which is the direction this feature
+is built to fail in.
+
+## Amendment, 2026-09-22: a guessed cron is not a cron
+
+ADR-0017's payload policy is that a notification says WHO and what KIND. The
+kind is the part that can be wrong: Hermes fires no cron hook, so every notifier
+recognises a scheduled run by a signal it chose, and the signals are not equally
+good. Hermie Web's daemon matches one of two headers the scheduler writes, word
+for word, and is therefore stating a fact. The plugin prefers `task_id` and
+`HERMES_CRON_SESSION`, which are also facts, and falls back to the session's
+`platform` string, which is free text.
+
+**So the payload carries `cronCertain`, and a notification worded from a guess
+does not claim a scheduled run.** `cron "Morning digest" failed` and `sent you a
+message` are indistinguishable to the reader in the one way that matters — the
+lock screen shows no workings — so the weaker sentence is the honest one, and it
+is true either way: something arrived in that chat, which is what a tap shows.
+An ABSENT `cronCertain` is read as certain, because that is every payload sent
+before the field existed and is how they were already being read.
+
+**`jobId` is carried and never printed.** It is an id. `cron "8f3a-77" failed`
+has told the reader less than `a cron run failed` would, so the NAME goes in the
+sentence and where there is no name the general line is used. Resolving an id to
+a name is the app's to do — `cronJobFor` / `cronJobName` in `features/cron` —
+and it answers nothing, rather than the id, before the crons list has been read.
+
+### What is unchanged
+
+The registration schema and its `v`, the app never talking to the notifier, the
+payload saying who rather than what, `preview` being per device, `seen` being a
+heartbeat rather than a protocol fact, and every action being re-validated
+against the gateway's own open requests before it is answered.

@@ -207,6 +207,28 @@ export function CompactShell({ initial }: { initial?: DevInitialView } = {}) {
   )
 
   /**
+   * One of a bot's OTHER conversations, from a notification.
+   *
+   * `navigate` rather than `push`, and the chat is not put underneath it: the
+   * reader was not in that chat, they were on a lock screen, so Back belongs to
+   * wherever they actually were. A container that is not ready yet falls back
+   * to the pending BOT rather than holding the conversation, because the
+   * fallback's whole job is to land somewhere true and the chat always is one.
+   */
+  const openConversation = useCallback(
+    (botName: string, storedId: string) => {
+      if (navigationRef.isReady()) {
+        navigationRef.navigate('Conversation', { bot: botName, id: storedId })
+
+        return
+      }
+
+      pendingBot.current = botName
+    },
+    [navigationRef]
+  )
+
+  /**
    * A widget pinned to a folder: show the list, with that folder open.
    *
    * Two writes and neither is navigation. Opening the folder is a write to the
@@ -250,7 +272,10 @@ export function CompactShell({ initial }: { initial?: DevInitialView } = {}) {
   // The same destination from a notification. `PushSync` sits beside the chat
   // controller and cannot know which shell is mounted, so it asks through the
   // bus rather than navigating — see `app/open-chat-bus.ts`.
-  useEffect(() => onOpenChatRequest(openChat), [openChat])
+  useEffect(
+    () => onOpenChatRequest((bot, sessionId) => (sessionId ? openConversation(bot, sessionId) : openChat(bot))),
+    [openChat, openConversation]
+  )
 
   // The browser tab's name follows the route that is actually on top. Held as
   // state rather than read during render because the container only answers

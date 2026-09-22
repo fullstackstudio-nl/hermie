@@ -9467,3 +9467,88 @@ add a subscription to every row to carry something that cannot change.
   does not claim otherwise.
 - **Nobody has been removed from `admins` while holding an open page.** The gate
   is fresh on every request, so the next click refuses — reasoned, not watched.
+
+## Push follow-ups: seven types, a tap that lands, and an honest cron line (2026-09-22)
+
+### A new notification type is off on every phone that already exists
+
+This is the thing that makes adding one dangerous, and it is not obvious from
+either side on its own.
+
+ADR-0017's wire rule is that a type a registration does not name is **off** — a
+device that has never heard of an event cannot have agreed to it, and a new
+event kind must not start buzzing every phone that predates it. That rule is
+right and it stays.
+
+The trap is that the app's own stored preferences are read through the _same_
+function. The bag on this device's disk is not a registration: it is what the
+reader last chose, and a key that is absent from it is not a refusal, it is a
+switch they have never been shown. Read by the wire's rule, every existing
+install would come back from the upgrade with both new switches **on screen
+looking ON** — because the section draws the ones the current build knows — and
+**off in the row it writes**. The owner would never be told the routine had
+stopped running, and there would be nothing anywhere to say why.
+
+So there are two functions and the difference is the point:
+`pushTypesOf` for a row off a gateway (absent → off) and `adoptedPushTypes` for
+this device's own disk (absent → the default, present-and-boolean → whatever the
+reader chose). A type somebody actually switched off stays off; that was a
+decision, and an upgrade must not undo one.
+
+Nothing extra has to be written to carry it upstream: the app already re-reads
+its push address and re-stamps its row on every launch and every foreground,
+which is the write that takes the adopted types with it.
+
+### `cron` had to stay, and become the coarse switch
+
+`cron_done` and `cron_failed` are finer than `cron`, not a replacement for it,
+and the audience is therefore a **union**: a scheduled run that ends notifies
+every device that asked for the fine type _or_ for `cron`, deduped so a device
+with both switches on hears it once. Replacing the type instead would have made
+"we added a switch" and "your phone went quiet" the same release.
+
+The payload names the finer fact (`cron_done` / `cron_failed`) and the sentence
+keeps saying what actually happened — "cron “Morning digest” reported" — so no
+existing wording moved.
+
+### The app composes no notification text, and that decided where the cron wording went
+
+Worth writing down because the brief reads as though it could go either side.
+Nothing in the app turns a payload into a sentence: on iOS and Android the
+notifier sends `title` and `body` and the OS draws them, and in a browser the
+service worker renders the `title` and `body` it was handed. So "a guessed cron
+is worded as a bot message" is the NOTIFIER's rule, and it is implemented in the
+one composer this repository owns — Hermie Web's `payload.ts`. The plugin's own
+composer is in the plugin.
+
+The app's half is the id: `cronJobFor` and `cronJobName` in `features/cron`, the
+inverse of the transcript's existing name-to-id lookup, answering nothing rather
+than the id for a job the crons list has not been read for yet. A raw job id is
+never printed as a name on either side.
+
+### A risk found while reading, and not resolved here
+
+The service worker falls back to the title `Hermie` and an empty body when a
+payload carries no `title` / `body` at the top level. The plugin's README
+documents its payload as the `data` bag only. If the plugin's Web Push body is
+that flat bag rather than `{title, body, data}`, a browser would draw "Hermie"
+with no text and a tap would carry no `bot` — which reads as a notification that
+does nothing. Nothing in this round changes that, because it cannot be told
+apart from the documents: it needs one real Web Push from a real plugin.
+
+### What could not be verified here
+
+- **No real push was sent.** No Expo token, no VAPID key, no APNs. Everything in
+  this round is against the daemon's own fake sender and the app's fake
+  platform, so what is proven is which registrations are addressed and what the
+  payload says, never that a phone buzzed.
+- **The plugin was not run.** `cron_done`, `cron_failed`, `sessionKind` and
+  `cronCertain` are read out of the plugin's README and `docs/DESIGN.md` §3 and
+  implemented against those documents. If the plugin spells a field differently
+  on the wire, nothing here would have noticed.
+- **The service worker is still untested**, for the reason `push-web.test.ts`
+  already gives: a stand-in for `push`, `notificationclick`, `clients.matchAll`
+  and `showNotification` is a second implementation, and it is the first one
+  that has the bug. The session fields reach the app because the worker forwards
+  the payload's `data` bag whole, which is a property of code that was read
+  rather than of code that was run.
