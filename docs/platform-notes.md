@@ -9598,3 +9598,167 @@ apart from the documents: it needs one real Web Push from a real plugin.
   that has the bug. The session fields reach the app because the worker forwards
   the payload's `data` bag whole, which is a property of code that was read
   rather than of code that was run.
+
+## Round R18: the chrome that read through, and a board that never asked its own size (2026-09-22)
+
+Two decided pieces of work — the chat header's pill, and dragging a card across
+a board — and a walk of the simulators that found three more things, one of
+which makes the drag unreachable in the shipped app.
+
+### One surface floating over a scrolling one is opaque, and that has to be all of it
+
+The pill was `variant="control"` with no `opaque`. That is the one combination
+this surface cannot have, and the reason is not aesthetic: the chat column
+scrolls UNDER the chrome, so the pill's backdrop is not the wallpaper but
+whichever bubble happens to be behind it. At the control wash's alpha that
+bubble's text reaches the ink — measured on the iPhone 17 Pro in dark, a blue
+user bubble printed through the bot's name and around `Online`. It is the same
+failure `AttachMenu` describes and fixed for itself, and `GlassSurface`'s own
+rule already said so.
+
+What the walk then added: **the two round buttons beside it had it too**, and
+fixing the pill alone made the header worse rather than better. Back and (…)
+are the same row of floating controls over the same scrolling surface, and a
+row where the middle element hides its backdrop while the two beside it do not
+reads as three materials rather than as one chrome. `RoundIconButton` gained an
+`opaque` that is off by default — most round buttons in the app sit on a panel
+and have nothing to hide — and only `ChatHeader` passes it.
+
+The bead was already assuming the fix: `PresenceBead`'s ring is painted in
+`glass.control.solid` so that it reads as a hole punched in the pill, which is
+only true once the pill IS that colour. That is now a second assertion rather
+than a coincidence.
+
+### A screen's width is its own, and it is the third time this has been written down
+
+`BoardScreen` asked `useWindowDimensions`. On the iPad the Boards page opens
+inside the Settings overlay, which is **520pt at most** (`OVERLAY_MAX_WIDTH`)
+— about half of the 1032pt window — so `wide` was true and eight 260pt columns
+were laid out side by side in half the room. Triage was readable, To do was cut
+at the panel's edge with its second card and its New card button out of reach,
+and the six columns after it were off the panel with nothing saying they
+existed.
+
+Same lesson as the chat list's header a commit earlier, and as the `Screen`
+inside a glass panel before that: **the thing running out of room is the
+screen, not the window it is in**, and neither `Platform.OS` nor
+`useWindowDimensions` answers that. The board now takes the window as a first
+guess and corrects it from its own `onLayout` — the guess is right wherever the
+board IS the window, so nothing already correct spends a frame in the wrong
+layout.
+
+The second half of the same defect: every sentence on that page lived INSIDE
+the horizontal scroller, so it was laid out against the columns' combined width
+(better than 2000pt) and never wrapped. What a reader saw was _"Running, Review
+and Scheduled are the dispatcher's. A card can leave them but"_ and no sign
+that the rest was two screens to the right. The columns scroll sideways; the
+prose does not.
+
+### The drag, and the three things a board does that a list does not
+
+`card-drag.ts` resolves a drop; `use-card-drag.ts` performs it. The lift, the
+claimed gesture and the settle-before-commit are the chat list's, argued at
+length in `features/bots/use-row-drag.ts`. What is deliberately NOT copied is
+the neighbour shift and the drop line: there is no rank on this wire — no
+`position`, no `index` — so there is no gap to open between two cards and
+nothing true to draw there. A drop resolves to a COLUMN and stops, and it is
+decided by **x alone**, because a column is a full-height band and asking the
+finger to also be inside the cards would make a drop into a nearly empty column
+fail for a reason nothing on screen explains.
+
+Three columns are refused in the CLIENT rather than by the gateway, because
+upstream's `_apply_status` raises on `running` before it looks at anything
+else: a request there is a 400 the app can see coming. They read as
+non-targets from the moment a card lifts rather than when the reader aims at
+one, which is the drag's version of the move menu simply not listing them.
+
+And a drop that changes nothing says nothing. Outside the columns and back in
+the card's own column are both silence — no request, no notice — which is
+`isReportable` in one place rather than a condition spelled at two call sites.
+
+#### `onShouldBlockNativeResponder` is Android-only, and a board scrolls the way the drag does
+
+Measured: holding a card and dragging it sideways scrolled the BOARD one column
+and never lifted the card. `UIScrollView`'s pan recognizer competes with the JS
+responder for the same finger, and here the two want the same axis.
+
+`BotsScreen` answers this with `scrollEnabled={draggingKey === null}` and that
+is enough for a vertical list, where the drag is claimed before the native
+recognizer has decided. It is not enough for a board: by the time a drag is
+GRANTED the scroll has started. The switch is thrown one step earlier instead —
+`holding`, which goes true when the long press ARMS and false again on a press
+that ends without a drag. Both of the board's scrollers read it.
+
+Also measured, and NOT a bug: a touch that lands while the board is still
+decelerating from a flick stops the scroll instead of pressing the card, so the
+long press never starts. Every iOS scroll view does this. Two of the three
+hand-driven attempts in this round hit it, and reading that as a defect would
+have sent the next round chasing nothing.
+
+#### The drag has no home in the shipped app, and that is the round's open item
+
+After the width fix, **no door to Boards in the native app is 700pt wide**:
+
+| Door                                         | Width                      |
+| -------------------------------------------- | -------------------------- |
+| Settings → Boards (iPad, either orientation) | 520pt, `OVERLAY_MAX_WIDTH` |
+| Chat list (…) → Boards                       | the sidebar, 300–340pt     |
+| Compact shell (iPhone)                       | the window, 402pt          |
+
+So the side-by-side layout — and the drag with it — is correct code that the
+app never reaches. It was verified by temporarily lowering `WIDE_BOARD_PX` to
+380 through Metro, driving both halves on the iPad and putting the constant
+back; the evidence is in the round's screenshots. `WIDE_BOARD_PX` is left at
+700 because stacking at 495pt genuinely reads better — every column fully
+visible — and because the fix for this is a decision about the shell rather
+than about the board. Two candidates, neither taken here:
+
+- let Boards have the content column rather than the capped overlay, which is a
+  change to `RegularShell`'s routing;
+- narrow `COLUMN_WIDTH` enough that two columns fit 520pt, which costs every
+  card about 30pt of title.
+
+### Three findings from the walk
+
+- **The options menu opened behind the keyboard.** With a draft half typed,
+  tapping (…) drew the composer and its send button over the popover's lower
+  half and left Model and Colour on screen and unreachable — the popover is laid
+  out absolutely from the top of the chrome and has nothing to scroll. Raising
+  its z-order only moves the collision. The keyboard is dismissed on the way in
+  instead, for the popover AND for the sheet a narrow column gets, because a
+  sheet over a raised keyboard is the same picture in a different frame.
+- **`CHAT_POPOVER_MIN_WIDTH` puts a modern phone on the popover side.** The
+  brief for this round expected "popover on iPad, sheet on phone"; the rule is
+  a measured 400pt and the iPhone 17 Pro's column is 402. Nothing is wrong —
+  the split is by measurement and always was — but the phone is no longer on
+  the side anyone assumes.
+- **A slash prefix that matches nothing closes the popover silently.**
+  `showSuggestions` is `prefix !== null && suggestions.length > 0`, so typing
+  `/ne` against a gateway whose catalogue has no such command draws nothing at
+  all. The refused call and the slow first fetch each got a row of their own a
+  round ago for exactly this reason — _an empty list and a refused call look
+  identical from the outside_ — and "no command matches" is the third case that
+  has not. Left alone: closing on no match is also what every autocomplete
+  does, and which of the two a reader wants is the owner's call.
+
+### What this round did NOT verify
+
+- **No light-scheme walk of the surfaces below.** Both devices were relaunched
+  with `--hermieTheme light` and photographed on the chat, and nothing else was
+  driven there.
+- **Most of the commissioned surface list was not reached.** Read-aloud and the
+  mic, the voice overlay, the app-lock plate, the Cloudflare preset, the memory
+  browser and graph, MCP/Skills/Connectors/Logs, the share target, inline
+  approvals, per-chat notification types, branching and pinning: none of these
+  was opened this round. What was walked is the chat (header, mermaid, maths,
+  context meter, slash popover, options), the chat list's header menu, Settings
+  (privacy, memory, appearance, text size, the bots section) and Boards.
+- **No mid-drag frame was captured.** `xcrun simctl io screenshot` cannot be
+  timed against the simulator MCP's `touch_path` from here: three attempts all
+  landed before the gesture began. The lift and the column highlight are
+  therefore asserted by their unit tests and by the drop's OUTCOME, never
+  photographed.
+- **The edge auto-scroll was exercised by accident, not on purpose.** One drag
+  carried a card to the right edge and the board scrolled under it, which is why
+  the drop landed on Review rather than the Scheduled that was aimed at. That it
+  scrolls is shown; the rate and the band are not measured.
