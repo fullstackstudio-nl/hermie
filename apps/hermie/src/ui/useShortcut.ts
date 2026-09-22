@@ -67,6 +67,13 @@ const DELIVERED_WHILE_TYPING: readonly ShortcutAction[] = [
 const SWITCHES_SURFACE: readonly ShortcutAction[] = [
   'search',
   'toggleSidebar',
+  /*
+    ⌘N is not a move, but it belongs here for the same reason the moves do: it
+    retires the session and empties the transcript of the chat UNDERNEATH
+    whatever is open. A reader who has a sheet up and presses it would come back
+    to a conversation that is not the one they left.
+  */
+  'newConversation',
   'nextChat',
   'previousChat',
   'chat1',

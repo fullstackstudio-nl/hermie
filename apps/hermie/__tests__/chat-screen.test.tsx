@@ -40,6 +40,26 @@ jest.mock('../src/features/chats/ChatRuntime', () => ({
 
 jest.mock('../src/platform/haptics', () => ({ haptic: jest.fn() }))
 
+/*
+  The keyboard seam, so a shortcut can be delivered without a keyboard.
+
+  `mock`-prefixed, which is the only way a `jest.mock` factory may reach out of
+  scope. Without this the real seam loads, asks the registry for `HermieMac`,
+  gets nothing and subscribes to a module that is not there — which is the honest
+  behaviour in a test renderer and also means nothing would ever fire.
+*/
+const mockShortcutListeners = new Set<(event: { action: string; typing: boolean }) => void>()
+
+jest.mock('../src/platform/desktop-shortcuts', () => ({
+  subscribeToShortcuts: (handler: (event: { action: string; typing: boolean }) => void) => {
+    mockShortcutListeners.add(handler)
+
+    return () => mockShortcutListeners.delete(handler)
+  },
+  setMenuBar: jest.fn(),
+  isMenuBarInstalled: jest.fn(() => false)
+}))
+
 // The picker is a native module with no test implementation; the screen only
 // ever awaits what it returns.
 jest.mock('../src/features/chats/attachments', () => ({
@@ -1025,5 +1045,47 @@ describe('the typing indicator', () => {
     })
 
     await waitFor(() => expect(screen.queryByTestId('typing-indicator')).toBeNull())
+  })
+})
+
+/**
+ * ⌘N: a new conversation in the chat that is open.
+ *
+ * The assertion that matters is the ARGUMENT. ⌘N reuses `/new` rather than
+ * calling `startNewConversation` itself, because `/new` is where the rules
+ * about the old conversation live — it retires the session, keeps the chat and
+ * writes the notice — and a shortcut with its own path to a new conversation
+ * would be a second set of those rules. `ChatController.dispatchSlash`
+ * intercepts the name before any round trip, so this reaches the same code the
+ * composer does.
+ */
+describe('⌘N', () => {
+  function pressNewConversation() {
+    act(() => {
+      for (const listener of [...mockShortcutListeners]) {
+        listener({ action: 'newConversation', typing: false })
+      }
+    })
+  }
+
+  it('runs the app\u2019s own /new in the open chat', async () => {
+    renderChat()
+    await waitFor(() => expect(mockController.openChat).toHaveBeenCalled())
+
+    pressNewConversation()
+
+    expect(mockController.runSlash).toHaveBeenCalledWith('researcher', '/new')
+  })
+
+  it('does not reach past the slash machinery to start one itself', async () => {
+    renderChat()
+    await waitFor(() => expect(mockController.openChat).toHaveBeenCalled())
+
+    pressNewConversation()
+
+    // There is no `startNewConversation` on this stand-in at all, which is the
+    // point: if the screen ever called it directly this would throw rather than
+    // quietly work.
+    expect(mockController.send).not.toHaveBeenCalled()
   })
 })

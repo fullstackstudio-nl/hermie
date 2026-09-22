@@ -523,6 +523,7 @@ export const strings = {
     search: 'Search…',
     settings: 'Settings…',
     close: 'Close',
+    newConversation: 'New Conversation',
     /**
      * Title Case, unlike everything else in this file, because a Mac menu bar is
      * the one surface where sentence case looks wrong next to the standard items

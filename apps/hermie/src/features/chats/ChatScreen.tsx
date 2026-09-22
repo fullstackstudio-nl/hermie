@@ -84,6 +84,7 @@ import {
   type ChatOptionsPane
 } from '../../ui/sheets'
 import { CONTROL_MIN_HEIGHT, TAP_SLOP } from '../../ui/tokens'
+import { useShortcut } from '../../ui/useShortcut'
 import { DropZone } from '../../chat-ui/DropZone'
 import type { DroppedFile } from '../../platform/file-drop'
 import { openAppSettings, pickAttachment, type PickedAttachment } from './attachments'
@@ -95,8 +96,8 @@ import type { ManualSheet } from './sheet-host'
 import { useChatRuntime } from './ChatRuntime'
 import { findMatchingItem } from '../search'
 import { connectionNotice, RETRY_OFFER_MS } from './connection-notice'
-import { countsAsRead, readWatermark } from './read-watermark'
 import { openAttachmentFile } from './open-attachment'
+import { countsAsRead, readWatermark } from './read-watermark'
 import { regenerateLastTurn } from './regenerate'
 import { useComposerDictation } from '../voice/useComposerDictation'
 import { useDictationLanguages } from '../voice/useDictationLanguages'
@@ -1753,6 +1754,27 @@ function Conversation({
     void runtime?.bots.refresh()
     void chat.reload().catch(error => setNotice(openFailed(messageOf(error))))
   }, [chat, runtime])
+
+  /**
+   * ⌘N: a new conversation in the chat that is open.
+   *
+   * The same `/new` the composer runs, through the same `runSlash` — not a
+   * second road to it. `ChatController.dispatchSlash` intercepts the name before
+   * any round trip and calls `startNewConversation`, which retires the session,
+   * keeps the chat and writes the notice; a shortcut that reimplemented any of
+   * that would be a second set of rules about what happens to the old
+   * conversation.
+   *
+   * It is deliberately NOT "new chat". A Mac reader expects ⌘N to make a new
+   * something in the window they are looking at, and the window they are looking
+   * at is one conversation. Creating a chat is a gateway-side act with a name to
+   * choose, which is a sheet rather than a keystroke.
+   */
+  const newConversation = useCallback(() => {
+    void chat.runSlash('/new').catch(error => setNotice(openFailed(messageOf(error))))
+  }, [chat])
+
+  useShortcut('newConversation', newConversation)
   const openProfile = useCallback(() => {
     void refreshUsage()
     setSheet('profile')

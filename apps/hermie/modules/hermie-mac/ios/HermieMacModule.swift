@@ -586,6 +586,12 @@ public class HermieMacModule: Module {
    ⌃Tab is the one non-Command entry, because that is what it is on every platform, and ⌃⇧S is
    accepted alongside ⌘⇧S because an iPad with a PC keyboard in a case has no Command key to press.
 
+   This table is a TRANSCRIPTION of `src/platform/desktop-shortcuts.shared.ts`'s `SHORTCUTS`, which
+   is where a chord is decided. It cannot be generated from it — GameController hands over a
+   `GCKeyCode` and nothing bridges that to a string on this side — but it is not allowed to drift in
+   silence either: `__tests__/shortcut-table.test.ts` reads this file and fails when an action exists
+   here and not there, or the other way round.
+
    An instance method since build 163, because a modifier is only believed when the poll and
    `heldModifiers` agree — and an allow-list that trusts the poll alone turns every bare letter on
    the table into its own chord the first time a Command is released over another window.
@@ -635,6 +641,8 @@ public class HermieMacModule: Module {
       return "settings"
     case .keyW:
       return "close"
+    case .keyN:
+      return "newConversation"
     case .upArrow:
       return "previousChat"
     case .downArrow:

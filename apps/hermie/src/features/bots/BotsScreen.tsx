@@ -57,6 +57,7 @@ import { archivedOf, foldersOf, useChatLayoutStore } from '../../store/chat-layo
 import type { Folder } from '../../store/folders'
 import { isMuted, MUTE_FOREVER, muteUntil, mutedUntil as mutedUntilOf, type Mutes } from '../../store/mute'
 import { useChatsStore } from '../../store/chats'
+import { DragGrip } from '../../ui/DragGrip'
 import { GlassSurface } from '../../ui/glass'
 import { Icon, ICON_SIZE } from '../../ui/Icon'
 import { Text } from '../../ui/primitives'
@@ -1594,14 +1595,11 @@ function FolderHeader({
         of row rather than two.
       */}
       {editing && handleHandlers ? (
-        <View
+        <DragGrip
           accessibilityLabel={strings.layout.dragHint}
-          style={{ alignItems: 'center', justifyContent: 'center', width: 26 }}
+          handlers={handleHandlers}
           testID={`folder-drag-handle-${folder.id}`}
-          {...handleHandlers}
-        >
-          <Icon color={theme.colors.textMuted} name="grip" size={ICON_SIZE.control} />
-        </View>
+        />
       ) : null}
 
       {/* Decorative: the row's own expanded state is what a screen reader reads,

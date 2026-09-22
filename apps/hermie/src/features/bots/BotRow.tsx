@@ -20,6 +20,7 @@ import { secondaryClick } from '../../platform/secondary-click'
 import { botNames, useNameOrder } from '../../store/bot-names'
 import type { Bot } from '../../store/bots'
 import { usePendingShareCount } from '../../store/share'
+import { DragGrip } from '../../ui/DragGrip'
 import { GlassSurface } from '../../ui/glass'
 import { Icon, ICON_SIZE } from '../../ui/Icon'
 import { PresenceBead } from '../../ui/PresenceBead'
@@ -193,25 +194,24 @@ export const BotRow = memo(function BotRow({
       }}
     >
       {editing ? (
-        <View
-          // The grab handle drags immediately: in edit mode a press on this column
-          // cannot mean anything else, so there is nothing for a long press to
-          // disambiguate. It is `View` and not `Pressable` on purpose — a pressable
-          // would claim the touch before the pan responder saw it.
-          //
-          // It used to hold a pair of ↑/↓ buttons, which put three tap targets in
-          // one 26pt column and made the outer one — the thing a reader is
-          // actually meant to hold — the hardest of the three to hit. The grip
-          // says "hold me" and nothing else; reordering a step at a time moved to
-          // the accessibility actions and the context menu below, where a
-          // keyboard and a screen reader both already look.
+        // The grab handle drags immediately: in edit mode a press on this column
+        // cannot mean anything else, so there is nothing for a long press to
+        // disambiguate.
+        //
+        // It used to hold a pair of ↑/↓ buttons, which put three tap targets in
+        // one 26pt column and made the outer one — the thing a reader is
+        // actually meant to hold — the hardest of the three to hit. The grip
+        // says "hold me" and nothing else; reordering a step at a time moved to
+        // the accessibility actions and the context menu below, where a
+        // keyboard and a screen reader both already look.
+        //
+        // `DragGrip` rather than the markup, because the folder row has the same
+        // one: two copies is where the pointer states would have diverged.
+        <DragGrip
           accessibilityLabel={strings.layout.dragHint}
-          style={{ alignItems: 'center', justifyContent: 'center', width: 26 }}
+          {...(handleHandlers ? { handlers: handleHandlers } : {})}
           testID={`bot-drag-handle-${bot.name}`}
-          {...(handleHandlers ?? {})}
-        >
-          <Icon color={theme.colors.textMuted} name="grip" size={ICON_SIZE.control} />
-        </View>
+        />
       ) : null}
 
       <View>

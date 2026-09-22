@@ -127,6 +127,54 @@ previewer appears over a bottom sheet rather than behind it, whether the title b
 of the preview reads the filename the app passed, and what a `.md` or a `.log`
 actually previews as, are all unwatched.
 
+## One shortcut table, and ⌘N (2026-09-22)
+
+There were three tables for one set of chords: a `switch` in `HermieMacModule.swift`,
+a second `switch` in `desktop-shortcuts.web.ts`, and a hand-written list of menu
+items in `HermieMenuBar.swift`. `SHORTCUTS` in
+`src/platform/desktop-shortcuts.shared.ts` is now the one place a chord is decided.
+The browser's matcher walks it; the menu bar's items come from the rows carrying a
+`menu`.
+
+The Swift key table cannot be generated from it — GameController hands over a
+`GCKeyCode` and nothing bridges that to a string on this side — so it stays a
+transcription. `__tests__/shortcut-table.test.ts` reads both Swift files and fails
+when an action exists on one side and not the other, and when a menu item's key
+equivalent is not the one the table names. Blunt, and proportionate to the failure
+it guards: a shortcut that works on the web and does nothing on the Mac is
+something no other test here would notice.
+
+⌘N joined the table in the same change and runs the app's own `/new` through
+`ChatController.runSlash`, which intercepts the name before any round trip.
+
+**What needs a real Mac.** That the menu bar draws **Chats ▸ New Conversation** at
+all. `HermieMenuBar` is installed onto the app delegate's class at runtime and has
+never been watched doing it (the note from the build that added it still stands);
+what is checked is that the symbols are in the binary and that the JavaScript side
+is unit tested.
+
+### The pointer on a control
+
+Same round, same file to read next to this one. `useHover` was already the mechanism and was applied in four places. The round added
+it to the four it had missed: the drag grip (now one `src/ui/DragGrip.tsx` for the
+chat row and the folder row, which is what stopped the two from diverging), the chat
+popover's rows, and `Button` — which is what the memory rows and an inline approval's
+answers are made of, so one change covers both.
+
+`TINT_HOVER` is a new token rather than `TINT_SUNK` re-used: a sunk tint darkens in
+both schemes, and a hover has to move a control towards the reader, so it darkens on
+a light floor and lightens on a dark one. It is laid over the control as a wash,
+which is what makes one value work on a neutral secondary, a tinted danger and a
+saturated accent bubble alike.
+
+`cursor` has two values in React Native 0.81, `auto` and `pointer`. A grip would want
+`grab` and cannot have it.
+
+**What needs a real Mac.** How any of it feels. A test can say a tint appeared and
+cleared; whether the wash is visible enough on a Lime theme's accent bubble and not
+so strong that a hovered primary reads as disabled is a judgement that needs a
+pointer and a screen.
+
 ## An inactive Mac window (2026-09-22) — settled, half of it unwatched
 
 The 2026-09-20 note below left one thing open: whether UIKit dims a native

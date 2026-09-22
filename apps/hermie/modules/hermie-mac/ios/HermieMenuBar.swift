@@ -159,6 +159,13 @@ import UIKit
       commands.append(command(title: close, key: "w", id: "close"))
     }
 
+    // ⌘N is "new conversation in the chat that is open", which is what a Mac reader expects ⌘N to
+    // mean in a window showing one conversation. It runs the app's own `/new`; see
+    // `src/platform/desktop-shortcuts.shared.ts`, where the chord is decided.
+    if let newConversation = titles["newConversation"] {
+      commands.append(command(title: newConversation, key: "n", id: "newConversation"))
+    }
+
     // The one item whose TITLE is state. JavaScript sends "Hide Sidebar" or "Show Sidebar" already
     // resolved, because whether the sidebar is showing is a question about a window width and a
     // stored preference, and neither of those is knowable from here.

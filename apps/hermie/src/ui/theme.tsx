@@ -18,6 +18,7 @@ import {
   lightShadows,
   radii,
   space,
+  TINT_HOVER,
   TINT_SUNK,
   type,
   type AccentName,
@@ -81,6 +82,8 @@ export type Theme = {
   edge: string
   edgeSoft: string
   tintSunk: string
+  /** The wash a pointer leaves on the control it is over. */
+  tintHover: string
   /** The soft destructive fill; `colors.dangerText` is the ink that goes on it. */
   dangerSoft: string
   /** Its counterpart, for a confirmed or locked state. `colors.okText` reads on it. */
@@ -180,6 +183,7 @@ export function buildTheme({
     edge: EDGE[scheme],
     edgeSoft: EDGE_SOFT[scheme],
     tintSunk: TINT_SUNK[scheme],
+    tintHover: TINT_HOVER[scheme],
     dangerSoft: DANGER_SOFT[scheme],
     okSoft: OK_SOFT[scheme],
     reduceTransparency,

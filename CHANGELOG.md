@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is iOS API, and the Mac only made the old behaviour obvious. Anything Quick Look has no previewer
   for still goes to the share sheet, and a browser still downloads.
 
+- **⌘N starts a new conversation in the chat you are looking at.** It runs the same `/new` the
+  composer does — the session is retired, the chat and its colour stay, and the transcript says so
+  — so there is one set of rules about what happens to the old conversation rather than two. It is
+  in the Mac's menu bar as **Chats ▸ New Conversation**, which is also where the other shortcuts are
+  discoverable. Not offered while a sheet or a panel is open, because the conversation it would
+  replace is the one underneath.
+
 - **A map of a bot's memory.** A **Graph** tab beside the entries draws what the plugin's `graph`
   answer holds: the bot at the centre, an entry per memory, and the topics they share — a
   capitalised phrase, an `@handle`, a `#hashtag`, a date — with a line wherever two entries mention
@@ -55,6 +62,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that does not exist — is shown beside the field and nothing local moves.
 
 ### Fixed
+
+- **Escape goes back one level in two more places.** Cancelling a theme deletion in Settings ▸
+  Appearance ▸ Advanced, and closing the detail card on a bot's memory map, are levels of their own
+  now. Both used to be skipped: the question and the card are drawn in place rather than presented,
+  so nothing registered for the key and the first Escape closed the whole screen — with a
+  destructive question still on it, in the first case. Android's back button does the same one
+  level in both.
+
+- **Controls say what they are under a pointer.** The drag grip on a chat row and on a folder row,
+  the rows of the chat's (…) popover, and every button in the app — which is what the memory rows
+  and an inline approval's answers are made of — now take a pointer cursor and a tint while the
+  mouse is over them. A disabled button takes neither, which is what the cursor already did. The
+  conversation itself is deliberately untouched: nothing in a transcript lights up because a mouse
+  went past it.
 
 - **The Mac window no longer restyles itself when you click another app.** Every glass surface in
   the app is a `UIVisualEffectView` underneath, and macOS draws those dimmed in a window that is not
