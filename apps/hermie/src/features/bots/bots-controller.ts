@@ -91,7 +91,8 @@ export interface UserChatSource {
  *    id it now knows;
  *  - `missing`: it does and the listing does not hold it. For an id that means
  *    the chat is gone and the memory should go with it; for a legacy entry it
- *    means the bare-lead chat was never persisted, and NOTHING is minted.
+ *    means the bare-lead chat was never persisted: the entry is cleared and
+ *    NOTHING is minted.
  */
 export type CurrentResolution =
   | { kind: 'group' }
@@ -466,7 +467,7 @@ export class BotsController {
    * profile's listing, a legacy entry by the bare lead's title — and set as
    * `Bot.current`, or cleared for the group chat. Lookup only: a remembered id
    * the listing no longer holds is forgotten (the bot opens its group chat), a
-   * legacy entry that finds nothing leaves the bot on its group chat, and
+   * legacy entry that finds nothing is cleared too (after that one lookup), and
    * nothing is ever minted. Only "New chat" creates.
    *
    * A bot whose chat is bound on this device is skipped. Its key is on the
@@ -545,7 +546,10 @@ export class BotsController {
       return outcome.session
     }
 
-    if (outcome.kind === 'missing' && !outcome.legacy) {
+    if (outcome.kind === 'missing') {
+      // A gone id, or a legacy entry whose bare-lead chat was never persisted:
+      // either way the bot is on its group chat, and the memory says so, as a
+      // chore, rather than costing a listing on every open.
       source.rememberCurrent?.(bot.name, null, { chore: true })
     }
 

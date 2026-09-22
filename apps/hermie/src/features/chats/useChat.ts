@@ -212,7 +212,9 @@ export function useChat(botName: string): UseChatResult {
 
     try {
       setError(null)
-      await runtime.controller.openChat(bot)
+      // The reader opening the chat screen is the "next open" a conversation
+      // picked on another device waits for (Owner Decision 4).
+      await runtime.controller.openChat(bot, { follow: true })
 
       if (attemptRef.current) {
         attemptRef.current.failed = false

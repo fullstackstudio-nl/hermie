@@ -218,7 +218,9 @@ describe('ChatScreen', () => {
     renderChat()
 
     await waitFor(() =>
-      expect(mockController.openChat).toHaveBeenCalledWith(expect.objectContaining({ name: 'researcher' }))
+      expect(mockController.openChat).toHaveBeenCalledWith(expect.objectContaining({ name: 'researcher' }), {
+        follow: true
+      })
     )
     expect(screen.getByTestId('chat-header')).toBeTruthy()
     // The header leads with the profile name. `Researcher` is that handle in

@@ -395,6 +395,7 @@ export const chat: Translation<typeof chatStrings> = {
     sharedNote: 'Alle auf diesem Gateway teilen sich diese Unterhaltung.',
     mineNote: 'Nur du siehst diese Unterhaltung. Der Bot behält sein eigenes Gedächtnis.',
     switchFailed: 'Dieser Chat konnte nicht gewechselt werden.',
+    busy: 'Warte, bis die Antwort fertig ist, oder leere zuerst die Warteschlange.',
     retired: 'Stillgelegt',
     messages: (count: number) => (count === 1 ? '1 Nachricht' : `${count} Nachrichten`)
   },

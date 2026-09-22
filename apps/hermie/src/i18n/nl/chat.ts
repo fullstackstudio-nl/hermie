@@ -367,6 +367,7 @@ export const chat: Translation<typeof chatStrings> = {
     sharedNote: 'Iedereen op deze gateway deelt dit gesprek.',
     mineNote: 'Alleen jij ziet dit gesprek. De bot houdt zijn eigen geheugen bij.',
     switchFailed: 'Er kon niet naar de andere chat geschakeld worden.',
+    busy: 'Wacht tot het antwoord klaar is of maak eerst de wachtrij leeg.',
     retired: 'Afgesloten',
     messages: (count: number) => (count === 1 ? '1 bericht' : `${count} berichten`)
   },

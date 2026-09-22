@@ -11,12 +11,12 @@ import type { GatewayHttp } from '@hermie/gateway-client'
 import { PLUGIN_CAPABILITIES } from '@hermie/gateway-client/plugin'
 
 import { BotsController } from '../src/features/bots/bots-controller'
-import { ChatController } from '../src/features/chats/chat-controller'
+import { ChatController, ConversationBusyError } from '../src/features/chats/chat-controller'
 import type { Conversation } from '../src/features/sessions/session-model'
 import { UserChatDirectory } from '../src/features/user-chats/user-chat-directory'
 import { userChatSwitch } from '../src/features/user-chats/user-chat-switch'
 import { MemoryChatCache } from '../src/platform/chat-cache'
-import { botFromProfileRow, useBotsStore, type Bot } from '../src/store/bots'
+import { botFromProfileRow, isOwnUnread, useBotsStore, type Bot } from '../src/store/bots'
 import { useChatsStore } from '../src/store/chats'
 import { usePluginStore } from '../src/store/plugin'
 import { FakeChatGateway } from './support/fake-chat-gateway'
@@ -67,10 +67,13 @@ const chat = () => useChatsStore.getState().chats.researcher
 function memory(initial: { current?: Record<string, string>; legacy?: string[] } = {}) {
   const current: Record<string, string> = { ...initial.current }
   const legacy = new Set(initial.legacy ?? [])
+  /** Every write, with whether it was a chore (never outranks a choice) or a dated choice. */
+  const writes: { name: string; id: string | null; chore: boolean }[] = []
 
   return {
     current,
     legacy,
+    writes,
     target: (name: string): string | null | undefined => current[name] ?? (legacy.has(name) ? null : undefined),
     remember: (name: string, id: string | null) => {
       if (id === null) {
@@ -188,7 +191,10 @@ function setup(
     },
     target: name => directory.target(name),
     resolveTarget: row => directory.resolveTarget(row),
-    rememberCurrent: (name, id) => mind.remember(name, id)
+    rememberCurrent: (name, id, options) => {
+      mind.writes.push({ name, id, chore: options?.chore === true })
+      mind.remember(name, id)
+    }
   })
   const botsController = new BotsController({
     gateway,
@@ -334,17 +340,33 @@ describe('switching conversations', () => {
     expect(gateway.callsOf('session.resume')).toHaveLength(resumes)
   })
 
-  it('puts the memory back when the switch is refused', async () => {
-    const { controller, gateway, mind } = setup({ rows: [{ id: 'own-1', title: `${LEAD} · Ideas` }] })
+  it('puts the memory and the previous conversation back when the switch is refused', async () => {
+    const { cache, controller, gateway, mind } = setup({ rows: [{ id: 'own-1', title: `${LEAD} · Ideas` }] })
 
     await controller.openChat(bot())
-    gateway.reply('session.resume', () => {
-      throw new Error('gateway is restarting')
+
+    const forget = jest.spyOn(cache, 'forget')
+    const resume = gateway.responders.get('session.resume')!
+
+    gateway.reply('session.resume', params => {
+      if (params.session_id === 'own-1') {
+        throw new Error('gateway is restarting')
+      }
+
+      return resume(params)
     })
 
     await expect(controller.selectConversation(bot(), own('own-1', `${LEAD} · Ideas`))).rejects.toThrow(/restarting/u)
     expect(mind.target('researcher')).toBeUndefined()
     expect(bot().current).toBeUndefined()
+    // On screen again, and live, by the time the refusal is reported.
+    expect(chat()?.storedSessionId).toBe(GROUP)
+    expect(chat()?.hydration).toBe('live')
+    // Its cache entry was written on the way out and never forgotten.
+    expect(forget).not.toHaveBeenCalled()
+    expect(await cache.read('researcher')).not.toBeNull()
+    // Written back as a dated choice, so a device that followed follows back.
+    expect(mind.writes.at(-1)).toEqual({ name: 'researcher', id: null, chore: false })
   })
 
   it('writes the watermark of the conversation the reader leaves, not the group chat', async () => {
@@ -578,7 +600,7 @@ describe('the turn claim', () => {
 })
 
 describe('a choice made on another device', () => {
-  it('never moves a chat open here, and applies on the next open', async () => {
+  it('never moves a chat open here, and applies when the reader next opens it', async () => {
     const mind = memory()
     const { botsController, controller } = setup({ rows: [{ id: 'own-1', title: `${LEAD} · Ideas` }], memory: mind })
 
@@ -593,8 +615,13 @@ describe('a choice made on another device', () => {
     expect(bot().current).toBeUndefined()
     expect(controller.readKeyFor('researcher')).toBe('researcher')
 
-    await controller.closeChat('researcher')
+    // A share, a Shortcut or a push tap reaching for the live chat: not moved.
     await controller.openChat(bot())
+    expect(chat()?.storedSessionId).toBe(GROUP)
+
+    // The reader opening the chat screen: that is the next open.
+    await controller.closeChat('researcher')
+    await controller.openChat(bot(), { follow: true })
 
     expect(chat()?.storedSessionId).toBe('own-1')
     expect(bot().current?.id).toBe('own-1')
@@ -647,5 +674,218 @@ describe('the old switch, until it goes', () => {
 
     expect(chat()?.storedSessionId).toBe(GROUP)
     expect(mind.target('researcher')).toBeUndefined()
+  })
+})
+
+/** A `prompt.submit` that answers only when the test says so. */
+function heldSubmit(gateway: FakeChatGateway): () => void {
+  let release: () => void = () => undefined
+
+  gateway.reply(
+    'prompt.submit',
+    () =>
+      new Promise(resolve => {
+        release = () => resolve({ status: 'streaming' })
+      })
+  )
+
+  return () => release()
+}
+
+const settle = () => new Promise<void>(resolve => setTimeout(resolve, 0))
+
+describe('review: a switch never lands on a send in flight', () => {
+  it('refuses to leave while a send is on its way, and relabels only the chat it was sent in', async () => {
+    const { controller, gateway } = setup()
+
+    await controller.openChat(bot())
+    await controller.startOwnChat(bot())
+
+    const release = heldSubmit(gateway)
+    const sending = controller.send('researcher', 'Plan the garden for next spring please')
+
+    await settle()
+    await expect(controller.selectConversation(bot(), null)).rejects.toBeInstanceOf(ConversationBusyError)
+    await expect(controller.startOwnChat(bot())).rejects.toBeInstanceOf(ConversationBusyError)
+
+    release()
+    await sending
+    await settle()
+
+    // Still in the own chat, and the rename went to IT, never to the Bot Chat.
+    expect(chat()?.storedSessionId).toBe('stored-new-1')
+    expect(gateway.callsOf('session.create')).toHaveLength(1)
+    expect(gateway.callsOf('session.title').map(call => call.session_id)).toEqual([
+      'runtime-stored-new-1',
+      'runtime-stored-new-1'
+    ])
+  })
+})
+
+describe('review: switching is refused while something would be lost', () => {
+  const busyChat = async () => {
+    const context = setup({ rows: [{ id: 'own-1', title: `${LEAD} · Ideas` }] })
+
+    await context.controller.openChat(bot())
+    await context.controller.send('researcher', 'First')
+
+    return context
+  }
+
+  it('while a reply runs', async () => {
+    const { controller, gateway, mind } = await busyChat()
+
+    await expect(controller.selectConversation(bot(), own('own-1', `${LEAD} · Ideas`))).rejects.toBeInstanceOf(
+      ConversationBusyError
+    )
+    await expect(controller.openSession(bot(), 'own-1')).rejects.toBeInstanceOf(ConversationBusyError)
+    await expect(controller.startOwnChat(bot())).rejects.toBeInstanceOf(ConversationBusyError)
+    expect(gateway.callsOf('session.create')).toHaveLength(0)
+    expect(mind.target('researcher')).toBeUndefined()
+    expect(chat()?.storedSessionId).toBe(GROUP)
+  })
+
+  it('while the queue holds a message, and keeps it', async () => {
+    const { controller } = await busyChat()
+
+    await controller.send('researcher', 'Queued behind the reply')
+    useChatsStore.getState().interrupt('researcher')
+    expect(chat()?.turn.active).toBe(false)
+
+    await expect(controller.selectConversation(bot(), own('own-1', `${LEAD} · Ideas`))).rejects.toBeInstanceOf(
+      ConversationBusyError
+    )
+    expect(useChatsStore.getState().queues.researcher).toHaveLength(1)
+    expect(chat()?.storedSessionId).toBe(GROUP)
+  })
+
+  it('when deleting the open chat', async () => {
+    const { controller, gateway } = setup({
+      rows: [{ id: 'own-1', title: `${LEAD} · Ideas` }],
+      memory: memory({ current: { researcher: 'own-1' } })
+    })
+
+    await controller.openChat(bot())
+    await controller.send('researcher', 'Still going')
+
+    await expect(controller.deleteOwnChat(bot(), 'own-1')).rejects.toBeInstanceOf(ConversationBusyError)
+    expect(gateway.callsOf('session.delete')).toHaveLength(0)
+    expect(chat()?.storedSessionId).toBe('own-1')
+  })
+})
+
+describe('review: delete waits for an open in the air', () => {
+  it('leaves the chat being opened for the group chat before deleting it', async () => {
+    const { controller, gateway } = setup({
+      rows: [{ id: 'own-1', title: `${LEAD} · Ideas` }],
+      memory: memory({ current: { researcher: 'own-1' } })
+    })
+
+    const opening = controller.openChat(bot())
+
+    await controller.deleteOwnChat(bot(), 'own-1')
+    await opening
+
+    expect(chat()?.storedSessionId).toBe(GROUP)
+
+    const order = gateway.calls.map(call => `${call.method}:${String(call.params.session_id ?? '')}`)
+
+    expect(order.indexOf(`session.resume:${GROUP}`)).toBeLessThan(order.indexOf('session.delete:own-1'))
+    expect(order.indexOf('session.resume:own-1')).toBeLessThan(order.indexOf(`session.resume:${GROUP}`))
+  })
+})
+
+describe('review: a chat just read is never unread', () => {
+  it('counts messages streamed in live when the reader leaves', async () => {
+    const { controller } = setup({
+      rows: [{ id: 'own-1', title: `${LEAD} · Ideas`, message_count: 0 }],
+      memory: memory({ current: { researcher: 'own-1' } })
+    })
+
+    await controller.openChat(bot())
+    await controller.send('researcher', 'Hello')
+    useChatsStore.getState().interrupt('researcher')
+    await controller.selectConversation(bot(), null)
+
+    expect(isOwnUnread(useBotsStore.getState(), 'researcher#own-1', 1)).toBe(false)
+  })
+
+  it('takes the gateway count for the live chat once it is read to the end', async () => {
+    const { controller, rows } = setup({
+      rows: [{ id: 'own-1', title: `${LEAD} · Ideas`, message_count: 0 }],
+      memory: memory({ current: { researcher: 'own-1' } })
+    })
+
+    await controller.openChat(bot())
+    rows[1]!.message_count = 5
+    await controller.closeChat('researcher')
+    await controller.listBotConversations(bot())
+
+    expect(isOwnUnread(useBotsStore.getState(), 'researcher#own-1', 5)).toBe(false)
+  })
+})
+
+describe('review: resolution never fails an open', () => {
+  it('clears a legacy entry that finds nothing, once', async () => {
+    const mind = memory({ legacy: ['researcher'] })
+    const { controller, gateway } = setup({ memory: mind })
+
+    await controller.openChat(bot())
+
+    expect(mind.target('researcher')).toBeUndefined()
+    expect(mind.writes.at(-1)).toEqual({ name: 'researcher', id: null, chore: true })
+
+    const listings = gateway.callsOf('session.list').length
+
+    useChatsStore.getState().reset()
+    await controller.openChat(bot())
+
+    expect(gateway.callsOf('session.list')).toHaveLength(listings)
+  })
+
+  it('opens the group chat when the listing fails', async () => {
+    const mind = memory({ current: { researcher: 'own-1' } })
+    const { controller, gateway } = setup({ memory: mind })
+
+    gateway.reply('session.list', () => {
+      throw new Error('gateway is restarting')
+    })
+
+    await controller.openChat(bot())
+
+    expect(chat()?.storedSessionId).toBe(GROUP)
+    // Nothing was learnt, so nothing is forgotten.
+    expect(mind.current.researcher).toBe('own-1')
+  })
+})
+
+describe('review: /new <name> keeps the name through a clash', () => {
+  it('numbers the name instead of stamping it', async () => {
+    const { controller, gateway } = setup({ titleRefusals: 1 })
+
+    await controller.openChat(bot())
+    await controller.startOwnChat(bot(), { label: 'Ideas' })
+
+    expect(gateway.callsOf('session.title').map(call => call.title)).toEqual([`${LEAD} · Ideas`, `${LEAD} · Ideas (2)`])
+  })
+})
+
+describe('review: adopting from an own chat', () => {
+  it('leaves the own chat under its own key before the key forgets it', async () => {
+    const { cache, controller, gateway } = setup({
+      rows: [
+        { id: 'own-1', title: `${LEAD} · Ideas` },
+        { id: 'past-1', title: 'Bot Chat · 2026-09-01 10:00' }
+      ],
+      memory: memory({ current: { researcher: 'own-1' } })
+    })
+
+    gateway.reply('session.set_title', { ok: true })
+    await controller.openChat(bot())
+    await controller.adoptAsCanonical('researcher', 'past-1')
+
+    expect(await cache.read('researcher#own-1')).not.toBeNull()
+    expect(useBotsStore.getState().lastSeen['researcher#own-1']).toBe(Math.floor(NOW / 1000))
+    expect(chat()?.storedSessionId).toBe('past-1')
   })
 })

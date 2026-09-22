@@ -582,6 +582,8 @@ const chatStringsEn = {
     sharedNote: 'Everyone on this gateway shares this conversation.',
     mineNote: 'Only you see this conversation. The bot keeps its own memory.',
     switchFailed: 'This chat could not be switched.',
+    /** Shown for `ConversationBusyError`: a switch would drop a running reply or the queue. */
+    busy: 'Wait until the reply is finished or clear the queue first.',
     retired: 'Retired',
     messages: (count: number) => (count === 1 ? '1 message' : `${count} messages`)
   },

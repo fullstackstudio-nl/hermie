@@ -25,6 +25,7 @@ import { hasPluginCapability, PLUGIN_CAPABILITIES } from '@hermie/gateway-client
 import {
   applySubagentSnapshot,
   type ChatState,
+  lastMessageAt,
   type ResumeSnapshot,
   type RowShape,
   rowsToItems,
@@ -273,6 +274,25 @@ export interface SetOptionResult {
   warning?: string
 }
 
+/**
+ * Moving a bot's key to another conversation was refused because it would lose
+ * something: a reply still running, a send not yet at the gateway, or messages
+ * waiting in the queue. UI-free on purpose; a surface shows
+ * `chatStrings.sessions.busy` for it (`error.code === 'conversation-busy'`).
+ */
+export class ConversationBusyError extends Error {
+  readonly code = 'conversation-busy'
+  readonly botName: string
+
+  constructor(botName: string) {
+    super(
+      `${botName} is still replying or has messages queued. Wait until the reply is finished or clear the queue first.`
+    )
+    this.name = 'ConversationBusyError'
+    this.botName = botName
+  }
+}
+
 interface PendingRequest {
   botName: string
   request: GatewayServerRequest
@@ -333,6 +353,8 @@ export class ChatController {
   private readonly loadingOlder = new Set<string>()
   private readonly parked = new Map<string, GatewayServerRequest[]>()
   private readonly opening = new Map<string, Promise<void>>()
+  /** Sends under each key that have not had their `prompt.submit` answered yet. */
+  private readonly sending = new Map<string, number>()
   private readonly slashCatalogs = new Map<string, CommandsCatalogResult>()
   /**
    * One catalogue fetch per session, shared by every keystroke that wants it.
@@ -380,6 +402,8 @@ export class ChatController {
   private readonly relabelTried = new Set<string>()
   /** `message_count` of each own chat when it was opened, by conversation key. */
   private readonly openedCounts = new Map<string, number>()
+  /** `message_count` of each own chat in the latest listing, by stored id. */
+  private readonly listedCounts = new Map<string, number>()
 
   constructor(options: ChatControllerOptions) {
     this.gateway = options.gateway
@@ -435,14 +459,14 @@ export class ChatController {
    * Calling this for a chat that is already live is cheap on purpose — the
    * roster calls it on every tap — but it is never two hydrations at once.
    */
-  openChat(bot: Bot): Promise<void> {
+  openChat(bot: Bot, options: { follow?: boolean } = {}): Promise<void> {
     const existing = this.opening.get(bot.name)
 
     if (existing) {
       return existing
     }
 
-    const run = this.openCurrent(bot).finally(() => {
+    const run = this.openCurrent(bot, options.follow === true).finally(() => {
       this.opening.delete(bot.name)
     })
 
@@ -454,29 +478,76 @@ export class ChatController {
   /**
    * Open the conversation this bot's key belongs on.
    *
-   * With sub-chats the reader's memory decides first — lookup only, never a
-   * mint (`BotsController.settleCurrent`). This is also where a memory that
-   * moved while the chat stayed bound is finally applied: another device picked
-   * a different conversation, and a chat in front of the reader is never pulled
-   * away for that (Owner Decision 4), so it waits for the next open, which is
-   * this.
+   * A chat already bound under the key stays on the conversation it is on: a
+   * share, a Shortcut or a push tap reaching for a bot whose chat is live must
+   * never pull it onto another one because another device chose differently
+   * (Owner Decision 4). The reader's memory decides — lookup only, never a mint
+   * (`BotsController.settleCurrent`) — on a cold open, where nothing is bound,
+   * and when `follow` says the reader is opening the chat screen itself: that is
+   * the "next open" a choice made elsewhere waits for. Even then a chat with a
+   * reply running or a queue waiting stays put.
+   *
+   * A failed listing never fails the open: the bot opens its group chat and the
+   * memory is left as it was for the next try.
    */
-  private async openCurrent(bot: Bot): Promise<void> {
+  private async openCurrent(bot: Bot, follow: boolean): Promise<void> {
     if (!this.botsController.tracksCurrent) {
       return this.hydrate(bot)
     }
 
-    const own = await this.botsController.settleCurrent(bot)
     const bound = this.boundOwnId(bot.name)
 
+    if (bound !== undefined && (!follow || !this.isIdle(bot.name))) {
+      return this.hydrate(botOn(this.bots.getState().byName[bot.name] ?? bot, this.boundSession(bot.name)))
+    }
+
+    let own: BotCanonicalSession | null
+
+    try {
+      own = await this.botsController.settleCurrent(bot)
+    } catch {
+      own = bound ? this.boundSession(bot.name) : null
+    }
+
     if (bound !== undefined && bound !== (own?.id ?? null)) {
-      await this.switchTo(bot, own)
+      try {
+        await this.switchTo(bot, own)
+      } catch (error) {
+        if (!(error instanceof ConversationBusyError)) {
+          throw error
+        }
+
+        // A send started while the chat was being put away: it stays where it is.
+        await this.hydrate(botOn(this.bots.getState().byName[bot.name] ?? bot, this.boundSession(bot.name)))
+      }
 
       return
     }
 
     this.bots.getState().setCurrent(bot.name, own)
-    await this.hydrate(botOn(bot, own))
+    await this.hydrate(botOn(this.bots.getState().byName[bot.name] ?? bot, own))
+  }
+
+  /** The own chat bound under this key, or `null` for the group chat (or nothing). */
+  private boundSession(botName: string): BotCanonicalSession | null {
+    if (!this.boundOwnId(botName)) {
+      return null
+    }
+
+    const bots = this.bots.getState()
+
+    return bots.byName[botName]?.current ?? bots.currentSessions[botName] ?? null
+  }
+
+  /** Whether moving this key would lose nothing — see `assertIdle`. */
+  private isIdle(botName: string): boolean {
+    try {
+      this.assertIdle(botName)
+
+      return true
+    } catch {
+      return false
+    }
   }
 
   /**
@@ -1576,6 +1647,15 @@ export class ChatController {
     }
 
     const sessionId = chat.runtimeSessionId
+    /*
+      Everything about WHICH conversation this turn belongs to is read now,
+      before the first await. By the time the submit answers, the key may be on
+      another conversation (a switch is refused while this is in flight, but the
+      rule is kept here too): the relabel, the last-opened stamp and the turn's
+      settling are then this conversation's business, not the one on screen.
+    */
+    const ownId = this.boundOwnId(botName)
+    const stillHere = (): boolean => this.chats.getState().chats[botName]?.runtimeSessionId === sessionId
     const files = attachments.filter(isFileAttachment)
     const images = attachments.filter((attachment): attachment is ImageAttachmentInput => !isFileAttachment(attachment))
     const body = withFileReferences(
@@ -1591,6 +1671,8 @@ export class ChatController {
     // Read back rather than recomputed: `beginLocalTurn` mints the id, and a
     // second spelling of that rule here would be a second place for it to drift.
     const painted = this.chats.getState().chats[botName]?.order.at(-1)
+
+    this.sending.set(botName, (this.sending.get(botName) ?? 0) + 1)
 
     try {
       for (const file of images) {
@@ -1612,10 +1694,14 @@ export class ChatController {
         text: body
       })
 
+      this.doneSending(botName)
+
+      if (!stillHere()) {
+        return painted
+      }
+
       this.chats.getState().settleTurn(botName, { status: result?.status ?? null })
       this.syncApprovalPoll()
-
-      const ownId = this.boundOwnId(botName)
 
       if (ownId) {
         // Sent to, on this device: the list is most recently used first.
@@ -1630,11 +1716,42 @@ export class ChatController {
 
       return painted
     } catch (error) {
+      this.doneSending(botName)
+
       // The optimistic bubble stays — the text is the user's, not ours to throw
-      // away — but the turn is not running, so the composer comes back.
-      this.chats.getState().interrupt(botName)
+      // away — but the turn is not running, so the composer comes back. Only on
+      // the conversation it was sent in.
+      if (stillHere()) {
+        this.chats.getState().interrupt(botName)
+      }
 
       throw error
+    }
+  }
+
+  /** One send under this key has had its answer (or its refusal) from the gateway. */
+  private doneSending(botName: string): void {
+    const left = (this.sending.get(botName) ?? 1) - 1
+
+    if (left > 0) {
+      this.sending.set(botName, left)
+    } else {
+      this.sending.delete(botName)
+    }
+  }
+
+  /**
+   * Refuse to move this bot's key while moving it would lose something: a send
+   * that has not reached the gateway yet, a reply still running, or messages
+   * (and their attachments) waiting in the queue. The reader is told why, with
+   * `ConversationBusyError`, rather than finding their queue gone.
+   */
+  private assertIdle(botName: string): void {
+    const state = this.chats.getState()
+    const chat = state.chats[botName]
+
+    if (this.sending.has(botName) || chat?.turn.active || (state.queues[botName]?.length ?? 0) > 0) {
+      throw new ConversationBusyError(botName)
     }
   }
 
@@ -2598,6 +2715,14 @@ export class ChatController {
     const botName = bot.name
     const previous = this.chats.getState().chats[botName]?.runtimeSessionId
 
+    if (this.boundOwnId(botName)) {
+      // Parked in one of the reader's own chats (an adopt from there): that chat
+      // is left properly, its watermark and cache written under its OWN key,
+      // before `current` is cleared and the key forgets it.
+      this.markLeft(botName)
+      await this.persist(botName)
+    }
+
     // The roster is the one thing that would undo this, so it is told first —
     // and told in a way a poll already in the air cannot reverse. See
     // `canonicalPins` in the bots store.
@@ -2673,8 +2798,30 @@ export class ChatController {
       lastOpenedAt: this.bots.getState().lastOpened
     })
 
+    const bots = this.bots.getState()
+    const bound = this.boundOwnId(botName)
+    const live = this.chats.getState().chats[botName]
+
     for (const conversation of list.own) {
       this.ownTitles.set(conversation.id, conversation.title)
+      this.listedCounts.set(conversation.id, conversation.messageCount)
+
+      const key = conversationKey(botName, conversation.id)
+
+      /*
+        The own chat live here, read to its newest message and not mid-reply:
+        whatever the gateway counts in it, the reader has seen, so its count is
+        the gateway's own. A chat just read is never listed as unread.
+      */
+      if (
+        bound === conversation.id &&
+        live &&
+        !live.turn.active &&
+        (bots.lastSeen[key] ?? 0) >= lastMessageAt(live) &&
+        conversation.messageCount > (bots.seenCounts[key] ?? 0)
+      ) {
+        bots.markSeenCount(key, conversation.messageCount)
+      }
     }
 
     return { rows, list }
@@ -2746,6 +2893,12 @@ export class ChatController {
       return
     }
 
+    if (bound !== undefined && bound !== wanted) {
+      // Moving a live chat would drop a running reply or the queue: refused
+      // before anything, the memory included, has changed.
+      this.assertIdle(botName)
+    }
+
     if (!remembered) {
       source?.rememberCurrent?.(botName, wanted)
     }
@@ -2783,14 +2936,20 @@ export class ChatController {
         this.restoreMemory(botName, memory)
       }
 
+      if (error instanceof ConversationBusyError && this.boundOwnId(botName) === bound) {
+        // Refused before the key was touched: the chat is where it was.
+        throw error
+      }
+
       this.chats.getState().forget(botName)
       this.bots.getState().setCurrent(botName, before)
 
-      // Best effort: put the conversation the reader was in back on screen.
+      // Put the conversation the reader was in back on screen, from its own
+      // cache entry (written on the way out), before the refusal is reported.
       const back = this.bots.getState().byName[botName]
 
-      if (back) {
-        void this.openChat(back).catch(() => undefined)
+      if (back && bound !== undefined) {
+        await this.openChat(back).catch(() => undefined)
       }
 
       throw error
@@ -2811,7 +2970,9 @@ export class ChatController {
       return
     }
 
-    source.rememberCurrent(botName, memory ?? null, { chore: true })
+    // A dated choice, not a chore: other devices may already have followed the
+    // switch that did not happen, and must follow it back.
+    source.rememberCurrent(botName, memory ?? null)
 
     if (memory === null) {
       // A legacy entry: the bare-lead chat nobody resolved yet.
@@ -2836,6 +2997,9 @@ export class ChatController {
     if (chat) {
       this.markLeft(botName)
       await this.persist(botName)
+      // A send may have started while the cache was written. Nothing is unbound
+      // yet, so refusing here loses nothing.
+      this.assertIdle(botName)
 
       if (chat.runtimeSessionId) {
         this.slashCatalogs.delete(chat.runtimeSessionId)
@@ -2886,6 +3050,12 @@ export class ChatController {
     }
 
     const botName = bot.name
+
+    // The new chat is opened at once, so the chat being left must be one that
+    // can be left: refused BEFORE anything is minted.
+    await this.opening.get(botName)?.catch(() => undefined)
+    this.assertIdle(botName)
+
     const group = bot.canonical?.id ? bot.canonical : await this.botsController.resolveCanonical(bot)
     const asked = cutLabel(options.label ?? '')
     const first = newOwnChatTitle(lead, asked || localStamp(this.now()))
@@ -2919,7 +3089,10 @@ export class ChatController {
       }
 
       try {
-        title = await this.titleSession(botName, runtimeId, newOwnChatTitle(lead, localStamp(this.now(), true)))
+        // The reader's own name is kept, numbered; a stamp gains its seconds.
+        const retry = asked ? numbered(asked, 2) : localStamp(this.now(), true)
+
+        title = await this.titleSession(botName, runtimeId, newOwnChatTitle(lead, retry))
       } catch (second) {
         await this.closeQuietly(botName, runtimeId)
 
@@ -3040,7 +3213,14 @@ export class ChatController {
       throw new Error('The group chat cannot be deleted.')
     }
 
+    // An open in the air lands first, so "is it the open chat" is answered
+    // about the chat that is actually bound.
+    await this.opening.get(botName)?.catch(() => undefined)
+
     if (this.boundOwnId(botName) === storedId) {
+      // Left fully first — its watermark and cache written under its own key,
+      // and refused while a reply or the queue would be lost — and only then
+      // deleted, so the gateway never loses a session this device holds live.
       await this.selectConversation(bot, null)
     } else {
       if (this.userChats?.target?.(botName) === storedId) {
@@ -3068,6 +3248,7 @@ export class ChatController {
     this.ownTitles.delete(storedId)
     this.relabelTried.delete(storedId)
     this.openedCounts.delete(key)
+    this.listedCounts.delete(storedId)
     this.notifyConversations(botName)
   }
 
@@ -3924,9 +4105,21 @@ export class ChatController {
 
     if (key !== botName && !botName.includes('#') && chat) {
       // A listing row carries a count and no activity time, so an own chat that
-      // is not open is called unread by counting (`isOwnUnread`). The larger of
-      // what the gateway reported on open and what this transcript now holds.
-      bots.markSeenCount(key, Math.max(this.openedCounts.get(key) ?? 0, countPersistedRows(chat)))
+      // is not open is called unread by counting (`isOwnUnread`). The best count
+      // there is: what the gateway last reported (on open, or in a listing), or
+      // what this transcript holds — messages streamed in live included, which
+      // carry no row yet. Never lowered: a chat just read is never unread.
+      const storedId = key.slice(botName.length + 1)
+
+      bots.markSeenCount(
+        key,
+        Math.max(
+          bots.seenCounts[key] ?? 0,
+          this.openedCounts.get(key) ?? 0,
+          this.listedCounts.get(storedId) ?? 0,
+          countMessages(chat)
+        )
+      )
     }
   }
 
@@ -3956,6 +4149,13 @@ function localStamp(now: number, seconds = false): string {
   const minute = `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`
 
   return seconds ? `${minute}:${pad(at.getSeconds())}` : minute
+}
+
+/** `Ideas (2)`: a label with a number after it, still within the label limit. */
+function numbered(label: string, count: number): string {
+  const suffix = ` (${count})`
+
+  return `${label.slice(0, OWN_CHAT_LABEL_MAX - suffix.length).trim()}${suffix}`
 }
 
 /** A label the reader gave, cut to what an own chat's name may carry. */
@@ -4185,6 +4385,24 @@ function transcriptEventOf(raw: Record<string, unknown>): TranscriptEvent | null
     ...(typeof raw.seq === 'number' ? { seq: raw.seq } : {}),
     payload: raw.payload
   }
+}
+
+/**
+ * How many messages a chat holds as the gateway would count them: its persisted
+ * rows, plus the user and assistant items streamed in live that have no row yet.
+ */
+function countMessages(chat: ChatState): number {
+  let live = 0
+
+  for (const id of chat.order) {
+    const item = chat.items[id]
+
+    if (item && item.rowId === undefined && (item.kind === 'user' || item.kind === 'assistant')) {
+      live += 1
+    }
+  }
+
+  return countPersistedRows(chat) + live
 }
 
 /** How many persisted rows a chat holds, for the reconnect count comparison. */

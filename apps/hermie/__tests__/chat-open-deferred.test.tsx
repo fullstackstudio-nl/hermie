@@ -161,7 +161,7 @@ it('opens by itself the moment the connection reports ready', async () => {
 
   view.setStatus('ready')
 
-  await waitFor(() => expect(mockController.openChat).toHaveBeenCalledWith(BOT))
+  await waitFor(() => expect(mockController.openChat).toHaveBeenCalledWith(BOT, { follow: true }))
   expect(screen.queryByTestId('chat-connecting-state')).toBeNull()
 })
 
