@@ -50,6 +50,9 @@ export const kanban: Translation<typeof kanbanStrings> = {
 
   noOrder: 'Kaarten staan op volgorde van prioriteit en ouderdom, dus binnen een kolom valt er niets te slepen.',
 
+  dragHint: 'Houd een kaart vast om hem op te pakken en laat hem los op een kolom.',
+  dragLabel: 'Houd vast om deze kaart op te pakken, of gebruik Verplaats naar…',
+  lockedTarget: (column: string) => `${column} is van de dispatcher. Daar kan geen kaart in.`,
   move: 'Verplaats naar…',
   moved: (column: string) => `Verplaatst naar ${column}.`,
   movedElsewhere: (asked: string, got: string) => `Gevraagd om ${asked}; het board zette hem in ${got}.`,

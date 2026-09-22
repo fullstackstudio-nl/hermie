@@ -60,6 +60,9 @@ export const kanban: Translation<typeof kanbanStrings> = {
 
   // „Verschieben nach…“ is twice the English label; the menu that opens lists
   // the columns, so the preposition carries nothing.
+  dragHint: 'Halte eine Karte gedrückt, um sie aufzunehmen, und lass sie auf einer Spalte los.',
+  dragLabel: 'Gedrückt halten, um diese Karte aufzunehmen, oder Verschieben… verwenden',
+  lockedTarget: (column: string) => `${column} gehört dem Dispatcher. Dort kann keine Karte hin.`,
   move: 'Verschieben…',
   moved: (column: string) => `Nach ${column} verschoben.`,
   movedElsewhere: (asked: string, got: string) => `Angefragt war ${asked}; das Board hat sie in ${got} gelegt.`,
