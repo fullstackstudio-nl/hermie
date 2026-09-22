@@ -127,6 +127,13 @@ export interface CardDragOptions {
 export interface CardDrag {
   /** The id of the card being dragged, or null. */
   draggingId: string | null
+  /**
+   * A card is held: armed by a long press, dragging, or both.
+   *
+   * What the board's scroll views read to switch themselves off. `draggingId`
+   * is too late to be that signal — see the note on `holding` below.
+   */
+  holding: boolean
   /** Where the lifted card is, relative to where it sits in its column. */
   translate: Animated.ValueXY
   /** 0 resting, 1 fully lifted. Scale and shadow read off this. */
@@ -159,6 +166,23 @@ export function useCardDrag({
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [draggingFrom, setDraggingFrom] = useState<string | null>(null)
   const [over, setOver] = useState<string | null>(null)
+  /*
+    A card is held, which is EARLIER than a card being dragged.
+
+    `onShouldBlockNativeResponder` is Android-only, so on iOS a
+    `UIScrollView`'s own pan recognizer competes with this gesture for the same
+    finger — and on a board it wins, because the board scrolls sideways and so
+    does the drag. Measured on the iPad Pro 13-inch: a held card produced a
+    board scrolled one column to the left and no lift at all.
+
+    `BotsScreen` switches its list off with `scrollEnabled={draggingKey ===
+    null}`, and that is enough for a list, where the drag is claimed before the
+    native recognizer has decided. It is NOT enough here: by the time a drag is
+    granted the scroll has already started. So the scrollers go off one step
+    earlier, when the long press ARMS, and come back on when the finger lifts
+    without having dragged.
+  */
+  const [holding, setHolding] = useState(false)
 
   const translate = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current
   const lift = useRef(new Animated.Value(0)).current
@@ -205,6 +229,7 @@ export function useCardDrag({
       armed.current = null
       landing.current = { kind: 'outside' }
       lastMove.current = null
+      setHolding(false)
 
       const done = () => {
         translate.setValue({ x: 0, y: 0 })
@@ -349,6 +374,7 @@ export function useCardDrag({
       }
 
       armed.current = cardId
+      setHolding(true)
       // Where the board is can have changed since the last layout, and the
       // answer is needed before the first move rather than after it.
       latest.current.measureRow()
@@ -360,6 +386,7 @@ export function useCardDrag({
   const disarm = useCallback(() => {
     if (!active.current) {
       armed.current = null
+      setHolding(false)
     }
   }, [])
 
@@ -379,6 +406,7 @@ export function useCardDrag({
       cardHandlers,
       disarm,
       draggingId,
+      holding,
       lift,
       measureColumn,
       onRowLeft: (x: number) => {
@@ -393,6 +421,6 @@ export function useCardDrag({
       stateFor,
       translate
     }),
-    [arm, cardHandlers, disarm, draggingId, lift, measureColumn, stateFor, translate]
+    [arm, cardHandlers, disarm, draggingId, holding, lift, measureColumn, stateFor, translate]
   )
 }

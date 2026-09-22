@@ -670,6 +670,9 @@ function BoardScreen({
         // reports the row's width and not the space it had.
         onLayout={event => setMeasured(event.nativeEvent.layout.width)}
         ref={directTouchPanRef}
+        // A held card owns the finger. Both scrollers step aside for it; see
+        // `holding` in `use-card-drag.ts` for why this is not `draggingId`.
+        scrollEnabled={!drag.holding}
         testID="kanban-board-scroll"
         refreshControl={
           <RefreshControl
@@ -695,6 +698,9 @@ function BoardScreen({
             // number: a throttled one leaves the card lagging the board it is
             // being dragged over.
             scrollEventThrottle={16}
+            // The one that actually loses the race without this: the board and
+            // the drag move along the same axis.
+            scrollEnabled={!drag.holding}
             showsHorizontalScrollIndicator
           >
             {columns}
