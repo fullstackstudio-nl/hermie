@@ -32,3 +32,7 @@ yarn-error.log*
 .DS_Store
 .idea/
 *.swp
+
+# Manual QA captures: simulator screenshots from a walk-through, kept out of the
+# tree because they are evidence for one round, not an asset the app builds from.
+qa/

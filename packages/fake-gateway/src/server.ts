@@ -1201,8 +1201,62 @@ const LONG_REPLY_DELTAS: string[] = [
   'I can start with the first of those if you want.'
 ]
 
+/**
+ * A reply whose body is a `mermaid` fence, reached with a prompt containing `mermaid`.
+ *
+ * Split across deltas ON PURPOSE, and the fence opens in one delta and closes in a
+ * later one: every flush in between hands the renderer a half-arrived diagram,
+ * which is exactly the state `parseMermaid` answers `null` for and the block falls
+ * back to a fenced listing. A fixture that arrived whole in one frame would never
+ * show that the fallback works, and the fallback is the part that keeps a streaming
+ * reply from flickering a picture in and out.
+ *
+ * The graph itself stays inside the supported subset (ADR-0020): `flowchart`, plain
+ * shapes, labelled and dotted edges, no `subgraph` and no `style`.
+ */
+const MERMAID_REPLY_DELTAS: string[] = [
+  'Here is the refresh path as a picture.\n\n',
+  '```mermaid\n',
+  'flowchart TD\n',
+  '  start([Client wakes]) --> check{Token still valid?}\n',
+  '  check -- yes --> open[Open socket]\n',
+  '  check -- no --> refresh[Refresh token]\n',
+  '  refresh --> open\n',
+  '  open --> ok([Connected])\n',
+  '  open -. on 401 .-> refresh\n',
+  '```\n\n',
+  'The dotted edge is the fallback, and it is the one that almost never runs.'
+]
+
+/**
+ * A reply carrying both block and inline mathematics, reached with a prompt
+ * containing `math`.
+ *
+ * It deliberately also contains a PRICE — `$12` — because the whole of
+ * `marked-math.ts`'s dollar defence is about not turning money into mathematics,
+ * and a fixture without one cannot show that the defence holds.
+ */
+const MATH_REPLY_DELTAS: string[] = [
+  'The backoff is a geometric series, so the total wait has a closed form.\n\n',
+  '$$\n',
+  '\\sum_{k=0}^{n-1} b \\cdot r^k = b \\cdot \\frac{1 - r^n}{1 - r}\n',
+  '$$\n\n',
+  'With $b = 250$ ms and $r = 2$, five attempts wait $3.75$ s in total.\n\n',
+  'That is the same ceiling the guide quotes, and the plan costs $12 a month either way.'
+]
+
 const DEFAULT_SCENARIO: Scenario = {
   replies: [
+    {
+      match: 'mermaid',
+      deltas: MERMAID_REPLY_DELTAS,
+      text: MERMAID_REPLY_DELTAS.join('')
+    },
+    {
+      match: 'math',
+      deltas: MATH_REPLY_DELTAS,
+      text: MATH_REPLY_DELTAS.join('')
+    },
     {
       match: 'long',
       reasoning: ['Reading the ', 'refresh path.'],
