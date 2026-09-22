@@ -84,12 +84,16 @@ describe('a mermaid fence', () => {
   })
 
   it('falls back to the fenced source when the diagram cannot be drawn', () => {
-    const source = ['```mermaid', 'sequenceDiagram', '  Alice->>Bob: hello', '```'].join('\n')
+    // A `classDiagram`, which nothing here draws. A `sequenceDiagram` and a `pie`
+    // used to be the examples and are now pictures of their own — see
+    // `markdown-diagrams.test.tsx`, which pins them and keeps this fallback
+    // asserted against a type that is still outside the subset.
+    const source = ['```mermaid', 'classDiagram', '  Animal <|-- Duck', '```'].join('\n')
 
     draw(source)
 
     expect(screen.queryByTestId('markdown-mermaid')).toBeNull()
-    expect(screen.getByText('sequenceDiagram')).toBeTruthy()
+    expect(screen.getByText('classDiagram')).toBeTruthy()
   })
 
   it('refuses a statement it would have to ignore rather than drawing a partial picture', () => {
@@ -155,16 +159,19 @@ describe('mathematics', () => {
   })
 
   it('falls back to the source when an expression cannot be drawn', () => {
-    // `\begin` is an environment, which this renderer has none of.
-    expect(parseMath('\\begin{matrix} a & b \\end{matrix}')).toBeNull()
+    // `array` carries a column specification this renderer has no drawing for.
+    // The matrix environments themselves ARE drawn now — see
+    // `markdown-latex.test.tsx` — so the fallback is asserted against the one
+    // environment that is still outside the subset.
+    expect(parseMath('\\begin{array}{cc} a & b \\end{array}')).toBeNull()
     // A half-typed command, which a streaming reply produces constantly.
     expect(parseMath('\\fra')).toBeNull()
     expect(parseMath('x^')).toBeNull()
 
-    draw('$$\\begin{matrix} a \\end{matrix}$$\n')
+    draw('$$\\begin{array}{cc} a \\end{array}$$\n')
 
     expect(screen.queryByTestId('markdown-math-block')).toBeNull()
-    expect(screen.getByText(/begin\{matrix\}/u)).toBeTruthy()
+    expect(screen.getByText(/begin\{array\}/u)).toBeTruthy()
   })
 
   it('leaves a price alone', () => {

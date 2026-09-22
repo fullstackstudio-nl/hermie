@@ -136,6 +136,20 @@ const SUBSCRIPTS: Record<string, string> = {
   x: 'ₓ'
 }
 
+/**
+ * The partner a one-sided fence gets in running text.
+ *
+ * A `cases` block opens with a brace and closes with nothing, which is right when
+ * it is drawn — the rows close it off — and reads as an unclosed bracket when the
+ * same expression is set on one line. So the linear form supplies the partner, and
+ * only the linear form.
+ */
+const MIRRORED: Record<string, string> = { '(': ')', '[': ']', '{': '}', '|': '|', '‖': '‖' }
+
+/** How a grid's cells and rows are separated when it has to fit on one line. */
+const CELL_JOIN = ' '
+const ROW_JOIN = '; '
+
 /** The characters of a sub-tree, with nothing about how they are set. */
 export function mathToPlainText(node: MathNode): string {
   switch (node.kind) {
@@ -173,7 +187,19 @@ export function mathToPlainText(node: MathNode): string {
 
     case 'accent':
       return mathToPlainText(node.base) + node.combining
+
+    case 'grid':
+      return (
+        node.open +
+        node.rows.map(cells => cells.map(mathToPlainText).join(CELL_JOIN)).join(ROW_JOIN) +
+        closingOf(node.open, node.close)
+      )
   }
+}
+
+/** A grid's closing fence, supplied where the drawing leaves it open. */
+function closingOf(open: string, close: string): string {
+  return close || (open ? (MIRRORED[open] ?? '') : '')
 }
 
 /** Brackets only where the extent is not already one character. */
@@ -333,6 +359,33 @@ function walk(node: MathNode, runs: MathRun[]): void {
       return
     }
 
+    case 'grid': {
+      // Only reached where a grid has to be set on one line, which is a script's
+      // spelling and the plain-text flattening. An INLINE expression containing
+      // one does not come here at all: `inlineMathRuns` declines it, so the
+      // reader gets the LaTeX in a code chip rather than a matrix pretending to
+      // be a list. See `containsGrid` below.
+      push(runs, node.open, 'roman')
+
+      node.rows.forEach((cells, row) => {
+        if (row > 0) {
+          push(runs, ROW_JOIN, 'roman')
+        }
+
+        cells.forEach((cell, column) => {
+          if (column > 0) {
+            push(runs, CELL_JOIN, 'roman')
+          }
+
+          walk(cell, runs)
+        })
+      })
+
+      push(runs, closingOf(node.open, node.close), 'roman')
+
+      return
+    }
+
     case 'operator': {
       push(runs, node.symbol, 'roman')
 
@@ -367,6 +420,53 @@ function appendGrouped(runs: MathRun[], side: MathRun[]): void {
 
   if (wrap) {
     push(runs, ')', 'roman')
+  }
+}
+
+/**
+ * Whether a tree holds a grid, anywhere inside it.
+ *
+ * The one question an inline caller has to ask. A matrix, a `cases` block or an
+ * aligned pair is rows — that is what it MEANS — and there is no honest way to set
+ * rows inside a sentence: React Native will not lay a `View` out inside a `Text`
+ * on Android, so an inline expression cannot have boxes at all (ADR-0020). Rather
+ * than invent a one-line notation and hope the reader reads it the way it was
+ * meant, an inline expression containing a grid falls back to its source in a code
+ * chip, which is exactly what the model wrote.
+ */
+export function containsGrid(node: MathNode): boolean {
+  switch (node.kind) {
+    case 'grid':
+      return true
+
+    case 'row':
+      return node.items.some(containsGrid)
+
+    case 'scripts':
+      return (
+        containsGrid(node.base) ||
+        (node.sup ? containsGrid(node.sup) : false) ||
+        (node.sub ? containsGrid(node.sub) : false)
+      )
+
+    case 'operator':
+      return (node.upper ? containsGrid(node.upper) : false) || (node.lower ? containsGrid(node.lower) : false)
+
+    case 'frac':
+      return containsGrid(node.numerator) || containsGrid(node.denominator)
+
+    case 'sqrt':
+      return containsGrid(node.radicand) || (node.index ? containsGrid(node.index) : false)
+
+    case 'fenced':
+      return containsGrid(node.body)
+
+    case 'accent':
+      return containsGrid(node.base)
+
+    case 'run':
+    case 'space':
+      return false
   }
 }
 

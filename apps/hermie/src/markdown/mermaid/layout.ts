@@ -26,6 +26,7 @@
  * is still drawn; it points backwards, which is what a loop in a flowchart looks
  * like.
  */
+import { CHARACTER_EM, diagramFontSize, diagramLineHeight, wrapToWidth } from './labels'
 import type { MermaidGraph, MermaidNode } from './parse'
 
 /** Where one box ended up, in diagram units. */
@@ -56,9 +57,6 @@ export interface MermaidLayout {
   fontSize: number
 }
 
-/** A rough advance per character for the label face, as a fraction of em. */
-const CHARACTER_EM = 0.58
-
 /** Air inside a box, on each side. */
 const PADDING_X = 14
 const PADDING_Y = 9
@@ -74,55 +72,17 @@ const GAP_BETWEEN = 46
 /** The drawing's own margin, so an arrowhead and a label are never clipped. */
 const MARGIN = 10
 
-/** The label a diagram draws at, which is smaller than the body. */
-export function diagramFontSize(bodyFontSize: number): number {
-  return Math.max(10, bodyFontSize - 3)
-}
-
 /**
- * A label broken so a box does not become a ribbon.
- *
- * An explicit `<br/>` is honoured first — the author asked — and a long single
- * line is wrapped on word boundaries at the width the box is capped to.
+ * A label broken so a box does not become a ribbon, at the width a box is
+ * capped to. The rule itself is shared with the other two diagram kinds.
  */
 function wrapLabel(label: string, fontSize: number): string[] {
-  const advance = fontSize * CHARACTER_EM
-  const limit = Math.max(6, Math.floor((MAX_WIDTH - PADDING_X * 2) / advance))
-
-  return label.split('\n').flatMap(line => {
-    const words = line.split(/\s+/u).filter(Boolean)
-
-    if (!words.length) {
-      return ['']
-    }
-
-    const out: string[] = []
-    let current = ''
-
-    for (const word of words) {
-      const candidate = current ? `${current} ${word}` : word
-
-      if (candidate.length <= limit || !current) {
-        current = candidate
-
-        continue
-      }
-
-      out.push(current)
-      current = word
-    }
-
-    if (current) {
-      out.push(current)
-    }
-
-    return out
-  })
+  return wrapToWidth(label, fontSize, MAX_WIDTH - PADDING_X * 2)
 }
 
 function boxSize(lines: string[], shape: MermaidNode['shape'], fontSize: number) {
   const widest = lines.reduce((most, line) => Math.max(most, line.length), 0)
-  const lineHeight = Math.round(fontSize * 1.35)
+  const lineHeight = diagramLineHeight(fontSize)
   let width = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.ceil(widest * fontSize * CHARACTER_EM) + PADDING_X * 2))
   let height = lines.length * lineHeight + PADDING_Y * 2
 

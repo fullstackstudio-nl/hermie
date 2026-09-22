@@ -22,10 +22,10 @@
  *    diagram's labels. This renderer has no script engine and no navigation: a
  *    label is characters in a `Text`, and an `<a>` in one is the literal
  *    characters an author typed.
- *  - **A diagram this renderer cannot draw is shown as its source.** A
- *    `sequenceDiagram`, a `subgraph`, a half-streamed fence — all of them come
- *    back from the parser as `null` and land in a code block, which is readable
- *    and copyable and says exactly what the model wrote.
+ *  - **A diagram this renderer cannot draw is shown as its source.** A `gantt`, a
+ *    `classDiagram`, a `subgraph`, a half-streamed fence — all of them come back
+ *    from every parser as `null` and land in a code block, which is readable and
+ *    copyable and says exactly what the model wrote.
  *
  * ## It scales, it does not reflow
  *
@@ -44,6 +44,12 @@ import { CodeBlock } from '../CodeBlock'
 import type { MarkdownContext } from '../context'
 import { layoutMermaid, type MermaidLayout, type PlacedEdge, type PlacedNode } from './layout'
 import { parseMermaid } from './parse'
+import { PieChartView } from './PieChart'
+import { SequenceDiagramView } from './SequenceDiagram'
+import { parsePie } from './pie'
+import { layoutPie } from './pie-layout'
+import { parseSequence } from './sequence'
+import { layoutSequence } from './sequence-layout'
 
 /** The fence info string this renderer claims. */
 export const MERMAID_LANGUAGE = 'mermaid'
@@ -261,13 +267,57 @@ function Labels({ layout, context, scale }: { layout: MermaidLayout; context: Ma
   )
 }
 
-function MermaidDiagramView({ source, context }: { source: string; context: MarkdownContext }) {
-  const graph = useMemo(() => parseMermaid(source), [source])
-  const layout = useMemo(() => (graph ? layoutMermaid(graph, context.fontSize) : null), [graph, context.fontSize])
+/**
+ * Which of the three drawings this fence is, already laid out.
+ *
+ * The parsers are tried in turn and each one reads the header line first, so the
+ * two that decline cost a regular expression apiece. Tagging the answer rather
+ * than returning three nullable layouts means the renderer below has one thing to
+ * branch on and cannot draw two diagrams from one fence.
+ */
+type Drawing =
+  | { kind: 'flowchart'; layout: MermaidLayout }
+  | { kind: 'sequence'; layout: ReturnType<typeof layoutSequence> }
+  | { kind: 'pie'; layout: ReturnType<typeof layoutPie> }
 
-  if (!layout) {
+function draw(source: string, fontSize: number): Drawing | null {
+  const graph = parseMermaid(source)
+
+  if (graph) {
+    return { kind: 'flowchart', layout: layoutMermaid(graph, fontSize) }
+  }
+
+  const sequence = parseSequence(source)
+
+  if (sequence) {
+    return { kind: 'sequence', layout: layoutSequence(sequence, fontSize) }
+  }
+
+  const pie = parsePie(source)
+
+  if (pie) {
+    return { kind: 'pie', layout: layoutPie(pie, fontSize) }
+  }
+
+  return null
+}
+
+function MermaidDiagramView({ source, context }: { source: string; context: MarkdownContext }) {
+  const drawing = useMemo(() => draw(source, context.fontSize), [source, context.fontSize])
+
+  if (!drawing) {
     return <CodeBlock code={source.replace(/\n$/u, '')} context={context} language={MERMAID_LANGUAGE} />
   }
+
+  if (drawing.kind === 'sequence') {
+    return <SequenceDiagramView context={context} layout={drawing.layout} />
+  }
+
+  if (drawing.kind === 'pie') {
+    return <PieChartView context={context} layout={drawing.layout} />
+  }
+
+  const layout = drawing.layout
 
   // Down only. A four-box diagram blown up to the width of an iPad is a poster,
   // and the reader asked for a diagram in a message.

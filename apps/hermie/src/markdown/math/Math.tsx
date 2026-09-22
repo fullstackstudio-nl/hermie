@@ -3,8 +3,9 @@
  *
  * Two surfaces, one notation. Inline math is runs inside the sentence's own
  * `Text` (`linear.ts` says why it can be nothing else); block math is the same
- * runs, with boxes for the three constructs that genuinely need a second
- * dimension — a fraction, a root, and a big operator's limits.
+ * runs, with boxes for the four constructs that genuinely need a second dimension
+ * — a fraction, a root, a big operator's limits, and a grid of cells, which is
+ * every environment from `pmatrix` to `cases`.
  *
  * ## Every height here is arithmetic on the font size
  *
@@ -26,20 +27,24 @@ import { Text, View } from 'react-native'
 
 import { CodeBlock } from '../CodeBlock'
 import { MONOSPACE, type MarkdownContext } from '../context'
-import { mathRuns, type MathRun } from './linear'
+import { containsGrid, mathRuns, type MathRun } from './linear'
+import {
+  FRACTION_GAP,
+  GRID_COLUMN_GAP,
+  gridColumns,
+  gridHeights,
+  gridRowGap,
+  mathHeight,
+  mathLineHeight,
+  OPERATOR_SCALE,
+  ROOT_GAP,
+  RULE,
+  SCRIPT_SCALE
+} from './metrics'
 import { parseMath, type MathNode, type MathStyle } from './parse'
 
 /** The info string a fenced fallback carries, so the block says what it is. */
 export const MATH_LANGUAGE = 'latex'
-
-/** A script's size, as a fraction of the size it hangs off. */
-const SCRIPT_SCALE = 0.72
-
-/** How thick a fraction bar and a radical's overline are drawn. */
-const RULE = 1
-
-/** Air above and below a fraction bar, as a fraction of the font size. */
-const FRACTION_GAP = 0.18
 
 function textStyle(style: MathStyle, fontSize: number, color: string) {
   return {
@@ -78,13 +83,23 @@ export function MathRunsText({
   )
 }
 
-/** Whether a node is one the block renderer opens out into boxes. */
+/**
+ * Whether a node is one the block renderer opens out into boxes.
+ *
+ * A `scripts` node is two-dimensional only when its BASE is. `x^2` stays on one
+ * line with a Unicode superscript, which is correct at any size and cannot be
+ * misread — but `\left( \frac{1}{n} \right)^n` has a fraction inside the fence,
+ * and setting the whole thing on one line turns a stacked fraction into `1/n`
+ * because one script was hanging off it.
+ */
 function isTwoDimensional(node: MathNode): boolean {
   return (
     node.kind === 'frac' ||
     node.kind === 'sqrt' ||
+    node.kind === 'grid' ||
     (node.kind === 'operator' && Boolean(node.upper ?? node.lower)) ||
-    (node.kind === 'fenced' && containsTwoDimensional(node.body))
+    (node.kind === 'fenced' && containsTwoDimensional(node.body)) ||
+    (node.kind === 'scripts' && containsTwoDimensional(node.base))
   )
 }
 
@@ -111,7 +126,7 @@ function LinearSpan({ nodes, context, fontSize }: { nodes: MathNode[]; context: 
   }
 
   return (
-    <Text selectable={context.selectable} style={{ lineHeight: Math.round(fontSize * 1.3) }}>
+    <Text selectable={context.selectable} style={{ lineHeight: mathLineHeight(fontSize) }}>
       <MathRunsText context={context} fontSize={fontSize} runs={runs} />
     </Text>
   )
@@ -146,7 +161,7 @@ function Root({ node, context, fontSize }: { node: MathNode; context: MarkdownCo
     return null
   }
 
-  const gap = Math.round(fontSize * 0.12)
+  const gap = Math.round(fontSize * ROOT_GAP)
 
   return (
     <View style={{ alignItems: 'flex-end', flexDirection: 'row' }}>
@@ -186,7 +201,7 @@ function BigOperator({ node, context, fontSize }: { node: MathNode; context: Mar
   const limitSize = Math.round(fontSize * SCRIPT_SCALE)
   // Big enough to read as an operator rather than as a letter, which is what
   // the display style of every typesetter does with these.
-  const symbolSize = Math.round(fontSize * 1.35)
+  const symbolSize = Math.round(fontSize * OPERATOR_SCALE)
 
   return (
     <View style={{ alignItems: 'center', paddingHorizontal: 3 }}>
@@ -199,24 +214,153 @@ function BigOperator({ node, context, fontSize }: { node: MathNode; context: Mar
   )
 }
 
+/**
+ * A fence set at the size of what it encloses.
+ *
+ * A `(` drawn at the body's own font size beside a two-line matrix is a comma with
+ * ambitions, and a fence that does not reach round its contents reads as a
+ * different expression. A typesetter answers this by picking a bigger glyph from a
+ * font built for it; without those fonts (ADR-0020) the same glyph is simply set
+ * larger, which is the same idea with one face instead of four.
+ *
+ * The size is arithmetic on the height the caller already computed, so nothing is
+ * measured and nothing settles late. It is capped, because a sixteen-row matrix
+ * would otherwise be fenced by a bracket taller than the bubble — and past a few
+ * rows a taller glyph stops adding anything a reader can use.
+ */
+function GrowingDelimiter({
+  character,
+  height,
+  context,
+  fontSize
+}: {
+  character: string
+  height: number
+  context: MarkdownContext
+  fontSize: number
+}) {
+  if (!character) {
+    return null
+  }
+
+  const size = Math.min(Math.round(height * 0.78), fontSize * 3)
+
+  return (
+    <Text selectable={context.selectable} style={textStyle('roman', Math.max(fontSize, size), context.textColor)}>
+      {character}
+    </Text>
+  )
+}
+
+/**
+ * A grid: every environment, and a bare line break.
+ *
+ * Laid out as a row of COLUMNS rather than a column of rows, which is the one
+ * decision in this file worth arguing: a column sized by its own content is
+ * exactly as wide as its widest cell, for free and without measuring anything, and
+ * that is what makes a matrix's columns line up. The cost is that rows then have
+ * to be made to agree, which is why each cell is given its row's computed height —
+ * `metrics.ts` has the arithmetic and the reason.
+ */
+function Grid({ node, context, fontSize }: { node: MathNode; context: MarkdownContext; fontSize: number }) {
+  if (node.kind !== 'grid') {
+    return null
+  }
+
+  const { rows: rowHeights, total } = gridHeights(node, fontSize)
+  const rowGap = gridRowGap(fontSize)
+  const columnGap = Math.round(fontSize * GRID_COLUMN_GAP[node.style])
+  const columns = gridColumns(node)
+
+  return (
+    <View style={{ alignItems: 'center', flexDirection: 'row' }}>
+      <GrowingDelimiter character={node.open} context={context} fontSize={fontSize} height={total} />
+      <View style={{ flexDirection: 'row', paddingHorizontal: 2 }}>
+        {Array.from({ length: columns }, (_unused, column) => (
+          <View
+            key={column}
+            style={{ alignItems: alignmentOf(node.style, column), marginLeft: column ? columnGap : 0 }}
+          >
+            {node.rows.map((cells, row) => (
+              <View
+                key={row}
+                style={{
+                  height: rowHeights[row],
+                  justifyContent: 'center',
+                  marginTop: row ? rowGap : 0
+                }}
+              >
+                {cells[column] ? <MathLayout context={context} fontSize={fontSize} node={cells[column]!} /> : null}
+              </View>
+            ))}
+          </View>
+        ))}
+      </View>
+      <GrowingDelimiter character={node.close} context={context} fontSize={fontSize} height={total} />
+    </View>
+  )
+}
+
+/**
+ * How one column of a grid lines up.
+ *
+ * `aligned` is LaTeX's own rule and the only one that is not uniform: the column
+ * before each `&` is set flush right and the one after it flush left, so a
+ * derivation lines up on its relation signs. `cases` is flush left throughout,
+ * because its second column is a condition and a ragged left edge there reads as
+ * a second expression.
+ */
+function alignmentOf(style: Extract<MathNode, { kind: 'grid' }>['style'], column: number) {
+  if (style === 'aligned') {
+    return column % 2 === 0 ? 'flex-end' : 'flex-start'
+  }
+
+  return style === 'cases' ? 'flex-start' : 'center'
+}
+
+/**
+ * A box with scripts hanging off it.
+ *
+ * Only ever reached when the base needs boxes of its own — everything else is set
+ * on one line, where a superscript is a Unicode character rather than a smaller
+ * run (see `linear.ts`). The scripts are a column beside the base: the row
+ * stretches it to the base's height, so the superscript sits at the top of the
+ * fence it belongs to and the subscript at the foot, which is where a typesetter
+ * puts them on a tall atom.
+ */
+function Scripted({ node, context, fontSize }: { node: MathNode; context: MarkdownContext; fontSize: number }) {
+  if (node.kind !== 'scripts') {
+    return null
+  }
+
+  const scriptSize = Math.round(fontSize * SCRIPT_SCALE)
+  const justify = node.sup && node.sub ? 'space-between' : node.sup ? 'flex-start' : 'flex-end'
+
+  return (
+    <View style={{ alignItems: 'stretch', flexDirection: 'row' }}>
+      <MathLayout context={context} fontSize={fontSize} node={node.base} />
+      <View style={{ justifyContent: justify, paddingLeft: 1 }}>
+        {node.sup ? <MathLayout context={context} fontSize={scriptSize} node={node.sup} /> : null}
+        {node.sub ? <MathLayout context={context} fontSize={scriptSize} node={node.sub} /> : null}
+      </View>
+    </View>
+  )
+}
+
 function Fenced({ node, context, fontSize }: { node: MathNode; context: MarkdownContext; fontSize: number }) {
   if (node.kind !== 'fenced') {
     return null
   }
 
+  // The fence grows with its contents, which for a single line is the same size
+  // it has always been drawn at.
+  const height = mathHeight(node.body, fontSize)
+
   return (
     <View style={{ alignItems: 'center', flexDirection: 'row' }}>
-      {node.open ? (
-        <Text selectable={context.selectable} style={textStyle('roman', fontSize, context.textColor)}>
-          {node.open}
-        </Text>
-      ) : null}
+      <GrowingDelimiter character={node.open} context={context} fontSize={fontSize} height={height} />
       <MathLayout context={context} fontSize={fontSize} node={node.body} />
-      {node.close ? (
-        <Text selectable={context.selectable} style={textStyle('roman', fontSize, context.textColor)}>
-          {node.close}
-        </Text>
-      ) : null}
+      <GrowingDelimiter character={node.close} context={context} fontSize={fontSize} height={height} />
     </View>
   )
 }
@@ -289,6 +433,12 @@ function Box({ node, context, fontSize }: { node: MathNode; context: MarkdownCon
     case 'fenced':
       return <Fenced context={context} fontSize={fontSize} node={node} />
 
+    case 'grid':
+      return <Grid context={context} fontSize={fontSize} node={node} />
+
+    case 'scripts':
+      return <Scripted context={context} fontSize={fontSize} node={node} />
+
     default:
       return <LinearSpan context={context} fontSize={fontSize} nodes={[node]} />
   }
@@ -324,5 +474,13 @@ export function BlockMath({ source, context }: { source: string; context: Markdo
 export function inlineMathRuns(source: string): MathRun[] | null {
   const node = parseMath(source)
 
-  return node ? mathRuns(node) : null
+  // A matrix, a `cases` block or an aligned derivation is ROWS, and an inline
+  // expression has no second dimension to put them in — see `containsGrid`. The
+  // caller's fallback is the LaTeX in a code chip, which says what the model wrote
+  // rather than inventing a one-line notation for it.
+  if (!node || containsGrid(node)) {
+    return null
+  }
+
+  return mathRuns(node)
 }

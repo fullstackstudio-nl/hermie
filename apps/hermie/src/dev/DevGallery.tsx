@@ -35,6 +35,7 @@ import { useWindowDimensions, View } from 'react-native'
 import { Shell } from '../app/Shell'
 import { BotsScreen } from '../features/bots'
 import { GalleryScreen, GALLERY_CHAT_SECTION } from '../features/settings/GalleryScreen'
+import { isMarkdownFixture, MarkdownFixtureSection } from './markdown-fixtures'
 import { useSafeAreaInsets } from '../platform/safe-area'
 import { useBotsStore, type Bot } from '../store/bots'
 import { useChatLayoutStore } from '../store/chat-layout'
@@ -143,6 +144,15 @@ export const GALLERY_LIST_SECTION = 'list'
 export const GALLERY_SHELL_SECTION = 'shell'
 
 /**
+ * The diagram and formula fixtures, which are this file's third special case.
+ *
+ * They live in `markdown-fixtures.tsx` and are reachable by name only —
+ * `--hermieOpen gallery:dev-mermaid-pie` and the rest. That module's own comment
+ * says why they are not rows in the gallery's registry and what it costs.
+ */
+export { MARKDOWN_FIXTURE_IDS } from './markdown-fixtures'
+
+/**
  * Enough state for the list to show what a list does.
  *
  * A roster alone draws four idle rows, which is a truthful picture of nothing in
@@ -184,6 +194,7 @@ export function DevGallery({ section }: { section: string }) {
   const wideChat = section === GALLERY_CHAT_SECTION && width >= REGULAR_LAYOUT_MIN_WIDTH
   const list = section === GALLERY_LIST_SECTION
   const shell = section === GALLERY_SHELL_SECTION
+  const markdown = isMarkdownFixture(section)
 
   useEffect(() => {
     if (wideChat || list || shell) {
@@ -195,6 +206,22 @@ export function DevGallery({ section }: { section: string }) {
   // wallpaper and its own window padding, so there is nothing to wrap it in.
   if (shell) {
     return <Shell />
+  }
+
+  // A diagram or a formula, in a real bubble. The framing is the fall-through
+  // case's — the wallpaper, one full-bleed panel, and the panel owning the
+  // safe-area inset for the reason the file's own comment gives — so a screenshot
+  // of one of these sits in the app's own chrome rather than in a bespoke frame.
+  if (markdown) {
+    return (
+      <Wallpaper style={{ flex: 1 }} testID="wallpaper">
+        <GlassSurface contentStyle={{ flex: 1 }} radius={0} shadow="none" style={{ flex: 1 }} variant="panel">
+          <View style={{ flex: 1, paddingBottom: insets.bottom, paddingTop: insets.top }}>
+            <MarkdownFixtureSection section={section} />
+          </View>
+        </GlassSurface>
+      </Wallpaper>
+    )
   }
 
   if (list) {

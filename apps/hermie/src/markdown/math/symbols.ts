@@ -280,3 +280,63 @@ export const FONT_COMMANDS: Record<string, 'roman' | 'bold' | 'italic' | 'mono'>
   mathfrak: 'roman',
   mathsf: 'roman'
 }
+
+/**
+ * The font commands that switch into TEXT mode rather than restyling mathematics.
+ *
+ * The distinction is one character wide and it matters: inside `\text{well-known}`
+ * a hyphen is a hyphen, and everywhere else in an expression the same keystroke
+ * means a minus sign. `\mathrm` and its family are deliberately absent — they set
+ * mathematics upright, they do not stop it being mathematics, so `\mathrm{a-b}` is
+ * still a subtraction.
+ */
+export const TEXT_MODE_COMMANDS = new Set(['text', 'textrm', 'textbf', 'textit', 'texttt', 'operatorname'])
+
+/** How a grid's columns line up, which is the only thing its style decides. */
+export type GridStyle = 'matrix' | 'cases' | 'aligned' | 'gathered'
+
+export interface Environment {
+  /** The fence on the left, as the character that draws it. */
+  open: string
+  /** The fence on the right. A `cases` block has none, which is correct. */
+  close: string
+  style: GridStyle
+}
+
+/**
+ * The environments this renderer draws, and the fences they wear.
+ *
+ * All of them are a grid of cells separated by an ampersand and a double
+ * backslash, which is why one node kind covers them all: what differs between a
+ * `pmatrix` and a `cases` is the delimiters and how the columns line up, and
+ * nothing else.
+ *
+ * `array` is deliberately absent. Its column specification is a small language of
+ * its own — alignment per column, and rules between them — and a grid drawn
+ * without it would be missing something the author wrote, which ADR-0020 says is
+ * worse than showing the source.
+ *
+ * The starred spellings are here because a model writes them. A star asks for the
+ * unnumbered form; this renderer numbers nothing, so the star changes nothing and
+ * accepting it costs nothing.
+ */
+export const ENVIRONMENTS: Record<string, Environment> = {
+  matrix: { close: '', open: '', style: 'matrix' },
+  smallmatrix: { close: '', open: '', style: 'matrix' },
+  pmatrix: { close: ')', open: '(', style: 'matrix' },
+  bmatrix: { close: ']', open: '[', style: 'matrix' },
+  Bmatrix: { close: '}', open: '{', style: 'matrix' },
+  vmatrix: { close: '|', open: '|', style: 'matrix' },
+  Vmatrix: { close: '‖', open: '‖', style: 'matrix' },
+  cases: { close: '', open: '{', style: 'cases' },
+  dcases: { close: '', open: '{', style: 'cases' },
+  aligned: { close: '', open: '', style: 'aligned' },
+  align: { close: '', open: '', style: 'aligned' },
+  'align*': { close: '', open: '', style: 'aligned' },
+  split: { close: '', open: '', style: 'aligned' },
+  gathered: { close: '', open: '', style: 'gathered' },
+  gather: { close: '', open: '', style: 'gathered' },
+  'gather*': { close: '', open: '', style: 'gathered' },
+  equation: { close: '', open: '', style: 'gathered' },
+  'equation*': { close: '', open: '', style: 'gathered' }
+}

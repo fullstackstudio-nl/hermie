@@ -49,18 +49,24 @@ Three options were considered.
 
 **We draw a subset ourselves, synchronously, and fall back to the source for everything else.**
 
-- **Mermaid**: `flowchart` and `graph`, all four directions, the seven common node shapes, and
-  solid / dotted / thick edges with labels. Parsed by `markdown/mermaid/parse.ts`, laid out as a
-  layered drawing by `layout.ts`, drawn with `react-native-svg`. Labels are real `Text` positioned
-  over the drawing rather than SVG text, so they are selectable and reach a screen reader.
-- **Mathematics**: `$…$` and `$$…$$` become real lexer tokens (`markdown/math/marked-math.ts`) so
-  `a_i` stops opening emphasis. The expression is parsed to a small tree and resolved against a
-  Unicode symbol table. A block gets boxes for the three constructs that need a second dimension — a
-  fraction, a root, a big operator's limits — and everything else, inline included, is set on one
-  line with Unicode superscripts and subscripts.
+- **Mermaid**: three diagram kinds, each with its own parser, its own layout and one shared canvas.
+  `flowchart` / `graph` in all four directions, the seven common node shapes and solid / dotted /
+  thick labelled edges (`mermaid/parse.ts`, `layout.ts`). `sequenceDiagram` with participants and
+  actors, the seven arrow spellings, activation from the `+` / `-` suffixes, the three note
+  placements and `loop` / `alt` / `else` / `opt` / `par` frames (`sequence.ts`,
+  `sequence-layout.ts`). `pie`, drawn as a ring with a legend that carries every label, value and
+  share (`pie.ts`, `pie-layout.ts`). All of it drawn with `react-native-svg`; labels are real `Text`
+  positioned over the drawing rather than SVG text, so they are selectable and reach a screen reader.
+- **Mathematics**: `$…$`, `$$…$$`, `\(…\)` and `\[…\]` become real lexer tokens
+  (`markdown/math/marked-math.ts`) so `a_i` stops opening emphasis and a backslash-paren stops being
+  read as an escape. The expression is parsed to a small tree and resolved against a Unicode symbol
+  table. A block gets boxes for the four constructs that need a second dimension — a fraction, a
+  root, a big operator's limits, and a grid of cells, which is every environment from `pmatrix` to
+  `cases` and `aligned` — and everything else, inline included, is set on one line with Unicode
+  superscripts and subscripts.
 - **Anything outside the subset answers `null`, and `null` means the SOURCE**, in a code block for a
-  fence or a block expression and in a code chip for an inline one. A `sequenceDiagram`, a
-  `subgraph`, `\begin{matrix}`, a half-streamed fence: all of them show the reader exactly what the
+  fence or a block expression and in a code chip for an inline one. A `gantt`, a `classDiagram`, a
+  `subgraph`, `\begin{array}`, a half-streamed fence: all of them show the reader exactly what the
   model wrote.
 
 ## Consequences
@@ -79,14 +85,18 @@ Three options were considered.
 
 **What this costs, stated plainly.**
 
-- **The subset is a subset.** A `sequenceDiagram` is a listing, not a picture. `\begin{align}` is a
-  listing. A `subgraph` makes the whole diagram a listing rather than drawing it without the
-  grouping — refusing is deliberate, because a picture that quietly leaves out what the author asked
-  for is worse than the source.
+- **The subset is a subset, and it is a moving line.** It started at `flowchart` and `$…$`; the
+  sequence diagram, the pie, the `\(…\)` spellings and the grid environments were added the first time
+  somebody looked at real replies and said which of them came out as listings. A `gantt`, a
+  `classDiagram`, a `stateDiagram` and `\begin{array}` are listings today. So is a `subgraph`, and so
+  is `autonumber` inside a sequence diagram: refusing what would have to be IGNORED is deliberate,
+  because a picture that quietly leaves out what the author asked for is worse than the source.
 - **Inline mathematics is set on one line.** `$\frac{a}{b}$` is `a/b`, not a stacked fraction, and it
   cannot be otherwise: React Native will not lay a `View` out inside a `Text` on Android, so an
   expression that lives inside a sentence cannot have boxes at all. Brackets are added wherever the
-  extent would otherwise be ambiguous.
+  extent would otherwise be ambiguous. The one construct that will not accept that treatment is a
+  GRID: a matrix set as `(a b; c d)` inside a sentence is a notation nobody agreed to, so an inline
+  expression containing one falls back to its source in a code chip instead.
 - **A superscript that Unicode cannot reach is spelled rather than raised.** `x^{\alpha}` comes out
   as `x^(α)`. Drawing it as a smaller run on the baseline — what a naive nested `Text` produces —
   would read as a _subscript_, which says the wrong thing.
@@ -95,6 +105,11 @@ Three options were considered.
 - **Widening the subset is our work now**, and every diagram type somebody wants is a parser, a
   layout and a renderer rather than a version bump. The fallback is what makes that acceptable:
   until the work is done, the reader loses a picture and keeps the text.
+- **A grid's rows are the one place a height is computed rather than settled by flexbox.** Columns
+  have to agree about where each row sits, and a column of `View`s cannot know what the column beside
+  it did, so `math/metrics.ts` computes each row's height from the same constants the renderer draws
+  with. Two copies of one rule would drift, which is why they are one copy in one file — and why a
+  change to a fraction's gap has to be made there rather than in the component.
 
 If the subset ever stops being enough, the replacement is option 2 rather than option 1 — a real
 renderer with the box size declared up front — because the displacement, not the bundle, is the

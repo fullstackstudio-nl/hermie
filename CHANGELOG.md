@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Sequence diagrams and pie charts are drawn.** A ` ```mermaid ` fence holding a
+  `sequenceDiagram` or a `pie` used to be a listing of its own source; both are now pictures, drawn
+  in the app the way the flowchart already was — no web view, no download, the same height the
+  moment they appear. A sequence diagram has its participants and actors, its lifelines, the seven
+  arrow spellings, activation bars, notes over and beside a lifeline, and `loop` / `alt` / `else` /
+  `opt` / `par` frames. A pie is a ring with a legend carrying every label, its value and its share.
+  Anything still outside the subset — a `gantt`, a `classDiagram`, a `subgraph` — shows the source
+  exactly as before, because a picture that quietly leaves out what was asked for is worse than the
+  text it was made from.
+
 ### Changed
 
 - **A share now reaches the bot without opening Hermie.** Sharing a link or a document into
@@ -154,6 +166,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   anything. Your own row already sitting on the gateway now counts as the answer it is,
   and a device with nothing of its own to say carries your row through exactly as it
   carries a colleague's.
+
+- **LaTeX written with `\(…\)` or `\[…\]` renders as mathematics.** Only the dollar spellings
+  were read as mathematics, so the other pair — which is what most replies use — reached the page as
+  prose with its backslashes eaten by the Markdown parser, and `\(E = mc^2\)` printed as
+  `(E = mc2)`. Both pairs are mathematics now, inline and as a block.
+
+- **A formula with `\left(…\right)` in it draws instead of falling back to its source.** The
+  renderer had the code for delimiters that grow with their contents and could never reach it: the
+  expression reader ran past the `\right` and refused the whole formula, so every fraction inside
+  grown brackets — which is most of the ones worth displaying — came out as LaTeX. Matrices,
+  `cases`, `aligned` and the rest of the environment family draw as well, as a grid with the
+  brackets the environment names; a minus is set as a minus rather than a hyphen, and `\cos\theta`
+  gets the thin space it is supposed to have. An expression the renderer still cannot draw shows its
+  source, as it always did — and a matrix inside a sentence does too, because a matrix flattened
+  onto one line is not a notation anybody agreed to.
 
 - **“Ask <bot>” in Shortcuts and Siri waits for the new reply instead of returning the last
   one.** A Shortcut cold-starts the app, and the watch that decides which message is the answer

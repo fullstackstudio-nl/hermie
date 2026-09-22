@@ -4,10 +4,11 @@
  * ## The subset, stated up front
  *
  * `flowchart` and `graph`, in all four directions, with the node shapes and the
- * edge kinds a model actually writes. Everything else — `sequenceDiagram`,
- * `classDiagram`, `stateDiagram`, `gantt`, `pie`, and the `subgraph`, `style`,
- * `classDef` and `click` statements inside a flowchart — answers `null`, and the
- * caller shows the fenced source instead.
+ * edge kinds a model actually writes. Everything else answers `null`. A
+ * `sequenceDiagram` and a `pie` have parsers of their own beside this one and
+ * `Mermaid.tsx` tries each in turn; a `classDiagram`, a `stateDiagram`, a
+ * `gantt`, and the `subgraph`, `style`, `classDef` and `click` statements inside
+ * a flowchart have none, so the caller shows the fenced source instead.
  *
  * That is the whole of ADR-0020's trade. The alternative is the `mermaid`
  * package, which is megabytes of JavaScript that needs a DOM and therefore a
@@ -23,6 +24,8 @@
  * which is what every flush of a streaming reply carries — is a `null` and a
  * fenced listing, not an exception.
  */
+
+import { cleanLabel } from './labels'
 
 export type Direction = 'TD' | 'BT' | 'LR' | 'RL'
 
@@ -123,30 +126,6 @@ function shapeOf(match: RegExpExecArray): { label?: string; shape: NodeShape } {
   }
 
   return { shape: 'rect' }
-}
-
-/**
- * A label as the reader should see it.
- *
- * Mermaid lets a label be quoted, carry `<br/>` as a line break and escape a
- * bracket with an entity. Only those three are honoured: anything else stays the
- * characters the author typed, which is what a diagram label almost always is.
- */
-function cleanLabel(raw: string | undefined): string {
-  if (raw === undefined) {
-    return ''
-  }
-
-  return raw
-    .trim()
-    .replace(/^"(.*)"$/su, '$1')
-    .replace(/^'(.*)'$/su, '$1')
-    .replace(/<br\s*\/?>/giu, '\n')
-    .replace(/&quot;/gu, '"')
-    .replace(/&amp;/gu, '&')
-    .replace(/&lt;/gu, '<')
-    .replace(/&gt;/gu, '>')
-    .trim()
 }
 
 class Builder {
