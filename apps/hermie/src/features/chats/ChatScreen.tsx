@@ -64,6 +64,7 @@ import { presenceOf } from '../bots/presence'
 import { botNames } from '../../store/bot-names'
 import { useBotsStore } from '../../store/bots'
 import { useChatAccent, useChatLayoutStore, useChatMuted } from '../../store/chat-layout'
+import { ChatChoiceRow } from '../user-chats'
 import { mutedUntil as mutedUntilOf } from '../../store/mute'
 import { useChatsStore } from '../../store/chats'
 import { useCronStore } from '../../store/cron'
@@ -367,6 +368,15 @@ function Conversation({
   const { config, connection, gatewayId, http, lastError, status } = useGateway()
   const view = useChatView(botName)
   const pinned = useChatLayoutStore(state => Boolean(state.pinned[botName]))
+  /** ADR-0007, amended: whether this bot opens the reader's own chat. */
+  const myChat = useChatLayoutStore(state => Boolean(state.myChats[botName]))
+  /*
+    `?? null` rather than a bare read: the gallery and a dozen tests mount this
+    screen with a hand-built runtime that has no switch on it, and a feature
+    added to the context must not be a way to crash every surface that predates
+    it. No switch is the same as no identity — the row is simply not drawn.
+  */
+  const userChats = runtime?.userChats ?? null
   const avatar = useBotsStore(state => state.avatars[botName])
   const byName = useBotsStore(state => state.byName)
   const overridden = useSettingsStore(state => hasChatViewOverride(state, botName))
@@ -2180,6 +2190,28 @@ function Conversation({
               botName={display}
               canExport
               canSetNotifications={Boolean(notifications)}
+              /*
+                ADR-0007, amended: the shared Bot Chat or this reader's own.
+
+                Passed as a NODE because the control belongs to
+                `features/user-chats` and the popover is `ui/`. It draws nothing
+                where the gateway named nobody, so a session-token deployment
+                sees the menu it has always seen.
+              */
+              chatChoice={
+                <ChatChoiceRow
+                  available={Boolean(userChats?.available && byName[botName])}
+                  choice={myChat ? 'mine' : 'shared'}
+                  onChoose={async choice => {
+                    const row = byName[botName]
+
+                    if (row) {
+                      await runtime?.controller.chooseChat(row, choice)
+                    }
+                  }}
+                  testID="chat-choice"
+                />
+              }
               contextUsage={chat.contextUsage}
               fast={chat.info?.fast === true}
               model={chat.info?.model ?? ''}

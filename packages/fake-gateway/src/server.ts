@@ -2442,14 +2442,32 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     return undefined
   }
 
-  /** The one session wearing this title, the way `get_session_by_title` answers. */
-  function titleHolder(title: string): FakeSession | undefined {
+  /**
+   * The one session wearing this title ON THIS PROFILE, the way
+   * `get_session_by_title` answers.
+   *
+   * **Scoped to the profile, and that is a correction rather than a
+   * simplification.** This used to scan every session in the gateway, which
+   * contradicted the fixtures two hundred lines up: `researcher`, `writer` and
+   * `notes` are each born with a session titled `Bot Chat`, because that title
+   * is the canonical chat's registry key ON A PROFILE and every bot has one
+   * (ADR-0007). A global scan makes `session.create {profile:'writer', title:
+   * 'Bot Chat'}` land untitled against a gateway that already ships three of
+   * them, which is a refusal the real thing cannot be making or Bot Mode would
+   * only ever work for one bot.
+   *
+   * So the uniqueness `_set_session_title` enforces is read as per profile.
+   * That is an inference from ADR-0007's own premise and not from a probe;
+   * `docs/platform-notes.md` says so, and it is the reading the canonical
+   * lookup in `bots-controller.ts` has always depended on.
+   */
+  function titleHolder(title: string, profile: string): FakeSession | undefined {
     if (!title) {
       return undefined
     }
 
     for (const session of state.sessions.values()) {
-      if (session.title === title) {
+      if (session.title === title && session.profile === profile) {
         return session
       }
     }
@@ -4727,7 +4745,7 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
           before it retires the old chat ends up with an untitled session the
           canonical lookup cannot find — which is the failure this models.
         */
-        const session = makeSession(profile, titleHolder(wanted) ? '' : wanted)
+        const session = makeSession(profile, titleHolder(wanted, profile) ? '' : wanted)
         session.messages = []
         session.hidden = params.hidden === true
 
@@ -4782,7 +4800,7 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
           )
         }
 
-        const holder = titleHolder(title)
+        const holder = titleHolder(title, session.profile)
 
         if (holder && holder !== session) {
           throw new RpcFault(4022, `Title '${title}' is already in use by session ${holder.storedId}`)
@@ -4850,7 +4868,7 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
           `_set_session_title` refuses a duplicate, and a client that assumes
           otherwise would go looking for its branch under a name nothing holds.
         */
-        const title = asked && !titleHolder(asked) ? asked : ''
+        const title = asked && !titleHolder(asked, parent.profile) ? asked : ''
         const child = makeSession(parent.profile, title)
         const count =
           typeof params.count === 'number' && Number.isFinite(params.count)

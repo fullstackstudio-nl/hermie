@@ -558,6 +558,16 @@ export const chatStrings = {
     cancel: 'Cancel',
     /** The one chat that may never be deleted or hidden; see ADR-0007. */
     canonical: 'Current conversation',
+    /** ADR-0007, amended: the shared chat and this reader's own, as a switch. */
+    whose: 'This conversation',
+    shared: 'Shared Bot Chat',
+    mine: 'My chat',
+    /** The group heading on the Conversations page. */
+    mineGroup: 'My chat',
+    /** Said under the switch, so nobody has to guess who else is reading. */
+    sharedNote: 'Everyone on this gateway shares this conversation.',
+    mineNote: 'Only you see this conversation. The bot keeps its own memory.',
+    switchFailed: 'This chat could not be switched.',
     retired: 'Retired',
     messages: (count: number) => (count === 1 ? '1 message' : `${count} messages`)
   },

@@ -46,7 +46,7 @@
  * only honest way to keep that true is for the arrow key and the renderer to
  * read the same array.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Pressable, ScrollView, View } from 'react-native'
 
 import { ContextMeter } from '../../chat-ui/ContextMeter'
@@ -270,6 +270,20 @@ export interface ChatOptionsPopoverProps extends Omit<
   /** This chat's transcript type scale, and a way to change it. */
   textSize: TextSize
   onChangeTextSize: (value: TextSize) => void
+  /**
+   * The "Shared Bot Chat / My chat" control, as a node (ADR-0007, amended).
+   *
+   * A SLOT rather than four props, because the control belongs to
+   * `features/user-chats` and this file is `ui/` — a menu that imported a
+   * feature to draw one of its rows would be the first edge from the kit into
+   * the app. Absent on every surface that has no gateway identity to offer one,
+   * which is the gallery and every session-token deployment.
+   *
+   * It sits above the first row and outside the ↓ ring: it is a segmented
+   * control like the verbosity and text-size rows, which Return already treats
+   * as a no-op.
+   */
+  chatChoice?: ReactNode
   /** The row menu's mute wording, already formatted by the caller. */
   muteLabel: string
   modelLabel: string
@@ -298,6 +312,7 @@ export function ChatOptionsPopover({
   muteLabel,
   modelLabel,
   reasoningLabel,
+  chatChoice,
   verbosity,
   onChangeVerbosity,
   showBotToBot,
@@ -441,6 +456,13 @@ export function ChatOptionsPopover({
               {botName}
             </Text>
           </View>
+
+          {chatChoice ? (
+            <>
+              {chatChoice}
+              <Separator />
+            </>
+          ) : null}
 
           {row(
             'yolo',

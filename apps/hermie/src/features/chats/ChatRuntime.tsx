@@ -42,6 +42,7 @@ import { pushProjectId, pushVapidUrl } from '../push/where'
 import { onShareRequest } from '../share/share-bus'
 import { ShareDelivery } from '../share/share-delivery'
 import { ShareTargetHost } from '../share/ShareTargetHost'
+import { UserChatDirectory, userChatSwitch, type UserChatSwitch } from '../user-chats'
 import { WidgetSync } from '../widgets'
 import { resizeToBase64 } from './attachments'
 import { ChatController } from './chat-controller'
@@ -51,6 +52,15 @@ export interface ChatRuntimeValue {
   bots: BotsController
   /** ADR-0016's settings sync. Local-only until a gateway takes a write. */
   uiMeta: UiMetaBridge
+  /**
+   * ADR-0007, amended: the shared Bot Chat or the reader's own, per bot.
+   *
+   * On the value rather than reached through the controller, because the two
+   * surfaces that draw the switch need `available` to decide whether to draw it
+   * at all — and a control that asked the controller whether it should exist
+   * would be a control that exists.
+   */
+  userChats: UserChatSwitch
   /** Writes the file the home-screen widgets read. No-op where there is none. */
   widgets: WidgetSync
   /** ADR-0017: the registration, the heartbeat, and what a tap is allowed to do. */
@@ -211,7 +221,39 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     // The chat store is handed over read-only: `session.active_list` answers for
     // the whole gateway process and carries no profile, so the roster attributes
     // a busy session to a bot through the ids its chat is known under.
-    const bots = new BotsController({ gateway, store: useBotsStore, cache: chatCache, chats: useChatsStore })
+    /*
+      ADR-0007, amended: where the reader's own chats live.
+
+      Built before the roster because the roster consults it on every
+      resolution, and given the identity through a FUNCTION rather than a value:
+      `/api/auth/me` is asked once per ready edge, so at the moment this is
+      constructed the store usually still says nobody. Reading it late is what
+      makes the first roster after a sign-in resolve the right chats.
+    */
+    const userChats = new UserChatDirectory({
+      gateway,
+      identity: () => {
+        const context = useDeviceContextStore.getState()
+
+        return context.userId ? { userId: context.userId, displayName: context.displayName } : null
+      },
+      choice: name => (useChatLayoutStore.getState().myChats[name] ? 'mine' : 'shared')
+    })
+    const userChatsSwitch = userChatSwitch({
+      available: () => userChats.available,
+      title: () => userChats.title,
+      chose: name => userChats.chose(name),
+      cached: name => userChats.cached(name),
+      resolve: bot => userChats.resolve(bot),
+      remember: (name, choice) => useChatLayoutStore.getState().setMyChat(name, choice === 'mine')
+    })
+    const bots = new BotsController({
+      gateway,
+      store: useBotsStore,
+      cache: chatCache,
+      chats: useChatsStore,
+      userChats: userChatsSwitch
+    })
     // ADR-0016. It is built here rather than in a store because it needs the
     // live connection and has to die with it: a sync holding a socket that has
     // been replaced would write this gateway's arrangement to the next one.
@@ -240,6 +282,7 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       // replaced with it, which is why it is not a dependency of its own.
       http,
       cache: chatCache,
+      userChats: userChatsSwitch,
       // Every gateway refusal the controller absorbs goes here, and the debug
       // screen reads it. The alternative is what shipped: `catch {}`.
       onRpcFailure: failure => useConnectionStore.getState().noteRpcFailure(failure)
@@ -396,7 +439,7 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     // The latency-critical twin: somebody is watching a Shortcut spin.
     const stopIntentBus = onIntentRequest(() => void intents.run())
 
-    const next = { controller, bots, uiMeta, widgets, push, share, intents, gateway }
+    const next = { controller, bots, uiMeta, userChats: userChatsSwitch, widgets, push, share, intents, gateway }
     valueRef.current = next
     setValue(next)
 
@@ -477,6 +520,16 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       // And deliberately AFTER the roster: the key lives on the default profile,
       // and which profile that is comes out of `profiles.list`.
       await value.uiMeta.reconcile().catch(() => undefined)
+      /*
+        Only NOW can the roster know which chats are this reader's own.
+
+        The refresh above ran before either half was in: the identity is read a
+        line ago and the per-bot choice arrives with the reconcile. So the rows
+        are re-pointed here rather than by a second `profiles.list`, which would
+        re-read a roster that has not changed to learn something that is not on
+        it (ADR-0007, amended).
+      */
+      await value.bots.placeUserChats().catch(() => undefined)
     })()
   }, [config, http, status, value])
 

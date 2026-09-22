@@ -83,3 +83,90 @@ guard upstream does not document, because the guard is this app's.
 
 **Not verified:** anything against a real gateway. See the round's section in
 `docs/platform-notes.md`, in particular the reading of `session.branch`'s `count`.
+
+## Amendment (2026-09-22): a chat of one's own, beside the shared one
+
+### What this closes
+
+This record's consequence list ends on a fact it accepted without comment:
+
+> The same chat is shared with Hermes Desktop and the CLI when they point at the
+> same gateway.
+
+Shared with other CLIENTS was the point. Shared with other PEOPLE was the same
+sentence read a second way, and on a gateway two colleagues sign in to it is the
+only reading that matters: one transcript, two people typing into it, and a bot
+whose memory belongs to neither of them. [ADR-0025](0025-hermie-web-is-a-service-layer.md)
+named per-user chats as a later part of its direction and said they would be off
+by default. They are: nothing below happens unless a reader asks for it.
+
+### What is decided
+
+**A bot has one SHARED chat and, per person, at most one private one.**
+
+- The shared chat is unchanged in every respect. It is still the hidden session
+  titled exactly `Bot Chat`, still the only one the roster points at by default,
+  still the one a DM, a cron delivery or another client lands in.
+- The private chat is a **visible** session on the same profile, titled exactly
+  `Chat · <display name, else user id>`, created with `parent_session_id` set to
+  the canonical chat and `follow_profile_config: true`.
+
+**The title is the identity, exactly as `Bot Chat` is.** It is resolved by
+`session.list {profile, title, include_hidden: true}`, twice, before anything is
+created — the same three steps and the same fail-closed rule the canonical
+resolution has, for the same reason: a lookup that errored is not a person
+without a chat, and minting on that answer splits a conversation in two.
+
+**Session titles are taken to be unique per PROFILE**, which is the only reading
+under which this record's own canonical chat can exist on every bot. It is an
+inference rather than a probe; `docs/platform-notes.md` carries it as the
+round's open question.
+
+**Without an identity there is no private chat and no switch.** A session-token
+gateway with an owner id gets one under `Chat · owner`; one that names nobody is
+left exactly where this record left it, with no new surface at all. That is the
+rule [ADR-0016](0016-ui-meta-sync.md)'s amendment already follows for the
+app-wide settings key.
+
+**One chat per bot is still what the app SHOWS.** The switch chooses which of
+the two a bot's row opens; it does not put two rows in the list, two composers on
+a screen or two unread counts on a badge. The store key stays the bot's name and
+only the session under it changes, so the composer, the approvals, the unread
+watermark, the widget and every notification route go on meaning what they meant.
+
+**The private chat may be opened and nothing else.** `conversationActions`
+answers `['open']` for it — not renamed, because its title is how every device
+this person signs in on finds it again; not adopted as the Bot Chat, because that
+would hand everybody on the gateway a transcript that was private a second ago;
+not deleted, because there is no undo and `/new` inside the chat retires rather
+than destroys.
+
+### What it costs
+
+- **A second registry lookup per chosen bot, per connection.** Who the reader is
+  and which bots they chose both arrive after the first roster read, so the
+  roster is re-pointed once both are in rather than by re-reading `profiles.list`.
+- **The transcript cache on disk is keyed by bot**, so switching forgets it —
+  the same thing "Make this the Bot Chat" already does, and for the same reason.
+- **Another client sees the private chat in its session list**, named after the
+  person. That is not a leak this app can close: the gateway has no per-user
+  scope and the title is the only key there is. It is why the chat is named
+  rather than opaque — a row somebody can read and delete beats one they cannot
+  explain.
+
+### What is verified
+
+`apps/hermie/__tests__/user-chats.test.ts`: the title ladder and the empty answer
+that turns the feature off; that the lookup runs twice before a create and that
+the create is visible, follows the profile and names its parent; that a failed
+lookup mints nothing; that concurrent asks resolve once; that a new identity
+drops the memo; that the roster row is re-pointed so its preview and unread are
+the reader's own; that a cold open resolves the private chat rather than
+short-circuiting on the roster's shared one; that the switch moves the chat, the
+roster and the disk cache together and puts the choice back when the gateway
+refuses; and that the Conversations page gives it a group of its own, leaves the
+canonical row canonical while the pin is on the private chat, and offers it
+nothing but Open. `packages/fake-gateway/src/upstream-shapes.test.ts` pins the
+per-profile title uniqueness this rests on.
+
+**Not verified:** anything against a real gateway.

@@ -78,6 +78,12 @@ export interface PersistedLayout {
    * `true` and cost a byte a chat to say nothing.
    */
   pinned?: string[]
+  /**
+   * Chats the reader opens as their OWN conversation rather than the shared
+   * Bot Chat (ADR-0007, amended). A list of bot names, like `archived` and
+   * `pinned` beside it, because the value is always "yes".
+   */
+  myChats?: string[]
   accents: Record<string, AccentName>
   /** Bot name -> the second its silence lapses, or 0 for forever. */
   mutes?: Mutes
@@ -121,6 +127,15 @@ export interface ChatLayoutState {
    * this is a separate key instead of `moveBotTo(0)`.
    */
   pinned: Record<string, true>
+  /**
+   * Which bots this reader talks to in a chat of their own.
+   *
+   * In the app-wide section rather than on each bot's profile, beside `mutes`
+   * and for the same reason: it is a fact about the READER, not about the bot.
+   * Two people sharing a gateway do not share a choice about whose transcript
+   * they are in — that is the entire point of the feature.
+   */
+  myChats: Record<string, true>
   accents: Record<string, AccentName>
   /**
    * Which chats are silent, and until when.
@@ -174,6 +189,8 @@ export interface ChatLayoutState {
   setPinned: (botName: string, pinned: boolean) => void
   /** The row menu's and the popover's one-press form of the above. */
   togglePinned: (botName: string) => void
+  /** Open this bot as the reader's own chat, or back to the shared one. */
+  setMyChat: (botName: string, mine: boolean) => void
   setAccent: (botName: string, accent: AccentName) => void
   /** Silence one chat until `until` seconds, `0` for forever, `null` to stop. */
   setMute: (botName: string, until: number | null) => void
@@ -205,6 +222,7 @@ export interface ChatLayoutState {
     arrangement?: Arrangement
     archived?: string[]
     pinned?: string[]
+    myChats?: string[]
     accents?: Record<string, AccentName>
     mutes?: Mutes
   }) => void
@@ -218,6 +236,7 @@ const INITIAL = {
   collapsed: {} as Record<string, true>,
   archived: {} as Record<string, true>,
   pinned: {} as Record<string, true>,
+  myChats: {} as Record<string, true>,
   accents: {} as Record<string, AccentName>,
   mutes: {} as Mutes,
   sidebarCollapsed: undefined as boolean | undefined,
@@ -273,6 +292,9 @@ function asLayout(value: unknown): PersistedLayout {
     pinned: (Array.isArray(raw.pinned) ? raw.pinned : []).filter(
       (name): name is string => typeof name === 'string' && name.length > 0
     ),
+    myChats: (Array.isArray(raw.myChats) ? raw.myChats : []).filter(
+      (name): name is string => typeof name === 'string' && name.length > 0
+    ),
     accents,
     mutes: mutesOf(raw.mutes),
     // Only a real boolean counts. Anything else — a missing key, a string an
@@ -317,7 +339,8 @@ function looseToEntryIndex(arrangement: Arrangement, loose: number, from: number
 
 export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
   const save = (): void => {
-    const { gatewayKey, entries, folders, collapsed, archived, pinned, accents, mutes, sidebarCollapsed } = get()
+    const { gatewayKey, entries, folders, collapsed, archived, pinned, myChats, accents, mutes, sidebarCollapsed } =
+      get()
 
     if (gatewayKey) {
       persist(gatewayKey, {
@@ -326,6 +349,7 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
         collapsed: Object.keys(collapsed),
         archived: Object.keys(archived),
         pinned: Object.keys(pinned),
+        myChats: Object.keys(myChats),
         accents,
         mutes,
         // Omitted while nobody has chosen, so that "never chosen" survives a
@@ -368,6 +392,12 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
         pinned[name] = true
       }
 
+      const myChats: Record<string, true> = {}
+
+      for (const name of stored.myChats ?? []) {
+        myChats[name] = true
+      }
+
       set({
         gatewayKey,
         entries: stored.entries,
@@ -375,6 +405,7 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
         collapsed,
         archived,
         pinned,
+        myChats,
         accents: stored.accents,
         mutes: stored.mutes ?? {},
         sidebarCollapsed: stored.sidebarCollapsed,
@@ -581,6 +612,22 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
       setPinned(botName, !pinned[botName])
     },
 
+    setMyChat(botName, mine) {
+      const next = { ...get().myChats }
+
+      // The shared Bot Chat is the absence of a choice rather than a choice of
+      // its own, so it is stored as nothing. A roster of forty bots nobody has
+      // moved then costs forty fewer entries and reads as "never asked".
+      if (mine) {
+        next[botName] = true
+      } else {
+        delete next[botName]
+      }
+
+      set({ myChats: next })
+      save()
+    },
+
     setAccent(botName, accent) {
       const accents = { ...get().accents }
 
@@ -642,6 +689,12 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
         pinned[name] = true
       }
 
+      const myChats: Record<string, true> = {}
+
+      for (const name of patch.myChats ?? []) {
+        myChats[name] = true
+      }
+
       set({
         ...(patch.arrangement ? { entries: patch.arrangement.entries, folders: patch.arrangement.folders } : {}),
         ...(patch.archived ? { archived } : {}),
@@ -649,6 +702,10 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
         // field says nothing about pins, and reading that as "none" would
         // unpin every chat the moment an older device wrote the section.
         ...(patch.pinned ? { pinned } : {}),
+        // Absent is not empty here either: a build that predates the field says
+        // nothing about which chats are the reader's own, and reading that as
+        // "none" would put them back in the shared transcript without asking.
+        ...(patch.myChats ? { myChats } : {}),
         ...(patch.accents ? { accents: patch.accents } : {}),
         ...(patch.mutes ? { mutes: patch.mutes } : {})
       })
@@ -689,6 +746,11 @@ export function useChatMuted(botName: string): boolean {
 /** Is this chat held at the top of its container? */
 export function useChatPinned(botName: string): boolean {
   return useChatLayoutStore(state => Boolean(state.pinned[botName]))
+}
+
+/** Is this bot opened as the reader's own chat rather than the shared one? */
+export function useMyChat(botName: string): boolean {
+  return useChatLayoutStore(state => Boolean(state.myChats[botName]))
 }
 
 /** One chat's colour. Part 2's header and outgoing bubble read this too. */

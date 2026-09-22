@@ -29,7 +29,10 @@
  *  - a retired conversation is `Bot Chat · <date time>`, which is the string
  *    `ChatController.startNewConversation` writes when it puts one away;
  *  - a branch is `Branch · <first words>`, which is the string `branchTitle`
- *    below writes.
+ *    below writes;
+ *  - and this reader's own chat is `Chat · <their name>`, which
+ *    `features/user-chats/user-chat.ts` writes — the same registry trick as the
+ *    canonical one, for the same reason (ADR-0007, amended).
  *
  * The consequence is worth stating plainly because a reader will hit it: a
  * conversation somebody RENAMES out of its prefix stops being grouped as a
@@ -62,7 +65,7 @@ export const BRANCH_TITLE_WORDS = 6
 /** And how long the whole generated title may get, before the words are cut. */
 export const BRANCH_TITLE_MAX = 48
 
-export type ConversationKind = 'canonical' | 'branch' | 'past'
+export type ConversationKind = 'canonical' | 'mine' | 'branch' | 'past'
 
 /**
  * One of a profile's conversations, as the app models it.
@@ -84,10 +87,15 @@ export interface Conversation {
   kind: ConversationKind
 }
 
-/** The three groups the Conversations page draws, in the order it draws them. */
+/** The groups the Conversations page draws, in the order it draws them. */
 export interface ConversationGroups {
   /** Exactly one row, or none where the gateway listed no canonical chat. */
   canonical: Conversation | null
+  /**
+   * This reader's own chat with the bot, or none where the gateway named
+   * nobody and there is therefore no such thing (ADR-0007, amended).
+   */
+  mine: Conversation | null
   branches: Conversation[]
   past: Conversation[]
 }
@@ -210,6 +218,22 @@ export interface ClassifyInput {
   canonicalId?: string
   /** The lineage tip of the same row, which a listing may report instead. */
   canonicalResolvedId?: string
+  /**
+   * The stored id of THIS reader's private chat, where one has been resolved.
+   *
+   * Preferred over the title for the same reason `canonicalId` is: an id cannot
+   * be typed into the wrong row by somebody renaming a conversation.
+   */
+  userChatId?: string
+  /**
+   * The title this reader's private chat carries.
+   *
+   * Read when no id is known yet — the first listing of a bot whose chat has
+   * never been opened — and ignored when it is. Empty on a gateway that named
+   * nobody, which is what makes the `mine` group absent there rather than
+   * matching some other reader's chat.
+   */
+  userChatTitle?: string
 }
 
 /**
@@ -224,9 +248,16 @@ export interface ClassifyInput {
  * also matches a prefix, so it can never be listed twice and can never turn up
  * somewhere Delete is offered.
  */
-export function classifyConversations({ canonicalId, canonicalResolvedId, rows }: ClassifyInput): ConversationGroups {
+export function classifyConversations({
+  canonicalId,
+  canonicalResolvedId,
+  rows,
+  userChatId,
+  userChatTitle
+}: ClassifyInput): ConversationGroups {
   const canonicalIds = new Set([canonicalId, canonicalResolvedId].filter((id): id is string => Boolean(id)))
   let canonical: Conversation | null = null
+  let mine: Conversation | null = null
   const branches: Conversation[] = []
   const past: Conversation[] = []
 
@@ -239,11 +270,30 @@ export function classifyConversations({ canonicalId, canonicalResolvedId, rows }
 
     const title = str(row.title)
     const resolvedId = str(row.resolved_id) || id
-    const isCanonical = canonicalIds.size
-      ? canonicalIds.has(id) || canonicalIds.has(resolvedId)
-      : title === CANONICAL_CHAT_TITLE
+    /*
+      The reader's own chat is tested FIRST, and that order is load-bearing.
 
-    const kind: ConversationKind = isCanonical ? 'canonical' : isBranchTitle(title) ? 'branch' : 'past'
+      While a bot is switched to "My chat" the roster's `canonical` is PINNED to
+      the private session (see `BotsController.placeUserChats`), so its id is in
+      `canonicalIds` — and a row tested against the ids first would come back as
+      the canonical Bot Chat, which would put the real one in `past` where
+      Delete is offered. Whoever this row belongs to, it is not everybody's.
+    */
+    const isMine = userChatId
+      ? id === userChatId || resolvedId === userChatId
+      : Boolean(userChatTitle) && title === userChatTitle
+
+    const isCanonical =
+      !isMine &&
+      (canonicalIds.size ? canonicalIds.has(id) || canonicalIds.has(resolvedId) : title === CANONICAL_CHAT_TITLE)
+
+    const kind: ConversationKind = isMine
+      ? 'mine'
+      : isCanonical
+        ? 'canonical'
+        : isBranchTitle(title)
+          ? 'branch'
+          : 'past'
 
     const conversation: Conversation = {
       id,
@@ -266,6 +316,13 @@ export function classifyConversations({ canonicalId, canonicalResolvedId, rows }
       continue
     }
 
+    if (kind === 'mine') {
+      // Same rule, same reason: a title is a registry key and two rows wearing
+      // one is a state to survive rather than to render.
+      mine = mine ?? conversation
+      continue
+    }
+
     if (kind === 'branch') {
       branches.push(conversation)
     } else {
@@ -273,7 +330,7 @@ export function classifyConversations({ canonicalId, canonicalResolvedId, rows }
     }
   }
 
-  return { canonical, branches: sortConversations(branches), past: sortConversations(past) }
+  return { canonical, mine, branches: sortConversations(branches), past: sortConversations(past) }
 }
 
 /** Newest first, with the title as a tie-break so the order is total. */
@@ -297,6 +354,20 @@ export type ConversationAction = 'open' | 'rename' | 'delete' | 'adopt'
 export function conversationActions(conversation: Conversation): ConversationAction[] {
   if (conversation.kind === 'canonical') {
     return []
+  }
+
+  /*
+    The reader's own chat may be OPENED and nothing else.
+
+    Its title is its identity exactly as `Bot Chat` is — it is how every device
+    this person signs in on finds the same conversation — so renaming it would
+    orphan it, and adopting it as the shared Bot Chat would hand everybody on
+    the gateway a transcript that was private a second ago. Delete is left out
+    with them: there is no undo, and a reader who wants a clean slate has `/new`
+    inside the chat, which retires rather than destroys.
+  */
+  if (conversation.kind === 'mine') {
+    return ['open']
   }
 
   return ['open', 'rename', 'delete', 'adopt']

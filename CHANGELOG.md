@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A chat of your own with every bot, beside the one everybody shares.** On a gateway that knows
+  who you are, each bot's (…) menu and its Conversations page carry one switch: **Shared Bot Chat**
+  or **My chat**. The shared one is what it has always been — the same conversation Hermes Desktop,
+  the CLI and your colleagues are in. Yours is a second conversation on the same bot, named after
+  you, that only you open; the bot still has its own memory and its own settings, and it starts from
+  the shared chat rather than from nothing. The choice is remembered per account and follows you to
+  your other devices, so a phone and a laptop signed in as you open the same conversation. The chat
+  list opens whichever you chose, and the badge and the "needs you" dot count that one. On a gateway
+  with no accounts the switch is not there at all and nothing changes.
+
 - **Hermie Web sets its gateway up once, and everybody else just signs in.** Start `hermie-web` with
   no `--gateway` and it serves an operator setup page at `/setup`: the gateway address, a probe of
   it, and the service login that push and the message cache are spent on — the same sign-in

@@ -8670,3 +8670,85 @@ shell that receives it is the one mounted over the NEW connection.
 - **The keychain migration has never met a keychain that refuses.** Each item is
   moved in its own try/catch and the failure is designed to cost one sign-in,
   but `expo-secure-store` refusing an item mid-move has only ever been staged.
+
+## Round R10b, part one: a chat of one's own (2026-09-22)
+
+ADR-0007 gives a bot one chat and ADR-0025 said per-user chats were a later
+part of the service-layer direction. This is that part, and the whole of it is
+six hundred lines in `apps/hermie/src/features/user-chats/` plus three seams.
+
+### The title is the only key there is
+
+`session.list` takes `{profile, title, limit, include_hidden}` and answers rows
+with no owner, no parent and no kind. So a private chat is found the same way
+the canonical one is — by an exact title on a profile — and the title carries
+the person: `Chat · <display name, else user id>`. There is no second index and
+there is deliberately no `ui_meta` table of "which session is whose", because
+that table would go stale against any other client on the same gateway.
+
+The chat is created **visible**, with `follow_profile_config: true` and
+`parent_session_id` set to the canonical chat. Visible matters: `hidden` is the
+flag upstream's rename guard keys on, and a second hidden session under another
+title is a conversation no other client can show the reader.
+
+### The reading this rests on, and it is an inference
+
+**Session titles are unique per profile, not per gateway.** Nothing in the
+generated contract says so. What says so is ADR-0007 itself: every bot's
+canonical chat is the session titled exactly `Bot Chat`, and a gateway with
+three bots has three of them. A gateway-wide uniqueness rule would make Bot Mode
+work for one profile.
+
+The fake gateway disagreed with its own fixtures here — `titleHolder` scanned
+every session, while the fixtures ship `researcher`, `writer` and `notes` each
+holding `Bot Chat`. It is now scoped to the profile, and
+`upstream-shapes.test.ts` pins both halves: a clash within one profile is
+refused with 4022, and two profiles may hold one title.
+
+**This has not been probed against a real gateway.** If upstream's
+`_set_session_title` really is gateway-wide, the second bot a person switches
+would be refused, and the refusal would arrive as a visible error rather than as
+a silent fork — `resolveUserChat` fails closed on a lookup it cannot make, and a
+create whose title did not land is found by the next lookup and not duplicated,
+because the lookup runs twice before any mint.
+
+### Why the store key stays the bot's name
+
+`store/chats.ts` is keyed by bot, and a branch gets `bot#storedId`. The private
+chat deliberately does **not**: it takes the bot's own key and only the SESSION
+underneath it changes. That is what makes "unread and needs-input follow the
+chosen one" true by construction rather than by three surfaces remembering to
+ask — the composer, the approvals, the badge, the widget and the notification
+route are all written against a key, and the key did not move.
+
+The mechanism is `canonicalPins`, which round R4b built for "Make this the Bot
+Chat". `BotsController.placeUserChats` resolves the chosen bots after a roster
+read and pins each one, so the row's preview and its unread are the reader's own
+rather than the shared conversation's. Coming back to the shared chat resolves
+it **by title** rather than trusting `bot.canonical`, which is sitting on the
+pin; the pin then drops itself on the next roster read, because the roster and
+the pin finally agree.
+
+Two costs, both paid on purpose:
+
+- **The transcript cache on disk is keyed by bot**, so a switch has to forget
+  it. `switchCanonical` already did, for the same reason, and the test asserts
+  it: left there, the next cold open would paint the conversation the reader
+  just left under the new session's ids.
+- **`placeUserChats` runs twice per connection.** Once inside the roster load,
+  which is a no-op before anybody is named, and once after `/api/auth/me` and
+  the `ui_meta` reconcile have both answered — because who this is and which
+  bots they chose are two things the first roster read cannot know. It is one
+  `session.list` per chosen bot and nothing for anybody else.
+
+### What is unverified here
+
+- **Nothing has run against a real gateway**, including the title-uniqueness
+  reading above, which is the one that decides whether the feature works for
+  more than one bot per person.
+- **`parent_session_id` is written and never read back.** `session.list` does
+  not report it, so "the private chat descends from the shared one" is a fact on
+  the gateway's row that this app cannot see and does not depend on.
+- **The switch has no UI test.** `ChatChoiceRow` is exercised through the
+  controller, not through a render; the popover slot and the Conversations page
+  group are wired and typechecked but nobody has tapped them.
