@@ -178,6 +178,45 @@ async function readForm(request: IncomingMessage): Promise<URLSearchParams> {
 
 const checked = (form: URLSearchParams, name: string): boolean => form.get(name) === '1'
 
+/**
+ * Which bots one person may reach, from whichever control said so.
+ *
+ * Two shapes, and both of them are read, because the page and the field it used
+ * to be are not the same thing:
+ *
+ *  - **`botList=1`** is the box-per-bot form the people page draws now.
+ *    `allBots` is "every bot, including ones added later" and answers `null`;
+ *    otherwise the ticked `bot` values are the list, and none of them ticked is
+ *    an empty list — the one answer the text field could never give.
+ *  - **`allowedBots`**, a comma-separated line, is what the field was and is
+ *    what a deployment whose bot roster is unknown still gets. Blank is every
+ *    bot there, for the same reason it always was: the accident an operator can
+ *    have is emptying a field, and the safe reading of an empty field is the
+ *    default rather than a lock-out.
+ *
+ * `null` and `[]` stay two different answers all the way down; `state.ts` says
+ * why.
+ */
+function allowedBotsFrom(form: URLSearchParams): string[] | null {
+  if (checked(form, 'botList')) {
+    return checked(form, 'allBots')
+      ? null
+      : form
+          .getAll('bot')
+          .map(name => name.trim())
+          .filter(Boolean)
+  }
+
+  const raw = (form.get('allowedBots') ?? '').trim()
+
+  return raw
+    ? raw
+        .split(',')
+        .map(name => name.trim())
+        .filter(Boolean)
+    : null
+}
+
 export class AdminRouter {
   private readonly sessions: AdminSessions
   /**
@@ -646,7 +685,6 @@ export class AdminRouter {
     // administrator list and may have added this very row.
     state = this.options.read()
 
-    const raw = (form.get('allowedBots') ?? '').trim()
     const held = state.users[userId]
     const next: AdminState = {
       ...state,
@@ -657,15 +695,7 @@ export class AdminRouter {
           displayName: held?.displayName ?? '',
           email: held?.email ?? '',
           seenAt: held?.seenAt ?? 0,
-          // Blank is "every bot" and a list is a list. There is no way to say
-          // "no bots" by typing nothing, which is the right way round: the
-          // accident an operator can have is emptying a field.
-          allowedBots: raw
-            ? raw
-                .split(',')
-                .map(name => name.trim())
-                .filter(Boolean)
-            : null,
+          allowedBots: allowedBotsFrom(form),
           readOnly: checked(form, 'readOnly'),
           pushAllowed: checked(form, 'pushAllowed'),
           ...(held?.fromIssuer ? { fromIssuer: true } : {})

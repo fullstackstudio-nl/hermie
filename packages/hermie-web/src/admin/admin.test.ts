@@ -62,12 +62,27 @@ async function openAdmin(
   return { status: response.status, body, csrf, cookie: csrf ? `${cookie}; hermie_admin_csrf=${csrf}` : cookie }
 }
 
-async function post(cookie: string, route: string, fields: Record<string, string>): Promise<Response> {
+/**
+ * Post one of the forms. A value may repeat, because a checkbox list does.
+ *
+ * `URLSearchParams` from an object cannot say `bot=researcher&bot=notes`, and
+ * that is the shape the bot allow list posts — so the fields are appended one at
+ * a time rather than handed over as a record.
+ */
+async function post(cookie: string, route: string, fields: Record<string, string | string[]>): Promise<Response> {
+  const body = new URLSearchParams()
+
+  for (const [name, value] of Object.entries(fields)) {
+    for (const one of Array.isArray(value) ? value : [value]) {
+      body.append(name, one)
+    }
+  }
+
   return fetch(`${web.url}${route}`, {
     method: 'POST',
     redirect: 'manual',
     headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' } as Record<string, string>,
-    body: new URLSearchParams(fields).toString()
+    body: body.toString()
   })
 }
 
@@ -315,6 +330,34 @@ describe('the people list', () => {
       pushAllowed: false
     })
     expect((await openAdmin(page.cookie, '/admin/people')).body).toContain('researcher, notes')
+  })
+
+  it('saves the bot list as boxes, including the empty answer a field could not give', async () => {
+    const page = await openAdmin(await signIn(ADA))
+    const save = async (fields: Record<string, string | string[]>): Promise<string[] | null> => {
+      await post(page.cookie, '/admin/user', { csrf: page.csrf, userId: GRACE.userId, ...fields })
+
+      return (await loadAdminState(stateDir)).users[GRACE.userId]?.allowedBots ?? null
+    }
+
+    // `botList` says the boxes are the answer. Two of them ticked is two bots.
+    expect(await save({ botList: '1', bot: ['researcher', 'notes'] })).toEqual(['researcher', 'notes'])
+    // None of them ticked is NO bots, which is not the same answer as every bot.
+    expect(await save({ botList: '1' })).toEqual([])
+    // And the box above them is every bot, including ones added later.
+    expect(await save({ botList: '1', allBots: '1', bot: ['researcher'] })).toBe(null)
+  })
+
+  it('still reads the comma-separated field, which is what an unknown roster gets', async () => {
+    const page = await openAdmin(await signIn(ADA))
+
+    await post(page.cookie, '/admin/user', {
+      csrf: page.csrf,
+      userId: GRACE.userId,
+      allowedBots: 'researcher, notes'
+    })
+
+    expect((await loadAdminState(stateDir)).users[GRACE.userId]?.allowedBots).toEqual(['researcher', 'notes'])
   })
 
   it('refuses to remove the last administrator', async () => {

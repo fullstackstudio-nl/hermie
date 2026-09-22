@@ -106,6 +106,17 @@ const STYLE = `
     --warn-ink: #865600;
     --hair: rgba(16, 38, 78, 0.13);
     --hair-soft: rgba(16, 38, 78, 0.08);
+    /*
+      The two greys a switch is drawn from, and why they are not --hair.
+
+      A hairline between two cards may be barely there; the edge of a CONTROL
+      may not. These clear 3:1 on the card and on the panel, which is the floor
+      the guidelines put on the boundary of something you can operate — 4.16
+      and 4.69 respectively, measured the same way "npm run contrast:check"
+      measures the app.
+    */
+    --switch-line: #737d8d;
+    --switch-knob: #5d6675;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -126,6 +137,8 @@ const STYLE = `
       --warn-ink: #ffcb61;
       --hair: rgba(190, 212, 255, 0.22);
       --hair-soft: rgba(190, 212, 255, 0.13);
+      --switch-line: #93a3bd;
+      --switch-knob: #c2cee2;
     }
   }
 
@@ -312,20 +325,189 @@ const STYLE = `
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
     font-size: 0.9rem;
   }
-  .badge {
+  /*
+    A pill says something about the line it is on. It does not shout it.
+
+    The first version of these was uppercase, letter-spaced and accent-filled,
+    and two of them beside a name took more room than the name — so on a roster
+    they wrapped, and the wrap was the first thing an operator saw. Sentence
+    case at 0.7rem on the softest tint there is reads as an annotation, which is
+    what a role or a status is.
+  */
+  .pill {
     display: inline-block;
     padding: 0 var(--s2);
     border-radius: var(--r-pill);
-    background: var(--accent-soft);
-    color: var(--accent-ink);
-    font: 600 0.7rem/1.5 inherit;
-    letter-spacing: 0.055em;
-    text-transform: uppercase;
-    vertical-align: 1px;
+    background: var(--hair-soft);
+    color: var(--muted);
+    font: 500 0.7rem/1.6 inherit;
+    white-space: nowrap;
+  }
+  .pill.on { background: var(--accent-soft); color: var(--accent-ink) }
+  /* Restated for the same reason "button.bad" restates it: .bad is also an ink. */
+  .pill.bad { background: var(--danger-soft); color: var(--danger-ink) }
+
+  /* ---- the roster: one line per person, and columns that line up ---- */
+  /*
+    A grid rather than a table, and fixed widths rather than content widths.
+
+    A table sized by its contents gives every row its own column edges the
+    moment one name is longer than another, which is what made the old people
+    table unreadable at any width. "--cols" is set once per roster, so the head
+    strip and every row are laid out from the same template and cannot disagree.
+  */
+  .roster { margin: 0 0 var(--s4) }
+  .roster-head, .roster-row {
+    display: grid;
+    grid-template-columns: var(--cols);
+    gap: var(--s2);
+    align-items: center;
+  }
+  .roster-head {
+    padding: 0 var(--s1) var(--s2);
+    border-bottom: 1px solid var(--hair);
+    color: var(--muted);
+    font: 600 0.78rem/1.3 inherit;
+  }
+  .roster-head > span { min-width: 0 }
+  .roster-list { list-style: none; margin: 0; padding: 0; color: var(--ink); font-size: 0.9rem }
+  .roster-list > li { margin: 0; border-bottom: 1px solid var(--hair-soft) }
+  .roster-list > li:last-child { border-bottom: 0 }
+  .roster-row { padding: var(--s2) var(--s1) }
+  .roster.people { --cols: minmax(0, 1fr) 7rem 6rem 13rem 4.5rem }
+  .roster.accounts { --cols: minmax(0, 1fr) 5rem 4.5rem 7rem 4.5rem }
+  /* Three words the columns are named by, and they may not wrap either. */
+  .roster-head .switches > span { font-size: 0.72rem; white-space: nowrap }
+
+  .who { display: flex; align-items: center; gap: var(--s2); min-width: 0 }
+  .who-text { min-width: 0 }
+  .who-name { display: flex; align-items: baseline; gap: var(--s2); min-width: 0; overflow: hidden }
+  .who-name strong { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+  .who-name .pill { flex: 0 0 auto }
+  .who-sub, .cell { color: var(--muted); font-size: 0.82rem }
+  /* Never two lines: a stamp that wraps is what pushed every row out of step. */
+  .who-sub, .cell { white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+  .cell-mid { text-align: center }
+  .more { font-size: 0.82rem; white-space: nowrap }
+
+  /*
+    The initials disc, tinted from the app's own accent table.
+
+    The colour is picked from the id, so the same person is the same colour on
+    every visit and two people are rarely the same. Tint plus ink rather than a
+    saturated fill with white on it: "apps/hermie/src/ui/tokens.ts" keeps a
+    readable ink per accent for exactly this, and its 13% / 26% soft tint is the
+    one an avatar ring already uses in the app.
+  */
+  .avatar {
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    border-radius: var(--r-pill);
+    display: grid;
+    place-items: center;
+    background: var(--av-bg);
+    color: var(--av-ink);
+    font: 600 0.72rem/1 inherit;
+  }
+  .av-0 { --av-bg: rgba(22, 104, 227, 0.13); --av-ink: #0b57c4 }
+  .av-1 { --av-bg: rgba(123, 63, 196, 0.13); --av-ink: #6a2fb4 }
+  .av-2 { --av-bg: rgba(14, 122, 132, 0.13); --av-ink: #0a6670 }
+  .av-3 { --av-bg: rgba(22, 120, 60, 0.13); --av-ink: #12652f }
+  .av-4 { --av-bg: rgba(182, 47, 129, 0.13); --av-ink: #a22270 }
+  .av-5 { --av-bg: rgba(176, 76, 8, 0.13); --av-ink: #9a4106 }
+  @media (prefers-color-scheme: dark) {
+    .av-0 { --av-bg: rgba(22, 104, 227, 0.26); --av-ink: #b4d6ff }
+    .av-1 { --av-bg: rgba(123, 63, 196, 0.26); --av-ink: #e0c8ff }
+    .av-2 { --av-bg: rgba(14, 122, 132, 0.26); --av-ink: #a6e8ee }
+    .av-3 { --av-bg: rgba(22, 120, 60, 0.26); --av-ink: #a8ecbe }
+    .av-4 { --av-bg: rgba(182, 47, 129, 0.26); --av-ink: #ffc2e2 }
+    .av-5 { --av-bg: rgba(176, 76, 8, 0.26); --av-ink: #ffd0a8 }
   }
 
+  /*
+    The switches, which are real checkboxes.
+
+    The box is the one the browser posts and the one a keyboard reaches; it is
+    clipped rather than hidden, because "display: none" takes it out of the tab
+    order, and the track beside it is what gets painted — including the focus
+    ring, which is drawn on the track so a keyboard can still see where it is.
+    Nothing here animates: a settings page that slides is a settings page an
+    operator waits for.
+  */
+  .switches { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s1); align-items: center }
+  .switches > span, .switches > label { justify-self: center }
+  .switch { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; margin: 0; cursor: pointer }
+  .switch > input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .track {
+    display: block;
+    width: 36px;
+    height: 20px;
+    border-radius: var(--r-pill);
+    background: var(--sunk);
+    border: 1px solid var(--switch-line);
+    position: relative;
+  }
+  .track::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: var(--r-pill);
+    background: var(--switch-knob);
+  }
+  /* The border stays: the accent fill alone is 2.5:1 on a dark card. */
+  .switch > input:checked + .track { background: var(--accent) }
+  .switch > input:checked + .track::after { left: 18px; background: var(--on-accent) }
+  .switch > input:focus-visible + .track { outline: 2px solid var(--accent-ink); outline-offset: 2px }
+  /* The head strip names the column on a wide screen; the card names it itself. */
+  .switch-name { display: none }
+
+  /*
+    One person's detail, opened by the link in their row.
+
+    ":target" and not a "<details>", because the panel has to be as wide as the
+    whole row and a "<details>" can only be as wide as the cell its summary sits
+    in. This way the row keeps its columns, the URL names whoever is open — one
+    at a time, which is what keeps the list a list — and it is still nothing but
+    HTML and a style sheet.
+  */
+  .panel { display: none }
+  .panel:target { display: block; padding: var(--s2) var(--s1) var(--s4) }
+  .panel h3 { font: 600 0.9rem/1.3 inherit; margin: var(--s3) 0 var(--s2) }
+  /* A role picker with three words in it does not need the whole row. */
+  .panel .fields > div { flex: 0 1 14rem }
+  .panel dl { font-size: 0.85rem }
+  .ticks { display: grid; grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); gap: var(--s1) var(--s3) }
+  .ticks label { color: var(--ink); font-size: 0.9rem; display: flex; align-items: center; gap: var(--s2) }
+  /* Destructive last and quiet: the far end of the line, never beside Save. */
+  .spread { margin-left: auto }
+  /* The paragraph the list's two-sentence intro left out, for whoever wants it. */
+  details.how { font-size: 0.85rem; color: var(--muted) }
+  details.how > summary { cursor: pointer; color: var(--accent-ink); width: fit-content }
+  details.how > p { margin: var(--s2) 0 0 }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); margin: 0 0 var(--s3) }
+  .grid2 > div { min-width: 0 }
+
   /* ---- one column, and the nav across the top ---- */
-  @media (max-width: 52rem) {
+  /*
+    60rem, and it used to be 52rem.
+
+    A 13rem nav beside a 68rem column is a wide-screen layout; on a 850px window
+    it left the roster 578px to lay seven columns out in, and seven columns in
+    578px is the wrapping that made the people list unreadable. Above this the
+    nav is a rail, below it the nav is a strip and the page gets the width.
+  */
+  @media (max-width: 60rem) {
     .shell { grid-template-columns: minmax(0, 1fr); gap: var(--s4); padding: var(--s4) var(--s4) var(--s6) }
     nav {
       position: static;
@@ -336,6 +518,46 @@ const STYLE = `
       border-bottom: 1px solid var(--hair);
     }
     .where { margin-left: 0; width: 100% }
+  }
+
+  /* ---- a phone: every row becomes a card ---- */
+  /*
+    Columns stop being the point below 48rem — there is no room for five of
+    them and nothing to compare across rows on a screen that shows two. The row
+    wraps instead: the person on the first line, the facts and the detail link
+    on the second, the switches on a line of their own with the names the head
+    strip was carrying.
+  */
+  @media (max-width: 48rem) {
+    .roster-head { display: none }
+    .roster-list > li {
+      border: 1px solid var(--hair);
+      border-radius: var(--r-inset);
+      background: var(--panel);
+      margin-bottom: var(--s2);
+    }
+    .roster-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: var(--s2) var(--s3);
+      padding: var(--s3);
+    }
+    .roster-row > .who { flex: 1 1 100% }
+    .roster-row > .cell { order: 2 }
+    .roster-row > .more { order: 2; margin-left: auto }
+    .roster-row > .switches {
+      order: 3;
+      flex: 1 1 100%;
+      gap: var(--s3);
+      padding-top: var(--s1);
+      border-top: 1px solid var(--hair-soft);
+    }
+    .switches > label { justify-self: start }
+    .switch { align-items: flex-start }
+    .switch-name { display: block; color: var(--muted); font-size: 0.72rem; line-height: 1.3 }
+    .panel:target { padding: 0 var(--s3) var(--s3) }
+    .grid2 { grid-template-columns: minmax(0, 1fr) }
   }
 `
 

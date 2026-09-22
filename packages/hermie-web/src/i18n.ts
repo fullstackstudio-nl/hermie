@@ -168,6 +168,22 @@ export interface WebStrings {
     administratorSecret: string
     yes: string
     no: string
+    /** The two days a roster says in words instead of in digits. */
+    today: string
+    yesterday: string
+    /** A short month name, by zero-based index, for every older date. */
+    monthShort: (month: number) => string
+    /** The link into one person's own detail, and the one that closes it. */
+    details: string
+    /**
+     * The same link, named for whoever it opens.
+     *
+     * A list of twenty rows is a list of twenty links called "Details", which
+     * is useless to anybody reading the page through a list of its links. The
+     * visible word stays short and this is what the link is actually called.
+     */
+    detailsFor: (name: string) => string
+    close: string
   }
   setup: {
     /** Both the `<title>` and the `<h1>`. */
@@ -376,14 +392,45 @@ export interface WebStrings {
       allowedBotsLabel: string
       pushAllowed: string
       administratorBox: string
+      addHeading: string
       addLabel: string
       addButton: string
       signedInAs: (viewer: string) => string
       signedInLocally: string
-      /** The badge on a row the built-in issuer vouches for; it links to that page. */
-      onThisIssuer: string
-      /** What that badge means, and what the administrator box does on such a row. */
+      /** What the second line of a row says this person is, and how they got here. */
+      sourceIssuer: string
+      sourceGateway: string
+      /**
+       * Two rows, one name, and no merge.
+       *
+       * A gateway with its own sign-in and an account on the built-in issuer are
+       * two identities as far as the gateway is concerned, even when the person
+       * is one person and the username is one username. Merging them would be
+       * this service inventing a fact; saying so on both rows is the operator
+       * being told why they are looking at two.
+       */
+      sameAsIssuer: string
+      sameAsGateway: string
+      /** The same thing in three words, for the line itself. */
+      alsoIssuer: string
+      alsoGateway: string
+      /** The disclosure that holds everything the two-sentence intro dropped. */
+      howHeading: string
+      howReadOnly: string
+      /** What that source means, and what the administrator switch does on such a row. */
       issuerNote: string
+      /** The bots column: all of them, none of them, or how many of how many. */
+      allBots: string
+      noBots: string
+      someBots: (allowed: number, total: number) => string
+      botsHeading: string
+      everyBot: string
+      botsNote: string
+      /** The per-person panel. */
+      gatewayUserId: string
+      source: string
+      savesRow: string
+      openAccount: string
     }
   }
   /**
@@ -476,7 +523,16 @@ export interface WebStrings {
       email: string
       displayName: string
       invite: string
+      inviteHeading: string
       inviteNote: string
+      /** The pills beside a username, all of them sentence case and quiet. */
+      administrator: string
+      invited: string
+      twoFactorOn: string
+      /** The panel: the subject id an operator sometimes has to copy, and the rest. */
+      subject: string
+      subjectNote: string
+      actionsHeading: string
     }
     test: {
       heading: string
@@ -567,6 +623,17 @@ export interface WebStrings {
   }
 }
 
+/**
+ * Short month names, by zero-based index.
+ *
+ * A table rather than `Intl`: a small-ICU build of Node answers English for
+ * every language and would do it silently, which is exactly the kind of
+ * difference between two deployments nobody ever finds.
+ */
+const MONTHS_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const MONTHS_NL = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec']
+const MONTHS_DE = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez']
+
 /** The source. Every other language is a partial answer to this. */
 const EN: WebStrings = {
   common: {
@@ -576,7 +643,13 @@ const EN: WebStrings = {
     administrationTitle: 'Hermie Web administration',
     administratorSecret: 'Administrator secret',
     yes: 'yes',
-    no: 'no'
+    no: 'no',
+    today: 'today',
+    yesterday: 'yesterday',
+    monthShort: month => MONTHS_EN[month] ?? '',
+    details: 'Details',
+    detailsFor: name => `Details for ${name}`,
+    close: 'Close'
   },
   setup: {
     title: 'Set up Hermie Web',
@@ -768,9 +841,8 @@ const EN: WebStrings = {
     people: {
       heading: 'People',
       intro:
-        '<strong>These are service-level settings, not gateway permissions.</strong> Push and the message cache are ' +
-        'this service’s own and are enforced completely. Read-only refuses every mutating HTTP request; it cannot ' +
-        'police the gateway WebSocket, which is a byte pipe by design — so it is a guard rail, not a boundary.',
+        '<strong>These are service-level settings, not gateway permissions.</strong> Push, the message cache and ' +
+        'the bot list are this service’s own, and every switch below takes effect when you save that person.',
       empty: 'Nobody has signed in through this service yet.',
       who: 'Who',
       lastSeen: 'Last seen',
@@ -781,15 +853,37 @@ const EN: WebStrings = {
       allowedBotsLabel: 'Allowed bots (blank = all)',
       pushAllowed: 'Push allowed',
       administratorBox: 'Administrator',
-      addLabel: 'Add somebody by gateway user id',
+      addHeading: 'Add somebody',
+      addLabel: 'Gateway user id',
       addButton: 'Add',
       signedInAs: viewer => `You are signed in as <code>${viewer}</code>. The last administrator cannot be removed.`,
       signedInLocally: 'You are signed in with the local administrator secret.',
-      onThisIssuer: 'account here',
+      sourceIssuer: 'account on this service',
+      sourceGateway: 'gateway sign-in',
+      sameAsIssuer: 'same username as the account on this service',
+      sameAsGateway: 'same username as the gateway sign-in',
+      alsoIssuer: 'also an account here',
+      alsoGateway: 'also a gateway sign-in',
+      howHeading: 'How this list works',
+      howReadOnly:
+        'Read-only refuses every mutating HTTP request; it cannot police the gateway WebSocket, which is a byte ' +
+        'pipe by design — so it is a guard rail, not a boundary.',
       issuerNote:
-        'Rows marked <strong>account here</strong> are accounts on this service’s own issuer, so their gateway ' +
-        'user id is the account’s subject. Ticking or clearing <strong>Administrator</strong> on one of those ' +
-        'changes the account’s role, which is the same switch as the one on the identity page.'
+        'A row whose source is <strong>account on this service</strong> is an account on this service’s own issuer, ' +
+        'so its gateway user id is the account’s subject. Turning <strong>Administrator</strong> on or off there ' +
+        'changes the account’s role, which is the same switch as the one on the identity page.',
+      allBots: 'All bots',
+      noBots: 'No bots',
+      someBots: (allowed, total) => `${allowed} of ${total}`,
+      botsHeading: 'Bots this person may reach',
+      everyBot: 'Every bot',
+      botsNote:
+        'Every bot covers the ones added later too. Clearing every box allows none of them, which is not the ' +
+        'same answer.',
+      gatewayUserId: 'Gateway user id',
+      source: 'Source',
+      savesRow: 'Saves the switches on this person’s row as well.',
+      openAccount: 'Open the account on the identity page'
     }
   },
   identity: {
@@ -885,10 +979,17 @@ const EN: WebStrings = {
       email: 'Email',
       displayName: 'Display name',
       invite: 'Invite',
+      inviteHeading: 'Invite somebody',
       inviteNote:
         'Creating somebody mints a one-time link they use to choose their own password. Nobody else, including ' +
         'you, ever sees it — which is the only way to add an account that does not end with a password in a chat ' +
-        'window.'
+        'window.',
+      administrator: 'administrator',
+      invited: 'invited',
+      twoFactorOn: '2FA on',
+      subject: 'Subject id',
+      subjectNote: 'This is the gateway user id the people list is keyed by. Copy it from here when you need it.',
+      actionsHeading: 'Role and actions'
     },
     test: {
       heading: 'Test sign-in',
@@ -1006,7 +1107,13 @@ const NL: WebCatalogue<WebStrings> = {
     administrationTitle: 'Hermie Web-beheer',
     administratorSecret: 'Beheerderswachtwoord',
     yes: 'ja',
-    no: 'nee'
+    no: 'nee',
+    today: 'vandaag',
+    yesterday: 'gisteren',
+    monthShort: month => MONTHS_NL[month] ?? '',
+    details: 'Details',
+    detailsFor: name => `Details van ${name}`,
+    close: 'Sluiten'
   },
   setup: {
     title: 'Hermie Web instellen',
@@ -1203,10 +1310,8 @@ const NL: WebCatalogue<WebStrings> = {
     people: {
       heading: 'Mensen',
       intro:
-        '<strong>Dit zijn instellingen van de service, geen gateway-permissies.</strong> Push en de berichtencache ' +
-        'zijn van deze service zelf en worden volledig afgedwongen. Alleen-lezen weigert elk wijzigend ' +
-        'HTTP-verzoek; het kan de gateway-WebSocket niet bewaken, want dat is met opzet een bytepijp — het is dus ' +
-        'een vangrail, geen grens.',
+        '<strong>Dit zijn instellingen van de service, geen gateway-permissies.</strong> Push, de berichtencache en ' +
+        'de botlijst zijn van deze service zelf, en elke schakelaar hieronder gaat in zodra je die persoon opslaat.',
       empty: 'Er heeft nog niemand via deze service ingelogd.',
       who: 'Wie',
       lastSeen: 'Laatst gezien',
@@ -1215,16 +1320,38 @@ const NL: WebCatalogue<WebStrings> = {
       allowedBotsLabel: 'Toegestane bots (leeg = alle)',
       pushAllowed: 'Push toegestaan',
       administratorBox: 'Beheerder',
-      addLabel: 'Iemand toevoegen op gateway-gebruikers-id',
+      addHeading: 'Iemand toevoegen',
+      addLabel: 'Gateway-gebruikers-id',
       addButton: 'Toevoegen',
       signedInAs: viewer =>
         `Je bent ingelogd als <code>${viewer}</code>. De laatste beheerder kan niet worden verwijderd.`,
       signedInLocally: 'Je bent ingelogd met het lokale beheerderswachtwoord.',
-      onThisIssuer: 'account hier',
+      sourceIssuer: 'account op deze service',
+      sourceGateway: 'gateway-login',
+      sameAsIssuer: 'zelfde gebruikersnaam als het account op deze service',
+      sameAsGateway: 'zelfde gebruikersnaam als de gateway-login',
+      alsoIssuer: 'ook een account hier',
+      alsoGateway: 'ook een gateway-login',
+      howHeading: 'Hoe deze lijst werkt',
+      howReadOnly:
+        'Alleen-lezen weigert elk wijzigend HTTP-verzoek; het kan de gateway-WebSocket niet bewaken, want dat is ' +
+        'met opzet een bytepijp — het is dus een vangrail, geen grens.',
       issuerNote:
-        'Regels met <strong>account hier</strong> zijn accounts op de eigen issuer van deze service, dus hun ' +
-        'gateway-gebruikers-id is het subject van het account. <strong>Beheerder</strong> aan- of uitvinken bij ' +
-        'zo’n regel verandert de rol van het account — dezelfde schakelaar als die op de identiteitspagina.'
+        'Een regel met bron <strong>account op deze service</strong> is een account op de eigen issuer van deze ' +
+        'service, dus de gateway-gebruikers-id is het subject van het account. <strong>Beheerder</strong> daar aan- ' +
+        'of uitzetten verandert de rol van het account — dezelfde schakelaar als die op de identiteitspagina.',
+      allBots: 'Alle bots',
+      noBots: 'Geen bots',
+      someBots: (allowed, total) => `${allowed} van ${total}`,
+      botsHeading: 'Bots die deze persoon mag bereiken',
+      everyBot: 'Elke bot',
+      botsNote:
+        'Elke bot geldt ook voor bots die er later bij komen. Alle vakjes leeg betekent geen enkele bot, en dat ' +
+        'is een ander antwoord.',
+      gatewayUserId: 'Gateway-gebruikers-id',
+      source: 'Bron',
+      savesRow: 'Slaat ook de schakelaars op de regel van deze persoon op.',
+      openAccount: 'Open het account op de identiteitspagina'
     }
   },
   identity: {
@@ -1313,10 +1440,17 @@ const NL: WebCatalogue<WebStrings> = {
       email: 'E-mail',
       displayName: 'Weergavenaam',
       invite: 'Uitnodigen',
+      inviteHeading: 'Iemand uitnodigen',
       inviteNote:
         'Iemand aanmaken maakt een eenmalige link waarmee diegene zelf een wachtwoord kiest. Niemand anders, jij ' +
         'ook niet, ziet die ooit — en dat is de enige manier om een account toe te voegen die niet eindigt met ' +
-        'een wachtwoord in een chatvenster.'
+        'een wachtwoord in een chatvenster.',
+      administrator: 'beheerder',
+      invited: 'uitgenodigd',
+      twoFactorOn: '2FA aan',
+      subject: 'Subject-id',
+      subjectNote: 'Dit is de gateway-gebruikers-id waarop de mensenlijst is gesleuteld. Kopieer hem hiervandaan.',
+      actionsHeading: 'Rol en acties'
     },
     test: {
       heading: 'Test-login',
@@ -1419,7 +1553,13 @@ const DE: WebCatalogue<WebStrings> = {
     administrationTitle: 'Hermie Web-Verwaltung',
     administratorSecret: 'Administrator-Passwort',
     yes: 'ja',
-    no: 'nein'
+    no: 'nein',
+    today: 'heute',
+    yesterday: 'gestern',
+    monthShort: month => MONTHS_DE[month] ?? '',
+    details: 'Details',
+    detailsFor: name => `Details zu ${name}`,
+    close: 'Schließen'
   },
   setup: {
     title: 'Hermie Web einrichten',
@@ -1620,10 +1760,9 @@ const DE: WebCatalogue<WebStrings> = {
     people: {
       heading: 'Menschen',
       intro:
-        '<strong>Das sind Einstellungen des Dienstes, keine gateway-Berechtigungen.</strong> Push und der ' +
-        'Nachrichten-Cache gehören diesem Dienst selbst und werden vollständig durchgesetzt. Nur-Lesen weist jede ' +
-        'verändernde HTTP-Anfrage ab; den gateway-WebSocket kann es nicht überwachen, denn der ist mit Absicht eine ' +
-        'Byte-Leitung — es ist also eine Leitplanke, keine Grenze.',
+        '<strong>Das sind Einstellungen des Dienstes, keine gateway-Berechtigungen.</strong> Push, der ' +
+        'Nachrichten-Cache und die Bot-Liste gehören diesem Dienst selbst, und jeder Schalter unten gilt, sobald du ' +
+        'diese Person speicherst.',
       empty: 'Über diesen Dienst hat sich noch niemand angemeldet.',
       who: 'Wer',
       lastSeen: 'Zuletzt gesehen',
@@ -1632,16 +1771,38 @@ const DE: WebCatalogue<WebStrings> = {
       allowedBotsLabel: 'Erlaubte Bots (leer = alle)',
       pushAllowed: 'Push erlaubt',
       administratorBox: 'Administrator',
-      addLabel: 'Jemanden über die gateway-Benutzer-id hinzufügen',
+      addHeading: 'Jemanden hinzufügen',
+      addLabel: 'Gateway-Benutzer-id',
       addButton: 'Hinzufügen',
       signedInAs: viewer =>
         `Du bist als <code>${viewer}</code> angemeldet. Der letzte Administrator kann nicht entfernt werden.`,
       signedInLocally: 'Du bist mit dem lokalen Administrator-Passwort angemeldet.',
-      onThisIssuer: 'Konto hier',
+      sourceIssuer: 'Konto auf diesem Dienst',
+      sourceGateway: 'gateway-Anmeldung',
+      sameAsIssuer: 'gleicher Benutzername wie das Konto auf diesem Dienst',
+      sameAsGateway: 'gleicher Benutzername wie die gateway-Anmeldung',
+      alsoIssuer: 'auch ein Konto hier',
+      alsoGateway: 'auch eine gateway-Anmeldung',
+      howHeading: 'Wie diese Liste funktioniert',
+      howReadOnly:
+        'Nur-Lesen weist jede verändernde HTTP-Anfrage ab; den gateway-WebSocket kann es nicht überwachen, denn der ' +
+        'ist mit Absicht eine Byte-Leitung — es ist also eine Leitplanke, keine Grenze.',
       issuerNote:
-        'Zeilen mit <strong>Konto hier</strong> sind Konten auf der eigenen issuer dieses Dienstes, ihre ' +
-        'gateway-Benutzer-id ist also das subject des Kontos. <strong>Administrator</strong> dort an- oder ' +
-        'abzuhaken ändert die Rolle des Kontos — derselbe Schalter wie auf der Identitätsseite.'
+        'Eine Zeile mit der Quelle <strong>Konto auf diesem Dienst</strong> ist ein Konto auf der eigenen issuer ' +
+        'dieses Dienstes, ihre gateway-Benutzer-id ist also das subject des Kontos. <strong>Administrator</strong> ' +
+        'dort ein- oder auszuschalten ändert die Rolle des Kontos — derselbe Schalter wie auf der Identitätsseite.',
+      allBots: 'Alle Bots',
+      noBots: 'Keine Bots',
+      someBots: (allowed, total) => `${allowed} von ${total}`,
+      botsHeading: 'Bots, die diese Person erreichen darf',
+      everyBot: 'Jeder Bot',
+      botsNote:
+        'Jeder Bot gilt auch für später hinzugefügte. Alle Kästchen leer erlaubt keinen einzigen Bot, und das ist ' +
+        'eine andere Antwort.',
+      gatewayUserId: 'Gateway-Benutzer-id',
+      source: 'Quelle',
+      savesRow: 'Speichert auch die Schalter in der Zeile dieser Person.',
+      openAccount: 'Das Konto auf der Identitätsseite öffnen'
     }
   },
   identity: {
@@ -1736,10 +1897,17 @@ const DE: WebCatalogue<WebStrings> = {
       email: 'E-Mail',
       displayName: 'Anzeigename',
       invite: 'Einladen',
+      inviteHeading: 'Jemanden einladen',
       inviteNote:
         'Jemanden anzulegen erzeugt einen einmaligen Link, mit dem die Person ihr eigenes Passwort wählt. ' +
         'Niemand sonst, auch du nicht, sieht ihn jemals — und das ist die einzige Art, ein Konto hinzuzufügen, ' +
-        'die nicht mit einem Passwort in einem Chatfenster endet.'
+        'die nicht mit einem Passwort in einem Chatfenster endet.',
+      administrator: 'Administrator',
+      invited: 'eingeladen',
+      twoFactorOn: '2FA an',
+      subject: 'Subject-id',
+      subjectNote: 'Das ist die gateway-Benutzer-id, nach der die Menschen-Liste geschlüsselt ist. Kopiere sie hier.',
+      actionsHeading: 'Rolle und Aktionen'
     },
     test: {
       heading: 'Test-Anmeldung',

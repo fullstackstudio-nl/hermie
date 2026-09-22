@@ -25,6 +25,7 @@ import { escapeHtml } from '../setup'
 import type { WebLocale, WebStrings } from '../i18n'
 import { CSRF_FIELD } from './session'
 import { adminShell, card, type AdminChrome } from './layout'
+import { avatar, cell, pill, rosterHead, whenAgo, whenCell } from './roster'
 import { issuerForOrigin } from '../oidc/accounts'
 import type { SelfTestStep } from '../oidc/selftest'
 import type { OidcState } from '../oidc/state'
@@ -54,8 +55,8 @@ export interface IdentityPageInput {
   chrome: Pick<AdminChrome, 'brand' | 'version' | 'canSelfUpdate' | 'updateReason'>
 }
 
-const when = (seconds: number): string =>
-  seconds ? new Date(seconds * 1000).toISOString().slice(0, 16).replace('T', ' ') : '—'
+/** The whole stamp, for the panel. The line above it says it the short way. */
+const when = (seconds: number, strings: WebStrings): string => (seconds ? whenAgo(seconds, strings).title : '—')
 
 /**
  * The name of a role, as opposed to its value.
@@ -97,80 +98,136 @@ export function gatewayEnvSnippet(state: OidcState): string {
   ].join('\n')
 }
 
-function userRow(user: OidcUser, input: IdentityPageInput): string {
+/**
+ * One account: the line, and the panel behind the link at the end of it.
+ *
+ * Every control an account has is in the panel, and that is the whole of the
+ * change. They used to be in the last cell of the row — a role select, a Save,
+ * and then Reset password, Disable and Delete wrapped onto two more lines — so
+ * an account was about 170 pixels tall and no column lined up with the one above
+ * it. A line is a line now, and the four things an operator does to an account
+ * are one click away with room to say what they do.
+ *
+ * The subject id is not on the line. It is 22 characters of base64url that mean
+ * nothing to a reader and wrap mid-string when the column is narrow; it is on
+ * the pointer, and in the panel where it can be copied.
+ */
+function accountRow(user: OidcUser, index: number, input: IdentityPageInput): string {
   const text = input.strings.identity.accounts
+  const common = input.strings.common
+  const panel = `account-${index}`
   const hidden = `<input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
-        <input type="hidden" name="sub" value="${escapeHtml(user.sub)}">`
+          <input type="hidden" name="sub" value="${escapeHtml(user.sub)}">`
+  const name = user.displayName || user.email
 
-  return `<tr>
-    <td>
-      <strong>${escapeHtml(user.username)}</strong>${
-        user.disabled ? ` <span class="note bad">${text.disabled}</span>` : ''
-      }
-      <br><span class="note">${escapeHtml(user.displayName || user.email || '—')}</span>
-      <br><code class="note">${escapeHtml(user.sub)}</code>
-    </td>
-    <td class="note">${roleName(user.role, text)}</td>
-    <td class="note">${user.totpSecret ? text.totpOn : user.invite ? text.totpInvited : text.totpOff}</td>
-    <td class="note">${when(user.lastSignInAt)}</td>
-    <td>
+  return `<li>
+    <div class="roster-row">
+      <span class="who">
+        ${avatar(user.displayName || user.username, user.sub)}
+        <span class="who-text">
+          <span class="who-name"><strong>${escapeHtml(user.username)}</strong>${
+            user.role === 'admin' ? pill(text.administrator, 'on') : ''
+          }${user.invite ? pill(text.invited) : ''}${user.totpSecret ? pill(text.twoFactorOn) : ''}${
+            user.disabled ? pill(text.disabled, 'bad') : ''
+          }</span>
+          <span class="who-sub" title="${escapeHtml(user.sub)}">${escapeHtml(name || '—')}</span>
+        </span>
+      </span>
+      ${cell(text.role, roleName(user.role, text))}
+      ${cell(text.twoFactor, user.totpSecret ? text.totpOn : user.invite ? text.totpInvited : text.totpOff)}
+      ${whenCell(text.lastSignIn, user.lastSignInAt, input.strings)}
+      <a class="more" href="#${panel}" aria-label="${escapeHtml(common.detailsFor(user.username))}">${
+        common.details
+      }</a>
+    </div>
+    <div class="panel" id="${panel}">
+      <dl>
+        <dt>${text.subject}</dt><dd><code>${escapeHtml(user.sub)}</code></dd>
+        ${user.email ? `<dt>${text.email}</dt><dd>${escapeHtml(user.email)}</dd>` : ''}
+        <dt>${text.lastSignIn}</dt><dd>${escapeHtml(when(user.lastSignInAt, input.strings))}</dd>
+      </dl>
+      <p class="note">${text.subjectNote}</p>
+      <h3>${text.actionsHeading}</h3>
       <form method="post" action="/admin/oidc/user">
         ${hidden}
         <div class="fields">
           <div>
-            <label for="role-${escapeHtml(user.sub)}">${text.role}</label>
-            <select id="role-${escapeHtml(user.sub)}" name="role">
+            <label for="role-${panel}">${text.role}</label>
+            <select id="role-${panel}" name="role">
               <option value="user"${user.role === 'user' ? ' selected' : ''}>${text.roleUser}</option>
               <option value="admin"${user.role === 'admin' ? ' selected' : ''}>${text.roleAdmin}</option>
             </select>
           </div>
-          <div class="narrow"><button type="submit" name="do" value="role">${input.strings.common.save}</button></div>
+          <div class="narrow"><button type="submit" name="do" value="role">${common.save}</button></div>
         </div>
       </form>
       <form method="post" action="/admin/oidc/user" class="actions">
         ${hidden}
         <button class="quiet" type="submit" name="do" value="invite">${text.resetPassword}</button>
-        <button class="quiet" type="submit" name="do" value="${user.disabled ? 'enable' : 'disable'}">${
-          user.disabled ? text.reEnable : text.disable
-        }</button>
         ${
           user.totpSecret
             ? `<button class="quiet" type="submit" name="do" value="clear-totp">${text.clearTotp}</button>`
             : ''
         }
+        <button class="quiet spread" type="submit" name="do" value="${user.disabled ? 'enable' : 'disable'}">${
+          user.disabled ? text.reEnable : text.disable
+        }</button>
         <button class="quiet" type="submit" name="do" value="remove">${text.remove}</button>
+        <a class="more" href="#accounts">${common.close}</a>
       </form>
-    </td>
-  </tr>`
+    </div>
+  </li>`
+}
+
+function accountsRoster(input: IdentityPageInput): string {
+  const text = input.strings.identity.accounts
+  const rows = [...input.state.users].sort((left, right) => left.username.localeCompare(right.username))
+
+  if (!rows.length) {
+    return `<p class="note">${text.empty}</p>`
+  }
+
+  return `<div class="roster accounts" id="accounts">
+  ${rosterHead([text.who, text.role, text.twoFactor, text.lastSignIn, ''])}
+  <ul class="roster-list">
+    ${rows.map((user, index) => accountRow(user, index, input)).join('\n    ')}
+  </ul>
+</div>`
 }
 
 function peopleSection(input: IdentityPageInput): string {
   const text = input.strings.identity.accounts
-  const rows = [...input.state.users].sort((left, right) => left.username.localeCompare(right.username))
 
   return card({
     heading: text.heading,
     intro: text.intro,
-    body: `${
-      rows.length
-        ? `<table>
-      <thead><tr><th>${text.who}</th><th>${text.role}</th><th>${text.twoFactor}</th><th>${
-        text.lastSignIn
-      }</th><th></th></tr></thead>
-      <tbody>${rows.map(user => userRow(user, input)).join('\n      ')}</tbody>
-    </table>`
-        : `<p class="note">${text.empty}</p>`
-    }
+    body: `${accountsRoster(input)}
     ${
       input.invite
         ? `<p class="note ok">${text.invitation(escapeHtml(input.invite.username))}<br><code>${escapeHtml(
             input.invite.url
           )}</code></p>`
         : ''
-    }
-    <form method="post" action="/admin/oidc/user">
+    }`
+  })
+}
+
+/**
+ * The invitation form, as its own card.
+ *
+ * Four fields in a 2×2 grid rather than a row that flexed: the row gave each
+ * field whatever was left over, so Username was twice the width of Display name
+ * and the labels above them started in four different places. Two equal columns
+ * is one rule that holds at every width, and on a phone it is one column.
+ */
+function inviteSection(input: IdentityPageInput): string {
+  const text = input.strings.identity.accounts
+
+  return card({
+    heading: text.inviteHeading,
+    body: `<form method="post" action="/admin/oidc/user">
       <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
-      <div class="fields">
+      <div class="grid2">
         <div>
           <label for="new-username">${text.username}</label>
           <input id="new-username" name="username" type="text" autocapitalize="off" spellcheck="false">
@@ -189,9 +246,9 @@ function peopleSection(input: IdentityPageInput): string {
             text.roleAdmin
           }</option></select>
         </div>
-        <div class="narrow"><button type="submit" name="do" value="create">${text.invite}</button></div>
       </div>
       <p class="note">${text.inviteNote}</p>
+      <div class="actions"><button type="submit" name="do" value="create">${text.invite}</button></div>
     </form>`
   })
 }
@@ -340,6 +397,7 @@ export function identityPage(input: IdentityPageInput): string {
     state.enabled
       ? `${guideSection(input)}
   ${peopleSection(input)}
+  ${inviteSection(input)}
   ${testSection(input)}
   ${card({
     heading: text.settings.heading,

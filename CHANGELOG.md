@@ -39,6 +39,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.5] - 2026-09-22
 
+### Changed
+
+- **The People table on `/admin` is a list of people now, not a spreadsheet.** One line each: an
+  initials disc tinted from the id, the name in bold with a quiet sentence-case pill for
+  administrator, then `username · source` on a second line — no raw subject id in the row, only in
+  its title attribute and its own detail section. Columns line up in a fixed grid, "Last seen" is
+  one relative stamp ("today 11:58", "22 Sep") with the full timestamp on the pointer, the tiny
+  checkboxes are real switches drawn as a track, and the bots multi-select is a one-line summary
+  ("All bots", "3 of 7") with the allow-list moved into a per-person panel that also holds the one
+  Save button for that row. A gateway sign-in and an account on this service that share a username
+  say so, on both rows, without merging them. The explanation is two sentences, with the rest behind
+  a "How this list works" disclosure. Below 40rem each row becomes a card.
+- **The Accounts table on `/admin/oidc` got the same redesign.** The same row shape — avatar,
+  name, inline status pills (administrator, invited, 2FA on, disabled), `Last signed in` as one
+  relative stamp — with the subject id, the role select, and Reset password / Clear two-factor /
+  Disable / Remove moved into a per-account panel. Role and Save sit on one line; the destructive
+  actions are grouped to the right and drawn as quiet outline buttons. The invite form is its own
+  card, a 2×2 field grid with Role and one Invite button below it.
+
 ## [0.1.4] - 2026-09-22
 
 ### Added

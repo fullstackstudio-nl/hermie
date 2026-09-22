@@ -33,6 +33,7 @@
 import { escapeHtml } from '../setup'
 import type { WebLocale, WebStrings } from '../i18n'
 import { barePage, adminShell, card, csrfField, type AdminChrome } from './layout'
+import { avatar, cell, pill, rosterHead, toggle, whenAgo, whenCell } from './roster'
 import { PUSH_TYPES } from '../push/registrations'
 import type { AdminState, AdminUserRow } from './state'
 
@@ -363,82 +364,247 @@ export function adminFeaturesPage(input: AdminPageInput): string {
 }
 
 /**
- * The people table.
+ * One person, as the list needs them.
  *
- * Real columns, and the trick that makes them possible without a script: a
- * `<form>` cannot be a child of a `<tr>`, so one row's form would have had to
- * live inside a single cell — which is what it used to do, and why every switch
- * for one person was stacked into one column while the headers above described
- * something else. HTML5's `form` attribute puts the element in the last cell and
- * points every input in the row at it by id, so the row is a row and the form is
- * still one form that posts.
- *
- * The id is the row's ORDINAL rather than the user id: a gateway user id is an
- * email address or worse, and an HTML id that contains an `@` or a space is one
- * no `form=` attribute can name.
+ * Gathered before anything is drawn because two of these answers are about the
+ * list rather than the row: whether an id is an account on the built-in issuer,
+ * and whether the username on this row is also the username on a row of the
+ * other kind. The second one cannot be answered from inside a row at all.
  */
-function peopleTable(input: AdminPageInput): string {
-  const text = input.strings.admin.people
-  const rows = Object.values(input.state.users).sort((left, right) => right.seenAt - left.seenAt)
+interface PersonView {
+  row: AdminUserRow
+  /** The panel's id. An ordinal, because a user id may be an email address. */
+  index: number
+  name: string
+  username: string
+  admin: boolean
+  fromIssuer: boolean
+  /** The other row with this username, where there is one of the other kind. */
+  alsoKnownAs: 'issuer' | 'gateway' | null
+}
 
-  if (!rows.length) {
+/** What this row calls somebody, for the second line. */
+const usernameOf = (row: AdminUserRow, account: { username: string } | undefined): string =>
+  account?.username || row.email || row.userId
+
+/**
+ * The name two rows would have to share to be worth a note, lowercased.
+ *
+ * The part before the at-sign, because a gateway that authenticates `max` and an
+ * issuer account called `max` are the case this exists for, and so is a gateway
+ * that calls the same person `max@example.org`. It is never a reason to merge
+ * anything: the note says so and the rows stay two rows.
+ */
+const usernameKey = (username: string): string => (username.split('@')[0] ?? username).toLowerCase()
+
+function peopleViews(input: AdminPageInput): PersonView[] {
+  const rows = Object.values(input.state.users).sort((left, right) => right.seenAt - left.seenAt)
+  const kinds = new Map<string, { issuer: boolean; gateway: boolean }>()
+
+  for (const row of rows) {
+    const account = input.identity.bySub[row.userId]
+    const key = usernameKey(usernameOf(row, account))
+    const held = kinds.get(key) ?? { issuer: false, gateway: false }
+
+    kinds.set(key, account ? { ...held, issuer: true } : { ...held, gateway: true })
+  }
+
+  return rows.map((row, index) => {
+    const account = input.identity.bySub[row.userId]
+    const username = usernameOf(row, account)
+    const both = kinds.get(usernameKey(username))
+    const shared = both?.issuer && both.gateway
+
+    return {
+      row,
+      index,
+      name: row.displayName || account?.username || row.email || row.userId,
+      username,
+      admin: input.state.admins.includes(row.userId),
+      fromIssuer: !!account,
+      alsoKnownAs: shared ? (account ? 'gateway' : 'issuer') : null
+    }
+  })
+}
+
+/**
+ * The bots column, as few characters as will still answer the question.
+ *
+ * The names when they fit, because "researcher, notes" is the whole answer and
+ * a count would send the reader into the panel for it. A count when they do
+ * not, because the alternative is a cell that is either truncated mid-name or
+ * as wide as the roster.
+ */
+function botsSummary(row: AdminUserRow, input: AdminPageInput): string {
+  const text = input.strings.admin.people
+
+  if (row.allowedBots === null) {
+    return text.allBots
+  }
+
+  if (!row.allowedBots.length) {
+    return text.noBots
+  }
+
+  const names = row.allowedBots.join(', ')
+  // The roster, or the allow list where it is longer — a list that still names a
+  // bot the gateway has dropped must not be reported as "4 of 2".
+  const total = Math.max(input.bots.length, row.allowedBots.length)
+
+  return names.length <= 22 ? escapeHtml(names) : text.someBots(row.allowedBots.length, total)
+}
+
+/**
+ * The bot allow list, as one box per bot.
+ *
+ * A text field of comma-separated names was the control this replaces, and it
+ * asked an operator to know the roster by heart and to spell it. The field is
+ * still what a deployment whose bot roster is unknown gets, because a list of
+ * checkboxes with nothing to put in it is not a control at all.
+ *
+ * `allBots` and the boxes are two different answers, and the route reads them
+ * in that order: no list is every bot — including bots added next month — and
+ * an empty list is none. A text field could never say the second one.
+ */
+function botControls(view: PersonView, input: AdminPageInput): string {
+  const text = input.strings.admin.people
+  const { row } = view
+
+  if (!input.bots.length) {
+    const allowed = row.allowedBots === null ? '' : row.allowedBots.join(', ')
+
+    return `<label for="bots-${view.index}">${text.allowedBotsLabel}</label>
+      <input id="bots-${view.index}" name="allowedBots" type="text" value="${escapeHtml(allowed)}"
+             placeholder="researcher, writer">`
+  }
+
+  const every = row.allowedBots === null
+  /*
+    The roster, plus whatever this person was already allowed that is not on it.
+
+    A name on the list that the gateway has since stopped serving would
+    otherwise have no box, and a save would drop it without saying so — the one
+    way a list of checkboxes can lose an answer a text field kept.
+  */
+  const names = [...input.bots, ...(row.allowedBots ?? []).filter(bot => !input.bots.includes(bot))]
+
+  return `<input type="hidden" name="botList" value="1">
+      <div class="ticks">
+        <label><input type="checkbox" name="allBots" value="1"${every ? ' checked' : ''}> ${text.everyBot}</label>
+        ${names
+          .map(
+            bot =>
+              `<label><input type="checkbox" name="bot" value="${escapeHtml(bot)}"${
+                !every && row.allowedBots?.includes(bot) ? ' checked' : ''
+              }> ${escapeHtml(bot)}</label>`
+          )
+          .join('\n        ')}
+      </div>
+      <p class="note">${text.botsNote}</p>`
+}
+
+/**
+ * One person: the line, and the panel behind the link at the end of it.
+ *
+ * The form is the whole of it, which is what settles where Save goes. A row
+ * cannot carry a Save button of its own without carrying five more beside it,
+ * so the one button lives in the panel and the switches on the line are inside
+ * the same form — flip one, open the panel, save. The panel says as much.
+ */
+function personRow(view: PersonView, input: AdminPageInput): string {
+  const text = input.strings.admin.people
+  const { row } = view
+  const panel = `person-${view.index}`
+  const source = view.fromIssuer
+    ? `<a href="/admin/oidc">${text.sourceIssuer}</a>`
+    : `<span>${text.sourceGateway}</span>`
+  /*
+    Three words on the line and the sentence behind them.
+
+    "same username as the account on this service" beside a name is wider than
+    the name, the pills and the column put together — it wrapped, and what it
+    wrapped over was the next column. It sits on the quiet second line, which is
+    one line and clips, with the whole sentence on the pointer and in the panel.
+  */
+  const shared =
+    view.alsoKnownAs === 'issuer'
+      ? { short: text.alsoIssuer, long: text.sameAsIssuer }
+      : view.alsoKnownAs === 'gateway'
+        ? { short: text.alsoGateway, long: text.sameAsGateway }
+        : null
+
+  return `<li>
+    <form method="post" action="/admin/user">
+      ${csrfField(input.csrf)}
+      <input type="hidden" name="userId" value="${escapeHtml(row.userId)}">
+      <div class="roster-row">
+        <span class="who">
+          ${avatar(view.name, row.userId)}
+          <span class="who-text">
+            <span class="who-name"><strong>${escapeHtml(view.name)}</strong>${
+              view.admin ? pill(text.administrator, 'on') : ''
+            }</span>
+            <span class="who-sub" title="${escapeHtml(row.userId)}">${escapeHtml(
+              view.username
+            )} · ${source}${shared ? ` · <span title="${escapeHtml(shared.long)}">${shared.short}</span>` : ''}</span>
+          </span>
+        </span>
+        ${whenCell(text.lastSeen, row.seenAt, input.strings)}
+        ${cell(text.bots, `<a href="#${panel}">${botsSummary(row, input)}</a>`)}
+        <span class="switches">
+          ${toggle({ name: 'readOnly', label: text.readOnly, checked: row.readOnly })}
+          ${toggle({ name: 'pushAllowed', label: text.push, checked: row.pushAllowed })}
+          ${toggle({ name: 'admin', label: text.administratorBox, checked: view.admin })}
+        </span>
+        <a class="more" href="#${panel}" aria-label="${escapeHtml(
+          input.strings.common.detailsFor(view.name)
+        )}">${input.strings.common.details}</a>
+      </div>
+      <div class="panel" id="${panel}">
+        <dl>
+          <dt>${text.gatewayUserId}</dt><dd><code>${escapeHtml(row.userId)}</code></dd>
+          <dt>${text.source}</dt><dd>${view.fromIssuer ? text.sourceIssuer : text.sourceGateway}${
+            shared ? ` — ${shared.long}` : ''
+          }</dd>
+          <dt>${text.lastSeen}</dt><dd>${row.seenAt ? escapeHtml(whenAgo(row.seenAt, input.strings).title) : '—'}</dd>
+          ${row.email ? `<dt>${input.strings.identity.accounts.email}</dt><dd>${escapeHtml(row.email)}</dd>` : ''}
+        </dl>
+        ${view.fromIssuer ? `<p class="note"><a href="/admin/oidc">${text.openAccount}</a></p>` : ''}
+        <h3>${text.botsHeading}</h3>
+        ${botControls(view, input)}
+        <div class="actions">
+          <button type="submit">${input.strings.common.save}</button>
+          <span class="note">${text.savesRow}</span>
+          <a class="more spread" href="#people">${input.strings.common.close}</a>
+        </div>
+      </div>
+    </form>
+  </li>`
+}
+
+/** The roster: a head strip, and one line per person under it. */
+function peopleRoster(input: AdminPageInput): string {
+  const text = input.strings.admin.people
+  const views = peopleViews(input)
+
+  if (!views.length) {
     return `<p class="note">${text.empty}</p>`
   }
 
-  return `<table>
-  <thead><tr>
-    <th>${text.who}</th>
-    <th>${text.lastSeen}</th>
-    <th>${text.bots}</th>
-    <th class="tick">${text.readOnly}</th>
-    <th class="tick">${text.push}</th>
-    <th class="tick">${text.administratorBox}</th>
-    <th></th>
-  </tr></thead>
-  <tbody>
-  ${rows.map((row, index) => personRow(row, index, input)).join('\n  ')}
-  </tbody>
-</table>`
-}
-
-function personRow(row: AdminUserRow, index: number, input: AdminPageInput): string {
-  const text = input.strings.admin.people
-  const label = row.displayName || row.email || row.userId
-  const allowed = row.allowedBots === null ? '' : row.allowedBots.join(', ')
-  const admin = input.state.admins.includes(row.userId)
-  const account = input.identity.bySub[row.userId]
-  const form = `person-${index}`
-
-  return `<tr>
-    <td><strong>${escapeHtml(label)}</strong>${admin ? ` <span class="badge">${text.administrator}</span>` : ''}${
-      account ? ` <a class="badge" href="/admin/oidc">${text.onThisIssuer}</a>` : ''
-    }
-      <br><code class="note">${escapeHtml(row.userId)}</code>${
-        account ? `<br><span class="note">${escapeHtml(account.username)}</span>` : ''
-      }</td>
-    <td class="note">${row.seenAt ? new Date(row.seenAt * 1000).toISOString().slice(0, 16).replace('T', ' ') : '—'}</td>
-    <td>
-      <label class="sr" for="bots-${form}">${text.allowedBotsLabel}</label>
-      <input id="bots-${form}" form="${form}" name="allowedBots" type="text" value="${escapeHtml(allowed)}"
-             placeholder="${escapeHtml(input.bots.join(', ') || 'researcher, writer')}">
-    </td>
-    <td class="tick"><input type="checkbox" form="${form}" name="readOnly" value="1"${
-      row.readOnly ? ' checked' : ''
-    } aria-label="${escapeHtml(text.readOnly)}"></td>
-    <td class="tick"><input type="checkbox" form="${form}" name="pushAllowed" value="1"${
-      row.pushAllowed ? ' checked' : ''
-    } aria-label="${escapeHtml(text.pushAllowed)}"></td>
-    <td class="tick"><input type="checkbox" form="${form}" name="admin" value="1"${
-      admin ? ' checked' : ''
-    } aria-label="${escapeHtml(text.administratorBox)}"></td>
-    <td>
-      <form id="${form}" method="post" action="/admin/user">
-        ${csrfField(input.csrf)}
-        <input type="hidden" name="userId" value="${escapeHtml(row.userId)}">
-        <button type="submit">${input.strings.common.save}</button>
-      </form>
-    </td>
-  </tr>`
+  return `<div class="roster people" id="people">
+  ${rosterHead([
+    text.who,
+    text.lastSeen,
+    text.bots,
+    `<span class="switches"><span>${text.readOnly}</span><span>${text.push}</span><span>${
+      text.administratorBox
+    }</span></span>`,
+    ''
+  ])}
+  <ul class="roster-list">
+    ${views.map(view => personRow(view, input)).join('\n    ')}
+  </ul>
+</div>`
 }
 
 /** People: everyone this service has seen, and what it will do for each of them. */
@@ -449,9 +615,15 @@ export function adminPeoplePage(input: AdminPageInput): string {
     title: text.heading,
     intro: text.intro,
     body: `${card({
-      body: `${input.identity.enabled ? `<p class="note">${text.issuerNote}</p>` : ''}${peopleTable(input)}`
+      body: `${peopleRoster(input)}
+      <details class="how">
+        <summary>${text.howHeading}</summary>
+        <p>${text.howReadOnly}</p>
+        ${input.identity.enabled ? `<p>${text.issuerNote}</p>` : ''}
+      </details>`
     })}
     ${card({
+      heading: text.addHeading,
       body: `<form method="post" action="/admin/user">
         ${csrfField(input.csrf)}
         <div class="fields">

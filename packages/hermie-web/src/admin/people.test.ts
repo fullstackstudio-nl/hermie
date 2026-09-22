@@ -235,8 +235,11 @@ describe('an account on the issuer is a person on the people list', () => {
 
     expect(page.body).toContain(sub)
     expect(page.body).toContain('katherine')
-    // Marked, and the mark is the way to the page that owns it.
-    expect(page.body).toContain('<a class="badge" href="/admin/oidc">account here</a>')
+    // The row says where the person came from, and the source is the way to the
+    // page that owns them. The subject id is not on the line any more — it is on
+    // the pointer and in the panel, which is what the two assertions above see.
+    expect(page.body).toContain('<a href="/admin/oidc">account on this service</a>')
+    expect(page.body).toContain(`title="${sub}"`)
     // The administrator's own gateway id is still there beside it.
     expect(page.body).toContain(ADA.userId)
   })
@@ -289,6 +292,32 @@ describe('an account on the issuer is a person on the people list', () => {
     expect(state.admins).not.toContain(sub)
     expect(state.users[sub]).toBeUndefined()
     expect((await open(await signIn(), '/admin/people')).body).not.toContain(sub)
+  })
+
+  it('says when a gateway sign-in and an account here share a username, and merges neither', async () => {
+    /*
+      The owner's own deployment, in one test: a gateway that authenticates `max`
+      with its own password file, and an account called `max` on the built-in
+      issuer. They are two identities as far as the gateway is concerned — two
+      `Session.user_id`s — so the list keeps two rows and says why.
+    */
+    await post('/admin/oidc/user', { do: 'create', username: 'ada', role: 'user' })
+
+    // The gateway's own row exists once this service has seen her use it.
+    await fetch(`${web.url}/api/auth/me`, { headers: { cookie: await signIn() } })
+
+    const sub = subFor('ada')
+    const page = await open(await signIn(), '/admin/people')
+    // Read after the page: the row is written to memory as the request is
+    // served and to the file just behind it.
+    const state = await loadAdminState(stateDir)
+
+    expect(Object.keys(state.users)).toContain(ADA.userId)
+    expect(Object.keys(state.users)).toContain(sub)
+    expect(page.body).toContain('same username as the account on this service')
+    expect(page.body).toContain('same username as the gateway sign-in')
+
+    await post('/admin/oidc/user', { do: 'remove', sub })
   })
 
   it('reconciles a state directory written before the two lists were one', async () => {

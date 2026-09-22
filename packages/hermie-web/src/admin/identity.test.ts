@@ -344,8 +344,10 @@ describe('accounts', () => {
     expect(body).not.toContain('privatePem')
     expect(body).not.toContain('katherine’s own password')
     // The `sub` IS shown, deliberately: it is what the administrator list on
-    // the main page is keyed by, so it has to be copyable.
-    expect(body).toMatch(/<code class="note">[A-Za-z0-9_-]{22}<\/code>/)
+    // the main page is keyed by, so it has to be copyable. It is in the
+    // account's own panel rather than on its line, where 22 characters of
+    // base64url wrapped over two lines and told a reader nothing.
+    expect(body).toMatch(/<code>[A-Za-z0-9_-]{22}<\/code>/)
   })
 
   it('disables, re-enables and re-roles somebody', async () => {
