@@ -8738,3 +8738,43 @@ somebody makes the layout quadratic again.
 two measured here, and nobody has watched the Graph tab open on a real 400-node
 memory. The pinch has likewise never been performed by a hand: the arithmetic is
 tested, the `PanResponder` wiring is read.
+
+### The widget tap, now carrying the gateway
+
+R7 put `gatewayKey` in the snapshot and R11a's notes closed with the gap: "the
+Swift still builds `hermie://chat/<bot>` with no query". Both native halves now
+append `?gateway=<key>`, and the JavaScript that reads it has been ready since
+R7 — `deep-link.ts` parses the parameter, `chat-link.ts` resolves it against the
+registry, and both shells act on it.
+
+**The key is a property of the SNAPSHOT and a tap is a property of a ROW**, and
+that shape is what made the change small. Three iOS widgets hold three different
+entry types, all of which hold rows; threading a second value through all of
+them would have touched every one. Instead `HermieWidgetStore.load()` stamps the
+key onto each row as the snapshot enters the extension — the one place that can
+be sure — and `chatURL` stays a property of the thing being tapped. Android does
+the same in `HermieWidgetStore.bots()`.
+
+**Both sides validate the key before they use it.** Sixteen lowercase hex
+digits, or the parameter is left off. `deep-link.ts` would ignore a malformed
+one anyway (`isGatewayKey` is the same check), but a URL carrying a parameter
+the receiver will discard is a worse thing to hand the system than one carrying
+none — and it would be indistinguishable, in a bug report, from the parameter
+not being sent at all.
+
+One Kotlin signature changed and it is the reason the key was reachable:
+`chatIntent(context, botName: String?)` became `chatIntent(context, bot: Bot?)`.
+The old one took a name and had nowhere to get anything else from.
+
+**Verified:** `xcodebuild … -destination 'generic/platform=iOS Simulator'
+CODE_SIGNING_ALLOWED=NO build` succeeded with the change in
+`ios/HermieWidgetsExtension/HermieWidgetSnapshot.swift` — the widget extension is
+an embedded target of the `Hermie` scheme, so building the app builds it.
+Android: `./gradlew assembleDebug`.
+
+**What needs a device:** the tap itself, on a phone set up against two real
+gateways, which is still the thing nothing in this repository has ever done. A
+compiler proves the Swift builds, not that the URL it builds is the one the
+reader wanted; `widget-deep-link.test.ts` covers the seam between the two
+languages by reading the native sources, which is the same thing
+`ios-scene-lifecycle.test.ts` does and has the same limit.

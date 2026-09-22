@@ -99,6 +99,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A widget tap says which gateway it came from.** The home-screen widgets build
+  `hermie://chat/<bot>?gateway=<key>` now, on iOS and on Android. On a device with one gateway
+  nothing changes; on a device with two it is the difference between opening the chat you were
+  looking at and opening a chat with the same name on whichever gateway happened to be current — and
+  two rosters routinely share names. The key is `gatewayKeyOf` the gateway's origin, the same
+  sixteen hex digits a push payload carries, and a link without one still opens the bot exactly as
+  it always did. **Not yet tapped on a device against two real gateways.**
+
 - **The memory map takes a pinch.** Two fingers zoom it, one finger still pans it, and the buttons
   and the mouse wheel still do what they did. The buttons are not a fallback for the pinch: a pinch
   is unavailable to anybody on a pointer, on a keyboard or using a switch control, so both exist
