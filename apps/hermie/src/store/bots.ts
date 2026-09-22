@@ -33,7 +33,19 @@ export interface Bot {
   provider: string
   isDefault: boolean
   hasAvatar: boolean
+  /** The bot's shared Bot Chat — the group chat — and nothing else. */
   canonical?: BotCanonicalSession
+  /**
+   * The reader's own chat this bot's key is bound to, when it is on one; absent
+   * means the group chat (`canonical`).
+   *
+   * Beside `canonical` rather than a pin on it, so the canonical always names the
+   * Bot Chat: the roster keeps reporting the group chat's `last_active` while the
+   * reader is parked elsewhere, and a cron delivery landing there still badges.
+   * Never read from the roster — `profiles.list` knows nothing about readers —
+   * so `setBots` carries it across every roster answer (see `currentSessions`).
+   */
+  current?: BotCanonicalSession
   /**
    * Highest of the profile's `ui_meta_revisions`. Avatars are cached against
    * `name + revision`, so a changed avatar invalidates itself.
@@ -49,6 +61,28 @@ export interface Bot {
  * silently marking the other's chat as read is a message somebody never sees.
  */
 export const BOT_LAST_SEEN_KEY = 'hermie.bots.last_seen'
+
+/**
+ * How many messages each of the reader's own chats held when they last read it,
+ * per gateway, keyed by conversation key (`bot#<storedId>`).
+ *
+ * A second watermark beside `lastSeen` because a listing row carries no
+ * last-activity time — `session.list` answers `message_count` and `started_at`
+ * and nothing else — so a chat that is not open can only be called unread by
+ * counting.
+ */
+export const BOT_SEEN_COUNTS_KEY = 'hermie.bots.seen_counts'
+
+/**
+ * When each of the reader's own chats was last opened or sent to ON THIS DEVICE,
+ * per gateway, keyed by stored session id; unix seconds.
+ *
+ * The own-chat list sorts by it (most recently used first) and falls back to the
+ * creation time for a chat never opened here. Deliberately never synced: it is
+ * this device's habit, and a phone's list reordering because a desktop was used
+ * is the list moving under somebody's thumb.
+ */
+export const BOT_LAST_OPENED_KEY = 'hermie.bots.last_opened'
 
 const str = (value: unknown): string => (typeof value === 'string' ? value : '')
 const num = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0)
@@ -94,8 +128,27 @@ export interface BotsState {
   avatarsFetched: Record<string, true>
   /** Bots the last `session.active_list` poll could place a busy session on. */
   running: Record<string, true>
-  /** name → the `last_active` the user has already looked at. */
+  /**
+   * Conversation key → the `last_active` the user has already looked at.
+   *
+   * The key is the bot's name for its group chat — the meaning it has always
+   * had — and `bot#<storedId>` for one of the reader's own chats, so reading a
+   * sub-chat never marks the group chat read.
+   */
   lastSeen: Record<string, number>
+  /** Conversation key → the `message_count` last read. See `BOT_SEEN_COUNTS_KEY`. */
+  seenCounts: Record<string, number>
+  /** Stored session id → when it was last opened here. See `BOT_LAST_OPENED_KEY`. */
+  lastOpened: Record<string, number>
+  /**
+   * Bot name → the own chat that bot is on, carried across roster answers.
+   *
+   * The roster is replaced wholesale on every `profiles.list`, and that call
+   * knows nothing about which conversation THIS reader is in; so the choice is
+   * held here and put back onto each bot `setBots` places. Kept for a bot the
+   * answer does not mention, as a pin is.
+   */
+  currentSessions: Record<string, BotCanonicalSession>
   /**
    * Canonical chats this app switched a bot onto, until the roster catches up.
    *
@@ -120,14 +173,30 @@ export interface BotsState {
   setBots: (bots: Bot[], options?: { fromCache?: boolean }) => void
   /** Point a bot at a different canonical chat and hold it there — see `canonicalPins`. */
   setCanonical: (name: string, canonical: BotCanonicalSession) => void
+  /**
+   * Bind a bot to one of the reader's own chats, or back to its group chat with
+   * `null`. Leaves `canonical` and its pins alone.
+   */
+  setCurrent: (name: string, session: BotCanonicalSession | null) => void
   setAvatar: (name: string, revision: number, dataUrl: string | null) => void
   setRunning: (names: readonly string[]) => void
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
   /** The gateway these watermarks belong to; null before the first read. */
   namespace: GatewayNamespace | null
+  /** Read this gateway's watermarks: `lastSeen`, `seenCounts` and `lastOpened`. */
   hydrateLastSeen: (ns: GatewayNamespace) => Promise<void>
-  markSeen: (name: string, lastActive?: number) => void
+  /**
+   * Move a conversation's read watermark forward. `key` is a conversation key —
+   * the bot's name for its group chat, `bot#<storedId>` for an own chat.
+   */
+  markSeen: (key: string, lastActive?: number) => void
+  /** Record how many messages an own chat held when it was read. */
+  markSeenCount: (key: string, count: number) => void
+  /** Stamp an own chat as opened (or sent to) now, on this device. */
+  markOpened: (storedId: string, at?: number) => void
+  /** Drop every watermark a deleted own chat left behind. */
+  forgetConversation: (key: string, storedId: string) => void
   reset: () => void
 }
 
@@ -139,6 +208,9 @@ const INITIAL = {
   avatarsFetched: {} as Record<string, true>,
   running: {} as Record<string, true>,
   lastSeen: {} as Record<string, number>,
+  seenCounts: {} as Record<string, number>,
+  lastOpened: {} as Record<string, number>,
+  currentSessions: {} as Record<string, BotCanonicalSession>,
   canonicalPins: {} as Record<string, BotCanonicalSession>,
   loading: false,
   error: null as string | null,
@@ -147,12 +219,48 @@ const INITIAL = {
 
 let lastSeenQueue: Promise<void> = Promise.resolve()
 
-function persistLastSeen(ns: GatewayNamespace, lastSeen: Record<string, number>): void {
+/** One queue for all three maps, so writes land in the order they were made. */
+function persistMap(ns: GatewayNamespace, key: string, map: Record<string, number>): void {
   lastSeenQueue = lastSeenQueue
-    .then(() => keyValueStore.setJson(ns.key(BOT_LAST_SEEN_KEY), lastSeen))
+    .then(() => keyValueStore.setJson(ns.key(key), map))
     .catch(() => {
       // A lost watermark shows one chat as unread again; not worth an error.
     })
+}
+
+/** A stored map of finite numbers, read defensively: an older build may have written anything. */
+async function readMap(ns: GatewayNamespace, key: string): Promise<Record<string, number>> {
+  const stored = await keyValueStore.getJson<Record<string, unknown>>(ns.key(key))
+  const out: Record<string, number> = {}
+
+  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
+    return out
+  }
+
+  for (const [name, value] of Object.entries(stored)) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      out[name] = value
+    }
+  }
+
+  return out
+}
+
+/** `bot` with its current own chat put back, or as it came when it has none. */
+const withCurrent = (bot: Bot, current: BotCanonicalSession | undefined): Bot => {
+  if (current) {
+    return { ...bot, current }
+  }
+
+  if (!bot.current) {
+    return bot
+  }
+
+  const rest = { ...bot }
+
+  delete rest.current
+
+  return rest
 }
 
 export const useBotsStore = create<BotsState>((set, get) => ({
@@ -160,6 +268,7 @@ export const useBotsStore = create<BotsState>((set, get) => ({
 
   setBots(bots, options = {}) {
     const pins = get().canonicalPins
+    const currents = get().currentSessions
     const keptPins: Record<string, BotCanonicalSession> = {}
     const byName: Record<string, Bot> = {}
     const placed: Bot[] = []
@@ -170,7 +279,7 @@ export const useBotsStore = create<BotsState>((set, get) => ({
       // resolved the canonical title to the chat we switched to, so the answer
       // and the pin say the same thing and the pin is dropped.
       const stale = pinned !== undefined && row.canonical?.id !== pinned.id
-      const bot = stale && pinned ? { ...row, canonical: pinned } : row
+      const bot = withCurrent(stale && pinned ? { ...row, canonical: pinned } : row, currents[row.name])
 
       if (stale && pinned) {
         keptPins[row.name] = pinned
@@ -212,6 +321,36 @@ export const useBotsStore = create<BotsState>((set, get) => ({
     }))
   },
 
+  setCurrent(name, session) {
+    const currentSessions = { ...get().currentSessions }
+
+    if (session) {
+      currentSessions[name] = session
+    } else if (name in currentSessions) {
+      delete currentSessions[name]
+    } else if (!get().byName[name]?.current) {
+      return
+    }
+
+    const existing = get().byName[name]
+
+    if (!existing) {
+      // No row yet: the choice is held and put onto the bot when the roster
+      // places it, the way a pin is.
+      set({ currentSessions })
+
+      return
+    }
+
+    const bot = withCurrent(existing, session ?? undefined)
+
+    set(state => ({
+      currentSessions,
+      bots: state.bots.map(entry => (entry.name === name ? bot : entry)),
+      byName: { ...state.byName, [name]: bot }
+    }))
+  },
+
   setAvatar(name, revision, dataUrl) {
     set(state => ({
       avatarsFetched: { ...state.avatarsFetched, [`${name}:${revision}`]: true },
@@ -238,28 +377,28 @@ export const useBotsStore = create<BotsState>((set, get) => ({
   },
 
   async hydrateLastSeen(ns) {
-    const stored = await keyValueStore.getJson<Record<string, number>>(ns.key(BOT_LAST_SEEN_KEY))
-    const lastSeen: Record<string, number> = {}
+    const [lastSeen, seenCounts, lastOpened] = await Promise.all([
+      readMap(ns, BOT_LAST_SEEN_KEY),
+      readMap(ns, BOT_SEEN_COUNTS_KEY),
+      readMap(ns, BOT_LAST_OPENED_KEY)
+    ])
 
-    for (const [name, value] of Object.entries(stored ?? {})) {
-      if (typeof value === 'number' && Number.isFinite(value)) {
-        lastSeen[name] = value
-      }
-    }
-
-    set({ namespace: ns, lastSeen })
+    set({ namespace: ns, lastSeen, seenCounts, lastOpened })
   },
 
-  markSeen(name, lastActive) {
-    const bot = get().byName[name]
+  markSeen(key, lastActive) {
+    // A bare bot name is the group chat and defaults to the roster's own
+    // `last_active` for it; an own chat's key (`bot#id`) names no roster row,
+    // so it falls through to the clock.
+    const bot = get().byName[key]
     const at = lastActive ?? bot?.canonical?.lastActive ?? Math.floor(Date.now() / 1000)
-    const current = get().lastSeen[name] ?? 0
+    const current = get().lastSeen[key] ?? 0
 
     if (at <= current) {
       return
     }
 
-    const lastSeen = { ...get().lastSeen, [name]: at }
+    const lastSeen = { ...get().lastSeen, [key]: at }
     const ns = get().namespace
 
     set({ lastSeen })
@@ -267,7 +406,78 @@ export const useBotsStore = create<BotsState>((set, get) => ({
     // Nothing is written before the gateway is known. A watermark under a key
     // nobody owns is one the next launch cannot find anyway.
     if (ns) {
-      persistLastSeen(ns, lastSeen)
+      persistMap(ns, BOT_LAST_SEEN_KEY, lastSeen)
+    }
+  },
+
+  markSeenCount(key, count) {
+    if (!Number.isFinite(count) || count < 0 || get().seenCounts[key] === count) {
+      return
+    }
+
+    // Set, not raised: unlike a timestamp a count can go DOWN — a compressed
+    // session reports fewer messages than it did — and a watermark held at the
+    // old high would hide every new message until the count climbed past it.
+    const seenCounts = { ...get().seenCounts, [key]: count }
+    const ns = get().namespace
+
+    set({ seenCounts })
+
+    if (ns) {
+      persistMap(ns, BOT_SEEN_COUNTS_KEY, seenCounts)
+    }
+  },
+
+  markOpened(storedId, at = Math.floor(Date.now() / 1000)) {
+    if (!storedId || (get().lastOpened[storedId] ?? 0) >= at) {
+      return
+    }
+
+    const lastOpened = { ...get().lastOpened, [storedId]: at }
+    const ns = get().namespace
+
+    set({ lastOpened })
+
+    if (ns) {
+      persistMap(ns, BOT_LAST_OPENED_KEY, lastOpened)
+    }
+  },
+
+  forgetConversation(key, storedId) {
+    const { lastSeen, seenCounts, lastOpened, namespace: ns } = get()
+    const drop = (map: Record<string, number>, name: string): Record<string, number> | null => {
+      if (!(name in map)) {
+        return null
+      }
+
+      const next = { ...map }
+
+      delete next[name]
+
+      return next
+    }
+    const nextSeen = drop(lastSeen, key)
+    const nextCounts = drop(seenCounts, key)
+    const nextOpened = drop(lastOpened, storedId)
+
+    set({
+      ...(nextSeen ? { lastSeen: nextSeen } : {}),
+      ...(nextCounts ? { seenCounts: nextCounts } : {}),
+      ...(nextOpened ? { lastOpened: nextOpened } : {})
+    })
+
+    if (ns) {
+      if (nextSeen) {
+        persistMap(ns, BOT_LAST_SEEN_KEY, nextSeen)
+      }
+
+      if (nextCounts) {
+        persistMap(ns, BOT_SEEN_COUNTS_KEY, nextCounts)
+      }
+
+      if (nextOpened) {
+        persistMap(ns, BOT_LAST_OPENED_KEY, nextOpened)
+      }
     }
   },
 
@@ -290,6 +500,19 @@ export function isUnread(state: Pick<BotsState, 'byName' | 'lastSeen'>, name: st
   const lastActive = state.byName[name]?.canonical?.lastActive ?? 0
 
   return lastActive > 0 && lastActive > (state.lastSeen[name] ?? 0)
+}
+
+/**
+ * Is one of the reader's own chats unread, going by its listing row?
+ *
+ * A listing row carries a `message_count` and no activity time, so this counts:
+ * more messages than when the chat was last read here. A chat never read on this
+ * device counts from zero, which is what `isUnread` does for a group chat with no
+ * watermark — both kinds of row answer the same question the same way. `key` is
+ * the chat's conversation key (`bot#<storedId>`).
+ */
+export function isOwnUnread(state: Pick<BotsState, 'seenCounts'>, key: string, messageCount: number): boolean {
+  return messageCount > 0 && messageCount > (state.seenCounts[key] ?? 0)
 }
 
 /**

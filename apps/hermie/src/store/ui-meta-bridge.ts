@@ -16,9 +16,10 @@
  *     second, so the send is debounced. What goes out is the arrangement the
  *     reader stopped on, not every frame of the gesture.
  *
- * The one thing it deliberately does NOT sync is `sidebarCollapsed`. That is
- * about the window in front of the reader — a phone has no sidebar — so it stays
- * where ADR-0012 put it.
+ * The things it deliberately does NOT sync are `sidebarCollapsed` and
+ * `conversationsCollapsed`. They are about the window in front of the reader — a
+ * phone has no sidebar and no conversation column — so they stay where ADR-0012
+ * put them.
  */
 import {
   contextDefaultOf,
@@ -118,6 +119,26 @@ export interface HermieAppShape extends HermieAppSection {
    * ADDITIVE, and the section version deliberately stays at 1 — see `pinned`.
    */
   myChats?: string[]
+  /**
+   * Which of the reader's own chats each bot is on: bot name -> STORED session id.
+   *
+   * The sub-chats list replaces the two-position switch, and this is what the
+   * switch becomes. `myChats` above goes on being written, as the projection
+   * "every bot named here", because an older build reads that and nothing else;
+   * a bot `myChats` names and this map does not is a legacy entry (the bare-lead
+   * chat, found by title).
+   *
+   * A map rather than `myChats` spelt `bot#id`: that list is a list of bot names
+   * to every build that reads it, and overloading it would have handed older
+   * builds names of bots that do not exist.
+   *
+   * Always sent, `{}` included, for the reason `pinned` gives: a reader who moves
+   * their last bot back to its group chat has to be able to say so. Absent means
+   * "this build knows nothing about it" and leaves the local map alone.
+   *
+   * ADDITIVE, and the section version deliberately stays at 1 — see `pinned`.
+   */
+  current?: Record<string, string>
   /**
    * What this reader calls each bot, by handle.
    *
@@ -278,6 +299,11 @@ export function snapshotFromStores(nowMs: number = Date.now()): UiMetaSnapshot {
     // Always sent, empty included, for the same reason: a reader who moves
     // their last chat back to the shared one has to be able to say so.
     myChats: Object.keys(layout.myChats),
+    // Always sent, `{}` included, for the same reason: picking the group chat
+    // again is removing the bot's entry, and an omitted key would read as "this
+    // build knows nothing about it" and leave the old conversation standing.
+    // A change here is a CHOICE and is dated by the diff below like any other.
+    current: layout.current,
     // Always sent, empty included, for the same reason again: clearing the field
     // on the bot's sheet is how a reader takes a name back, and an omitted key
     // would leave the last name they gave on every other device for ever.
@@ -378,6 +404,11 @@ export function applySnapshot(snapshot: UiMetaSnapshot): void {
     ...(Array.isArray(app?.myChats)
       ? { myChats: app.myChats.filter((name): name is string => typeof name === 'string' && name.length > 0) }
       : {}),
+    // And for the conversation each bot is on. A section from a build that
+    // predates `current` leaves this device's map exactly as it was — an older
+    // build writing the section must not move anybody back to a group chat —
+    // and `applyRemote` sanitises each id, which came off a wire.
+    ...(app?.current && typeof app.current === 'object' && !Array.isArray(app.current) ? { current: app.current } : {}),
     // And once more, which is what makes a name given on one device arrive on the
     // next: absent is "this build says nothing about names", and reading that as
     // "nobody named anything" would un-name every bot the moment an older device

@@ -5,7 +5,17 @@ import {
   type ChatSessionIds
 } from '../src/features/bots/bots-controller'
 import { MemoryChatCache } from '../src/platform/chat-cache'
-import { botFromProfileRow, isUnread, useBotsStore } from '../src/store/bots'
+import { namespace } from '../src/gateway/namespace'
+import { keyValueStore } from '../src/platform/key-value-store'
+import {
+  BOT_LAST_OPENED_KEY,
+  BOT_LAST_SEEN_KEY,
+  BOT_SEEN_COUNTS_KEY,
+  botFromProfileRow,
+  isOwnUnread,
+  isUnread,
+  useBotsStore
+} from '../src/store/bots'
 import { FakeChatGateway } from './support/fake-chat-gateway'
 
 const PROFILE_ROW = {
@@ -367,6 +377,137 @@ describe('unread', () => {
     useBotsStore.getState().markSeen('researcher', 1_000)
 
     expect(useBotsStore.getState().lastSeen.researcher).toBe(2_000)
+  })
+})
+
+describe('the conversation a bot is on', () => {
+  const OWN = { id: 'sess-ideas', resolvedId: 'sess-ideas', preview: 'An idea.', lastActive: 0, messageCount: 3 }
+
+  it('binds the bot to an own chat and leaves the group chat where it was', () => {
+    useBotsStore.getState().setBots([botFromProfileRow(PROFILE_ROW)])
+    useBotsStore.getState().setCurrent('researcher', OWN)
+
+    const bot = useBotsStore.getState().byName.researcher
+
+    expect(bot?.current).toEqual(OWN)
+    expect(bot?.canonical?.id).toBe('stored-researcher')
+    // No pin: the canonical still names the Bot Chat, so nothing waits on the
+    // roster to agree with anything.
+    expect(useBotsStore.getState().canonicalPins).toEqual({})
+    expect(useBotsStore.getState().bots[0]?.current).toEqual(OWN)
+  })
+
+  it('survives the next roster answer, which knows nothing about readers', () => {
+    useBotsStore.getState().setBots([botFromProfileRow(PROFILE_ROW)])
+    useBotsStore.getState().setCurrent('researcher', OWN)
+    useBotsStore.getState().setBots([botFromProfileRow(PROFILE_ROW), botFromProfileRow(WRITER_ROW)])
+
+    expect(useBotsStore.getState().byName.researcher?.current).toEqual(OWN)
+    expect(useBotsStore.getState().byName.writer?.current).toBeUndefined()
+  })
+
+  it('holds a choice made before the roster placed the bot', () => {
+    useBotsStore.getState().setCurrent('researcher', OWN)
+    useBotsStore.getState().setBots([botFromProfileRow(PROFILE_ROW)])
+
+    expect(useBotsStore.getState().byName.researcher?.current).toEqual(OWN)
+  })
+
+  it('goes back to the group chat on null, and stays there across a roster answer', () => {
+    useBotsStore.getState().setBots([botFromProfileRow(PROFILE_ROW)])
+    useBotsStore.getState().setCurrent('researcher', OWN)
+    useBotsStore.getState().setCurrent('researcher', null)
+
+    expect(useBotsStore.getState().byName.researcher).not.toHaveProperty('current')
+
+    useBotsStore.getState().setBots([botFromProfileRow(PROFILE_ROW)])
+
+    expect(useBotsStore.getState().byName.researcher).not.toHaveProperty('current')
+  })
+
+  it('keeps the group chat unread rule on the canonical while parked', () => {
+    useBotsStore.getState().setBots([botFromProfileRow(PROFILE_ROW)])
+    useBotsStore.getState().markSeen('researcher')
+    useBotsStore.getState().setCurrent('researcher', { ...OWN, lastActive: 1_800_000_000 })
+
+    // The own chat moving is not the group chat moving.
+    expect(isUnread(useBotsStore.getState(), 'researcher')).toBe(false)
+  })
+})
+
+describe('watermarks per conversation', () => {
+  const NS = namespace('gwatermarks00000')
+  const KEY = 'researcher#sess-ideas'
+
+  beforeEach(async () => {
+    for (const key of [BOT_LAST_SEEN_KEY, BOT_SEEN_COUNTS_KEY, BOT_LAST_OPENED_KEY]) {
+      await keyValueStore.delete(NS.key(key))
+    }
+
+    await useBotsStore.getState().hydrateLastSeen(NS)
+  })
+
+  /** A relaunch: memory gone, the same gateway's disk read again. */
+  const relaunch = async (): Promise<void> => {
+    await new Promise(resolve => setTimeout(resolve, 0))
+    useBotsStore.setState({ lastSeen: {}, seenCounts: {}, lastOpened: {} })
+    await useBotsStore.getState().hydrateLastSeen(NS)
+  }
+
+  it('keeps an own chat’s watermark apart from the group chat’s', () => {
+    useBotsStore.getState().setBots([botFromProfileRow(PROFILE_ROW)])
+    useBotsStore.getState().markSeen(KEY, 1_800_000_000)
+
+    expect(useBotsStore.getState().lastSeen[KEY]).toBe(1_800_000_000)
+    expect(isUnread(useBotsStore.getState(), 'researcher')).toBe(true)
+  })
+
+  it('survives a relaunch, all three maps', async () => {
+    useBotsStore.getState().markSeen(KEY, 1_800_000_000)
+    useBotsStore.getState().markSeenCount(KEY, 5)
+    useBotsStore.getState().markOpened('sess-ideas', 1_800_000_100)
+    await relaunch()
+
+    expect(useBotsStore.getState().lastSeen[KEY]).toBe(1_800_000_000)
+    expect(useBotsStore.getState().seenCounts[KEY]).toBe(5)
+    expect(useBotsStore.getState().lastOpened['sess-ideas']).toBe(1_800_000_100)
+  })
+
+  it('calls an own chat unread by count, from zero when never read here', () => {
+    expect(isOwnUnread(useBotsStore.getState(), KEY, 0)).toBe(false)
+    expect(isOwnUnread(useBotsStore.getState(), KEY, 2)).toBe(true)
+
+    useBotsStore.getState().markSeenCount(KEY, 2)
+
+    expect(isOwnUnread(useBotsStore.getState(), KEY, 2)).toBe(false)
+    expect(isOwnUnread(useBotsStore.getState(), KEY, 3)).toBe(true)
+  })
+
+  it('lets a count go down, which a compressed session does', () => {
+    useBotsStore.getState().markSeenCount(KEY, 40)
+    useBotsStore.getState().markSeenCount(KEY, 12)
+
+    expect(isOwnUnread(useBotsStore.getState(), KEY, 13)).toBe(true)
+  })
+
+  it('never moves the last-opened stamp backwards', () => {
+    useBotsStore.getState().markOpened('sess-ideas', 2_000)
+    useBotsStore.getState().markOpened('sess-ideas', 1_000)
+
+    expect(useBotsStore.getState().lastOpened['sess-ideas']).toBe(2_000)
+  })
+
+  it('forgets every watermark of a deleted chat, and only those', async () => {
+    useBotsStore.getState().markSeen('researcher', 1_000)
+    useBotsStore.getState().markSeen(KEY, 1_000)
+    useBotsStore.getState().markSeenCount(KEY, 4)
+    useBotsStore.getState().markOpened('sess-ideas', 1_000)
+    useBotsStore.getState().forgetConversation(KEY, 'sess-ideas')
+    await relaunch()
+
+    expect(useBotsStore.getState().lastSeen).toEqual({ researcher: 1_000 })
+    expect(useBotsStore.getState().seenCounts).toEqual({})
+    expect(useBotsStore.getState().lastOpened).toEqual({})
   })
 })
 

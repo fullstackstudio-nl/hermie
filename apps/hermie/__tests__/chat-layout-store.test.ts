@@ -9,7 +9,7 @@
  * arrangement disagree: a bot that appears, a bot that vanishes, and a gateway
  * that is swapped underneath both.
  */
-import { CHAT_LAYOUT_KEY, archivedOf, foldersOf, useChatLayoutStore } from '../src/store/chat-layout'
+import { CHAT_LAYOUT_KEY, archivedOf, currentTargetOf, foldersOf, useChatLayoutStore } from '../src/store/chat-layout'
 import { botsInOrder } from '../src/store/folders'
 
 const mockDisk = new Map<string, string>()
@@ -504,5 +504,166 @@ describe('one accent, read by every surface', () => {
     useChatLayoutStore.getState().setAccent('writer', 'orange')
 
     expect(useChatLayoutStore.getState().accents).toEqual({ researcher: 'teal', writer: 'orange' })
+  })
+})
+
+/**
+ * Which conversation each bot is on (sub-chats).
+ *
+ * `current` is the new map; `myChats` stays beside it as the projection older
+ * builds read. What the store adds is the invariant between the two — every bot
+ * with a `current` is in `myChats`, and a bot in `myChats` without one is a
+ * legacy entry — kept whichever half was written, and by whom.
+ */
+describe('the conversation each bot is on', () => {
+  const GATEWAY = 'https://gateway.example.com'
+
+  it('remembers an own chat by id and projects it into myChats', () => {
+    store().setCurrent('researcher', 'sess-ideas')
+
+    expect(store().current).toEqual({ researcher: 'sess-ideas' })
+    expect(store().myChats).toEqual({ researcher: true })
+    expect(currentTargetOf(store(), 'researcher')).toBe('sess-ideas')
+  })
+
+  it('removes the entry and its projection on the group chat', () => {
+    store().setCurrent('researcher', 'sess-ideas')
+    store().setCurrent('researcher', null)
+
+    expect(store().current).toEqual({})
+    expect(store().myChats).toEqual({})
+    expect(currentTargetOf(store(), 'researcher')).toBeUndefined()
+  })
+
+  it('reads a legacy entry as the bare-lead chat until something resolves it', () => {
+    store().setMyChat('researcher', true)
+
+    expect(currentTargetOf(store(), 'researcher')).toBeNull()
+
+    store().setCurrent('researcher', 'sess-legacy', { chore: true })
+
+    expect(currentTargetOf(store(), 'researcher')).toBe('sess-legacy')
+  })
+
+  it('counts a correction as a chore and a pick as nothing of the kind', () => {
+    const before = store().chores
+
+    store().setCurrent('researcher', 'sess-picked')
+
+    expect(store().chores).toBe(before)
+
+    store().setCurrent('researcher', null, { chore: true })
+
+    expect(store().chores).toBe(before + 1)
+  })
+
+  it('treats the switch back to "shared" as the group chat, forgetting the id too', () => {
+    store().setCurrent('researcher', 'sess-ideas')
+    store().setMyChat('researcher', false)
+
+    expect(store().current).toEqual({})
+    expect(store().myChats).toEqual({})
+  })
+
+  it('keeps the map when a gateway copy says nothing about it', () => {
+    store().setCurrent('writer', 'sess-drafts')
+    store().applyRemote({ myChats: ['researcher'] })
+
+    expect(store().current).toEqual({ writer: 'sess-drafts' })
+    // The older build's list is taken, and the writer is put back into it.
+    expect(store().myChats).toEqual({ researcher: true, writer: true })
+  })
+
+  it('replaces the map when a gateway copy carries one, empty included', () => {
+    store().setCurrent('writer', 'sess-drafts')
+    store().applyRemote({ current: { researcher: 'sess-ideas' }, myChats: ['researcher'] })
+
+    expect(store().current).toEqual({ researcher: 'sess-ideas' })
+    expect(store().myChats).toEqual({ researcher: true })
+
+    store().applyRemote({ current: {}, myChats: [] })
+
+    expect(store().current).toEqual({})
+    expect(store().myChats).toEqual({})
+  })
+
+  it('does not turn a bot moved back to its group chat into a legacy entry', () => {
+    store().setMyChat('bookkeeper', true)
+    store().setCurrent('writer', 'sess-drafts')
+    // A `current` with no `myChats` beside it: the writer is on its group chat
+    // now, and the bookkeeper's legacy entry is untouched.
+    store().applyRemote({ current: {} })
+
+    expect(store().current).toEqual({})
+    expect(store().myChats).toEqual({ bookkeeper: true })
+  })
+
+  it('reads a gateway copy defensively', () => {
+    const wire = { researcher: 'sess-ideas', writer: '', '': 'sess-x', bookkeeper: 7 } as unknown
+
+    store().applyRemote({ current: wire as Record<string, string> })
+
+    expect(store().current).toEqual({ researcher: 'sess-ideas' })
+  })
+
+  it('survives a reload, and an older blob with no map reads as empty', async () => {
+    await store().load(GATEWAY)
+    store().setCurrent('researcher', 'sess-ideas')
+    store().setMyChat('writer', true)
+    await settle()
+
+    store().reset()
+    await store().load(GATEWAY)
+
+    expect(store().current).toEqual({ researcher: 'sess-ideas' })
+    expect(store().myChats).toEqual({ researcher: true, writer: true })
+
+    mockDisk.set(
+      CHAT_LAYOUT_KEY,
+      JSON.stringify({ [GATEWAY]: { entries: [], archived: [], accents: {}, myChats: ['writer'] } })
+    )
+    store().reset()
+    await store().load(GATEWAY)
+
+    expect(store().current).toEqual({})
+    expect(currentTargetOf(store(), 'writer')).toBeNull()
+  })
+
+  it('restores the projection from disk even when a blob lost it', async () => {
+    mockDisk.set(
+      CHAT_LAYOUT_KEY,
+      JSON.stringify({ [GATEWAY]: { entries: [], archived: [], accents: {}, current: { writer: 'sess-drafts' } } })
+    )
+
+    await store().load(GATEWAY)
+
+    expect(store().myChats).toEqual({ writer: true })
+  })
+})
+
+describe('the conversation column, on this device only', () => {
+  const GATEWAY = 'https://gateway.example.com'
+
+  it('starts with no choice and remembers Hide across a reload', async () => {
+    await store().load(GATEWAY)
+
+    expect(store().conversationsCollapsed).toBeUndefined()
+
+    store().setConversationsCollapsed(true)
+    await settle()
+    store().reset()
+    await store().load(GATEWAY)
+
+    expect(store().conversationsCollapsed).toBe(true)
+  })
+
+  it('is never replaced by a gateway copy', () => {
+    // A patch carrying the field anyway, as a confused writer might send it.
+    const wire = { conversationsCollapsed: false } as unknown as Parameters<ReturnType<typeof store>['applyRemote']>[0]
+
+    store().setConversationsCollapsed(true)
+    store().applyRemote(wire)
+
+    expect(store().conversationsCollapsed).toBe(true)
   })
 })

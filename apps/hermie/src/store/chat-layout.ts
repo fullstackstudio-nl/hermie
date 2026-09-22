@@ -85,6 +85,17 @@ export interface PersistedLayout {
    * `pinned` beside it, because the value is always "yes".
    */
   myChats?: string[]
+  /**
+   * Which of the reader's own chats each bot is on, by STORED session id
+   * (sub-chats; ADR-0016's amendment of 2026-09-22). Absent for a bot on its
+   * group chat, which is most of them.
+   *
+   * `myChats` above is kept beside it as a projection for builds that predate
+   * this field: every bot named here is named there too. A bot named there and
+   * NOT here is a legacy entry — "the bare-lead chat", found by title — that no
+   * build has resolved to an id yet.
+   */
+  current?: Record<string, string>
   accents: Record<string, AccentName>
   /**
    * The name THIS READER gave a bot, by handle. Absent for a bot they have not
@@ -113,6 +124,15 @@ export interface PersistedLayout {
    * survive Change gateway too, which is the one thing it must not do.
    */
   sidebarCollapsed?: boolean
+  /**
+   * Whether the reader has hidden the conversation column on a wide window.
+   *
+   * Local for the reason `sidebarCollapsed` is: it is about the window in front
+   * of somebody. Absent reads as "shown" — unlike the sidebar there is no width
+   * band to answer for it, because the column is only ever drawn on a window
+   * wide enough to hold it.
+   */
+  conversationsCollapsed?: boolean
 }
 
 type LayoutsOnDisk = Record<string, PersistedLayout>
@@ -148,6 +168,17 @@ export interface ChatLayoutState {
    * they are in — that is the entire point of the feature.
    */
   myChats: Record<string, true>
+  /**
+   * Which of the reader's own chats each bot is on: bot name -> stored session
+   * id. A bot missing here is on its group chat, or — while `myChats` still
+   * names it — on the legacy bare-lead chat nobody has resolved yet. Read it
+   * through `currentTargetOf`, which says which of the three it is.
+   *
+   * Synced (app-wide section, `current`) and dated as a choice, so the device
+   * where somebody last picked a conversation is the one every other device
+   * follows on its next open.
+   */
+  current: Record<string, string>
   accents: Record<string, AccentName>
   /**
    * What this reader calls each bot, by handle. Absent where they have not said.
@@ -172,6 +203,8 @@ export interface ChatLayoutState {
    * directly: on its own it does not say what the shell should draw.
    */
   sidebarCollapsed?: boolean
+  /** The reader's Hide/Show of the conversation column. Never synced; see `PersistedLayout`. */
+  conversationsCollapsed?: boolean
   /** False until the disk read finishes; the list paints the roster order meanwhile. */
   loaded: boolean
   /**
@@ -228,8 +261,29 @@ export interface ChatLayoutState {
   setPinned: (botName: string, pinned: boolean) => void
   /** The row menu's and the popover's one-press form of the above. */
   togglePinned: (botName: string) => void
-  /** Open this bot as the reader's own chat, or back to the shared one. */
+  /**
+   * Open this bot as the reader's own chat, or back to the shared one.
+   *
+   * The two-position switch's setter, kept until the switch goes. "Mine" is a
+   * legacy entry — the bare-lead chat, no id — and "shared" also forgets any
+   * `current` id, because the switch means the group chat.
+   */
   setMyChat: (botName: string, mine: boolean) => void
+  /**
+   * Remember which conversation a bot is on: a stored session id for one of the
+   * reader's own chats, `null` for the group chat.
+   *
+   * `myChats` follows as the projection older builds read: an id adds the bot,
+   * `null` removes it together with any legacy entry, because the reader has now
+   * said where this bot is.
+   *
+   * By default this is the READER's choice and the bridge dates it, so it wins
+   * over older copies on every device. `{ chore: true }` is for the app's own
+   * corrections — an id the gateway no longer lists being forgotten, a legacy
+   * entry being resolved to the id it names — which must be sent but must never
+   * outrank a choice somebody made on another device (see `chores`).
+   */
+  setCurrent: (botName: string, sessionId: string | null, options?: { chore?: boolean }) => void
   setAccent: (botName: string, accent: AccentName) => void
   /** Name this bot in this reader's own list; an empty string clears it. */
   setLabel: (botName: string, label: string) => void
@@ -247,10 +301,12 @@ export interface ChatLayoutState {
   dropExpiredMutes: (now: number) => void
   /** Record an explicit Hide/Show. There is no "back to automatic" — see the type. */
   setSidebarCollapsed: (collapsed: boolean) => void
+  /** Hide or show the conversation column on this device. */
+  setConversationsCollapsed: (collapsed: boolean) => void
   /**
    * Replace the parts ADR-0016 syncs with the gateway's copy.
    *
-   * `sidebarCollapsed` is deliberately NOT in here. It is about the WINDOW the
+   * `sidebarCollapsed` and `conversationsCollapsed` are deliberately NOT in here. It is about the WINDOW the
    * reader is looking at — a phone has no sidebar and a Mac window has one at a
    * different width — so a desktop hiding its list must not collapse a tablet's.
    * It stays what ADR-0012 made it: local to the device.
@@ -264,6 +320,7 @@ export interface ChatLayoutState {
     archived?: string[]
     pinned?: string[]
     myChats?: string[]
+    current?: Record<string, string>
     accents?: Record<string, AccentName>
     labels?: Record<string, string>
     mutes?: Mutes
@@ -279,10 +336,12 @@ const INITIAL = {
   archived: {} as Record<string, true>,
   pinned: {} as Record<string, true>,
   myChats: {} as Record<string, true>,
+  current: {} as Record<string, string>,
   accents: {} as Record<string, AccentName>,
   labels: {} as Record<string, string>,
   mutes: {} as Mutes,
   sidebarCollapsed: undefined as boolean | undefined,
+  conversationsCollapsed: undefined as boolean | undefined,
   loaded: false,
   chores: 0
 }
@@ -347,6 +406,74 @@ function labelsOf(value: unknown): Record<string, string> {
   return out
 }
 
+/**
+ * Read a map of bot name -> stored session id defensively.
+ *
+ * It arrives from disk and from a gateway, so a key or a value that is not a
+ * non-empty string is dropped. Nothing is repaired: an id is an address, and a
+ * guessed one is worse than none — the bot then opens its group chat, which is
+ * always there.
+ */
+export function currentOf(value: unknown): Record<string, string> {
+  const out: Record<string, string> = {}
+
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return out
+  }
+
+  for (const [bot, id] of Object.entries(value as Record<string, unknown>)) {
+    if (bot && typeof id === 'string' && id.length > 0) {
+      out[bot] = id
+    }
+  }
+
+  return out
+}
+
+/**
+ * `myChats` as older builds must read it: every bot with a `current` id, plus
+ * the legacy entries nobody has resolved yet.
+ *
+ * Imposed wherever either map is written, so the invariant holds whichever
+ * build wrote which half: an older build replaces `myChats` and says nothing
+ * about `current`, and a bot this device holds an id for must not drop out of
+ * the projection because of it.
+ */
+function withProjection(myChats: Record<string, true>, current: Record<string, string>): Record<string, true> {
+  const missing = Object.keys(current).filter(bot => !myChats[bot])
+
+  if (!missing.length) {
+    return myChats
+  }
+
+  const next = { ...myChats }
+
+  for (const bot of missing) {
+    next[bot] = true
+  }
+
+  return next
+}
+
+/**
+ * The part of `myChats` that is NOT a projection of `current`: legacy entries.
+ *
+ * What survives when a `current` arrives without a `myChats` beside it — a bot
+ * the arriving map moved back to its group chat must leave the projection with
+ * it, rather than turn into a legacy entry nobody chose.
+ */
+function legacyEntries(myChats: Record<string, true>, current: Record<string, string>): Record<string, true> {
+  const out: Record<string, true> = {}
+
+  for (const bot of Object.keys(myChats)) {
+    if (!(bot in current)) {
+      out[bot] = true
+    }
+  }
+
+  return out
+}
+
 /** Read a stored blob defensively: an older build may have written anything. */
 function asLayout(value: unknown): PersistedLayout {
   const raw = (value ?? {}) as Partial<PersistedLayout>
@@ -378,8 +505,10 @@ function asLayout(value: unknown): PersistedLayout {
     myChats: (Array.isArray(raw.myChats) ? raw.myChats : []).filter(
       (name): name is string => typeof name === 'string' && name.length > 0
     ),
+    current: currentOf(raw.current),
     accents,
     mutes: mutesOf(raw.mutes),
+    ...(typeof raw.conversationsCollapsed === 'boolean' ? { conversationsCollapsed: raw.conversationsCollapsed } : {}),
     // Only a real boolean counts. Anything else — a missing key, a string an
     // older build wrote — has to read as "never chosen", because that is the
     // value the width bands are allowed to answer for.
@@ -430,10 +559,12 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
       archived,
       pinned,
       myChats,
+      current,
       accents,
       labels,
       mutes,
-      sidebarCollapsed
+      sidebarCollapsed,
+      conversationsCollapsed
     } = get()
 
     if (gatewayKey) {
@@ -444,9 +575,11 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
         archived: Object.keys(archived),
         pinned: Object.keys(pinned),
         myChats: Object.keys(myChats),
+        current,
         accents,
         labels,
         mutes,
+        ...(conversationsCollapsed === undefined ? {} : { conversationsCollapsed }),
         // Omitted while nobody has chosen, so that "never chosen" survives a
         // round trip as the absence it is rather than as a `false` the width
         // bands would then never get to answer for.
@@ -493,6 +626,8 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
         myChats[name] = true
       }
 
+      const current = stored.current ?? {}
+
       set({
         gatewayKey,
         entries: stored.entries,
@@ -500,11 +635,13 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
         collapsed,
         archived,
         pinned,
-        myChats,
+        myChats: withProjection(myChats, current),
+        current,
         accents: stored.accents,
         labels: stored.labels ?? {},
         mutes: stored.mutes ?? {},
         sidebarCollapsed: stored.sidebarCollapsed,
+        conversationsCollapsed: stored.conversationsCollapsed,
         loaded: true
       })
     },
@@ -726,11 +863,48 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
       // moved then costs forty fewer entries and reads as "never asked".
       if (mine) {
         next[botName] = true
+        set({ myChats: next })
       } else {
+        const current = { ...get().current }
+
         delete next[botName]
+        delete current[botName]
+        set({ myChats: next, current })
       }
 
-      set({ myChats: next })
+      save()
+    },
+
+    setCurrent(botName, sessionId, options = {}) {
+      const { current, myChats } = get()
+
+      // The same answer is no change: re-picking the row a bot is already on
+      // must not re-date the section, or a device that merely re-opened a chat
+      // would outrank a choice made since on another one.
+      if (sessionId === null ? !(botName in current) && !myChats[botName] : current[botName] === sessionId) {
+        return
+      }
+
+      const nextCurrent = { ...current }
+      const nextMine = { ...myChats }
+
+      if (sessionId === null) {
+        // The group chat is the absence of a choice, as with `setMyChat`, and it
+        // clears the legacy entry too: the reader has said where this bot is.
+        delete nextCurrent[botName]
+        delete nextMine[botName]
+      } else {
+        nextCurrent[botName] = sessionId
+        nextMine[botName] = true
+      }
+
+      set({
+        current: nextCurrent,
+        myChats: nextMine,
+        // One `set`, so the bridge sees the chore and the change in the same
+        // notification and does not date it. See `chores`.
+        ...(options.chore ? { chores: get().chores + 1 } : {})
+      })
       save()
     },
 
@@ -805,6 +979,11 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
       save()
     },
 
+    setConversationsCollapsed(collapsed) {
+      set({ conversationsCollapsed: collapsed })
+      save()
+    },
+
     applyRemote(patch) {
       const archived: Record<string, true> = {}
 
@@ -824,6 +1003,11 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
         myChats[name] = true
       }
 
+      // Absent is not empty, and here it is the rule older builds lean on: a
+      // section written before `current` existed says nothing about which of the
+      // reader's chats each bot is on, so this device keeps its own map.
+      const current = patch.current ? currentOf(patch.current) : get().current
+
       set({
         ...(patch.arrangement ? { entries: patch.arrangement.entries, folders: patch.arrangement.folders } : {}),
         ...(patch.archived ? { archived } : {}),
@@ -834,7 +1018,11 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
         // Absent is not empty here either: a build that predates the field says
         // nothing about which chats are the reader's own, and reading that as
         // "none" would put them back in the shared transcript without asking.
-        ...(patch.myChats ? { myChats } : {}),
+        // The projection is re-imposed over whichever half arrived, so a bot this
+        // device holds an id for stays in the list older builds read even when one
+        // of them wrote that list without it.
+        myChats: withProjection(patch.myChats ? myChats : legacyEntries(get().myChats, get().current), current),
+        current,
         ...(patch.accents ? { accents: patch.accents } : {}),
         // Absent is not empty once more: a build that predates the field says
         // nothing about what this reader calls their bots, and reading that as
@@ -884,6 +1072,33 @@ export function useChatPinned(botName: string): boolean {
 /** Is this bot opened as the reader's own chat rather than the shared one? */
 export function useMyChat(botName: string): boolean {
   return useChatLayoutStore(state => Boolean(state.myChats[botName]))
+}
+
+/**
+ * Where a bot is, as the conversation directory needs to ask it.
+ *
+ *  - a stored session id: one of the reader's own chats, by address;
+ *  - `null`: a legacy entry — `myChats` names the bot and no build has resolved
+ *    it to an id yet, so it means "the bare-lead chat", found by title, never
+ *    minted;
+ *  - `undefined`: the group chat.
+ *
+ * Pure over the state so a controller can ask it without a hook.
+ */
+export function currentTargetOf(
+  state: Pick<ChatLayoutState, 'current' | 'myChats'>,
+  botName: string
+): string | null | undefined {
+  return state.current[botName] ?? (state.myChats[botName] ? null : undefined)
+}
+
+/**
+ * The stored id of the reader's own chat this bot is on, or `undefined` for the
+ * group chat (and for a legacy entry nobody has resolved yet). A string, so a
+ * row does not re-render because a different bot moved.
+ */
+export function useCurrentConversation(botName: string): string | undefined {
+  return useChatLayoutStore(state => state.current[botName])
 }
 
 /**

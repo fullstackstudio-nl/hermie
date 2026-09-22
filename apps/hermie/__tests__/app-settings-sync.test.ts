@@ -22,6 +22,8 @@
  * real socket. This suite is the app on top of it: real stores, a real disk, and a
  * gateway that remembers what it was told.
  */
+import { HERMIE_APP_SECTION_VERSION } from '@hermie/gateway-client/ui-meta'
+
 import { keyValueStore } from '../src/platform/key-value-store'
 import { APP_STAMP_KEY, useAppStampStore } from '../src/store/app-stamp'
 import { CHAT_VIEW_KEY, useSettingsStore } from '../src/store/settings'
@@ -281,5 +283,20 @@ describe('the section this all rides in', () => {
     // The marker another tool owns, and the plugin's advert. A client that wrote
     // its settings by replacing the bag would un-bot the whole roster.
     expect(Object.keys(researcher?.ui_meta ?? {}).sort()).toEqual([APP_KEY, 'hermes-bots', 'hermie-plugin'].sort())
+  })
+
+  it('stays at version 1 however many fields it gains', async () => {
+    const gateway = holdingGateway()
+
+    await newDevice()
+    await chooseOnline(gateway, 'graphite')
+
+    // Every field since the first — folders, pins, `myChats`, labels, `current`
+    // — is additive. A `v` an older build does not know makes it treat the whole
+    // section as unreadable and re-seed it from its own copy (ADR-0016).
+    expect(HERMIE_APP_SECTION_VERSION).toBe(1)
+    expect(gateway.app()?.v).toBe(1)
+    expect(gateway.app()).toHaveProperty('current')
+    expect(gateway.app()).toHaveProperty('myChats')
   })
 })

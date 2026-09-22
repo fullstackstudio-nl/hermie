@@ -437,3 +437,61 @@ ever on the next. The per-bot section is unchanged and still carries `archived` 
 remembers: a rename arriving on the second device, one made with no socket landing on the next
 connect, an emptied field clearing the name on a device that still had it, and a rename being dated
 as a choice while the roster's fold beside it is not.
+
+## Amendment (2026-09-22): `current`, the conversation each bot is on
+
+The sub-chats round replaces the two-position "Shared Bot Chat / My chat" switch with a list per
+bot: the group chat (the canonical `Bot Chat`) and any number of the reader's own chats. What the
+switch recorded as `myChats: string[]` becomes a map in the **app-wide** section:
+
+```json
+{ "current": { "researcher": "<stored session id>" }, "myChats": ["researcher"] }
+```
+
+- **`current: Record<bot, storedId>`** names the reader's own chat a bot is on. A bot with no entry is
+  on its group chat. Ids, not titles: the title family (`Chat · <lead>[ · <label>]`) is how the chats
+  are LISTED, the stored id is how one is remembered and addressed.
+- **`myChats` is kept and still written**, as the projection "every bot with a `current` entry". It
+  is all an older build reads, and it tells that build to open its own chat (the bare-lead one) rather
+  than the shared one. A bot `myChats` names and `current` does not is a **legacy entry**: the
+  bare-lead chat, found by title, never minted, until something resolves it to an id.
+- Not `myChats` spelt `bot#id`. That list is a list of bot NAMES to every build that reads it, and
+  overloading it would have handed older builds names of bots that do not exist.
+
+**Additive, and `v` stays at 1**, by the rule this record states for `pinned`.
+`current` is **always written, `{}` included**: moving the last bot back to its group chat is
+removing an entry, and an omitted key would read as "this build knows nothing about it".
+
+**Absent is not empty.** A section without `current` — every section an older build writes — leaves
+the device's map exactly as it was; the device re-imposes the projection on whatever `myChats`
+arrived, so a bot it holds an id for is not reported to older builds as back on its group chat. The
+cost is the one this record already accepts for every additive field: an older build's switch back
+to "shared" does not reach a newer device that has an id for that bot.
+
+**A pick is a choice, and it is dated.** `current` sits among the section's choices, so the bridge's
+diff moves `updatedAt` when the reader picks a conversation, and the device where somebody last
+picked is the one every other device follows. Two things are not choices and are sent undated, as
+the roster's fold is: forgetting an id the gateway no longer lists, and resolving a legacy entry to
+the id it names (`setCurrent(bot, id, { chore: true })`). Re-picking the conversation a bot is
+already on changes nothing and dates nothing.
+
+**Following happens on the next open, never under a live chat.** The section arrives on reconnect
+and replaces the stored map at once; the chat controller (built after the stores) applies it only to
+bots whose chat is not open on that device, so an open chat stays where it is until the reader leaves
+it or picks a row.
+Two devices open on the same bot can therefore show different conversations until one of them
+leaves — accepted, and the owner's decision.
+
+**What stays on the device.** The conversation column's Hide/Show (`conversationsCollapsed`) is
+local like `sidebarCollapsed`. So are the per-conversation read watermarks (`lastSeen` keyed
+`bot#<storedId>`, `seenCounts`) and the last-opened time the own-chat list sorts by: they are this
+device's reading and this device's habit, and a list reordering on a phone because a desktop was used
+is a list moving under somebody's thumb.
+
+`apps/hermie/__tests__/current-conversation-sync.test.ts` drives it on two devices against the
+gateway that remembers: a pick arriving on the next open, the later pick winning in both connect
+orders, an offline pick landing on the next connect, a move back to the group chat carried as `{}`,
+the date moving for a pick and not for the fold, a stale-id correction or a re-pick, `myChats` still
+projecting the parked bots, a section without `current` leaving the map alone, a legacy-only section
+yielding an empty map and a readable legacy set, and the column choice never leaving the device.
+`app-settings-sync.test.ts` asserts the section is still at version 1.
