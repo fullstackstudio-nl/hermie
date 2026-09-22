@@ -99,6 +99,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The profile sheet offers Memory wherever it is opened from.** The row was there when the sheet
+  came from the chat list's menu and absent when the same sheet came from the chat header's pill,
+  because the browser is a full page rather than a modal — it needs the screen underneath it to
+  stand aside, so the sheet renders the row only where a screen has said it can. The conversation
+  had never said so. It does now, and it stands aside the same way the roster does: the sheet
+  closes first, the page replaces the conversation, and Back or Escape returns to the chat rather
+  than to the form the reader left. The page is opened on the bot's **profile** name, not on the
+  name the reader has chosen to see — routinely the same word in a different case, which is the
+  difference that would otherwise surface as a route answering 400.
+
 - **Escape goes back one level in two more places.** Cancelling a theme deletion in Settings ▸
   Appearance ▸ Advanced, and closing the detail card on a bot's memory map, are levels of their own
   now. Both used to be skipped: the question and the card are drawn in place rather than presented,

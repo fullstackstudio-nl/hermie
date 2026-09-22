@@ -10,7 +10,9 @@
  * `chat-mockController.test.ts`.
  */
 import { act, fireEvent, screen, waitFor } from '@testing-library/react-native'
+import type * as ReactModule from 'react'
 import { FlatList } from 'react-native'
+import type * as ReactNativeModule from 'react-native'
 
 import { ChatScreen } from '../src/features/chats/ChatScreen'
 import { haptic } from '../src/platform/haptics'
@@ -59,6 +61,22 @@ jest.mock('../src/platform/desktop-shortcuts', () => ({
   setMenuBar: jest.fn(),
   isMenuBarInstalled: jest.fn(() => false)
 }))
+
+/*
+  The memory browser is a page of its own, with its own plugin route and its own
+  three empty states. What THIS file is responsible for is the swap — that the
+  chat hands the browser a profile name and gets out of the way — so the browser
+  stands in for itself here rather than dragging a gateway in behind it.
+*/
+jest.mock('../src/features/memory', () => {
+  const { createElement } = jest.requireActual<typeof ReactModule>('react')
+  const { Text: RNText } = jest.requireActual<typeof ReactNativeModule>('react-native')
+
+  return {
+    MemoryBotsScreen: ({ initialProfile, onClose }: { initialProfile?: string; onClose: () => void }) =>
+      createElement(RNText, { onPress: onClose, testID: 'memory-bots' }, initialProfile)
+  }
+})
 
 // The picker is a native module with no test implementation; the screen only
 // ever awaits what it returns.
@@ -1091,5 +1109,77 @@ describe('⌘N', () => {
     // point: if the screen ever called it directly this would throw rather than
     // quietly work.
     expect(mockController.send).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * The Memory row, when the profile sheet is opened from the chat header.
+ *
+ * There is one profile sheet and two ways in, and only one of them used to
+ * carry `onOpenMemory` — so the row a reader found from the roster was simply
+ * missing when they opened the same sheet from the conversation they were
+ * already in. The sheet renders the row only when the handler is there, which
+ * is what made the gap invisible: nothing was broken, a section was absent.
+ */
+describe('the chat\u2019s own way into memory', () => {
+  async function openProfileSheet() {
+    renderChat()
+    await waitFor(() => expect(mockController.openChat).toHaveBeenCalled())
+
+    fireEvent.press(screen.getByTestId('chat-header-profile'))
+
+    await waitFor(() => expect(screen.getByTestId('bot-profile')).toBeTruthy())
+  }
+
+  it('offers the row here too, and not only from the roster', async () => {
+    await openProfileSheet()
+
+    expect(screen.getByTestId('bot-profile-memory')).toBeTruthy()
+  })
+
+  /**
+   * A page, not a second modal. The browser owns a header and an Escape of its
+   * own, and leaving the sheet underneath it would put the reader back on a
+   * profile form when they press Back.
+   */
+  it('replaces the conversation with the browser, closing the sheet on the way', async () => {
+    await openProfileSheet()
+
+    fireEvent.press(screen.getByTestId('bot-profile-memory'))
+
+    await waitFor(() => expect(screen.getByTestId('memory-bots')).toBeTruthy())
+    // The conversation itself is gone, not merely covered.
+    expect(screen.queryByTestId('composer-input')).toBeNull()
+    expect(screen.queryByTestId('chat-header')).toBeNull()
+    expect(screen.queryByTestId('bot-profile')).toBeNull()
+  })
+
+  /**
+   * By the PROFILE name. The header shows whichever name this reader chose to
+   * see, and the plugin's `profile` parameter accepts only the other one \u2014
+   * routinely the same word in different case, which is the difference nobody
+   * notices until a route answers 400.
+   */
+  it('opens it on the bot\u2019s profile name', async () => {
+    await openProfileSheet()
+
+    fireEvent.press(screen.getByTestId('bot-profile-memory'))
+
+    await waitFor(() => expect(screen.getByTestId('memory-bots')).toBeTruthy())
+    expect(screen.getByTestId('memory-bots').props.children).toBe('researcher')
+  })
+
+  it('comes back to the conversation when the browser closes', async () => {
+    await openProfileSheet()
+
+    fireEvent.press(screen.getByTestId('bot-profile-memory'))
+    await waitFor(() => expect(screen.getByTestId('memory-bots')).toBeTruthy())
+
+    fireEvent.press(screen.getByTestId('memory-bots'))
+
+    await waitFor(() => expect(screen.queryByTestId('memory-bots')).toBeNull())
+    expect(screen.getByTestId('composer-input')).toBeTruthy()
+    // And not back onto the sheet it was opened from.
+    expect(screen.queryByTestId('bot-profile')).toBeNull()
   })
 })

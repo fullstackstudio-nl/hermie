@@ -8563,3 +8563,42 @@ shell that receives it is the one mounted over the NEW connection.
 - **The keychain migration has never met a keychain that refuses.** Each item is
   moved in its own try/catch and the failure is designed to cost one sign-in,
   but `expo-secure-store` refusing an item mid-move has only ever been staged.
+
+## Round R14: polish, and the loose ends of five rounds (2026-09-22)
+
+### One sheet, two entry points, and a section that was simply absent
+
+`BotProfileSheet` draws its Memory group only when it is handed `onOpenMemory`.
+That is the right shape — the browser is a PAGE, with a header and an Escape of
+its own, so only a caller that can stand aside may offer it — and it is also why
+the gap was invisible. Nothing was broken from the chat header. A section was
+missing, and a missing section looks exactly like a design.
+
+The chat now does what `BotsScreen` does: `memoryFor` in state, the sheet closed
+before the page opens, and an early return above the screen's own tree. Two
+details are load-bearing rather than incidental:
+
+- **The sheet closes FIRST.** A full page mounted over a live sheet leaves the
+  reader on a profile form when they press Back, which is the bug the ordering in
+  `BotsScreen` was written against.
+- **The page is opened on `byName[botName]?.name`**, the profile name, not on
+  `botName` as the header spells it and not on the display name. The plugin's
+  `profile` parameter accepts only the profile name, and the two differ in case
+  often enough that the wrong one is a 400 nobody sees until a device is in hand.
+
+The early return sits below every hook in `Conversation`, which is the only
+placement React allows and worth saying out loud in a component whose hook list
+is two hundred lines long.
+
+**What needed a device: nothing.** The swap, the name that is handed over and the
+return path are all in the test renderer (`__tests__/chat-screen.test.tsx`). What
+the browser then DOES with that name — the plugin route, the three empty states —
+was already covered and is deliberately stood in for here, so this suite does not
+grow a second gateway.
+
+**A test-only trap found on the way.** `chat-drop-zone` is a testID on `DropZone`,
+a component that renders its children bare when there is no native drop view —
+which is every test run. So the id never reaches a host node and
+`queryByTestId('chat-drop-zone')` is null whether the conversation is on screen
+or not. An assertion written on it passes for the wrong reason. The assertions
+here are on `composer-input` and `chat-header`, which are real host elements.

@@ -61,6 +61,7 @@ import { chatGatewayFor } from '../../gateway/link'
 import { strings } from '../../i18n/strings'
 import { haptic } from '../../platform/haptics'
 import { presenceOf } from '../bots/presence'
+import { MemoryBotsScreen } from '../memory'
 import { botNames } from '../../store/bot-names'
 import { useBotsStore } from '../../store/bots'
 import { useChatAccent, useChatLayoutStore, useChatMuted } from '../../store/chat-layout'
@@ -418,6 +419,13 @@ function Conversation({
   }, [botName, runtime])
 
   const [sheet, setSheet] = useState<ManualSheet>('none')
+  /*
+    The memory browser REPLACES this conversation while it is open, the way it
+    replaces the roster in `BotsScreen`. It is a full page with its own header
+    and its own Escape, and a page stacked on top of a sheet would leave the
+    reader on a profile form when they press Back.
+  */
+  const [memoryFor, setMemoryFor] = useState<string | null>(null)
   const [attachments, setAttachments] = useState<PickedAttachment[]>([])
   /**
    * Local URIs for images sent from THIS device, this session, by filename.
@@ -1982,6 +1990,10 @@ function Conversation({
     [chat]
   )
 
+  if (memoryFor) {
+    return <MemoryBotsScreen initialProfile={memoryFor} onClose={() => setMemoryFor(null)} />
+  }
+
   return (
     <Screen edgeToEdgeTop={false} padded={false}>
       {/*
@@ -2331,6 +2343,12 @@ function Conversation({
                 gatewayId,
                 gatewayVersion: config?.version ?? '',
                 http,
+                // The sheet goes first, so the page is not a second modal over
+                // it — the same order `BotsScreen` opens the browser in.
+                onOpenMemory: () => {
+                  closeManualSheet()
+                  setMemoryFor(byName[botName]?.name ?? botName)
+                },
                 // A saved description or picture only reaches the header, the
                 // list and every other chat once the roster has been read
                 // again; the sheet itself writes to the gateway, not the store.
