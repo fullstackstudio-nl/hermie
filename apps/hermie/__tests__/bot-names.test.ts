@@ -11,19 +11,19 @@ import { asNameOrder, botLabel, botNames, DEFAULT_NAME_ORDER } from '../src/stor
 const LANCE = { name: 'lance-vance', displayName: 'Netwerkbeheerder' }
 
 describe('the two names a bot has', () => {
-  it('leads with the profile name by default', () => {
-    // The owner's call: the handle is what the rest of the app addresses a bot
-    // by — `@mentions`, crons, DM lines, the gateway's own logs — so it is the
-    // one a reader has to be able to recognise.
-    expect(DEFAULT_NAME_ORDER).toBe('profile')
+  it('leads with the display name by default', () => {
+    // The owner's call, revisited: somebody who has named their bots thinks of
+    // them by those names. The handle stays on the row one line down, which is
+    // where a reader looks to match a chat against an `@mention` or a cron.
+    expect(DEFAULT_NAME_ORDER).toBe('display')
     expect(botNames(LANCE, DEFAULT_NAME_ORDER)).toEqual({
-      primary: 'lance-vance',
-      secondary: 'Netwerkbeheerder'
+      primary: 'Netwerkbeheerder',
+      secondary: 'lance-vance'
     })
   })
 
   it('swaps the two on request, and swaps nothing else', () => {
-    expect(botNames(LANCE, 'display')).toEqual({ primary: 'Netwerkbeheerder', secondary: 'lance-vance' })
+    expect(botNames(LANCE, 'profile')).toEqual({ primary: 'lance-vance', secondary: 'Netwerkbeheerder' })
   })
 
   /**

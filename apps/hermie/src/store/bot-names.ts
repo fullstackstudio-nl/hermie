@@ -36,16 +36,22 @@ import { useSettingsStore } from './settings'
 /**
  * Which of the two names is the large one.
  *
- * `profile` is the default, and it is the owner's call: the handle is the name
- * the rest of the app addresses a bot by, so it is the one a reader needs to
- * recognise. `display` puts the friendly label first for somebody who has named
- * their bots and thinks of them that way.
+ * `display` is the default, and that is the owner's call — the second one they
+ * have made about it. The handle led at first because it is the name the rest of
+ * the app addresses a bot by, and using the app said the opposite: somebody who
+ * has given their bots names thinks of them by those names, and a list of
+ * handles reads like a directory of processes rather than a list of people to
+ * talk to. Nothing is hidden by the swap — the handle is still on the row, one
+ * line down, which is where a reader looks when they have to match a chat
+ * against an `@mention`, a cron or a line in a log.
+ *
+ * `profile` puts it back, for a reader who wants the identity first.
  */
 export type NameOrder = 'profile' | 'display'
 
 export const NAME_ORDERS: readonly NameOrder[] = ['profile', 'display']
 
-export const DEFAULT_NAME_ORDER: NameOrder = 'profile'
+export const DEFAULT_NAME_ORDER: NameOrder = 'display'
 
 /** Read a stored order defensively: it arrives from disk AND from a gateway. */
 export const asNameOrder = (value: unknown): NameOrder | undefined =>

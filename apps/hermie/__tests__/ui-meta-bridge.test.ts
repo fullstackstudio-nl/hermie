@@ -113,6 +113,9 @@ describe('the projection', () => {
     })
 
     it('ignores a value it does not recognise', () => {
+      // Set away from the default first, so "kept what this reader chose" and
+      // "fell back to the default" are two different answers here.
+      useSettingsStore.getState().setBotNameOrder('profile')
       applySnapshot({ app: { v: 1, botNameOrder: 'handle' } as unknown as HermieAppShape, bots: {} })
 
       expect(useSettingsStore.getState().botNameOrder).toBe('profile')

@@ -37,6 +37,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [ADR-0026](docs/adr/0026-the-share-sheet-may-deliver.md) records the decision and what it costs;
   Android is unchanged, because its share already opens the app.
 
+- **A bot leads with the name you gave it.** The chat list, the chat header, the bot's own
+  sheet and the home-screen widget all put the display name on the big line now and the
+  profile name on the small one under it. The handle led before, on the argument that it is
+  what `@`-mentions, crons and the gateway's logs use — which is true, and is why it is still
+  drawn, one line down. It is not what somebody who has named their bots is reading the list
+  for. **Appearance → Bot names** still swaps the two, and a reader who had already chosen the
+  profile name keeps it: the setting is stored, so only somebody who never touched it moves.
+
 - **Bot-to-bot messages are asides, not chat bubbles.** Both directions — the message this
   bot sent a teammate and the teammate's answer — now read as a muted line on the left with
   a chevron, the same shape a reply's thoughts have: no bubble, no tail, no card. An inbound

@@ -1,4 +1,5 @@
 import { keyValueStore } from '../src/platform/key-value-store'
+import { DEFAULT_NAME_ORDER } from '../src/store/bot-names'
 import { CHAT_VIEW_KEY, chatViewFor, DEFAULT_CHAT_VIEW, useSettingsStore } from '../src/store/settings'
 
 import { NS_A } from './support/gateway-namespace'
@@ -47,6 +48,25 @@ describe('chat view settings', () => {
 
     expect(useSettingsStore.getState().defaults.showThinking).toBe(true)
     expect(chatViewFor(useSettingsStore.getState(), 'writer').level).toBe('quiet')
+  })
+
+  /**
+   * The default moved from `profile` to `display`, so a reader who had already
+   * chosen the one that used to be the default must not be moved with it.
+   * `undefined` and `'profile'` are the two cases that used to look alike.
+   */
+  it('keeps a stored name order that happens to equal the old default', async () => {
+    await keyValueStore.setJson(NS_A.key(CHAT_VIEW_KEY), { botNameOrder: 'profile' })
+    await useSettingsStore.getState().hydrate(NS_A)
+
+    expect(useSettingsStore.getState().botNameOrder).toBe('profile')
+
+    useSettingsStore.getState().reset()
+    await keyValueStore.setJson(NS_A.key(CHAT_VIEW_KEY), {})
+    await useSettingsStore.getState().hydrate(NS_A)
+
+    expect(useSettingsStore.getState().botNameOrder).toBe(DEFAULT_NAME_ORDER)
+    expect(DEFAULT_NAME_ORDER).toBe('display')
   })
 
   it('falls back to the defaults when the stored blob is from another build', async () => {
