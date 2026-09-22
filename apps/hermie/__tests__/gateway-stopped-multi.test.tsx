@@ -54,13 +54,17 @@ jest.mock('../src/platform/key-value-store', () => ({
     }),
     setJson: jest.fn(async (key: string, value: unknown) => {
       mockDisk.set(key, JSON.stringify(value))
+    }),
+    keys: jest.fn(async () => [...mockDisk.keys()]),
+    deleteMany: jest.fn(async (keys: readonly string[]) => {
+      keys.forEach(key => mockDisk.delete(key))
     })
   }
 }))
 
 jest.mock('../src/platform/secret-store', () => ({
   secretStore: {
-    get: jest.fn(async (key: string) => (key.startsWith('hermie.auth.access_token@') ? 'access-1' : null)),
+    get: jest.fn(async (key: string) => (key.startsWith('hermie.auth.access_token-') ? 'access-1' : null)),
     set: jest.fn(async () => undefined),
     delete: jest.fn(async () => undefined)
   }

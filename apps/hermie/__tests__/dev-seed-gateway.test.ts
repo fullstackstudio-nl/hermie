@@ -112,7 +112,7 @@ describe('seeding a gateway from a launch argument', () => {
 
     // …and the credential, in the keychain, under the key `loadGatewaySetup`
     // reads to decide `hasCredentials`.
-    expect(run.setSecret).toHaveBeenCalledWith(`${SECRET_KEYS.sessionToken}@${run.gatewayId}`, 'demo')
+    expect(run.setSecret).toHaveBeenCalledWith(`${SECRET_KEYS.sessionToken}-${run.gatewayId}`, 'demo')
   })
 
   it('seeds the address alone when no token was given', async () => {
@@ -127,7 +127,7 @@ describe('seeding a gateway from a launch argument', () => {
     // No credential, so the launch lands on the wizard's sign-in step with the
     // address already filled — the state a sign-out leaves behind, not a
     // half-written one.
-    expect(run.setSecret).not.toHaveBeenCalledWith(`${SECRET_KEYS.sessionToken}@${run.gatewayId}`, expect.anything())
+    expect(run.setSecret).not.toHaveBeenCalledWith(`${SECRET_KEYS.sessionToken}-${run.gatewayId}`, expect.anything())
   })
 
   it('writes nothing at all when no gateway was named', async () => {

@@ -40,11 +40,38 @@
 
 export const NAMESPACE_SEPARATOR = '@'
 
+/**
+ * The same suffix for the SECRET store, which will not accept an `@`.
+ *
+ * `expo-secure-store` validates every key against `/^[\w.-]+$/` and throws
+ * before it reaches the keychain at all. So from the moment the registry
+ * started suffixing keys, every namespaced credential write threw
+ * _"Invalid key provided to SecureStore"_ — on every platform, not only on the
+ * unsigned builds this was first blamed on. Onboarding could not finish, the
+ * one-time move in `migrate.ts` silently carried nothing across (it catches per
+ * item, which is how this stayed quiet), and the configuration written just
+ * before the throw was left behind under an id nothing recorded.
+ *
+ * `-` rather than a cleverer escape, because the split has to stay
+ * unambiguous and this is the one character that is legal there and cannot
+ * appear on either side of it: every base key is dotted with underscores
+ * (`hermie.auth.access_token`) and every id is `g` followed by hex.
+ *
+ * It is spelled HERE, beside the other one, rather than in `config.ts` or
+ * inside the secret-store seam. The whole argument of this file is that a
+ * suffix written down in a second place is a key that gets left behind; a
+ * second suffix is not an exception to that, it is the case that most needs
+ * the rule.
+ */
+export const SECRET_NAMESPACE_SEPARATOR = '-'
+
 export interface GatewayNamespace {
   /** The gateway this namespace belongs to. */
   readonly id: string
   /** One stored key, scoped to that gateway. */
   key(base: string): string
+  /** The same, for a key going to the secret store. See the separator above. */
+  secretKey(base: string): string
 }
 
 /**
@@ -58,7 +85,8 @@ export interface GatewayNamespace {
 export function namespace(gatewayId: string): GatewayNamespace {
   return {
     id: gatewayId,
-    key: (base: string) => `${base}${NAMESPACE_SEPARATOR}${gatewayId}`
+    key: (base: string) => `${base}${NAMESPACE_SEPARATOR}${gatewayId}`,
+    secretKey: (base: string) => `${base}${SECRET_NAMESPACE_SEPARATOR}${gatewayId}`
   }
 }
 

@@ -21,6 +21,12 @@ apps/hermie/modules/*/android/.cxx/
 DerivedData/
 apps/hermie/build/
 
+# Screenshots from a simulator QA walk. Evidence for one round, not a fixture:
+# they are named after the device and the day, they go stale the moment a
+# surface changes, and a repository is not where a hundred PNGs of the same
+# app belong. The findings go in the round's report and in docs/.
+qa/
+
 # Logs and local state
 *.log
 npm-debug.log*

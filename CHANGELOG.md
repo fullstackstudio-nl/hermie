@@ -169,6 +169,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Signing in works again.** Since gateways got ids, every credential the app tried to store was
+  rejected before it reached the device's secret store at all: the id is appended with an `@`, and
+  `expo-secure-store` accepts only letters, digits, `.`, `-` and `_` in a key. It was not a
+  permissions problem and not particular to developer builds — onboarding could not finish on any
+  phone, and the one-time move that carries a pre-existing sign-in into the new layout silently
+  carried nothing, which is what was behind being asked to sign in again after an app update.
+  Credential keys now use a separator the secret store accepts, and a test runs the library's own
+  check over every key the app can produce, so a key it would refuse cannot ship again. Anyone
+  affected signs in once more; nothing else is lost.
+
 - **Setting a gateway up now either happens completely or leaves nothing behind — and never fails
   silently.** The credentials go to the secret store first and the address and the list entry only
   once they have landed; before, the address was written first, and a device whose keychain refused

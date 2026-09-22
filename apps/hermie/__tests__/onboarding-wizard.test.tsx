@@ -15,7 +15,9 @@ import { GATEWAY_A, NS_A } from './support/gateway-namespace'
  * the assertions can name the keys they expect.
  */
 const KEYS = Object.fromEntries(
-  Object.entries(SECRET_KEYS).map(([slot, key]) => [slot, NS_A.key(key)])
+  // `secretKey`, not `key`: the secret store will not take the `@` the
+  // key-value store is suffixed with. See `gateway/namespace.ts`.
+  Object.entries(SECRET_KEYS).map(([slot, key]) => [slot, NS_A.secretKey(key)])
 ) as typeof SECRET_KEYS
 const GATEWAY_CONFIG_KEY = NS_A.key(CONFIG_KEY)
 
@@ -443,7 +445,7 @@ describe('the Done step', () => {
     */
     ;(secretStore.set as jest.Mock).mockRejectedValueOnce(
       new Error(
-        "Calling the 'setValueWithKeyAsync' function has failed → Caused by: A required entitlement isn't present."
+        "Calling the 'setValueWithKeyAsync' function has failed → Caused by: A Invalid key provided to SecureStore isn't present."
       )
     )
 
@@ -459,7 +461,7 @@ describe('the Done step', () => {
 
     await waitFor(() =>
       expect(screen.getByTestId('done-error')).toHaveTextContent(
-        /Hermie could not store the credentials securely on this device: .*required entitlement/
+        /Hermie could not store the credentials securely on this device: .*Invalid key provided to SecureStore/
       )
     )
 

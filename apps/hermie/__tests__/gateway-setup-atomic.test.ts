@@ -100,14 +100,17 @@ const CONFIG: StoredGatewayConfig = {
 }
 
 /**
- * The message a simulator build with no keychain entitlement actually produces.
+ * The message the secret store actually produced on the simulator, verbatim.
  *
- * Verbatim rather than a stand-in: the whole point of carrying a reason through
- * is that an OSStatus reaches the reader, and a test with "boom" in it would
- * pass just as happily if the reason were dropped on the way.
+ * Not a stand-in, because the whole point of carrying a reason through is that
+ * the platform's own words reach the reader: a test with "boom" in it would
+ * pass just as happily if the reason were dropped on the way. This particular
+ * sentence is also the round's finding — the refusal was never about an
+ * entitlement, it was the `@` in a namespaced key, which `expo-secure-store`
+ * rejects before the keychain is touched. See `secret-store-keys.test.ts`.
  */
 const MOCK_REFUSAL =
-  "Calling the 'setValueWithKeyAsync' function has failed → Caused by: A required entitlement isn't present."
+  'Invalid key provided to SecureStore. Keys must not be empty and contain only alphanumeric characters, ".", "-", and "_".'
 
 beforeEach(() => {
   mockDisk.clear()
@@ -120,7 +123,7 @@ beforeEach(() => {
 
 describe('a secret store that refuses', () => {
   it('writes no configuration, so the failure leaves no orphan behind', async () => {
-    mockRefusals.set(NS_A.key('hermie.auth.session_token'), MOCK_REFUSAL)
+    mockRefusals.set(NS_A.secretKey('hermie.auth.session_token'), MOCK_REFUSAL)
 
     await expect(
       saveGatewaySetup(NS_A, { config: CONFIG, extraHeaders: {}, sessionToken: 'devtoken' })
@@ -131,7 +134,7 @@ describe('a secret store that refuses', () => {
   })
 
   it('takes back the secrets that did land, so nothing half-written survives', async () => {
-    mockRefusals.set(NS_A.key('hermie.auth.session_token'), MOCK_REFUSAL)
+    mockRefusals.set(NS_A.secretKey('hermie.auth.session_token'), MOCK_REFUSAL)
 
     await expect(
       saveGatewaySetup(NS_A, {
@@ -147,7 +150,7 @@ describe('a secret store that refuses', () => {
   })
 
   it('throws a typed error carrying the platform’s own reason', async () => {
-    mockRefusals.set(NS_A.key('hermie.auth.session_token'), MOCK_REFUSAL)
+    mockRefusals.set(NS_A.secretKey('hermie.auth.session_token'), MOCK_REFUSAL)
 
     const error: unknown = await saveGatewaySetup(NS_A, {
       config: CONFIG,
@@ -162,7 +165,7 @@ describe('a secret store that refuses', () => {
   })
 
   it('still throws when the rollback cannot run either', async () => {
-    mockRefusals.set(NS_A.key('hermie.auth.session_token'), MOCK_REFUSAL)
+    mockRefusals.set(NS_A.secretKey('hermie.auth.session_token'), MOCK_REFUSAL)
     mockRefuseDeletes = true
 
     await expect(

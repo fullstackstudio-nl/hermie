@@ -63,7 +63,9 @@ export type SecretKeys = Record<keyof typeof SECRET_KEYS, string>
  * the suffix goes on here, at the one place the names are written down.
  */
 export function secretKeysFor(ns: GatewayNamespace): SecretKeys {
-  return Object.fromEntries(Object.entries(SECRET_KEYS).map(([slot, key]) => [slot, ns.key(key)])) as SecretKeys
+  // `secretKey`, not `key`: the secret store rejects the `@` the key-value
+  // store is suffixed with. See `SECRET_NAMESPACE_SEPARATOR`.
+  return Object.fromEntries(Object.entries(SECRET_KEYS).map(([slot, key]) => [slot, ns.secretKey(key)])) as SecretKeys
 }
 
 export interface StoredGatewayConfig {
