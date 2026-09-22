@@ -432,6 +432,56 @@ export interface FakeMcpServer {
   probeError?: string
 }
 
+/**
+ * One row of the connector catalogue, as the vendor's list route shapes it.
+ *
+ * `statusReason` is declared here although the VENDORED `ConnectorRow` has no
+ * such field: upstream's `ConnectorListItem` carries it, and both models are
+ * open on purpose because the connector service owns the key set.
+ */
+export interface FakeConnector {
+  connector: string
+  connected: boolean
+  enabled: boolean
+  connectionStatus: string
+  statusReason: string | null
+  name?: string
+  description?: string
+}
+
+/**
+ * A live connection operation, the way `tools/connectors/live.py` holds one.
+ *
+ * `seq` is the monotonic write counter every snapshot is stamped with, and the
+ * reason it matters here is that a client has to ORDER frames: the gateway's
+ * own account watcher moves a target on its own tick while a client is
+ * polling, so a snapshot can arrive older than one already applied.
+ *
+ * `reads` plus `woken` is how this fake reproduces the watcher's latency
+ * WITHOUT a timer: a target settles after two status reads, or immediately
+ * after `connectors.operation.wake` — which is exactly what that method is for.
+ */
+export interface FakeConnectorOp {
+  opId: string
+  sessionId: string
+  seq: number
+  deadlineAt: number
+  settled: boolean
+  settledBy: string | null
+  reads: number
+  woken: boolean
+  targets: {
+    name: string
+    kind: 'connector' | 'mcp'
+    action: string
+    state: string
+    connectUrl: string | null
+    detail: string | null
+    /** Where the target lands once the flow resolves. */
+    resolvesTo: string
+  }[]
+}
+
 /** A PKCE flow `mcp.servers.oauth.start` opened and `…poll` walks. */
 interface FakeOauthFlow {
   name: string
@@ -588,6 +638,32 @@ export interface FakeGatewayState {
   mcpOauthFlows: Map<string, FakeOauthFlow>
   /** Skill names installed from the hub over the socket, newest last. */
   skillsInstalled: string[]
+  /**
+   * The connector catalogue one session can see.
+   *
+   * Upstream reaches this through `manage_connections`, so the rows are the
+   * vendor's `ConnectorListItem` shape — an OPEN model whose key set the
+   * connector service owns, which is why `statusReason` rides here without
+   * being in the vendored contract's `ConnectorRow`.
+   */
+  connectors: FakeConnector[]
+  /**
+   * `manage_connections` being off for the session.
+   *
+   * When it is true `connectors.list` answers `{available: false,
+   * connectors: []}` with NO error frame, and `connectors.connect` refuses
+   * with 4031.
+   */
+  connectorsUnavailable: boolean
+  /** Live connection operations by `op_id`. */
+  connectorOps: Map<string, FakeConnectorOp>
+  /**
+   * The monotonic write counter every operation snapshot is stamped with.
+   *
+   * It is gateway-wide rather than per operation, the way upstream's is, so a
+   * client cannot get away with comparing two operations' counters.
+   */
+  connectorSeq: number
   cronJobs: CronJob[]
   /**
    * The profile `hermes serve` was launched with. `cron.manage` binds
@@ -2108,6 +2184,26 @@ function initialState(options: FakeGatewayOptions): FakeGatewayState {
     mcpReloads: 0,
     mcpOauthFlows: new Map<string, FakeOauthFlow>(),
     skillsInstalled: [],
+    connectors: [
+      { connector: 'gmail', connected: true, enabled: true, connectionStatus: 'active', statusReason: null },
+      {
+        connector: 'notion',
+        connected: false,
+        enabled: true,
+        connectionStatus: 'not_connected',
+        statusReason: null
+      },
+      {
+        connector: 'slack',
+        connected: false,
+        enabled: false,
+        connectionStatus: 'failed',
+        statusReason: 'the workspace revoked the token'
+      }
+    ],
+    connectorsUnavailable: false,
+    connectorOps: new Map<string, FakeConnectorOp>(),
+    connectorSeq: 0,
     runningSessions: new Set<string>(),
     sessionConfig: new Map<string, Record<string, string>>(),
     pendingApprovals: new Map<string, { session_id: string; payload: Record<string, unknown> }>(),
@@ -2564,6 +2660,71 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       tool_count: toolset.toolCount,
       enabled: pinned ? pinned.has(toolset.name) : toolset.platformDefault
     }))
+  }
+
+  /**
+   * The `session_id` every connector call is addressed by.
+   *
+   * Upstream refuses a missing or blank one with `4000 INVALID_PARAMS` before
+   * it looks at anything else, because the id is only a lookup hint — authority
+   * is whether the calling transport is ATTACHED to that session. A fake that
+   * accepted a call without one would let a client ship a gateway-wide
+   * connector page that cannot exist.
+   */
+  function requireConnectorSession(params: Record<string, unknown>): string {
+    const sessionId = params.session_id
+
+    if (typeof sessionId !== 'string' || !sessionId.trim()) {
+      throw new RpcFault(4000, 'session_id required')
+    }
+
+    return sessionId
+  }
+
+  /** The open operation `op_id` names, or upstream's `4004 UNKNOWN_OPERATION`. */
+  function requireConnectorOp(params: Record<string, unknown>): FakeConnectorOp {
+    requireConnectorSession(params)
+
+    const opId = params.op_id
+
+    if (typeof opId !== 'string' || !opId) {
+      throw new RpcFault(4000, 'op_id required')
+    }
+
+    const op = state.connectorOps.get(opId)
+
+    if (!op) {
+      throw new RpcFault(4004, 'no open operation with that op_id in this session')
+    }
+
+    return op
+  }
+
+  /**
+   * One operation, as `_operation_view` shapes it.
+   *
+   * `connect_url` is present on a target that has one and absent on one that
+   * does not, rather than being sent as `null`: upstream's redaction exempts
+   * the key by name, and a client that read a null as "no link yet" and kept
+   * polling would behave differently from one that read a missing key.
+   */
+  function connectorOpView(op: FakeConnectorOp): Record<string, unknown> {
+    return {
+      op_id: op.opId,
+      seq: op.seq,
+      deadline_at: op.deadlineAt,
+      settled: op.settled,
+      settled_at: op.settled ? Math.floor(Date.now() / 1000) : null,
+      settled_by: op.settledBy,
+      targets: op.targets.map(target => ({
+        name: target.name,
+        kind: target.kind,
+        action: target.action,
+        state: target.state,
+        detail: target.detail,
+        ...(target.connectUrl ? { connect_url: target.connectUrl } : {})
+      }))
+    }
   }
 
   /** `mcp.servers.list`'s projection of one config entry. */
@@ -4536,6 +4697,136 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
         state.mcpReloads += 1
 
         return { status: 'reloaded', loaded_rev: `rev-${state.mcpReloads}`, coalesced: false }
+      }
+
+      /**
+       * `connectors.list` — `methods_connectors.py::connectors.list`.
+       *
+       * Two things a client gets wrong here. It needs a `session_id` and
+       * upstream refuses without one (`4000 INVALID_PARAMS`), because authority
+       * is transport ATTACHMENT to that session and not the id itself. And when
+       * the session's `manage_connections` toolset is off it answers
+       * `{available: false, connectors: []}` as a SUCCESS — a client reading
+       * only the array reports an empty account for a switch that is off.
+       */
+      case 'connectors.list': {
+        requireConnectorSession(params)
+
+        if (state.connectorsUnavailable) {
+          return { available: false, connectors: [] }
+        }
+
+        return {
+          available: true,
+          connectors: state.connectors.map(entry => ({
+            connector: entry.connector,
+            connected: entry.connected,
+            enabled: entry.enabled,
+            connectionStatus: entry.connectionStatus,
+            statusReason: entry.statusReason,
+            ...(entry.name === undefined ? {} : { name: entry.name }),
+            ...(entry.description === undefined ? {} : { description: entry.description })
+          }))
+        }
+      }
+
+      /**
+       * `connectors.connect` — opens (or re-mints on) an operation.
+       *
+       * The authorisation link rides at `targets[].connect_url` and NOWHERE
+       * else. `connector_ui_payload` redacts the whole payload but exempts that
+       * one key by name, which is the only reason it survives the trip.
+       */
+      case 'connectors.connect': {
+        const sessionId = requireConnectorSession(params)
+
+        if (state.connectorsUnavailable) {
+          throw new RpcFault(4031, 'Connectors are not available in this session.')
+        }
+
+        const slugs = Array.isArray(params.connectors) ? (params.connectors as string[]) : []
+
+        if (!slugs.length || slugs.some(slug => !/^[a-z0-9][a-z0-9_-]*$/u.test(String(slug)))) {
+          throw new RpcFault(4000, 'connectors must be nonempty slugs; reconnect must be boolean')
+        }
+
+        const unknown = slugs.find(slug => !state.connectors.some(entry => entry.connector === slug))
+
+        if (unknown) {
+          throw new RpcFault(4004, `no such connector: ${unknown}`)
+        }
+
+        state.connectorSeq += 1
+
+        const op: FakeConnectorOp = {
+          opId: `op-${state.connectorOps.size + 1}`,
+          sessionId,
+          seq: state.connectorSeq,
+          deadlineAt: Math.floor(Date.now() / 1000) + 300,
+          settled: false,
+          settledBy: null,
+          reads: 0,
+          woken: false,
+          targets: slugs.map(slug => ({
+            name: slug,
+            kind: 'connector' as const,
+            action: params.reconnect === true ? 'reconnect' : 'connect',
+            state: 'initiated',
+            connectUrl: `https://vendor.test/authorize/${slug}?op=${state.connectorOps.size + 1}`,
+            detail: null,
+            // `slack` is the fixture that fails, so a client has a failure to
+            // draw without reaching in and mutating the catalogue first.
+            resolvesTo: slug === 'slack' ? 'failed' : 'connected'
+          }))
+        }
+
+        state.connectorOps.set(op.opId, op)
+
+        return { ...connectorOpView(op), status: 'initiated', note: 'Show each connect_url to the user.' }
+      }
+
+      /** `connectors.operation.status` — the snapshot, one `seq` newer each read. */
+      case 'connectors.operation.status': {
+        const op = requireConnectorOp(params)
+
+        op.reads += 1
+
+        // The gateway's own watcher reads the vendor account on a tick; two
+        // reads, or one `wake`, is this fake's stand-in for that latency.
+        if (op.woken || op.reads >= 2) {
+          for (const target of op.targets) {
+            if (target.state === 'initiated') {
+              target.state = target.resolvesTo
+              target.detail = target.resolvesTo === 'failed' ? 'the workspace refused the grant' : null
+            }
+          }
+
+          if (op.targets.every(target => target.state !== 'initiated' && target.state !== 'pending')) {
+            op.settled = true
+            op.settledBy = 'all_resolved'
+          }
+        }
+
+        state.connectorSeq += 1
+        op.seq = state.connectorSeq
+
+        return connectorOpView(op)
+      }
+
+      /**
+       * `connectors.operation.wake` — the browser leg came back.
+       *
+       * A LATENCY shortcut and nothing else; upstream's docstring says the link
+       * "is not trusted for anything else". It is pinned here because it is
+       * MISSING from the vendored contract while upstream registers it, so
+       * without a fixture nothing in this repo would notice either way.
+       */
+      case 'connectors.operation.wake': {
+        const op = requireConnectorOp(params)
+
+        op.woken = true
+
+        return { status: 'ok' }
       }
 
       case 'mcp.servers.list':

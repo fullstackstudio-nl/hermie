@@ -24,6 +24,7 @@ import { useTheme } from '../../ui/theme'
 import { useEscapeKey } from '../../ui/useEscapeKey'
 import { useHardwareBack } from '../../ui/useHardwareBack'
 import { FORM_MAX_WIDTH } from '../../ui/tokens'
+import { ConnectorsScreen, connectorStrings } from '../connectors'
 import { McpScreen, mcpStrings } from '../mcp'
 import { NewBotFlow, profileStrings } from '../profiles'
 import { SkillsScreen, skillStrings } from '../skills'
@@ -75,6 +76,7 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
   */
   const [showSkills, setShowSkills] = useState(false)
   const [showMcp, setShowMcp] = useState(false)
+  const [showConnectors, setShowConnectors] = useState(false)
   const [showNewBot, setShowNewBot] = useState(false)
 
   // Escape goes back ONE level: out of a screen Settings opened and into
@@ -88,8 +90,16 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
       setShowMemory(false)
       setShowSkills(false)
       setShowMcp(false)
+      setShowConnectors(false)
     },
-    showConnectionTest || showGallery || showLicences || showThemes || showMemory || showSkills || showMcp
+    showConnectionTest ||
+      showGallery ||
+      showLicences ||
+      showThemes ||
+      showMemory ||
+      showSkills ||
+      showMcp ||
+      showConnectors
   )
 
   // The same one level for Android's back button, which is not Escape and has
@@ -106,8 +116,16 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
       setShowMemory(false)
       setShowSkills(false)
       setShowMcp(false)
+      setShowConnectors(false)
     },
-    showConnectionTest || showGallery || showLicences || showThemes || showMemory || showSkills || showMcp
+    showConnectionTest ||
+      showGallery ||
+      showLicences ||
+      showThemes ||
+      showMemory ||
+      showSkills ||
+      showMcp ||
+      showConnectors
   )
 
   // A screen opened from here REPLACES Settings rather than pushing onto a
@@ -140,6 +158,10 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
 
   if (showMcp) {
     return <McpScreen onClose={() => setShowMcp(false)} />
+  }
+
+  if (showConnectors) {
+    return <ConnectorsScreen onClose={() => setShowConnectors(false)} />
   }
 
   const token = config?.authMode === 'session_token'
@@ -349,6 +371,11 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
             detail={mcpStrings.settings.hint}
             onPress={() => setShowMcp(true)}
             title={mcpStrings.settings.row}
+          />
+          <InsetButtonRow
+            detail={connectorStrings.settings.hint}
+            onPress={() => setShowConnectors(true)}
+            title={connectorStrings.settings.row}
           />
         </InsetGroup>
 

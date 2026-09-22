@@ -1839,6 +1839,8 @@ describe('session.usage over the socket — server.py::_get_usage + agent/contex
  */
 function socketHarness(): {
   call: (method: string, params?: Record<string, unknown>) => Promise<Record<string, unknown>>
+  /** The live gateway's mutable state, for a case that has to arrange one. */
+  state: () => FakeGateway['state']
   open: () => Promise<void>
   close: () => Promise<void>
 } {
@@ -1857,6 +1859,7 @@ function socketHarness(): {
         socket.send(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`)
       })
     },
+    state: () => live.state,
     open: async () => {
       live = await startFakeGateway({ port: 0 })
       socket = new WebSocket(live.wsUrl, ['hermes-gateway-v1'])
@@ -2425,6 +2428,167 @@ describe('skills.manage over the socket — methods_tools.py::_SKILLS_ACTIONS', 
  * needs-auth case. A client that only inspects the error frame reports a broken
  * server as working.
  */
+/**
+ * The connector RPCs, over the socket.
+ *
+ * Upstream: `tui_gateway/methods_connectors.py`, whose whole registered surface
+ * is `connectors.list`, `connectors.connect`, `connectors.operation.status`,
+ * `connectors.operation.wake` and `connection.respond`. Three things are worth
+ * pinning and none of them is visible from a screen:
+ *
+ *  - every call is SESSION-scoped, and the id is only a lookup hint — authority
+ *    is transport attachment, so there is no gateway-wide connector list;
+ *  - `available: false` is a SUCCESS that means the bot's `manage_connections`
+ *    toolset is off, not an empty account;
+ *  - the authorisation link rides at `targets[].connect_url` and nowhere else,
+ *    surviving `connector_ui_payload` only because that key is exempted by name.
+ *
+ * `connectors.operation.wake` is pinned although the VENDORED contract has no
+ * such method: upstream registers it and generates it, this repo's copy of the
+ * contract predates that, and without a fixture nothing here would notice.
+ */
+describe('connectors.* over the socket — methods_connectors.py', () => {
+  const harness = socketHarness()
+
+  beforeAll(harness.open)
+  afterAll(harness.close)
+
+  it('refuses a call that names no session, because the id is how it is scoped', async () => {
+    const frame = await harness.call('connectors.list')
+
+    expect((frame.error as Record<string, unknown>)?.code).toBe(4000)
+  })
+
+  it('lists the catalogue with the vendor key set, statusReason included', async () => {
+    const result = (await harness.call('connectors.list', { session_id: 'sess-1' })).result as Record<string, unknown>
+    const rows = result.connectors as Record<string, unknown>[]
+
+    expect(result.available).toBe(true)
+    expect(keysOf(rows[0])).toEqual(['connected', 'connectionStatus', 'connector', 'enabled', 'statusReason'])
+    expect(rows.find(row => row.connector === 'slack')?.statusReason).toBe('the workspace revoked the token')
+  })
+
+  /**
+   * The answer a client most easily misreads. Nothing in the frame says
+   * "error", so a page that drew `connectors.length === 0` as "you have none"
+   * would report an empty account for a switch the reader can turn on.
+   */
+  it('answers available:false — a SUCCESS — when the toolset is off', async () => {
+    harness.state().connectorsUnavailable = true
+
+    try {
+      const frame = await harness.call('connectors.list', { session_id: 'sess-1' })
+
+      expect(frame.error).toBeUndefined()
+      expect(frame.result).toEqual({ available: false, connectors: [] })
+
+      // And the connect half refuses OUTRIGHT in the same state, which is the
+      // asymmetry: `list` degrades, `connect` raises `CONNECTORS_UNAVAILABLE`.
+      const refused = await harness.call('connectors.connect', { session_id: 'sess-1', connectors: ['gmail'] })
+
+      expect((refused.error as Record<string, unknown>)?.code).toBe(4031)
+    } finally {
+      harness.state().connectorsUnavailable = false
+    }
+  })
+
+  it('mints an operation whose link lives on the target, not at the top level', async () => {
+    const result = (await harness.call('connectors.connect', { session_id: 'sess-1', connectors: ['notion'] }))
+      .result as Record<string, unknown>
+
+    expect(typeof result.op_id).toBe('string')
+    expect(typeof result.seq).toBe('number')
+    expect(result.connect_url).toBeUndefined()
+
+    const targets = result.targets as Record<string, unknown>[]
+
+    expect(keysOf(targets[0])).toEqual(['action', 'connect_url', 'detail', 'kind', 'name', 'state'])
+    expect(targets[0]?.state).toBe('initiated')
+    expect(String(targets[0]?.connect_url)).toMatch(/^https:\/\//u)
+  })
+
+  it('refuses a slug the catalogue does not carry', async () => {
+    const frame = await harness.call('connectors.connect', { session_id: 'sess-1', connectors: ['nope'] })
+
+    expect((frame.error as Record<string, unknown>)?.code).toBe(4004)
+  })
+
+  it('refuses an empty or malformed slug list', async () => {
+    const empty = await harness.call('connectors.connect', { session_id: 'sess-1', connectors: [] })
+    const bad = await harness.call('connectors.connect', { session_id: 'sess-1', connectors: ['Not A Slug'] })
+
+    expect((empty.error as Record<string, unknown>)?.code).toBe(4000)
+    expect((bad.error as Record<string, unknown>)?.code).toBe(4000)
+  })
+
+  /**
+   * `seq` is the ordering guard the vendored contract is missing. The gateway's
+   * own account watcher moves a target on its own tick while a client polls, so
+   * without it a client cannot tell a newer snapshot from an older one.
+   */
+  it('stamps every snapshot with a seq that only ever goes up', async () => {
+    const opened = (await harness.call('connectors.connect', { session_id: 'sess-1', connectors: ['gmail'] }))
+      .result as Record<string, unknown>
+    const first = (await harness.call('connectors.operation.status', { session_id: 'sess-1', op_id: opened.op_id }))
+      .result as Record<string, unknown>
+    const second = (await harness.call('connectors.operation.status', { session_id: 'sess-1', op_id: opened.op_id }))
+      .result as Record<string, unknown>
+
+    expect(Number(first.seq)).toBeGreaterThan(Number(opened.seq))
+    expect(Number(second.seq)).toBeGreaterThan(Number(first.seq))
+  })
+
+  it('settles the operation once every target has stopped moving', async () => {
+    const opened = (await harness.call('connectors.connect', { session_id: 'sess-1', connectors: ['gmail'] }))
+      .result as Record<string, unknown>
+
+    await harness.call('connectors.operation.status', { session_id: 'sess-1', op_id: opened.op_id })
+
+    const settled = (await harness.call('connectors.operation.status', { session_id: 'sess-1', op_id: opened.op_id }))
+      .result as Record<string, unknown>
+
+    expect(settled.settled).toBe(true)
+    expect(settled.settled_by).toBe('all_resolved')
+    expect((settled.targets as Record<string, unknown>[])[0]?.state).toBe('connected')
+  })
+
+  it('reports a refused grant as a settled FAILED target, never as an error frame', async () => {
+    const opened = (await harness.call('connectors.connect', { session_id: 'sess-1', connectors: ['slack'] }))
+      .result as Record<string, unknown>
+
+    await harness.call('connectors.operation.wake', { session_id: 'sess-1', op_id: opened.op_id })
+
+    const frame = await harness.call('connectors.operation.status', { session_id: 'sess-1', op_id: opened.op_id })
+    const target = ((frame.result as Record<string, unknown>).targets as Record<string, unknown>[])[0]
+
+    expect(frame.error).toBeUndefined()
+    expect(target?.state).toBe('failed')
+    expect(target?.detail).toBe('the workspace refused the grant')
+  })
+
+  /** The method the vendored contract has not grown. It only shortens the wait. */
+  it('wakes an operation so the account is read now rather than on the next tick', async () => {
+    const opened = (await harness.call('connectors.connect', { session_id: 'sess-1', connectors: ['notion'] }))
+      .result as Record<string, unknown>
+
+    expect(
+      (await harness.call('connectors.operation.wake', { session_id: 'sess-1', op_id: opened.op_id })).result
+    ).toEqual({ status: 'ok' })
+
+    const woken = (await harness.call('connectors.operation.status', { session_id: 'sess-1', op_id: opened.op_id }))
+      .result as Record<string, unknown>
+
+    // One read, where an unwoken operation needs two.
+    expect((woken.targets as Record<string, unknown>[])[0]?.state).toBe('connected')
+  })
+
+  it('refuses an op_id it does not hold', async () => {
+    const frame = await harness.call('connectors.operation.status', { session_id: 'sess-1', op_id: 'op-nope' })
+
+    expect((frame.error as Record<string, unknown>)?.code).toBe(4004)
+  })
+})
+
 describe('mcp.servers.* over the socket — methods_tools.py::_mcp_rpc', () => {
   const harness = socketHarness()
 
