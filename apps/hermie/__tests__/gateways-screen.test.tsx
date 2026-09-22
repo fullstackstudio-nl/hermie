@@ -1,0 +1,296 @@
+/**
+ * Settings → Gateways: the list, and the four things it can do.
+ *
+ * The cases are chosen for what a mistake would cost rather than for coverage.
+ * Switching tears a live socket down, so the test is that it writes the pointer
+ * and re-reads; ADDING must NOT do that, so the test is that the pointer did
+ * not move; and removing takes a keychain item and a cache with it, so the test
+ * is what is left on disk afterwards rather than what is left on screen.
+ */
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native'
+import type { ConnectionStatus, GatewayError } from '@hermie/gateway-client'
+
+import { GatewayNameLine } from '../src/features/bots/GatewayNameLine'
+import { GatewaysScreen } from '../src/features/settings/GatewaysScreen'
+import { GatewayProvider, useGateway } from '../src/gateway'
+import { withProviders } from './support/render'
+
+const mockDisk = new Map<string, string>()
+const mockKeychain = new Map<string, string>()
+
+const mockGatewayA = 'gaaaaaaaaaaaaaaaa'
+const mockGatewayB = 'gbbbbbbbbbbbbbbbb'
+
+jest.mock('../src/gateway/client', () => ({
+  attachLifecycle: () => () => undefined,
+  createTokenCoordinator: () => ({ save: jest.fn(async () => undefined) }),
+  endGatewaySession: jest.fn(async () => undefined),
+  createGatewayConnection: () => ({
+    http: {},
+    start: jest.fn(),
+    stop: jest.fn(),
+    resume: jest.fn(),
+    retryNow: jest.fn(),
+    onStatus: (handler: (status: ConnectionStatus, error: GatewayError | null) => void) => {
+      handler('ready', null)
+
+      return () => undefined
+    }
+  })
+}))
+
+jest.mock('../src/platform/key-value-store', () => ({
+  keyValueStore: {
+    get: jest.fn(async (key: string) => mockDisk.get(key) ?? null),
+    set: jest.fn(async (key: string, value: string) => {
+      mockDisk.set(key, value)
+    }),
+    delete: jest.fn(async (key: string) => {
+      mockDisk.delete(key)
+    }),
+    getJson: jest.fn(async (key: string) => {
+      const raw = mockDisk.get(key)
+
+      return raw === undefined ? null : JSON.parse(raw)
+    }),
+    setJson: jest.fn(async (key: string, value: unknown) => {
+      mockDisk.set(key, JSON.stringify(value))
+    })
+  }
+}))
+
+jest.mock('../src/platform/secret-store', () => ({
+  secretStore: {
+    get: jest.fn(async (key: string) => mockKeychain.get(key) ?? null),
+    set: jest.fn(async (key: string, value: string) => {
+      mockKeychain.set(key, value)
+    }),
+    delete: jest.fn(async (key: string) => {
+      mockKeychain.delete(key)
+    })
+  }
+}))
+
+const entry = (id: string, name: string, address: string, addedAt: number) => ({
+  id,
+  name,
+  address,
+  authKind: 'native_pkce' as const,
+  signedInUser: 'Sam',
+  addedAt
+})
+
+function seed(activeGatewayId = mockGatewayA) {
+  mockDisk.set(
+    'hermie.gateways',
+    JSON.stringify({
+      v: 1,
+      activeGatewayId,
+      gateways: [
+        entry(mockGatewayA, 'Home', 'https://home.example.com', 1),
+        entry(mockGatewayB, 'Work', 'https://work.example.com', 2)
+      ]
+    })
+  )
+
+  for (const [id, address] of [
+    [mockGatewayA, 'https://home.example.com'],
+    [mockGatewayB, 'https://work.example.com']
+  ]) {
+    mockDisk.set(`hermie.gateway.config@${id}`, JSON.stringify({ baseUrl: address, authMode: 'native_pkce' }))
+    mockDisk.set(`hermie.chat.view@${id}`, JSON.stringify({ defaults: {}, perChat: {} }))
+    mockKeychain.set(`hermie.auth.access_token@${id}`, `access-${id}`)
+  }
+
+  mockDisk.set(
+    'hermie.chats.layout',
+    JSON.stringify({ [mockGatewayA]: { entries: [], archived: [], accents: {} }, [mockGatewayB]: {} })
+  )
+}
+
+const registry = () => JSON.parse(mockDisk.get('hermie.gateways')!)
+
+/** The provider's answer, read the way the app's own root reads it. */
+function Harness({ onRead }: { onRead: (value: ReturnType<typeof useGateway>) => void }) {
+  onRead(useGateway())
+
+  return null
+}
+
+async function openList() {
+  let gateway: ReturnType<typeof useGateway> | null = null
+
+  render(
+    withProviders(
+      <GatewayProvider>
+        <Harness onRead={value => (gateway = value)} />
+        <GatewaysScreen onClose={jest.fn()} />
+      </GatewayProvider>
+    )
+  )
+
+  await waitFor(() => expect(screen.getByTestId(`gateway-row-${mockGatewayA}`)).toBeTruthy())
+
+  return () => gateway
+}
+
+beforeEach(() => {
+  mockDisk.clear()
+  mockKeychain.clear()
+  jest.clearAllMocks()
+  seed()
+})
+
+describe('the list', () => {
+  it('names every gateway and marks the one that is connected', async () => {
+    await openList()
+
+    expect(screen.getByText('Home')).toBeTruthy()
+    expect(screen.getByText('Work')).toBeTruthy()
+    expect(screen.getByTestId(`gateway-active-${mockGatewayA}`)).toBeTruthy()
+    expect(screen.queryByTestId(`gateway-active-${mockGatewayB}`)).toBeNull()
+  })
+
+  it('shows the address and who is signed in on each row', async () => {
+    await openList()
+
+    expect(screen.getByText('https://work.example.com · Signed in as Sam')).toBeTruthy()
+  })
+})
+
+describe('switching', () => {
+  it('moves the pointer and redials', async () => {
+    const read = await openList()
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId(`gateway-switch-${mockGatewayB}`))
+    })
+
+    await waitFor(() => expect(registry().activeGatewayId).toBe(mockGatewayB))
+    // The provider's own copy follows, which is what every other screen reads.
+    await waitFor(() => expect(read()?.gatewayId).toBe(mockGatewayB))
+  })
+
+  it('does nothing when the gateway is already the live one', async () => {
+    await openList()
+
+    // The row for the live gateway is not pressable at all: the whole of what
+    // a tap would do has already happened.
+    expect(screen.getByTestId(`gateway-switch-${mockGatewayA}`).props.accessibilityState.disabled).toBe(true)
+    expect(registry().activeGatewayId).toBe(mockGatewayA)
+  })
+})
+
+describe('adding another', () => {
+  it('opens setup and leaves the live gateway alone', async () => {
+    await openList()
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('gateways-add'))
+    })
+
+    // The wizard, on its cover step, over a gateway that is still connected.
+    expect(screen.getByTestId('onboarding-card')).toBeTruthy()
+    expect(registry().activeGatewayId).toBe(mockGatewayA)
+  })
+})
+
+describe('one gateway’s own page', () => {
+  const openWork = async () => {
+    const read = await openList()
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId(`gateway-manage-${mockGatewayB}`))
+    })
+
+    return read
+  }
+
+  it('renames it on this device and nowhere else', async () => {
+    await openWork()
+
+    fireEvent.changeText(screen.getByTestId('gateway-name'), 'The Pi')
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('gateway-rename'))
+    })
+
+    await waitFor(() =>
+      expect(registry().gateways.find((row: { id: string }) => row.id === mockGatewayB).name).toBe('The Pi')
+    )
+  })
+
+  it('signs out of a gateway that is not live without touching the one that is', async () => {
+    await openWork()
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('gateway-sign-out'))
+    })
+
+    await waitFor(() => expect(mockKeychain.has(`hermie.auth.access_token@${mockGatewayB}`)).toBe(false))
+    // The live gateway's credential is untouched, and B keeps its address.
+    expect(mockKeychain.get(`hermie.auth.access_token@${mockGatewayA}`)).toBe(`access-${mockGatewayA}`)
+    expect(mockDisk.has(`hermie.gateway.config@${mockGatewayB}`)).toBe(true)
+  })
+
+  it('asks before removing, and then removes everything that gateway left here', async () => {
+    await openWork()
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('gateway-remove'))
+    })
+
+    // Nothing has happened yet: the first press only asks.
+    expect(mockDisk.has(`hermie.gateway.config@${mockGatewayB}`)).toBe(true)
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('gateway-remove-confirm'))
+    })
+
+    await waitFor(() => expect(registry().gateways).toHaveLength(1))
+
+    expect(mockDisk.has(`hermie.gateway.config@${mockGatewayB}`)).toBe(false)
+    expect(mockDisk.has(`hermie.chat.view@${mockGatewayB}`)).toBe(false)
+    expect(mockKeychain.has(`hermie.auth.access_token@${mockGatewayB}`)).toBe(false)
+    expect(Object.keys(JSON.parse(mockDisk.get('hermie.chats.layout')!))).toEqual([mockGatewayA])
+
+    // And the live gateway is exactly as it was.
+    expect(mockDisk.has(`hermie.gateway.config@${mockGatewayA}`)).toBe(true)
+    expect(mockKeychain.get(`hermie.auth.access_token@${mockGatewayA}`)).toBe(`access-${mockGatewayA}`)
+    expect(registry().activeGatewayId).toBe(mockGatewayA)
+  })
+})
+
+describe('the name on the chat list', () => {
+  const renderLine = () =>
+    render(
+      withProviders(
+        <GatewayProvider>
+          <GatewayNameLine />
+        </GatewayProvider>
+      )
+    )
+
+  it('names the gateway once there is more than one to tell apart', async () => {
+    renderLine()
+
+    await waitFor(() => expect(screen.getByTestId('bots-gateway-name')).toHaveTextContent('Home'))
+  })
+
+  it('says nothing when there is only one', async () => {
+    mockDisk.set(
+      'hermie.gateways',
+      JSON.stringify({
+        v: 1,
+        activeGatewayId: mockGatewayA,
+        gateways: [entry(mockGatewayA, 'Home', 'https://home.example.com', 1)]
+      })
+    )
+
+    renderLine()
+
+    // A permanent label under the title, answering a question nobody has, is
+    // a row of the sidebar spent on nothing.
+    await waitFor(() => expect(screen.queryByTestId('bots-gateway-name')).toBeNull())
+  })
+})

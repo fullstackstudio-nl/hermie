@@ -10,6 +10,7 @@ import {
 import { keyValueStore } from '../platform/key-value-store'
 import { secretStore } from '../platform/secret-store'
 import { clearUrlCache } from '../platform/url-cache'
+import type { GatewayNamespace } from './namespace'
 
 /**
  * Where a configured gateway lives on disk.
@@ -20,8 +21,17 @@ import { clearUrlCache } from '../platform/url-cache'
  * support log — which address, which provider, which version.
  */
 
-/** Non-secret configuration, in the key-value store. */
+/**
+ * Non-secret configuration, in the key-value store.
+ *
+ * The BASE key. What is actually written is `configKeyFor(namespace)` — one
+ * gateway's configuration, under that gateway's id. The bare name survives as
+ * the thing the one-time move reads from, and as what `migrate.ts` names.
+ */
 export const CONFIG_KEY = 'hermie.gateway.config'
+
+/** Where one gateway's configuration lives. */
+export const configKeyFor = (ns: GatewayNamespace): string => ns.key(CONFIG_KEY)
 
 /**
  * Secret-store keys. Signing out deletes exactly these six.
@@ -40,6 +50,21 @@ export const SECRET_KEYS = {
   extraHeaders: 'hermie.auth.extra_headers',
   frontDoor: 'hermie.auth.front_door'
 } as const
+
+export type SecretKeys = Record<keyof typeof SECRET_KEYS, string>
+
+/**
+ * The same six, for one gateway.
+ *
+ * A keychain is the one store where a key collision is not a stale preference
+ * but a credential handed to a stranger: two gateways under one
+ * `hermie.auth.access_token` means the second sign-in overwrites the first, and
+ * whichever gateway dials next presents a token minted for the other one. So
+ * the suffix goes on here, at the one place the names are written down.
+ */
+export function secretKeysFor(ns: GatewayNamespace): SecretKeys {
+  return Object.fromEntries(Object.entries(SECRET_KEYS).map(([slot, key]) => [slot, ns.key(key)])) as SecretKeys
+}
 
 export interface StoredGatewayConfig {
   baseUrl: string
@@ -173,8 +198,9 @@ function readFrontDoor(raw: string | null, baseUrl: string): FrontDoor {
 }
 
 /** Read the configured gateway, or `null` when the app has never been set up. */
-export async function loadGatewaySetup(): Promise<GatewaySetup | null> {
-  const config = await keyValueStore.getJson<StoredGatewayConfig>(CONFIG_KEY)
+export async function loadGatewaySetup(ns: GatewayNamespace): Promise<GatewaySetup | null> {
+  const keys = secretKeysFor(ns)
+  const config = await keyValueStore.getJson<StoredGatewayConfig>(configKeyFor(ns))
 
   if (!config || typeof config.baseUrl !== 'string' || !config.baseUrl) {
     return null
@@ -186,11 +212,11 @@ export async function loadGatewaySetup(): Promise<GatewaySetup | null> {
   // escaped `reload()`'s un-awaited call and the app sat on the splash for ever
   // — the one outcome worse than asking for a sign-in.
   const [rawHeaders, rawFrontDoor, sessionToken, accessToken, refreshToken] = await Promise.all([
-    secretStore.get(SECRET_KEYS.extraHeaders),
-    secretStore.get(SECRET_KEYS.frontDoor),
-    secretStore.get(SECRET_KEYS.sessionToken),
-    secretStore.get(SECRET_KEYS.accessToken),
-    secretStore.get(SECRET_KEYS.refreshToken)
+    secretStore.get(keys.extraHeaders),
+    secretStore.get(keys.frontDoor),
+    secretStore.get(keys.sessionToken),
+    secretStore.get(keys.accessToken),
+    secretStore.get(keys.refreshToken)
   ]).catch((error: unknown) => {
     credentialError = error instanceof Error ? error.message : String(error)
 
@@ -259,49 +285,50 @@ export async function loadGatewaySetup(): Promise<GatewaySetup | null> {
  * exist only in memory, so abandoning a half-finished wizard leaves nothing
  * behind.
  */
-export async function saveGatewaySetup(input: SaveGatewaySetupInput): Promise<void> {
+export async function saveGatewaySetup(ns: GatewayNamespace, input: SaveGatewaySetupInput): Promise<void> {
   const { config, extraHeaders, frontDoor = NO_FRONT_DOOR, tokens, sessionToken } = input
+  const keys = secretKeysFor(ns)
 
-  await keyValueStore.setJson(CONFIG_KEY, config)
+  await keyValueStore.setJson(configKeyFor(ns), config)
 
   const writes: Promise<void>[] = [
     Object.keys(extraHeaders).length > 0
-      ? secretStore.set(SECRET_KEYS.extraHeaders, JSON.stringify(extraHeaders))
-      : secretStore.delete(SECRET_KEYS.extraHeaders),
+      ? secretStore.set(keys.extraHeaders, JSON.stringify(extraHeaders))
+      : secretStore.delete(keys.extraHeaders),
     // Bound to the address being saved rather than to whatever the record said
     // when it was typed, so the two cannot disagree after a change of gateway.
     frontDoor.kind === 'cloudflare_access'
-      ? secretStore.set(SECRET_KEYS.frontDoor, JSON.stringify({ ...frontDoor, origin: originOf(config.baseUrl) }))
-      : secretStore.delete(SECRET_KEYS.frontDoor)
+      ? secretStore.set(keys.frontDoor, JSON.stringify({ ...frontDoor, origin: originOf(config.baseUrl) }))
+      : secretStore.delete(keys.frontDoor)
   ]
 
   if (tokens) {
     writes.push(
-      secretStore.set(SECRET_KEYS.accessToken, tokens.accessToken),
-      secretStore.set(SECRET_KEYS.refreshToken, tokens.refreshToken),
+      secretStore.set(keys.accessToken, tokens.accessToken),
+      secretStore.set(keys.refreshToken, tokens.refreshToken),
       secretStore.set(
-        SECRET_KEYS.tokenMeta,
+        keys.tokenMeta,
         JSON.stringify({ expiresAt: tokens.expiresAt, provider: tokens.provider, userId: tokens.userId })
       )
     )
   }
 
   if (sessionToken) {
-    writes.push(secretStore.set(SECRET_KEYS.sessionToken, sessionToken))
+    writes.push(secretStore.set(keys.sessionToken, sessionToken))
   }
 
   await Promise.all(writes)
 }
 
-/** Sign out: forget the credentials, keep the address. */
-export async function clearCredentials(): Promise<void> {
-  await Promise.all(Object.values(SECRET_KEYS).map(key => secretStore.delete(key)))
+/** Sign out of ONE gateway: forget its credentials, keep its address. */
+export async function clearCredentials(ns: GatewayNamespace): Promise<void> {
+  await Promise.all(Object.values(secretKeysFor(ns)).map(key => secretStore.delete(key)))
 }
 
-/** Change gateway: forget the credentials and the address. */
-export async function clearGateway(): Promise<void> {
-  await clearCredentials()
-  await keyValueStore.delete(CONFIG_KEY)
+/** Forget ONE gateway: its credentials and its address. */
+export async function clearGateway(ns: GatewayNamespace): Promise<void> {
+  await clearCredentials(ns)
+  await keyValueStore.delete(configKeyFor(ns))
   /*
     And whatever the platform cached for it.
 

@@ -10,10 +10,11 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import { AppState } from 'react-native'
 
 import { requestOpenChat } from '../../app/open-chat-bus'
-import { useGateway } from '../../gateway'
+import { gatewayForKey, useGateway } from '../../gateway'
 import { chatGatewayFor, type ChatGateway } from '../../gateway/link'
 import { useConnectionStore } from '../../gateway/store'
-import { chatCache } from '../../platform/chat-cache'
+import { namespace } from '../../gateway/namespace'
+import { chatCacheFor } from '../../platform/chat-cache'
 import { intentQueue } from '../../platform/intent-queue'
 import { RUNS_ON_MAC } from '../../platform/runs-on-mac'
 import { shareInbox } from '../../platform/share-inbox'
@@ -109,20 +110,65 @@ async function readIdentity(
 const ChatRuntimeContext = createContext<ChatRuntimeValue | null>(null)
 
 export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
-  const { config, connection, http, status } = useGateway()
+  const { config, connection, gatewayId, http, registry, status, switchGateway } = useGateway()
   const [value, setValue] = useState<ChatRuntimeValue | null>(null)
   const valueRef = useRef<ChatRuntimeValue | null>(null)
+  /*
+    The list, through a ref.
+
+    The push ports below are built once per connection and captured by closures
+    that outlive a render, so reading the list through the value this render saw
+    would answer the list as it was when the socket came up. A gateway added
+    since then would be one a notification could not resolve.
+  */
+  const registryRef = useRef(registry)
+  registryRef.current = registry
+
+  /*
+    Everything that is stored PER GATEWAY is read here, keyed by the active
+    gateway's id, and read again when that id changes.
+
+    Before the registry these were read once at startup, because there was one
+    gateway and therefore one answer. There are now two things they could mean
+    and only one of them is right: the settings, the read watermarks and the
+    push registration all belong to the gateway that is live.
+
+    The reader's own context switches are the exception and stay at startup:
+    they are decisions about what this person is willing to tell a bot, and they
+    do not change because a different machine answered.
+  */
+  useEffect(() => {
+    if (!gatewayId) {
+      return
+    }
+
+    const ns = namespace(gatewayId)
+
+    /*
+      Out with the previous gateway's roster and open chats FIRST.
+
+      A switch replaces the connection rather than removing it, so the
+      `!connection` branch below — which is what normally empties these — never
+      runs, and the list would paint the machine the reader has just stepped
+      away from until the new roster arrived. These stores are module-level and
+      outlive every provider, so nothing else clears them.
+    */
+    useChatsStore.getState().reset()
+    useBotsStore.getState().reset()
+    usePluginStore.getState().reset()
+
+    void useSettingsStore.getState().hydrate(ns)
+    void useBotsStore.getState().hydrateLastSeen(ns)
+    void usePushStore.getState().hydrate(ns)
+    // The list's arrangement, on the same key. "Change gateway" now edits an
+    // entry rather than replacing the one gateway, so an arrangement follows
+    // an address correction instead of being dropped by it (ADR-0012, amended).
+    void useChatLayoutStore.getState().load(gatewayId)
+  }, [gatewayId])
 
   useEffect(() => {
-    void useSettingsStore.getState().hydrate()
-    void useBotsStore.getState().hydrateLastSeen()
-    // Before any gateway exists, because the installation id it mints is what
-    // every later write of the push section is addressed by.
-    void usePushStore.getState().hydrate()
-    // Same reason, one step weaker: the context section is only written once a
-    // gateway has named somebody, but the reader's switches have to be in
-    // memory before the first projection or the defaults would travel as though
-    // they were decisions.
+    // The reader's switches have to be in memory before the first projection or
+    // the defaults would travel as though they were decisions.
     void useDeviceContextStore.getState().hydrate()
     // Before the first chat is drawn, because "read replies aloud" is armed by
     // a transcript effect: a chat opened against an unhydrated store would take
@@ -130,18 +176,6 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     // reads to the owner as a reply that was skipped.
     void useVoiceSettingsStore.getState().hydrate()
   }, [])
-
-  // The list's arrangement is stored per gateway, so it is read when the
-  // gateway is known rather than at startup: "Change gateway" then starts with
-  // an empty arrangement and "Sign out" keeps the one it had, with no clean-up
-  // code on either path (ADR-0012).
-  useEffect(() => {
-    if (config?.baseUrl) {
-      void useChatLayoutStore.getState().load(config.baseUrl)
-    } else {
-      useChatLayoutStore.getState().reset()
-    }
-  }, [config?.baseUrl])
 
   useEffect(() => {
     if (!connection) {
@@ -170,6 +204,10 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     }
 
     const gateway = chatGatewayFor(connection)
+    // One cache per gateway. Two gateways can both have a `researcher`, and a
+    // cache that could not tell them apart would paint one machine's
+    // conversation under the other's name.
+    const chatCache = gatewayId ? chatCacheFor(gatewayId) : null
     // The chat store is handed over read-only: `session.active_list` answers for
     // the whole gateway process and carries no profile, so the roster attributes
     // a busy session to a bot through the ids its chat is known under.
@@ -218,6 +256,7 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     */
     const push = new PushSync({
       platform: pushPlatform,
+      namespace: gatewayId ? namespace(gatewayId) : null,
       projectId: pushProjectId(),
       vapidUrl: pushVapidUrl(),
       // A registration that never happened lands in the same ring the
@@ -235,7 +274,29 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
           }
         },
         openApprovals: name => controller.openApprovals(name),
-        respondApproval: (name, requestId, choice) => controller.respondApproval(name, requestId, choice)
+        respondApproval: (name, requestId, choice) => controller.respondApproval(name, requestId, choice),
+        /*
+          A notification from another configured gateway.
+
+          It goes through the BUS rather than through `controller.openChat`,
+          because the switch tears this controller down: by the time the dial
+          to the other gateway has finished, the object this closure captured
+          is stopped and the chat the reader wants belongs to a controller that
+          did not exist when the notification was tapped. The bus is read by
+          whichever shell is mounted, which by then is the new one.
+        */
+        switchToGateway: async (key, bot) => {
+          const target = gatewayForKey(registryRef.current, key)
+
+          if (!target || target.id === gatewayId) {
+            return false
+          }
+
+          await switchGateway(target.id)
+          requestOpenChat(bot)
+
+          return true
+        }
       }
     })
     const stopPush = push.start()
@@ -355,7 +416,10 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     // `http` is built with the connection and handed out as a ref, like the
     // connection itself, so listing it costs no extra rebuild — and leaving it
     // out would hand the controller a stale one if that ever changed.
-  }, [connection, http])
+    // `switchGateway` and the list are read through a ref and a stable callback
+    // respectively, so neither rebuilds the runtime; see `registryRef`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connection, gatewayId, http])
 
   /**
    * Read the roster when the connection becomes usable, and again after every
@@ -429,6 +493,17 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     value?.widgets.setGatewayReady(status === 'ready')
   }, [status, value])
+
+  /**
+   * And which gateway the rows it writes belong to.
+   *
+   * Its own effect, beside the one above, because the two move independently: a
+   * socket goes up and down all day on one gateway, and the gateway itself
+   * changes only when somebody switches.
+   */
+  useEffect(() => {
+    value?.widgets.setGatewayAddress(config?.baseUrl ?? '')
+  }, [config?.baseUrl, value])
 
   /**
    * Drain the share outbox whenever there is a gateway to drain it into.

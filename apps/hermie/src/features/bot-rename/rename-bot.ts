@@ -38,16 +38,20 @@
  *
  * ## The cache is separate because it can fail on its own
  *
- * `chatCache` is SQLite on the phones and IndexedDB in a browser, it is async,
+ * The cache is SQLite on the phones and IndexedDB in a browser, it is async,
  * and it is allowed to be unavailable — `FallbackChatCache` downgrades to
  * memory the first time it throws. So the cached transcript is moved after the
  * in-memory stores and its failure is reported rather than rolled back: the
  * worst case is a cold start that re-fetches one conversation, which is what a
  * cache miss has always cost.
+ *
+ * There is one cache PER GATEWAY, so the caller says which: two gateways can
+ * both have a `researcher`, and a rename on one of them must not go looking
+ * through the other one's transcripts.
  */
 import type { ChatState } from '@hermie/transcript'
 
-import { chatCache } from '../../platform/chat-cache'
+import { chatCacheFor } from '../../platform/chat-cache'
 import { useBotsStore, type Bot, type BotCanonicalSession } from '../../store/bots'
 import { useChatLayoutStore } from '../../store/chat-layout'
 import { useChatsStore, type QueuedMessage } from '../../store/chats'
@@ -85,8 +89,12 @@ function rekey<T>(map: Record<string, T>, from: string, to: string): Record<stri
  *
  * A no-op when the two names are equal, which is the `default` profile's case:
  * that one keeps its id and gains a display name, so there is no key to move.
+ *
+ * `gatewayId` names the cache to move the transcript in. `null` means there is
+ * no gateway to have renamed anything on, which leaves the in-memory stores as
+ * the whole of the move rather than guessing at a corner of the disk.
  */
-export async function renameBot(from: string, to: string): Promise<RenameBotResult> {
+export async function renameBot(from: string, to: string, gatewayId: string | null): Promise<RenameBotResult> {
   if (!from || !to || from === to) {
     return { ok: true, failed: [] }
   }
@@ -197,15 +205,19 @@ export async function renameBot(from: string, to: string): Promise<RenameBotResu
   }
 
   // -- the cached transcript ------------------------------------------------
-  try {
-    const cached = await chatCache.read(from)
+  if (gatewayId) {
+    const cache = chatCacheFor(gatewayId)
 
-    if (cached) {
-      await chatCache.write({ ...cached, bot: to })
-      await chatCache.forget(from)
+    try {
+      const cached = await cache.read(from)
+
+      if (cached) {
+        await cache.write({ ...cached, bot: to })
+        await cache.forget(from)
+      }
+    } catch {
+      failed.push('cache')
     }
-  } catch {
-    failed.push('cache')
   }
 
   return { ok: failed.length === 0, failed }

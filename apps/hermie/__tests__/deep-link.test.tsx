@@ -26,20 +26,28 @@ jest.mock('expo', () => ({
 
 describe('parseHermieLink', () => {
   it('reads the bot out of a chat link', () => {
-    expect(parseHermieLink('hermie://chat/researcher')).toEqual({ kind: 'chat', bot: 'researcher' })
+    expect(parseHermieLink('hermie://chat/researcher')).toEqual({ kind: 'chat', bot: 'researcher', gatewayKey: '' })
   })
 
   it('accepts the dev client scheme, so a link tested in development is the same link', () => {
-    expect(parseHermieLink('exp+hermie://chat/researcher')).toEqual({ kind: 'chat', bot: 'researcher' })
+    expect(parseHermieLink('exp+hermie://chat/researcher')).toEqual({ kind: 'chat', bot: 'researcher', gatewayKey: '' })
   })
 
   it('tolerates a trailing slash and a query nobody asked for', () => {
-    expect(parseHermieLink('hermie://chat/researcher/')).toEqual({ kind: 'chat', bot: 'researcher' })
-    expect(parseHermieLink('hermie://chat/researcher?from=widget')).toEqual({ kind: 'chat', bot: 'researcher' })
+    expect(parseHermieLink('hermie://chat/researcher/')).toEqual({ kind: 'chat', bot: 'researcher', gatewayKey: '' })
+    expect(parseHermieLink('hermie://chat/researcher?from=widget')).toEqual({
+      kind: 'chat',
+      bot: 'researcher',
+      gatewayKey: ''
+    })
   })
 
   it('decodes a name that had to be escaped', () => {
-    expect(parseHermieLink('hermie://chat/code%20reviewer')).toEqual({ kind: 'chat', bot: 'code reviewer' })
+    expect(parseHermieLink('hermie://chat/code%20reviewer')).toEqual({
+      kind: 'chat',
+      bot: 'code reviewer',
+      gatewayKey: ''
+    })
   })
 
   /**

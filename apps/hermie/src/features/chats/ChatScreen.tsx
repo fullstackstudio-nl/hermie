@@ -363,7 +363,7 @@ function Conversation({
   const chat = useChat(botName)
   const runtime = useChatRuntime()
   const cronJobs = useCronStore(state => state.jobs)
-  const { config, connection, http, lastError, status } = useGateway()
+  const { config, connection, gatewayId, http, lastError, status } = useGateway()
   const view = useChatView(botName)
   const pinned = useChatLayoutStore(state => Boolean(state.pinned[botName]))
   const avatar = useBotsStore(state => state.avatars[botName])
@@ -2308,6 +2308,7 @@ function Conversation({
                 bot: byName[botName],
                 contextUsage: chat.contextUsage,
                 gateway: profileGateway,
+                gatewayId,
                 gatewayVersion: config?.version ?? '',
                 http,
                 // A saved description or picture only reaches the header, the

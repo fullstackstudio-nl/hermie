@@ -24,6 +24,8 @@
  */
 import { fireEvent, screen, waitFor } from '@testing-library/react-native'
 
+import { NS_A } from './support/gateway-namespace'
+
 import { NotificationsSection } from '../src/features/push/NotificationsSection'
 import type { PushAddress } from '@hermie/gateway-client/push'
 import type { PushPermission, PushPlatform } from '../src/features/push/platform-contract'
@@ -77,13 +79,14 @@ function macPlatform(permission: PushPermission = 'undetermined'): MacPlatform {
 const syncOn = (platform: PushPlatform) =>
   new PushSync({
     platform,
+    namespace: NS_A,
     ports: { showChat: async () => undefined, openApprovals: async () => [], respondApproval: async () => undefined }
   })
 
 beforeEach(async () => {
   usePushStore.getState().reset()
-  await keyValueStore.delete(PUSH_KEY)
-  await usePushStore.getState().hydrate()
+  await keyValueStore.delete(NS_A.key(PUSH_KEY))
+  await usePushStore.getState().hydrate(NS_A)
 })
 
 describe('turning notifications on', () => {

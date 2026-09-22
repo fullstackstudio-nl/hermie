@@ -14,9 +14,14 @@ import { useState } from 'react'
 import { NativeSignInWebView } from '../src/features/onboarding/NativeSignInWebView'
 import { draftFromConfig, effectiveHeaders, emptyDraft, type OnboardingDraft } from '../src/features/onboarding'
 import { GatewayAddressStep } from '../src/features/onboarding/steps/GatewayAddressStep'
-import { clearGateway, loadGatewaySetup, saveGatewaySetup, SECRET_KEYS } from '../src/gateway/config'
+import { clearGateway, loadGatewaySetup, saveGatewaySetup, secretKeysFor } from '../src/gateway/config'
 import { secretStore } from '../src/platform/secret-store'
 import { renderScreen } from './support/render'
+
+import { NS_A } from './support/gateway-namespace'
+
+/** Every credential belongs to one gateway; this suite writes that one's. */
+const KEYS = secretKeysFor(NS_A)
 
 jest.mock('@hermie/gateway-client', () => ({
   ...jest.requireActual('@hermie/gateway-client'),
@@ -64,7 +69,7 @@ beforeEach(async () => {
   resolveGatewayAddress.mockReset()
   resolveGatewayAddress.mockResolvedValue(at('https://gateway.example.com'))
   latest = emptyDraft()
-  await clearGateway()
+  await clearGateway(NS_A)
 })
 
 describe('the draft', () => {
@@ -97,7 +102,7 @@ describe('the draft', () => {
 
 describe('what reaches disk', () => {
   it('stores the preset as a preset, not as a copy of the headers it derives', async () => {
-    await saveGatewaySetup({
+    await saveGatewaySetup(NS_A, {
       config: { baseUrl: 'https://gateway.example.com', authMode: 'native_pkce' },
       extraHeaders: {},
       frontDoor: ACCESS,
@@ -105,9 +110,9 @@ describe('what reaches disk', () => {
     })
 
     // The derived pair is NOT in the header blob: one secret, one place.
-    expect(await secretStore.get(SECRET_KEYS.extraHeaders)).toBeNull()
+    expect(await secretStore.get(KEYS.extraHeaders)).toBeNull()
 
-    const setup = await loadGatewaySetup()
+    const setup = await loadGatewaySetup(NS_A)
 
     expect(setup?.frontDoor).toEqual(ACCESS)
     expect(setup?.customHeaders).toEqual({})
@@ -115,59 +120,59 @@ describe('what reaches disk', () => {
   })
 
   it('binds the record to the address being saved, not to whatever it was typed against', async () => {
-    await saveGatewaySetup({
+    await saveGatewaySetup(NS_A, {
       config: { baseUrl: 'https://moved.example.com', authMode: 'native_pkce' },
       extraHeaders: {},
       frontDoor: ACCESS,
       sessionToken: 'st-1'
     })
 
-    const setup = await loadGatewaySetup()
+    const setup = await loadGatewaySetup(NS_A)
 
     expect(setup?.frontDoor).toMatchObject({ origin: 'https://moved.example.com' })
   })
 
   it('refuses to hand a service token to a gateway it was not issued for', async () => {
-    await secretStore.set(SECRET_KEYS.frontDoor, JSON.stringify(ACCESS))
-    await saveGatewaySetup({
+    await secretStore.set(KEYS.frontDoor, JSON.stringify(ACCESS))
+    await saveGatewaySetup(NS_A, {
       config: { baseUrl: 'https://somewhere-else.example.com', authMode: 'session_token' },
       extraHeaders: {},
       sessionToken: 'st-1'
     })
     // The save above cleared it; put a stale record back the way a restore or an
     // older build would have.
-    await secretStore.set(SECRET_KEYS.frontDoor, JSON.stringify(ACCESS))
+    await secretStore.set(KEYS.frontDoor, JSON.stringify(ACCESS))
 
-    const setup = await loadGatewaySetup()
+    const setup = await loadGatewaySetup(NS_A)
 
     expect(setup?.frontDoor).toEqual({ kind: 'none' })
     expect(setup?.extraHeaders).toEqual({})
   })
 
   it('treats a record with no origin as one that does not belong here', async () => {
-    await saveGatewaySetup({
+    await saveGatewaySetup(NS_A, {
       config: { baseUrl: 'https://gateway.example.com', authMode: 'session_token' },
       extraHeaders: {},
       sessionToken: 'st-1'
     })
     await secretStore.set(
-      SECRET_KEYS.frontDoor,
+      KEYS.frontDoor,
       JSON.stringify({ kind: 'cloudflare_access', clientId: ID, clientSecret: SECRET })
     )
 
-    expect((await loadGatewaySetup())?.frontDoor).toEqual({ kind: 'none' })
+    expect((await loadGatewaySetup(NS_A))?.frontDoor).toEqual({ kind: 'none' })
   })
 
   it('is deleted by a sign-out, along with the other five', async () => {
-    await saveGatewaySetup({
+    await saveGatewaySetup(NS_A, {
       config: { baseUrl: 'https://gateway.example.com', authMode: 'native_pkce' },
       extraHeaders: {},
       frontDoor: ACCESS,
       sessionToken: 'st-1'
     })
-    await clearGateway()
+    await clearGateway(NS_A)
 
-    expect(await secretStore.get(SECRET_KEYS.frontDoor)).toBeNull()
+    expect(await secretStore.get(KEYS.frontDoor)).toBeNull()
   })
 
   it('comes back into a resumed wizard, so a sign-out does not cost a retyped secret', () => {

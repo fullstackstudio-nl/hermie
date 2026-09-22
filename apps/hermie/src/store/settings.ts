@@ -10,13 +10,16 @@
  * an override follows the default as the default moves; an override pins that
  * chat until it is reset. Both are persisted through the `KeyValueStore`.
  *
- * The appearance preference rides along here rather than in its own store: it
- * is the same blob on disk, read at the same moment, and a second store would
- * mean a second first-paint flash.
+ * The appearance preference lives in this store and in a key of its own. One
+ * store, because a second one would mean a second first-paint flash; two keys,
+ * because everything else here belongs to a gateway account and light-or-dark
+ * belongs to the device. Both are read in the same pass, so the flash the
+ * single blob was avoiding is still avoided.
  */
 import type { Verbosity } from '@hermie/transcript'
 import { create } from 'zustand'
 
+import type { GatewayNamespace } from '../gateway/namespace'
 import { keyValueStore } from '../platform/key-value-store'
 import { asNameOrder, DEFAULT_NAME_ORDER, type NameOrder } from './bot-names'
 import { asTextSize, DEFAULT_TEXT_SIZE, type TextSize } from './text-size'
@@ -49,12 +52,34 @@ export const DEFAULT_CHAT_VIEW: ChatViewSettings = {
   showThinking: false
 }
 
+/**
+ * The per-account half, keyed by gateway.
+ *
+ * Everything under it either follows the account through ADR-0016's
+ * `hermie-app:<user_id>` — the defaults, the name order, the theme — or is
+ * keyed by bot name, which is a gateway's own namespace. `perChat` is the one
+ * that decides it: two gateways can both have a `researcher`, and one of them
+ * pinning that chat to Verbose must not turn the other one verbose too.
+ */
 export const CHAT_VIEW_KEY = 'hermie.chat.view'
+
+/**
+ * Light or dark, on this device, whatever gateway is live.
+ *
+ * The one field pulled OUT of the blob above, because it is the one that is not
+ * about an account at all: it is about the eyes in front of the screen and the
+ * room they are in. A reader whose phone went light because they switched to
+ * their work gateway would have found a bug, not a feature.
+ */
+export const APPEARANCE_KEY = 'hermie.appearance'
+
+interface PersistedAppearance {
+  appearance?: Appearance
+}
 
 interface PersistedChatView {
   defaults: ChatViewSettings
   perChat: Record<string, Partial<ChatViewSettings>>
-  appearance?: Appearance
   botNameOrder?: NameOrder
   themeChoice?: ThemeChoice
   userThemes?: UserTheme[]
@@ -209,7 +234,21 @@ export interface SettingsState {
   textSize: TextSize
   /** False until the first disk read finishes; screens paint the defaults meanwhile. */
   loaded: boolean
-  hydrate: () => Promise<void>
+  /**
+   * The same, for the appearance alone.
+   *
+   * Its own flag because its read happens at a different moment and above a
+   * different provider: `ThemeProvider` sits over the whole app, including the
+   * lock and the wizard, and has no gateway to key anything by. One flag for
+   * both would leave it either waiting for a gateway that may never be
+   * configured or re-reading on every render.
+   */
+  appearanceLoaded: boolean
+  /** The gateway the per-account half belongs to; null before the first read. */
+  namespace: GatewayNamespace | null
+  hydrate: (ns: GatewayNamespace) => Promise<void>
+  /** Read the device-level appearance. No gateway needed; see `appearanceLoaded`. */
+  hydrateAppearance: () => Promise<void>
   setDefaults: (patch: Partial<ChatViewSettings>) => void
   setChatView: (botName: string, patch: Partial<ChatViewSettings>) => void
   resetChatView: (botName: string) => void
@@ -243,12 +282,20 @@ export interface SettingsState {
 let writeQueue: Promise<void> = Promise.resolve()
 
 /** Serialise the writes: two toggles flipped in the same tick must not race. */
-function persist(state: PersistedChatView): void {
+function persist(ns: GatewayNamespace, state: PersistedChatView): void {
   writeQueue = writeQueue
-    .then(() => keyValueStore.setJson(CHAT_VIEW_KEY, state))
+    .then(() => keyValueStore.setJson(ns.key(CHAT_VIEW_KEY), state))
     .catch(() => {
       // A preference that failed to persist is a preference that resets on the
       // next launch, which is not worth surfacing as an error.
+    })
+}
+
+function persistAppearance(appearance: Appearance): void {
+  writeQueue = writeQueue
+    .then(() => keyValueStore.setJson(APPEARANCE_KEY, { appearance }))
+    .catch(() => {
+      // As above.
     })
 }
 
@@ -270,9 +317,15 @@ function newThemeId(): string {
 export const useSettingsStore = create<SettingsState>((set, get) => {
   /** Write whatever is in the store now; every setter calls this after its `set`. */
   const save = (): void => {
-    const { defaults, perChat, appearance, botNameOrder, themeChoice, userThemes, textSize } = get()
+    const { namespace: ns, defaults, perChat, botNameOrder, themeChoice, userThemes, textSize } = get()
 
-    persist({ defaults, perChat, appearance, botNameOrder, themeChoice, userThemes, textSize })
+    // Nothing before a gateway is known. These are somebody's settings ON a
+    // gateway, and a blob under a key nobody owns is one the next launch will
+    // not find. The appearance is the exception and is not here at all: it has
+    // a device-level key of its own and `persistAppearance` writes it.
+    if (ns) {
+      persist(ns, { defaults, perChat, botNameOrder, themeChoice, userThemes, textSize })
+    }
   }
 
   const writeThemes = (userThemes: UserTheme[]): void => {
@@ -289,9 +342,17 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
     userThemes: [],
     textSize: DEFAULT_TEXT_SIZE,
     loaded: false,
+    appearanceLoaded: false,
+    namespace: null,
 
-    async hydrate() {
-      const stored = await keyValueStore.getJson<PersistedChatView>(CHAT_VIEW_KEY)
+    async hydrateAppearance() {
+      const stored = await keyValueStore.getJson<PersistedAppearance>(APPEARANCE_KEY)
+
+      set({ appearance: asAppearance(stored?.appearance) ?? DEFAULT_APPEARANCE, appearanceLoaded: true })
+    },
+
+    async hydrate(ns) {
+      const stored = await keyValueStore.getJson<PersistedChatView>(ns.key(CHAT_VIEW_KEY))
       const perChat: Record<string, Partial<ChatViewSettings>> = {}
 
       for (const [bot, patch] of Object.entries(stored?.perChat ?? {})) {
@@ -303,9 +364,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
       }
 
       set({
+        namespace: ns,
         defaults: { ...DEFAULT_CHAT_VIEW, ...asPatch(stored?.defaults) },
         perChat,
-        appearance: asAppearance(stored?.appearance) ?? DEFAULT_APPEARANCE,
         botNameOrder: asNameOrder(stored?.botNameOrder) ?? DEFAULT_NAME_ORDER,
         themeChoice: asThemeChoice(stored?.themeChoice, stored?.wallpaper) ?? DEFAULT_THEME_CHOICE,
         userThemes: asUserThemes(stored?.userThemes),
@@ -334,7 +395,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
 
     setAppearance(appearance) {
       set({ appearance })
-      save()
+      // Its own key, and therefore its own write: it is the one preference here
+      // that does not belong to a gateway.
+      persistAppearance(appearance)
     },
 
     setBotNameOrder(botNameOrder) {
@@ -440,7 +503,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
         themeChoice: DEFAULT_THEME_CHOICE,
         userThemes: [],
         textSize: DEFAULT_TEXT_SIZE,
-        loaded: false
+        loaded: false,
+        appearanceLoaded: false,
+        namespace: null
       })
     }
   }

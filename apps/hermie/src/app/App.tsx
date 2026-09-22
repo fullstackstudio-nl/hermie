@@ -62,7 +62,7 @@ export default function App() {
  * credentials are still there: the startup read, the wizard, and the app.
  */
 function Root() {
-  const { phase, resumeAccess, resumeConfig, resumeIntent, reload } = useGateway()
+  const { gatewayId, phase, resumeAccess, resumeConfig, resumeIntent, reload } = useGateway()
   const devOpen = DEV_LAUNCH_INTENT?.open
 
   // Before the phase check on purpose: the component kit takes no gateway, so a
@@ -78,6 +78,11 @@ function Root() {
   if (phase === 'onboarding') {
     return (
       <OnboardingNavigator
+        // The entry being edited, or null on a first run. A wizard opened over
+        // a configured gateway is changing THAT gateway's address rather than
+        // describing a second machine; "Add gateway" in Settings is the other
+        // one, and it passes null.
+        gatewayId={gatewayId}
         onComplete={reload}
         resumeAccess={resumeAccess}
         resumeConfig={resumeConfig}

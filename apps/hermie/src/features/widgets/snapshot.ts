@@ -29,6 +29,8 @@
  *    installed extension until it reloads. A widget that finds a version it does
  *    not know draws its empty state rather than half a row.
  */
+import { gatewayKeyOf } from '@hermie/gateway-client'
+
 import { formatPreview, initialFor } from '../../chat-ui'
 import { hasOpenRequest, unreadCountSince } from '@hermie/transcript'
 import type { ChatState } from '@hermie/transcript'
@@ -135,6 +137,19 @@ export interface WidgetSnapshot {
   version: number
   /** Unix MILLISECONDS, as `Date.now()`. The widget shows it as a staleness hint. */
   generatedAt: number
+  /**
+   * Which gateway these bots belong to, as `gatewayKeyOf` its address.
+   *
+   * A widget shows the ACTIVE gateway's bots, because the app has one live
+   * connection and a widget cannot dial. What the key adds is that a tap can
+   * say which gateway the row it drew belonged to — a reader who switched
+   * between the last write and the tap would otherwise open a chat by name on
+   * whichever machine happened to be live.
+   *
+   * Optional, so a widget binary built before this decodes the file with a
+   * default rather than drawing its empty state; see `WIDGET_SNAPSHOT_VERSION`.
+   */
+  gatewayKey?: string
   /** Most recently active first, archived bots excluded. */
   bots: WidgetBot[]
   /**
@@ -201,6 +216,8 @@ export interface WidgetSnapshotInput {
   avatars: Record<string, true>
   /** `Date.now()`, passed in so this function has no clock of its own. */
   now: number
+  /** The active gateway's address; `''` before one is configured. */
+  gatewayAddress?: string
 }
 
 /**
@@ -281,8 +298,15 @@ export function projectWidgetSnapshot(input: WidgetSnapshotInput): WidgetSnapsho
   }
 
   const bots = ranked.filter(bot => keep.has(bot.name)).slice(0, WIDGET_BOT_CAP)
+  const gatewayKey = gatewayKeyOf(input.gatewayAddress ?? '')
 
-  return { version: WIDGET_SNAPSHOT_VERSION, generatedAt: input.now, bots, folders }
+  return {
+    version: WIDGET_SNAPSHOT_VERSION,
+    generatedAt: input.now,
+    ...(gatewayKey ? { gatewayKey } : {}),
+    bots,
+    folders
+  }
 }
 
 /**
@@ -398,8 +422,12 @@ export function needsInputCount(snapshot: WidgetSnapshot): number {
  * is one `JSON.stringify` and no hand-written field list to forget to update.
  */
 export function sameWidgetContent(left: WidgetSnapshot | null, right: WidgetSnapshot): boolean {
+  // The gateway key joins the comparison, because a switch between two gateways
+  // with identical rosters would otherwise leave the home screen holding the
+  // previous gateway's key and send every tap to the wrong machine.
   return (
     left !== null &&
+    left.gatewayKey === right.gatewayKey &&
     JSON.stringify(left.bots) === JSON.stringify(right.bots) &&
     // Folders too, and not only for completeness: a folder's badge counts muted
     // chats, so a message into a silenced conversation moves a number no bot

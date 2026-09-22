@@ -1,3 +1,4 @@
+export { gatewayKeyOf, isGatewayKey } from './gateway-key'
 export {
   AUTH_TIMELINE_SIZE,
   type AuthEvent,

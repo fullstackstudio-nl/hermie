@@ -12,6 +12,7 @@
 import type { ProfileRow } from '@hermes/shared/gateway-contract'
 import { create } from 'zustand'
 
+import type { GatewayNamespace } from '../gateway/namespace'
 import { keyValueStore } from '../platform/key-value-store'
 
 export interface BotCanonicalSession {
@@ -40,6 +41,13 @@ export interface Bot {
   uiMetaRevision: number
 }
 
+/**
+ * The read watermarks, per gateway.
+ *
+ * Namespaced because it is keyed by BOT NAME, and bot names are a gateway's
+ * own: two gateways can both have a `researcher`, and one list's watermark
+ * silently marking the other's chat as read is a message somebody never sees.
+ */
 export const BOT_LAST_SEEN_KEY = 'hermie.bots.last_seen'
 
 const str = (value: unknown): string => (typeof value === 'string' ? value : '')
@@ -116,12 +124,15 @@ export interface BotsState {
   setRunning: (names: readonly string[]) => void
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
-  hydrateLastSeen: () => Promise<void>
+  /** The gateway these watermarks belong to; null before the first read. */
+  namespace: GatewayNamespace | null
+  hydrateLastSeen: (ns: GatewayNamespace) => Promise<void>
   markSeen: (name: string, lastActive?: number) => void
   reset: () => void
 }
 
 const INITIAL = {
+  namespace: null as GatewayNamespace | null,
   bots: [] as Bot[],
   byName: {} as Record<string, Bot>,
   avatars: {} as Record<string, string>,
@@ -136,9 +147,9 @@ const INITIAL = {
 
 let lastSeenQueue: Promise<void> = Promise.resolve()
 
-function persistLastSeen(lastSeen: Record<string, number>): void {
+function persistLastSeen(ns: GatewayNamespace, lastSeen: Record<string, number>): void {
   lastSeenQueue = lastSeenQueue
-    .then(() => keyValueStore.setJson(BOT_LAST_SEEN_KEY, lastSeen))
+    .then(() => keyValueStore.setJson(ns.key(BOT_LAST_SEEN_KEY), lastSeen))
     .catch(() => {
       // A lost watermark shows one chat as unread again; not worth an error.
     })
@@ -226,8 +237,8 @@ export const useBotsStore = create<BotsState>((set, get) => ({
     set({ error })
   },
 
-  async hydrateLastSeen() {
-    const stored = await keyValueStore.getJson<Record<string, number>>(BOT_LAST_SEEN_KEY)
+  async hydrateLastSeen(ns) {
+    const stored = await keyValueStore.getJson<Record<string, number>>(ns.key(BOT_LAST_SEEN_KEY))
     const lastSeen: Record<string, number> = {}
 
     for (const [name, value] of Object.entries(stored ?? {})) {
@@ -236,7 +247,7 @@ export const useBotsStore = create<BotsState>((set, get) => ({
       }
     }
 
-    set({ lastSeen })
+    set({ namespace: ns, lastSeen })
   },
 
   markSeen(name, lastActive) {
@@ -249,13 +260,24 @@ export const useBotsStore = create<BotsState>((set, get) => ({
     }
 
     const lastSeen = { ...get().lastSeen, [name]: at }
+    const ns = get().namespace
 
     set({ lastSeen })
-    persistLastSeen(lastSeen)
+
+    // Nothing is written before the gateway is known. A watermark under a key
+    // nobody owns is one the next launch cannot find anyway.
+    if (ns) {
+      persistLastSeen(ns, lastSeen)
+    }
   },
 
   reset() {
-    set(INITIAL)
+    // The namespace survives, and it is the one field that has to. `reset` runs
+    // when a connection goes — a sign-out, a reconnect — and the gateway those
+    // watermarks belong to has not changed; clearing it would leave `markSeen`
+    // with nowhere to write until something re-hydrated the store, which on a
+    // sign-in to the same gateway nothing does.
+    set({ ...INITIAL, namespace: get().namespace })
   }
 }))
 

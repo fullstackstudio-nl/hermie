@@ -28,6 +28,7 @@
  * that is what gives the registration ADR-0016's compare-and-swap and its
  * local-only fallback without a second protocol.
  */
+import { gatewayKeyOf } from '@hermie/gateway-client'
 import {
   noPushTypes,
   pushTypesOf,
@@ -40,11 +41,34 @@ import {
 import { create } from 'zustand'
 
 import type { PushAddressFailure } from '../features/push/platform-contract'
+import type { GatewayNamespace } from '../gateway/namespace'
 import { keyValueStore } from '../platform/key-value-store'
 import { randomBytes } from '../platform/random'
 
-/** Everything this device stores about push, under one key. */
+/**
+ * What this device asked FOR on one gateway: the switch, the types, the
+ * preview. Namespaced, because a registration is only meaningful for the
+ * gateway it was made on — ADR-0017 says so, and it is the reason a sign-out
+ * removes one.
+ */
 export const PUSH_KEY = 'hermie.push'
+
+/**
+ * The installation id, and it is deliberately NOT namespaced.
+ *
+ * ADR-0017 keys the whole push section by an id the device mints once, and the
+ * sentence it gives for that is the sentence that decides this: "a device that
+ * re-minted it on every launch would leave a dead registration behind each
+ * time and the daemon would go on sending to tokens that nothing answers". A
+ * device that minted one PER GATEWAY is the same failure at a slower rate, and
+ * on top of it the id stops being an answer to "which device is this" the
+ * moment it depends on which gateway is live.
+ */
+export const INSTALLATION_KEY = 'hermie.installation'
+
+interface PersistedInstallation {
+  installationId: string
+}
 
 /**
  * The types a reader who has just switched notifications on gets: all of them.
@@ -70,7 +94,6 @@ export const DEFAULT_PUSH_TYPES: Record<PushType, boolean> = {
 
 /** The part of this store that survives a launch. Ours only; never theirs. */
 interface PersistedPush {
-  installationId: string
   enabled: boolean
   types: Record<string, boolean>
   preview: boolean
@@ -117,7 +140,19 @@ export interface PushState {
    */
   addressFailure: PushAddressFailure | null
 
-  hydrate: () => Promise<void>
+  /** The gateway this registration belongs to; null before the first read. */
+  namespace: GatewayNamespace | null
+  /**
+   * Read this gateway's registration, and re-read it when the gateway changes.
+   *
+   * It ADOPTS rather than overwrites in one case: the setup wizard offers the
+   * notifications switch before the gateway it would register on has an id, so
+   * a reader who turns it on there has made a decision that lives only in
+   * memory. The first hydrate after setup is the moment that decision gets a
+   * gateway, and reading the (empty) stored blob over it would silently undo
+   * the last thing the reader did in the wizard.
+   */
+  hydrate: (ns: GatewayNamespace) => Promise<void>
   /** Turn the whole section on or off. The address is set separately. */
   setEnabled: (enabled: boolean) => void
   setType: (type: PushType, on: boolean) => void
@@ -154,9 +189,9 @@ export interface PushState {
 
 let writeQueue: Promise<void> = Promise.resolve()
 
-function persist(state: PersistedPush): void {
+function persist(ns: GatewayNamespace, state: PersistedPush): void {
   writeQueue = writeQueue
-    .then(() => keyValueStore.setJson(PUSH_KEY, state))
+    .then(() => keyValueStore.setJson(ns.key(PUSH_KEY), state))
     .catch(() => {
       // A preference that failed to persist resets on the next launch. That is a
       // notification toggle to set again, not an error to put in front of anybody.
@@ -176,12 +211,15 @@ const newInstallationId = (): string =>
 
 export const usePushStore = create<PushState>((set, get) => {
   const save = (): void => {
-    const { installationId, enabled, types, preview } = get()
+    const { namespace: ns, enabled, types, preview } = get()
 
-    persist({ installationId, enabled, types, preview })
+    if (ns) {
+      persist(ns, { enabled, types, preview })
+    }
   }
 
   return {
+    namespace: null,
     installationId: '',
     enabled: false,
     types: noPushTypes(),
@@ -194,27 +232,50 @@ export const usePushStore = create<PushState>((set, get) => {
     loaded: false,
     addressFailure: null,
 
-    async hydrate() {
-      if (get().loaded) {
+    async hydrate(ns) {
+      // Re-read when the gateway changes, and only then. The registration is
+      // that gateway's; the id below is not and is read once either way.
+      if (get().loaded && get().namespace?.id === ns.id) {
         return
       }
 
-      const stored = await keyValueStore.getJson<PersistedPush>(PUSH_KEY)
+      // A switch turned on in the wizard, before any gateway had an id. See
+      // `hydrate` on `PushState` for why this adopts rather than reads.
+      const fromWizard = get().namespace === null && get().enabled
+      const [stored, installation] = await Promise.all([
+        keyValueStore.getJson<PersistedPush>(ns.key(PUSH_KEY)),
+        keyValueStore.getJson<PersistedInstallation>(INSTALLATION_KEY)
+      ])
+
+      const existing = get().installationId
       const installationId =
-        typeof stored?.installationId === 'string' && stored.installationId
-          ? stored.installationId
-          : newInstallationId()
+        existing ||
+        (typeof installation?.installationId === 'string' && installation.installationId
+          ? installation.installationId
+          : newInstallationId())
 
       set({
+        namespace: ns,
         installationId,
-        enabled: stored?.enabled === true,
-        types: stored?.types ? pushTypesOf(stored.types) : noPushTypes(),
-        preview: stored?.preview === true,
+        enabled: fromWizard || stored?.enabled === true,
+        types: fromWizard ? get().types : stored?.types ? pushTypesOf(stored.types) : noPushTypes(),
+        preview: fromWizard ? get().preview : stored?.preview === true,
+        // Whoever was registered on the previous gateway is not registered
+        // here, and their rows are not ours to carry across. The address the
+        // wizard just obtained IS ours, and survives with the switch.
+        address: fromWizard ? get().address : null,
+        updatedAt: fromWizard ? get().updatedAt : 0,
+        others: {},
+        seen: {},
+        addressFailure: null,
         loaded: true
       })
 
       // Written back even when nothing was stored, so the id this launch minted
       // is the id the next launch finds. Everything else round-trips unchanged.
+      writeQueue = writeQueue
+        .then(() => keyValueStore.setJson(INSTALLATION_KEY, { installationId }))
+        .catch(() => undefined)
       save()
     },
 
@@ -338,6 +399,7 @@ export const usePushStore = create<PushState>((set, get) => {
 
     reset() {
       set({
+        namespace: null,
         enabled: false,
         types: noPushTypes(),
         preview: false,
@@ -353,14 +415,24 @@ export const usePushStore = create<PushState>((set, get) => {
   }
 })
 
-/** This device's registration as ADR-0017 wants it, or `null` when it is off. */
-export function ownRegistration(state: PushState, platform: string): PushRegistrationInput | null {
+/**
+ * This device's registration as ADR-0017 wants it, or `null` when it is off.
+ *
+ * `gatewayKey` is what lets a notification say which gateway it came from on a
+ * device that has more than one. It is derived from the address rather than
+ * held, so an entry whose address the reader corrected produces the new key on
+ * the next write without anybody having to remember to re-register.
+ */
+export function ownRegistration(state: PushState, platform: string, address = ''): PushRegistrationInput | null {
   if (!state.loaded || !state.enabled || !state.installationId || !state.address) {
     return null
   }
 
+  const gatewayKey = gatewayKeyOf(address)
+
   return {
     installationId: state.installationId,
+    ...(gatewayKey ? { gatewayKey } : {}),
     address: state.address,
     platform,
     types: state.types,

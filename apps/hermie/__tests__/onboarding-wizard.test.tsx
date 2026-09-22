@@ -7,6 +7,18 @@ import { keyValueStore } from '../src/platform/key-value-store'
 import { secretStore } from '../src/platform/secret-store'
 import { renderScreen } from './support/render'
 
+import { GATEWAY_A, NS_A } from './support/gateway-namespace'
+
+/**
+ * The wizard writes into an entry, so every key it touches carries that
+ * entry's id. The suite pins one rather than letting it mint a random one, so
+ * the assertions can name the keys they expect.
+ */
+const KEYS = Object.fromEntries(
+  Object.entries(SECRET_KEYS).map(([slot, key]) => [slot, NS_A.key(key)])
+) as typeof SECRET_KEYS
+const GATEWAY_CONFIG_KEY = NS_A.key(CONFIG_KEY)
+
 // The sign-in step records `signin.no_refresh` on the app's auth ring, which
 // belongs to the gateway provider. The wizard itself needs nothing else from it.
 jest.mock('../src/gateway/GatewayProvider', () => ({ useGateway: () => ({ recordAuth: jest.fn() }) }))
@@ -24,12 +36,35 @@ jest.mock('../src/platform/secret-store', () => ({
   }
 }))
 
+/**
+ * A list with one entry in it, so the wizard writes into an id this suite can
+ * name. Without it `saveGatewayAndRegister` mints a random one and every
+ * assertion below would be guessing at a key.
+ */
+const mockGatewayId = 'gaaaaaaaaaaaaaaaa'
+
 jest.mock('../src/platform/key-value-store', () => ({
   keyValueStore: {
     get: jest.fn(async () => null),
     set: jest.fn(async () => undefined),
     delete: jest.fn(async () => undefined),
-    getJson: jest.fn(async () => null),
+    getJson: jest.fn(async (key: string) =>
+      key === 'hermie.gateways'
+        ? {
+            v: 1,
+            activeGatewayId: mockGatewayId,
+            gateways: [
+              {
+                id: mockGatewayId,
+                name: 'hermes.example.com',
+                address: 'https://hermes.example.com',
+                authKind: 'native_pkce',
+                addedAt: 1
+              }
+            ]
+          }
+        : null
+    ),
     setJson: jest.fn(async () => undefined)
   }
 }))
@@ -74,7 +109,7 @@ beforeEach(() => {
 
 describe('the wizard as a whole', () => {
   it('walks Welcome → Gateway address → Sign in → Test connection → Notifications → Done', () => {
-    renderScreen(<OnboardingNavigator onComplete={jest.fn()} initialDraft={signedInDraft()} />)
+    renderScreen(<OnboardingNavigator gatewayId={GATEWAY_A} onComplete={jest.fn()} initialDraft={signedInDraft()} />)
 
     expect(screen.getByText('Welcome to Hermie')).toBeTruthy()
     expect(screen.queryByTestId('step-counter')).toBeNull()
@@ -94,7 +129,14 @@ describe('the wizard as a whole', () => {
   })
 
   it('holds every step in one card on the wallpaper, with the actions inside it', () => {
-    renderScreen(<OnboardingNavigator onComplete={jest.fn()} initialStep="address" initialDraft={signedInDraft()} />)
+    renderScreen(
+      <OnboardingNavigator
+        gatewayId={GATEWAY_A}
+        onComplete={jest.fn()}
+        initialStep="address"
+        initialDraft={signedInDraft()}
+      />
+    )
 
     expect(screen.getByTestId('onboarding-wallpaper')).toBeTruthy()
     expect(screen.getByTestId('onboarding-card')).toBeTruthy()
@@ -108,7 +150,7 @@ describe('the wizard as a whole', () => {
   })
 
   it('shows no progress rail on the cover, which is not one of the numbered steps', () => {
-    renderScreen(<OnboardingNavigator onComplete={jest.fn()} initialDraft={signedInDraft()} />)
+    renderScreen(<OnboardingNavigator gatewayId={GATEWAY_A} onComplete={jest.fn()} initialDraft={signedInDraft()} />)
 
     expect(screen.queryByTestId('step-rail', { includeHiddenElements: true })).toBeNull()
     expect(screen.queryByTestId('step-counter')).toBeNull()
@@ -120,6 +162,7 @@ describe('the wizard as a whole', () => {
     // blue buttons stacked would read as two ways forward rather than one gate.
     renderScreen(
       <OnboardingNavigator
+        gatewayId={GATEWAY_A}
         onComplete={jest.fn()}
         initialStep="signin"
         initialDraft={{ ...signedInDraft(), tokens: null }}
@@ -133,6 +176,7 @@ describe('the wizard as a whole', () => {
   it('opens on the sign-in step when a sign-out left the address behind', () => {
     renderScreen(
       <OnboardingNavigator
+        gatewayId={GATEWAY_A}
         onComplete={jest.fn()}
         resumeConfig={{
           baseUrl: 'https://hermes.example.com',
@@ -162,7 +206,9 @@ describe('the test-connection gate', () => {
       botCount: 2
     })
 
-    renderScreen(<OnboardingNavigator onComplete={jest.fn()} initialStep="test" initialDraft={draft} />)
+    renderScreen(
+      <OnboardingNavigator gatewayId={GATEWAY_A} onComplete={jest.fn()} initialStep="test" initialDraft={draft} />
+    )
 
     // Nothing was pressed, and Continue is shut until the dial answers.
     expect(isDisabled('Continue')).toBe(true)
@@ -183,7 +229,9 @@ describe('the test-connection gate', () => {
       botCount: 2
     })
 
-    renderScreen(<OnboardingNavigator onComplete={jest.fn()} initialStep="test" initialDraft={draft} />)
+    renderScreen(
+      <OnboardingNavigator gatewayId={GATEWAY_A} onComplete={jest.fn()} initialStep="test" initialDraft={draft} />
+    )
 
     await waitFor(() => expect(screen.getByTestId('test-result')).toBeTruthy())
     expect(runConnectionTest).toHaveBeenCalledTimes(1)
@@ -206,7 +254,9 @@ describe('the test-connection gate', () => {
     })
 
     const onComplete = jest.fn()
-    renderScreen(<OnboardingNavigator onComplete={onComplete} initialStep="test" initialDraft={draft} />)
+    renderScreen(
+      <OnboardingNavigator gatewayId={GATEWAY_A} onComplete={onComplete} initialStep="test" initialDraft={draft} />
+    )
 
     await waitFor(() => expect(screen.getByTestId('test-result')).toBeTruthy())
 
@@ -220,14 +270,21 @@ describe('the test-connection gate', () => {
 
     await waitFor(() => expect(onComplete).toHaveBeenCalled())
 
-    expect(secretStore.set).toHaveBeenCalledWith(SECRET_KEYS.refreshToken, 'refresh-2')
-    expect(secretStore.set).not.toHaveBeenCalledWith(SECRET_KEYS.refreshToken, 'refresh-1')
+    expect(secretStore.set).toHaveBeenCalledWith(KEYS.refreshToken, 'refresh-2')
+    expect(secretStore.set).not.toHaveBeenCalledWith(KEYS.refreshToken, 'refresh-1')
   })
 
   it('reports a rejected credential, stays shut, and offers a retry', async () => {
     runConnectionTest.mockRejectedValue(new GatewayError('auth', 'raw', { closeCode: 4401 }))
 
-    renderScreen(<OnboardingNavigator onComplete={jest.fn()} initialStep="test" initialDraft={signedInDraft()} />)
+    renderScreen(
+      <OnboardingNavigator
+        gatewayId={GATEWAY_A}
+        onComplete={jest.fn()}
+        initialStep="test"
+        initialDraft={signedInDraft()}
+      />
+    )
 
     await waitFor(() => expect(screen.getByTestId('test-error')).toHaveTextContent(/rejected the credentials/))
     expect(isDisabled('Continue')).toBe(true)
@@ -238,7 +295,9 @@ describe('the test-connection gate', () => {
     const draft = signedInDraft()
     runConnectionTest.mockRejectedValue(new GatewayError('network', 'raw'))
 
-    renderScreen(<OnboardingNavigator onComplete={jest.fn()} initialStep="test" initialDraft={draft} />)
+    renderScreen(
+      <OnboardingNavigator gatewayId={GATEWAY_A} onComplete={jest.fn()} initialStep="test" initialDraft={draft} />
+    )
 
     await waitFor(() => expect(screen.getByTestId('test-error')).toBeTruthy())
     expect(runConnectionTest).toHaveBeenCalledTimes(1)
@@ -257,7 +316,14 @@ describe('the test-connection gate', () => {
   it('names the gateway address as the fix behind a 4403 close', async () => {
     runConnectionTest.mockRejectedValue(new GatewayError('config', 'raw', { closeCode: 4403 }))
 
-    renderScreen(<OnboardingNavigator onComplete={jest.fn()} initialStep="test" initialDraft={signedInDraft()} />)
+    renderScreen(
+      <OnboardingNavigator
+        gatewayId={GATEWAY_A}
+        onComplete={jest.fn()}
+        initialStep="test"
+        initialDraft={signedInDraft()}
+      />
+    )
 
     await waitFor(() => expect(screen.getByTestId('test-error')).toHaveTextContent(/dashboard\.public_url/))
   })
@@ -270,7 +336,9 @@ describe('the test-connection gate', () => {
     }
     runConnectionTest.mockRejectedValue(new GatewayError('network', 'raw'))
 
-    renderScreen(<OnboardingNavigator onComplete={jest.fn()} initialStep="test" initialDraft={stale} />)
+    renderScreen(
+      <OnboardingNavigator gatewayId={GATEWAY_A} onComplete={jest.fn()} initialStep="test" initialDraft={stale} />
+    )
 
     expect(isDisabled('Continue')).toBe(true)
     expect(screen.queryByTestId('test-result')).toBeNull()
@@ -291,12 +359,14 @@ describe('the Done step', () => {
     }
     const onComplete = jest.fn()
 
-    renderScreen(<OnboardingNavigator onComplete={onComplete} initialStep="done" initialDraft={tested} />)
+    renderScreen(
+      <OnboardingNavigator gatewayId={GATEWAY_A} onComplete={onComplete} initialStep="done" initialDraft={tested} />
+    )
     fireEvent.press(primaryButton('Start chatting'))
 
     await waitFor(() => expect(onComplete).toHaveBeenCalled())
 
-    expect(keyValueStore.setJson).toHaveBeenCalledWith(CONFIG_KEY, {
+    expect(keyValueStore.setJson).toHaveBeenCalledWith(GATEWAY_CONFIG_KEY, {
       baseUrl: 'https://hermes.example.com',
       authMode: 'native_pkce',
       provider: 'self-hosted',
@@ -304,17 +374,17 @@ describe('the Done step', () => {
       version: '2026.9.14',
       userDisplayName: 'Fake Tester'
     })
-    expect(secretStore.set).toHaveBeenCalledWith(SECRET_KEYS.accessToken, 'access-1')
-    expect(secretStore.set).toHaveBeenCalledWith(SECRET_KEYS.refreshToken, 'refresh-1')
+    expect(secretStore.set).toHaveBeenCalledWith(KEYS.accessToken, 'access-1')
+    expect(secretStore.set).toHaveBeenCalledWith(KEYS.refreshToken, 'refresh-1')
     expect(secretStore.set).toHaveBeenCalledWith(
-      SECRET_KEYS.tokenMeta,
+      KEYS.tokenMeta,
       JSON.stringify({ expiresAt: 4102444800, provider: 'self-hosted', userId: 'tester@example.invalid' })
     )
     expect(secretStore.set).toHaveBeenCalledWith(
-      SECRET_KEYS.extraHeaders,
+      KEYS.extraHeaders,
       JSON.stringify({ 'CF-Access-Client-Id': 'client-id' })
     )
-    expect(secretStore.set).not.toHaveBeenCalledWith(SECRET_KEYS.sessionToken, expect.anything())
+    expect(secretStore.set).not.toHaveBeenCalledWith(KEYS.sessionToken, expect.anything())
   })
 
   it('stores the session token, and no bearer tokens, for an ungated gateway', async () => {
@@ -328,20 +398,22 @@ describe('the Done step', () => {
     }
     const onComplete = jest.fn()
 
-    renderScreen(<OnboardingNavigator onComplete={onComplete} initialStep="done" initialDraft={tested} />)
+    renderScreen(
+      <OnboardingNavigator gatewayId={GATEWAY_A} onComplete={onComplete} initialStep="done" initialDraft={tested} />
+    )
     fireEvent.press(primaryButton('Start chatting'))
 
     await waitFor(() => expect(onComplete).toHaveBeenCalled())
 
-    expect(keyValueStore.setJson).toHaveBeenCalledWith(CONFIG_KEY, {
+    expect(keyValueStore.setJson).toHaveBeenCalledWith(GATEWAY_CONFIG_KEY, {
       baseUrl: 'http://localhost:9119',
       authMode: 'session_token',
       version: '2026.9.14'
     })
-    expect(secretStore.set).toHaveBeenCalledWith(SECRET_KEYS.sessionToken, 'session-token-value')
-    expect(secretStore.set).not.toHaveBeenCalledWith(SECRET_KEYS.accessToken, expect.anything())
+    expect(secretStore.set).toHaveBeenCalledWith(KEYS.sessionToken, 'session-token-value')
+    expect(secretStore.set).not.toHaveBeenCalledWith(KEYS.accessToken, expect.anything())
     // No extra headers means the key is removed rather than left holding an old set.
-    expect(secretStore.delete).toHaveBeenCalledWith(SECRET_KEYS.extraHeaders)
+    expect(secretStore.delete).toHaveBeenCalledWith(KEYS.extraHeaders)
   })
 
   it('keeps the wizard open and explains itself when the write fails', async () => {
@@ -350,6 +422,7 @@ describe('the Done step', () => {
 
     renderScreen(
       <OnboardingNavigator
+        gatewayId={GATEWAY_A}
         onComplete={onComplete}
         initialStep="done"
         initialDraft={{ ...signedInDraft(), test: { key: '', userDisplayName: 'Fake Tester', botCount: 2 } }}

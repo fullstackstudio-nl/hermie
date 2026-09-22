@@ -72,6 +72,17 @@ export type PushAddress =
 /** This device's registration, before it becomes a row. */
 export interface PushRegistrationInput {
   installationId: string
+  /**
+   * `gatewayKeyOf` the gateway this registration was made on.
+   *
+   * The notifier already knows which gateway it is — it is the one it is
+   * connected to — so this is not there to tell it. It is there so the
+   * notification it SENDS can carry the key, and so a device reading the
+   * section back can tell its own row from a row it wrote against a gateway it
+   * has since renamed or re-addressed. Empty when the address will not parse,
+   * which reads everywhere as "no key".
+   */
+  gatewayKey?: string
   address: PushAddress
   /** `ios`, `android` or `web`. Informational; the daemon does not route on it. */
   platform: string
@@ -217,6 +228,10 @@ export function pushRowFor(input: PushRegistrationInput): Record<string, unknown
     platform: input.platform,
     types: { ...input.types },
     preview: input.preview,
+    // Omitted rather than written empty: a row saying its gateway key is the
+    // empty string is a row claiming a key, and every reader of one checks for
+    // absence rather than for a falsy value.
+    ...(input.gatewayKey ? { gatewayKey: input.gatewayKey } : {}),
     updatedAt: input.updatedAt
   }
 

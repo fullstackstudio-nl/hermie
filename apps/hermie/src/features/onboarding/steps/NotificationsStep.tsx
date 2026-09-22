@@ -48,7 +48,10 @@ export interface NotificationsStepProps {
 const NO_PORTS = {
   showChat: async (): Promise<void> => undefined,
   openApprovals: async (): Promise<[]> => [],
-  respondApproval: async (): Promise<void> => undefined
+  respondApproval: async (): Promise<void> => undefined,
+  // There is no list to switch within and no chat to open: this object exists
+  // so the step can ask the platform for permission, and for nothing else.
+  switchToGateway: async (): Promise<boolean> => false
 }
 
 export function NotificationsStep({ draft }: NotificationsStepProps) {
@@ -67,6 +70,9 @@ export function NotificationsStep({ draft }: NotificationsStepProps) {
         platform: pushPlatform,
         projectId: pushProjectId(),
         vapidUrl: pushVapidUrl(),
+        // The gateway this would register on does not have an id yet — it is
+        // written down on the last step. The switch lives in memory until then.
+        namespace: null,
         ports: NO_PORTS
       }),
     []

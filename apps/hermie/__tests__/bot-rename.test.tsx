@@ -22,7 +22,7 @@ import type { GatewayHttp } from '@hermie/gateway-client'
 import { BotProfileSheet } from '../src/features/bot-profile'
 import { initialBotName, renameBot, renameProfile, ProfileRenameError } from '../src/features/bot-rename'
 import type { ChatGateway } from '../src/gateway/link'
-import { chatCache } from '../src/platform/chat-cache'
+import { type ChatCache, chatCacheFor } from '../src/platform/chat-cache'
 import { useBotsStore, type Bot } from '../src/store/bots'
 import { useChatLayoutStore } from '../src/store/chat-layout'
 import { useChatsStore } from '../src/store/chats'
@@ -36,9 +36,26 @@ import { renderScreen } from './support/render'
 */
 jest.mock('../src/platform/chat-cache', () => {
   const core = jest.requireActual('../src/platform/chat-cache-core')
+  const caches = new Map<string, unknown>()
 
-  return { ...core, chatCache: new core.MemoryChatCache() }
+  // One per gateway, memoised exactly as the real module memoises: `renameBot`
+  // asks for the cache by id, and a second instance would answer an empty one.
+  return {
+    ...core,
+    chatCacheFor: (gatewayId: string) => {
+      if (!caches.has(gatewayId)) {
+        caches.set(gatewayId, new core.MemoryChatCache())
+      }
+
+      return caches.get(gatewayId)
+    }
+  }
 })
+
+/** The gateway the rename is happening on. One is enough to key a cache by. */
+const GATEWAY = 'gaaaaaaaaaaaaaaaa'
+
+const cache = (): ChatCache => chatCacheFor(GATEWAY)
 
 const BOT: Bot = {
   name: 'researcher',
@@ -223,7 +240,7 @@ describe('renameBot', () => {
     useChatLayoutStore.getState().setArchived('researcher', true)
     useChatLayoutStore.getState().setMute('researcher', 0)
     useDeviceContextStore.getState().setBotNote('researcher', 'Prefers footnotes.', 10)
-    await chatCache.write({
+    await cache().write({
       bot: 'researcher',
       itemsJson: '[]',
       lastRowId: 9,
@@ -236,7 +253,7 @@ describe('renameBot', () => {
   it('moves every key the app holds a bot under', async () => {
     await seed()
 
-    const result = await act(async () => renameBot('researcher', 'analyst'))
+    const result = await act(async () => renameBot('researcher', 'analyst', GATEWAY))
 
     expect(result).toEqual({ ok: true, failed: [] })
 
@@ -261,15 +278,15 @@ describe('renameBot', () => {
     expect(layout.mutes.analyst).toBe(0)
     expect(useDeviceContextStore.getState().perBot).toEqual({ analyst: 'Prefers footnotes.' })
 
-    expect((await chatCache.read('analyst'))?.lastRowId).toBe(9)
-    expect(await chatCache.read('researcher')).toBeNull()
+    expect((await cache().read('analyst'))?.lastRowId).toBe(9)
+    expect(await cache().read('researcher')).toBeNull()
   })
 
   it('moves a bot inside a folder with the folder', async () => {
     await seed()
     useChatLayoutStore.getState().addFolderAround('researcher', 'Work')
 
-    await act(async () => renameBot('researcher', 'analyst'))
+    await act(async () => renameBot('researcher', 'analyst', GATEWAY))
 
     expect(useChatLayoutStore.getState().folders[0]?.bots).toEqual(['analyst'])
   })
@@ -278,7 +295,7 @@ describe('renameBot', () => {
   it('does nothing when the name did not actually change', async () => {
     await seed()
 
-    expect(await renameBot('researcher', 'researcher')).toEqual({ ok: true, failed: [] })
+    expect(await renameBot('researcher', 'researcher', GATEWAY)).toEqual({ ok: true, failed: [] })
     expect(useChatsStore.getState().chats.researcher).toBeTruthy()
   })
 })

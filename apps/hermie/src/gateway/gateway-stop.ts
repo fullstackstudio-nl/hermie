@@ -28,7 +28,7 @@ import { describeConnectionError, hostOf } from './errors'
 export type GatewayStopKind = 'auth' | 'config' | 'tls' | 'incompatible' | 'protocol' | 'not_hermes' | 'redirect'
 
 /** What it offers; `useReauth` decides what signing in MEANS for the gateway's auth mode. */
-export type GatewayStopAction = 'signIn' | 'recheck' | 'changeGateway' | 'signOut'
+export type GatewayStopAction = 'signIn' | 'recheck' | 'changeGateway' | 'signOut' | 'switchGateway'
 
 export interface GatewayAddressParts {
   /** The address exactly as it is stored, path prefix and all. */
@@ -41,6 +41,15 @@ export interface GatewayAddressParts {
 
 export interface GatewayStop {
   kind: GatewayStopKind
+  /**
+   * What this gateway is CALLED, when the device knows more than one.
+   *
+   * Empty on a device with a single gateway, where the card is already
+   * unambiguous and a name would be a label with nothing to distinguish it
+   * from. The address block below it is unchanged either way: a name is how a
+   * reader recognises the machine, and the address is how they check it.
+   */
+  gatewayName: string
   title: string
   /** One sentence, in the app's voice, about what went wrong. */
   sentence: string
@@ -56,6 +65,16 @@ export interface GatewayStopInput {
   status: ConnectionStatus
   error: GatewayError | null | undefined
   config: StoredGatewayConfig | null | undefined
+  /** The active entry, when there is a list. Only its name is read. */
+  gateway?: { name: string } | null
+  /**
+   * How many gateways this device has configured.
+   *
+   * It decides one thing: whether the card can offer stepping across to
+   * another machine. With one there is nowhere to step, and an action that
+   * leads nowhere is worse than an action that is absent.
+   */
+  gatewayCount?: number
 }
 
 /**
@@ -213,7 +232,13 @@ function hintFor(kind: GatewayStopKind, error: GatewayError | null | undefined):
  * A gateway that was never configured returns `null` too: with nothing stored
  * there is nothing to explain, and the wizard already owns the screen.
  */
-export function gatewayStop({ status, error, config }: GatewayStopInput): GatewayStop | null {
+export function gatewayStop({
+  status,
+  error,
+  config,
+  gateway,
+  gatewayCount = 1
+}: GatewayStopInput): GatewayStop | null {
   const stopped =
     STOPPED_STATUSES.has(status) ||
     (DIALLING_STATUSES.has(status) && error !== null && error !== undefined && STOPS_THE_LOOP.has(error.kind))
@@ -230,8 +255,21 @@ export function gatewayStop({ status, error, config }: GatewayStopInput): Gatewa
 
   const host = hostOf(config.baseUrl)
 
+  /*
+    Stepping across to another configured gateway, where there is one.
+
+    Offered on every stop rather than only on the one that named it, and the
+    reason is what the reader is looking at: a card that says this machine
+    cannot be used is a card where "use the other one" is the fastest true
+    answer, whether the gateway refused the connection, answered like something
+    else, or simply signed them out. It goes LAST in the list, after the ways
+    of fixing the gateway that is actually broken.
+  */
+  const canSwitch = gatewayCount > 1
+
   return {
     kind,
+    gatewayName: canSwitch ? (gateway?.name ?? '') : '',
     title: titleFor(kind, error?.closeCode),
     // The signed-out sentence is the one this card already had, and it is
     // better than the connection table's: it names the gateway and says what
@@ -250,6 +288,11 @@ export function gatewayStop({ status, error, config }: GatewayStopInput): Gatewa
     // Signing out of a session the gateway has already rejected does nothing a
     // reader wants; signing in, or going somewhere else, is the whole choice.
     // Every other stop still holds credentials worth being able to drop.
-    actions: kind === 'auth' ? ['signIn', 'recheck', 'changeGateway'] : ['recheck', 'changeGateway', 'signOut']
+    actions: [
+      ...(kind === 'auth'
+        ? (['signIn', 'recheck', 'changeGateway'] as GatewayStopAction[])
+        : (['recheck', 'changeGateway', 'signOut'] as GatewayStopAction[])),
+      ...(canSwitch ? (['switchGateway'] as GatewayStopAction[]) : [])
+    ]
   }
 }

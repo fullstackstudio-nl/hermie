@@ -19,6 +19,7 @@ import { requestIntentRun } from '../features/intents'
 import { requestShareDelivery } from '../features/share'
 import { chatStrings } from '../chat-ui/strings'
 import { strings } from '../i18n/strings'
+import { useChatLinkOpener } from './chat-link'
 import { useHermieLink } from '../platform/deep-link'
 import { usePageTitle } from '../platform/page-title'
 import { onOpenChatRequest } from './open-chat-bus'
@@ -226,13 +227,17 @@ export function CompactShell({ initial }: { initial?: DevInitialView } = {}) {
     [navigationRef]
   )
 
+  // A chat link may name a gateway other than the live one, so it goes through
+  // the shared opener rather than straight to `openChat` — see `chat-link.ts`.
+  const openChatLink = useChatLinkOpener(openChat)
+
   // Neither the share nor the Shortcut link carries a destination of its own:
   // each has already written its request into the shared container, and the id
   // in the URL is only there so that the tap arrives as a pump rather than as a
   // foreground three seconds later. Both readers work from the directory.
   useHermieLink(link => {
     if (link.kind === 'chat') {
-      openChat(link.bot)
+      openChatLink(link.bot, link.gatewayKey)
     } else if (link.kind === 'share') {
       requestShareDelivery()
     } else if (link.kind === 'intent') {

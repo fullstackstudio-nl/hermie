@@ -72,6 +72,7 @@ import { BotRow } from './BotRow'
 import { NewBotFlow } from '../profiles/NewBotFlow'
 import { profileStrings } from '../profiles/strings'
 import { ConnectionLine } from './ConnectionLine'
+import { GatewayNameLine } from './GatewayNameLine'
 import {
   clampToPinnedBand,
   committedRowIndex,
@@ -191,7 +192,7 @@ export function BotsScreen({
   const theme = useTheme()
   const insets = useSafeAreaInsets()
   const runtime = useChatRuntime()
-  const { config, connection, http, status } = useGateway()
+  const { config, connection, gatewayId, http, status } = useGateway()
   const bots = useBotsStore(state => state.bots)
   const byName = useBotsStore(state => state.byName)
   const running = useBotsStore(state => state.running)
@@ -1276,6 +1277,7 @@ export function BotsScreen({
           avatarUri={avatars[profileFor]}
           bot={byName[profileFor]}
           gateway={profileGateway}
+          gatewayId={gatewayId}
           http={http}
           gatewayVersion={config?.version ?? ''}
           onClose={() => setProfileFor(null)}
@@ -1347,9 +1349,14 @@ function Head({
         paddingTop: theme.space.panel
       }}
     >
-      <Text accessibilityRole="header" aria-level={1} style={{ flex: 1 }} variant={sidebar ? 'titleWide' : 'title'}>
-        {strings.bots.title}
-      </Text>
+      <View style={{ flex: 1 }}>
+        <Text accessibilityRole="header" aria-level={1} variant={sidebar ? 'titleWide' : 'title'}>
+          {strings.bots.title}
+        </Text>
+        {/* Which gateway this list belongs to, and only once there is more
+            than one of them to tell apart. */}
+        <GatewayNameLine />
+      </View>
 
       {/*
         Its own control rather than a second meaning for the `+`. That button

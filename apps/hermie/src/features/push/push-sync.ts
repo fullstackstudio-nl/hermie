@@ -29,6 +29,7 @@
  */
 import { pushStampOf } from '@hermie/gateway-client/push'
 
+import type { GatewayNamespace } from '../../gateway/namespace'
 import type { RpcFailure } from '../../gateway/rpc-failures'
 import { usePushStore, type PushState } from '../../store/push'
 import { pushTapOf, resolvePushTap, type OpenApproval } from './actions'
@@ -88,11 +89,39 @@ export interface PushSyncPorts {
   /** What `approval.pending` says is open for that bot, asked just now. */
   openApprovals(bot: string): Promise<OpenApproval[]>
   respondApproval(bot: string, requestId: string, choice: string): Promise<void>
+  /**
+   * Move to the gateway a notification came from, and open the chat there.
+   *
+   * Answers TRUE when it actually switched, and false for every other case —
+   * no key, a key this device does not recognise, or the key of the gateway
+   * that is already live. A false answer means the tap is an ordinary one and
+   * the three ports above handle it.
+   *
+   * It does the opening as well as the switching, and that is not tidiness: a
+   * switch tears this object's own connection down, so the chat controller
+   * these ports are bound to is stopped by the time it returns. Whatever opens
+   * the chat has to be on the other side of that teardown.
+   */
+  switchToGateway(gatewayKey: string, bot: string): Promise<boolean>
 }
 
 export interface PushSyncOptions {
   platform: PushPlatform
   ports: PushSyncPorts
+  /**
+   * The gateway this device is registering ON, or `null` in the wizard.
+   *
+   * A registration is only meaningful for one gateway (ADR-0017), so the store
+   * it reads is that gateway's and the namespace has to come in from outside:
+   * this class is built with a connection and dies with it, and the connection
+   * knows which gateway it is.
+   *
+   * `null` is the setup step, which offers the switch before the gateway it
+   * would register on has been written down. Nothing is read or persisted
+   * there; the store carries the reader's answer in memory and the first
+   * `hydrate` after setup adopts it. See `PushState.hydrate`.
+   */
+  namespace: GatewayNamespace | null
   /** `extra.eas.projectId`. Native only; a browser needs `vapidUrl` instead. */
   projectId?: string | null
   /** Where the daemon publishes its VAPID public key. Browser only. */
@@ -114,6 +143,7 @@ export interface PushSyncOptions {
 export class PushSync {
   private readonly platform: PushPlatform
   private readonly ports: PushSyncPorts
+  private readonly namespace: GatewayNamespace | null
   private readonly projectId: string | null
   private readonly vapidUrl: string | null
   private readonly store: { getState: () => PushState }
@@ -132,6 +162,7 @@ export class PushSync {
   constructor(options: PushSyncOptions) {
     this.platform = options.platform
     this.ports = options.ports
+    this.namespace = options.namespace
     this.projectId = options.projectId ?? null
     this.vapidUrl = options.vapidUrl ?? null
     this.store = options.store ?? usePushStore
@@ -169,7 +200,10 @@ export class PushSync {
   }
 
   private async boot(): Promise<void> {
-    await this.store.getState().hydrate()
+    // Nothing to read in the wizard: there is no gateway to key it by yet.
+    if (this.namespace) {
+      await this.store.getState().hydrate(this.namespace)
+    }
 
     /*
       A chat can come on screen before the disk read finishes — it always does
@@ -442,6 +476,20 @@ export class PushSync {
     const tap = pushTapOf(response)
 
     if (!tap) {
+      return
+    }
+
+    /*
+      A notification from another gateway moves the app before anything else.
+
+      And then stops. An Allow on such a notification opens the chat and
+      answers nothing, which is ADR-0017's own rule taken to its conclusion: a
+      response has to be validated against `approval.pending` ON THE GATEWAY
+      THAT ASKED, and that gateway's connection does not exist until the switch
+      has finished. The reader lands on the request and answers it there, which
+      is the direction this feature is built to fail in.
+    */
+    if (await this.ports.switchToGateway(tap.gatewayKey, tap.bot)) {
       return
     }
 

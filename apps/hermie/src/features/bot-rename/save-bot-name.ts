@@ -28,6 +28,8 @@ export interface SaveBotNameOptions {
   bot: { name: string; displayName: string; isDefault: boolean }
   /** What the field holds now. */
   draft: string
+  /** Which gateway's stored transcripts the rename moves. See `renameBot`. */
+  gatewayId: string | null
 }
 
 export interface SaveBotNameResult {
@@ -56,14 +58,14 @@ export function botNameChanged(initial: string, draft: string): boolean {
   return initial.trim() !== draft.trim()
 }
 
-export async function saveBotName({ http, bot, draft }: SaveBotNameOptions): Promise<SaveBotNameResult> {
+export async function saveBotName({ http, bot, draft, gatewayId }: SaveBotNameOptions): Promise<SaveBotNameResult> {
   const answer = await renameProfile(http, bot.name, draft)
 
   if (!answer.renamed) {
     return { name: answer.name, renamed: false, warning: null }
   }
 
-  const moved = await renameBot(bot.name, answer.name)
+  const moved = await renameBot(bot.name, answer.name, gatewayId)
 
   if (moved.ok) {
     return { name: answer.name, renamed: true, warning: null }

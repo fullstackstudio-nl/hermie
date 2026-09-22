@@ -581,6 +581,22 @@ export const strings = {
      * and stopped there, without ever saying which endpoint.
      */
     stopped: {
+      /**
+       * Stepping across to another configured gateway, from the card that says
+       * this one cannot be used.
+       *
+       * Offered on every stop rather than only on the one that named it: a
+       * reader looking at a dead machine is a reader for whom "use the other
+       * one" is the fastest true answer, whatever killed this one. The rows
+       * name the gateway rather than describing the act, because the reader is
+       * choosing between machines and not between verbs.
+       */
+      others: 'OTHER GATEWAYS',
+      othersHint: 'Hermie talks to one gateway at a time. This one keeps its conversations.',
+      switchTo: (name: string) => `Connect to ${name}`,
+      /** Above the title, when the device knows more than one gateway. */
+      onGateway: (name: string) => name,
+
       titles: {
         auth: 'Signed out',
         config: 'This gateway refused the connection',
@@ -961,6 +977,55 @@ export const strings = {
       perBotHint: 'A note only that bot sees, on top of everything above.',
       perBotPlaceholder: 'Nothing extra',
       perBotEmpty: 'No bots on this gateway yet.'
+    },
+
+    /**
+     * The gateways list, which is the primary list once there is more than one
+     * of them.
+     *
+     * The wording keeps two things apart that used to be one, because with a
+     * list they are plainly different acts: SWITCHING is stepping across to a
+     * machine this device already knows, and REMOVING is forgetting one. The
+     * old "Change gateway" survives beside them and means the third thing —
+     * editing THIS gateway's address.
+     */
+    gateways: {
+      header: 'GATEWAYS',
+      row: 'Gateways',
+      rowHint: (count: number) => (count === 1 ? 'One gateway' : `${count} gateways`),
+      title: 'Gateways',
+      /** Under the list. It says what a tap does, because a tap does a lot. */
+      hint: 'Tap a gateway to connect to it. Hermie talks to one at a time; the others keep their conversations and their notifications.',
+      active: 'Connected',
+      signedInAs: (user: string) => `Signed in as ${user}`,
+      signedOut: 'Signed out',
+      authModeToken: 'Session token',
+      manage: 'Manage',
+      add: 'Add gateway',
+      addHint: 'Runs setup for another machine. The gateway you are on now stays connected until you switch.',
+
+      /** One gateway, on its own page. */
+      detailTitle: 'Gateway',
+      name: 'Name',
+      nameHint: 'What this gateway is called on this device. It is not sent anywhere.',
+      save: 'Save',
+      connect: 'Connect to this gateway',
+      connectHint: 'Hermie disconnects from the gateway it is on and dials this one.',
+      signOut: 'Sign out of this gateway',
+      signOutHint: 'Clears its stored credentials and keeps its address.',
+      remove: 'Remove this gateway',
+      removeHint: 'Forgets its address, its credentials, its conversations and its settings on this device.',
+      removeConfirm: 'Remove this gateway and everything stored for it on this device?',
+      removeConfirmAction: 'Remove it',
+      keepIt: 'Keep it',
+      /**
+       * Said once, on the page that removes one, because it is the one thing a
+       * reader cannot find out afterwards: a gateway with no live socket has
+       * nowhere to send the "stop notifying this device" write.
+       */
+      removeNotifyNote:
+        'If this gateway is not the one Hermie is connected to, its notifications stop when it next tries to reach this device rather than straight away.',
+      back: 'Gateways'
     },
 
     account: 'ACCOUNT',

@@ -263,6 +263,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the settings sync, and a gateway section written by a build that has never heard of it leaves
   this reader on their own size rather than resetting them to Default.
 
+- **More than one gateway.** Settings → **Gateways** lists every gateway this device knows about,
+  with its name, its address, how it signs in and who is signed in on it, and marks the one Hermie
+  is connected to. Tapping a row connects to it: Hermie talks to one gateway at a time, so it
+  disconnects, dials the other and paints that gateway's chats from its own cache while the dial is
+  in flight. **Add gateway** runs setup for another machine and comes straight back — the gateway
+  you are on stays connected, because describing a second machine is not asking to be moved onto it.
+  Each gateway has a page of its own for the things a mis-tap must not reach: renaming it (a name on
+  this device, sent nowhere), signing out of it, and removing it, which asks first and then takes its
+  address, its credentials, its conversations, its arrangement and its settings with it. The chat
+  list names the gateway once there is more than one to tell apart.
+
+  Everything stored is now keyed by which gateway it belongs to, so the two do not mix: their
+  sign-ins, their cached conversations, their read marks, their chat arrangements and their
+  notification registrations are separate even when both gateways have a bot with the same name.
+  Your existing gateway becomes the first entry on the first launch, with nothing to do and nothing
+  lost. Light or dark stays a setting on the device; the theme follows the account, as it already
+  did. [ADR-0024](docs/adr/0024-a-list-of-gateways.md)
+
+- **A notification, a link or a widget tap lands on the right gateway.** Notifications now say which
+  gateway sent them, so tapping one from a gateway you are not on switches to it first and then
+  opens the chat — and stops there rather than answering a request, because an approval has to be
+  re-read on the gateway that asked. `hermie://chat/<bot>` takes an optional `?gateway=` for the
+  same reason. A key that names a gateway this device has not been set up against does nothing at
+  all: it can only ever select one you already configured.
+
+### Changed
+
+- **Change gateway now edits the gateway you are on, rather than replacing it.** Correcting an
+  address or a port keeps that gateway's chat arrangement instead of starting from an empty list,
+  which is what the arrangement being keyed by address used to cost. Moving to a different machine
+  is **Add gateway**.
+
+- **The card that appears when a gateway cannot be used names it, and offers the others.** On a
+  device with more than one gateway configured, a refused connection, an address that answers like
+  something else, a rejected certificate or an expired session all list your other gateways by name
+  under the explanation — after the ways of fixing the one that is broken. The developer connection
+  screen names the gateway whose sign-in history it is printing, since there is now one per gateway.
+
 ## [0.1.2] - 2026-09-22
 
 ### Added

@@ -18,6 +18,30 @@ export {
   SECRET_KEYS,
   type StoredGatewayConfig
 } from './config'
+export {
+  activeGatewayOf,
+  addGateway,
+  asRegistry,
+  defaultGatewayName,
+  EMPTY_REGISTRY,
+  GATEWAY_REGISTRY_KEY,
+  GATEWAY_REGISTRY_VERSION,
+  gatewayById,
+  gatewayForKey,
+  type GatewayRecord,
+  type GatewayRegistry,
+  gatewaysInOrder,
+  isGatewayId,
+  loadGatewayRegistry,
+  newGatewayId,
+  recordFromConfig,
+  reconcileActiveGateway,
+  removeGateway,
+  renameGateway,
+  saveGatewayRegistry,
+  setActiveGateway,
+  updateGateway
+} from './registry'
 export { AUTH_TIMELINE_KEY, createPersistentAuthTimeline } from './auth-timeline'
 export { describeConnectionError, describeProbeError, describeSignInError, hostOf } from './errors'
 export { GatewayProvider, type GatewayContextValue, type GatewayPhase, useGateway } from './GatewayProvider'

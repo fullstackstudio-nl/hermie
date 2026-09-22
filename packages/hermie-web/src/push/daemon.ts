@@ -193,6 +193,9 @@ export async function startPushDaemon(options: PushDaemonOptions): Promise<PushD
       save,
       sender,
       log,
+      // So every notification says which gateway it came from, for a device
+      // that is set up against more than one.
+      gatewayUrl: options.gatewayUrl,
       // Informational only. ADR-0017: the app never dials this; it reads the
       // stamp so Settings can say whether push is available at all.
       availability: () => ({

@@ -14,6 +14,29 @@
  * snapshot without this module needing to know why.
  */
 
+/**
+ * What separates a gateway id from a bot name inside a stored row key.
+ *
+ * A gateway id is hex (`newGatewayId`), so the FIRST colon is always the one
+ * that separates the two halves however many colons a bot name carries. That
+ * one sentence is why the key can be split back apart at all, and why the id
+ * goes first.
+ */
+export const CACHE_NS_SEPARATOR = ':'
+
+/** The stored key for one bot's row inside one gateway's namespace. */
+export const cacheRowKey = (ns: string, name: string): string => `${ns}${CACHE_NS_SEPARATOR}${name}`
+
+/** The bot name back out of a stored key. */
+export function cacheRowName(key: string): string {
+  const at = key.indexOf(CACHE_NS_SEPARATOR)
+
+  // A key with no separator is a row from before the cache had namespaces. It
+  // is only reachable if the one-time move did not finish, and reading it as
+  // the whole name is what it meant when it was written.
+  return at === -1 ? key : key.slice(at + CACHE_NS_SEPARATOR.length)
+}
+
 export type CachedTranscriptRow = {
   bot: string
   itemsJson: string

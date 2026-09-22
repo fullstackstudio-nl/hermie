@@ -26,11 +26,12 @@ import { View } from 'react-native'
 
 import { strings } from '../i18n/strings'
 import { GlassSurface } from '../ui/glass'
-import { Button, InsetGroup, InsetValueRow, Text } from '../ui/primitives'
+import { Button, InsetButtonRow, InsetGroup, InsetValueRow, Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
 import { GatewayAddressRow } from './GatewayAddressRow'
 import { gatewayStop, type GatewayStop } from './gateway-stop'
 import { useGateway } from './GatewayProvider'
+import { EMPTY_REGISTRY, gatewaysInOrder } from './registry'
 import { describeSignOutReason, useReauth } from './reauth'
 import { useConnectionStore } from './store'
 import { WEB_GATEWAY_BASE_URL } from './web-config'
@@ -40,9 +41,48 @@ const CHECKING_STATUSES = new Set(['probing', 'authenticating', 'connecting'])
 
 /** The current stop, or `null` while the app is usable. See `gatewayStop`. */
 export function useGatewayStop(): GatewayStop | null {
-  const { status, lastError, config } = useGateway()
+  const { status, lastError, config, gateway, registry } = useGateway()
 
-  return gatewayStop({ status, error: lastError, config })
+  return gatewayStop({
+    status,
+    error: lastError,
+    config,
+    gateway,
+    // `?.` for the reason `GatewayNameLine` gives: several suites stand in for
+    // this context with the fields they care about, and a card that explains a
+    // dead connection must not be the thing that crashes.
+    gatewayCount: registry?.gateways.length ?? 1
+  })
+}
+
+/**
+ * The other gateways this device knows, as one row each.
+ *
+ * A picker would be the obvious shape and is the wrong one here: the reader is
+ * looking at a card that says the machine they were on cannot be used, and the
+ * shortest path off it is a button with the other machine's name on it. With
+ * one gateway configured this draws nothing, because there is nowhere to go.
+ */
+function OtherGateways() {
+  const { gatewayId, registry, switchGateway } = useGateway()
+  const others = gatewaysInOrder(registry ?? EMPTY_REGISTRY).filter(entry => entry.id !== gatewayId)
+
+  if (!others.length) {
+    return null
+  }
+
+  return (
+    <InsetGroup footer={strings.signedOut.stopped.othersHint} header={strings.signedOut.stopped.others}>
+      {others.map(entry => (
+        <InsetButtonRow
+          key={entry.id}
+          onPress={() => void switchGateway(entry.id)}
+          testID={`gateway-stopped-switch-${entry.id}`}
+          title={strings.signedOut.stopped.switchTo(entry.name)}
+        />
+      ))}
+    </InsetGroup>
+  )
 }
 
 /**
@@ -100,6 +140,14 @@ export function GatewayStoppedPanel() {
     >
       <GlassSurface style={{ maxWidth: 420, width: '100%' }} variant="card">
         <View style={{ gap: theme.space.md, padding: theme.space.panel }}>
+          {/* Which machine this is about, above the title, and only on a
+              device that knows more than one. See `GatewayStop.gatewayName`. */}
+          {stop.gatewayName ? (
+            <Text color="textMuted" testID="gateway-stopped-name" variant="meta">
+              {strings.signedOut.stopped.onGateway(stop.gatewayName)}
+            </Text>
+          ) : null}
+
           <Text variant="sheetTitle">{stop.title}</Text>
 
           <Text color="textMuted" testID="gateway-stopped-sentence" variant="preview">
@@ -123,6 +171,10 @@ export function GatewayStoppedPanel() {
           ) : null}
 
           <AddressBlock stop={stop} />
+
+          {/* After the address block, because choosing another machine is only
+              worth doing once the reader has read what is wrong with this one. */}
+          {stop.actions.includes('switchGateway') ? <OtherGateways /> : null}
 
           <View style={{ gap: theme.space.sm, paddingTop: theme.space.xs }}>
             {/* Labels rather than spinners while these work. This card exists

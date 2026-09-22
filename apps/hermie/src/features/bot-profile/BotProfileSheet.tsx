@@ -94,6 +94,8 @@ export interface BotProfileSheetProps {
    * whose Save has nowhere to go.
    */
   http?: GatewayHttp | null
+  /** Which gateway this bot is on, so a rename moves the right cache. */
+  gatewayId?: string | null
   /** What the gateway reported about itself when it was configured. */
   gatewayVersion?: string
   /**
@@ -139,6 +141,7 @@ export function BotProfileSheet({
   avatarUri,
   gateway,
   http,
+  gatewayId,
   gatewayVersion,
   contextUsage,
   onOpenMemory,
@@ -252,7 +255,7 @@ export function BotProfileSheet({
         at a name that no longer exists if the order were the other way round.
       */
       if (nameChanged && http) {
-        const saved = await saveBotName({ http, bot, draft: name })
+        const saved = await saveBotName({ http, bot, draft: name, gatewayId: gatewayId ?? null })
 
         if (saved.warning) {
           // The rename landed; the local half did not, all of it. Reported and
@@ -278,7 +281,7 @@ export function BotProfileSheet({
     } finally {
       setBusy(false)
     }
-  }, [avatar, bot, changes.description, gateway, http, name, nameChanged, onClose, onSaved, text.saveFailed])
+  }, [avatar, bot, changes.description, gateway, gatewayId, http, name, nameChanged, onClose, onSaved, text.saveFailed])
 
   /*
     What this bot gets BESIDES the note, said in the same breath as the note

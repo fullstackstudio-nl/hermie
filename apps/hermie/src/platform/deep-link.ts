@@ -26,6 +26,7 @@
  * in the URL, only the id of a file the app then reads out of its own
  * container.
  */
+import { isGatewayKey } from '@hermie/gateway-client'
 import { requireOptionalNativeModule } from 'expo'
 import { useEffect, useRef } from 'react'
 import { Linking } from 'react-native'
@@ -73,9 +74,27 @@ function consumeNativeLaunchURL(): string | null {
  * of them carries an address, a token or a payload, which is the rule the module
  * comment states and the only thing that makes a scheme any web page can invoke
  * safe to answer.
+ *
+ * `gatewayKey` is the one exception to "nothing but an id", and it is an
+ * exception only in the narrowest sense: it is a LOOKUP, not an address. It
+ * selects a gateway the owner has already configured and nothing else.
  */
 export type HermieLink =
-  | { kind: 'chat'; bot: string }
+  /** `hermie://chat/<bot>?gateway=<key>` — a chat on the roster of a gateway. */
+  | {
+      kind: 'chat'
+      bot: string
+      /**
+       * Which gateway's chat, as `gatewayKeyOf` its origin, or `''`.
+       *
+       * Optional on the wire and absent from every link written before this: a
+       * widget or a notification from a device with one gateway has nothing to
+       * disambiguate. It stays a LOOKUP — it selects a gateway the owner has
+       * already configured, and a key nothing matches leaves the app where it
+       * is.
+       */
+      gatewayKey: string
+    }
   /** `hermie://share/<id>` — the share sheet wrote an outbox entry. */
   | { kind: 'share'; id: string }
   /** `hermie://intent/<id>` — a Shortcut queued a request and is waiting. */
@@ -90,8 +109,14 @@ export type HermieLink =
  * client registers and uses, so a link tested in development is the same link.
  * A second segment is not accepted at all, for any kind, which is what keeps a
  * name from being read as a path.
+ *
+ * `?gateway=<key>` is the one parameter, and it is read under the same rule as
+ * everything else here: a key that is not the shape this project produces is
+ * dropped rather than carried, so a link cannot send the app looking through
+ * its own list for a string somebody made up. Every other query parameter is
+ * ignored, which is what keeps the grammar as narrow as the note above says.
  */
-const LINK = /^(?:exp\+)?hermie:\/\/(chat|share|intent|folder)\/([^/?#]+)\/?(?:[?#].*)?$/
+const LINK = /^(?:exp\+)?hermie:\/\/(chat|share|intent|folder)\/([^/?#]+)\/?(?:\?([^#]*))?(?:#.*)?$/
 
 /**
  * One of the four shapes, or nothing.
@@ -139,7 +164,26 @@ export function parseHermieLink(url: string | null | undefined): HermieLink | nu
     return null
   }
 
-  return bot && !bot.includes('/') ? { kind: 'chat', bot } : null
+  if (!bot || bot.includes('/')) {
+    return null
+  }
+
+  const key = gatewayKeyFrom(match[3])
+
+  return { kind: 'chat', bot, gatewayKey: key }
+}
+
+/** The `gateway` parameter, checked. Anything else in the query is ignored. */
+function gatewayKeyFrom(query: string | undefined): string {
+  for (const pair of (query ?? '').split('&')) {
+    const [name, value = ''] = pair.split('=')
+
+    if (name === 'gateway' && isGatewayKey(value)) {
+      return value
+    }
+  }
+
+  return ''
 }
 
 /**

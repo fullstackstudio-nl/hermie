@@ -2,10 +2,15 @@ import type { TokenSet } from '@hermie/gateway-client'
 
 import { AUTH_TIMELINE_KEY, createPersistentAuthTimeline } from '../src/gateway/auth-timeline'
 import { createSecretTokenStore } from '../src/gateway/client'
-import { SECRET_KEYS } from '../src/gateway/config'
+import { secretKeysFor } from '../src/gateway/config'
 import { useConnectionStore } from '../src/gateway/store'
 import { keyValueStore } from '../src/platform/key-value-store'
 import { secretStore } from '../src/platform/secret-store'
+import { NS_A } from './support/gateway-namespace'
+
+/** Every credential and every ring belongs to one gateway; this is that one. */
+const KEYS = secretKeysFor(NS_A)
+const RING_KEY = NS_A.key(AUTH_TIMELINE_KEY)
 
 const mockWrites: string[] = []
 let mockFailWrites: Set<string>
@@ -55,7 +60,7 @@ beforeEach(async () => {
   mockWrites.length = 0
   mockFailWrites = new Set()
   jest.clearAllMocks()
-  await keyValueStore.delete(AUTH_TIMELINE_KEY)
+  await keyValueStore.delete(RING_KEY)
   useConnectionStore.getState().setAuthTimeline({ events: [], lastSignOut: null })
 })
 
@@ -71,27 +76,27 @@ beforeEach(async () => {
  */
 describe('the secret token store', () => {
   it('writes the refresh token before anything else', async () => {
-    await createSecretTokenStore().save(tokens())
+    await createSecretTokenStore(NS_A).save(tokens())
 
-    expect(mockWrites[0]).toBe(SECRET_KEYS.refreshToken)
+    expect(mockWrites[0]).toBe(KEYS.refreshToken)
     expect(mockWrites).toHaveLength(3)
   })
 
   it('does not overwrite the access token when the refresh token could not be stored', async () => {
-    mockFailWrites.add(SECRET_KEYS.refreshToken)
+    mockFailWrites.add(KEYS.refreshToken)
 
-    await expect(createSecretTokenStore().save(tokens())).rejects.toThrow('keychain refused')
+    await expect(createSecretTokenStore(NS_A).save(tokens())).rejects.toThrow('keychain refused')
 
     // The store still holds a consistent older pair rather than a new access
     // token beside a refresh token the gateway has already rotated away.
-    expect(mockWrites).toEqual([SECRET_KEYS.refreshToken])
+    expect(mockWrites).toEqual([KEYS.refreshToken])
     expect(secretStore.set).toHaveBeenCalledTimes(1)
   })
 })
 
 describe('the persistent auth timeline', () => {
   it('publishes every event to the connection store', async () => {
-    const timeline = await createPersistentAuthTimeline()
+    const timeline = await createPersistentAuthTimeline(NS_A)
 
     timeline.record({ event: 'dial.start' })
     timeline.record({ event: 'ws.closed', closeCode: 4401 })
@@ -108,7 +113,7 @@ describe('the persistent auth timeline', () => {
    * was built for.
    */
   it('survives the restart that follows a sign-out', async () => {
-    const before = await createPersistentAuthTimeline()
+    const before = await createPersistentAuthTimeline(NS_A)
 
     before.record({ event: 'refresh.failed', kind: 'auth', status: 401 })
     before.record({ event: 'token.cleared', reason: 'refresh_rejected' })
@@ -117,25 +122,25 @@ describe('the persistent auth timeline', () => {
     expect(before.signOutReason).toBe('refresh_rejected')
 
     // A fresh process reading the same key-value store.
-    const after = await createPersistentAuthTimeline()
+    const after = await createPersistentAuthTimeline(NS_A)
 
     expect(after.signOutReason).toBe('refresh_rejected')
     expect(after.snapshot().events.map(entry => entry.event)).toContain('signin.required')
   })
 
   it('keeps the ring out of the secret store', async () => {
-    const timeline = await createPersistentAuthTimeline()
+    const timeline = await createPersistentAuthTimeline(NS_A)
 
     timeline.record({ event: 'dial.start' })
 
     expect(secretStore.set).not.toHaveBeenCalled()
-    expect(keyValueStore.setJson).toHaveBeenCalledWith(AUTH_TIMELINE_KEY, expect.anything())
+    expect(keyValueStore.setJson).toHaveBeenCalledWith(RING_KEY, expect.anything())
   })
 
   it('starts empty rather than failing when the stored ring cannot be read', async () => {
     ;(keyValueStore.getJson as jest.Mock).mockRejectedValueOnce(new Error('unreadable'))
 
-    const timeline = await createPersistentAuthTimeline()
+    const timeline = await createPersistentAuthTimeline(NS_A)
 
     expect(timeline.snapshot().events).toEqual([])
   })
@@ -145,7 +150,7 @@ describe('the persistent auth timeline', () => {
    * that it can be pasted into an issue without anybody having to check first.
    */
   it('records no token values', async () => {
-    const timeline = await createPersistentAuthTimeline()
+    const timeline = await createPersistentAuthTimeline(NS_A)
 
     timeline.record({ event: 'token.served', expiresIn: 3599 })
     timeline.record({ event: 'refresh.ok', expiresIn: 3600 })
