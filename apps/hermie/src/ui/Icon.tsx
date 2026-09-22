@@ -64,6 +64,16 @@ export type IconName =
   | 'mic'
   | 'check'
   | 'folder'
+  | 'person'
+  | 'server'
+  | 'bell'
+  | 'idCard'
+  | 'book'
+  | 'contrast'
+  | 'lock'
+  | 'bolt'
+  | 'sliders'
+  | 'info'
 
 export interface IconProps {
   name: IconName
@@ -260,6 +270,94 @@ function Glyph({ color, name, stroke }: { color: string; name: IconName; stroke:
         <>
           <Line color={color} d="M3.5 7.5A1.6 1.6 0 015.1 5.9h3.6l1.9 2.2" stroke={stroke} />
           <Rect fill="none" height={10.6} rx={2} stroke={color} strokeWidth={stroke} width={17} x={3.5} y={7.5} />
+        </>
+      )
+
+    /*
+      The Settings categories' marks (HERM-108). Drawn in the same 24pt box, at
+      the same stroke, from as few strokes as each one can be read in — they sit
+      in a column of twelve and have to tell apart at a glance, not illustrate.
+    */
+    case 'person':
+      return (
+        <>
+          <Circle cx={12} cy={8.4} fill="none" r={3.6} stroke={color} strokeWidth={stroke} />
+          <Line color={color} d="M5 19.6A7 6.2 0 0 1 19 19.6" stroke={stroke} />
+        </>
+      )
+
+    case 'server':
+      return (
+        <>
+          <Rect fill="none" height={6.2} rx={1.8} stroke={color} strokeWidth={stroke} width={16} x={4} y={4.4} />
+          <Rect fill="none" height={6.2} rx={1.8} stroke={color} strokeWidth={stroke} width={16} x={4} y={13.4} />
+          <Line color={color} d="M7.6 7.5H8.4M7.6 16.5H8.4" stroke={stroke * 1.3} />
+        </>
+      )
+
+    case 'bell':
+      return (
+        <>
+          <Line
+            color={color}
+            d="M6.7 16.5V11.4A5.3 5.3 0 0 1 12 6.1A5.3 5.3 0 0 1 17.3 11.4V16.5L18.8 18.3H5.2Z"
+            stroke={stroke}
+          />
+          <Line color={color} d="M10.3 18.3A1.8 1.8 0 0 0 13.7 18.3" stroke={stroke} />
+        </>
+      )
+
+    case 'idCard':
+      return (
+        <>
+          <Rect fill="none" height={13} rx={2.4} stroke={color} strokeWidth={stroke} width={18} x={3} y={5.5} />
+          <Circle cx={8.8} cy={10.6} fill="none" r={1.9} stroke={color} strokeWidth={stroke} />
+          <Line color={color} d="M5.9 15.6A3 2.4 0 0 1 11.7 15.6M14 10H18M14 13.6H17" stroke={stroke} />
+        </>
+      )
+
+    case 'book':
+      return (
+        <>
+          <Line color={color} d="M12 6.4C10 5 7.2 4.6 4.5 5V18C7.2 17.6 10 18 12 19.4V6.4Z" stroke={stroke} />
+          <Line color={color} d="M12 6.4C14 5 16.8 4.6 19.5 5V18C16.8 17.6 14 18 12 19.4" stroke={stroke} />
+        </>
+      )
+
+    /** Light and dark: a disc with one half drawn in. */
+    case 'contrast':
+      return (
+        <>
+          <Circle cx={12} cy={12} fill="none" r={7.8} stroke={color} strokeWidth={stroke} />
+          <Path d="M12 4.2A7.8 7.8 0 0 1 12 19.8Z" fill={color} />
+        </>
+      )
+
+    case 'lock':
+      return (
+        <>
+          <Rect fill="none" height={9.4} rx={2.2} stroke={color} strokeWidth={stroke} width={14} x={5} y={10.4} />
+          <Line color={color} d="M8.2 10.4V8A3.8 3.8 0 0 1 15.8 8V10.4" stroke={stroke} />
+        </>
+      )
+
+    case 'bolt':
+      return <Line color={color} d="M13.2 3.8L6 13.4H11.6L10.8 20.2L18 10.6H12.4Z" stroke={stroke} />
+
+    case 'sliders':
+      return (
+        <>
+          <Line color={color} d="M4.5 7.5H19.5M4.5 16.5H19.5" stroke={stroke} />
+          <Circle cx={9} cy={7.5} fill="none" r={2.2} stroke={color} strokeWidth={stroke} />
+          <Circle cx={15} cy={16.5} fill="none" r={2.2} stroke={color} strokeWidth={stroke} />
+        </>
+      )
+
+    case 'info':
+      return (
+        <>
+          <Circle cx={12} cy={12} fill="none" r={7.8} stroke={color} strokeWidth={stroke} />
+          <Line color={color} d="M12 11V16.2M12 7.8V7.9" stroke={stroke * 1.15} />
         </>
       )
 

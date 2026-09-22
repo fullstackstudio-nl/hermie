@@ -71,7 +71,15 @@ export interface PageChromeProps {
 }
 
 /** How tall the chrome measured itself, so a scrolling sibling knows how much to clear. */
-const PageChromeHeightContext = createContext(0)
+export const PageChromeHeightContext = createContext(0)
+
+/**
+ * Where a chrome reports the height it measured, when something above it wants
+ * to hand that number to the chrome's SIBLINGS — see `PageFrame`. The height
+ * context below only reaches the chrome's own subtree (its trailing slot), and a
+ * page's list is never inside the header it scrolls under.
+ */
+export const PageChromeReportContext = createContext<((height: number) => void) | null>(null)
 
 /**
  * The chrome's own height, for whatever needs it.
@@ -95,6 +103,7 @@ export function PageChrome({
 }: PageChromeProps) {
   const theme = useTheme()
   const [height, setHeight] = useState(0)
+  const report = useContext(PageChromeReportContext)
 
   // A page never wires these by hand. `enabled` follows `back` rather than a
   // constant `true`, so a tab root — which passes no `back` at all — takes
@@ -117,6 +126,7 @@ export function PageChrome({
 
           setHeight(measured)
           onHeightChange?.(measured)
+          report?.(measured)
         }}
         pointerEvents="box-none"
         style={{ left: 0, position: 'absolute', right: 0, top: 0 }}
