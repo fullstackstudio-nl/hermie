@@ -653,9 +653,14 @@ function Conversation({
    * URI has nothing to open, so the tap does nothing rather than putting up an
    * empty sheet.
    */
-  const openAttachment = useCallback((attachment: { name: string; uri?: string }) => {
-    void openAttachmentFile(attachment)
-  }, [])
+  const openAttachment = useCallback(
+    (attachment: { name: string; uri?: string }) => {
+      // The gateway's own client, because a remote attachment has to be fetched
+      // with this connection's credentials before anything can preview it.
+      void openAttachmentFile(attachment, { http })
+    },
+    [http]
+  )
 
   const images = useMemo(
     () => ({

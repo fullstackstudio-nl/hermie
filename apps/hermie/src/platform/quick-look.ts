@@ -22,16 +22,17 @@
  * anywhere. A rejected promise would make the caller tell an expected answer
  * from a real failure by reading a message.
  *
- * ## What it can actually be given today
+ * ## Local files only
  *
- * Local `file://` URIs, because those are the only attachment URIs this app
- * ever has: the gateway stores an uploaded file on its own disk and serves
- * nothing back, so a chip in the transcript is a name and a path on another
- * machine (see `ChatScreen`'s `sentImages`). An `http(s)` URI is accepted and
- * fetched to the caches directory by the native side first — unauthenticated,
- * which is stated in `HermieQuickLook.swift` rather than papered over, because a
- * gateway that needs a header to serve a file is one this cannot preview and
- * the honest answer there is `false`.
+ * `file://` and nothing else. A remote attachment is brought down BEFORE it
+ * reaches here, by `open-attachment.ts`, through the gateway's own
+ * `GatewayHttp` — which carries the bearer, the operator's front-door headers
+ * and the one 401 retry. The Swift used to do that fetch itself with a bare
+ * `URLSession`, which meant an attachment on a gated gateway could never have
+ * been previewed at all.
+ *
+ * So what this seam is handed is always a path on this device: the app's own
+ * picker produced it, or the cache copy did.
  */
 import { requireOptionalNativeModule } from 'expo'
 

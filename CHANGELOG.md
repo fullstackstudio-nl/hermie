@@ -132,6 +132,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   name the reader has chosen to see — routinely the same word in a different case, which is the
   difference that would otherwise surface as a route answering 400.
 
+- **An attachment the gateway serves can actually be previewed.** Opening a remote attachment used
+  to fetch it from the native side with no credentials at all — no bearer, no Cloudflare Access
+  header, no cookie — so on any gateway that is not wide open it was a request that could never have
+  succeeded, and the failure arrived as a share sheet that looked like "Quick Look has no previewer
+  for this". The download goes through the same authenticated client as everything else now, into
+  the caches directory, and Quick Look is handed the local copy. So does the share sheet, for a type
+  with no previewer: the receiving app is given a file rather than an address it would have to
+  authenticate to on its own. **The gateway has no route that serves an attachment back yet**, so
+  none of this has met a real server; `docs/platform-notes.md` says what that first meeting is most
+  likely to break.
+
 - **The way out of a failed probe goes when the address changes.** The onboarding address step
   offers a button under a failure — "use the host that answered", "open the front door" — and the
   button is built from the address that failed. Editing the address cleared the MESSAGE and left the

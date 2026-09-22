@@ -8778,3 +8778,46 @@ compiler proves the Swift builds, not that the URL it builds is the one the
 reader wanted; `widget-deep-link.test.ts` covers the seam between the two
 languages by reading the native sources, which is the same thing
 `ios-scene-lifecycle.test.ts` does and has the same limit.
+
+### Quick Look, with the credentials it always needed
+
+`HermieQuickLook.swift` accepted an `http(s)` URI and fetched it with
+`URLSession.shared.data(from:)`. No bearer, no operator front-door header, no
+cookie. Against a gated gateway that is not "a file that fails to preview" — it
+is a request that could never have succeeded, and the failure arrives as the
+share sheet, which looks like a type Quick Look has no previewer for.
+
+The fetch moved to JavaScript rather than growing a credential ladder in Swift.
+`GatewayHttp.requestHeaders()` already existed for exactly this shape of
+problem — it was added so the platform's own image loader could fetch a Markdown
+image from a gated gateway — and it returns the operator's extra headers and the
+bearer together. Reproducing that in Swift would have been a second
+implementation of the bearer, the front-door headers AND the single 401 retry
+that asks the credential provider for a fresh token.
+
+So: `open-attachment.ts` fetches a remote attachment through the gateway's own
+client into `Paths.cache`, and hands Quick Look a `file://`. The Swift now
+refuses anything that is not a readable local file.
+
+Three decisions inside that are not obvious:
+
+- **A directory per fetch.** Two attachments can be called the same thing, and
+  the second must not overwrite the first while the first is open in a
+  previewer. Nothing deletes them: a reader who chose "Save to Files" from
+  inside the preview is still reading from the copy.
+- **The file is named from the TRANSCRIPT's filename**, flattened to a leaf.
+  Quick Look picks its previewer from the extension, and a gateway route ending
+  in `/api/attachments/7` previews as nothing at all.
+- **No gateway means `'nothing'`, not the share sheet.** Falling back there
+  would hand the system the very URL this could not authenticate to, which only
+  moves the 401 somewhere with nowhere to report it. The share sheet still
+  catches a type with no previewer — and it is handed the local copy, so the
+  receiving app does not have to authenticate either.
+
+**What needs a device:** all of it, and it is worth being exact about why. **The
+gateway has no route that serves an attachment back.** Every attachment URI this
+app has today is local, from its own picker. So this path has never run against
+a real server, and what is tested is the seam: which headers are asked for,
+which of them reach the downloader, and what the answer is used for. The first
+time it meets a real route, the thing most likely to be wrong is the filename —
+whether the app's name or a `Content-Disposition` should win.
