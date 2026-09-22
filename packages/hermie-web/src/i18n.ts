@@ -344,6 +344,18 @@ export interface WebStrings {
       turnOffNote: string
       turnOn: string
       turnOnNote: (origin: string) => string
+      /** The address this page was actually reached on, beside the stored issuer. */
+      reachedOn: string
+      /**
+       * The stored issuer and this address disagree.
+       *
+       * The case this was written for is a reverse proxy that dropped the port:
+       * the issuer was captured once, the address moved, and every token since
+       * has carried an origin nothing answers on.
+       */
+      issuerElsewhere: (issuer: string, origin: string) => string
+      recapture: string
+      recaptureNote: string
     }
     guide: {
       heading: string
@@ -651,7 +663,17 @@ const EN: WebStrings = {
       turnOffNote: 'Accounts and keys are kept; every refresh token is dropped.',
       turnOn: 'Turn it on',
       turnOnNote: origin =>
-        `The issuer becomes <code>${origin}/oidc</code>, taken from the address you reached this page on.`
+        `The issuer becomes <code>${origin}/oidc</code>, taken from the address you reached this page on.`,
+      reachedOn: 'Reached on',
+      issuerElsewhere: (issuer, origin) =>
+        `<strong>The stored issuer is not this address.</strong> Every token says <code>${issuer}</code> while you ` +
+        `reached this page on <code>${origin}</code>. If nothing answers on the stored one — a reverse proxy that ` +
+        'dropped the port is the usual cause — the gateway cannot fetch the key set and nobody can sign in.',
+      recapture: 'Re-capture the issuer from this address',
+      recaptureNote:
+        'Keeps the accounts, the signing keys, the client id and every refresh token; only the issuer and the ' +
+        'redirect URI are recomputed. The gateway’s own configuration then has to name the new issuer, so update ' +
+        'the snippet below and restart it — until you do, sign-in is refused at the gateway.'
     },
     guide: {
       heading: 'What to put in the gateway’s configuration',
@@ -1001,7 +1023,18 @@ const NL: WebCatalogue<WebStrings> = {
       turnOffNote: 'Accounts en sleutels blijven bewaard; elk refresh token vervalt.',
       turnOn: 'Zet hem aan',
       turnOnNote: origin =>
-        `De issuer wordt <code>${origin}/oidc</code>, genomen uit het adres waarop je deze pagina bereikt hebt.`
+        `De issuer wordt <code>${origin}/oidc</code>, genomen uit het adres waarop je deze pagina bereikt hebt.`,
+      reachedOn: 'Bereikt op',
+      issuerElsewhere: (issuer, origin) =>
+        `<strong>De opgeslagen issuer is niet dit adres.</strong> Elk token zegt <code>${issuer}</code>, terwijl je ` +
+        `deze pagina bereikt hebt op <code>${origin}</code>. Als er op de opgeslagen issuer niets antwoordt — een ` +
+        'reverse proxy die de poort weglaat is de gebruikelijke oorzaak — kan de gateway de sleutelset niet ophalen ' +
+        'en kan er niemand inloggen.',
+      recapture: 'Issuer opnieuw uit dit adres overnemen',
+      recaptureNote:
+        'De accounts, de ondertekeningssleutels, het client id en elk refresh token blijven; alleen de issuer en de ' +
+        'redirect-URI worden opnieuw berekend. De configuratie van de gateway moet daarna de nieuwe issuer noemen, ' +
+        'dus werk het snippet hieronder bij en herstart hem — tot dat gebeurd is weigert de gateway elke login.'
     },
     guide: {
       heading: 'Wat je in de configuratie van de gateway zet',
@@ -1338,7 +1371,18 @@ const DE: WebCatalogue<WebStrings> = {
       turnOn: 'Einschalten',
       turnOnNote: origin =>
         `Der issuer wird <code>${origin}/oidc</code>, genommen aus der Adresse, über die du diese Seite erreicht ` +
-        'hast.'
+        'hast.',
+      reachedOn: 'Erreicht über',
+      issuerElsewhere: (issuer, origin) =>
+        `<strong>Der gespeicherte issuer ist nicht diese Adresse.</strong> Jedes token nennt <code>${issuer}</code>, ` +
+        `während du diese Seite über <code>${origin}</code> erreicht hast. Wenn auf dem gespeicherten issuer nichts ` +
+        'antwortet — ein reverse proxy, der den Port weglässt, ist die übliche Ursache — kann das gateway das ' +
+        'Schlüsselset nicht laden und niemand kann sich anmelden.',
+      recapture: 'Den issuer aus dieser Adresse neu übernehmen',
+      recaptureNote:
+        'Konten, Signierschlüssel, client id und jeder refresh token bleiben; nur issuer und redirect URI werden ' +
+        'neu berechnet. Die Konfiguration des gateway muss danach den neuen issuer nennen, also aktualisiere das ' +
+        'snippet unten und starte es neu — bis dahin lehnt das gateway jede Anmeldung ab.'
     },
     guide: {
       heading: 'Was in die Konfiguration des gateway gehört',

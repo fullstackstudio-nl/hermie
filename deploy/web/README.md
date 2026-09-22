@@ -460,10 +460,16 @@ server {
         proxy_set_header Upgrade    $http_upgrade;
         proxy_set_header Connection "upgrade";
 
-        proxy_set_header Host              $host;
+        # `$http_host` and not `$host`: `$host` is the name with the port
+        # stripped off it, so on a port that is not 443 this service is told it
+        # is on `example.com` while the browser is on `example.com:9443` — and
+        # every address it then builds (the issuer, an invitation link, the
+        # service-login redirect) points at a port nothing is listening on.
+        proxy_set_header Host              $http_host;
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-Host  $host;
+        proxy_set_header X-Forwarded-Host  $http_host;
+        proxy_set_header X-Forwarded-Port  $server_port;
 
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
@@ -489,6 +495,17 @@ page, so nothing about it depends on where the callback points.
 Hermie Web speaks plain HTTP and expects something in front of it whenever it is reachable beyond
 the machine it runs on. All three of these pass `X-Forwarded-Proto`, which is what makes the
 gateway issue `Secure` cookies with the right names.
+
+**On a port that is not 443, pass the port too.** Hermie Web builds three addresses out of these
+headers that an operator cannot correct afterwards: the OIDC issuer, an invitation link, and the
+redirect the service login comes back to. nginx's `$host` is the name with the port **stripped off
+it**, so the block most guides print reports `example.com` while the browser is on
+`example.com:9443`, and every one of those addresses then points at a port nothing is listening on.
+Use `$http_host` for both `Host` and `X-Forwarded-Host`, and add `X-Forwarded-Port $server_port` —
+or set the standard `Forwarded` header, which carries the port inside `host=` and which Hermie Web
+reads for whichever half the `X-` headers did not say. Caddy and Tailscale Serve get this right
+without being asked. If it has already happened to you, `/admin/oidc` prints the stored issuer next
+to the address you reached it on and offers to re-capture it.
 
 ### Caddy
 
@@ -519,10 +536,13 @@ server {
         proxy_set_header Upgrade    $http_upgrade;
         proxy_set_header Connection "upgrade";
 
-        proxy_set_header Host              $host;
+        # `$http_host`, not `$host`: `$host` has the port stripped off it, and
+        # this service builds addresses out of what these headers say.
+        proxy_set_header Host              $http_host;
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-Host  $host;
+        proxy_set_header X-Forwarded-Host  $http_host;
+        proxy_set_header X-Forwarded-Port  $server_port;
 
         # An agent's reply can stream for minutes; the default 60 s read timeout
         # cuts the socket mid-answer.

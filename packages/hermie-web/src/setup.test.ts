@@ -1,4 +1,5 @@
 import { mkdtemp, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import type { IncomingMessage } from 'node:http'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -6,7 +7,7 @@ import { type FakeGateway, startFakeGateway } from '@hermie/fake-gateway'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { startHermieWeb, type HermieWebServer } from './server'
-import { normalizeGatewayInput, probeGateway, readSetup, SETUP_FILE, writeSetup } from './setup'
+import { normalizeGatewayInput, ownOrigin, probeGateway, readSetup, SETUP_FILE, writeSetup } from './setup'
 import { loadPushState } from './push/state'
 
 /**
@@ -342,5 +343,98 @@ describe('saving the gateway', () => {
     } finally {
       await overridden.close()
     }
+  })
+})
+
+/**
+ * `ownOrigin`, header by header.
+ *
+ * It decides three addresses an operator cannot correct afterwards: the issuer
+ * every token will carry, the invitation link somebody is sent, and the redirect
+ * the service login comes back to. So each header combination is pinned
+ * separately rather than through one page that happens to use it — the failure
+ * this covers was an origin that looked right in every log and pointed at a port
+ * nothing was listening on.
+ */
+describe('ownOrigin', () => {
+  const origin = (headers: Record<string, string>): string =>
+    ownOrigin({ headers, socket: {} } as unknown as IncomingMessage)
+
+  it('falls back to Host on a request no proxy touched', () => {
+    expect(origin({ host: '127.0.0.1:9120' })).toBe('http://127.0.0.1:9120')
+  })
+
+  it('appends X-Forwarded-Port when $host stripped it', () => {
+    expect(
+      origin({ 'x-forwarded-proto': 'https', 'x-forwarded-host': 'example.internal', 'x-forwarded-port': '9443' })
+    ).toBe('https://example.internal:9443')
+  })
+
+  it('leaves the scheme’s own port out, because naming it would be noise', () => {
+    expect(
+      origin({ 'x-forwarded-proto': 'https', 'x-forwarded-host': 'example.internal', 'x-forwarded-port': '443' })
+    ).toBe('https://example.internal')
+    expect(
+      origin({ 'x-forwarded-proto': 'http', 'x-forwarded-host': 'example.internal', 'x-forwarded-port': '80' })
+    ).toBe('http://example.internal')
+  })
+
+  it('does not append a port the forwarded host already carries', () => {
+    expect(
+      origin({
+        'x-forwarded-proto': 'https',
+        'x-forwarded-host': 'example.internal:9443',
+        'x-forwarded-port': '9443'
+      })
+    ).toBe('https://example.internal:9443')
+  })
+
+  it('ignores a port that is not one', () => {
+    expect(
+      origin({ 'x-forwarded-proto': 'https', 'x-forwarded-host': 'example.internal', 'x-forwarded-port': 'nginx' })
+    ).toBe('https://example.internal')
+    expect(
+      origin({ 'x-forwarded-proto': 'https', 'x-forwarded-host': 'example.internal', 'x-forwarded-port': '99999' })
+    ).toBe('https://example.internal')
+  })
+
+  it('knows an IPv6 literal already has its port, and when it has none', () => {
+    expect(origin({ 'x-forwarded-host': '[::1]:9443', 'x-forwarded-port': '9443' })).toBe('http://[::1]:9443')
+    expect(origin({ 'x-forwarded-host': '[::1]', 'x-forwarded-port': '9443' })).toBe('http://[::1]:9443')
+  })
+
+  it('reads Forwarded, port and all, when the X- headers said nothing', () => {
+    expect(origin({ forwarded: 'for=203.0.113.7;proto=https;host="example.internal:9443"' })).toBe(
+      'https://example.internal:9443'
+    )
+  })
+
+  it('takes only the first Forwarded element, which is the hop nearest the reader', () => {
+    expect(origin({ forwarded: 'proto=https;host=outer.example:9443, proto=http;host=inner.invalid' })).toBe(
+      'https://outer.example:9443'
+    )
+  })
+
+  it('lets the X- headers win over Forwarded, because they are what is deployed', () => {
+    expect(
+      origin({
+        forwarded: 'proto=http;host=stale.invalid',
+        'x-forwarded-proto': 'https',
+        'x-forwarded-host': 'example.internal',
+        'x-forwarded-port': '9443'
+      })
+    ).toBe('https://example.internal:9443')
+  })
+
+  it('fills in only the half the X- headers left empty', () => {
+    expect(origin({ forwarded: 'proto=https;host=example.internal:9443', 'x-forwarded-proto': 'http' })).toBe(
+      'http://example.internal:9443'
+    )
+  })
+
+  it('reads a TLS socket as https when nothing said otherwise', () => {
+    expect(
+      ownOrigin({ headers: { host: 'example.internal' }, socket: { encrypted: true } } as unknown as IncomingMessage)
+    ).toBe('https://example.internal')
   })
 })

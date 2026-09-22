@@ -506,6 +506,102 @@ describe('rotation and turning it off', () => {
   })
 })
 
+/**
+ * The issuer that is stored against the address the page was reached on.
+ *
+ * The deployment this was written for is a reverse proxy whose `$host` drops the
+ * port: the provider was enabled once on `https://name:9443`, the header said
+ * `https://name`, and every token since has named an origin nothing answers on.
+ * Nothing in any log says "port" — the symptom is that sign-in stops working —
+ * so the page has to be the thing that notices.
+ *
+ * `--allow-insecure-oidc` is not passed anywhere here. The forwarded origin is
+ * `https`, which is what upstream's validator accepts, so the re-capture is
+ * exercised through the same gate a real one goes through.
+ */
+describe('the issuer and the address it was reached on', () => {
+  const FORWARDED = {
+    'x-forwarded-proto': 'https',
+    'x-forwarded-host': 'hermie.example.invalid',
+    'x-forwarded-port': '9443'
+  }
+  const MOVED = 'https://hermie.example.invalid:9443'
+
+  /** `/admin/oidc` as a browser behind that proxy would reach it. */
+  async function openAs(
+    cookie: string,
+    headers: Record<string, string>
+  ): Promise<{ body: string; csrf: string; cookie: string }> {
+    const response = await fetch(`${web.url}/admin/oidc`, { headers: { cookie, ...headers } })
+    const body = await response.text()
+    const csrf = decodeURIComponent(
+      /hermie_admin_csrf=([^;,]*)/.exec(response.headers.get('set-cookie') ?? '')?.[1] ?? ''
+    )
+
+    return { body, csrf, cookie: `${cookie}; hermie_admin_csrf=${csrf}` }
+  }
+
+  async function recaptureFrom(headers: Record<string, string>): Promise<string> {
+    const page = await openAs(await signInToGateway(ADA), headers)
+    const response = await fetch(`${web.url}/admin/oidc/recapture`, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { cookie: page.cookie, 'content-type': 'application/x-www-form-urlencoded', ...headers },
+      body: new URLSearchParams({ csrf: page.csrf }).toString()
+    })
+
+    return new URL(response.headers.get('location') ?? '', web.url).searchParams.get('notice') ?? ''
+  }
+
+  it('prints the address it was reached on beside the stored issuer', async () => {
+    const { body } = await openAs(await signInToGateway(ADA), {})
+
+    expect(body).toContain('Reached on')
+    expect(body).toContain(`<code>${web.url}/oidc</code>`)
+    // Nothing to warn about while the two agree, and nothing to press either.
+    expect(body).not.toContain('The stored issuer is not this address')
+    expect(body).not.toContain('/admin/oidc/recapture')
+  })
+
+  it('says so when the forwarded origin is not the issuer, naming both', async () => {
+    const { body } = await openAs(await signInToGateway(ADA), FORWARDED)
+
+    expect(body).toContain('The stored issuer is not this address')
+    expect(body).toContain(`<code>${web.url}/oidc</code>`)
+    expect(body).toContain(`<code>${MOVED}</code>`)
+    expect(body).toContain('/admin/oidc/recapture')
+    expect(body).toContain('Re-capture the issuer from this address')
+  })
+
+  it('re-captures the issuer, keeping the client id, the keys and the accounts', async () => {
+    const clientId = web.oidc.clientId
+    const keys = ((await (await fetch(`${web.url}/oidc/jwks`)).json()) as { keys: unknown[] }).keys.length
+    const accounts = countAccounts()
+    const notice = await recaptureFrom(FORWARDED)
+
+    expect(notice).toContain(`${MOVED}/oidc`)
+    expect(notice).toContain('Accounts, keys and sessions were kept')
+    expect(web.oidc.issuer).toBe(`${MOVED}/oidc`)
+    expect(web.oidc.clientId).toBe(clientId)
+    expect(web.oidc.users.length).toBe(accounts)
+    expect(web.oidc.enabled).toBe(true)
+
+    /*
+      The old key set is still published, unchanged.
+
+      That is the difference from the off/on this replaces: disabling drops every
+      refresh token, so correcting an address used to sign out every device in
+      the deployment.
+    */
+    expect(((await (await fetch(`${web.url}/oidc/jwks`)).json()) as { keys: unknown[] }).keys.length).toBe(keys)
+  })
+
+  it('and puts it back when the page is reached on the real address again', async () => {
+    expect(await recaptureFrom({})).toContain(`${web.url}/oidc`)
+    expect(web.oidc.issuer).toBe(`${web.url}/oidc`)
+  })
+})
+
 /*
   The readers below go through the provider's own accessor rather than
   re-reading the file: the server holds the state in memory and the file lags a

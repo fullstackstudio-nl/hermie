@@ -265,6 +265,55 @@ async function probeProviders(base: string, fetchImpl: typeof fetch): Promise<Se
 }
 
 /**
+ * One `Forwarded` element (RFC 7239), as far as this file cares about it.
+ *
+ * Only the first element is read. The header is a list in the order the hops
+ * added themselves, so the first element is the one closest to the client —
+ * which is the browser's own address, and the only one that answers "what did
+ * the reader type".
+ */
+function forwardedElement(value: string): { proto: string; host: string } {
+  const out = { proto: '', host: '' }
+
+  for (const parameter of (value.split(',')[0] ?? '').split(';')) {
+    const match = /^\s*(proto|host)\s*=\s*(.*?)\s*$/i.exec(parameter)
+
+    if (!match) {
+      continue
+    }
+
+    // `host="example.com:9443"` is the quoted form the grammar requires as soon
+    // as the value contains a colon, which is exactly the case this fix is for.
+    const raw = (match[2] ?? '').replace(/^"(.*)"$/, '$1').trim()
+    const name = (match[1] ?? '').toLowerCase()
+
+    if (name === 'proto' && !out.proto) {
+      out.proto = raw.toLowerCase()
+    }
+
+    if (name === 'host' && !out.host) {
+      out.host = raw
+    }
+  }
+
+  return out
+}
+
+/**
+ * Does this authority already name a port?
+ *
+ * An IPv6 literal is full of colons, so the bracket form decides: `[::1]` has
+ * no port and `[::1]:9443` has one. Anything else has a port when it has a
+ * colon at all.
+ */
+function hasPort(host: string): boolean {
+  return host.startsWith('[') ? host.includes(']:') : host.includes(':')
+}
+
+/** The port a URL of this scheme leaves out, because naming it would be noise. */
+const DEFAULT_PORT: Record<string, string> = { http: '80', https: '443' }
+
+/**
  * The absolute address a browser reached THIS server on.
  *
  * It has to be built from the request rather than from `--host`/`--port`,
@@ -273,6 +322,22 @@ async function probeProviders(base: string, fetchImpl: typeof fetch): Promise<Se
  * one the browser can actually come back to. `X-Forwarded-Proto` and
  * `X-Forwarded-Host` are read first for exactly that reason, the same way
  * `proxy.ts` reads the former.
+ *
+ * **`X-Forwarded-Port` is read too, and that is not a nicety.** nginx's `$host`
+ * is the name with the port stripped off it, so the block every deployment
+ * guide prints — `proxy_set_header X-Forwarded-Host $host;` — tells this service
+ * it is on `example.internal` while the browser is on `example.internal:9443`.
+ * Every address built from that origin then points at a port nothing is
+ * listening on: an invitation link that 404s, and an issuer the gateway cannot
+ * reach. The port is appended when the forwarded host did not carry one
+ * already and it is not the scheme's own default, so `https` on 443 stays
+ * `https://example.internal`.
+ *
+ * `Forwarded` (RFC 7239) fills in whichever of the two the `X-` headers did not
+ * say. It is the standardised header and it carries the port inside `host=`, so
+ * a proxy that sets it correctly needs nothing else; the `X-` headers keep
+ * precedence because they are what is actually deployed, and an operator who
+ * set both meant the one they set on purpose.
  */
 export function ownOrigin(request: IncomingMessage): string {
   const header = (name: string): string => {
@@ -283,10 +348,19 @@ export function ownOrigin(request: IncomingMessage): string {
   }
 
   const socket = request.socket as { encrypted?: boolean }
-  const proto = header('x-forwarded-proto') || (socket.encrypted === true ? 'https' : 'http')
-  const host = header('x-forwarded-host') || String(request.headers.host ?? '127.0.0.1')
+  const forwarded = forwardedElement(String(request.headers.forwarded ?? ''))
+  const proto = header('x-forwarded-proto') || forwarded.proto || (socket.encrypted === true ? 'https' : 'http')
+  const host = header('x-forwarded-host') || forwarded.host || String(request.headers.host ?? '127.0.0.1')
+  const port = header('x-forwarded-port')
 
-  return `${proto}://${host}`
+  // A port that is not a port is ignored rather than pasted on: the header is
+  // set by whatever is in front of this service, and an origin with `:nginx` in
+  // it would be a worse answer than one with no port at all.
+  const wanted = /^\d{1,5}$/.test(port) && Number(port) > 0 && Number(port) <= 65_535 ? port : ''
+
+  return wanted && !hasPort(host) && wanted !== DEFAULT_PORT[proto]
+    ? `${proto}://${host}:${wanted}`
+    : `${proto}://${host}`
 }
 
 /** Where the gateway sends the operator's browser back at the end of the service login. */

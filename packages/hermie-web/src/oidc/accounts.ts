@@ -66,6 +66,17 @@ export function issuerOriginAcceptable(origin: string): boolean {
   return url.protocol === 'http:' && ['localhost', '127.0.0.1', '::1', '[::1]'].includes(url.hostname)
 }
 
+/**
+ * The issuer this service would publish if it were enabled on this origin.
+ *
+ * One function rather than a string built twice, because `/admin/oidc` has to
+ * be able to say "the issuer you are storing is not the one this address would
+ * give you" — and it can only say that if both sides are derived the same way.
+ */
+export function issuerForOrigin(origin: string): string {
+  return `${origin.replace(/\/+$/, '')}/oidc`
+}
+
 export class OidcEnableError extends Error {}
 
 export interface EnableInput {
@@ -123,7 +134,7 @@ export function enableProvider(state: OidcState, input: EnableInput): OidcState 
   return {
     ...base,
     enabled: true,
-    issuer: `${origin}/oidc`,
+    issuer: issuerForOrigin(origin),
     keys,
     client: {
       // Fixed per install, generated once. Two deployments never share one, and

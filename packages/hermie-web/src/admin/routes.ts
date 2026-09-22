@@ -384,6 +384,11 @@ export class AdminRouter {
 
         return
 
+      case '/admin/oidc/recapture':
+        await this.oidcRecapture(response, origin)
+
+        return
+
       case '/admin/oidc/settings':
         await this.oidcSettings(response, form)
 
@@ -553,6 +558,48 @@ export class AdminRouter {
       this.doneAt(
         '/admin/oidc',
         `The identity provider is on at ${next.issuer}. It changed nothing on the gateway — the snippet below is what to put there.`
+      )(response)
+    } catch (error) {
+      this.doneAt('/admin/oidc', (error as OidcEnableError).message)(response)
+    }
+  }
+
+  /**
+   * Take the issuer from the address this page was reached on, keeping the rest.
+   *
+   * It is the enable transition with nothing else changed, which is the point:
+   * an operator whose reverse proxy dropped the port used to have to turn the
+   * provider OFF and back ON to correct the issuer, and turning it off drops
+   * every refresh token — so a fix for a typo in an address signed out every
+   * device in the deployment. `enableProvider` on an already-enabled state
+   * recomputes the issuer and the redirect URI and touches neither the keys, the
+   * client id, the accounts nor the refresh list, so there is nothing to spend
+   * here and the off/on is no longer the only way.
+   *
+   * What it CANNOT do is tell the gateway. Every token minted from now on
+   * carries the new `iss`, and a gateway still configured with the old one
+   * refuses it — which is why the notice sends the operator to the snippet.
+   */
+  private async oidcRecapture(response: ServerResponse, origin: string): Promise<void> {
+    if (!this.options.oidc.read().enabled) {
+      this.doneAt('/admin/oidc', 'The identity provider is off, so there is no issuer to re-capture.')(response)
+
+      return
+    }
+
+    try {
+      const next = await this.options.oidc.provider.update(state =>
+        enableProvider(state, {
+          origin,
+          gatewayPublicUrl: this.options.oidc.gatewayPublicUrl(),
+          allowInsecure: this.options.oidc.allowInsecure
+        })
+      )
+
+      this.doneAt(
+        '/admin/oidc',
+        `The issuer is now ${next.issuer}. Accounts, keys and sessions were kept — put the issuer below in the ` +
+          'gateway’s configuration and restart it.'
       )(response)
     } catch (error) {
       this.doneAt('/admin/oidc', (error as OidcEnableError).message)(response)

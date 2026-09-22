@@ -88,6 +88,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Hermie Web behind a reverse proxy keeps its port.** nginx's `$host` is the name with the
+  port stripped off it, so the block every deployment guide prints told the service it was on
+  `example.com` while the browser was on `example.com:9443`. Hermie Web builds three addresses
+  out of that origin — the OIDC issuer, the invitation link somebody is sent, and the redirect
+  the service login comes back to — and all three pointed at a port nothing was listening on:
+  a link that 404s, and a gateway that cannot fetch the key set, with nothing in any log about
+  a port. `X-Forwarded-Port` is now read and appended when the forwarded host carried no port
+  of its own and the port is not the scheme's default, and the standard `Forwarded` header
+  (RFC 7239) fills in whichever of proto and host the `X-` headers did not say. The nginx
+  examples in `deploy/web/README.md` use `$http_host` and pass `X-Forwarded-Port`.
+
+  **`/admin/oidc` says when the issuer it stored is not the address you are on**, names both,
+  and offers **Re-capture the issuer from this address**. Correcting it used to mean turning
+  the provider off and on again, and turning it off drops every refresh token — so fixing a
+  dropped port signed out every device in the deployment. Re-capturing keeps the accounts, the
+  signing keys, the client id and every session, and says that the gateway's own configuration
+  now has to name the new issuer.
+
 - **A message to another bot stops appearing twice and wandering between the other
   messages.** A dispatch is a tool call, and the only thing tying the row you saw go out
   to the row the gateway stored was the call's own id. When the gateway hands back a

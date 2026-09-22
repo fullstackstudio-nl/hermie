@@ -24,6 +24,7 @@
 import { escapeHtml } from '../setup'
 import { htmlLang, type WebLocale, type WebStrings } from '../i18n'
 import { CSRF_FIELD } from './session'
+import { issuerForOrigin } from '../oidc/accounts'
 import type { SelfTestStep } from '../oidc/selftest'
 import type { OidcState } from '../oidc/state'
 import type { OidcRole, OidcUser } from '../oidc/users'
@@ -302,6 +303,18 @@ export function identityPage(input: IdentityPageInput): string {
   const text = input.strings.identity
   const provider = text.provider
   const blocked = !input.originAcceptable && !input.allowInsecure
+  /*
+    The issuer that is STORED against the issuer this address would give.
+
+    They are the same on every deployment that was set up on the address it is
+    still reached on, and they disagree the moment something in front of this
+    service changes the origin — a port that a reverse proxy dropped being the
+    case this was written for. The page says so rather than leaving an operator
+    to compare two URLs in their head, because the symptom at the other end is
+    "nobody can sign in" with nothing in any log about a port.
+  */
+  const issuerHere = issuerForOrigin(input.origin)
+  const moved = state.enabled && state.issuer !== issuerHere
 
   return `${head(input.locale, text.title)}<main>
   <h1>${text.heading}</h1>
@@ -316,12 +329,23 @@ export function identityPage(input: IdentityPageInput): string {
       ${
         state.enabled
           ? `<dt>${provider.issuer}</dt><dd><code>${escapeHtml(state.issuer)}</code></dd>
+      <dt>${provider.reachedOn}</dt><dd><code>${escapeHtml(input.origin)}</code></dd>
       <dt>${provider.signingKeys}</dt><dd>${provider.keysPublished(state.keys.length)}</dd>
       <dt>${provider.accounts}</dt><dd>${state.users.length}</dd>`
           : ''
       }
     </dl>
     ${blocked ? `<p class="note bad">${provider.originBlocked(escapeHtml(input.origin))}</p>` : ''}
+    ${
+      moved
+        ? `<p class="note bad">${provider.issuerElsewhere(escapeHtml(state.issuer), escapeHtml(input.origin))}</p>
+    <form method="post" action="/admin/oidc/recapture">
+      <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
+      <button type="submit"${blocked ? ' disabled' : ''}>${provider.recapture}</button>
+      <p class="note">${provider.recaptureNote}</p>
+    </form>`
+        : ''
+    }
     <form method="post" action="/admin/oidc/enable">
       <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
       ${
