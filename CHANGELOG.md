@@ -254,6 +254,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signing keys, the client id and every session, and says that the gateway's own configuration
   now has to name the new issuer.
 
+- **The app looks the same whether its window is in front or behind.** Clicking another app on the
+  Mac used to change Hermie's chrome: every glass panel swapped for a flat fill for as long as the
+  window was not the front one. That was the app trying to get ahead of macOS, which dims a window's
+  materials when it loses focus — and the cure was the complaint, because the drawing still changed
+  the moment you looked away. Nothing in the app reads its window's focus any more, on any platform.
+
 - **A message to another bot stops appearing twice and wandering between the other
   messages.** A dispatch is a tool call, and the only thing tying the row you saw go out
   to the row the gateway stored was the call's own id. When the gateway hands back a

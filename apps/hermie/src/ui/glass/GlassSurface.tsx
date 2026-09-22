@@ -160,31 +160,21 @@ export function GlassSurface({
   // never opens a blur view of its own.
   const wantsBlur = recipe.blurIntensity > 0
   /*
-    `windowActive` is the Mac's, and it is a material question rather than a
-    style one.
+    Two things decide the material, and the app's own window state is not one of
+    them.
 
-    Both blurring materials are `UIVisualEffectView`s, and macOS draws every
-    visual effect view in a window that is not key with the dimmed variant of
-    its material. UIKit offers nothing to opt out of that — the search through
-    the iOS 27 headers is written out in `platform/window-activity.ts` — so the
-    only way for the chrome not to change when the reader clicks another window
-    is for there to be no visual effect view on screen while it is inactive.
-
-    What is left is the branch this component already has for Android and for
-    Reduce Transparency: the surface's own rung of the elevation ladder, which
-    the ladder is defined to make interchangeable with the blurred recipe. It is
-    the ONLY inactive-safe recipe — the `blur` fallback is a `UIVisualEffectView`
-    too and dims exactly the same way, so dropping the native material to
-    `expo-blur` on a Mac would have fixed nothing.
-
-    This is true off a Mac and on the web, where it costs one boolean AND.
+    R11a made a surface stop drawing its `UIVisualEffectView` while the Mac
+    window was not key, because macOS dims a visual effect view in a window that
+    is not in front and this was the only lever UIKit offers. The owner rejected
+    the cure along with the disease — _"I do not want the styling to change when
+    the window is inactive. Same for iOS, Android etc."_ — and he is describing
+    the thing that swap DID: it changed the app's own drawing, at the moment the
+    reader looked away, which is a restyle whichever direction it goes in. What
+    macOS does to its own materials is the platform's business and is the same
+    for every application on the screen; what this app draws is now the same
+    whether its window is in front or behind. See docs/platform-notes.md.
   */
-  const blurred =
-    wantsBlur &&
-    !theme.reduceTransparency &&
-    theme.windowActive &&
-    depth < MAX_GLASS_DEPTH &&
-    GLASS_MATERIAL !== 'solid'
+  const blurred = wantsBlur && !theme.reduceTransparency && depth < MAX_GLASS_DEPTH && GLASS_MATERIAL !== 'solid'
   const childDepth = wantsBlur ? depth + 1 : depth
 
   /**
@@ -330,10 +320,9 @@ function Material({
 export function GlassGroup({ spacing = 12, style, children, ...rest }: ViewProps & { spacing?: number }) {
   const theme = useTheme()
 
-  // A glass container is a `UIVisualEffectView` carrying a `UIGlassContainerEffect`,
-  // so an inactive window dims it for the same reason it dims the surfaces inside
-  // it — and a plain row is what those controls look like everywhere else anyway.
-  if (GLASS_MATERIAL !== 'native' || theme.reduceTransparency || !theme.windowActive) {
+  // Reduce Transparency is the one thing that takes the container away; the
+  // window's own key state is not, for the reason `GlassSurface` gives above.
+  if (GLASS_MATERIAL !== 'native' || theme.reduceTransparency) {
     return (
       <View {...rest} style={style}>
         {children}

@@ -413,7 +413,46 @@ Return or on blur), New folder moved into the header's `…`, and Delete is on t
 folder's menu plus beside the field while a folder is being named. `DragGrip` and
 `handleHandlers` are gone with it.
 
-## An inactive Mac window (2026-09-22) — settled, half of it unwatched
+## An inactive window is not a style (2026-09-22) — R11a reversed
+
+The section below records what R11a built: a scene-activation observer in Swift,
+a seam, a `windowActive` flag on the theme, and a `GlassSurface` that stopped
+putting a `UIVisualEffectView` on screen while the Mac window was not key. Every
+measurement in it still holds — macOS does draw a visual effect view in a non-key
+window with the dimmed variant of its material, and UIKit exposes nothing to opt
+out of that.
+
+The conclusion drawn from those measurements is what was wrong. The owner's
+verdict: _"I do not want the styling to change when the window is inactive. Same
+for iOS, Android etc."_ A swap from glass to a solid rung IS a change of styling,
+made by this app, at the moment the reader clicks somewhere else — the only
+difference from the dimming it was avoiding is whose code did it.
+
+**What was removed** (2026-09-22): `windowActive` from the theme,
+`useWindowActive` from `ThemeProvider`, both halves of `platform/window-activity`,
+the `windowActive` branches in `GlassSurface` and `GlassGroup`, and
+`HermieWindowActivity.swift` with its `onWindowActive` event and `isWindowActive`
+function in `HermieMacModule`. **A Swift file left the module, so the next iOS or
+Mac build needs `pod install`** — the podspec globs `**/*.swift`, and a stale
+`Pods` project referencing a file that is gone fails the build with no useful
+message.
+
+What is NOT removed is the `AppState` plumbing: `ChatRuntime`, the gateway client
+and the app lock all watch it, all for "the app went to the background", which is
+a different question and one nobody has objected to.
+
+**What a Mac will now show.** Whatever macOS does to a visual effect view in a
+window that is not key — the same thing it does to every other application on
+that screen. The app's own layers (the border, the tint, the solid rung, the
+shadow) are theme values with no window state in them, so nothing of ours moves.
+`no-inactive-window-styling.test.ts` is the guard: it fails if any source under
+`src` starts asking whether the window is active.
+
+## An inactive Mac window (2026-09-22) — settled, then reversed
+
+**Superseded by the section above.** What this section measured is still true;
+what it built was rejected and has been removed. It is kept because the SDK
+findings in it are the reason nobody should try the same fix again.
 
 The 2026-09-20 note below left one thing open: whether UIKit dims a native
 material for a window that is not key in a "Designed for iPad" app. It is still
