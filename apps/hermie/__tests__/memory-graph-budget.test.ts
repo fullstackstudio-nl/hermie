@@ -35,11 +35,16 @@ import type { MemoryGraph } from '../src/features/memory/graph-model'
 /**
  * The budget under jest-expo on the development Mac. Stated, not derived.
  *
- * Measured: 476 ms adaptive, 1271 ms with the old fixed pass count. 800 sits
- * between them with about a 1.7× margin on each side — loose enough not to
- * fail on a busy machine, tight enough to fail if the pass count goes back.
+ * Measured: 476 ms adaptive, 1271 ms with the old fixed pass count — on an idle
+ * machine. The same run took 3320 ms with a load average of 17 (several native
+ * builds and test suites side by side), and still passed the structural
+ * assertions above, which are what pin the algorithm: the pass count times the
+ * pair count is exact on every machine. So this clock is a tripwire against a
+ * gross regression (a return to quadratic work would take tens of seconds),
+ * not a performance measurement, and its budget is set well above what a
+ * loaded machine produces rather than just above what an idle one does.
  */
-const BUDGET_MS = 800
+const BUDGET_MS = 6000
 
 function graphOf(nodeCount: number): MemoryGraph {
   const topics = Math.max(1, Math.round(nodeCount / 12))
