@@ -43,7 +43,56 @@ struct HermieSnapshot: Decodable {
    */
   let folders: [HermieFolder]?
 
-  static let empty = HermieSnapshot(version: supportedVersion, generatedAt: 0, bots: [], folders: [])
+  /**
+   Which gateway this roster came from, as `gatewayKeyOf` its origin.
+
+   Sixteen lowercase hex digits, or nil from an app that predates two gateways
+   on one device. Optional in both senses, so it needed no version bump: see the
+   paragraph above about adding a field versus changing what one means.
+
+   The key travels rather than the gateway's local id, because the id is minted
+   on one device and means nothing anywhere else. `packages/gateway-client/src/
+   gateway-key.ts` is where the algorithm is written down.
+   */
+  let gatewayKey: String?
+
+  static let empty = HermieSnapshot(
+    version: supportedVersion, generatedAt: 0, bots: [], folders: [], gatewayKey: nil)
+
+  /**
+   The same snapshot with every row told which gateway it belongs to.
+
+   The key is a property of the SNAPSHOT and a tap is a property of a ROW, and
+   the three widgets in between carry entry types that hold rows. Stamping the
+   rows once, here, is what keeps `chatURL` a property of the thing being tapped
+   instead of threading a second value through all three.
+
+   A key that is not sixteen lowercase hex digits is dropped rather than passed
+   on. `deep-link.ts` would ignore it anyway — `isGatewayKey` is the same check
+   on the other side — and a URL carrying a malformed parameter is a worse thing
+   to hand the system than one carrying none.
+   */
+  func stampingGatewayKey() -> HermieSnapshot {
+    guard let key = gatewayKey, HermieSnapshot.isGatewayKey(key) else {
+      return self
+    }
+
+    let stamped = bots.map { bot -> HermieBot in
+      var copy = bot
+
+      copy.gatewayKey = key
+
+      return copy
+    }
+
+    return HermieSnapshot(
+      version: version, generatedAt: generatedAt, bots: stamped, folders: folders, gatewayKey: key)
+  }
+
+  /** Sixteen lowercase hex digits, which is what `gatewayKeyOf` produces. */
+  static func isGatewayKey(_ value: String) -> Bool {
+    value.count == 16 && value.allSatisfy { $0.isHexDigit && !$0.isUppercase }
+  }
 
   var isUsable: Bool {
     version == Self.supportedVersion
@@ -122,6 +171,15 @@ struct HermieBot: Decodable, Identifiable, Hashable {
   let unread: Int
   let needsInput: Bool
 
+  /**
+   Which gateway this row came from. NOT decoded from the row.
+
+   It is a property of the snapshot around it, and `HermieWidgetStore.load()`
+   stamps it on after decoding. Declared `var` and Optional for exactly that:
+   absent from the JSON, it decodes to nil and is then filled in.
+   */
+  var gatewayKey: String?
+
   var id: String { name }
 
   /**
@@ -133,8 +191,22 @@ struct HermieBot: Decodable, Identifiable, Hashable {
    */
   var chatURL: URL? {
     let escaped = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/")))
+    let path = "hermie://chat/\(escaped ?? name)"
 
-    return URL(string: "hermie://chat/\(escaped ?? name)")
+    /*
+     The gateway, when this device has more than one.
+
+     Without it a tap opens the named bot on whichever gateway happens to be
+     current, which on a device with two is a coin toss — and the two rosters
+     routinely share names. The key is hex by the time it gets here, so it is
+     appended unescaped; `HermieSnapshot.stampingGatewayKey()` is what refuses
+     anything that is not.
+     */
+    guard let key = gatewayKey else {
+      return URL(string: path)
+    }
+
+    return URL(string: "\(path)?gateway=\(key)")
   }
 }
 
@@ -159,7 +231,9 @@ enum HermieWidgetStore {
       return .empty
     }
 
-    return snapshot
+    // Stamped here rather than at every call site: this is the one place a
+    // snapshot enters the extension, so it is the one place that can be sure.
+    return snapshot.stampingGatewayKey()
   }
 
   /**

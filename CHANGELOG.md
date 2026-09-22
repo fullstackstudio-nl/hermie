@@ -169,6 +169,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Reduce Motion, checked over every surface that moves.** Eighteen of them, against three rules:
+  the duration collapses to zero rather than the animation being skipped — a skipped animation is a
+  skipped completion callback, which is how a reader ends up with a panel that never goes away —
+  nothing on its way out keeps eating taps, and nothing animates in for content that was already on
+  screen. No surface was found breaking any of them. Two pieces of code that happened to be right
+  were made to say why: one duration that read as "never reduce", and the rule that a LOOP must
+  never be collapsed to zero, because a loop of zero-length animations restarts on every frame for
+  ever. `docs/platform-notes.md` has the table, and the account of how the test that checks all this
+  very nearly proved nothing at all.
+
+- **A widget tap says which gateway it came from.** The home-screen widgets build
+  `hermie://chat/<bot>?gateway=<key>` now, on iOS and on Android. On a device with one gateway
+  nothing changes; on a device with two it is the difference between opening the chat you were
+  looking at and opening a chat with the same name on whichever gateway happened to be current — and
+  two rosters routinely share names. The key is `gatewayKeyOf` the gateway's origin, the same
+  sixteen hex digits a push payload carries, and a link without one still opens the bot exactly as
+  it always did. **Not yet tapped on a device against two real gateways.**
+
+- **The memory map takes a pinch.** Two fingers zoom it, one finger still pans it, and the buttons
+  and the mouse wheel still do what they did. The buttons are not a fallback for the pinch: a pinch
+  is unavailable to anybody on a pointer, on a keyboard or using a switch control, so both exist
+  because each is somebody's only way in. Lifting one finger of a pinch re-anchors the pan, so the
+  drawing does not leap when a zoom turns back into a drag.
+
+- **A big memory map stops blocking the tab for as long.** The layout is force-directed and every
+  pass compares every pair of nodes, so a fixed pass count cost sixteen times as much at the
+  400-node cap as at a hundred. Past 150 nodes the pass count now comes down with the node count,
+  which makes the total work grow with the number of nodes rather than with its square: at the cap,
+  174 ms became 62 ms under Node on the development Mac. It is still deterministic — the count is a
+  pure function of how many nodes there are, so the same memory still draws the same picture every
+  time, which is what stops a cluster somebody has learned the position of from moving on them.
+  **Not measured on a device**, and `docs/platform-notes.md` says so.
+
+- **The profile sheet offers Memory wherever it is opened from.** The row was there when the sheet
+  came from the chat list's menu and absent when the same sheet came from the chat header's pill,
+  because the browser is a full page rather than a modal — it needs the screen underneath it to
+  stand aside, so the sheet renders the row only where a screen has said it can. The conversation
+  had never said so. It does now, and it stands aside the same way the roster does: the sheet
+  closes first, the page replaces the conversation, and Back or Escape returns to the chat rather
+  than to the form the reader left. The page is opened on the bot's **profile** name, not on the
+  name the reader has chosen to see — routinely the same word in a different case, which is the
+  difference that would otherwise surface as a route answering 400.
+
+- **An attachment the gateway serves can actually be previewed.** Opening a remote attachment used
+  to fetch it from the native side with no credentials at all — no bearer, no Cloudflare Access
+  header, no cookie — so on any gateway that is not wide open it was a request that could never have
+  succeeded, and the failure arrived as a share sheet that looked like "Quick Look has no previewer
+  for this". The download goes through the same authenticated client as everything else now, into
+  the caches directory, and Quick Look is handed the local copy. So does the share sheet, for a type
+  with no previewer: the receiving app is given a file rather than an address it would have to
+  authenticate to on its own. **The gateway has no route that serves an attachment back yet**, so
+  none of this has met a real server; `docs/platform-notes.md` says what that first meeting is most
+  likely to break.
+
+- **The way out of a failed probe goes when the address changes.** The onboarding address step
+  offers a button under a failure — "use the host that answered", "open the front door" — and the
+  button is built from the address that failed. Editing the address cleared the MESSAGE and left the
+  button, so a stale offer sat under a "checking…" line: pressing it would have configured a
+  Cloudflare Access credential for a host the reader had already stopped typing. The offer now goes
+  the moment a new probe starts, which is also when its message goes.
+
 - **Escape goes back one level in two more places.** Cancelling a theme deletion in Settings ▸
   Appearance ▸ Advanced, and closing the detail card on a bot's memory map, are levels of their own
   now. Both used to be skipped: the question and the card are drawn in place rather than presented,
@@ -203,6 +264,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only thing in the world that can move the pill is the bot being renamed.
 
 ### Changed
+
+- **The release notes describe all three signed binaries, not two.** The iOS app ships as an app, a
+  widget extension and a share extension, and each needs the App Group to reach the others — a
+  widget cannot dial a gateway and a share extension is killed the moment its sheet closes, so the
+  shared container is the only way anything gets across. `docs/release.md` listed two App IDs where
+  there are three, so anybody setting up a developer portal by hand would have provisioned
+  `dev.hermie.app` and `dev.hermie.app.widgets` and met the failure on `dev.hermie.app.share`. It
+  now has the full table, what `-allowProvisioningUpdates` creates by itself, and the three things
+  it does not.
 
 - **A permission request can be answered from the transcript, without the sheet.** ADR-0010's sheet
   stays — a question that holds the agent's turn has to arrive in front of the reader rather than

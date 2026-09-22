@@ -13,11 +13,11 @@
  * here would be two spellings of somebody else's bytes.
  */
 import type { NetworkKind } from '@hermie/gateway-client'
+import type { IntentQueueEntry } from '../features/intents/queue'
+import type { ShareOutboxEntry } from '../features/share/outbox'
 
 /** Re-exported so both `net-info` seams name the same four values. */
 export type { NetworkKind } from '@hermie/gateway-client'
-import type { IntentQueueEntry } from '../features/intents/queue'
-import type { ShareOutboxEntry } from '../features/share/outbox'
 
 /**
  * Storage for values that must never land in a plain-text preference file:

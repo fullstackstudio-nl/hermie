@@ -8837,3 +8837,383 @@ handlers rather than to match the app.
   a fourth control now sits beside New bot, the cron `+` and Edit. Whether that header still lays out
   on the narrowest supported phone has been reasoned about (the title is one short word and takes the
   remaining space) and not looked at.
+
+## Round R14: polish, and the loose ends of five rounds (2026-09-22)
+
+### One sheet, two entry points, and a section that was simply absent
+
+`BotProfileSheet` draws its Memory group only when it is handed `onOpenMemory`.
+That is the right shape — the browser is a PAGE, with a header and an Escape of
+its own, so only a caller that can stand aside may offer it — and it is also why
+the gap was invisible. Nothing was broken from the chat header. A section was
+missing, and a missing section looks exactly like a design.
+
+The chat now does what `BotsScreen` does: `memoryFor` in state, the sheet closed
+before the page opens, and an early return above the screen's own tree. Two
+details are load-bearing rather than incidental:
+
+- **The sheet closes FIRST.** A full page mounted over a live sheet leaves the
+  reader on a profile form when they press Back, which is the bug the ordering in
+  `BotsScreen` was written against.
+- **The page is opened on `byName[botName]?.name`**, the profile name, not on
+  `botName` as the header spells it and not on the display name. The plugin's
+  `profile` parameter accepts only the profile name, and the two differ in case
+  often enough that the wrong one is a 400 nobody sees until a device is in hand.
+
+The early return sits below every hook in `Conversation`, which is the only
+placement React allows and worth saying out loud in a component whose hook list
+is two hundred lines long.
+
+**What needed a device: nothing.** The swap, the name that is handed over and the
+return path are all in the test renderer (`__tests__/chat-screen.test.tsx`). What
+the browser then DOES with that name — the plugin route, the three empty states —
+was already covered and is deliberately stood in for here, so this suite does not
+grow a second gateway.
+
+**A test-only trap found on the way.** `chat-drop-zone` is a testID on `DropZone`,
+a component that renders its children bare when there is no native drop view —
+which is every test run. So the id never reaches a host node and
+`queryByTestId('chat-drop-zone')` is null whether the conversation is on screen
+or not. An assertion written on it passes for the wrong reason. The assertions
+here are on `composer-input` and `chat-header`, which are real host elements.
+
+### Two warnings that were a comment holding an export in place
+
+`platform-contracts.ts` re-exports `NetworkKind` so both `net-info` seams name
+the same four values, and the re-export had been written directly under the
+import it mirrors — with its one-line comment attached — which put two `import
+type` lines below a statement and produced two `import/first` warnings.
+
+`--fix` would have moved the imports and left the comment stranded above an
+export it no longer touches, so the re-export was moved down instead, comment
+and all. The file's own header still reads correctly: the two imports it calls
+"the exception that proves the rule" are still the two below it.
+
+**No new test.** The guard here is the gate — `npx eslint .` is run with zero
+warnings tolerated — and the alternative, an ESLint run inside vitest, would
+hand every future test run a type-aware lint pass to pay for in order to
+re-assert a rule the gate already asserts over the whole repository rather than
+over one file.
+
+### The flake hunt: one of the two reproduced, and it was a real bug
+
+Two flakes had each been seen once. They were chased by repetition, and the
+runs are reported here whether or not they found anything.
+
+| Suite                                               | Runs    | Failures |
+| --------------------------------------------------- | ------- | -------- |
+| `npx vitest run --reporter=verbose` (whole project) | 5       | 0        |
+| `onboarding-probe-hints.test.tsx --runInBand`       | 10      | **2**    |
+| `onboarding-probe-hints.test.tsx` (workers)         | 10      | 0        |
+| the same two, after the fix                         | 10 + 10 | 0        |
+
+**The vitest one did not reproduce.** 71 files, 1353 tests, five green runs,
+nothing appended or removed from `upstream-shapes.test.ts` in between. A "1
+failed" with no detail and no reproduction in 6765 subsequent test executions is
+recorded here as unexplained rather than as fixed. Shared fake-gateway state
+across describes was the hypothesis and it is not supported by anything measured:
+the file's describes were read and each builds its own upstream.
+
+**The jest one reproduced at 2 in 10, and only under `--runInBand`** — which is
+the tell, because `--runInBand` changes nothing about the test and everything
+about how fast the machine gets back to it.
+
+The cause was not the test. `GatewayAddressStep` renders `testID="probe-result"`
+for BOTH the "checking…" line and the answer, so `getByTestId('probe-result')`
+matches while a probe is still in flight. That on its own would be a sloppy
+assertion. What made it a bug is what was still on screen underneath: a new
+probe cleared `error` and left `actions` alone, so the previous failure's button
+survived into the next probe. Under workers the answer landed before `waitFor`
+ever sampled the busy frame; in-band it sometimes sampled it.
+
+And the stale button is not cosmetic. `classifyProbeFailure` is handed the
+address that failed, so "Open the front door…" left standing while a different
+host is probed offers to write a Cloudflare Access credential **against the old
+origin**. The fix is one line where it belongs — `setActions([])` beside the
+`setError(null)` that already runs when a probe starts — plus the same in the
+branch that rejects an unparseable address.
+
+**What needed a device: nothing.** The step is the test renderer's; the probe is
+a mocked resolver.
+
+### The memory graph: a pinch, and what the layout actually costs
+
+**The pinch is one `PanResponder`, still.** `react-native-gesture-handler` is
+still not a dependency and was not added, because a pinch turns out to be two
+subtractions and a ratio. Three things about the wiring are not obvious:
+
+- **Two touches claim the gesture with no slop.** One finger has to travel past
+  `DRAG_SLOP` so a tap reaches the node under it. Nobody taps a node with two
+  fingers, so there is no tap to protect — and making a pinch travel a slop
+  first eats the beginning of every zoom.
+- **The scale is a RATIO against where the fingers went down**, not an
+  increment, and the anchor stores the scale at that moment. So a pinch that
+  starts after the buttons or the wheel have been used carries on from there
+  instead of snapping back to 1.
+- **Lifting one finger re-anchors the pan.** `PanResponder` accumulates `dx`
+  from the centroid across the whole gesture, so the frame a pinch becomes a
+  drag is a frame where `dx` has already absorbed everything the centroid did
+  while two fingers were down. Without re-anchoring, the drawing leaps by
+  exactly that. There is deliberately **no `onPanResponderEnd` handler**: it
+  fires when ANY finger lifts, including the second of a pinch, and clearing the
+  anchor there would skip the one re-anchor that needs to happen. `Grant` resets
+  all three refs, so nothing survives into the next gesture.
+
+**The arithmetic is in `graph-gestures.ts` rather than in the component**, and
+that is a testability decision worth recording: driving a `PanResponder` from a
+test means hand-building React Native's internal `touchHistory`, an undocumented
+shape with no compatibility promise. A suite that did it would be pinning the
+framework rather than the app. So the component keeps the refs and the module
+keeps everything a reader can get wrong.
+
+One bug was found by writing those tests: `clampScale` guarded with
+`!Number.isFinite`, which sent `Infinity` to the MINIMUM zoom. Only `NaN` needs
+that guard — an infinity clamps to a limit like any other out-of-range number —
+and a pinch that hit an infinity would have zoomed all the way out.
+
+#### The layout cost, measured
+
+Fruchterman-Reingold with every pair repelling: each pass is O(n²), so a fixed
+240 passes costs sixteen times as much at 400 nodes as at 100. Median of five,
+`layoutMemoryGraph` alone, development Mac:
+
+| Nodes | Passes, before | Before  | Passes, after | After     |
+| ----- | -------------- | ------- | ------------- | --------- |
+| 50    | 240            | 4.1 ms  | 240           | 3.4 ms    |
+| 100   | 240            | 11.9 ms | 240           | 11.3 ms   |
+| 150   | 240            | 24.9 ms | 240           | 24.1 ms   |
+| 200   | 240            | 43.4 ms | 180           | 31.7 ms   |
+| 300   | 240            | 94.7 ms | 120           | 50.8 ms   |
+| 400   | 240            | 174 ms  | 90            | **62 ms** |
+
+Past 150 nodes the pass count is scaled by `150 / n`, which turns the total work
+from quadratic into linear in the node count. Determinism is untouched and that
+matters more than the milliseconds: the count is a pure function of the node
+count, so the same memory draws the same picture on every run and every
+platform.
+
+**Three numbers that are easy to conflate, so they are written out.**
+
+| Where                   | 400 nodes, 240 passes | 400 nodes, 90 passes |
+| ----------------------- | --------------------- | -------------------- |
+| Node 22, plain          | 174 ms                | 62 ms                |
+| jest-expo, same machine | 1271 ms               | 476 ms               |
+| a phone                 | **not measured**      | **not measured**     |
+
+jest-expo is **7.7× slower** than plain Node here, because it runs the
+Babel-transformed source. That is why `memory-graph-budget.test.ts` states a
+budget of 800 ms rather than 150: 800 sits between the two jest figures with
+about a 1.7× margin on each side. The test carries a second, unflakeable
+assertion beside the clock — pass count times pairs, which is arithmetic and
+identical on every machine — because that is the one that actually fails when
+somebody makes the layout quadratic again.
+
+**What needs a device:** the phone column. Hermes' own engine is neither of the
+two measured here, and nobody has watched the Graph tab open on a real 400-node
+memory. The pinch has likewise never been performed by a hand: the arithmetic is
+tested, the `PanResponder` wiring is read.
+
+### The widget tap, now carrying the gateway
+
+R7 put `gatewayKey` in the snapshot and R11a's notes closed with the gap: "the
+Swift still builds `hermie://chat/<bot>` with no query". Both native halves now
+append `?gateway=<key>`, and the JavaScript that reads it has been ready since
+R7 — `deep-link.ts` parses the parameter, `chat-link.ts` resolves it against the
+registry, and both shells act on it.
+
+**The key is a property of the SNAPSHOT and a tap is a property of a ROW**, and
+that shape is what made the change small. Three iOS widgets hold three different
+entry types, all of which hold rows; threading a second value through all of
+them would have touched every one. Instead `HermieWidgetStore.load()` stamps the
+key onto each row as the snapshot enters the extension — the one place that can
+be sure — and `chatURL` stays a property of the thing being tapped. Android does
+the same in `HermieWidgetStore.bots()`.
+
+**Both sides validate the key before they use it.** Sixteen lowercase hex
+digits, or the parameter is left off. `deep-link.ts` would ignore a malformed
+one anyway (`isGatewayKey` is the same check), but a URL carrying a parameter
+the receiver will discard is a worse thing to hand the system than one carrying
+none — and it would be indistinguishable, in a bug report, from the parameter
+not being sent at all.
+
+One Kotlin signature changed and it is the reason the key was reachable:
+`chatIntent(context, botName: String?)` became `chatIntent(context, bot: Bot?)`.
+The old one took a name and had nowhere to get anything else from.
+
+**Verified:** `xcodebuild … -destination 'generic/platform=iOS Simulator'
+CODE_SIGNING_ALLOWED=NO build` succeeded with the change in
+`ios/HermieWidgetsExtension/HermieWidgetSnapshot.swift` — the widget extension is
+an embedded target of the `Hermie` scheme, so building the app builds it.
+Android: `./gradlew assembleDebug`.
+
+**What needs a device:** the tap itself, on a phone set up against two real
+gateways, which is still the thing nothing in this repository has ever done. A
+compiler proves the Swift builds, not that the URL it builds is the one the
+reader wanted; `widget-deep-link.test.ts` covers the seam between the two
+languages by reading the native sources, which is the same thing
+`ios-scene-lifecycle.test.ts` does and has the same limit.
+
+### Quick Look, with the credentials it always needed
+
+`HermieQuickLook.swift` accepted an `http(s)` URI and fetched it with
+`URLSession.shared.data(from:)`. No bearer, no operator front-door header, no
+cookie. Against a gated gateway that is not "a file that fails to preview" — it
+is a request that could never have succeeded, and the failure arrives as the
+share sheet, which looks like a type Quick Look has no previewer for.
+
+The fetch moved to JavaScript rather than growing a credential ladder in Swift.
+`GatewayHttp.requestHeaders()` already existed for exactly this shape of
+problem — it was added so the platform's own image loader could fetch a Markdown
+image from a gated gateway — and it returns the operator's extra headers and the
+bearer together. Reproducing that in Swift would have been a second
+implementation of the bearer, the front-door headers AND the single 401 retry
+that asks the credential provider for a fresh token.
+
+So: `open-attachment.ts` fetches a remote attachment through the gateway's own
+client into `Paths.cache`, and hands Quick Look a `file://`. The Swift now
+refuses anything that is not a readable local file.
+
+Three decisions inside that are not obvious:
+
+- **A directory per fetch.** Two attachments can be called the same thing, and
+  the second must not overwrite the first while the first is open in a
+  previewer. Nothing deletes them: a reader who chose "Save to Files" from
+  inside the preview is still reading from the copy.
+- **The file is named from the TRANSCRIPT's filename**, flattened to a leaf.
+  Quick Look picks its previewer from the extension, and a gateway route ending
+  in `/api/attachments/7` previews as nothing at all.
+- **No gateway means `'nothing'`, not the share sheet.** Falling back there
+  would hand the system the very URL this could not authenticate to, which only
+  moves the 401 somewhere with nowhere to report it. The share sheet still
+  catches a type with no previewer — and it is handed the local copy, so the
+  receiving app does not have to authenticate either.
+
+**What needs a device:** all of it, and it is worth being exact about why. **The
+gateway has no route that serves an attachment back.** Every attachment URI this
+app has today is local, from its own picker. So this path has never run against
+a real server, and what is tested is the seam: which headers are asked for,
+which of them reach the downloader, and what the answer is used for. The first
+time it meets a real route, the thing most likely to be wrong is the filename —
+whether the app's name or a `Content-Disposition` should win.
+
+### The Reduce Motion audit: thirteen surfaces, no misses, and a test that nearly proved nothing
+
+Every surface in the app that moves was walked against three rules: the
+duration collapses to zero under Reduce Motion, nothing leaves a `pointerEvents`
+trap behind it, and nothing animates on mount for content that is already on
+screen when a surface opens.
+
+| Surface                     | Where                           | Collapses                             | No pointer trap        | Arrival rule                |
+| --------------------------- | ------------------------------- | ------------------------------------- | ---------------------- | --------------------------- |
+| `Appear` (all nine uses)    | `ui/Appear.tsx`                 | `usePresence`                         | forced `none` on exit  | value starts at 0           |
+| the jump-to-latest pill     | `TranscriptList`                | via `Appear`                          | via `Appear`           | via `Appear`                |
+| the attach menu, slash list | `Composer`                      | via `Appear`                          | `exit="cut"`           | via `Appear`                |
+| the drop overlay            | `DropZone`                      | via `Appear`                          | `exit="cut"`           | via `Appear`                |
+| the queued strip            | `QueuedStrip`                   | via `Appear`                          | via `Appear`           | `onExited` unmounts         |
+| the chat options popover    | `ChatOptionsPopover`            | via `Appear`                          | via `Appear`           | via `Appear`                |
+| the bottom sheet            | `ui/BottomSheet.tsx`            | `usePresence`, JS driver              | `onClosed` unmounts    | value starts at 0           |
+| the panel scrim             | `app/PanelScrim.tsx`            | `usePresence`                         | inert while leaving    | value starts at 0           |
+| the overlay panel           | `app/OverlayPanel.tsx`          | `usePresence`                         | unmounts on exit       | value starts at 0           |
+| the sidebar slide-over      | `app/SidebarOverlay.tsx`        | `usePresence`                         | unmounts on exit       | value starts at 0           |
+| the lock plate              | `features/lock`                 | nothing animates                      | n/a                    | n/a                         |
+| the voice overlay           | `features/voice`                | guarded loop + `animationType="none"` | `Modal`                | ring assigned, not animated |
+| the memory graph settle     | `MemoryGraphView`               | guarded, value assigned               | not interactive        | value starts at 1           |
+| the typing dots             | `TypingIndicator`               | guarded loop, value assigned          | n/a                    | n/a                         |
+| the needs-input pulse       | `ui/PresenceBead.tsx`           | loop not built at all                 | `pointerEvents="none"` | n/a                         |
+| the switch knob             | `ui/sheets/controls.tsx`        | `durationFor('control', …)`           | n/a                    | n/a                         |
+| the drag lift and settle    | `features/bots/use-row-drag.ts` | spring becomes a 0 ms timing          | released on commit     | n/a                         |
+| the image viewer            | `chat-ui/ImageViewer.tsx`       | spring becomes an assignment          | `Modal`                | reset on every open         |
+
+**No behavioural misses were found**, which is the honest result and not a
+foregone one — the suite was written expecting to find some. Two things were
+changed anyway, both where the code read as though the rule were being followed
+by accident:
+
+- `MemoryGraphView` wrote `durationFor('panel', false)`, a hard-coded "never
+  reduce" five lines below the guard that is actually doing the work. It says
+  `motion.panel` now, with the reason.
+- `motion.ts` gained the rule the audit confirmed all three loops already
+  follow, because it is the one place the collapse-to-zero rule inverts:
+  **a loop must never be collapsed.** `Animated.loop` restarts its child the
+  moment it finishes, so a loop of zero-duration timings finishes and restarts
+  on the same frame for ever. The only correct answer for a loop is not to build
+  it and to assign the resting value instead.
+
+#### The test that nearly proved nothing
+
+Worth recording in full, because it is a trap any Reduce Motion test in a React
+Native codebase will fall into.
+
+`AccessibilityInfo.isReduceMotionEnabled()` is a promise, so the FIRST render of
+any tree has `reduceMotion: false`. A surface mounted straight under the
+provider therefore animates once, correctly, under the default — and only then
+learns the preference.
+
+The first version of the suite handled that by clearing the record of started
+animations once the preference landed. That defeated the entire thing: the
+re-render the preference TRIGGERS is precisely the one worth watching, and it
+happens inside the same flush that was being cleared. Deleting
+`MemoryGraphView`'s Reduce Motion guard outright left all eighteen tests green.
+
+The fix is a gate — a component that renders its children only once
+`theme.reduceMotion` is true — so nothing is ever mounted under the default and
+nothing has to be cleared. With it, removing that same guard fails the suite.
+**Every assertion here was checked against a deliberately broken guard**, which
+is the only way to know a test of an absence is a test at all.
+
+Two smaller things the spy taught:
+
+- **It records on `start()`, not on construction.** `Animated.sequence`,
+  `parallel` and `loop` all start their children, so nesting is caught by the
+  same spy; an animation built and never started is not motion.
+- **`Appear`'s `onExited` cannot be observed in jest.** It animates opacity and
+  a transform, so it asks for the native driver, and a native-driven
+  animation's completion comes back from a module the test environment does not
+  have. The callback is therefore proven on the bottom sheet, which drives
+  layout and so runs on the JS driver — same hook, same code path, one of them
+  observable. This is a limit of the environment and not of the app.
+
+**What needs a device:** whether any of it FEELS right with the setting on.
+Everything here is a measurement of what was started, and "no animation ran" is
+not the same claim as "the app is comfortable to use at Reduce Motion". Nobody
+has switched the setting on and used the app.
+
+### The App Group, checked rather than assumed
+
+Read end to end, and the answer is that **nothing was wrong**. All three
+entitlements name `group.dev.hermie.app`; the app's copy is written by the two
+config plugins rather than by hand; `ios.appleTeamId` does not exist anywhere,
+`DEVELOPMENT_TEAM` appears in no checked-in build setting, and the generated
+`project.pbxproj` contains it zero times after a prebuild. Verified against the
+real prebuild output rather than against the config, which is the only way to
+check a value three plugins cooperate to produce.
+
+What the audit did find is a **gap in the documentation, not in the build**:
+`docs/release.md` listed two App IDs where there are three. The share extension
+has been signed as `dev.hermie.app.share` since it was added, and needs the App
+Group as much as the widget does — it is a process that is killed the moment its
+sheet closes, so the container is the only place it can leave anything. Anybody
+following the release doc to set up a portal by hand would have provisioned two
+of the three and met the failure on the third.
+
+`docs/release.md` now carries the table, what `-allowProvisioningUpdates`
+creates by itself (all three App IDs, the group, the capabilities, the
+distribution certificate and the profiles) and the three things it does not —
+the App Store Connect record, anything at all on an Apple ID with only the
+Developer role, and a group on an App ID somebody created by hand before the
+extensions existed.
+
+**One test was added and it is not a duplicate of the two that already exist.**
+Each plugin's own suite holds its own plugin to the group. Neither can see the
+failure that actually threatens this: the two plugins write onto the SAME
+`ios.entitlements`, in an order nothing fixes, and the three sandboxes share a
+container only while all three name the same string. `app-group.test.ts`
+compares the three with each other, runs the two plugins in both orders, and
+asserts no team id has crept into `app.config.ts`, `eas.json` or either
+entitlements file.
+
+**What needs a device:** the portal itself. Everything above is a reading of
+what the repository produces; nobody has run `-allowProvisioningUpdates` against
+a portal that has never seen these App IDs, so the claim about what it creates
+by itself is Apple's documented behaviour plus this project's own archives, not
+a clean-room observation.

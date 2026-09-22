@@ -110,6 +110,7 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
       sequence.current += 1
       setBusy(false)
       setFoundOverHttp(false)
+      setActions([])
       setError(describeProbeError(normalizeError, raw))
       updateRef.current({ probe: null, baseUrl: null })
 
@@ -125,6 +126,15 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
     let cancelled = false
     setBusy(true)
     setError(null)
+    /*
+      And the actions, which belong to the failure that produced them.
+
+      `classifyProbeFailure` was given the PREVIOUS address, so a button left
+      standing while a new address is probed offers to open a front door for a
+      host the reader has already stopped typing. It read as a live offer under
+      a "checking…" line, which is also why the suite could see the two at once.
+    */
+    setActions([])
 
     const timer = setTimeout(() => {
       resolveGatewayAddress(raw, JSON.parse(headersKey) as Record<string, string>)

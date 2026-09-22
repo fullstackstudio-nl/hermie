@@ -218,14 +218,9 @@ which is the same reason the Play half is written out rather than automated.
 
 ### What has to exist first
 
-- The paid Apple team, `FDGV4X8F27`, and an Xcode signed in to it. Automatic
-  signing mints what it needs from the developer portal: the App IDs
-  `dev.hermie.app` and `dev.hermie.app.widgets`, the App Group
-  `group.dev.hermie.app`, and an **Apple Distribution** certificate. A machine
-  that has only ever built for development has only an Apple Development
-  certificate; `-allowProvisioningUpdates` creates the distribution one on the
-  first archive, and that needs the Apple ID to hold **Account Holder, Admin or
-  App Manager** on the team.
+- The paid Apple team, `FDGV4X8F27`, and an Xcode signed in to it. See
+  **The App Group and the three App IDs** below for exactly what the developer
+  portal ends up holding and how much of it appears by itself.
 - **An app record in App Store Connect**, with bundle id `dev.hermie.app`. The
   archive and the export do not need it — they only talk to the developer
   portal — but the upload does, and it fails with a bundle-id error that does
@@ -248,6 +243,84 @@ which is the same reason the Play half is written out rather than automated.
 
 The key, its Key ID and the Issuer ID are credentials and live with the owner,
 outside every checkout, the same way the Android keystore does.
+
+### The App Group and the three App IDs
+
+The iOS app ships as **three signed binaries in one bundle**, and they talk to
+each other through one shared container. That is the whole reason this section
+exists: a widget cannot dial a gateway and a share extension is killed the
+moment its sheet closes, so both of them read and write a file in the App Group
+container instead.
+
+| Binary               | App ID                   | Needs the App Group                                |
+| -------------------- | ------------------------ | -------------------------------------------------- |
+| the app              | `dev.hermie.app`         | yes — it writes the snapshot and drains the outbox |
+| the widget extension | `dev.hermie.app.widgets` | yes — it reads the snapshot                        |
+| the share extension  | `dev.hermie.app.share`   | yes — it writes into the outbox                    |
+
+The group is `group.dev.hermie.app`, and all three entitlements files name it.
+**None of it is written by hand in `app.config.ts`.** Two config plugins own it —
+`modules/hermie-widgets/plugin` and `modules/hermie-share/plugin` — and each
+adds it to the app's entitlements additively, so whichever runs second is a
+no-op. Each also **refuses to prebuild** when its extension's entitlements file
+names a different string, because that particular mistake reports itself
+nowhere: nothing fails to build, nothing fails to launch, and the only symptom
+is a widget that is permanently empty or a share that silently does nothing.
+`__tests__/app-group.test.ts` compares all three with each other.
+
+#### What `-allowProvisioningUpdates` creates by itself
+
+On a machine whose Apple ID holds **Account Holder, Admin or App Manager** on
+the team, the first archive creates all of this without anyone visiting the
+portal:
+
+- the three **App IDs** above, from the bundle identifiers in the project;
+- the **App Group** `group.dev.hermie.app`, and the group's membership on each
+  of the three App IDs;
+- the **capabilities** each App ID needs — App Groups on all three, Push
+  Notifications and Keychain Sharing on the app;
+- an **Apple Distribution** certificate. A machine that has only ever built for
+  development holds only an Apple Development certificate, and this is where the
+  distribution one comes from;
+- the matching **provisioning profiles**, one per binary.
+
+#### What it does not create, and what to check when it fails
+
+- **An App Store Connect app record.** It is a different service; see the bullet
+  above about the bundle-id error that does not say so.
+- **Anything at all, on an Apple ID with only the Developer role.** Provisioning
+  updates are an account-level write. The failure names the entitlement it could
+  not add rather than the permission it lacked, so this is worth ruling out
+  first.
+- **A group on an App ID that already existed without one.** If `dev.hermie.app`
+  was created by hand before the extensions existed, the archive can fail on the
+  extension rather than on the app. Adding App Groups to the existing App ID
+  under **Certificates, Identifiers & Profiles → Identifiers** is enough;
+  the profiles regenerate on the next archive.
+
+#### The team id is not in this repository
+
+There is no `ios.appleTeamId` in `app.config.ts`, no `DEVELOPMENT_TEAM` in any
+checked-in build setting, and nothing in `eas.json`. A team id is not a secret
+in the cryptographic sense and is exactly one in the sense that matters for a
+public repository: it names the account a fork would otherwise be building
+against.
+
+So a **fork signs by supplying its own**, and neither route needs a file in the
+repository to change:
+
+```sh
+# Locally: pass it to the archive.
+xcodebuild -workspace Hermie.xcworkspace -scheme Hermie \
+  -allowProvisioningUpdates DEVELOPMENT_TEAM=<your team id> …
+
+# Or in Xcode: select each of the three targets → Signing & Capabilities →
+# Team. It has to be set on all three; they are separately signed binaries.
+```
+
+EAS resolves the team from the credentials on its own account and needs nothing
+here either. `__tests__/app-group.test.ts` asserts that no team id has crept
+back into any of these files.
 
 ### Building and uploading
 

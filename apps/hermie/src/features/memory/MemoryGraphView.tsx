@@ -13,15 +13,27 @@
  *
  * ## Pan and zoom, with a keyboard-reachable way to do both
  *
- * `react-native-gesture-handler` is not a dependency of this app, so panning is
- * one `PanResponder` — the same choice `BottomSheet` documents — and zooming is
- * two buttons plus, in a browser, the wheel. Two buttons rather than only a
- * pinch is not a fallback: a pinch is unavailable to anybody on a pointer, on a
- * keyboard, or using a switch control, and a picture whose only way in is a
- * two-finger gesture is a picture some readers cannot use at all.
+ * `react-native-gesture-handler` is not a dependency of this app, so all of it
+ * is one `PanResponder` — the same choice `BottomSheet` documents — which is
+ * affordable because a pinch is two subtractions and a ratio. The arithmetic
+ * lives in `graph-gestures.ts`, where it can be tested without hand-building
+ * React Native's internal `touchHistory`.
  *
- * The responder claims the gesture only after the finger has travelled past a
- * slop, so a tap still reaches the node under it.
+ * One finger pans; two pinch; the buttons and, in a browser, the wheel zoom as
+ * well. The buttons are not a fallback for the pinch and the pinch is not the
+ * real way in: a pinch is unavailable to anybody on a pointer, on a keyboard or
+ * using a switch control, and a picture whose only way in is a two-finger
+ * gesture is a picture some readers cannot use at all. Both exist because each
+ * is somebody's only one.
+ *
+ * With one finger the responder claims the gesture only after a slop, so a tap
+ * still reaches the node under it. With two it claims at once — there is no tap
+ * to protect, and a slop would eat the beginning of every zoom.
+ *
+ * Going from two fingers back to one RE-ANCHORS the pan. `PanResponder` keeps
+ * accumulating `dx` from the centroid across the whole gesture, so without that
+ * the drawing would leap by however far the centroid moved while the pinch was
+ * running.
  *
  * ## Reduce Motion
  *
@@ -35,8 +47,9 @@ import { Animated, PanResponder, Platform, View } from 'react-native'
 import Svg, { Circle, G, Line, Text as SvgText } from 'react-native-svg'
 
 import { Button } from '../../ui/primitives'
-import { durationFor } from '../../ui/motion'
+import { motion } from '../../ui/motion'
 import { useTheme } from '../../ui/theme'
+import { claimsGesture, clampScale, type PinchAnchor, pinchSpan, scaleFromPinch, ZOOM_STEP } from './graph-gestures'
 import type { MemoryGraph, MemoryGraphNode } from './graph-model'
 import { type GraphLayout, layoutMemoryGraph } from './graph-layout'
 import { memoryStrings } from './strings'
@@ -51,19 +64,8 @@ export interface MemoryGraphViewProps {
   testID?: string
 }
 
-/** How far a finger may travel before the pan claims the gesture from a tap. */
-const DRAG_SLOP = 6
-
-const ZOOM_STEP = 1.35
-const ZOOM_MIN = 0.5
-const ZOOM_MAX = 4
-
 /** A topic's label is drawn beside it; an entry's excerpt is not — see below. */
 const TOPIC_LABEL_MAX = 18
-
-function clampScale(value: number): number {
-  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, value))
-}
 
 export function MemoryGraphView({ graph, selectedId, onSelect, size, testID = 'memory-graph' }: MemoryGraphViewProps) {
   const theme = useTheme()
@@ -72,6 +74,10 @@ export function MemoryGraphView({ graph, selectedId, onSelect, size, testID = 'm
   const [scale, setScale] = useState(1)
   const [offset, setOffset] = useState({ x: 0, y: 0 })
   const origin = useRef({ x: 0, y: 0 })
+  /** Set while two fingers are down, cleared the moment they are not. */
+  const pinch = useRef<PinchAnchor | null>(null)
+  /** The `dx`/`dy` the pan is measured FROM, moved when a pinch ends. */
+  const panBase = useRef({ dx: 0, dy: 0 })
 
   /* The settle. One value for the whole group, not one per node. */
   const settle = useRef(new Animated.Value(theme.reduceMotion ? 1 : 0)).current
@@ -85,7 +91,11 @@ export function MemoryGraphView({ graph, selectedId, onSelect, size, testID = 'm
 
     settle.setValue(0)
     Animated.timing(settle, {
-      duration: durationFor('panel', false),
+      // `motion.panel`, not `durationFor('panel', theme.reduceMotion)`: the
+      // guard above is this surface's Reduce Motion path, and a `durationFor`
+      // here would read as though the guard were belt and braces rather than
+      // the thing doing the work.
+      duration: motion.panel,
       toValue: 1,
       useNativeDriver: true
     }).start()
@@ -96,15 +106,47 @@ export function MemoryGraphView({ graph, selectedId, onSelect, size, testID = 'm
       PanResponder.create({
         // Never on the press itself: a tap has to reach the node under it.
         onStartShouldSetPanResponder: () => false,
-        onMoveShouldSetPanResponder: (_event, gesture) => Math.hypot(gesture.dx, gesture.dy) > DRAG_SLOP,
+        onMoveShouldSetPanResponder: (event, gesture) =>
+          claimsGesture(event.nativeEvent.touches.length, gesture.dx, gesture.dy),
         onPanResponderGrant: () => {
           origin.current = offset
+          panBase.current = { dx: 0, dy: 0 }
+          pinch.current = null
         },
-        onPanResponderMove: (_event, gesture) => {
-          setOffset({ x: origin.current.x + gesture.dx, y: origin.current.y + gesture.dy })
+        onPanResponderMove: (event, gesture) => {
+          const span = pinchSpan(event.nativeEvent.touches)
+
+          if (span !== null) {
+            // The first frame of a pinch only records where it started from —
+            // the scale it is measured against is whatever the buttons, the
+            // wheel or an earlier pinch left behind.
+            pinch.current ??= { span, scale }
+            setScale(scaleFromPinch(pinch.current, span))
+
+            return
+          }
+
+          if (pinch.current) {
+            pinch.current = null
+            origin.current = offset
+            panBase.current = { dx: gesture.dx, dy: gesture.dy }
+          }
+
+          setOffset({
+            x: origin.current.x + gesture.dx - panBase.current.dx,
+            y: origin.current.y + gesture.dy - panBase.current.dy
+          })
         }
+        /*
+          Deliberately NO handler on a touch ending. `onPanResponderEnd` fires
+          when ANY finger lifts, including the second one of a pinch — clearing
+          the anchor there would take the re-anchor above out of the one path
+          that needs it and the drawing would jump on every pinch that ends with
+          one finger still down. `onPanResponderGrant` resets all three refs, so
+          nothing survives into the next gesture anyway.
+        */
       }),
-    [offset]
+    [offset, scale]
   )
 
   const zoomBy = (factor: number): void => setScale(current => clampScale(current * factor))

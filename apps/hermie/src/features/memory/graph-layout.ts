@@ -83,6 +83,38 @@ export const GRAPH_MAX_NODES = 400
 
 const DEFAULT_SIZE = 640
 const DEFAULT_ITERATIONS = 240
+
+/**
+ * Above this many nodes the pass count comes down with the node count.
+ *
+ * Every pass is O(n²) — the repulsion is every pair — so a fixed 240 passes
+ * costs sixteen times as much at 400 nodes as it does at 100. Measured on the
+ * development Mac (Node 22, `docs/platform-notes.md` has the table): 25 ms at
+ * 150 nodes, 174 ms at 400, and 174 ms is a page that visibly stalls before it
+ * paints on a phone, where the same arithmetic is several times slower again.
+ *
+ * So the passes are scaled by `150 / n`, which makes the total work grow
+ * LINEARLY with the node count instead of quadratically. The floor stops the
+ * largest graphs from being handed too few passes to settle at all.
+ *
+ * This is still deterministic, which is the property the whole module is built
+ * around: the count is a pure function of how many nodes there are, so the same
+ * memory draws the same picture every time. A graph whose node count changes
+ * gets a different picture — but it already did, because the layout is over all
+ * the nodes at once.
+ */
+const ADAPTIVE_FROM_NODES = 150
+const MIN_ITERATIONS = 60
+
+/** How many passes a graph of `nodes` nodes is laid out with. */
+export function iterationsFor(nodes: number): number {
+  if (nodes <= ADAPTIVE_FROM_NODES) {
+    return DEFAULT_ITERATIONS
+  }
+
+  return Math.max(MIN_ITERATIONS, Math.round((DEFAULT_ITERATIONS * ADAPTIVE_FROM_NODES) / nodes))
+}
+
 /** Any constant would do; this one is written down so nobody "improves" it. */
 const DEFAULT_SEED = 0x9e3779b9
 
@@ -135,12 +167,13 @@ interface Body {
  */
 export function layoutMemoryGraph(graph: MemoryGraph, options: GraphLayoutOptions = {}): GraphLayout {
   const size = options.size ?? DEFAULT_SIZE
-  const iterations = options.iterations ?? DEFAULT_ITERATIONS
   const maxNodes = options.maxNodes ?? GRAPH_MAX_NODES
   const random = mulberry32(options.seed ?? DEFAULT_SEED)
 
   const kept = graph.nodes.slice(0, maxNodes)
   const dropped = graph.nodes.length - kept.length
+  // After the cap, not before it: what costs the time is what is laid out.
+  const iterations = options.iterations ?? iterationsFor(kept.length)
 
   if (kept.length === 0) {
     return { nodes: [], edges: [], width: size, height: size, dropped }

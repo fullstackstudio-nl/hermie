@@ -94,9 +94,9 @@ object HermieWidgets {
 
     // The whole square is one tap target, which is what systemSmall is on iOS too.
     views.setOnClickPendingIntent(R.id.hermie_empty, chatIntent(context, null))
-    views.setOnClickPendingIntent(R.id.hermie_name, chatIntent(context, bot.name))
-    views.setOnClickPendingIntent(R.id.hermie_avatar, chatIntent(context, bot.name))
-    views.setOnClickPendingIntent(R.id.hermie_last_line, chatIntent(context, bot.name))
+    views.setOnClickPendingIntent(R.id.hermie_name, chatIntent(context, bot))
+    views.setOnClickPendingIntent(R.id.hermie_avatar, chatIntent(context, bot))
+    views.setOnClickPendingIntent(R.id.hermie_last_line, chatIntent(context, bot))
 
     return views
   }
@@ -136,7 +136,7 @@ object HermieWidgets {
       // Each row is its own link, so a tap lands on the chat under the finger —
       // the same choice `HermieBotsWidget` makes with `Link` per row.
       for (id in listOf(ids.avatar, ids.name, ids.lastLine, ids.badge)) {
-        views.setOnClickPendingIntent(id, chatIntent(context, bot.name))
+        views.setOnClickPendingIntent(id, chatIntent(context, bot))
       }
     }
 
@@ -182,11 +182,18 @@ object HermieWidgets {
   }
 
   /**
-   * `hermie://chat/<bot>`, as a PendingIntent the launcher can fire.
+   * `hermie://chat/<bot>?gateway=<key>`, as a PendingIntent the launcher can fire.
    *
    * The same URL the iOS widgets carry and the same one `src/platform/deep-link.ts`
    * parses, so the tap behaviour is one piece of TypeScript on both platforms.
    * A null bot opens the app's list, which is what the empty state should do.
+   *
+   * The gateway parameter is what stops a tap on a device with two gateways
+   * being a coin toss: without it the named bot opens on whichever gateway is
+   * current, and two rosters routinely share names. It is appended unescaped
+   * because it is hex by the time it reaches here — `HermieWidgetStore` drops
+   * anything that is not — and left off entirely when there is none, which is
+   * exactly how every snapshot written before this field looked.
    *
    * Three things about the flags. `FLAG_IMMUTABLE` because nothing may fill this
    * intent in — it is complete, and a mutable one handed to the launcher is a
@@ -197,8 +204,12 @@ object HermieWidgets {
    * already `singleTask`, which is what makes a second tap arrive at `onNewIntent`
    * and reach JavaScript as a `url` event rather than relaunching the app.
    */
-  private fun chatIntent(context: Context, botName: String?): PendingIntent {
-    val uri = botName?.let { "hermie://chat/${encode(it)}" } ?: "hermie://chat"
+  private fun chatIntent(context: Context, bot: HermieWidgetStore.Bot?): PendingIntent {
+    val uri = bot?.let {
+      val gateway = it.gatewayKey?.let { key -> "?gateway=$key" } ?: ""
+
+      "hermie://chat/${encode(it.name)}$gateway"
+    } ?: "hermie://chat"
 
     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri)).apply {
       `package` = context.packageName
@@ -207,7 +218,7 @@ object HermieWidgets {
 
     return PendingIntent.getActivity(
       context,
-      botName?.hashCode() ?: 0,
+      bot?.name?.hashCode() ?: 0,
       intent,
       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )

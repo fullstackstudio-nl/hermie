@@ -50,8 +50,23 @@ object HermieWidgetStore {
     val presence: String,
     val lastLine: String,
     val unread: Int,
-    val needsInput: Boolean
+    val needsInput: Boolean,
+    /**
+     * Which gateway this row came from, as `gatewayKeyOf` its origin.
+     *
+     * NOT read off the row: it is a property of the snapshot around it, stamped
+     * on here so a tap can carry it without every provider having to hold a
+     * second value. Null from an app that predates two gateways on one device,
+     * and null for a key that is not sixteen lowercase hex digits —
+     * `deep-link.ts` would ignore that anyway, and a URL carrying a malformed
+     * parameter is worse than one carrying none.
+     */
+    val gatewayKey: String?
   )
+
+  /** Sixteen lowercase hex digits, which is what `gatewayKeyOf` produces. */
+  private fun gatewayKeyOrNull(value: String): String? =
+    value.takeIf { it.length == 16 && it.all { character -> character in "0123456789abcdef" } }
 
   /**
    * Every bot in the snapshot, in the order the app wrote them — most recently
@@ -72,6 +87,7 @@ object HermieWidgetStore {
       }
 
       val array = document.optJSONArray("bots") ?: return emptyList()
+      val gatewayKey = gatewayKeyOrNull(document.optString("gatewayKey"))
 
       (0 until array.length()).mapNotNull { index ->
         val entry = array.optJSONObject(index) ?: return@mapNotNull null
@@ -86,7 +102,8 @@ object HermieWidgetStore {
           presence = entry.optString("presence", "offline"),
           lastLine = entry.optString("lastLine"),
           unread = entry.optInt("unread"),
-          needsInput = entry.optBoolean("needsInput")
+          needsInput = entry.optBoolean("needsInput"),
+          gatewayKey = gatewayKey
         )
       }
     } catch (error: Exception) {

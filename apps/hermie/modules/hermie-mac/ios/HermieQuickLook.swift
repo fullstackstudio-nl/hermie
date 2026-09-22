@@ -23,24 +23,22 @@ import UIKit
  bottom sheet rather than behind one: a sheet is a presented `UIViewController` and presenting from
  the root while one is up throws "which is already presenting".
 
- ## The cache copy
+ ## Local files only, and why the download left this file
 
- `QLPreviewItem` is a URL, and the controller reads it directly — so it has to be a URL the process
- can read, which in practice means a `file://` one. Every caller today hands over exactly that: the
- only attachment URIs this app ever has are the local ones from its own picker, because the gateway
- stores a file on its own disk and serves nothing back (see `ChatScreen`'s `sentImages`).
+ `QLPreviewItem` is a URL and the controller reads it directly, so it has to be one this process can
+ read — in practice a `file://` one.
 
- An `http(s)` URI is still accepted and is fetched to the caches directory first, for two reasons.
- The first is that it is the only correct thing to do with one: handing a remote URL to
- `QLPreviewController` shows an empty sheet on some types and nothing at all on others. The second
- is that when the gateway does grow a route that serves an attachment back, this is the half that
- would otherwise have to be written under time pressure — and the caches directory is where a copy of
- somebody else's file belongs, because the system may delete it and nothing here depends on it
- surviving.
+ This class used to accept an `http(s)` URI as well and fetch it with `URLSession.shared.data(from:)`.
+ That fetch carried no `Authorization` header, no operator front-door header and no cookie, so
+ against a gated gateway it was not a file that failed to preview but a request that could never have
+ succeeded. Reproducing the credential ladder here would have meant a second implementation of what
+ `GatewayHttp` already is: the bearer, the operator's extra headers, and the one 401 retry that asks
+ the credential provider for a fresh token before giving up.
 
- The fetch carries no credentials and no headers. That is a limit worth stating rather than papering
- over: a gateway that needs an `Authorization` header to serve a file is a gateway this cannot
- preview, and the honest answer then is `false` — which sends the caller back to the share sheet.
+ So the download moved to `src/platform/attachment-cache.ts`, where that client already lives, and
+ this class was left doing the thing only it can do — presenting a previewer over the topmost view
+ controller. A URI that is not a readable local file answers `false`, which is the same answer the
+ caller already had a fallback for.
  */
 /*
  `@MainActor` on the class rather than on the two static entry points: the data source and delegate
@@ -83,19 +81,21 @@ final class HermieQuickLook: NSObject, QLPreviewControllerDataSource, @preconcur
       return false
     }
 
-    let local: URL?
+    /*
+     A readable local file, or nothing.
 
-    if source.isFileURL {
-      local = FileManager.default.isReadableFile(atPath: source.path) ? source : nil
-    } else if source.scheme == "http" || source.scheme == "https" {
-      local = await cached(from: source, title: title)
-    } else {
-      // A `data:`, `ph:` or `content:` URI is not something `QLPreviewController` reads, and
-      // inventing a conversion for one nothing in this app produces would be code with no caller.
-      local = nil
+     An `http(s)` URI arrives here already fetched: `open-attachment.ts` brings a remote attachment
+     down through the gateway's own authenticated client and hands over the `file://` it wrote. A
+     `data:`, `ph:` or `content:` URI is not something `QLPreviewController` reads, and inventing a
+     conversion for one nothing in this app produces would be code with no caller.
+     */
+    guard source.isFileURL, FileManager.default.isReadableFile(atPath: source.path) else {
+      return false
     }
 
-    guard let local, QLPreviewController.canPreview(local as QLPreviewItem) else {
+    let local = source
+
+    guard QLPreviewController.canPreview(local as QLPreviewItem) else {
       return false
     }
 
@@ -113,40 +113,6 @@ final class HermieQuickLook: NSObject, QLPreviewControllerDataSource, @preconcur
     host.present(controller, animated: true)
 
     return true
-  }
-
-  /**
-   A copy of a remote file in the caches directory, or nothing.
-
-   Named after the URL's own last path component, or after the caller's filename when it has one,
-   because Quick Look picks its previewer from the EXTENSION and a URL ending in `/download` would
-   otherwise be previewed as nothing at all. Written under a per-fetch directory so two attachments
-   with the same name cannot overwrite each other while both are open.
-   */
-  private static func cached(from source: URL, title: String?) async -> URL? {
-    let name = (title?.isEmpty == false ? title : nil) ?? source.lastPathComponent
-    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(
-      "quick-look/\(UUID().uuidString)",
-      isDirectory: true
-    )
-
-    do {
-      let (data, response) = try await URLSession.shared.data(from: source)
-
-      if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-        return nil
-      }
-
-      try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-
-      let file = folder.appendingPathComponent(name.isEmpty ? "attachment" : name)
-
-      try data.write(to: file, options: .atomic)
-
-      return file
-    } catch {
-      return nil
-    }
   }
 
   /**
@@ -187,7 +153,7 @@ final class HermieQuickLook: NSObject, QLPreviewControllerDataSource, @preconcur
 
   func previewControllerDidDismiss(_ controller: QLPreviewController) {
     // The previewer is gone, so the only reason to hold this object is gone with it. A cached copy
-    // is left where it is: it is in the temporary directory, the system reclaims it, and deleting it
+    // is left where it is: it is in the caches directory, the system reclaims it, and deleting it
     // here would race a "Save to Files" the reader started from inside the preview.
     if Self.presenting === self {
       Self.presenting = nil
