@@ -46,6 +46,17 @@ export interface WebPushKeys {
 export interface PushRegistration {
   /** The installation that wrote it; the key it was stored under. */
   installationId: string
+  /**
+   * The person whose `hermie-app:<user_id>` section this row came out of, or
+   * `''` for the legacy anonymous key.
+   *
+   * Not on the wire and not the app's: it is the KEY NAME, carried alongside
+   * the row so that a service-level decision about one person — "this account
+   * may not be notified", "this account may only reach these bots" — has
+   * somebody to be about. Without it the pool is a list of devices with no
+   * owner, which is all a notifier ever needed and not enough for an operator.
+   */
+  owner: string
   transport: PushTransport
   /** Expo only: the push token, which is the whole address. */
   token?: string
@@ -93,7 +104,7 @@ function typesOf(value: unknown): Record<PushType, boolean> {
  * the fields of both transports is a confusion rather than a choice — it is
  * dropped rather than resolved in favour of one.
  */
-export function pushRegistrationOf(installationId: string, value: unknown): PushRegistration | null {
+export function pushRegistrationOf(installationId: string, value: unknown, owner = ''): PushRegistration | null {
   if (!installationId || !value || typeof value !== 'object') {
     return null
   }
@@ -113,6 +124,7 @@ export function pushRegistrationOf(installationId: string, value: unknown): Push
 
   const common = {
     installationId,
+    owner,
     platform: str(row.platform) || 'unknown',
     types: typesOf(row.types),
     preview: row.preview === true,
@@ -133,7 +145,7 @@ export function pushRegistrationOf(installationId: string, value: unknown): Push
 }
 
 /** Read the whole `push` section out of a `hermie-app` bag. */
-export function readPushSection(section: unknown): PushSection {
+export function readPushSection(section: unknown, owner = ''): PushSection {
   const push = (section as { push?: unknown } | null)?.push
 
   if (!push || typeof push !== 'object') {
@@ -145,7 +157,7 @@ export function readPushSection(section: unknown): PushSection {
   const registrations: PushRegistration[] = []
 
   for (const [installationId, value] of Object.entries(rows)) {
-    const registration = pushRegistrationOf(installationId, value)
+    const registration = pushRegistrationOf(installationId, value, owner)
 
     if (registration) {
       registrations.push(registration)

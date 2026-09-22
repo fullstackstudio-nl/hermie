@@ -19,9 +19,9 @@
  */
 import type { AuthProvider } from '@hermie/gateway-client'
 
-import type { HermieWebConfig, HermieWebService } from './web-config'
+import type { HermieWebBranding, HermieWebConfig, HermieWebFlags, HermieWebService } from './web-config'
 
-export type { HermieWebConfig, HermieWebService } from './web-config'
+export type { HermieWebBranding, HermieWebConfig, HermieWebFlags, HermieWebService } from './web-config'
 export { probeFromWebConfig } from './web-config'
 
 export const WEB_GATEWAY_BASE_URL: string | null = typeof window === 'undefined' ? null : window.location.origin
@@ -64,6 +64,44 @@ function serviceOf(value: unknown): HermieWebService {
   return { login: row.login === true, push: row.push === true, cache: row.cache === true }
 }
 
+/** Nothing set is `null`, not an empty branding — the two mean different things. */
+function brandingOf(value: unknown): HermieWebBranding | null {
+  if (!value || typeof value !== 'object') {
+    return null
+  }
+
+  const row = value as Record<string, unknown>
+  const out: HermieWebBranding = {
+    ...(str(row.name) ? { name: str(row.name) } : {}),
+    ...(str(row.accent) ? { accent: str(row.accent) } : {}),
+    ...(str(row.theme) ? { theme: str(row.theme) } : {})
+  }
+
+  return Object.keys(out).length ? out : null
+}
+
+/**
+ * The flags, read so that an ABSENT one is on.
+ *
+ * A Hermie Web too old to send the object at all answers `null` and the app
+ * behaves exactly as it did before flags existed. A field the server did not
+ * send inside an object it did send is also on, for the same reason: a build
+ * that has never heard of a flag must not be switched off by its absence.
+ */
+function flagsOf(value: unknown): HermieWebFlags | null {
+  if (!value || typeof value !== 'object') {
+    return null
+  }
+
+  const row = value as Record<string, unknown>
+
+  return {
+    userChats: row.userChats !== false,
+    messageCache: row.messageCache !== false,
+    selfUpdate: row.selfUpdate !== false
+  }
+}
+
 async function fetchConfig(): Promise<HermieWebConfig | null> {
   const response = await fetch('/hermie/config.json', { headers: { accept: 'application/json' } })
 
@@ -84,6 +122,8 @@ async function fetchConfig(): Promise<HermieWebConfig | null> {
     authRequired: typeof body.authRequired === 'boolean' ? body.authRequired : null,
     authKinds: stringsOrNull(body.authKinds),
     providers: providersOrNull(body.providers),
-    service: serviceOf(body.service)
+    service: serviceOf(body.service),
+    branding: brandingOf(body.branding),
+    flags: flagsOf(body.flags)
   }
 }

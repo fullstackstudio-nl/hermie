@@ -49,6 +49,7 @@ import {
   type Folder,
   type LayoutEntry
 } from './folders'
+import { accentOrBrand } from '../features/branding/branding'
 import { isMuted, mutesOf, withoutExpired, type Mutes } from './mute'
 
 export const CHAT_LAYOUT_KEY = 'hermie.chats.layout'
@@ -753,9 +754,15 @@ export function useMyChat(botName: string): boolean {
   return useChatLayoutStore(state => Boolean(state.myChats[botName]))
 }
 
-/** One chat's colour. Part 2's header and outgoing bubble read this too. */
+/**
+ * One chat's colour. Part 2's header and outgoing bubble read this too.
+ *
+ * `accentOrBrand` is what makes a team's accent (ADR-0025, part 2) mean
+ * anything: it stands in for "the reader has not coloured this chat", and a
+ * chat they HAVE coloured is untouched.
+ */
 export function useChatAccent(botName: string): AccentName {
-  return useChatLayoutStore(state => state.accents[botName] ?? 'default')
+  return accentOrBrand(useChatLayoutStore(state => state.accents[botName] ?? 'default'))
 }
 
 /**

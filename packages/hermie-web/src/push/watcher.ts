@@ -127,6 +127,29 @@ export interface WatcherOptions {
    * looked like before this and what an app with one gateway does not need.
    */
   gatewayUrl?: string
+  /**
+   * What the operator has decided about one person and one bot (`/admin`).
+   *
+   * Absent means "nothing has been decided about anybody", which is every
+   * deployment that has never opened the admin page and every test. This is one
+   * of the two places a service-level rule is COMPLETE rather than advisory:
+   * the daemon is ours, so a device that may not be notified simply is not,
+   * before anything leaves the process.
+   */
+  allowedTo?: (owner: string, bot: string) => boolean
+  /**
+   * The service-wide ceiling an operator set on `/admin`.
+   *
+   * A CEILING rather than a second opt-in: a device still has to have asked for
+   * the type, and this can only take it away. `preview: 'never'` overrides each
+   * device's own flag, which is the one setting here that makes a notification
+   * say LESS than the device asked for — for a shared or regulated deployment
+   * where a message summary on a lock screen is not acceptable.
+   *
+   * Absent means no ceiling, which is every deployment that has never opened
+   * the page and every test.
+   */
+  policy?: () => { types: Record<PushType, boolean>; preview: 'device' | 'never' }
 }
 
 interface WatchedSession extends WatchedBot {
@@ -606,8 +629,20 @@ export class PushWatcher {
       await this.refreshRegistrations()
     }
 
+    const policy = this.options.policy?.()
+
+    if (policy && policy.types[event.type] === false) {
+      this.log(`push: ${event.bot} — ${event.type} is off for this service; not notifying`)
+      await this.options.save()
+
+      return
+    }
+
     const audience = registrationsFor(this.roster.push, event.type).filter(
-      registration => !state.invalid[registration.installationId] && this.allow(registration.installationId)
+      registration =>
+        !state.invalid[registration.installationId] &&
+        this.allow(registration.installationId) &&
+        (this.options.allowedTo?.(registration.owner, event.bot) ?? true)
     )
 
     if (!audience.length) {
@@ -619,7 +654,11 @@ export class PushWatcher {
     // One send per preview setting: the same event, said two ways, because the
     // decision is the registration's and not the event's.
     for (const preview of [false, true]) {
-      const targets = audience.filter(registration => registration.preview === preview)
+      // `never` folds every device into the no-preview pass: one send, and no
+      // registration's own flag can put the text back.
+      const targets = audience.filter(registration =>
+        policy?.preview === 'never' ? preview === false : registration.preview === preview
+      )
 
       if (!targets.length) {
         continue

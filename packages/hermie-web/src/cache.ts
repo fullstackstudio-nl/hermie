@@ -147,6 +147,8 @@ export class TranscriptCache {
   /** Every name a session answers to → its session id. */
   private readonly aliases = new Map<string, string>()
   private bytes = 0
+  private served = 0
+  private missed = 0
   private loaded = false
   /** Serialises index writes, so two puts cannot interleave a read-modify-write. */
   private tail: Promise<void> = Promise.resolve()
@@ -163,6 +165,22 @@ export class TranscriptCache {
 
   get count(): number {
     return this.rows.size
+  }
+
+  /**
+   * Reads served and reads that found nothing, since this process started.
+   *
+   * Counted rather than derived, and deliberately NOT persisted: a hit rate
+   * across restarts would average away the one thing it is useful for, which is
+   * whether the cache is earning its disk on THIS run. A refusal on ownership
+   * counts as a miss, because from the seam's side it is one.
+   */
+  get hits(): number {
+    return this.served
+  }
+
+  get misses(): number {
+    return this.missed
   }
 
   private get now(): number {
@@ -347,10 +365,14 @@ export class TranscriptCache {
     const row = sessionId ? this.rows.get(sessionId) : undefined
 
     if (!row) {
+      this.missed += 1
+
       return null
     }
 
     if (row.owner && row.owner !== reader) {
+      this.missed += 1
+
       return null
     }
 
@@ -364,9 +386,12 @@ export class TranscriptCache {
       // answering for it.
       this.forget(row)
       void this.saveIndex().catch(() => undefined)
+      this.missed += 1
 
       return null
     }
+
+    this.served += 1
 
     row.readAt = this.now
     void this.saveIndex().catch(() => undefined)
@@ -391,6 +416,41 @@ export class TranscriptCache {
         this.aliases.delete(alias)
       }
     }
+  }
+
+  /**
+   * Drop everything nobody has read for this long.
+   *
+   * The size cap is a start-up flag and this is a setting an operator can
+   * change while the service runs (`/admin`), so it is a method rather than an
+   * option: the caller passes the number it holds now. `0` is "no age limit",
+   * which is ADR-0025's behaviour and the default.
+   */
+  async sweep(maxAgeSeconds: number): Promise<number> {
+    if (!this.enabled || maxAgeSeconds <= 0) {
+      return 0
+    }
+
+    await this.load()
+
+    const cutoff = this.now - maxAgeSeconds
+    let dropped = 0
+
+    for (const row of [...this.rows.values()]) {
+      // `readAt` rather than `updatedAt`: retention here is about what nobody
+      // is opening, not about what nobody is saying.
+      if (row.readAt <= cutoff) {
+        this.forget(row)
+        await rm(path.join(this.options.dir, row.file), { force: true }).catch(() => undefined)
+        dropped += 1
+      }
+    }
+
+    if (dropped) {
+      await this.saveIndex()
+    }
+
+    return dropped
   }
 
   /**

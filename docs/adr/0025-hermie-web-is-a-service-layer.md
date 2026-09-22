@@ -153,3 +153,88 @@ the app is worse than a wizard step nobody needed.
 `/auth/native/token`. Those are the gateway's routes and `packages/gateway-client` is their
 specification; where the two disagree, that package is right and this one is the bug — the same
 rule `link.ts` and `credentials.ts` already carry, for the same packaging reason.
+
+## Amendment (2026-09-22): part 2 — per-user chats, per-user isolation, and an admin area
+
+This record's part 4 said the rest would come "off by default". Here it is, and the default rule
+held: a deployment that opens nothing new behaves exactly as it did.
+
+### What part 2 delivers
+
+**Per-user chats** are [ADR-0007](0007-canonical-bot-chats-only.md)'s amendment, not this record's,
+and the reasoning lives there. What belongs here is the consequence for the service, below.
+
+**The message cache is no longer gateway-wide.** This record wrote that entries are "per gateway,
+not per user, and that is written down rather than hidden", on the grounds that the only
+conversation a bot had was one ADR-0007 had already made shared. The moment a private conversation
+existed that reasoning expired. Entries carry an owner now; the full rule and its cost are in
+[ADR-0016](0016-ui-meta-sync.md)'s amendment, which is where the two-reader verification lives.
+
+**An admin area at `/admin`**, which is the part that needs a decision of its own.
+
+### The admin area
+
+**It is gated on a gateway user id, not on a credential of its own.** Hermie Web still has no user
+database, and this does not give it one: `admins` is a list of ids the gateway authenticates, and
+the gate is `/api/auth/me` asked with `{ fresh: true }` so that a removal or a sign-out takes effect
+at once rather than after a memo expires. **The first administrator is whoever completed `/setup`**,
+because that is the one moment this process can point at somebody without being told.
+
+**A gateway with no accounts gets a local secret instead.** Offered on `/setup`, stored as a scrypt
+hash, unlocking this page and nothing else. It is not a gateway session: it cannot read a chat, and
+it never appears in a page. Without one, a deployment on a token or ungated gateway has nobody who
+can open `/admin` — and the setup page says so while the operator is still standing there.
+
+**The page is server-rendered HTML with no script at all.** Further than `/setup` goes, deliberately:
+an admin page is what an operator reaches for when something is already wrong, which is exactly when
+a bundle that has to load first is the thing that will not. Every control is a form that posts,
+changes one thing and redirects. Every POST carries a double-submit CSRF token in a `SameSite=Strict`
+cookie, checked before the body is read. Nothing secret is rendered — not the VAPID private key, not
+the refresh token, not the local secret — only whether each exists.
+
+**The per-user options are SERVICE-level, and the page says so in those words.** This is the part a
+reader could be misled by, so it is stated three times — here, in `admin/access.ts`, and beside the
+switches themselves:
+
+- **Push and the message cache are enforced completely.** The daemon and the cache are this
+  service's own, so `pushAllowed` and `allowedBots` decide what is sent and what is served before
+  anything leaves the process.
+- **Mutating HTTP is refused** for a read-only reader, which is the REST surface and file uploads.
+- **The WebSocket is not policed, and cannot be.** ADR-0015 makes it a raw byte pipe on purpose, and
+  everything of consequence travels over it. `readOnly` is a guard rail against accident, not a
+  boundary against intent. An operator who needs the second thing needs two gateways, which is the
+  same answer this record already gives for two people who must not see each other's Bot Chats.
+
+**The user list is the people this service has seen sign in.** Upstream documents no route for
+listing accounts, and inventing one would be this service guessing at another project's API. The
+page names which of the two it is showing rather than letting a short list read as a small team.
+
+**Branding and feature flags ride in `/hermie/config.json`**, which this record already made the
+app's bootstrap. Branding is a STARTING POINT and never an override: a reader who has chosen a theme
+keeps it, and a chat they have coloured keeps its colour. A flag nobody set is on, and a Hermie Web
+too old to send the object at all leaves every feature on — a build must not lose one because the
+thing in front of it has never heard of it.
+
+### What this costs
+
+- **One more file in the state directory**, `admin.json`, `0600` beside the push state.
+- **One identity round trip on the proxy's hot path**, memoised for fifteen seconds
+  (`identity.ts`). `/admin` itself always asks fresh.
+- **A service nobody can administer is now a reachable state** — a gateway that named nobody, set up
+  without a secret. It is said out loud on the setup page rather than discovered later.
+
+### What is verified
+
+`packages/hermie-web/src/admin/admin.test.ts`, against the real fake gateway with two accounts: the
+role gate in all three of its answers, that a POST without the token and a POST with the wrong token
+are both refused, that each settings form round-trips and shows itself back, that branding and the
+flags reach `/hermie/config.json`, that the cache flag closes the route without deleting anything,
+that the state file is `0600`, that the people list fills from who has signed in, that the last
+administrator cannot be removed, and that read-only and the bot allow list are enforced on the proxy
+and on the cache. `packages/hermie-web/src/admin/access.test.ts` pins the gate's own arithmetic,
+including that a gateway naming nobody never matches an empty entry.
+`apps/hermie/__tests__/branding.test.ts` pins the app's half: a starting point rather than an
+override, and an absent flag reading as on.
+
+**Not verified:** anything against a real gateway, the push ceiling end to end through a real
+notifier, and the local-administrator sign-in in a browser.

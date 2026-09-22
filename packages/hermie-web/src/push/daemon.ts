@@ -18,6 +18,7 @@ import { PUSH_PUBLIC_KEY_PATH } from '../options'
 import { type PushCredentials, resolveCredentials } from './credentials'
 import { GatewayLink, type LinkEvent, type LinkServerRequest } from './link'
 import { createSender, pollExpoReceipts, RECEIPT_POLL_INTERVAL_MS } from './senders'
+import type { PushType } from './registrations'
 import { loadPushState, prunePushState, type PushState, savePushState } from './state'
 import { gatewayApiUrl } from './credentials'
 import {
@@ -57,6 +58,16 @@ export interface PushDaemonOptions {
   onServerRequest?: (request: LinkServerRequest) => void
   /** The `sub` claim of the VAPID token: a `mailto:` or `https:` contact. */
   vapidSubject?: string
+  /**
+   * What the operator decided about one person and one bot (`/admin`).
+   *
+   * Read on every send rather than captured, because the admin page can change
+   * it while the daemon is running and a daemon holding a stale copy would go
+   * on notifying somebody an operator has just turned off.
+   */
+  allowedTo?: (owner: string, bot: string) => boolean
+  /** The service-wide push ceiling an operator set on `/admin`. See the watcher. */
+  policy?: () => { types: Record<PushType, boolean>; preview: 'device' | 'never' }
   /**
    * Ask the gateway to route server→client requests to this connection.
    *
@@ -319,6 +330,8 @@ export async function startPushDaemon(options: PushDaemonOptions): Promise<PushD
         version: options.version ?? '0.0.0'
       }),
       fetchTail,
+      ...(options.allowedTo ? { allowedTo: options.allowedTo } : {}),
+      ...(options.policy ? { policy: options.policy } : {}),
       ...(options.tuning ?? {})
     })
   }

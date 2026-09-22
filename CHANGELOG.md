@@ -19,6 +19,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   list opens whichever you chose, and the badge and the "needs you" dot count that one. On a gateway
   with no accounts the switch is not there at all and nothing changes.
 
+- **Hermie Web has an administration page.** `/admin` on a configured service: what it is running
+  (push, the message cache and how much of it is used, whether an update is waiting), which
+  notification types it will send at all and whether a notification may carry message text, how long
+  a cached chat is kept, and an update button. It also carries a list of the people who have signed
+  in through it, with what this service will do for each of them — which bots they may reach,
+  whether their notifications go out, and whether it will pass their changes on to the gateway.
+  Those are **this service's settings, not the gateway's**: notifications and the cached chats are
+  its own and are enforced completely, while "read-only" stops everything it can see and cannot stop
+  somebody typing into a chat, because the gateway connection is a pipe this service deliberately
+  does not read. The page says so where you set it.
+
+  Whoever finishes `/setup` becomes the first administrator; others are added by their gateway
+  account id. On a gateway with no accounts there is nobody to recognise, so setup can take an
+  administrator secret instead — stored as a hash, and never shown back. The page is plain HTML with
+  no scripts, so it works on the day something is wrong.
+
+- **A team can make the app look like theirs.** A name, an accent and a starting theme, set on
+  `/admin` and read by the app before it draws anything. It is a starting point and never an
+  override: if you have chosen a theme it stays, and a chat you have given a colour keeps it. There
+  are also switches to turn service features off for everybody — private chats, the message cache,
+  the update button — and an app talking to a service too old to mention them keeps everything it
+  has.
+
 - **Hermie Web sets its gateway up once, and everybody else just signs in.** Start `hermie-web` with
   no `--gateway` and it serves an operator setup page at `/setup`: the gateway address, a probe of
   it, and the service login that push and the message cache are spent on — the same sign-in

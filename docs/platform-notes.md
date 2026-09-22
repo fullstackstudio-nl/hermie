@@ -8822,3 +8822,101 @@ two people in. Every existing test sees the same single tester it always did.
 - **Nothing tests eviction against ownership.** An owner has no bearing on the
   LRU, which is correct, but a cache that is full of one person's private chats
   will evict another person's shared ones on the ordinary rules.
+
+## Round R10b, part three: an admin page with no script in it (2026-09-22)
+
+### The gate is somebody else's authentication
+
+`/admin` is a list of gateway user ids and nothing more. Hermie Web does not
+issue a session for them, does not know what a valid cookie looks like, and does
+not cache the answer: the gate asks `/api/auth/me` with `{ fresh: true }` on
+every request, so an administrator removed a minute ago does not get one more
+write out of the fifteen-second memo the cache tee uses.
+
+The one exception is the deployment that has nobody to name. A token or ungated
+gateway answers `/api/auth/me` with the same identity for everybody, so a list
+of ids would be a list of one shared name — which is not a gate. Those get a
+local secret instead, scrypt with a per-credential salt, offered on `/setup` and
+stored as a hash. It unlocks the page and nothing else.
+
+**A reachable state worth knowing about:** a gateway that named nobody, set up
+without a secret, has no way into `/admin` short of editing `admin.json` on the
+host. The setup page says so at the moment of saving rather than leaving it to
+be discovered.
+
+### No script, on purpose
+
+`/setup` has an inline ES5 IIFE. `/admin` has nothing: every control is a
+`<form method="post">`. An admin page is what somebody opens when something is
+already wrong, and a page that needs JavaScript to render is a page that will
+not render on the day it is needed.
+
+The cost is the HTML form's own semantics, and it shows up in the tests: an
+unticked checkbox sends NOTHING, so every boolean is read as a whitelist and a
+form that posts partial state turns off what it does not mention. That is why
+the tests that flip flags put them back.
+
+### What "read-only" is, and what it is not
+
+Worth repeating here because it is the thing an operator could be misled by.
+ADR-0015 makes the gateway WebSocket a raw byte pipe — `upstreamSocket.pipe(socket)`
+in both directions — and everything the app does of consequence travels over it.
+Policing it would mean terminating the protocol and re-implementing the gateway's
+own contract inside a proxy, which is the opposite of what this process is for.
+
+So:
+
+- **push and the cache** are ours and are enforced completely;
+- **mutating HTTP** (`POST`/`PUT`/`PATCH`/`DELETE` to `/api/*`) is refused, which
+  covers uploads and the REST surface;
+- **prompts, approvals and `profiles.configure` are not touched.**
+
+The page says this in those words, beside the switches. A deployment that needs
+a real boundary needs two gateways, which is the same answer ADR-0025 already
+gives for two people who must not share a Bot Chat.
+
+### The user list is what we have seen, and says so
+
+Upstream documents no route for listing accounts — nothing in
+`gateway-contract.generated.ts`, nothing in `docs/web.md`, no `/api/auth/users`
+anywhere in this repository. Guessing at one would be this service inventing
+another project's API and then reading a 404 as "no users".
+
+So the list is the people who have signed in through this service, with when,
+noted on the proxy's own hot path at a minute's resolution. The page labels it
+rather than presenting it as the gateway's roster, because a short list that
+looks authoritative is worse than a short list that explains itself.
+
+### Branding is a starting point
+
+`name`, `accent` and `theme` ride in `/hermie/config.json`, which ADR-0025 had
+already made the app's bootstrap. The rule that makes them safe is that they are
+applied once, to a reader who has chosen nothing:
+
+- the **theme** is set only when this reader has no theme of their own on disk,
+  and the check is made after `hydrateAppearance` rather than against a store
+  still holding its seeded defaults — asking too early finds "the default" for
+  everybody and repaints the brand over a choice on every launch;
+- the **accent** stands in for `default`, which is what an uncoloured chat is,
+  so a chat the reader coloured is untouched by construction;
+- the **name** is not stored at all — it is read from the bootstrap on every
+  render, so an operator who changes it changes every tab on the next load.
+
+`setDefaultAccent` is a module value rather than a store, which is a deliberate
+exception: it is written exactly once, before the list paints, and a store would
+add a subscription to every row to carry something that cannot change.
+
+### What is unverified here
+
+- **No real gateway, and no browser.** The local-administrator sign-in, the
+  CSRF cookie's `SameSite=Strict` behaviour and the forms' redirects are
+  exercised by `fetch` with `redirect: 'manual'`, not by a browser.
+- **The push ceiling is unit-level.** `policy()` and `allowedTo()` are asserted
+  through the watcher's own filter; no notification has been withheld from a
+  real device by them.
+- **Cache retention is applied on change, not on a timer.** An operator who sets
+  48 hours and then never opens the page again has a sweep that ran once. The
+  size cap is still what bounds the cache; retention is a tidy-up, and the page
+  does not claim otherwise.
+- **Nobody has been removed from `admins` while holding an open page.** The gate
+  is fresh on every request, so the next click refuses — reasoned, not watched.

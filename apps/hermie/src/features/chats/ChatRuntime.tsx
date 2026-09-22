@@ -12,6 +12,7 @@ import { AppState } from 'react-native'
 import { requestOpenChat } from '../../app/open-chat-bus'
 import { gatewayForKey, useGateway } from '../../gateway'
 import { chatGatewayFor, type ChatGateway } from '../../gateway/link'
+import { loadHermieWebConfig, type HermieWebConfig } from '../../gateway/web-config'
 import { useConnectionStore } from '../../gateway/store'
 import { namespace } from '../../gateway/namespace'
 import { chatCacheFor } from '../../platform/chat-cache'
@@ -28,6 +29,7 @@ import { usePushStore } from '../../store/push'
 import { useSettingsStore } from '../../store/settings'
 import { useShareStore } from '../../store/share'
 import { UiMetaBridge } from '../../store/ui-meta-bridge'
+import { isThemePresetName } from '../../ui/themes'
 import { BotsController } from '../bots/bots-controller'
 import { pushPlatform } from '../push/platform'
 import { PushSync } from '../push/push-sync'
@@ -42,6 +44,7 @@ import { pushProjectId, pushVapidUrl } from '../push/where'
 import { onShareRequest } from '../share/share-bus'
 import { ShareDelivery } from '../share/share-delivery'
 import { ShareTargetHost } from '../share/ShareTargetHost'
+import { applyBranding, featureOn } from '../branding'
 import { UserChatDirectory, userChatSwitch, type UserChatSwitch } from '../user-chats'
 import { WidgetSync } from '../widgets'
 import { resizeToBase64 } from './attachments'
@@ -122,6 +125,10 @@ const ChatRuntimeContext = createContext<ChatRuntimeValue | null>(null)
 export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
   const { config, connection, gatewayId, http, registry, status, switchGateway } = useGateway()
   const [value, setValue] = useState<ChatRuntimeValue | null>(null)
+  /** The service's bootstrap, for the feature flags. `null` off the web. */
+  const [webConfig, setWebConfig] = useState<HermieWebConfig | null>(null)
+  const webConfigRef = useRef<HermieWebConfig | null>(null)
+  webConfigRef.current = webConfig
   const valueRef = useRef<ChatRuntimeValue | null>(null)
   /*
     The list, through a ref.
@@ -175,6 +182,47 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     // an address correction instead of being dropped by it (ADR-0012, amended).
     void useChatLayoutStore.getState().load(gatewayId)
   }, [gatewayId])
+
+  /**
+   * The team's own look, once, before anything has painted (ADR-0025, part 2).
+   *
+   * `loadHermieWebConfig` is cached and answers `null` off the web, so this is
+   * one fetch in a browser and nothing at all anywhere else. It runs after the
+   * settings store has been read from disk, because "has this reader chosen a
+   * theme" is a question about what is stored and not about what the store was
+   * seeded with — asking too early would find the app's default for everybody
+   * and paint the brand over a choice on every launch.
+   */
+  useEffect(() => {
+    let cancelled = false
+
+    void (async () => {
+      const config = await loadHermieWebConfig().catch(() => null)
+
+      if (cancelled || !config) {
+        return
+      }
+
+      setWebConfig(config)
+      await useSettingsStore
+        .getState()
+        .hydrateAppearance()
+        .catch(() => undefined)
+
+      applyBranding(config, {
+        chosenTheme: useSettingsStore.getState().themeChoice.kind !== 'preset',
+        setTheme: preset => {
+          if (isThemePresetName(preset)) {
+            useSettingsStore.getState().setThemeChoice({ kind: 'preset', name: preset })
+          }
+        }
+      })
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     // The reader's switches have to be in memory before the first projection or
@@ -233,6 +281,14 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     const userChats = new UserChatDirectory({
       gateway,
       identity: () => {
+        // An operator can turn the whole feature off for this deployment
+        // (`/admin`), and the honest way to express that is to have no identity
+        // to write a title from — which is the same state a gateway that named
+        // nobody is in, and the one every other reader here already handles.
+        if (!featureOn(webConfigRef.current, 'userChats')) {
+          return null
+        }
+
         const context = useDeviceContextStore.getState()
 
         return context.userId ? { userId: context.userId, displayName: context.displayName } : null

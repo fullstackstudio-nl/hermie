@@ -16,6 +16,34 @@ export interface HermieWebService {
   cache: boolean
 }
 
+/**
+ * What a team's Hermie Web wants its build to look like (ADR-0025, part 2).
+ *
+ * Every field is optional and an ABSENT one means "the app decides", which is
+ * not the same answer as an empty string. A reader who has already chosen a
+ * theme or an accent keeps it: this is where the app starts, never an override,
+ * because an operator's default that reached back in and undid somebody's
+ * choice would be a setting that fights its own reader.
+ */
+export interface HermieWebBranding {
+  /** Shown instead of "Hermie" where the app names itself. */
+  name?: string
+  /** One of the app's accent names. */
+  accent?: string
+  /** A theme preset name the app starts on. */
+  theme?: string
+}
+
+/** Service features an operator turned off for everybody on this deployment. */
+export interface HermieWebFlags {
+  /** ADR-0007's amendment: the private chat beside the shared Bot Chat. */
+  userChats: boolean
+  /** Whether the service will serve its message cache to this app at all. */
+  messageCache: boolean
+  /** Whether Settings may offer the update button. */
+  selfUpdate: boolean
+}
+
 export interface HermieWebConfig {
   /** The gateway host Hermie Web proxies to, for display only. */
   gatewayHost: string
@@ -55,6 +83,14 @@ export interface HermieWebConfig {
   authRequired: boolean | null
   providers: AuthProvider[] | null
   service: HermieWebService
+  /** Absent on a service that has set none, and on every older one. */
+  branding: HermieWebBranding | null
+  /**
+   * Absent on a Hermie Web too old to send them, which reads as "every feature
+   * this build has". A flag nobody set is on; a build that has never heard of
+   * a flag is unaffected by it.
+   */
+  flags: HermieWebFlags | null
 }
 
 /**

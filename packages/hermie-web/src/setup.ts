@@ -290,7 +290,7 @@ export function ownOrigin(request: IncomingMessage): string {
 /** Where the gateway sends the operator's browser back at the end of the service login. */
 export const SETUP_CALLBACK_PATH = '/hermie/setup/callback'
 
-const escapeHtml = (value: string): string =>
+export const escapeHtml = (value: string): string =>
   value.replace(
     /[&<>"']/g,
     character =>
@@ -375,6 +375,11 @@ export function setupPage(options: { version: string; defaultGateway: string }):
   <section id="save-card" hidden>
     <h2>3. Save</h2>
     <p>Saving writes the gateway to this server's state directory and closes this page for good.</p>
+    <label for="admin-secret">Administrator secret (optional)</label>
+    <input id="admin-secret" type="password" autocomplete="new-password">
+    <p class="note">Only needed on a gateway with no accounts. With accounts, whoever is signed in
+    right now becomes this service's first administrator and this can stay empty. Stored as a scrypt
+    hash; <code>/admin</code> never shows it back.</p>
     <button id="save" type="button">Save and finish</button>
     <p class="note" id="save-result"></p>
   </section>
@@ -428,8 +433,15 @@ export function setupPage(options: { version: string; defaultGateway: string }):
     if (!probed) { return }
     $('save').disabled = true;
     say('save-result', 'Saving …');
-    post('/hermie/setup/save', { gateway: probed }).then(function (answer) {
+    post('/hermie/setup/save', { gateway: probed, adminSecret: $('admin-secret').value }).then(function (answer) {
       if (!answer.ok) { $('save').disabled = false; say('save-result', answer.body.detail || 'That did not work.', true); return }
+      if (answer.body.admin === 'none') {
+        // Said here rather than discovered later: a service nobody can
+        // administer needs a file edited on the host to get one.
+        $('save').disabled = false;
+        say('save-result', 'Saved, but nothing can open /admin: this gateway named nobody and no secret was set.', true);
+        return
+      }
       say('save-result', 'Saved. Opening Hermie …');
       window.location.assign('/');
     }, function (error) { $('save').disabled = false; say('save-result', String(error), true) });

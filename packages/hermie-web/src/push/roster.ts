@@ -78,7 +78,12 @@ function pooledPush(bag: Record<string, unknown>): PushSection {
   const seen: Record<string, number> = {}
 
   for (const key of appKeysOf(bag)) {
-    const section = readPushSection(isObject(bag[key]) ? bag[key] : null)
+    // The key NAMES the person: `hermie-app:<user_id>`. The legacy bare key
+    // names nobody, and a row out of it carries `''` — which every
+    // service-level rule reads as "this service has decided nothing about
+    // whoever this is", the same answer a person nobody has configured gets.
+    const owner = key.startsWith(`${HERMIE_APP_KEY}:`) ? key.slice(HERMIE_APP_KEY.length + 1) : ''
+    const section = readPushSection(isObject(bag[key]) ? bag[key] : null, owner)
 
     for (const registration of section.registrations) {
       const held = byInstallation.get(registration.installationId)
