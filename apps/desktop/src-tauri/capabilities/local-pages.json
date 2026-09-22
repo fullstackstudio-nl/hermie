@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "local-pages",
-  "description": "The shell's own pages (connect.html, offline.html). Full local API; never granted to a remote Hermie Web origin — that is capabilities/remote-app.json, added in Task 2.",
+  "description": "The shell's own pages (connect.html, offline.html). Full local API. This is the only capability file in the app: a configured Hermie Web origin is granted at run time instead, one capability per entry, by src/bridge.rs::grant — see permissions/bridge.toml. `local` defaults to true and `remote` is absent here, so nothing in this file can ever reach a page the shell loaded from the network.",
   "windows": ["main"],
   "permissions": ["core:default"]
 }

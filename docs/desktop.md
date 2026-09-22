@@ -33,6 +33,13 @@ HERMIE_WEB_URL=http://127.0.0.1:9120 npm run desktop # opens the shell on that a
 set, the window opens on the bundled placeholder page (`connect.html`) instead — there is no gateway
 list yet (Task 3 builds it); the environment variable is the only way in for now.
 
+**`HERMIE_WEB_URL` is read by debug builds only.** A release binary ignores it and opens the
+placeholder page whatever the environment says. The variable does not only choose the first page: it
+becomes a configured gateway, which is an origin the shell grants the bridge to, and an environment
+variable is not something the reader configured. In a debug build the value goes through the same
+validator a typed address does, so the dev bed is not a way past any of those rules; a value that
+fails is logged and ignored, and the shell starts with nothing granted.
+
 The Tauri CLI is a build-time tool, not an npm dependency the shared `node_modules` can carry (this
 repository never runs `npm install` inside an agent worktree). Install it once with:
 
@@ -53,7 +60,7 @@ newer than the shell" and "a shell newer than the page" are both permanent, norm
 
 ### The marker
 
-Before any page script runs, on the top frame only, the shell sets:
+Before any page script runs, the shell sets:
 
 ```js
 window.__HERMIE_DESKTOP__ = Object.freeze({ version: 1, platform: 'macos' | 'windows' | 'linux' })
@@ -67,7 +74,16 @@ the shell", which leaves the app in its plain-browser behaviour rather than bran
 cannot interpret.
 
 The marker is injected on **every** page the window loads, the identity provider's included. It is
-an announcement, not a credential; what actually gates the bridge is the origin guard below.
+an announcement, not a credential; what actually gates the bridge is the ACL, below.
+
+**On Windows it reaches every frame, not only the top one.** Tauri asks for a main-frame-only
+initialization script, and WKWebView and WebKitGTK honour that, but wry's WebView2 backend
+implements initialization scripts with `AddScriptToExecuteOnDocumentCreated`, which runs in every
+frame and does not consult the flag. So on Windows a third-party iframe inside the app page sees
+this marker and Tauri's own globals. That is an accepted residual and not a way in: an `invoke` from
+such a frame is refused before any command runs, because the ACL matches the **calling frame's**
+origin against the gateways the reader configured. What leaks is "this page is inside Hermie's
+desktop shell".
 
 ### The six commands
 
@@ -95,7 +111,12 @@ app keeps the old path for one release.
 
 ### The four events
 
-Tauri events on the main window, delivered only while the window is on a configured origin:
+Tauri events on the main window. A page on an origin you have not configured **cannot register a
+Tauri event listener at all** — `plugin:event|listen` is refused by the ACL — so it receives none of
+these, and none of Tauri's own window events either. A page that is on a configured origin can also
+listen to Tauri's own window events (`tauri://focus`, `tauri://resize`, `tauri://close-requested`,
+…): `core:event:allow-listen` cannot be scoped to event names. That is accepted — it is the app, and
+none of those payloads carries anything it does not already know.
 
 | Event               | Payload                                                        |
 | ------------------- | -------------------------------------------------------------- |
@@ -104,42 +125,86 @@ Tauri events on the main window, delivered only while the window is on a configu
 | `hermie://gateway`  | `{ id, name }`, after a switch and before the navigation.      |
 | `hermie://focus`    | `{}`, the window regained focus.                               |
 
-### The origin guard
+### Who may use the bridge
 
-This is the security core of the feature, and it is two layers, neither of which is sufficient
-alone.
+This is the security core of the feature. The shell navigates one webview across origins **on
+purpose** — signing in walks through an identity provider's pages, a Cloudflare Access page, or
+Hermie Web's own OIDC issuer, and every one of those is a page the shell loaded. So "which page is
+asking" has to be answered per call, and only one component in Tauri can answer it honestly.
 
-**The capability** (`apps/desktop/src-tauri/capabilities/remote-app.json`) says what a page loaded
-from the network can reach at all: the six commands, plus `core:event:allow-listen` and
-`core:event:allow-unlisten`. Nothing else — no `fs`, no `shell`, no `dialog`, no `opener`, no
-`core:window`, and not even the notification plugin's own permission (the shell's `hermie_notify`
-wraps it). Its `local` is `false`, so the shell's own pages get none of it either; they have
-`local-pages.json`.
+**The ACL is the boundary.** There is no capability file for remote origins.
+`apps/desktop/src-tauri/capabilities/` holds `local-pages.json` and nothing else; for every entry in
+the gateway list the shell registers one **runtime** capability instead —
+`src-tauri/src/bridge.rs::grant`, via `Manager::add_capability`:
 
-Tauri capabilities are **static** URL patterns, and the reader's Hermie Web address is not known
-when the app is built, so the patterns have to be `https://*:*` and `http://*:*`. The trailing
-`:*` is load-bearing: a URLPattern with no port component matches the scheme's _default_ port only,
-so a bare `https://*` would silently exclude every Hermie Web on `:9443`. Verified against
-`tauri-utils` 2.9.3's `RemoteUrlPattern`, not assumed.
+- identifier `remote-app:<id>`;
+- `local(false)`, so it can never reach the shell's own pages;
+- `window("main")`, the one window there is;
+- one `remote` pattern that is **exactly that entry's origin** — lowercased host, and the port
+  written only when it is not the scheme's default, because a `Url` drops a default port when it
+  parses and a URLPattern with no port component matches the default port only (verified against
+  `tauri-utils` 2.9.3's `RemoteUrlPattern`, not assumed). An IPv6 host's colons are escaped, because
+  `http://[::1]:9120` is a tokenizer error as a pattern;
+- exactly the eight permissions in `bridge::REMOTE_PERMISSIONS`: the six commands plus
+  `core:event:allow-listen` and `core:event:allow-unlisten`. Nothing else — no `fs`, no `shell`, no
+  `dialog`, no `opener`, no `core:window`, and not even the notification plugin's own permission
+  (the shell's `hermie_notify` wraps it).
 
-**The guard** (`apps/desktop/src-tauri/src/bridge.rs`) is what makes that breadth safe. Every
-command takes the calling `tauri::Webview`, reads its **current** URL, and compares the origin —
-scheme, lowercased host, port always made explicit — against the configured Hermie Web list. A
-mismatch is `{ ok: false, reason: 'origin' }`; there is no code path from a command's body to
-anything else. Events go out through `emit_to_app` in `src-tauri/src/lib.rs`, which runs the same
-check before emitting.
+Grants are made in `setup()` for every stored entry, **before** the window is navigated anywhere, and
+in `gateways::add` for a new one (Task 3). Every entry is granted, not only the active one: switching
+is a navigation, and a call from the page that was live a moment ago is still the app's.
 
-The guard exists because the shell navigates one webview across origins **on purpose**: signing in
-walks through an identity provider's pages, a Cloudflare Access page, or Hermie Web's own OIDC
-issuer, and every one of those is a page the shell loaded and would otherwise be holding the
-capability. Without the guard, such a page could raise OS notifications, read the active gateway's
-name, and listen for every deep link the reader follows.
+Why the ACL and not the command: `RuntimeAuthority::resolve_access` runs before the command and
+matches `InvokeRequest.url`, which is the **calling frame's** URL — read from the IPC request's
+`Origin` header on the fetch path and from wry's message-source URI on the `postMessage` fallback,
+neither of which page script can set. A command only ever sees `webview.url()`, the **top frame**.
+Those answers come apart in exactly two ways that matter, and both were live holes in the first
+version of this bridge: a cross-origin iframe on Windows (see the marker section), and a page that
+fires calls and then navigates the window to a configured origin so the in-flight calls land after
+the navigation commits.
 
-Refused, by construction: `about:blank`, `data:` documents, `file://`, the shell's own
-`tauri://localhost` (and `http://tauri.localhost` on Windows and Linux), any unconfigured host, the
-same host on a different port, and the same host and port under a different scheme. An empty gateway
-list refuses everything, which is the honest answer for a shell with no Hermie Web configured.
-`cargo test` in `apps/desktop/src-tauri` covers each of those cases.
+**A grant cannot be withdrawn**, so forgetting a gateway relaunches the shell: `gateways::forget`
+writes the store, clears the browsing data and calls `AppHandle::restart()` (Task 3 builds it; the
+connect page's confirmation says the window will reopen). The invariant that buys is exact — the set
+of granted origins equals the stored list at every moment a page can run. Switching and adding do not
+restart.
+
+**The guard is the second layer, and it can only refuse.** Every command also takes
+`tauri::ipc::Request` and calls `bridge::guard`, which (1) requires the **top frame** to be on a
+configured origin, and (2) requires an `Origin` header, when the request carries one, to name a
+configured origin too. A header that is present and does not parse is a refusal. The refusal is
+`{ ok: false, reason: 'origin' }` and says nothing about which check said no.
+
+The header may only ever _refuse_. On the fetch path it is browser-set and script-proof (`Origin` is
+a forbidden header name), but Tauri falls back to `postMessage` whenever the fetch to the `ipc`
+scheme fails — a page CSP whose `connect-src` blocks it, for instance — and on that path the headers
+are whatever the page put in `invoke`'s options. A command cannot tell which path a request took, so
+a forged header can make the forger's own call stricter and never looser. What the second layer is
+actually _for_ is the reverse framing shape: a configured Hermie Web embedded inside an unconfigured
+top page passes the ACL on its own origin, and the top-frame check refuses it. `emit_to_app` in
+`src-tauri/src/lib.rs` keeps the same top-frame check at emit time, split out as `should_emit` so it
+is unit-tested.
+
+From an unconfigured origin an `invoke` therefore **rejects** (Tauri's own ACL error) rather than
+answering `{ ok: false }`. The app-side facade treats a rejection and a refusal alike, as "no".
+
+**Every URL goes through one validator** (`src-tauri/src/gateways.rs::validate`), whatever it came
+from — typed on the connect page, read back from `gateways.json`, or set in `HERMIE_WEB_URL`. It
+requires `http`/`https` and a host, and refuses userinfo, a query, a fragment, a trailing dot on the
+host (`host.` and `host` are different origins), a host with any character outside `[a-z0-9.-]` or a
+bracketed IP literal, `tauri://localhost`, any `*.localhost`, and the dev server's own
+`http://localhost:1420` — Tauri would call a page on those local and hand it `core:default`. Bare
+`localhost` is allowed; it is where a dev Hermie Web runs, and it stays a different origin from
+`127.0.0.1`. The last rule is the one that makes the rest exact: the resulting origin pattern must
+parse as a `RemoteUrlPattern`, because `add_capability` parses and unwraps it internally and a bad
+pattern would otherwise panic at a reader's launch. A stored entry that fails validation on load is
+skipped and logged, never granted and never navigated to.
+
+`cargo test` in `apps/desktop/src-tauri` covers all of this, and the part that matters is covered
+**through the ACL**: `src/acl.rs` builds an app on `tauri::test::mock_builder()` with the real
+`tauri::generate_context!()` and sends real IPC requests, because `mock_context` carries no app ACL
+manifest and Tauri then skips the ACL for app commands entirely — a suite built on it would pass with
+every capability deleted.
 
 ### The app-side seams
 
@@ -227,6 +292,14 @@ lives in the agent's scratch directory, not the repository).
 
 ### Task 2 — the bridge and the origin guard, macOS (2026-09-22)
 
+> **Superseded by Task 2b, below.** The trust model this table describes was the wrong one: the
+> guard compared the WINDOW's URL while Tauri's ACL compares the CALLING FRAME's, and the static
+> `https://*:*` capability meant the ACL said yes to every origin. Two rows here read differently
+> now and were re-run: "all six commands from another origin" (a rejection from the ACL, not
+> `{ ok: false }`) and "`core:event:allow-listen` from an unconfigured origin" (refused, not
+> "Pass (by design)"). The rest of the table still stands. It is kept rather than edited because
+> what it recorded did happen.
+
 Bed: a two-origin probe harness rather than the app, because the property under test is about the
 WINDOW's current URL and needs two origins in one shell session. Two plain Node servers on
 `127.0.0.1:9121` and `127.0.0.1:9122` serve the same page, which reads `window.__HERMIE_DESKTOP__`,
@@ -250,3 +323,38 @@ Hermie Web and `:9122` is not. The page-load path was then re-checked against th
 
 Window-only screenshot (`screencapture -l <windowid>`) of the app page in the shell: in the agent's
 scratch directory, not the repository — see the handoff for this task.
+
+### Task 2b — the ACL as the boundary, macOS (2026-09-22)
+
+Bed: the same two-origin harness, extended. Two plain Node servers on `127.0.0.1:9121`
+(configured) and `127.0.0.1:9122` (not configured) serve one page that reads
+`window.__HERMIE_DESKTOP__`, invokes all six `hermie_*` commands, invokes three commands the grant
+deliberately leaves out (`plugin:opener|open_url`, `plugin:fs|read_text_file`,
+`plugin:window|set_title`), registers a `tauri://focus` listener, and POSTs every outcome back to
+its own server. The configured page then navigates the window to `:9122`; the page there, after
+reporting, fires all six commands again **without awaiting** and navigates the window straight back
+to `:9121`, shipping whatever the promises settled to with `navigator.sendBeacon` on `pagehide` —
+the race the old model lost. The shell ran as
+`HERMIE_WEB_URL=http://127.0.0.1:9121 ./target/debug/hermie-desktop`.
+
+| Check                                                | Result                | Notes                                                                                                                                                                                                                                                                             |
+| ---------------------------------------------------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| All six commands from the configured origin          | Pass                  | Each resolved; `hermie_shell_info` answered `{ ok: true, version: '0.1.0', platform: 'macos', bridge: 1, gatewayId: 'dev', gatewayName: '127.0.0.1' }`.                                                                                                                           |
+| `listen` from the configured origin                  | Pass                  | `plugin:event\|listen` for `tauri://focus` resolved with an unlisten function.                                                                                                                                                                                                    |
+| All six commands from the unconfigured origin        | Pass                  | Every one **rejected** by the ACL, not answered: _"hermie\_\* not allowed on window "main", webview "main", URL: http://127.0.0.1:9122/ — allowed on: [windows: "main", URL: http://127.0.0.1:9121]"_. No command body runs at all, so none of the six can answer anything.       |
+| `listen` from the unconfigured origin                | Pass                  | _"event.listen not allowed on window "main", webview "main", URL: http://127.0.0.1:9122/"_. This is what "receives no event" means: the page holds no listener, so neither the shell's four events nor Tauri's own window events can reach it. The Task 2 row said the opposite.  |
+| The invoke-then-navigate race                        | Pass                  | Six calls fired from `:9122` and the window sent to `:9121` in the same task: all six rejected, each naming `:9122` as the URL. The ACL reads the calling frame, so there is nothing for the navigation to win.                                                                   |
+| Commands outside the grant, from BOTH origins        | Pass                  | `plugin:opener\|open_url` and `plugin:window\|set_title` rejected ("not allowed. Permissions associated with this command: …") and `plugin:fs\|read_text_file` rejected ("Plugin not found") — the eight permissions are the whole surface.                                       |
+| Marker in the shell                                  | Pass                  | `{ platform: 'macos', version: 1 }` on both origins, as designed: it is an announcement, not what gates anything.                                                                                                                                                                 |
+| A release build ignores `HERMIE_WEB_URL`             | Pass                  | `cargo build --release` with `HERMIE_WEB_URL=http://127.0.0.1:9121` set: the window opened on the `connect.html` placeholder and **neither** server ever received a request. `GatewayList::from_env` is `#[cfg(debug_assertions)]`, so the release binary has no code to read it. |
+| Windows sub-frames / WebView2                        | —                     | Not verifiable on macOS. The shape is covered by `cargo test` (`src/acl.rs`: a call whose frame URL is unconfigured is refused while the top frame is the configured gateway), and Task 9 re-runs it on a Windows 11 VM.                                                          |
+| An event actually withheld from an unconfigured page | Reasoned, not watched | Nothing emits yet — the four events are Tasks 5 and 6. `should_emit` is unit-tested against a configured and an unconfigured top frame; this row gets watched in Task 5.                                                                                                          |
+
+Two notes on the bed itself, so the next person does not re-derive them:
+
+- The release binary above was built with plain `cargo build --release`, which leaves Tauri's `dev`
+  cfg on, so it loads the shell's own pages from the Vite dev server rather than from embedded
+  assets. That has no bearing on the `HERMIE_WEB_URL` row — `--release` is what turns
+  `debug_assertions` off — but it does mean Vite has to be running for the placeholder to paint.
+- `tauri-plugin-single-instance` is live, so a second shell launched while one is running just
+  focuses the first and exits. Kill the running one before starting another.

@@ -35,7 +35,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(marker_plugin())
-        .manage(GatewayState::new(GatewayList::from_env()))
+        .manage(GatewayState::new(GatewayList::at_launch()))
         .invoke_handler(tauri::generate_handler![
             bridge::hermie_shell_info,
             bridge::hermie_set_menu,
@@ -64,11 +64,19 @@ pub fn run() {
     builder
         .setup(|app| {
             app.set_menu(build_menu(app.handle())?)?;
+            grant_configured_gateways(app);
             navigate_to_active_gateway(app)?;
             Ok(())
         })
-        .run(tauri::generate_context!())
+        .run(context())
         .expect("error while running the Hermie desktop shell");
+}
+
+/// The app's baked-in context: `tauri.conf.json`, the assets, and — the reason
+/// this is a function rather than a macro call at the one use site — the
+/// resolved ACL manifest.
+pub fn context<R: Runtime>() -> tauri::Context<R> {
+    tauri::generate_context!()
 }
 
 /// The marker the app page feature-detects, injected before any page script.
@@ -84,17 +92,21 @@ pub fn run() {
 /// chain, to an identity provider and back. A marker set once at startup would
 /// be gone by the time the app page loaded.
 ///
-/// **Top frame only.** `js_init_script` sets `for_main_frame_only: true`, and
-/// the alternative (`js_init_script_on_all_frames`) would hand the marker to
-/// every iframe the app page embeds. An iframe cannot reach the bridge either
-/// way — the guard reads the WEBVIEW's URL, not the frame's, and a cross-origin
-/// iframe has no path to `__TAURI_INTERNALS__` — but telling a third-party frame
-/// that it is inside a desktop app is information it has no use for.
+/// **Not "top frame only", whatever the flag says.** `js_init_script` asks for
+/// `for_main_frame_only: true`, and WKWebView and WebKitGTK honour it — but
+/// wry's WebView2 backend implements init scripts with
+/// `AddScriptToExecuteOnDocumentCreated`, which runs in **every frame** and does
+/// not consult that flag. So on Windows a third-party iframe inside the app page
+/// sees this marker, and Tauri's own globals besides.
+///
+/// That is an accepted residual, not a hole. The marker is an announcement, not
+/// a credential, and an `invoke` from such a frame is refused before any command
+/// runs: the ACL matches the CALLING frame's origin against the grants
+/// `bridge::grant` made, and a foreign frame's origin is not among them. What
+/// leaks is "this page is inside Hermie's desktop shell".
 ///
 /// It runs on pages that are not the app, too: the identity provider's, the
-/// connect page's. That is safe and is not an oversight. The marker is an
-/// announcement, not a credential, and the thing that actually gates the bridge
-/// is `bridge::guard`, which no script can influence.
+/// connect page's. Same answer — nothing is gated on it.
 fn marker_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
     let marker = serde_json::json!({
         "version": MARKER_VERSION,
@@ -108,20 +120,35 @@ fn marker_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
         .build()
 }
 
+/// May the page currently in this webview be sent one of the shell's events?
+///
+/// The emit-time half of the two layers, and the second of them. The first is
+/// the ACL: a page on an origin the shell has not granted cannot call
+/// `plugin:event|listen` at all, so it holds no listener and there is nothing
+/// for an emit to reach — not the shell's four events and not Tauri's own window
+/// events either.
+///
+/// This check is what covers the window in between: the shell emits from a menu
+/// click, an OS notification or a deep link, and the page that is loaded when
+/// that happens is whatever the last navigation left there — an identity
+/// provider's page mid-sign-in, say, whose own listener the ACL refused but
+/// whose presence the emitter has no other way to notice.
+///
+/// Separate from the emit so it can be unit-tested; `false` when the URL cannot
+/// be read, like every other failure here.
+pub(crate) fn should_emit<R: Runtime>(webview: &Webview<R>) -> bool {
+    let Ok(url) = webview.url() else {
+        return false;
+    };
+
+    bridge::origin_allowed(&url, &webview.state::<GatewayState>().urls())
+}
+
 /// Emit one of the shell's events to the app page — and only to the app page.
 ///
-/// The counterpart of `bridge::guard`, and needed for the same reason: Tauri's
-/// `emit` delivers to whatever is listening in that webview, and what is
-/// listening depends on which page is loaded, which the shell changes on every
-/// sign-in hop. Without this check a shortcut, a deep link or the name of the
-/// active gateway would be delivered to an identity provider's page that had
-/// registered a listener — and `capabilities/remote-app.json` grants
-/// `core:event:allow-listen` to any http(s) origin, so registering one is
-/// something any such page can do.
-///
-/// Silent when the current page is not a configured origin: there is no caller
-/// to report to (the shell emits from a menu click or an OS event, not from a
-/// request), and a dropped event is exactly the intended outcome.
+/// Silent when [`should_emit`] says no: there is no caller to report to (the
+/// shell emits from a menu click or an OS event, not from a request), and a
+/// dropped event is exactly the intended outcome.
 ///
 /// Unused until Tasks 5 and 6 emit the four events; it lives here now because it
 /// is the other half of this task's contract and the place where forgetting the
@@ -132,7 +159,7 @@ pub(crate) fn emit_to_app<R: Runtime, S: Serialize + Clone>(
     event: &str,
     payload: S,
 ) {
-    if !bridge::guard(webview) {
+    if !should_emit(webview) {
         return;
     }
 
@@ -141,6 +168,34 @@ pub(crate) fn emit_to_app<R: Runtime, S: Serialize + Clone>(
     // not depend on. `labeled` matches whatever kind of target the page's
     // `listen()` registered under this label, which is the page itself.
     let _ = webview.emit_to(EventTarget::labeled(webview.label()), event, payload);
+}
+
+/// Give every configured Hermie Web its own runtime capability.
+///
+/// **Before the window is navigated anywhere**, which is the ordering that
+/// matters: the ACL is what decides whether a page may use the bridge, and the
+/// first page the shell loads must already be covered by it.
+///
+/// Every entry, not only the active one — `bridge::grant` says why.
+///
+/// A grant that fails is logged and skipped rather than fatal. The failure
+/// direction is the safe one: that gateway's page simply cannot reach the
+/// bridge, and the app treats an unreachable bridge as "not in a shell" already.
+///
+/// Nothing here removes a grant, because Tauri cannot: `add_capability` has no
+/// inverse. That is why Task 3's `gateways::forget` clears the browsing data and
+/// calls `AppHandle::restart()` instead of trying to undo this.
+fn grant_configured_gateways(app: &tauri::App) {
+    let entries = app
+        .state::<GatewayState>()
+        .read(|list| list.entries().to_vec())
+        .unwrap_or_default();
+
+    for entry in &entries {
+        if let Err(error) = bridge::grant(app, entry) {
+            eprintln!("gateway {} was not granted the bridge: {error}", entry.id);
+        }
+    }
 }
 
 /// Point the window at the active gateway, if there is one.
@@ -204,3 +259,6 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<Wry>> {
         .items(&[&app_menu, &edit_menu])
         .build()
 }
+
+#[cfg(test)]
+mod acl;

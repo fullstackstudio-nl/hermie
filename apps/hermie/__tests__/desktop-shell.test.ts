@@ -11,8 +11,12 @@
  *     from this page: an older shell without `withGlobalTauri`, or a page the
  *     shell did not grant the capability to. `RUNS_IN_DESKTOP_SHELL` must still
  *     be true, because the socket rule depends on it and is right regardless.
- *  3. **Both** — the bridge is there. And even then every call can be refused,
- *     because the shell re-checks the calling page's origin per command.
+ *  3. **Both** — the bridge is there. And even then every call can come back
+ *     "no": the shell grants the bridge to the Hermie Web origins the reader
+ *     configured and to nothing else, so a page it did not grant has its calls
+ *     REJECTED by Tauri's ACL, and a page it did grant can still be refused by
+ *     the shell's second-layer check with `{ ok: false, reason: 'origin' }`.
+ *     The facade answers "no" to both.
  *
  * `RUNS_IN_DESKTOP_SHELL` is a module-load constant (the marker is injected
  * before any page script, so it cannot change while the page lives), which is
@@ -48,11 +52,12 @@ function setMarker(marker: unknown) {
 /**
  * A stand-in for what `withGlobalTauri` puts on the page.
  *
- * `invoke` answers whatever the test queued, so a refusal is expressed the way
- * the shell expresses it — a RESOLVED `{ ok: false, reason }`, not a rejection.
- * That distinction is the whole reason the facade exists: a page must not have
- * to tell "this shell has no such command" (a rejection from Tauri's ACL) from
- * "you are not the app" (a reply from the origin guard).
+ * `invoke` answers whatever the test queued, so a refusal can be expressed
+ * either way the shell expresses one: a RESOLVED `{ ok: false, reason }` from
+ * the shell's own check, or a rejection from Tauri's ACL. Erasing that
+ * distinction is the whole reason the facade exists — a page must not have to
+ * tell "this shell has no such command", "you are not the app" and "the ACL
+ * never let this call through" apart.
  */
 function setTauri(options: {
   invoke?: (command: string, args?: Record<string, unknown>) => Promise<unknown>
@@ -277,15 +282,24 @@ describe('with the bridge', () => {
     await expect(bridge.closeHandled(true)).resolves.toBe(false)
   })
 
-  it('answers "no" when the call rejects, which is what a missing command does', async () => {
-    // Tauri's ACL rejects a command no capability covers, so an older shell's
-    // answer to a newer app is a rejection, not a reply.
+  it('answers "no" when the call rejects, which is what the shell\'s ACL does', async () => {
+    // A rejection is the ordinary answer from a page the shell did not grant
+    // the bridge to: the desktop shell registers one capability per configured
+    // Hermie Web, and Tauri's ACL refuses the call before any command runs, so
+    // nothing ever replies `{ ok: false }`. It is also what an older shell says
+    // to a newer app about a command it does not have. The facade must not be
+    // able to tell those apart, and must never let either one throw into the
+    // app.
     const { bridge } = withBridge(async () => {
-      throw new Error('hermie_set_badge not allowed by ACL')
+      throw new Error('hermie_set_badge not allowed on window "main"')
     })
 
     await expect(bridge.info()).resolves.toBeNull()
+    await expect(bridge.setMenu(TITLES, [])).resolves.toBe(false)
+    await expect(bridge.notify({ id: 'evt-1', title: 'Researcher' })).resolves.toBe(false)
     await expect(bridge.setBadge(1)).resolves.toBe(false)
+    await expect(bridge.openGateways()).resolves.toBe(false)
+    await expect(bridge.closeHandled(true)).resolves.toBe(false)
   })
 
   describe('events', () => {

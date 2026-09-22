@@ -16,20 +16,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [ADR-0027](docs/adr/0027-desktop-is-a-webview-over-hermie-web.md) and `docs/desktop.md`. The
   gateway list, sign-in, notifications, the full menu, files and platform packaging are not built
   yet.
-- **The desktop bridge: the marker, six commands and the origin guard.** The shell tells the page it
-  is there (`window.__HERMIE_DESKTOP__`, top frame only) and offers exactly six commands —
+- **The desktop bridge: the marker, six commands, and a grant per gateway.** The shell tells the
+  page it is there (`window.__HERMIE_DESKTOP__`) and offers exactly six commands —
   `hermie_shell_info`, `hermie_set_menu`, `hermie_notify`, `hermie_set_badge`,
   `hermie_open_gateways`, `hermie_close_handled` — of which the first is implemented and the rest
   answer `{ ok: true }` until the tasks that fill them. The app detects all of it at run time
   through `platform/desktop-shell.ts` and imports nothing Tauri, so a browser tab's bundle is
   unchanged and every call is optional in both directions.
 
-  The security of it is two layers. A page the shell loaded from the network can reach the six
-  commands and event listening and **nothing else** — no file, shell, dialog, opener or window
-  permission — and then every command re-checks the calling window's current origin against the
-  configured Hermie Web and answers `{ ok: false, reason: 'origin' }` to anything else, so an
-  identity provider's page passed through mid-sign-in gets none of it. `docs/desktop.md` has the
-  contract and the verification.
+  **Only the Hermie Web addresses you configured can use any of it.** The shell registers one
+  Tauri capability per configured gateway, matching that address and nothing else, carrying those
+  six commands plus event listening and nothing else — no file, shell, dialog, opener, window or
+  notification permission. A page on any other address, including an identity provider's page the
+  shell passed through mid-sign-in and including a third-party frame inside the app page, cannot
+  call a command, cannot register an event listener, and therefore receives no event. Tauri
+  refuses the call before any of the shell's code runs, and it reads the address of the frame that
+  asked, so a page cannot borrow a configured one by navigating there mid-call. Each command then
+  makes a second check of its own that can only ever refuse. `docs/desktop.md` has the contract and
+  the verification; forgetting a gateway will relaunch the shell, because a grant cannot be taken
+  back.
+
+  `HERMIE_WEB_URL` is read by development builds only — a released build ignores it — and every
+  address, however it arrives, passes one validator before it is stored, granted or opened.
 - **The desktop shell never drops its connection when its window is hidden**, exactly as the Mac
   build does not. This is the browser build, which reports "background" whenever the document is
   hidden, so without it a ⌘Tab or a minimise would tear the socket down and stop the approval polls.
