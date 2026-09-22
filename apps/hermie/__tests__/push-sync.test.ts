@@ -158,7 +158,7 @@ describe('the switch', () => {
     sync.start()
     await settled()
 
-    const app = snapshotFromStores().app as HermieAppShape
+    const app = snapshotFromStores(NOW_MS).app as HermieAppShape
 
     expect(app.push).toBeUndefined()
     // The dialog is what turning the switch on does. A settings screen that
@@ -178,7 +178,7 @@ describe('the switch', () => {
     expect(await sync.enable()).toBe('enabled')
 
     const state = usePushStore.getState()
-    const app = snapshotFromStores().app as HermieAppShape
+    const app = snapshotFromStores(NOW_MS).app as HermieAppShape
     const row = app.push?.registrations[state.installationId] as Record<string, unknown>
 
     expect(row).toMatchObject({ v: 1, transport: 'expo', token: 'ExponentPushToken[abc]', platform: 'ios' })
@@ -198,7 +198,7 @@ describe('the switch', () => {
 
     expect(await sync.enable()).toBe('denied')
     expect(usePushStore.getState().enabled).toBe(false)
-    expect((snapshotFromStores().app as HermieAppShape).push).toBeUndefined()
+    expect((snapshotFromStores(NOW_MS).app as HermieAppShape).push).toBeUndefined()
 
     sync.stop()
   })
@@ -215,7 +215,7 @@ describe('the switch', () => {
 
     expect(await sync.enable()).toBe('unavailable')
     expect(usePushStore.getState().enabled).toBe(true)
-    expect((snapshotFromStores().app as HermieAppShape).push).toBeUndefined()
+    expect((snapshotFromStores(NOW_MS).app as HermieAppShape).push).toBeUndefined()
 
     sync.stop()
   })
@@ -315,7 +315,7 @@ describe('the switch', () => {
 
       expect(await sync.retry()).toBe('enabled')
       expect(usePushStore.getState().addressFailure).toBeNull()
-      expect((snapshotFromStores().app as HermieAppShape).push?.registrations).not.toEqual({})
+      expect((snapshotFromStores(NOW_MS).app as HermieAppShape).push?.registrations).not.toEqual({})
 
       sync.stop()
     })
@@ -347,7 +347,7 @@ describe('the switch', () => {
     })
     await sync.enable()
 
-    const app = snapshotFromStores().app as HermieAppShape
+    const app = snapshotFromStores(NOW_MS).app as HermieAppShape
 
     expect(app.push?.registrations['i-tablet']).toEqual({ v: 1, transport: 'expo', token: 'theirs' })
     expect(app.push?.seen['i-tablet']).toBe(NOW - 10)
@@ -369,7 +369,7 @@ describe('every way a registration goes away', () => {
   }
 
   const rowCount = (): number =>
-    Object.keys(((snapshotFromStores().app as HermieAppShape).push?.registrations ?? {}) as object).length
+    Object.keys(((snapshotFromStores(NOW_MS).app as HermieAppShape).push?.registrations ?? {}) as object).length
 
   it('removes the row when the switch goes off', async () => {
     const { sync } = await enabled()
@@ -377,7 +377,7 @@ describe('every way a registration goes away', () => {
     expect(rowCount()).toBe(1)
     await sync.disable()
 
-    expect((snapshotFromStores().app as HermieAppShape).push).toBeUndefined()
+    expect((snapshotFromStores(NOW_MS).app as HermieAppShape).push).toBeUndefined()
 
     sync.stop()
   })
@@ -392,7 +392,7 @@ describe('every way a registration goes away', () => {
     await sync.refresh()
 
     expect(usePushStore.getState().enabled).toBe(false)
-    expect((snapshotFromStores().app as HermieAppShape).push).toBeUndefined()
+    expect((snapshotFromStores(NOW_MS).app as HermieAppShape).push).toBeUndefined()
 
     sync.stop()
   })
@@ -403,7 +403,7 @@ describe('every way a registration goes away', () => {
 
     await sync.retire()
 
-    expect((snapshotFromStores().app as HermieAppShape).push).toBeUndefined()
+    expect((snapshotFromStores(NOW_MS).app as HermieAppShape).push).toBeUndefined()
     expect(usePushStore.getState().installationId).toBe(id)
     expect(platform.dropped).toBe(1)
 
@@ -431,7 +431,7 @@ describe('every way a registration goes away', () => {
       Ours goes; theirs stays. They are dropped when the connection does, in
       `ChatRuntime`, which is the first moment nothing is going to write them.
     */
-    const section = (snapshotFromStores().app as HermieAppShape).push
+    const section = (snapshotFromStores(NOW_MS).app as HermieAppShape).push
 
     expect(Object.keys(section?.registrations ?? {})).toEqual(['i-tablet'])
     // A bare number, because this gateway's plugin has not said it can read the
@@ -467,7 +467,7 @@ describe('every way a registration goes away', () => {
     await sync.refresh()
 
     const state = usePushStore.getState()
-    const app = snapshotFromStores().app as HermieAppShape
+    const app = snapshotFromStores(NOW_MS).app as HermieAppShape
     const row = app.push?.registrations[state.installationId] as { types: Record<string, boolean> }
 
     expect(row.types.cron_failed).toBe(false)
@@ -475,7 +475,7 @@ describe('every way a registration goes away', () => {
     usePushStore.getState().setType('cron_failed', true)
     await sync.refresh()
 
-    const after = (snapshotFromStores().app as HermieAppShape).push?.registrations[state.installationId] as {
+    const after = (snapshotFromStores(NOW_MS).app as HermieAppShape).push?.registrations[state.installationId] as {
       types: Record<string, boolean>
     }
 

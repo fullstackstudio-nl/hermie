@@ -164,7 +164,14 @@ export interface HermieAppShape extends HermieAppSection {
 export const pushPlatformName = (): string => Platform.OS
 
 /** Everything ADR-0016 syncs, read out of the two stores as they are now. */
-export function snapshotFromStores(): UiMetaSnapshot {
+/**
+ * `nowMs` is the clock the push section's `seen` rows are aged against
+ * (`PUSH_SEEN_TTL_SECONDS`). It is a parameter rather than a `Date.now()` read
+ * so a caller that runs on an injected clock — `PushSync` in its tests — asks
+ * this snapshot the same question it asks everything else, instead of a
+ * fixed-clock test silently expiring once the wall clock walks a day past it.
+ */
+export function snapshotFromStores(nowMs: number = Date.now()): UiMetaSnapshot {
   const layout = useChatLayoutStore.getState()
   const settings = useSettingsStore.getState()
   const bots: Record<string, HermieBotSection> = {}
@@ -190,7 +197,7 @@ export function snapshotFromStores(): UiMetaSnapshot {
     // Per CHAT and per person, beside the registrations: silencing one bot's
     // cron deliveries is a decision about the reader, not about this device.
     perBot: push.perBot,
-    now: pushStampOf(Date.now()),
+    now: pushStampOf(nowMs),
     /*
       The shape the GATEWAY said it can read, not the one this build prefers.
 
