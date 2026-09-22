@@ -175,6 +175,18 @@ no third-party network call. The only address Hermie knows is the one you typed.
   arrival would feel broken while it worked.
 - **Skills.** What is installed, with a switch per skill for whichever bot you
   pick, and a search of the hub to install more.
+- **Connectors.** The apps a bot can reach on your behalf, and a Connect that
+  opens the provider's page in your browser. It is per chat, because that is how
+  the gateway scopes it. Signing one out is done where the account lives — the
+  gateway deliberately offers no way to do it from a client, and the page says so.
+- **The gateway's logs.** The six files `hermes logs` knows, with a level, a
+  component, a search that runs on the gateway, and a copy. Follow re-reads every
+  few seconds: there is no live stream to subscribe to, and the page does not
+  pretend otherwise.
+- **Boards.** The gateway's Kanban boards, their columns and their cards — make
+  one, edit it, move it, archive it, comment on it. The same store the Hermes
+  desktop app uses, so both show the same boards. Running, Review and Scheduled
+  belong to the dispatcher and are never offered as a destination.
 - **Offline-tolerant.** The last stretch of every conversation is cached, so a
   chat paints before the gateway answers and is still readable on a plane.
 - **A lock, if you want one.** Face ID, Touch ID, Optic ID or your Android

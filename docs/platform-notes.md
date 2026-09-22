@@ -8121,3 +8121,170 @@ True)` and answers `{installed: true, name}`, which is what the fake does — bu
   device, and the wide shell's overlay panel holds Settings without a navigator — so whether a
   sub-page inside an overlay behaves the way the compact shell's does is asserted by construction
   (it is the existing pattern) rather than by having looked.
+
+## Desktop parity, part two: connectors, gateway logs and boards
+
+Three more surfaces Hermes Desktop has and Hermie did not. As in part one, most of what follows is
+about the places where the gateway's shape is not the shape the screen wants — and this round has
+one new category: two of the three are not on the socket at all.
+
+### The brief named a method the vendored contract does not have
+
+`connectors.operation.wake` is real. `tui_gateway/methods_connectors.py` registers it, upstream
+generates it into its own contract, and the desktop calls it when the browser comes back from the
+vendor's done page. It is simply **not in this repo's vendored copy**, and neither is `seq` — the
+monotonic write counter every operation snapshot is stamped with, which the desktop uses to drop
+frames older than the one it already holds.
+
+Both are read and called through a narrow cast rather than by regenerating a file this repo vendors,
+with the gap named at each site. `seq` degrades honestly: a gateway that does not send one makes the
+ordering guard a no-op instead of dropping every frame. The vendored contract is also behind on
+`ConnectionOperationTarget` (`instructions`, `discovery_error`, `connection_id`, `required_env`), on
+`ConnectionAnswerTarget`'s strictness, and on `ConnectionActor` — upstream has dropped
+`renderer_flow`. None of those are used here, but a later round that wants the account identity or
+an env prompt will need the contract regenerated first.
+
+### A connector list belongs to a chat, not to a gateway
+
+`connectors.list` takes a `session_id`, and `_owned_session` authorises it by transport ATTACHMENT —
+`_current_session_steer_authority` requires the socket making the call to be attached to the live
+record under that id, so an id alone proves nothing. There is no gateway-wide connector list a
+client can ask for.
+
+So Settings → Connectors is scoped to a chat, and the chats it offers are the ones this app holds a
+runtime session for (`runtimeToBot` in the chats store, which is filled on attach and is exactly the
+condition the gateway checks). A gateway with no chat open says so rather than drawing an empty
+account. Resolving a bot's canonical session to get one was deliberately not done: `resolveCanonical`
+MINTS a session when it finds none, and a Settings page is not a place that should create
+conversations.
+
+`available: false` is a SUCCESS. When the bot's `manage_connections` toolset is off, `list` answers
+`{available: false, connectors: []}` with no error frame, so the page names the switch. `connect` in
+the same state refuses outright with `4031`, which is the asymmetry: one degrades, one raises.
+
+### There is no way to disconnect a connector, and that is on purpose
+
+Upstream registers `connectors.list`, `connectors.connect`, `connectors.operation.status`,
+`connectors.operation.wake` and `connection.respond`. That is the whole surface. There is no
+`connectors.disconnect`, no `hermes connectors` subcommand, and `tools/connectors/targets.py`
+refuses the verb inside its own error text. `tools/connectors/tool.py` says it plainly: the tool
+"can NOT disconnect, delete, or revoke an account — that is deliberately user-only."
+
+So, as with profile deletion in part one, the control is ABSENT and the reasoning is written where
+somebody will find it (`CONNECTOR_DISCONNECT_UNAVAILABLE`, in
+`features/connectors/connectors-controller.ts`). The page says whose decision it is without naming
+one particular vendor's dashboard, because which gateway this app is talking to is not ours to
+assume.
+
+### The gateway's logs are REST, and there is no tail
+
+There is no socket method for logs anywhere. `tui_gateway/methods_*.py` registers none, and the two
+whose names come close are about something else — `groups.log` is a hosted room's event log,
+`subagent.tail` is a child's transcript. What exists is `GET /api/logs` in
+`hermes_cli/web_routers/status.py`: `{file, lines}`, and then it hangs up.
+
+There is no follow behind it, no stream and no websocket, so **Follow on that page is a poll and the
+copy says so**. A page that called a three-second refetch a live tail would be making a claim about
+the gateway rather than about itself. `hermes logs gateway -f` is the real tail, and it is named on
+the page for a gateway that has no route at all.
+
+Its edges are the interesting part. A log the gateway has never written answers 200 with an empty
+list, because `get_logs` checks `exists()` first — so an empty file is an answer and never an error.
+`level` is a MINIMUM rather than an equality and `ALL` means no filter, which upstream comments on
+because an empty prefix tuple silently drops every line. An unknown component is a 400, so an absent
+filter is omitted rather than sent as `all`. And the 500-line ceiling is applied twice in silence, so
+a full page says the API will not serve more instead of implying that is the whole file.
+
+`process.list`'s `output_tail` was deliberately not folded in. It is one background process's stdout,
+scoped to the session that spawned it, and putting a chat's shell command under a heading about the
+server would be a worse lie than the missing feature.
+
+### Kanban is a plugin, and its boards are not a board app
+
+The data lives behind the plugin's own FastAPI router at `/api/plugins/kanban/*`
+(`plugins/kanban/dashboard/plugin_api.py`), over a per-board SQLite file. It is not `ui_meta` — that
+is a per-profile blob in `profile.yaml` with no list semantics — and it is not on the socket. The
+gateway's `/kanban` slash command answers human-readable text, which is unusable for a client.
+
+Every call carries `?board=<slug>` and nothing calls `POST /boards/{slug}/switch`. That route exists
+but moves the SERVER's current-board pointer, which the CLI and the desktop share; upstream says
+dashboard users pick boards client-side for exactly this reason, and a phone flipping it would move
+the board out from under somebody else's terminal. Keeping to `?board=` is what makes the desktop
+and Hermie show the same boards.
+
+Four assumptions a board app makes are wrong here:
+
+- **Columns are a server-owned constant.** `BOARD_COLUMNS` is a fixed list and a card's column IS
+  its `status`. No column id, no create-column, no reorder-column. `archived` is a filter toggle
+  rather than a column, appended only when `include_archived=true`.
+- **There is no card order.** No `position`, `index` or rank anywhere in the schema; the server
+  sorts by `priority DESC, created_at ASC`. So dragging a card within a column is not missing, it is
+  meaningless, and the page says so rather than implying a rank it could not save.
+- **Three columns refuse every card.** `running` and `review` are the dispatcher's and `scheduled`
+  needs a wake-up time no client can attach. `_apply_status` raises for `running` before it looks at
+  anything else, so it is a 400 and not a silent no-op.
+- **Create cannot choose a column.** `CreateTaskBody` has no `status`: the server derives `triage`
+  or `ready`. Landing a card anywhere else is a second call, which is what the desktop does too.
+
+Two answers are carried through rather than flattened. A move returns the APPLIED status, which is
+not always the requested one — `_set_status_direct` consults `_retry_status_for_run` when a card
+leaves `running`, so a card sent to `ready` can legitimately land in `review`. And a refusal is shown
+in the server's own words, because the 409's `detail` NAMES the parent cards that are blocking and
+nothing on the client side can reconstruct that.
+
+Carrying that sentence needed one change outside the feature: `GatewayHttp` was throwing away the
+body of every 4xx, so a caller got "failed with HTTP 409" and could not say why. A JSON error body's
+`detail` now rides on the existing `hint` field, whose documented meaning was already "one extra
+sentence, when the classification alone is not enough to act on".
+
+Archiving is `status: 'archived'`, which upstream routes to `archive_task` and is recoverable;
+`DELETE /tasks/{id}` removes the row and its history and is not offered. Every write nudges
+`POST /dispatch` on a 400ms debounce, because the dispatcher's own tick is sixty seconds and a card
+made on a phone would otherwise sit idle for a minute.
+
+### Moving a card is a menu, not a drag
+
+The brief asked for a drag on wide layouts and a menu on phones. **Only the menu is built.** The
+columns do lay side by side on a wide window, so a drag can be added later without moving anything
+else, but a half-working cross-column gesture would be worse than a control that always works — and
+the menu is the only form that can decline a column by simply not offering it, which is what the
+three dispatcher-owned columns need.
+
+### What is unverified here
+
+**Nothing in this round has been run against a live `hermes serve`.** Everything is the suites, the
+vendored contract and a reading of the upstream handlers; the fake was written to match those
+handlers rather than to match the app.
+
+- **No connector has been connected.** The whole flow — connect, open the URL, poll, settle — is
+  asserted against a fake that answers the shape upstream's handler answers. What a real vendor page
+  does, how long a real mint takes, and whether the six-minute ceiling is anywhere near right have
+  not been seen.
+- **`connectors.operation.wake` has never been called against a real gateway**, and it is not in the
+  vendored contract, so the cast that calls it is unverified in both directions. If upstream renamed
+  it, nothing here would fail until somebody tried it.
+- **The foreground nudge is a guess at the desktop's deep link.** The desktop learns the browser
+  came back from `hermes://connections/done`; Hermie has no such link and uses the AppState `active`
+  edge instead. On a Mac window built from the iPad target in particular, whether that edge fires at
+  all when the default browser takes focus and hands it back has not been watched.
+- **`seq` has never been seen on the wire**, because the vendored contract does not carry it. The
+  ordering guard is written against upstream's source and the fake, and against a gateway that omits
+  it the guard simply does nothing.
+- **No log file has been read from a real gateway.** The line format the level parser keys on comes
+  from `hermes_cli/logs.py`'s own regex, but a gateway logging through a different formatter — a
+  systemd unit, a container's JSON driver — would produce lines this page paints as unclassified.
+  That degrades to plain text rather than failing, which is why it is written that way.
+- **The 404-means-no-route rule is inferred.** A reverse proxy in front of a gateway can answer 404
+  for its own reasons, and that reader would be told to go and run `hermes logs` on a host where the
+  route does exist. A 405 is treated the same way for the same reason.
+- **No board has been opened.** Every Kanban case is against the fake. The two-call create, the
+  applied-status divergence and the 409's exact sentence are read off `plugin_api.py` rather than
+  observed, and the app's `hermie` comment author has never appeared in a real board.
+- **The plugin-absent path turns on a bare 404.** Telling the prefix's 404 from the router's own
+  depends on whether the body carries a `detail`, which is FastAPI's default for `HTTPException` and
+  a guess about what the mount answers when there is no route at all.
+- **Nothing here has been rendered on a device.** All three pages are pages over Settings, the shape
+  Licences and the part-one pages use, and Boards is also reachable from the chat list header — where
+  a fourth control now sits beside New bot, the cron `+` and Edit. Whether that header still lays out
+  on the narrowest supported phone has been reasoned about (the title is one short word and takes the
+  remaining space) and not looked at.
