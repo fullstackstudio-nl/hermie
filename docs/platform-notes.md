@@ -10363,3 +10363,105 @@ notation nobody agreed to, so an inline expression containing one still falls ba
 - **The gallery fixtures are reachable by name only.** They are rendered by `DevGallery` itself
   rather than added to `GalleryScreen`'s sections, because that file belongs to another round — so
   they do not appear in Settings → Gallery. The fixture file says so at the top.
+
+## Round R25a: five rejections, and the one the gateway cannot answer (2026-09-22)
+
+Five items the owner tested and sent back. Four were ours to fix outright; the
+first ran into a gap in the gateway's API that has been recorded here twice
+before and is now decided rather than deferred.
+
+### Renaming a bot renamed the profile (item A)
+
+The name field on the bot profile sheet sent `PATCH /api/profiles/{name}`, which
+on every profile but `default` renames the profile itself — directory, wrapper
+script, service and active-profile pointer. Editing what reads as a label moved
+the handle that `@`-mentions, crons, DM lines and the gateway's own logs use.
+
+**The gateway has no writable display name, and this round stops pretending
+otherwise.** The vendored contract's `ProfilesConfigureParams` has no such field,
+`ProfilesCreateParams` has none, and the REST route above renames. Upstream's
+`hermes_cli/profiles.py::set_profile_display_name` can set one and is reachable
+only from a shell on the gateway host. Two earlier sections here — "`profiles.configure`
+cannot set a display name" and "The bot's display name has nowhere to go" — laid
+out the options and said the choice was the owner's. It has been made by the
+rejection: the editable field is the display name.
+
+So the name is the APP's. It is stored beside the reader's folders and colours in
+`chat-layout`'s `labels`, preferred by `botNames` over the roster's `display_name`,
+and therefore drawn by the chat list, the chat header, the sheet, the memory list
+and the widget snapshot. Clearing it falls back to the roster's copy and then to
+the handle. Renaming the profile is still reachable, behind its own disclosure
+with its own field, its own button and the warning out loud, and is not offered
+for `default` — whose home IS the installation root, so its id cannot move.
+
+**What that costs, said plainly:** the name is Hermie's. The TUI, the desktop
+client and bot-mode `@handle` resolution go on seeing the gateway's copy. The
+alternative was a field that saves and reverts on the next roster poll.
+
+**The one thing NOT done.** `labels` does not reach the gateway yet. The per-bot
+`hermie` `ui_meta` section is the right home and the bridge that projects it
+(`store/ui-meta-bridge.ts`) is owned by another round, so the store, the reader
+and `applyRemote`'s `labels` patch are all in place and the two lines that would
+close it are not written: `labels: layout.labels` in `snapshotFromStores`'s `app`
+object, and `...(app?.labels ? { labels: app.labels } : {})` in `applySnapshot`'s
+`applyRemote` call. Until then a name given on one device stays on it.
+
+### The current model read as a wire id (item B)
+
+The picker listed **Claude Opus 4.1** and the row above it said
+`anthropic/claude-opus-4-1-20250805`. One option was the cause: a chat's own model
+is always appended to the list so the picker can show what you are on, and it was
+appended with the id as its LABEL — so `modelRowLabel` found it and printed it,
+and the fallback that formats an unknown id never ran. The list and the row are
+one function now (`modelPickerOptions`, beside `modelRowLabel`). The New-bot
+form's list reads the same way.
+
+### The name order (item C)
+
+`DEFAULT_NAME_ORDER` is `display`. A stored `profile` is respected, which is the
+case that used to look like an absent setting; there is a test for it.
+
+### A folder looked like a renamed divider (item D)
+
+Behaviour arrived last round and the drawing did not. `FolderGroup` is the plate:
+the header rounds the top, each chat continues the sides, the last one rounds the
+bottom, and a closed folder is all four corners because then it IS the group.
+Three cells rather than one wrapper, because the rows are `FlatList` items and the
+drag measures cells. The chevron rotates on one `Animated.Value`; the rows arrive
+and leave under a `LayoutAnimation` whose duration `durationFor` collapses to zero
+under Reduce Motion. The drop highlight reads the anchor's TARGET rather than its
+key, which is what makes one answer cover a drop onto the header, into an empty
+folder and between two chats already inside.
+
+### Switching gateway (item E)
+
+There was no switcher in the chat header to remove — the header carries no gateway
+control at all, and `GatewayNameLine` was a label under the chat list's title. The
+list's title IS the switch now: with two or more gateways it becomes that gateway's
+name and a chevron, with the screen's own name on the small line under it, and a
+popover lists them with the live one ticked. Settings → Gateways keeps the
+management screen and its rows say **Use this gateway** in words.
+
+### Verified
+
+- Every gate: typecheck, eslint, prettier, vitest (1628), jest (3021 across 231
+  suites), `contrast:check` (743 pairs), the web build.
+- On an iPhone 17 Pro Max and an iPad Pro 13-inch simulator against the fake
+  gateway: the folder plate open and closed, the gateway popover with its tick on
+  both shells, and the profile sheet's display-name field with the rename action
+  under it and the model row reading `Example Model`.
+
+### Not verified
+
+- **The layout animation and the chevron's rotation were seen, not measured.** No
+  frame trace; a `LayoutAnimation` on a virtualised list is exactly the kind of
+  thing that is smooth at two rows and not at forty.
+- **The drag's folder highlight was never dragged.** It is tested as a drawing
+  (`FolderGroup` with `targeted`) and reasoned about through the anchors' own
+  tests; no finger has been put on a row and moved over a folder.
+- **Nothing was seen on Android, on the Mac or in a browser.**
+- **The display name has not been seen to survive a reinstall on a second device**,
+  because it does not: see the two lines above.
+- Two suites — `chat-screen` and `inline-approvals`, both on the approval sheet's
+  timing — failed once under a loaded machine and passed on their own and on the
+  next full run. They are untouched by this round.
