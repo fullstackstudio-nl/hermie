@@ -71,3 +71,17 @@ describe('the microphone', () => {
     ])
   })
 })
+
+describe('the image picker plugin', () => {
+  it('does not delete the microphone purpose string the dictation plugin needs', () => {
+    // `microphonePermission: false` removes the key from the plist; a binary
+    // that uses the microphone with no purpose string is rejected after upload.
+    const plugin = (config.plugins ?? []).find(
+      (entry): entry is [string, Record<string, unknown>] => Array.isArray(entry) && entry[0] === 'expo-image-picker'
+    )
+
+    expect(plugin).toBeDefined()
+    expect(typeof plugin?.[1].microphonePermission).toBe('string')
+    expect(plugin?.[1].microphonePermission).toBe(config.ios?.infoPlist?.NSMicrophoneUsageDescription)
+  })
+})

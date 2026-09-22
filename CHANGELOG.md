@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The microphone purpose string ships.** The image-picker plugin was told
+  `microphonePermission: false`, which deletes `NSMicrophoneUsageDescription` from the plist
+  after the app's own sentence was written — so a build that dictates carried no explanation
+  for the microphone, and App Store Connect dropped two uploads after the fact without a word
+  from `altool`. The plugin now carries the same sentence as the app.
+
 - **Slash completion works against a gateway from before `session_id`.** Hermes 0.21.3's
   own contract for `complete.slash` takes `text` alone and validates its parameters
   strictly, so the session the app started naming for project-local skills made the older

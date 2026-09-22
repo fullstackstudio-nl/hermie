@@ -234,7 +234,15 @@ const config: ExpoConfig = {
       {
         photosPermission: 'Hermie uses your photo library so you can attach an image to a message.',
         cameraPermission: false,
-        microphonePermission: false
+        // NOT `false`: `false` DELETES `NSMicrophoneUsageDescription` from the
+        // plist, and this plugin runs after the app's own `infoPlist` above —
+        // so it silently threw away the dictation sentence and shipped a
+        // microphone-using binary with no purpose string, which App Store
+        // Connect rejects after the upload without a word in `altool`
+        // (2026-09-22, builds 408 and 409 never appeared). Same sentence as
+        // above, so the two agree whichever plugin writes last.
+        microphonePermission:
+          'Hermie uses the microphone so you can dictate a message instead of typing it. Audio is transcribed on this device and never sent anywhere.'
       }
     ],
     [
