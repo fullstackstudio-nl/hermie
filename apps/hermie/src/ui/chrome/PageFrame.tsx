@@ -80,8 +80,8 @@ export function useFramedScroll(gap = 0): FramedScroll {
  * scroll sideways. It keeps the first thing on the page out from behind the
  * glass without the page having to know how tall the glass is.
  */
-export function PageChromeSpacer() {
-  return <View style={{ height: usePageChromeHeight() }} />
+export function PageChromeSpacer({ testID = 'page-chrome-spacer' }: { testID?: string } = {}) {
+  return <View style={{ height: usePageChromeHeight() }} testID={testID} />
 }
 
 /**

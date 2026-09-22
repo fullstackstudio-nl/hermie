@@ -26,7 +26,7 @@ import { useGateway } from '../../gateway'
 import { gatewayLabel, gatewaysInOrder, type GatewayRecord } from '../../gateway/registry'
 import { strings } from '../../i18n/strings'
 import { Icon, ICON_SIZE } from '../../ui/Icon'
-import { usePageChromeHeight } from '../../ui/chrome'
+import { PageChromeSpacer } from '../../ui/chrome'
 import { InsetButtonRow, InsetGroup, InsetValueRow, Text, TextField } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { OnboardingNavigator } from '../onboarding'
@@ -89,11 +89,18 @@ export function GatewayList({ onManage, onAdd }: GatewayListProps) {
  *
  * No `onCancel`: the page's own back control is the way out, and a Cancel in
  * the card beside it would be a second one.
+ *
+ * The wizard does not scroll under the chrome — it is a card whose first step
+ * has a field and a button at the top — so it clears the glass with a spacer
+ * instead. `PageChromeSpacer` is a CHILD of the frame, and that is the whole
+ * point: the chrome's measured height only reaches inside `PageFrame`, so a
+ * `usePageChromeHeight()` called out here, in the component that renders the
+ * frame, reads the context's default of 0 for ever. It did, and the wizard's
+ * first row was drawn under the header with the header taking its taps.
  */
 export function GatewayAddPage() {
   const navigation = useNavigation()
   const { refreshRegistry } = useGateway()
-  const headerHeight = usePageChromeHeight()
 
   const finish = useCallback(async () => {
     // The wizard wrote a new entry; this provider's copy of the list is the one
@@ -108,7 +115,8 @@ export function GatewayAddPage() {
 
   return (
     <SettingsPage route="GatewayAdd" scroll={false}>
-      <View style={{ flex: 1, paddingTop: headerHeight }}>
+      <PageChromeSpacer />
+      <View style={{ flex: 1 }}>
         <OnboardingNavigator
           // `null` is what makes this an ADD rather than an edit: the wizard mints
           // an entry instead of writing into the one that is live.

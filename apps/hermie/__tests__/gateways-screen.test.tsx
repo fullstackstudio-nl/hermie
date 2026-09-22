@@ -8,6 +8,7 @@
  * is what is left on disk afterwards rather than what is left on screen.
  */
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native'
+import { StyleSheet } from 'react-native'
 import type { ConnectionStatus, GatewayError } from '@hermie/gateway-client'
 
 import { GatewayTitle } from '../src/features/bots/GatewayTitle'
@@ -226,6 +227,36 @@ describe('adding another', () => {
     // The wizard, on its cover step, over a gateway that is still connected.
     expect(screen.getByTestId('onboarding-card')).toBeTruthy()
     expect(registry().activeGatewayId).toBe(mockGatewayA)
+  })
+
+  /**
+   * The wizard's first step is not under the glass header.
+   *
+   * It does not scroll under the chrome — it is a card with a field and a button
+   * at the top — so it clears the header with a spacer, and the spacer's height
+   * is the seam this asserts on. The bug it replaces was silent and total:
+   * `usePageChromeHeight()` was called in the component that RENDERS the frame,
+   * one level above the context that carries the measurement, so it read the
+   * default 0 for ever. The wizard drew under the header and the header took
+   * the taps meant for the field.
+   */
+  it('keeps the wizard’s first step clear of the glass header', async () => {
+    await openList()
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('gateways-add'))
+    })
+
+    // A layout pass, which a test renderer never performs by itself.
+    act(() => {
+      fireEvent(screen.getByTestId('page-chrome'), 'layout', {
+        nativeEvent: { layout: { height: 96, width: 402, x: 0, y: 0 } }
+      })
+    })
+
+    const spacer = screen.getByTestId('page-chrome-spacer')
+
+    expect(StyleSheet.flatten(spacer.props.style).height).toBe(96)
   })
 })
 
