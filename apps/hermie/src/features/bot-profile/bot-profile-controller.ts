@@ -29,18 +29,28 @@
  * this module is about those two calls and the other two are one line each at
  * the call site.
  *
- * ## The display name is not here
+ * ## The display name is not one of the socket calls, but it IS one of the changes
  *
  * `ProfilesConfigureParams` carries `profile`, `name`, `ui_meta`, `soul`,
  * `description`, `model`, `provider`, the skill and toolset lists — and no
  * display name. `name` there is the profile's IDENTIFIER, which is how the
- * request says which profile it means. A gateway simply does not offer a client
- * a way to rename a bot, so the sheet shows the display name beside the profile
- * it belongs to instead of offering a field that would fail silently.
+ * request says which profile it means. So core offers no way to write one and
+ * the name is not sent by either call above.
+ *
+ * It is still part of `changesFor`, and that is the whole of the bug this
+ * answers. The field used to write itself into the arrangement on every
+ * keystroke, which left the sheet's one button disabled while a reader typed a
+ * new name into it: they had changed the only thing they came to change and the
+ * control that says "save" was dead. Nothing was lost — the name was already
+ * stored — but nothing said so either. A name is a change now, Save is
+ * enabled by it, and Save is what commits it.
  */
 import type { ProfilesConfigureResult, ProfilesSetAssetResult } from '@hermes/shared/gateway-contract'
 
 import type { ChatGateway } from '../../gateway/link'
+// The module rather than the feature's barrel: that one also exports the name
+// ROWS, and this file is deliberately importable without React.
+import { botNameChanged } from '../bot-rename/save-bot-name'
 
 /** The asset name the gateway stores a profile picture under. */
 export const AVATAR_ASSET = 'avatar'
@@ -106,21 +116,33 @@ export interface BotProfileDraft {
   description: string
   /** A newly picked picture, `null` to remove the current one, `undefined` to leave it. */
   avatar: string | null | undefined
+  /** The display name as the field holds it. */
+  name: string
 }
 
 export interface BotProfileChanges {
   description: string | null
   avatar: string | null | undefined
+  /**
+   * The display name to store, or `null` when the field still holds the stored one.
+   *
+   * An EMPTY string is a change like any other — it is how a reader takes the
+   * name back — so this is `string | null` and not a truthiness test. Compared
+   * trimmed, through `botNameChanged`, for the reason that function gives.
+   */
+  name: string | null
   /** False when the reader opened the sheet and changed nothing that travels. */
   any: boolean
 }
 
-export function changesFor(initial: { description: string }, draft: BotProfileDraft): BotProfileChanges {
+export function changesFor(initial: { description: string; name: string }, draft: BotProfileDraft): BotProfileChanges {
   const description = draft.description === initial.description ? null : draft.description
+  const name = botNameChanged(initial.name, draft.name) ? draft.name.trim() : null
 
   return {
     description,
     avatar: draft.avatar,
-    any: description !== null || draft.avatar !== undefined
+    name,
+    any: description !== null || draft.avatar !== undefined || name !== null
   }
 }

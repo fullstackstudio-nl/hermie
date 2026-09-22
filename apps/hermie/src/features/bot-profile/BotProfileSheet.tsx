@@ -28,13 +28,19 @@
  * this sheet is not the model picker, which is the chat options sheet's job and
  * is a guarded call with a confirmation of its own.
  *
- * The display NAME is the exception, and it is a fourth thing that writes as it
- * is typed. It is Hermie's own — no call a client has writes a profile's
- * `display_name`, and the one REST route that touches it RENAMES the profile
- * instead — so it is stored beside the colour in `chat-layout` and needs no
- * round trip and no Save. Renaming the profile itself is a separate act behind
- * its own disclosure; that one needs `http`, needs the stores rekeyed, and lives
- * in `features/bot-rename`.
+ * The display NAME is the exception, and it waits for Save like the two above
+ * it. It used to write itself into the arrangement on every keystroke, which is
+ * how the sheet ended up with a dead button: a reader who came to rename a bot
+ * changed the one thing they meant to change and watched Save stay greyed out,
+ * with nothing on the screen saying the name had already been kept. So the
+ * field holds a DRAFT now and Save commits it. It is still Hermie's own name —
+ * no call a client has writes a profile's `display_name`, and the one REST
+ * route that touches it RENAMES the profile instead — so it is stored beside
+ * the colour in `chat-layout` and costs no round trip.
+ *
+ * Renaming the profile itself is still a separate act behind its own
+ * disclosure; that one needs `http`, needs the stores rekeyed, and lives in
+ * `features/bot-rename`.
  *
  * ## The sharing notice is not asked twice
  *
@@ -150,9 +156,24 @@ export function BotProfileSheet({
 }: BotProfileSheetProps) {
   const theme = useTheme()
   const text = strings.botProfile
-  /* The same two lines every other surface draws, in this reader's own order. */
-  const names = botNames({ ...bot, label: useChatLayoutStore(state => state.labels[bot.name] ?? '') }, useNameOrder())
+  /*
+    The reader's own name for this bot, and the draft the field is editing.
 
+    A draft rather than a live write, for the reason in the docstring. It is
+    seeded from the store and reset when the sheet is pointed at another bot;
+    like `description`, it deliberately does not follow the store afterwards, so
+    an arrangement arriving from another device cannot rewrite a half-typed name
+    underneath the reader.
+  */
+  const label = useChatLayoutStore(state => state.labels[bot.name] ?? '')
+  const setLabel = useChatLayoutStore(state => state.setLabel)
+  const [name, setName] = useState(label)
+  /*
+    The same two lines every other surface draws, in this reader's own order, and
+    from the STORED name rather than the draft: the title and the avatar's letter
+    say what this bot is called, which is not yet what the field says.
+  */
+  const names = botNames({ ...bot, label }, useNameOrder())
   const [description, setDescription] = useState(bot.description)
   /**
    * The gateway took the name and part of the local move did not land.
@@ -184,6 +205,9 @@ export function BotProfileSheet({
   */
   useEffect(() => {
     setDescription(bot.description)
+    // Read imperatively: as a dependency, this bot's stored name would reset the
+    // draft every time an arrangement arrived, which is the overwrite above.
+    setName(useChatLayoutStore.getState().labels[bot.name] ?? '')
     setAvatar(undefined)
     setError(null)
     setWarning(null)
@@ -193,13 +217,6 @@ export function BotProfileSheet({
 
   const accent = useChatLayoutStore(state => state.accents[bot.name] ?? 'default')
   const setAccent = useChatLayoutStore(state => state.setAccent)
-  /*
-    The reader's own name for this bot, read from the store rather than held as a
-    draft. It writes as it is typed, like the note below it, so there is nothing
-    to seed and nothing a roster poll can overwrite mid-sentence.
-  */
-  const label = useChatLayoutStore(state => state.labels[bot.name] ?? '')
-  const setLabel = useChatLayoutStore(state => state.setLabel)
 
   const note = useDeviceContextStore(state => state.perBot[bot.name] ?? '')
   const setBotNote = useDeviceContextStore(state => state.setBotNote)
@@ -230,10 +247,21 @@ export function BotProfileSheet({
   // `undefined` leave it, `null` remove it, a string upload it — the three
   // states the draft distinguishes, flattened out of the picked object.
   const pickedBytes: string | null | undefined = avatar === undefined ? undefined : (avatar?.base64 ?? null)
-  const changes = changesFor({ description: bot.description }, { description, avatar: pickedBytes })
+  const changes = changesFor({ description: bot.description, name: label }, { description, avatar: pickedBytes, name })
+  /*
+    Which half of this Save needs a connection.
+
+    The description and the picture are writes to the profile on the gateway's
+    disk and there is nothing to do about them while the socket is down. The
+    display name is the app's own, so a Save that only changes THAT is offered
+    on a gateway that is not answering — refusing it would be the second dead
+    button on this sheet.
+  */
+  const needsGateway = changes.description !== null || changes.avatar !== undefined
+  const canSave = changes.any && (gateway !== null || !needsGateway)
 
   const onSave = useCallback(async () => {
-    if (!gateway) {
+    if (!canSave) {
       return
     }
 
@@ -242,16 +270,25 @@ export function BotProfileSheet({
     setWarning(null)
 
     try {
-      if (changes.description !== null) {
-        await saveDescription({ gateway, botName: bot.name }, changes.description)
+      if (gateway) {
+        if (changes.description !== null) {
+          await saveDescription({ gateway, botName: bot.name }, changes.description)
+        }
+
+        // The picture second, so a description that saved is not undone by a
+        // photo that did not. Both are independent writes on the gateway anyway.
+        if (avatar === null) {
+          await clearAvatar({ gateway, botName: bot.name })
+        } else if (avatar) {
+          await uploadAvatar({ gateway, botName: bot.name }, avatar.base64)
+        }
       }
 
-      // The picture second, so a description that saved is not undone by a
-      // photo that did not. Both are independent writes on the gateway anyway.
-      if (avatar === null) {
-        await clearAvatar({ gateway, botName: bot.name })
-      } else if (avatar) {
-        await uploadAvatar({ gateway, botName: bot.name }, avatar.base64)
+      // Last, and after the two writes that can be refused: the name is the
+      // app's own and cannot fail, so committing it first would leave a bot
+      // renamed by a Save that then reported that it had not worked.
+      if (changes.name !== null) {
+        setLabel(bot.name, changes.name)
       }
 
       onSaved?.()
@@ -261,7 +298,18 @@ export function BotProfileSheet({
     } finally {
       setBusy(false)
     }
-  }, [avatar, bot.name, changes.description, gateway, onClose, onSaved, text.saveFailed])
+  }, [
+    avatar,
+    bot.name,
+    canSave,
+    changes.description,
+    changes.name,
+    gateway,
+    onClose,
+    onSaved,
+    setLabel,
+    text.saveFailed
+  ])
 
   /**
    * Rename the profile itself — the separate, destructive act.
@@ -478,11 +526,11 @@ export function BotProfileSheet({
             botName={bot.name}
             displayName={bot.displayName}
             isDefault={bot.isDefault}
-            onChangeText={next => setLabel(bot.name, next)}
+            onChangeText={setName}
             renameError={renameError}
             renaming={renaming}
             testID={`${testID}-name`}
-            value={label}
+            value={name}
             {...(http ? { onRenameProfile: (next: string) => void onRenameProfile(next) } : {})}
           />
           <InsetValueRow
@@ -517,7 +565,7 @@ export function BotProfileSheet({
 
         <Button
           busy={busy}
-          disabled={!gateway || !changes.any}
+          disabled={!canSave}
           onPress={() => void onSave()}
           testID={`${testID}-save`}
           title={busy ? text.saving : text.save}

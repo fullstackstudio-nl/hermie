@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A bot's display name can be saved.** Typing a new name on a bot's profile sheet left **Save**
+  greyed out: the field wrote itself into the arrangement on every keystroke, so the button — which
+  only ever looked at the description and the picture — had nothing to notice, and a reader who had
+  come to rename a bot was left looking at a dead control with nothing on the screen saying the name
+  had been kept anyway. The field holds a draft now and Save commits it, which is also what the
+  button says. A name-only Save no longer needs a live connection, because that name is the app's
+  own; the description and the picture are writes to the profile on the gateway's disk and still do.
+
 ## [0.1.5] - 2026-09-22
 
 ## [0.1.4] - 2026-09-22

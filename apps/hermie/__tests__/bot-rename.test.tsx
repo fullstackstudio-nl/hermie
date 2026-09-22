@@ -6,7 +6,13 @@
  *  - **The field is the DISPLAY name.** The owner renamed a bot expecting its
  *    label to change and watched its handle move instead, because that is what
  *    `PATCH /api/profiles/{name}` does to every profile but `default`. The field
- *    writes Hermie's own name for the bot now, and sends nothing.
+ *    is Hermie's own name for the bot now, and core's rename route is not what
+ *    it writes.
+ *  - **Save is what commits it, and typing a name enables Save.** The field used
+ *    to write itself into the arrangement on every keystroke, which left the
+ *    sheet's only button greyed out while a reader typed a new name into it —
+ *    the complaint this suite grew from was "I change the name and I cannot
+ *    press Save".
  *  - **Renaming the profile is still reachable, and it is its own act.** Behind
  *    its own disclosure, with its own button, and not offered at all for a
  *    profile that cannot be renamed or a connection that cannot do it.
@@ -135,23 +141,82 @@ function typeNewProfileName(next: string): void {
   fireEvent.changeText(screen.getByTestId('bot-profile-name-rename-field'), next)
 }
 
+/** Is the sheet's one button pressable right now? */
+const saveDisabled = (): boolean => screen.getByTestId('bot-profile-save').props.accessibilityState.disabled === true
+
 describe('the name field', () => {
-  it('writes the display name into the app and sends nothing', () => {
+  /**
+   * The complaint, as one assertion.
+   *
+   * Typing a name is a change to the only thing on this sheet a reader came to
+   * change, so the button that saves has to notice. It did not: the field wrote
+   * straight into the arrangement and `changesFor` only ever looked at the
+   * description and the picture, so Save stayed disabled for ever and nothing on
+   * the screen said the name had been kept anyway.
+   */
+  it('enables Save when a name is typed, and stores it when Save is pressed', async () => {
     const { http, calls } = fakeHttp({ ok: true })
 
     sheet(BOT, http)
+
+    expect(saveDisabled()).toBe(true)
+
     fireEvent.changeText(screen.getByTestId('bot-profile-name'), 'De Onderzoeker')
 
+    expect(saveDisabled()).toBe(false)
+    // Not yet: the field holds a draft, and Save is what commits it.
+    expect(useChatLayoutStore.getState().labels.researcher).toBeUndefined()
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('bot-profile-save'))
+    })
+
     expect(useChatLayoutStore.getState().labels.researcher).toBe('De Onderzoeker')
+    // Core's rename route is not what a display name goes through.
     expect(calls).toHaveLength(0)
   })
 
-  /** Emptying it is how a reader goes back to the name the gateway reports. */
-  it('clears the name rather than storing an empty one', () => {
+  /** A name that is already the stored one is not a change, so Save stays shut. */
+  it('does not count retyping the same name as a change', () => {
+    useChatLayoutStore.getState().setLabel('researcher', 'De Onderzoeker')
     sheet(BOT, fakeHttp({ ok: true }).http)
 
+    fireEvent.changeText(screen.getByTestId('bot-profile-name'), '  De Onderzoeker  ')
+
+    expect(saveDisabled()).toBe(true)
+  })
+
+  /**
+   * The name is the app's own, so it is saved on a gateway that is not
+   * answering. Everything else on this sheet is a write to the profile on the
+   * gateway's disk and stays unavailable.
+   */
+  it('saves a name with no connection at all', async () => {
+    renderScreen(<BotProfileSheet bot={BOT} gateway={null} onClose={() => undefined} visible />)
+
     fireEvent.changeText(screen.getByTestId('bot-profile-name'), 'De Onderzoeker')
+
+    expect(saveDisabled()).toBe(false)
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('bot-profile-save'))
+    })
+
+    expect(useChatLayoutStore.getState().labels.researcher).toBe('De Onderzoeker')
+  })
+
+  /** Emptying it is how a reader goes back to the name the gateway reports. */
+  it('clears the name rather than storing an empty one', async () => {
+    useChatLayoutStore.getState().setLabel('researcher', 'De Onderzoeker')
+    sheet(BOT, fakeHttp({ ok: true }).http)
+
     fireEvent.changeText(screen.getByTestId('bot-profile-name'), '   ')
+
+    expect(saveDisabled()).toBe(false)
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('bot-profile-save'))
+    })
 
     expect(useChatLayoutStore.getState().labels.researcher).toBeUndefined()
   })
