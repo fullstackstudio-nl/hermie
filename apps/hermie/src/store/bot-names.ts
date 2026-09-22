@@ -76,6 +76,21 @@ export interface BotNames {
 }
 
 /**
+ * The third thing that decides which name wins (HERM-110).
+ *
+ * `hideHandle` is Settings → Chats & messages' "Hide profile name". On, a bot
+ * that HAS a display name shows it alone — `order` stops mattering, because
+ * the point of the setting is to stop showing the handle next to it at all,
+ * and an order that still surfaced it one way round would be the setting lying
+ * about what it does. A bot with no display name is untouched: it has one
+ * name, and this setting is about which of two names shows, not about
+ * inventing a second one.
+ */
+export interface BotNamesOptions {
+  hideHandle?: boolean
+}
+
+/**
  * Just enough of a bot to name it.
  *
  * Deliberately structural rather than `Bot`: the widget snapshot's projection
@@ -112,7 +127,7 @@ export interface NameableBot {
  * common thing on a real gateway — see the note `useBotDisplayName` has carried
  * since the roster was written.
  */
-export function botNames(bot: NameableBot, order: NameOrder): BotNames {
+export function botNames(bot: NameableBot, order: NameOrder, options?: BotNamesOptions): BotNames {
   const handle = bot.name
   // The reader's own name first, the roster's second. An empty one is not a
   // name, which is what makes clearing the field fall back rather than blank the
@@ -124,12 +139,24 @@ export function botNames(bot: NameableBot, order: NameOrder): BotNames {
     return { primary: handle, secondary: '' }
   }
 
+  // The owner's call (2026-09-22): with the setting on, a bot that has a real
+  // display name is ALWAYS led with it — `order` only decides which name is
+  // primary when this is off.
+  if (options?.hideHandle) {
+    return { primary: display, secondary: '' }
+  }
+
   return order === 'display' ? { primary: display, secondary: handle } : { primary: handle, secondary: display }
 }
 
 /** The order this reader chose, for a surface that resolves its own names. */
 export function useNameOrder(): NameOrder {
   return useSettingsStore(state => state.botNameOrder)
+}
+
+/** Whether a named bot's handle is hidden everywhere (Settings → Chats & messages). */
+export function useHideHandleWhenNamed(): boolean {
+  return useSettingsStore(state => state.hideHandleWhenNamed)
 }
 
 /**
@@ -141,10 +168,11 @@ export function useNameOrder(): NameOrder {
  */
 export function useBotNames(name: string | undefined): BotNames {
   const order = useNameOrder()
+  const hideHandle = useHideHandleWhenNamed()
   const displayName = useBotsStore(state => (name === undefined ? '' : (state.byName[name]?.displayName ?? name)))
   const label = useBotLabel(name)
 
-  return botNames({ name: name ?? '', displayName, label }, order)
+  return botNames({ name: name ?? '', displayName, label }, order, { hideHandle })
 }
 
 /**
@@ -154,6 +182,6 @@ export function useBotNames(name: string | undefined): BotNames {
  * secondary name is dropped rather than appended: these are places where the
  * text is already competing with something else for a few characters.
  */
-export function botLabel(bot: NameableBot, order: NameOrder): string {
-  return botNames(bot, order).primary
+export function botLabel(bot: NameableBot, order: NameOrder, options?: BotNamesOptions): string {
+  return botNames(bot, order, options).primary
 }

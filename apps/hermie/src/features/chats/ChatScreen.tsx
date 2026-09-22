@@ -62,7 +62,7 @@ import { strings } from '../../i18n/strings'
 import { haptic } from '../../platform/haptics'
 import { presenceOf } from '../bots/presence'
 import { MemoryBotsScreen } from '../memory'
-import { botNames } from '../../store/bot-names'
+import { botNames, useHideHandleWhenNamed } from '../../store/bot-names'
 import { useBotsStore } from '../../store/bots'
 import {
   useBotLabel,
@@ -1622,7 +1622,8 @@ function Conversation({
       displayName: byName[botName]?.displayName ?? botName,
       label: useBotLabel(botName)
     },
-    useSettingsStore(state => state.botNameOrder)
+    useSettingsStore(state => state.botNameOrder),
+    { hideHandle: useHideHandleWhenNamed() }
   )
   const display = names.primary
 

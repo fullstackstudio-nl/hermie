@@ -176,6 +176,17 @@ export interface WidgetSnapshotInput {
    */
   nameOrder: NameOrder
   /**
+   * Whether a named bot's handle is dropped from the widget line entirely
+   * (HERM-110), same as everywhere else `botLabel` is asked for one name.
+   *
+   * Optional — and defaulted to off, not read from the settings store here —
+   * so a snapshot built without an opinion (an existing test fixture, a build
+   * that has not been told) behaves exactly as it did before this field
+   * existed rather than reaching into a store this module has no other reason
+   * to import.
+   */
+  hideHandleWhenNamed?: boolean
+  /**
    * The name THIS READER gave each bot, by handle, where they gave one.
    *
    * It wins over the roster's `display_name` here for the same reason it wins in
@@ -394,7 +405,9 @@ function projectBot(bot: Bot, input: WidgetSnapshotInput): WidgetBot {
   // The line the widget draws, which is the app's primary name for this bot.
   // `name` beside it stays the HANDLE whatever the order says: it is the deep
   // link's key (`hermie://chat/<bot>`) and the avatar file's key, not a label.
-  const label = botLabel({ ...bot, label: input.labels[bot.name] ?? '' }, input.nameOrder)
+  const label = botLabel({ ...bot, label: input.labels[bot.name] ?? '' }, input.nameOrder, {
+    hideHandle: input.hideHandleWhenNamed ?? false
+  })
 
   return {
     name: bot.name,

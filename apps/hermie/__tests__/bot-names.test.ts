@@ -91,6 +91,51 @@ describe('the two names a bot has', () => {
     expect(botLabel(LANCE, 'display')).toBe('Netwerkbeheerder')
   })
 
+  /**
+   * HERM-110: the owner's decision (2026-09-22) that the display name wins
+   * outright while the setting is on, whichever order is stored.
+   */
+  describe('hiding the handle when a bot has a display name', () => {
+    it('leaves a bot with only one name alone, in both orders, on or off', () => {
+      const bot = { name: 'researcher', displayName: 'Researcher' }
+
+      expect(botNames(bot, 'profile', { hideHandle: true })).toEqual({ primary: 'researcher', secondary: '' })
+      expect(botNames(bot, 'display', { hideHandle: true })).toEqual({ primary: 'researcher', secondary: '' })
+      expect(botNames(bot, 'profile', { hideHandle: false })).toEqual({ primary: 'researcher', secondary: '' })
+    })
+
+    it('wins over the "profile name" order for a bot that has a real display name', () => {
+      // Off: 'profile' leads with the handle, same as ever.
+      expect(botNames(LANCE, 'profile', { hideHandle: false })).toEqual({
+        primary: 'lance-vance',
+        secondary: 'Netwerkbeheerder'
+      })
+
+      // On: the display name leads regardless — the order setting is overridden,
+      // not merely ignored in one direction.
+      expect(botNames(LANCE, 'profile', { hideHandle: true })).toEqual({
+        primary: 'Netwerkbeheerder',
+        secondary: ''
+      })
+    })
+
+    it('wins over the "display name" order too, dropping the handle it would otherwise show second', () => {
+      expect(botNames(LANCE, 'display', { hideHandle: false })).toEqual({
+        primary: 'Netwerkbeheerder',
+        secondary: 'lance-vance'
+      })
+
+      expect(botNames(LANCE, 'display', { hideHandle: true })).toEqual({
+        primary: 'Netwerkbeheerder',
+        secondary: ''
+      })
+    })
+
+    it('does nothing when the option is left out — the default is off', () => {
+      expect(botNames(LANCE, 'profile')).toEqual(botNames(LANCE, 'profile', { hideHandle: false }))
+    })
+  })
+
   describe('reading a stored order', () => {
     it('takes the two it knows', () => {
       expect(asNameOrder('profile')).toBe('profile')

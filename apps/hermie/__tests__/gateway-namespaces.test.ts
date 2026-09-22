@@ -175,8 +175,10 @@ describe('two gateways, two sets of preferences', () => {
 
     // Written where no gateway id can reach it, and read back without one —
     // which is the whole point: `ThemeProvider` sits above the gateway and has
-    // no id to ask with.
-    expect(mockDisk.get(APPEARANCE_KEY)).toBe(JSON.stringify({ appearance: 'dark' }))
+    // no id to ask with. `hideHandleWhenNamed` rides along under the same key
+    // (HERM-110) at whatever it already was — the reset above leaves it at its
+    // default.
+    expect(mockDisk.get(APPEARANCE_KEY)).toBe(JSON.stringify({ appearance: 'dark', hideHandleWhenNamed: true }))
     expect(mockDisk.get(NS_A.key(CHAT_VIEW_KEY))).not.toContain('appearance')
     expect(useSettingsStore.getState().appearance).toBe('dark')
   })

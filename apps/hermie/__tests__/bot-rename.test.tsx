@@ -39,6 +39,7 @@ import { useChatLayoutStore } from '../src/store/chat-layout'
 import { useChatsStore } from '../src/store/chats'
 import { useDeviceContextStore } from '../src/store/device-context'
 import { usePluginStore } from '../src/store/plugin'
+import { useSettingsStore } from '../src/store/settings'
 import { renderScreen } from './support/render'
 
 /*
@@ -134,6 +135,7 @@ beforeEach(() => {
   useChatLayoutStore.getState().reset()
   useDeviceContextStore.getState().reset()
   usePluginStore.getState().reset()
+  useSettingsStore.getState().reset()
 })
 
 /**
@@ -264,6 +266,26 @@ describe('the name field', () => {
     expect(screen.getByTestId('bot-profile-name-warning')).toHaveTextContent(
       'Renaming changes the profile name other tools use'
     )
+  })
+
+  /**
+   * HERM-110's "hide profile name" only touches the two-line display; it must
+   * not touch the one place on this sheet where the profile name is the whole
+   * point — the fact row and the rename field both address the PROFILE, not
+   * whichever name the header happens to be leading with.
+   */
+  it('still shows and renames the profile name while Hide profile name is on', () => {
+    expect(useSettingsStore.getState().hideHandleWhenNamed).toBe(true)
+
+    sheet({ ...BOT, displayName: 'De Onderzoeker' }, fakeHttp({ ok: true }).http)
+
+    // The fact row: always the handle, whatever the header leads with.
+    expect(screen.getByText('Profile name')).toBeTruthy()
+    expect(screen.getByText('researcher')).toBeTruthy()
+
+    // The rename disclosure's own field starts from the handle too.
+    fireEvent.press(screen.getByTestId('bot-profile-name-rename'))
+    expect(screen.getByTestId('bot-profile-name-rename-field').props.value).toBe('researcher')
   })
 })
 

@@ -18,7 +18,7 @@ import { strings } from '../../i18n/strings'
 import { useFollowsLocale } from '../../i18n/use-locale'
 import { ContextMenuHost } from '../../platform/context-menu'
 import { secondaryClick } from '../../platform/secondary-click'
-import { botNames, useNameOrder } from '../../store/bot-names'
+import { botNames, useHideHandleWhenNamed, useNameOrder } from '../../store/bot-names'
 import type { Bot } from '../../store/bots'
 import { useBotLabel } from '../../store/chat-layout'
 import { usePendingShareCount } from '../../store/share'
@@ -150,7 +150,9 @@ export const BotRow = memo(function BotRow({
     where nobody has set a display name — so the third line is conditional and
     the row keeps the height it had.
   */
-  const names = botNames({ ...bot, label: useBotLabel(bot.name) }, useNameOrder())
+  const names = botNames({ ...bot, label: useBotLabel(bot.name) }, useNameOrder(), {
+    hideHandle: useHideHandleWhenNamed()
+  })
 
   /**
    * Shares this chat has been given that have not gone out yet.

@@ -17,7 +17,7 @@ import { useState } from 'react'
 import { ScrollView } from 'react-native'
 
 import { strings } from '../../i18n/strings'
-import { botNames, useNameOrder } from '../../store/bot-names'
+import { botNames, useHideHandleWhenNamed, useNameOrder } from '../../store/bot-names'
 import { useBotsStore } from '../../store/bots'
 import { useChatLayoutStore } from '../../store/chat-layout'
 import { PageFrame, useFramedScroll } from '../../ui/chrome'
@@ -30,9 +30,10 @@ import { memoryStrings } from './strings'
 export function useMemoryBotTitle(profile: string): string | undefined {
   const bot = useBotsStore(state => state.bots.find(row => row.name === profile))
   const order = useNameOrder()
+  const hideHandle = useHideHandleWhenNamed()
   const label = useChatLayoutStore(state => state.labels[profile])
 
-  return bot ? botNames({ ...bot, label: label ?? '' }, order).primary : undefined
+  return bot ? botNames({ ...bot, label: label ?? '' }, order, { hideHandle }).primary : undefined
 }
 
 export interface MemoryBotListProps {
@@ -44,6 +45,7 @@ export interface MemoryBotListProps {
 export function MemoryBotList({ onOpen, testID = 'memory-bots' }: MemoryBotListProps) {
   const bots = useBotsStore(state => state.bots)
   const order = useNameOrder()
+  const hideHandle = useHideHandleWhenNamed()
   /* The names this reader gave their bots, which win over the roster's. */
   const labels = useChatLayoutStore(state => state.labels)
 
@@ -58,7 +60,7 @@ export function MemoryBotList({ onOpen, testID = 'memory-bots' }: MemoryBotListP
   return (
     <InsetGroup footer={memoryStrings.botsHint} testID={`${testID}-list`}>
       {bots.map(bot => {
-        const names = botNames({ ...bot, label: labels[bot.name] ?? '' }, order)
+        const names = botNames({ ...bot, label: labels[bot.name] ?? '' }, order, { hideHandle })
 
         return (
           <InsetButtonRow

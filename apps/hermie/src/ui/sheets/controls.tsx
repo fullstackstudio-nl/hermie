@@ -126,14 +126,30 @@ export interface SegmentedRowProps<T extends string> {
   options: { value: T; label: string }[]
   value: T
   onChange: (value: T) => void
+  /** Greyed out and unresponsive — a choice that another setting has made moot. */
+  disabled?: boolean
   testID?: string
 }
 
-export function SegmentedRow<T extends string>({ label, options, value, onChange, testID }: SegmentedRowProps<T>) {
+export function SegmentedRow<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+  disabled = false,
+  testID
+}: SegmentedRowProps<T>) {
   const theme = useTheme()
 
   return (
-    <View style={{ gap: theme.space.sm, paddingHorizontal: theme.space.lg, paddingVertical: theme.space.sm }}>
+    <View
+      style={{
+        gap: theme.space.sm,
+        opacity: disabled ? 0.4 : 1,
+        paddingHorizontal: theme.space.lg,
+        paddingVertical: theme.space.sm
+      }}
+    >
       {label ? (
         <Text color="textMuted" variant="meta">
           {label}
@@ -167,6 +183,8 @@ export function SegmentedRow<T extends string>({ label, options, value, onChange
             <Pressable
               accessibilityRole="radio"
               aria-checked={selected}
+              aria-disabled={disabled}
+              disabled={disabled}
               key={option.value}
               onPress={() => onChange(option.value)}
               style={{ flex: 1 }}

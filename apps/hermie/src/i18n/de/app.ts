@@ -707,7 +707,10 @@ export const app: Translation<typeof strings> = {
     botNames: 'Bot-Namen',
     botNameOptions: { profile: 'Profilname', display: 'Anzeigename' },
     botNamesHint:
-      'Welcher Name der große ist. Der Profilname ist der, mit dem der Rest der App einen Bot anspricht; der Anzeigename ist das Label, das auf dem Gateway gesetzt ist. Ein Bot mit nur einem von beiden zeigt eine Zeile.',
+      'Welcher Name der große ist. Der Profilname ist der, mit dem der Rest der App einen Bot anspricht; der Anzeigename ist das Label, das auf dem Gateway gesetzt ist. Ein Bot mit nur einem von beiden zeigt eine Zeile. Wird nur verwendet, solange Profilname ausblenden, unten, aus ist.',
+    hideHandle: 'Profilname ausblenden',
+    hideHandleHint:
+      'Zeigt bei einem Bot mit Anzeigename nur diesen — der Profilname, mit dem er sonst gezeigt wird, entfällt in der zweiten Zeile. Ein Bot ohne Anzeigename behält so oder so seinen einen Namen.',
     chatTextSize: 'Chat-Textgröße',
     chatTextSizeHint:
       'Gilt für die Wörter in einer Unterhaltung, zusätzlich zur Textgröße des Geräts. Der Rest der App folgt dem Gerät.',

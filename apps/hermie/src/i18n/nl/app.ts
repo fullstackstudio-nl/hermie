@@ -692,7 +692,10 @@ export const app: Translation<typeof strings> = {
     botNames: 'Botnamen',
     botNameOptions: { profile: 'Profielnaam', display: 'Weergavenaam' },
     botNamesHint:
-      'Welke naam de grote is. De profielnaam is waarmee de rest van de app een bot aanspreekt; de weergavenaam is het label dat op de gateway is ingesteld. Een bot met maar één daarvan toont één regel.',
+      'Welke naam de grote is. De profielnaam is waarmee de rest van de app een bot aanspreekt; de weergavenaam is het label dat op de gateway is ingesteld. Een bot met maar één daarvan toont één regel. Wordt alleen gebruikt terwijl Profielnaam verbergen, hieronder, uit staat.',
+    hideHandle: 'Profielnaam verbergen',
+    hideHandleHint:
+      'Toon voor een bot met een weergavenaam alleen die naam — de profielnaam waar hij anders mee wordt getoond vervalt op de tweede regel. Een bot zonder weergavenaam behoudt hoe dan ook zijn ene naam.',
     chatTextSize: 'Tekstgrootte chat',
     chatTextSizeHint:
       'Geldt voor de woorden in een gesprek, bovenop de eigen tekstgrootte van het apparaat. De rest van de app volgt het apparaat.',

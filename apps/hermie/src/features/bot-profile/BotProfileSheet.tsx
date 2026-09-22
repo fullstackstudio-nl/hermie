@@ -66,7 +66,7 @@ import { Avatar } from '../../chat-ui/primitives/Avatar'
 import { chatStrings } from '../../chat-ui/strings'
 import { useChatLayoutStore } from '../../store/chat-layout'
 import { effectiveDisplayName, needsSharingNotice, useDeviceContextStore } from '../../store/device-context'
-import { botNames, useNameOrder } from '../../store/bot-names'
+import { botNames, useHideHandleWhenNamed, useNameOrder } from '../../store/bot-names'
 import type { Bot } from '../../store/bots'
 import { AccentSwatches } from '../../ui/AccentSwatches'
 import { BottomSheet } from '../../ui/BottomSheet'
@@ -182,7 +182,7 @@ export function BotProfileSheet({
     from the STORED name rather than the draft: the title and the avatar's letter
     say what this bot is called, which is not yet what the field says.
   */
-  const names = botNames({ ...bot, label }, useNameOrder())
+  const names = botNames({ ...bot, label }, useNameOrder(), { hideHandle: useHideHandleWhenNamed() })
   const [description, setDescription] = useState(bot.description)
   /**
    * The gateway took the name and part of the local move did not land.

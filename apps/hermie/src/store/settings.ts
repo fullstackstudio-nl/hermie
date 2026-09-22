@@ -73,8 +73,20 @@ export const CHAT_VIEW_KEY = 'hermie.chat.view'
  */
 export const APPEARANCE_KEY = 'hermie.appearance'
 
+/**
+ * Whether a named bot's handle is hidden everywhere it would otherwise show
+ * beside the display name (HERM-110).
+ *
+ * Device-local and defaulted ON, and it lives beside `appearance` rather than
+ * in the per-account half for the same reason: it is a statement about how
+ * THIS READER wants a name they cannot see the gateway's copy of to be drawn,
+ * not something a second device signed into the same account should inherit.
+ */
+export const DEFAULT_HIDE_HANDLE_WHEN_NAMED = true
+
 interface PersistedAppearance {
   appearance?: Appearance
+  hideHandleWhenNamed?: boolean
 }
 
 interface PersistedChatView {
@@ -92,6 +104,8 @@ const APPEARANCES: readonly Appearance[] = ['system', 'light', 'dark']
 
 const asAppearance = (value: unknown): Appearance | undefined =>
   typeof value === 'string' && (APPEARANCES as readonly string[]).includes(value) ? (value as Appearance) : undefined
+
+const asHideHandleWhenNamed = (value: unknown): boolean | undefined => (typeof value === 'boolean' ? value : undefined)
 
 /**
  * What a wallpaper name from an older build becomes.
@@ -216,6 +230,11 @@ export interface SettingsState {
    * with a handle and two with a label is a list that has to be read twice.
    */
   botNameOrder: NameOrder
+  /**
+   * Hide a named bot's handle everywhere it would otherwise show beside the
+   * display name. See `DEFAULT_HIDE_HANDLE_WHEN_NAMED` and `store/bot-names.ts`.
+   */
+  hideHandleWhenNamed: boolean
   /** Which theme the glass floats over: a preset, or one of the reader's own. */
   themeChoice: ThemeChoice
   /** Themes the reader made. App-wide, and ADR-0016's `hermie-app` carries them. */
@@ -253,6 +272,7 @@ export interface SettingsState {
   setChatView: (botName: string, patch: Partial<ChatViewSettings>) => void
   resetChatView: (botName: string) => void
   setAppearance: (appearance: Appearance) => void
+  setHideHandleWhenNamed: (hideHandleWhenNamed: boolean) => void
   setBotNameOrder: (order: NameOrder) => void
   setTextSize: (size: TextSize) => void
   setThemeChoice: (choice: ThemeChoice) => void
@@ -295,11 +315,19 @@ function persist(ns: GatewayNamespace, state: PersistedChatView): void {
     })
 }
 
-function persistAppearance(appearance: Appearance): void {
+/**
+ * Both device-level fields under `APPEARANCE_KEY`, written together.
+ *
+ * One key, two fields that change independently — `setAppearance` and
+ * `setHideHandleWhenNamed` both call this with the CURRENT value of the field
+ * they did not just change, so neither write clobbers the other's.
+ */
+function persistAppearance(blob: PersistedAppearance): void {
   writeQueue = writeQueue
-    .then(() => keyValueStore.setJson(APPEARANCE_KEY, { appearance }))
+    .then(() => keyValueStore.setJson(APPEARANCE_KEY, blob))
     .catch(() => {
-      // As above.
+      // A preference that failed to persist is a preference that resets on the
+      // next launch, which is not worth surfacing as an error.
     })
 }
 
@@ -342,6 +370,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
     perChat: {},
     appearance: DEFAULT_APPEARANCE,
     botNameOrder: DEFAULT_NAME_ORDER,
+    hideHandleWhenNamed: DEFAULT_HIDE_HANDLE_WHEN_NAMED,
     themeChoice: DEFAULT_THEME_CHOICE,
     userThemes: [],
     textSize: DEFAULT_TEXT_SIZE,
@@ -352,7 +381,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
     async hydrateAppearance() {
       const stored = await keyValueStore.getJson<PersistedAppearance>(APPEARANCE_KEY)
 
-      set({ appearance: asAppearance(stored?.appearance) ?? DEFAULT_APPEARANCE, appearanceLoaded: true })
+      set({
+        appearance: asAppearance(stored?.appearance) ?? DEFAULT_APPEARANCE,
+        hideHandleWhenNamed: asHideHandleWhenNamed(stored?.hideHandleWhenNamed) ?? DEFAULT_HIDE_HANDLE_WHEN_NAMED,
+        appearanceLoaded: true
+      })
     },
 
     async hydrate(ns) {
@@ -401,7 +434,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
       set({ appearance })
       // Its own key, and therefore its own write: it is the one preference here
       // that does not belong to a gateway.
-      persistAppearance(appearance)
+      persistAppearance({ appearance, hideHandleWhenNamed: get().hideHandleWhenNamed })
+    },
+
+    setHideHandleWhenNamed(hideHandleWhenNamed) {
+      set({ hideHandleWhenNamed })
+      // Beside `appearance` under the same key, for the reason on the field.
+      persistAppearance({ appearance: get().appearance, hideHandleWhenNamed })
     },
 
     setBotNameOrder(botNameOrder) {
@@ -505,6 +544,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
         perChat: {},
         appearance: DEFAULT_APPEARANCE,
         botNameOrder: DEFAULT_NAME_ORDER,
+        hideHandleWhenNamed: DEFAULT_HIDE_HANDLE_WHEN_NAMED,
         themeChoice: DEFAULT_THEME_CHOICE,
         userThemes: [],
         textSize: DEFAULT_TEXT_SIZE,

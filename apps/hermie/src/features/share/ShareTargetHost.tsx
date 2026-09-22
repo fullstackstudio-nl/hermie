@@ -70,6 +70,7 @@ export function ShareTargetHost({ share: delivery }: { share: ShareDelivery }) {
   }, [share])
   const avatars = useBotsStore(state => state.avatars)
   const order = useSettingsStore(state => state.botNameOrder)
+  const hideHandle = useSettingsStore(state => state.hideHandleWhenNamed)
 
   /**
    * Most recently active first, which is the widget snapshot's order and for
@@ -88,10 +89,10 @@ export function ShareTargetHost({ share: delivery }: { share: ShareDelivery }) {
         )
         .map(bot => ({
           name: bot.name,
-          label: botLabel(bot, order),
+          label: botLabel(bot, order, { hideHandle }),
           ...(avatars[bot.name] ? { avatarUri: avatars[bot.name] } : {})
         })),
-    [avatars, bots, order]
+    [avatars, bots, hideHandle, order]
   )
 
   if (!shown) {

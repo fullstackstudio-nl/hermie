@@ -229,6 +229,42 @@ describe('ChatScreen', () => {
     expect(screen.getByText('researcher')).toBeTruthy()
   })
 
+  /**
+   * HERM-110, the owner's call: the display name wins in the header outright
+   * while the setting is on, whichever order `botNameOrder` is set to — the
+   * order is what decides the second line's PRESENCE, not merely which of the
+   * two names leads.
+   */
+  it('drops the second name from the header when Hide profile name is on, in either order', async () => {
+    useBotsStore.getState().setBots([{ ...BOT, displayName: 'Netwerkbeheerder' }])
+    // 'profile' would normally lead with the handle and print the display name
+    // second; Hide profile name overrides that too.
+    useSettingsStore.getState().setBotNameOrder('profile')
+
+    renderChat()
+
+    await waitFor(() => expect(screen.getByTestId('chat-header')).toBeTruthy())
+    expect(screen.getByText('Netwerkbeheerder')).toBeTruthy()
+    await waitForGone(() => screen.queryByTestId('chat-header-handle'), 'the handle under the header name')
+  })
+
+  it('shows the handle under the header when Hide profile name is off', async () => {
+    useBotsStore.getState().setBots([{ ...BOT, displayName: 'Netwerkbeheerder' }])
+
+    renderChat()
+
+    // After the mount settles, not before: `ThemeProvider` hydrates the same
+    // device-local key on mount, and asserting past that point is what makes
+    // this the reader's own change rather than a race with it.
+    await waitFor(() => expect(screen.getByTestId('chat-header')).toBeTruthy())
+
+    act(() => {
+      useSettingsStore.getState().setHideHandleWhenNamed(false)
+    })
+
+    expect(screen.getByTestId('chat-header-handle')).toHaveTextContent('researcher')
+  })
+
   it('renders the transcript through the view settings', async () => {
     act(() => {
       useChatsStore.getState().dispatchEvent('researcher', {

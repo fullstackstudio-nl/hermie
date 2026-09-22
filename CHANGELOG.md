@@ -107,6 +107,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   value already in force costs no prompt at all. Web keeps its own notice, since there is nothing
   there to ask.
 
+- **A bot with a display name can hide its profile name everywhere it used to show beside it
+  (HERM-110).** Chats & messages has a new "Hide profile name" switch, on by default: a bot that
+  has a real display name leads with it alone — in the chat list, the chat header, the profile
+  sheet's header, memory's bot list and picker, the share sheet and a widget — whichever way the
+  Bot names order below is set. That order row is only in effect while the switch is off, and says
+  so while it is on. A bot with no display name has one name either way, and the rename field and
+  the profile's own "Profile name" fact keep showing and editing the handle regardless — the switch
+  only ever hides a SECOND name, never the only one a bot has.
+
 ### Removed
 
 - **The gateway's logs page (HERM-103).** Settings no longer has a "gateway's logs" row, and the

@@ -20,6 +20,7 @@ import { Text } from 'react-native'
 import { SETTINGS_ROUTE_NAMES, SETTINGS_ROUTES, type SettingsRouteName } from '../src/features/settings/navigation'
 import { SettingsScreen } from '../src/features/settings'
 import { useBotsStore } from '../src/store/bots'
+import { useSettingsStore } from '../src/store/settings'
 import { renderScreen, waitForGone } from './support/render'
 
 const mockEscapeListeners = new Set<() => void>()
@@ -126,6 +127,7 @@ async function open(name: SettingsRouteName) {
 beforeEach(() => {
   mockEscapeListeners.clear()
   useBotsStore.getState().reset()
+  useSettingsStore.getState().reset()
 })
 
 describe('the route registry', () => {
@@ -313,6 +315,7 @@ describe('every setting still has a home', () => {
     ['ChatsMessages', 'settings-bot-to-bot'],
     ['ChatsMessages', 'settings-thinking'],
     ['ChatsMessages', 'settings-bot-names'],
+    ['ChatsMessages', 'settings-hide-handle'],
     ['Privacy', 'settings-app-lock'],
     ['Memory', 'settings-memory'],
     ['Gateways', 'settings-gateways'],
@@ -328,5 +331,22 @@ describe('every setting still has a home', () => {
     await open(route as SettingsRouteName)
 
     await waitFor(() => expect(screen.getByTestId(testID)).toBeTruthy())
+  })
+})
+
+/** HERM-110: the order row is moot, and says so, while the switch above it is on. */
+describe('the bot-name order while Hide profile name is on', () => {
+  it('is disabled by default, and enabled once the switch is turned off', async () => {
+    await open('ChatsMessages')
+
+    expect(useSettingsStore.getState().hideHandleWhenNamed).toBe(true)
+    expect(screen.getByTestId('settings-bot-names-profile').props.accessibilityState.disabled).toBe(true)
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('settings-hide-handle'))
+    })
+
+    expect(useSettingsStore.getState().hideHandleWhenNamed).toBe(false)
+    expect(screen.getByTestId('settings-bot-names-profile').props.accessibilityState.disabled).toBe(false)
   })
 })

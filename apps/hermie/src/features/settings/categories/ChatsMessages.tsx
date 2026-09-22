@@ -42,6 +42,8 @@ export function Page() {
   const setDefaults = useSettingsStore(state => state.setDefaults)
   const botNameOrder = useSettingsStore(state => state.botNameOrder)
   const setBotNameOrder = useSettingsStore(state => state.setBotNameOrder)
+  const hideHandleWhenNamed = useSettingsStore(state => state.hideHandleWhenNamed)
+  const setHideHandleWhenNamed = useSettingsStore(state => state.setHideHandleWhenNamed)
 
   return (
     <SettingsPage route="ChatsMessages">
@@ -74,11 +76,25 @@ export function Page() {
       */}
       <InsetGroup footer={strings.settings.botNamesHint}>
         <SegmentedRow
+          disabled={hideHandleWhenNamed}
           label={strings.settings.botNames}
           onChange={(value: NameOrder) => setBotNameOrder(value)}
           options={nameOrderOptions()}
           testID="settings-bot-names"
           value={botNameOrder}
+        />
+      </InsetGroup>
+
+      {/*
+        Below the order it overrides, matching the reading order the footer
+        above points to ("below" in `botNamesHint`).
+      */}
+      <InsetGroup footer={strings.settings.hideHandleHint}>
+        <SwitchRow
+          label={strings.settings.hideHandle}
+          onChange={setHideHandleWhenNamed}
+          testID="settings-hide-handle"
+          value={hideHandleWhenNamed}
         />
       </InsetGroup>
     </SettingsPage>

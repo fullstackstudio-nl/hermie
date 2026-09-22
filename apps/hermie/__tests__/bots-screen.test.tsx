@@ -245,11 +245,14 @@ describe('the two names a bot has', () => {
   ]
 
   beforeEach(() => {
-    useSettingsStore.setState({ botNameOrder: 'profile' })
+    // Hide profile name off: these cases are about the ORDER setting, and
+    // HERM-110's override would otherwise always print the display name,
+    // masking which order is in effect.
+    useSettingsStore.setState({ botNameOrder: 'profile', hideHandleWhenNamed: false })
     useBotsStore.getState().setBots(NAMED)
   })
 
-  afterEach(() => useSettingsStore.setState({ botNameOrder: 'profile' }))
+  afterEach(() => useSettingsStore.setState({ botNameOrder: 'profile', hideHandleWhenNamed: false }))
 
   it('leads with the profile name by default, and says the display name under it', () => {
     renderScreen(<BotsScreen />)

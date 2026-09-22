@@ -1210,7 +1210,19 @@ const stringsEn = {
      */
     botNameOptions: { profile: 'Profile name', display: 'Display name' },
     botNamesHint:
-      'Which name is the large one. The profile name is what the rest of the app addresses a bot by; the display name is the label set on the gateway. A bot with only one of them shows one line.',
+      'Which name is the large one. The profile name is what the rest of the app addresses a bot by; the display name is the label set on the gateway. A bot with only one of them shows one line. Only used while Hide profile name, below, is off.',
+    /**
+     * HERM-110: the display name wins outright, order or no order.
+     *
+     * A separate switch rather than a third option on the order above, because
+     * it answers a different question — not which name leads, but whether the
+     * OTHER one is shown at all. On, a bot with a display name drops its
+     * profile name everywhere that would otherwise print both; a bot with only
+     * one name is untouched, because there is nothing to hide.
+     */
+    hideHandle: 'Hide profile name',
+    hideHandleHint:
+      'When a bot has a display name, show only that — the profile name it is otherwise shown with drops off the second line. A bot with no display name keeps its one name either way.',
     /**
      * The transcript's own type scale.
      *
