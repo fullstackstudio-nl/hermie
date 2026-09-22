@@ -163,7 +163,7 @@ const stringsEn = {
         'This gateway is not gated by an identity provider; it authenticates with the session token it prints at startup.',
       subtitleCookie:
         'The gateway hosts the sign-in page. Your browser keeps the session it hands back; Hermie never sees it.',
-      chooseProvider: 'PROVIDER',
+      chooseProvider: 'Provider',
       signInWith: (provider: string) => `Sign in with ${provider}`,
       signedInAs: (user: string) => `Signed in as ${user}`,
       signedIn: 'Signed in',
@@ -232,7 +232,7 @@ const stringsEn = {
           'Open the sign-in page in your browser, then paste the address it fails to open back here. You can go back and use the in-app page instead.',
         headersWithheld:
           'This gateway needs extra headers, and Android\u2019s in-app browser would forward them to your identity provider. Sign in in your browser instead, then paste the address it fails to open back here.',
-        fallbackLabel: 'FAILED ADDRESS',
+        fallbackLabel: 'Failed address',
         fallbackPlaceholder: 'http://127.0.0.1:38007/callback?code=…',
         fallbackHelp:
           'The browser will fail to load a 127.0.0.1 address — that is expected. Copy it out of the address bar and paste it here.',
@@ -313,7 +313,7 @@ const stringsEn = {
       // promise a keychain that is not there.
       subtitleCookie:
         'Hermie will remember this gateway in this browser. The session itself stays where the gateway put it \u2014 in a cookie Hermie cannot read.',
-      gateway: 'GATEWAY',
+      gateway: 'Gateway',
       finish: 'Start chatting',
       /** The same button after a failure: it is a retry, and it says so. */
       retry: 'Try again',
@@ -692,7 +692,7 @@ const stringsEn = {
         config: 'If the gateway moved, change the address stored here to the one it publishes as its public URL.',
         takenOver: 'Re-check reclaims the connection once the other client has let go.'
       },
-      gateway: 'GATEWAY',
+      gateway: 'Gateway',
       notSignedIn: 'Not signed in',
       recheck: 'Re-check',
       rechecking: 'Checking\u2026',
@@ -920,7 +920,7 @@ const stringsEn = {
 
   settings: {
     title: 'Settings',
-    gateway: 'GATEWAY',
+    gateway: 'Gateway',
     address: 'Address',
     /**
      * Browser build only, under the gateway's address.
@@ -936,7 +936,7 @@ const stringsEn = {
 
     /** Browser build only: the Hermie Web server this page came from. */
     webUpdate: {
-      header: 'HERMIE WEB',
+      header: 'Hermie Web',
       running: 'Running',
       state: 'Update',
       checking: 'Checking\u2026',
@@ -961,14 +961,14 @@ const stringsEn = {
      * nothing else unless they say otherwise.
      */
     notifications: {
-      header: 'NOTIFICATIONS',
+      header: 'Notifications',
       enabled: 'Notifications',
       enabledHint:
         'The Hermie plugin runs inside your gateway and sends a notification when a bot has news. Hermie Web with --push does the same job from outside, if a plugin cannot be installed.',
       denied: 'Notifications are turned off for Hermie in your device settings. Turn them on there first.',
       unavailable: 'This device cannot register for notifications. Nothing has been sent.',
       webInsecure: 'The browser only offers notifications when Hermie Web is served over https.',
-      types: 'TELL ME ABOUT',
+      types: 'Tell me about',
       typeMessage: 'New message',
       typeRequest: 'Needs input',
       typeCron: 'Routines',
@@ -1023,7 +1023,7 @@ const stringsEn = {
      * the reader has read that sentence and said yes.
      */
     context: {
-      header: 'CONTEXT',
+      header: 'Context',
       hint: 'Your bots are told who they are talking to and what you are on. It is added to the start of a conversation, not to the messages.',
       unavailable: 'A gateway has to be connected before there is anywhere to keep this.',
 
@@ -1045,7 +1045,7 @@ const stringsEn = {
       aboutPlaceholder: 'What a bot should know about you',
       aboutCount: (used: number, limit: number) => `${used} of ${limit} characters`,
 
-      device: 'THIS DEVICE',
+      device: 'This device',
       deviceHint: 'Always sent, so a bot can answer with the right time and the right language.',
       deviceModel: 'Device',
       deviceOs: 'System',
@@ -1054,7 +1054,7 @@ const stringsEn = {
       deviceLocale: 'Language',
       deviceUnknown: '—',
 
-      perBot: 'PER CONVERSATION',
+      perBot: 'Per conversation',
       perBotHint: 'A note only that bot sees, on top of everything above.',
       perBotPlaceholder: 'Nothing extra',
       perBotEmpty: 'No bots on this gateway yet.'
@@ -1071,7 +1071,7 @@ const stringsEn = {
      * editing THIS gateway's address.
      */
     gateways: {
-      header: 'GATEWAYS',
+      header: 'Gateways',
       row: 'Gateways',
       rowHint: (count: number) => (count === 1 ? 'One gateway' : `${count} gateways`),
       title: 'Gateways',
@@ -1117,7 +1117,7 @@ const stringsEn = {
       back: 'Gateways'
     },
 
-    account: 'ACCOUNT',
+    account: 'Account',
     signOut: 'Sign out',
     signOutHint: 'Clears the stored credentials and keeps the gateway address.',
     changeGateway: 'Change gateway',
@@ -1126,16 +1126,16 @@ const stringsEn = {
     changeGatewayConfirm: 'Forget this gateway and everything stored for it?',
     confirm: 'Forget it',
     keepIt: 'Keep it',
-    developer: 'DEVELOPER',
+    developer: 'Developer',
     connectionTest: 'Connection test',
     unknown: 'Unknown',
-    chat: 'CHAT',
+    chat: 'Chat',
     defaultVerbosity: 'Default verbosity',
     defaultVerbosityHint:
       'How much of a bot’s working-out a new conversation shows. A conversation with its own setting keeps it.',
     showBotToBot: 'Show bot-to-bot',
     showThinking: 'Show thinking',
-    appearance: 'APPEARANCE',
+    appearance: 'Appearance',
 
     /**
      * The language picker, and the sentence that says what it does NOT do.
@@ -1228,7 +1228,7 @@ const stringsEn = {
       reasonAccentFill: (ratio: string) =>
         `it measures ${ratio} : 1 against the surface behind it, and a mark needs 3 : 1.`
     },
-    about: 'ABOUT',
+    about: 'About',
     licences: 'Licences',
     licencesHint: 'The open-source packages Hermie is built from, and what each one asks for.',
     licencesSummary: (count: number) =>

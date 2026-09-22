@@ -135,7 +135,9 @@ describe('a screen', () => {
     render(withProviders(<AppearanceSection onOpenAdvanced={() => undefined} />))
 
     expect(screen.getByText('DARSTELLUNG')).toBeTruthy()
-    expect(screen.getByText('Sprache')).toBeTruthy()
+    // `InsetGroup` uppercases every header at render now (HERM-106), so a
+    // section header is 'SPRACHE' whatever case the string is stored in.
+    expect(screen.getByText('SPRACHE')).toBeTruthy()
     expect(screen.getByText('Nederlands')).toBeTruthy()
     expect(screen.getByText('Deutsch')).toBeTruthy()
   })

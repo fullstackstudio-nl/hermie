@@ -154,7 +154,7 @@ export const app: Translation<typeof strings> = {
           'Öffne die Anmeldeseite in deinem Browser und füge dann die Adresse, an der er scheitert, hier wieder ein. Du kannst zurückgehen und stattdessen die In-App-Seite nutzen.',
         headersWithheld:
           'Dieses Gateway braucht zusätzliche Header, und Androids In-App-Browser würde sie an deinen Identity Provider weiterreichen. Melde dich stattdessen in deinem Browser an und füge dann die Adresse, an der er scheitert, hier wieder ein.',
-        fallbackLabel: 'GESCHEITERTE ADRESSE',
+        fallbackLabel: 'Gescheiterte Adresse',
         fallbackHelp:
           'Der Browser wird eine 127.0.0.1-Adresse nicht laden können — das ist so gewollt. Kopiere sie aus der Adressleiste und füge sie hier ein.',
         fallbackSubmit: 'Diese Adresse verwenden',
@@ -545,7 +545,7 @@ export const app: Translation<typeof strings> = {
     pluginUnknown: 'Prüfe…',
 
     notifications: {
-      header: 'BENACHRICHTIGUNGEN',
+      header: 'Benachrichtigungen',
       enabled: 'Benachrichtigungen',
       enabledHint:
         'Das Hermie-Plugin läuft in deinem Gateway und sendet eine Benachrichtigung, wenn ein Bot Neues hat. Hermie Web mit --push erledigt dieselbe Aufgabe von außen, falls sich kein Plugin installieren lässt.',
@@ -553,7 +553,7 @@ export const app: Translation<typeof strings> = {
         'Benachrichtigungen sind für Hermie in deinen Geräteeinstellungen ausgeschaltet. Schalte sie zuerst dort ein.',
       unavailable: 'Dieses Gerät kann sich nicht für Benachrichtigungen registrieren. Es wurde nichts gesendet.',
       webInsecure: 'Der Browser bietet Benachrichtigungen nur an, wenn Hermie Web über https ausgeliefert wird.',
-      types: 'SAG MIR BESCHEID BEI',
+      types: 'Sag mir Bescheid bei',
       typeMessage: 'Neue Nachricht',
       typeRequest: 'Braucht Eingabe',
       typeCron: 'Routinen',
@@ -584,7 +584,7 @@ export const app: Translation<typeof strings> = {
     },
 
     context: {
-      header: 'KONTEXT',
+      header: 'Kontext',
       hint: 'Deinen Bots wird gesagt, mit wem sie sprechen und womit du unterwegs bist. Es wird an den Anfang einer Unterhaltung gesetzt, nicht an die Nachrichten.',
       unavailable: 'Es muss ein Gateway verbunden sein, damit es einen Ort dafür gibt.',
 
@@ -606,13 +606,13 @@ export const app: Translation<typeof strings> = {
       aboutPlaceholder: 'Was ein Bot über dich wissen sollte',
       aboutCount: (used: number, limit: number) => `${used} von ${limit} Zeichen`,
 
-      device: 'DIESES GERÄT',
+      device: 'Dieses Gerät',
       deviceHint: 'Wird immer gesendet, damit ein Bot mit der richtigen Zeit und der richtigen Sprache antworten kann.',
       deviceModel: 'Gerät',
       deviceTimezone: 'Zeitzone',
       deviceLocale: 'Sprache',
 
-      perBot: 'PRO UNTERHALTUNG',
+      perBot: 'Pro Unterhaltung',
       perBotHint: 'Eine Notiz, die nur dieser Bot sieht, zusätzlich zu allem oben.',
       perBotPlaceholder: 'Nichts Zusätzliches',
       perBotEmpty: 'Noch keine Bots auf diesem Gateway.'
@@ -647,7 +647,7 @@ export const app: Translation<typeof strings> = {
         'Wenn dieses Gateway nicht das ist, mit dem Hermie verbunden ist, hören seine Benachrichtigungen erst auf, wenn es das nächste Mal versucht, dieses Gerät zu erreichen — und nicht sofort.'
     },
 
-    account: 'KONTO',
+    account: 'Konto',
     signOut: 'Abmelden',
     signOutHint: 'Löscht die gespeicherten Zugangsdaten und behält die Gateway-Adresse.',
     changeGateway: 'Gateway wechseln',
@@ -656,7 +656,7 @@ export const app: Translation<typeof strings> = {
     changeGatewayConfirm: 'Dieses Gateway und alles, was dafür gespeichert ist, vergessen?',
     confirm: 'Vergessen',
     keepIt: 'Behalten',
-    developer: 'ENTWICKLER',
+    developer: 'Entwickler',
     connectionTest: 'Verbindungstest',
     unknown: 'Unbekannt',
     defaultVerbosity: 'Standard-Detailgrad',
@@ -664,7 +664,7 @@ export const app: Translation<typeof strings> = {
       'Wie viel von der Denkarbeit eines Bots eine neue Unterhaltung zeigt. Eine Unterhaltung mit eigener Einstellung behält sie.',
     showBotToBot: 'Bot-zu-Bot zeigen',
     showThinking: 'Denken zeigen',
-    appearance: 'DARSTELLUNG',
+    appearance: 'Darstellung',
 
     language: 'Sprache',
     languageFollowDevice: 'Gerät folgen',
@@ -715,7 +715,7 @@ export const app: Translation<typeof strings> = {
       reasonAccentFill: (ratio: string) =>
         `sie misst ${ratio} : 1 gegen die Fläche dahinter, und eine Markierung braucht 3 : 1.`
     },
-    about: 'ÜBER',
+    about: 'Über',
     licences: 'Lizenzen',
     licencesHint: 'Die Open-Source-Pakete, aus denen Hermie gebaut ist, und was jedes davon verlangt.',
     licencesSummary: (count: number) =>

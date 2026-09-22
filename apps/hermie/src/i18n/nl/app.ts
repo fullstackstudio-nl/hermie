@@ -149,7 +149,7 @@ export const app: Translation<typeof strings> = {
           'Open de inlogpagina in je browser en plak het adres dat hij niet kan openen hier terug. Je kunt ook terug en alsnog de in-app pagina gebruiken.',
         headersWithheld:
           'Deze gateway heeft extra headers nodig, en de in-app browser van Android zou die doorsturen naar je identity provider. Log in je browser in en plak het adres dat hij niet kan openen hier terug.',
-        fallbackLabel: 'MISLUKT ADRES',
+        fallbackLabel: 'Mislukt adres',
         fallbackHelp:
           'De browser zal een 127.0.0.1-adres niet kunnen laden — dat hoort zo. Kopieer het uit de adresbalk en plak het hier.',
         fallbackSubmit: 'Dit adres gebruiken',
@@ -533,14 +533,14 @@ export const app: Translation<typeof strings> = {
     pluginUnknown: 'Controleren…',
 
     notifications: {
-      header: 'MELDINGEN',
+      header: 'Meldingen',
       enabled: 'Meldingen',
       enabledHint:
         'De Hermie-plugin draait in je gateway en stuurt een melding zodra een bot nieuws heeft. Hermie Web met --push doet hetzelfde van buitenaf, als er geen plugin geïnstalleerd kan worden.',
       denied: 'Meldingen staan uit voor Hermie bij je apparaatinstellingen. Zet ze daar eerst aan.',
       unavailable: 'Dit apparaat kan zich niet registreren voor meldingen. Er is niets verstuurd.',
       webInsecure: 'De browser biedt alleen meldingen aan als Hermie Web via https wordt geleverd.',
-      types: 'VERTEL ME OVER',
+      types: 'Vertel me over',
       typeMessage: 'Nieuw bericht',
       typeRequest: 'Wacht op jou',
       typeCronDone: 'Een routine is klaar',
@@ -592,14 +592,14 @@ export const app: Translation<typeof strings> = {
       aboutPlaceholder: 'Wat een bot over je zou moeten weten',
       aboutCount: (used: number, limit: number) => `${used} van ${limit} tekens`,
 
-      device: 'DIT APPARAAT',
+      device: 'Dit apparaat',
       deviceHint: 'Wordt altijd meegestuurd, zodat een bot met de juiste tijd en de juiste taal kan antwoorden.',
       deviceModel: 'Apparaat',
       deviceOs: 'Systeem',
       deviceTimezone: 'Tijdzone',
       deviceLocale: 'Taal',
 
-      perBot: 'PER GESPREK',
+      perBot: 'Per gesprek',
       perBotHint: 'Een notitie die alleen die bot ziet, bovenop alles hierboven.',
       perBotPlaceholder: 'Niets extra’s',
       perBotEmpty: 'Nog geen bots op deze gateway.'
@@ -641,7 +641,7 @@ export const app: Translation<typeof strings> = {
     changeGatewayConfirm: 'Deze gateway en alles wat ervoor bewaard is vergeten?',
     confirm: 'Vergeten',
     keepIt: 'Behouden',
-    developer: 'ONTWIKKELAAR',
+    developer: 'Ontwikkelaar',
     connectionTest: 'Verbindingstest',
     unknown: 'Onbekend',
     defaultVerbosity: 'Standaard detailniveau',
@@ -649,7 +649,7 @@ export const app: Translation<typeof strings> = {
       'Hoeveel van het denkwerk van een bot een nieuw gesprek toont. Een gesprek met een eigen instelling houdt die.',
     showBotToBot: 'Toon bot-naar-bot',
     showThinking: 'Toon denkwerk',
-    appearance: 'WEERGAVE',
+    appearance: 'Weergave',
 
     language: 'Taal',
     languageFollowDevice: 'Volg apparaat',
@@ -700,7 +700,7 @@ export const app: Translation<typeof strings> = {
       reasonAccentFill: (ratio: string) =>
         `hij meet ${ratio} : 1 tegen het oppervlak erachter, en een markering heeft 3 : 1 nodig.`
     },
-    about: 'OVER',
+    about: 'Over',
     licences: 'Licenties',
     licencesHint: 'De open source-pakketten waaruit Hermie is opgebouwd, en wat elk daarvan vraagt.',
     licencesSummary: (count: number) =>

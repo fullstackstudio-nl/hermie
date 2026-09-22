@@ -31,10 +31,21 @@ export function InsetGroup({ header, footer, children, style, ...rest }: InsetGr
           // like and now what it is: level 2 under the title's 1.
           aria-level={2}
           color="textMuted"
-          style={{ marginLeft: theme.space.lg, letterSpacing: 0.6 }}
-          variant="meta"
+          style={{ marginLeft: theme.space.lg }}
+          variant="micro"
         >
-          {header}
+          {/*
+            Casing lives HERE, not in the string. `header` used to be typed in
+            capitals by whichever caller wanted the look — 'GATEWAY', 'ACCOUNT'
+            — and left in sentence case by whichever caller did not, which is
+            the whole of HERM-106: two screens side by side, one shouting and
+            one not. `toLocaleUpperCase` is a locale-aware uppercase rather than
+            a text-transform, because a text-transform runs on the DEVICE'S
+            locale rather than the app's own language setting, and the two can
+            disagree — a Turkish device would uppercase an English "i" to "İ"
+            under `text-transform: uppercase` on the STYLE, not on the string.
+          */}
+          {header.toLocaleUpperCase()}
         </Text>
       ) : null}
 

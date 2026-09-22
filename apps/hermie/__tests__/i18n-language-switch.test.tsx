@@ -54,7 +54,9 @@ describe('the picker in Settings → Appearance', () => {
     expect(useLanguageStore.getState().locale).toBe('nl')
     // The group re-rendered because it reads the store, and its own header came
     // back in Dutch. The rest of the screen needs the root subscription below.
-    expect(screen.getByText('Taal')).toBeTruthy()
+    // `InsetGroup` uppercases every header at render (HERM-106), so the
+    // rendered text is 'TAAL' even though the string itself is `Taal`.
+    expect(screen.getByText('TAAL')).toBeTruthy()
   })
 
   it('starts on "follow the device"', () => {

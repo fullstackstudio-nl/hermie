@@ -102,7 +102,9 @@ describe('the New-bot sheet picks a model on a page', () => {
     }
 
     // The provider heads a section instead of being repeated on every row.
-    for (const provider of ['Acme', 'Globex', 'Initech']) {
+    // `InsetGroup` uppercases every header at render (HERM-106), whatever the
+    // section's own name is stored as.
+    for (const provider of ['ACME', 'GLOBEX', 'INITECH']) {
       expect(screen.getByText(provider)).toBeTruthy()
     }
 

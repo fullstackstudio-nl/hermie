@@ -98,7 +98,9 @@ describe('a screen', () => {
     render(withProviders(<AppearanceSection onOpenAdvanced={() => undefined} />))
 
     expect(screen.getByText('WEERGAVE')).toBeTruthy()
-    expect(screen.getByText('Taal')).toBeTruthy()
+    // `InsetGroup` uppercases every header at render now (HERM-106), so a
+    // section header is 'TAAL' whatever case the string is stored in.
+    expect(screen.getByText('TAAL')).toBeTruthy()
     // The languages still name themselves, in every language.
     expect(screen.getByText('Nederlands')).toBeTruthy()
     expect(screen.getByText('Deutsch')).toBeTruthy()
