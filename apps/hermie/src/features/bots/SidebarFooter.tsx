@@ -1,6 +1,11 @@
 /**
- * The bottom of the chat list: a four-tab glass strip, and nothing else, on
- * every layout.
+ * The bottom of the chat list: who you are signed in as, and — where the list
+ * owns the four destinations — the tab strip under it.
+ *
+ * The strip is drawn only when somebody hands in `onOpenSection`, which on the
+ * compact shell nobody does any more: the four destinations are a real tab
+ * navigator there and the shell draws one bar under every tab root. The strip
+ * itself lives in `ui/chrome/TabBar.tsx` with the bar it is the other half of.
  *
  * The compose button the mockup does not have is deliberate — there is one
  * canonical chat per bot and you never create a conversation (ADR-0007), so the
@@ -20,12 +25,11 @@
  * `SidebarIdentity` draws itself or nothing, so a gateway with no accounts —
  * and every screen that has no gateway in scope at all — is unchanged.
  */
-import { Pressable, View } from 'react-native'
+import { View } from 'react-native'
 
 import { strings } from '../../i18n/strings'
-import { Icon, ICON_SIZE, type IconName } from '../../ui/Icon'
-import { Text } from '../../ui/primitives'
-import { useTheme } from '../../ui/theme'
+import { TabStrip } from '../../ui/chrome'
+import { type IconName } from '../../ui/Icon'
 import { SidebarIdentity } from './SidebarIdentity'
 
 export type BotsSection = 'activity' | 'cron' | 'settings'
@@ -69,82 +73,29 @@ export function SidebarFooter({
   onSignOut
 }: {
   current?: TabKey
-  onOpenSection: (section: BotsSection) => void
+  /**
+   * Where a tab goes. ABSENT on the compact shell, and that absence is the
+   * whole of "BotsScreen stops rendering the strip": the four destinations are
+   * a real tab navigator there and the shell draws one bar under every tab
+   * root, so a second strip inside the list would be the same four places
+   * twice. The identity row above it stays, because who you are signed in as
+   * is a property of this list rather than of the tabs.
+   */
+  onOpenSection?: ((section: BotsSection) => void) | undefined
   /** Passed through to the identity row; absent means it draws no way out. */
   onSignOut?: (() => void) | undefined
 }) {
   return (
     <View>
       <SidebarIdentity onSignOut={onSignOut} />
-      <TabStrip current={current} onOpenSection={onOpenSection} />
-    </View>
-  )
-}
-
-function TabStrip({ current, onOpenSection }: { current: TabKey; onOpenSection: (section: BotsSection) => void }) {
-  const theme = useTheme()
-
-  return (
-    <View
-      // A sunk track with a raised slot for the current tab. Level 3: a tint and
-      // a hairline, never a blur of its own.
-      style={{
-        backgroundColor: theme.tintSunk,
-        borderColor: theme.hairlineSoft,
-        borderRadius: theme.radii.inset,
-        borderWidth: 1,
-        flexDirection: 'row',
-        marginHorizontal: theme.space.md,
-        marginVertical: theme.space.sm,
-        padding: 3
-      }}
-    >
-      {tabs().map(tab => {
-        const selected = tab.key === current
-
-        return (
-          <Pressable
-            // Named explicitly, although the label is right there under the mark.
-            // Name-from-content is allowed for `tab` and Chrome does compute it,
-            // and a second reader on the same page returned four tabs with no
-            // name at all. The label is the visible text, character for
-            // character, so the two can never drift apart.
-            accessibilityLabel={tab.label}
-            accessibilityRole="tab"
-            aria-selected={selected}
-            key={tab.key}
-            onPress={() => (tab.key === 'chats' ? undefined : onOpenSection(tab.key))}
-            style={{
-              alignItems: 'center',
-              backgroundColor: selected ? theme.elevation.e3 : 'transparent',
-              borderRadius: 9,
-              flex: 1,
-              gap: 2,
-              paddingHorizontal: 2,
-              paddingVertical: 6
-            }}
-            testID={`tab-${tab.key}`}
-          >
-            {/*
-              One drawn size for all four marks, and one SLOT around each of them
-              so the labels sit on one line whatever the mark's own weight wants.
-              The icon is decorative and `Icon` hides itself from the tree — with
-              `aria-hidden` as well as the two native props, which is what makes
-              that true in a browser — so the tab is not announced twice.
-            */}
-            <Icon
-              color={selected ? theme.colors.text : theme.colors.textMuted}
-              name={tab.icon}
-              size={ICON_SIZE.tab}
-              slot={ICON_SIZE.tabSlot}
-              testID={`tab-icon-${tab.key}`}
-            />
-            <Text color={selected ? 'text' : 'textMuted'} numberOfLines={1} variant="micro">
-              {tab.label}
-            </Text>
-          </Pressable>
-        )
-      })}
+      {onOpenSection ? (
+        <TabStrip
+          current={current}
+          items={tabs()}
+          // `chats` is where the strip already is, so it opens nothing.
+          onSelect={key => (key === 'chats' ? undefined : onOpenSection(key as BotsSection))}
+        />
+      ) : null}
     </View>
   )
 }

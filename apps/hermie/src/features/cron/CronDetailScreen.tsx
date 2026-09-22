@@ -39,6 +39,14 @@ import { cronStrings } from './strings'
 export interface CronDetailScreenProps {
   controller: CronController | null
   job: CronJob
+  /**
+   * What the page's one back control says, when it is not the crons list.
+   *
+   * The list is the usual page underneath, so the label defaults to it. A cron
+   * opened straight from a card in a transcript has no list underneath: the
+   * chat is what `onClose` returns to, and the button has to say so.
+   */
+  backLabel?: string
   onClose: () => void
   onOpenRun: (run: CronRun) => void
   onEdit: (job: CronJob) => void
@@ -46,7 +54,15 @@ export interface CronDetailScreenProps {
   onDeleted: () => void
 }
 
-export function CronDetailScreen({ controller, job, onClose, onOpenRun, onEdit, onDeleted }: CronDetailScreenProps) {
+export function CronDetailScreen({
+  controller,
+  job,
+  backLabel,
+  onClose,
+  onOpenRun,
+  onEdit,
+  onDeleted
+}: CronDetailScreenProps) {
   const theme = useTheme()
   const detail = useCronStore(state => state.details[job.id]) ?? job
   const runs = useCronStore(state => state.runs[job.id])
@@ -278,7 +294,7 @@ export function CronDetailScreen({ controller, job, onClose, onOpenRun, onEdit, 
       </BottomSheet>
 
       <PageChrome
-        back={{ label: cronStrings.title, onPress: onClose }}
+        back={{ label: backLabel ?? cronStrings.title, onPress: onClose }}
         onHeightChange={setChromeHeight}
         subtitle={scheduleText(detail.schedule)}
         title={detail.name}

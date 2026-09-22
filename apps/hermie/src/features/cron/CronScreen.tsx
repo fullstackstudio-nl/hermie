@@ -65,9 +65,19 @@ export interface CronScreenProps {
   initialCreate?: boolean
   /** Absent on a tab root — both shells mount this as one, so neither passes it. */
   back?: PageChromeBack
+  /**
+   * This mount is ONE cron, not the list with a cron open on top of it.
+   *
+   * What a cron card in a transcript pushes. The reader came from a chat and
+   * `back` returns to that chat, so there is no list underneath to close the
+   * detail onto — and a detail that could close onto one would leave them on a
+   * crons list they never asked for, with a back button pointing at a chat.
+   * Needs `initialJobId`; without one there is nothing to show.
+   */
+  detailOnly?: boolean
 }
 
-export function CronScreen({ back, initialCreate, initialJobId }: CronScreenProps = {}) {
+export function CronScreen({ back, detailOnly = false, initialCreate, initialJobId }: CronScreenProps = {}) {
   const controller = useCronController()
   const jobs = useCronStore(state => state.jobs)
   const loading = useCronStore(state => state.loading)
@@ -224,13 +234,22 @@ export function CronScreen({ back, initialCreate, initialJobId }: CronScreenProp
   }
 
   if (view.screen !== 'list' && selected) {
+    /*
+      Where the detail's own back goes. On the list mount it goes to the list,
+      which is the page under it; on a `detailOnly` mount there is no such page
+      and the shell's `back` — the chat the card was in — is the only way out.
+    */
+    const closeDetail =
+      detailOnly && back ? back : { label: cronStrings.title, onPress: () => setView({ screen: 'list' }) }
+
     return (
       <>
         <CronDetailScreen
+          backLabel={closeDetail.label}
           controller={controller}
           job={selected}
-          onClose={() => setView({ screen: 'list' })}
-          onDeleted={() => setView({ screen: 'list' })}
+          onClose={closeDetail.onPress}
+          onDeleted={closeDetail.onPress}
           onEdit={job => {
             setSaveError(null)
             setEditing({ open: true, job })

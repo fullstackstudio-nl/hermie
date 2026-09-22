@@ -11,6 +11,7 @@ import { BoardsHost, KanbanScreen } from '../features/kanban'
 import { SettingsScreen } from '../features/settings'
 import { requestIntentRun } from '../features/intents'
 import { requestShareDelivery } from '../features/share'
+import { chatStrings } from '../chat-ui/strings'
 import { strings } from '../i18n/strings'
 import { useChatLinkOpener } from './chat-link'
 import { useHermieLink } from '../platform/deep-link'
@@ -475,8 +476,11 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
                   <KanbanScreen backLabel={titleFor(boards.from) || strings.tabs.chats} onClose={closeBoards} />
                 ) : conversations?.id ? (
                   <ConversationViewScreen
+                    back={{
+                      label: chatStrings.sessions.conversations,
+                      onPress: () => setConversations({ bot: conversations.bot })
+                    }}
                     botName={conversations.bot}
-                    onBack={() => setConversations({ bot: conversations.bot })}
                     onOpenChat={openBot}
                     storedId={conversations.id}
                   />

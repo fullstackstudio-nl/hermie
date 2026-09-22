@@ -37,7 +37,7 @@ import { CANONICAL_CHAT_TITLE } from '../bots/bots-controller'
 import { useBotsStore, useBotDisplayName } from '../../store/bots'
 import { useChatsStore } from '../../store/chats'
 import { useChatView } from '../../store/settings'
-import { PageChrome } from '../../ui/chrome'
+import { PageChrome, type PageChromeBack } from '../../ui/chrome'
 import { Screen, Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { CONTROL_MIN_HEIGHT } from '../../ui/tokens'
@@ -51,10 +51,19 @@ export interface ConversationViewScreenProps {
   storedId: string
   /** Back to the bot's own Bot Chat, which is what the banner offers. */
   onOpenChat?: (botName: string) => void
-  onBack?: () => void
+  /**
+   * The way out, LABELLED by whoever pushed this page.
+   *
+   * A label rather than a bare `onBack`, because this page is reached from two
+   * different places: the bot's list of other conversations, and a notice in
+   * the chat itself that names one branch. It used to say "Conversations"
+   * either way, which on the second path is a button that names a page the
+   * reader was never on and does not return to.
+   */
+  back?: PageChromeBack
 }
 
-export function ConversationViewScreen({ botName, onBack, onOpenChat, storedId }: ConversationViewScreenProps) {
+export function ConversationViewScreen({ botName, back, onOpenChat, storedId }: ConversationViewScreenProps) {
   const theme = useTheme()
   const runtime = useChatRuntime()
   const bot = useBotsStore(state => state.byName[botName])
@@ -115,7 +124,7 @@ export function ConversationViewScreen({ botName, onBack, onOpenChat, storedId }
         </Text>
         <Pressable
           accessibilityRole="button"
-          onPress={() => (onOpenChat ? onOpenChat(botName) : onBack?.())}
+          onPress={() => (onOpenChat ? onOpenChat(botName) : back?.onPress())}
           testID="conversation-view-back-to-main"
         >
           <Text color="accentText" variant="preview">
@@ -137,11 +146,7 @@ export function ConversationViewScreen({ botName, onBack, onOpenChat, storedId }
 
       <TranscriptList items={items} />
 
-      <PageChrome
-        {...(onBack ? { back: { label: chatStrings.sessions.conversations, onPress: onBack } } : {})}
-        onHeightChange={setChromeHeight}
-        title={display ?? botName}
-      />
+      <PageChrome {...(back ? { back } : {})} onHeightChange={setChromeHeight} title={display ?? botName} />
     </Screen>
   )
 }

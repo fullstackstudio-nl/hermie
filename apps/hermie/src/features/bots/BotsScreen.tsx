@@ -1514,13 +1514,20 @@ export function BotsScreen({
         </Text>
       ) : null}
 
-      {onOpenSection ? (
-        <SidebarFooter
-          current={currentTab}
-          onOpenSection={onOpenSection}
-          {...(signOut ? { onSignOut: () => void signOut() } : {})}
-        />
-      ) : null}
+      {/*
+        Unconditional, where it used to be gated on `onOpenSection`. The footer
+        is two things and only one of them is the tab strip: the identity row
+        above it is who this device is signed in as, which is true of the list
+        whether or not the list is also the place the four destinations are
+        reached from. `SidebarFooter` draws the strip only when there is
+        somewhere to send it, and `SidebarIdentity` draws nothing at all where
+        there is no account — so a screen with neither is unchanged.
+      */}
+      <SidebarFooter
+        current={currentTab}
+        {...(onOpenSection ? { onOpenSection } : {})}
+        {...(signOut ? { onSignOut: () => void signOut() } : {})}
+      />
 
       {menuFor ? (
         /*
