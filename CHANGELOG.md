@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A chat opened the next morning no longer shows yesterday twice.** An approval you
+  answered yesterday is kept in the offline cache, and the transcript is painted from that
+  cache before the history comes back. Folding the history in put the answered card
+  *behind* every row it brought — including this morning's — so the thread read `Today`,
+  two messages, `Yesterday`, the old "Allowed once" card, and `Today` again above the next
+  message. A settled question is now put back into the moment it was answered in. A question
+  still waiting on you is not: it stays at the bottom, where it is being asked.
 - **Slash completion works against a gateway from before `session_id`.** Hermes 0.21.3's
   own contract for `complete.slash` takes `text` alone and validates its parameters
   strictly, so the session the app started naming for project-local skills made the older

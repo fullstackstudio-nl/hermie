@@ -9945,3 +9945,68 @@ a listing, and the memory graph is the screen that puts them all on one page.
 navigator`. A real launch always has the list underneath; this is an artefact
   of the screenshot door, not a defect in the app.
 - **Nothing was verified on Android, on the Mac or in a browser this round.**
+
+## Round R21: a card from yesterday, and a pill measured on the wrong line (2026-09-22)
+
+### `Today · Yesterday · Today`, and the sequence that produces it
+
+The report was a screenshot: a divider reading **TODAY**, a message at 09:32 and
+its reply, then a divider reading **YESTERDAY** over an answered approval row
+(`Allowed once · sudo -n docker compose down …`), then **TODAY** again over the
+09:33 message. One day, two stamps, with the day before wedged between them.
+
+`layoutRows` was not the culprit and could not have been. It stamps a date
+wherever the day changes between NEIGHBOURS, which is the only thing a single
+pass over a list can honestly say — hand it an order that goes forwards,
+backwards and forwards again and it will report exactly that, twice. The bug was
+the order, and it is reproduced from the real sequence in
+`packages/transcript/src/request-order.test.ts`:
+
+1. **Day 1.** A turn runs, an approval is asked and answered. `applyServerRequest`
+   stamps the card `ts: now/1000`, so it carries yesterday's clock.
+2. **The cache takes it.** `snapshotForCache` keeps everything but an _open_
+   request, so an ANSWERED card is cached like any other row — correctly: it is
+   part of what was said.
+3. **Day 2, cold open.** `paintFromCache` puts the thread on screen with the card
+   at the end of it, which is where it belongs, because it is still the end.
+4. **The resume's history lands.** `reconcile` folds in every persisted row —
+   day 1's, and this morning's new turn. The card is not persisted and never can
+   be (`isEphemeral`), so it is _kept_ — and kept was implemented as
+   `[...merged, ...kept]`, which appends it behind every row the hydration
+   brought back, this morning's included.
+5. **The owner types.** `beginLocalTurn` appends after that.
+
+Order: day 1, this morning, yesterday's card, 09:33. Two `TODAY`s with a
+`YESTERDAY` in the middle, precisely.
+
+**The fix is a distinction, not a sort.** An OPEN request and an ANSWERED one are
+different objects. An open one is being asked _now_: it belongs at the tail
+whatever timestamp it carries, because that is where the reader is looking and
+what the turn is waiting on. A settled one is a line in the transcript like any
+other and belongs in the moment it happened. So `reconcile` splits its kept
+items, and a settled request with a `ts` is placed in front of the first item
+strictly newer than it (`placeByTimestamp`); everything else keeps the behaviour
+it had.
+
+Deliberately **not** a sort of the transcript by `ts`. Streaming bubbles, interim
+notes and optimistic submits each have ordering rules of their own that a
+timestamp knows nothing about — the duplicate-turn tests are those rules written
+down — and re-sorting the whole list would overrule every one of them. Items
+with no timestamp are stepped over rather than moved, for the same reason
+`inRowOrder` lets them inherit the position their neighbours gave them.
+
+### Verified, and not
+
+- **Gates:** `npm run typecheck`, `npx eslint .`, `npx prettier --check .`,
+  `npx vitest run` (84 files, 1618 tests) and `apps/hermie` Jest (231 suites,
+  2972 tests) all green.
+- **Item 1 is verified against the real sequence, not against a hand-built
+  state.** The test goes through `reconcile` → `applyServerRequest` →
+  `answerRequest` → `snapshotForCache` → `stateFromCache` → `reconcile` →
+  `beginLocalTurn`, and asserts both the card's position and that every item
+  carrying a gateway timestamp is in ascending order.
+- **Not addressed: `applyServerRequest` still mints a fresh card when an
+  ANSWERED one is replayed under the same `srq-N`.** That is deliberate — the
+  gateway restarts that counter per process, and the guard that dropped the new
+  question was itself a bug — but it means a replayed request can stand beside
+  the answered card it resembles.

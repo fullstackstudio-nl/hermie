@@ -45,6 +45,62 @@ const matchKeyOf = (item: TranscriptItem): string => `${item.kind}\n${itemMatchK
 const isEphemeral = (item: TranscriptItem): boolean => item.kind === 'approval' || item.kind === 'clarify'
 
 /**
+ * A request the reader has already settled.
+ *
+ * It is the difference between a question and a record of one, and the two
+ * belong in different places. An OPEN request is being asked NOW: it stands at
+ * the tail whatever timestamp it carries, because that is where the reader is
+ * looking and where the turn is waiting. An ANSWERED or CANCELLED one is a line
+ * in the transcript like any other, and its place is the moment it happened.
+ *
+ * Which is the whole of the owner's report. A card answered yesterday is cached
+ * (`cache.ts` keeps everything but an open request), painted on a cold open, and
+ * then survives the history re-hydration as an item history can never re-supply
+ * — and was appended BEHIND every row that hydration brought back, including
+ * this morning's. `layoutRows` stamps a date wherever the day changes between
+ * neighbours, so the reader got `TODAY`, yesterday's card, and `TODAY` again.
+ */
+const isSettledRequest = (item: TranscriptItem): boolean =>
+  (item.kind === 'approval' || item.kind === 'clarify') && item.state !== 'open'
+
+/**
+ * Put items that carry their own moment back into it, rather than at the end.
+ *
+ * Only for the handful of items a re-hydration keeps without being able to place
+ * them: they have no row id, so `inRowOrder` has nothing to sort them by, and
+ * the timestamp they were created with is the only thing that says where they
+ * belong. Each one goes in front of the first item that is strictly NEWER than
+ * it; an item carrying no timestamp of its own is passed over, because its
+ * position is the one its neighbours gave it. Nothing newer than the whole list
+ * moves at all, which is the ordinary live case — a card answered a moment ago
+ * still lands at the tail, exactly as it did before.
+ *
+ * Deliberately not a sort of the transcript. A streaming bubble, an interim note
+ * and an optimistic submit each have ordering rules of their own that a
+ * timestamp does not know about, and re-sorting the whole list by `ts` would
+ * overrule every one of them.
+ */
+function placeByTimestamp(list: readonly TranscriptItem[], floating: readonly TranscriptItem[]): TranscriptItem[] {
+  const placed = [...list]
+
+  for (const item of floating) {
+    const ts = item.ts
+
+    if (ts === undefined) {
+      placed.push(item)
+
+      continue
+    }
+
+    const newer = placed.findIndex(other => other.ts !== undefined && other.ts > ts)
+
+    placed.splice(newer < 0 ? placed.length : newer, 0, item)
+  }
+
+  return placed
+}
+
+/**
  * A row that opens a turn, and therefore names the author a foreign
  * `message.start` placeholder is standing in for.
  *
@@ -324,6 +380,8 @@ export function reconcile(state: ChatState, freshItems: readonly TranscriptItem[
 
   const lastUsedIndex = state.order.reduce((last, id, index) => (used.has(id) ? index : last), -1)
   const kept: TranscriptItem[] = []
+  /** Kept, but with a moment of their own to be put back into — see `placeByTimestamp`. */
+  const settled: TranscriptItem[] = []
 
   state.order.forEach((id, index) => {
     const item = state.items[id]
@@ -332,12 +390,20 @@ export function reconcile(state: ChatState, freshItems: readonly TranscriptItem[
       return
     }
 
-    if (isEphemeral(item) || (item.origin !== 'history' && index > lastUsedIndex)) {
-      kept.push(item)
+    if (!isEphemeral(item) && !(item.origin !== 'history' && index > lastUsedIndex)) {
+      return
     }
+
+    if (isSettledRequest(item) && item.ts !== undefined) {
+      settled.push(item)
+
+      return
+    }
+
+    kept.push(item)
   })
 
-  const next = rebuild(state, [...merged, ...kept])
+  const next = rebuild(state, placeByTimestamp([...merged, ...kept], settled))
 
   next.hydration = 'live'
 
