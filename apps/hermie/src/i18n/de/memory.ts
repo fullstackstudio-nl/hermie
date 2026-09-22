@@ -17,7 +17,8 @@ export const memory: Translation<typeof memoryStrings> = {
   forBot: (name: string) => `Gedächtnis von ${name}`,
 
   tabs: {
-    entries: 'Einträge'
+    entries: 'Einträge',
+    raw: 'Roh'
   },
 
   // `sections` keeps MEMORY and USER: the two headers name MEMORY.md and
@@ -86,6 +87,12 @@ export const memory: Translation<typeof memoryStrings> = {
     truncated: (shown: number, total: number) =>
       `${shown} von ${total} Einträgen. Der Rest ist nicht auf dieser Seite der Karte.`,
     dropped: (count: number) => `${count} weitere Knoten wurden nicht gezeichnet.`,
+    full: {
+      open: 'Im Vollbild öffnen',
+      title: 'Gedächtniskarte',
+      close: 'Schließen',
+      dismiss: 'Die Karte schließen'
+    },
     detail: {
       profile: 'Dieser Bot',
       topic: 'Thema',
@@ -97,6 +104,19 @@ export const memory: Translation<typeof memoryStrings> = {
       open: 'In der Liste zeigen',
       close: 'Schließen'
     }
+  },
+
+  raw: {
+    loading: 'Es wird gelesen, was jedes Backend enthält…',
+    readOnly: 'Nur lesen. Einträge werden im Reiter Einträge bearbeitet.',
+    emptyDocument: 'Dieses hier ist leer.',
+    truncated: 'Das Gateway hat nur den Anfang davon geschickt.',
+    chars: (chars: number) => `${chars} ${chars === 1 ? 'Zeichen' : 'Zeichen'}`,
+    unavailable: 'Dieses Backend gibt es auf diesem Gateway nicht.',
+    notListable: 'Dieses Backend kann nicht sagen, was es enthält.',
+    none: 'Dieses Gateway hat kein Gedächtnis-Backend genannt.',
+    missing: 'Das Hermie-Plugin dieses Gateways liefert kein rohes Gedächtnis aus.',
+    missingHint: 'Aktualisiere das Plugin auf der Maschine, die das Gateway ausführt:'
   },
 
   providers: {

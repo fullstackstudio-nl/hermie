@@ -23,7 +23,8 @@ export const memory: Translation<typeof memoryStrings> = {
     entries: 'Notities',
     // De afbeelding heet in de app een kaart ("Een kaart van dit geheugen"),
     // en "Graaf" leest als wiskunde.
-    graph: 'Kaart'
+    graph: 'Kaart',
+    raw: 'Ruw'
   },
 
   // Deze twee koppen worden ook ingevuld in `usageLabel` en `add.label`
@@ -92,6 +93,12 @@ export const memory: Translation<typeof memoryStrings> = {
     truncated: (shown: number, total: number) =>
       `${shown} van ${total} notities te zien. De rest staat niet op deze pagina van de kaart.`,
     dropped: (count: number) => `Er zijn nog ${count} knooppunten weggelaten uit de tekening.`,
+    full: {
+      open: 'Schermvullend openen',
+      title: 'Geheugenkaart',
+      close: 'Sluiten',
+      dismiss: 'De kaart sluiten'
+    },
     detail: {
       profile: 'Deze bot',
       topic: 'Onderwerp',
@@ -101,6 +108,19 @@ export const memory: Translation<typeof memoryStrings> = {
       open: 'Toon in de lijst',
       close: 'Sluiten'
     }
+  },
+
+  raw: {
+    loading: 'Lezen wat elke backend bewaart…',
+    readOnly: 'Alleen lezen. Notities pas je aan op het tabblad Notities.',
+    emptyDocument: 'Deze is leeg.',
+    truncated: 'De gateway stuurde alleen het begin hiervan.',
+    chars: (chars: number) => `${chars} ${chars === 1 ? 'teken' : 'tekens'}`,
+    unavailable: 'Deze backend is niet beschikbaar op deze gateway.',
+    notListable: 'Deze backend kan niet zeggen wat hij bewaart.',
+    none: 'Deze gateway noemde geen enkele geheugenbackend.',
+    missing: 'De Hermie-plugin van deze gateway serveert geen ruw geheugen.',
+    missingHint: 'Werk de plugin bij op de machine die de gateway draait:'
   },
 
   providers: {

@@ -41,6 +41,7 @@ import { memoryGraphOf } from './graph-model'
 import {
   type MemoryEntry,
   memoryListingOf,
+  memoryRawOf,
   memorySearchOf,
   type MemoryTarget,
   type MemoryWriteAnswer,
@@ -190,6 +191,88 @@ export class MemoryController {
       if (this.current(mine)) {
         this.store.getState().setGraphLoading(false)
         this.store.getState().setNotice(asRouteError(failure).message)
+      }
+    }
+  }
+
+  /**
+   * `GET …/memory/raw` — a route the plugin does not have yet.
+   *
+   * The four that exist are `list`, `search`, `graph` and `edit`, and none of
+   * them answers "what is actually stored". `list` is the parsed view: entries
+   * split on the store's `"\n§\n"` delimiter, which is enough to browse and not
+   * enough to SEE the file — a heading, a stray blank line or a delimiter that
+   * ended up inside an entry are all invisible in it. And for an external
+   * provider there is nothing at all: `list` names mem0 and says
+   * `enumerable: false`, which tells a reader it exists and nothing about what
+   * it holds.
+   *
+   * So the contract below is specified here, served by the fake gateway, and
+   * read by the tab. A gateway whose plugin predates it answers 404, which
+   * `isMissingRoute` turns into the tab's own "this gateway cannot show this"
+   * rather than into an error banner over the rest of the page.
+   *
+   * ```
+   * GET /api/plugins/hermie/memory/raw?profile=<name>[&backend=<name>]
+   *
+   * 200 {
+   *   "profile": "researcher",
+   *   "backends": [
+   *     {
+   *       "name": "builtin",
+   *       "label": "MEMORY.md and USER.md",
+   *       "available": true,
+   *       "editable": true,
+   *       "note": null,
+   *       "documents": [
+   *         { "id": "memory", "label": "MEMORY.md", "content": "<as stored>",
+   *           "chars": 412, "truncated": false },
+   *         { "id": "user", "label": "USER.md", "content": "<as stored>",
+   *           "chars": 96, "truncated": false }
+   *       ]
+   *     },
+   *     {
+   *       "name": "mem0", "label": "mem0 (cloud)",
+   *       "available": true, "editable": false, "documents": [],
+   *       "note": "mem0 offers no call that lists what it holds."
+   *     }
+   *   ]
+   * }
+   *
+   * 400 an unknown `backend`, or a profile that is pathlike — as `list` already does
+   * 403 `memory.browse` switched off for this profile — the same sentence `list` gives
+   * 404 the plugin does not serve raw memory
+   * ```
+   *
+   * `backend` narrows to one and is not sent here: the tab shows every backend
+   * the gateway has, because "what is at mem0" is half of the question being
+   * asked and a picker would hide the half nobody thought to look at.
+   */
+  async loadRaw(): Promise<void> {
+    const mine = ++this.generation
+
+    this.store.setState({ rawLoading: true, rawMissing: false })
+
+    try {
+      const body = await this.get(`${MEMORY_ROUTE}/raw?profile=${encodeURIComponent(this.profile)}`)
+
+      if (this.current(mine)) {
+        this.store.getState().setRaw(memoryRawOf(body))
+      }
+    } catch (failure) {
+      if (!this.current(mine)) {
+        return
+      }
+
+      const routeError = asRouteError(failure)
+
+      if (isMissingRoute(routeError.status)) {
+        // Not an error banner: a gateway without the route is a gateway with
+        // one fewer tab's worth of content, which is the whole of the gate.
+        this.store.getState().setRawMissing()
+      } else {
+        this.store.getState().setRawLoading(false)
+        this.store.getState().setNotice(routeError.message)
       }
     }
   }

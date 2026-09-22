@@ -46,6 +46,8 @@ import { useEscapeKey } from '../../ui/useEscapeKey'
 import { useTheme } from '../../ui/theme'
 import { MemoryEntryRow } from './MemoryEntryRow'
 import type { MemoryGraph as MemoryGraphType, MemoryGraphNode } from './graph-model'
+import { MemoryGraphFullScreen } from './MemoryGraphFullScreen'
+import { MemoryRawTab } from './MemoryRawTab'
 import { MemoryGraphView } from './MemoryGraphView'
 import { MemoryNodeCard } from './MemoryNodeCard'
 import { MemoryUsageBar } from './MemoryUsageBar'
@@ -87,11 +89,16 @@ export function MemoryScreen({ profile, title, onClose, testID = 'memory' }: Mem
   const results = useMemoryStore(state => state.results)
   const graph = useMemoryStore(state => state.graph)
   const graphLoading = useMemoryStore(state => state.graphLoading)
+  const raw = useMemoryStore(state => state.raw)
+  const rawLoading = useMemoryStore(state => state.rawLoading)
+  const rawMissing = useMemoryStore(state => state.rawMissing)
 
   const [tab, setTab] = useState<MemoryTab>('entries')
   const [selected, setSelected] = useState<MemoryGraphNode | null>(null)
   /** The entry the map sent us to, lit until the reader touches something else. */
   const [highlighted, setHighlighted] = useState<string | null>(null)
+  /** The graph with the window to itself, opened from the card's own button. */
+  const [fullGraph, setFullGraph] = useState(false)
   const scroller = useRef<ScrollView | null>(null)
   /** Entry id → the row's own view, so it can be measured against the scroller. */
   const rows = useRef<Record<string, View | null>>({})
@@ -106,10 +113,25 @@ export function MemoryScreen({ profile, title, onClose, testID = 'memory' }: Mem
     if (tab === 'graph' && controller) {
       void controller.loadGraph()
     }
+
+    // Same rule as the graph's: a third read of the same files, asked for only
+    // by a reader who opened the tab that shows it.
+    if (tab === 'raw' && controller) {
+      void controller.loadRaw()
+    }
   }, [controller, tab])
 
-  useEscapeKey(onClose, true)
-  useHardwareBack(onClose, true)
+  /*
+    Scoped to `!fullGraph`, which is the same idiom `MemoryBotsScreen` uses for
+    its own two levels — and here it is not a nicety but the only thing that
+    works. `useEscapeKey` delivers to whoever registered LAST and effects flush
+    child-first, so the full-screen graph mounted BELOW this component registers
+    before these do and would lose the key to them: one press on a full-screen
+    picture would have closed the whole page. A handler that is switched off
+    while a deeper surface is open cannot swallow that surface's key.
+  */
+  useEscapeKey(onClose, !fullGraph)
+  useHardwareBack(onClose, !fullGraph)
 
   /*
     A selected node on the map is a LEVEL, so Escape leaves it before it leaves
@@ -121,8 +143,8 @@ export function MemoryScreen({ profile, title, onClose, testID = 'memory' }: Mem
     the key straight back when nothing is — which is the whole of the ordering,
     and why neither of the two above has to know this exists.
   */
-  useEscapeKey(() => setSelected(null), selected !== null)
-  useHardwareBack(() => setSelected(null), selected !== null)
+  useEscapeKey(() => setSelected(null), selected !== null && !fullGraph)
+  useHardwareBack(() => setSelected(null), selected !== null && !fullGraph)
 
   const onReplace = useCallback(
     (entry: MemoryEntry, text: string) => void controller?.replace(entry, text),
@@ -237,6 +259,7 @@ export function MemoryScreen({ profile, title, onClose, testID = 'memory' }: Mem
             graph={graph}
             listing={listing}
             loading={graphLoading}
+            onOpenFull={() => setFullGraph(true)}
             onOpenInList={openInList}
             onSelect={setSelected}
             selected={selected}
@@ -244,7 +267,9 @@ export function MemoryScreen({ profile, title, onClose, testID = 'memory' }: Mem
           />
         ) : null}
 
-        {tab === 'graph' ? null : (
+        {tab === 'raw' ? <MemoryRawTab loading={rawLoading} missing={rawMissing} raw={raw} testID={testID} /> : null}
+
+        {tab === 'entries' ? (
           <>
             <InsetGroup footer={memoryStrings.search.hint}>
               <InsetRow>
@@ -321,8 +346,25 @@ export function MemoryScreen({ profile, title, onClose, testID = 'memory' }: Mem
 
             <Providers listing={listing} testID={testID} />
           </>
-        )}
+        ) : null}
       </ScrollView>
+
+      {/*
+        Rendered from the screen rather than from the tab, so it survives a tab
+        switch underneath it and so there is one of it. `graph` is non-null
+        whenever it can be opened — the button lives inside the branch that
+        already checked.
+      */}
+      {graph ? (
+        <MemoryGraphFullScreen
+          graph={graph}
+          listing={listing}
+          onClose={() => setFullGraph(false)}
+          onSelect={setSelected}
+          selected={selected}
+          visible={fullGraph}
+        />
+      ) : null}
     </Screen>
   )
 }
@@ -500,7 +542,7 @@ function Providers({ listing, testID }: { listing: Parameters<typeof externalPro
 }
 
 /** Which half of the page is showing. */
-export type MemoryTab = 'entries' | 'graph'
+export type MemoryTab = 'entries' | 'graph' | 'raw'
 
 /**
  * The two tabs.
@@ -523,7 +565,7 @@ function MemoryTabs({
 
   return (
     <View style={{ flexDirection: 'row', gap: theme.space.lg, paddingHorizontal: theme.space.lg }}>
-      {(['entries', 'graph'] as const).map(name => (
+      {(['entries', 'graph', 'raw'] as const).map(name => (
         <Pressable
           accessibilityRole="tab"
           // `aria-selected`, never `accessibilityState`: react-native-web drops
@@ -563,6 +605,7 @@ function GraphTab({
   selected,
   onSelect,
   onOpenInList,
+  onOpenFull,
   testID
 }: {
   graph: MemoryGraphType | null
@@ -571,6 +614,7 @@ function GraphTab({
   selected: MemoryGraphNode | null
   onSelect: (node: MemoryGraphNode | null) => void
   onOpenInList: (entryId: string) => void
+  onOpenFull: () => void
   testID: string
 }) {
   if (loading && !graph) {
@@ -592,6 +636,18 @@ function GraphTab({
   return (
     <>
       <MemoryGraphView graph={graph} onSelect={onSelect} selectedId={selected?.id ?? null} />
+
+      {/*
+        The card is a square the width of this column, and a 640-unit drawing in
+        350 points arrives at about half size before anybody has zoomed. This is
+        the way out of that: the same picture with the window to itself.
+      */}
+      <Button
+        onPress={onOpenFull}
+        testID={`${testID}-graph-open-full`}
+        title={memoryStrings.graph.full.open}
+        variant="secondary"
+      />
 
       {graph.truncated || graph.page.hasMore ? (
         <Text color="textMuted" testID={`${testID}-graph-truncated`} variant="meta">

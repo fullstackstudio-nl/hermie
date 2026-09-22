@@ -23,7 +23,7 @@
 import { create } from 'zustand'
 
 import type { MemoryGraph } from '../features/memory/graph-model'
-import type { MemoryEntry, MemoryListing } from '../features/memory/model'
+import type { MemoryEntry, MemoryListing, MemoryRaw } from '../features/memory/model'
 
 export interface MemoryState {
   /** The bot whose memory this is, or null before a page has opened. */
@@ -55,6 +55,24 @@ export interface MemoryState {
   graph: MemoryGraph | null
   graphLoading: boolean
 
+  /**
+   * The Raw tab's answer: what each backend is actually holding.
+   *
+   * Fetched only once that tab is opened, for the reason the graph is — it is
+   * another read of the same files, and of whatever an external provider will
+   * say about itself.
+   */
+  raw: MemoryRaw | null
+  rawLoading: boolean
+  /**
+   * The gateway's plugin has no `raw` route.
+   *
+   * A state of its own rather than an error, because it is a CAPABILITY answer:
+   * an older plugin is not a failure, it is a plugin with one fewer route, and
+   * the tab says that instead of painting a banner over the page.
+   */
+  rawMissing: boolean
+
   open: (profile: string, readOnly: boolean) => void
   setListing: (listing: MemoryListing) => void
   setLoading: (loading: boolean) => void
@@ -66,6 +84,9 @@ export interface MemoryState {
   setResults: (results: MemoryEntry[] | null) => void
   setGraph: (graph: MemoryGraph | null) => void
   setGraphLoading: (loading: boolean) => void
+  setRaw: (raw: MemoryRaw | null) => void
+  setRawLoading: (loading: boolean) => void
+  setRawMissing: () => void
   reset: () => void
 }
 
@@ -81,7 +102,10 @@ const INITIAL = {
   searching: false,
   results: null as MemoryEntry[] | null,
   graph: null as MemoryGraph | null,
-  graphLoading: false
+  graphLoading: false,
+  raw: null as MemoryRaw | null,
+  rawLoading: false,
+  rawMissing: false
 }
 
 export const useMemoryStore = create<MemoryState>(set => ({
@@ -138,6 +162,18 @@ export const useMemoryStore = create<MemoryState>(set => ({
 
   setGraphLoading(graphLoading) {
     set({ graphLoading })
+  },
+
+  setRaw(raw) {
+    set({ raw, rawLoading: false, rawMissing: false })
+  },
+
+  setRawLoading(rawLoading) {
+    set({ rawLoading })
+  },
+
+  setRawMissing() {
+    set({ raw: null, rawLoading: false, rawMissing: true })
   },
 
   reset() {

@@ -169,6 +169,7 @@ export const UNTRANSLATED_KEYS: Record<TranslatedLocale, readonly string[]> = {
 
     'logs.settings.row',
     'logs.command',
+    'memory.raw.missingCommand',
     'logs.unexpectedCommand',
     'logs.files.agent',
     'logs.files.gateway',
@@ -309,6 +310,7 @@ export const UNTRANSLATED_KEYS: Record<TranslatedLocale, readonly string[]> = {
 
     'logs.settings.row',
     'logs.command',
+    'memory.raw.missingCommand',
     'logs.unexpectedCommand',
     'logs.files.agent',
     'logs.files.gateway',

@@ -99,6 +99,37 @@ export interface MemoryWriteAnswer {
   currentEntries: string[] | null
 }
 
+/** One stored document of one backend, as it is held rather than as parsed. */
+export interface MemoryDocument {
+  /** The backend's own name for it — `memory`, `user`, a collection. */
+  id: string
+  /** What to put on the card: `MEMORY.md`, a collection's title. */
+  label: string
+  /** The content as stored. Empty is a real answer: the file exists and is bare. */
+  content: string
+  chars: number
+  /** The gateway cut it. Said out loud rather than shown as the whole of it. */
+  truncated: boolean
+}
+
+/** One memory backend's raw side: what it holds, or why it cannot say. */
+export interface MemoryBackendRaw {
+  name: string
+  label: string
+  /** The gateway has this backend at all. `false` is the "not on this gateway" state. */
+  available: boolean
+  /** The route would take a write for it. Nothing writes raw content yet. */
+  editable: boolean
+  /** Why there are no documents, when there are none and that is not an error. */
+  note: string | null
+  documents: MemoryDocument[]
+}
+
+export interface MemoryRaw {
+  profile: string
+  backends: MemoryBackendRaw[]
+}
+
 const isObject = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 
@@ -198,6 +229,74 @@ export function memoryWriteOf(value: unknown): MemoryWriteAnswer {
     currentEntries: Array.isArray(entries)
       ? entries.filter((entry): entry is string => typeof entry === 'string')
       : null
+  }
+}
+
+/**
+ * `GET …/memory/raw`.
+ *
+ * The route this reads is NOT on the plugin at the pin this app was built
+ * against: the four that exist are `list`, `search`, `graph` and `edit`, and
+ * none of them hands back a backend's stored content as such. `list` comes
+ * close for the built-in one — every entry's full text is in it — but an entry
+ * list is the parsed view, and the owner asked to see what is in the memory
+ * ITSELF, delimiters and headings and all, plus what a provider like mem0 is
+ * holding. Neither is reconstructable from a parse.
+ *
+ * So the shape is specified rather than discovered, the fake gateway serves it,
+ * and a plugin that does not have the route yet gets the "this gateway cannot
+ * show this" state instead of a blank tab. The exact contract is in
+ * `memory-controller.ts` beside the call.
+ *
+ * `available: false` and an empty `documents` are different answers on purpose.
+ * A provider that is configured but cannot be listed — which is every external
+ * one today, because `MemoryProvider` offers only `prefetch(query)` — is
+ * available with no documents and a `note` saying why. A backend the gateway
+ * does not have at all is not available, and the tab says THAT instead.
+ */
+export function memoryRawOf(value: unknown): MemoryRaw {
+  const body = isObject(value) ? value : {}
+  const sent = Array.isArray(body.backends) ? body.backends : []
+
+  return {
+    profile: str(body.profile),
+    backends: sent.flatMap(row => {
+      if (!isObject(row) || !str(row.name)) {
+        return []
+      }
+
+      const documents = Array.isArray(row.documents) ? row.documents : []
+
+      return [
+        {
+          name: str(row.name),
+          label: str(row.label) || str(row.name),
+          available: row.available !== false,
+          editable: row.editable === true,
+          note: str(row.note) || null,
+          documents: documents.flatMap(document => {
+            if (!isObject(document)) {
+              return []
+            }
+
+            const content = str(document.content)
+
+            return [
+              {
+                id: str(document.id) || str(document.label),
+                label: str(document.label) || str(document.id),
+                content,
+                // The gateway's own count where it sent one: a file of
+                // surrogate pairs costs the store more than this string's
+                // `length` says it does.
+                chars: typeof document.chars === 'number' ? num(document.chars) : content.length,
+                truncated: document.truncated === true
+              }
+            ]
+          })
+        }
+      ]
+    })
   }
 }
 

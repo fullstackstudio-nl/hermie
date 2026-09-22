@@ -4258,6 +4258,70 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       return
     }
 
+    /*
+      `raw` is the one route here that the plugin does NOT have at the pin this
+      repository was built against, and it is served so the app's Raw tab has a
+      contract to be built and tested against rather than a guess. The four the
+      plugin has — list, search, graph, edit — all answer a PARSED memory, and
+      none of them says what an external provider is holding.
+
+      Two of its answers matter more than the happy one:
+
+        - `builtin` hands back each file as the store writes it, entries joined
+          by the delimiter. That is deliberately NOT the entry list rejoined by
+          the client: the point of the tab is to show what the parse hides.
+        - `mem0` is available with no documents and a `note`. It is configured
+          and it cannot enumerate, which is a different answer from a backend
+          the gateway does not have — `MemoryProvider` offers `prefetch(query)`
+          and nothing that lists, so there is nothing for it to send.
+
+      `--plugin` false takes the whole prefix away above, which is how a gateway
+      whose plugin predates the route is simulated: 404, and the tab says the
+      plugin is older rather than painting an error.
+    */
+    if (route === 'raw' && method === 'GET') {
+      const only = query.get('backend')
+
+      if (only && only !== 'builtin' && only !== 'mem0') {
+        json(res, 400, { detail: `no memory backend named '${only}' on this gateway` })
+
+        return
+      }
+
+      const backends = [
+        {
+          name: 'builtin',
+          label: 'MEMORY.md and USER.md',
+          available: true,
+          editable: capabilities.includes('memory.edit'),
+          note: null,
+          documents: MEMORY_TARGETS.map(target => {
+            const content = files[target].join(ENTRY_DELIMITER)
+
+            return {
+              id: target,
+              label: target === 'memory' ? 'MEMORY.md' : 'USER.md',
+              content,
+              chars: content.length,
+              truncated: false
+            }
+          })
+        },
+        {
+          name: 'mem0',
+          label: 'mem0 (cloud)',
+          available: true,
+          editable: false,
+          documents: [],
+          note: 'mem0 answers a query and offers no call that lists what it holds.'
+        }
+      ].filter(backend => !only || backend.name === only)
+
+      json(res, 200, { profile: wanted, backends })
+
+      return
+    }
+
     if (route === 'edit' && method === 'POST') {
       handleMemoryEdit(res, files, body, capabilities)
 

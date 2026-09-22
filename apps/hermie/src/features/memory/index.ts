@@ -20,8 +20,10 @@ export {
   type MemoryGraphPage,
   topicsOf
 } from './graph-model'
+export { MemoryGraphFullScreen, type MemoryGraphFullScreenProps } from './MemoryGraphFullScreen'
 export { MemoryGraphView, type MemoryGraphViewProps } from './MemoryGraphView'
 export { MemoryNodeCard, type MemoryNodeCardProps } from './MemoryNodeCard'
+export { MemoryRawTab, type MemoryRawTabProps } from './MemoryRawTab'
 export { MemoryScreen, type MemoryScreenProps, type MemoryTab } from './MemoryScreen'
 export { MemoryScreenHeader, type MemoryScreenHeaderProps } from './MemoryScreenHeader'
 export { MemoryUsageBar, type MemoryUsageBarProps } from './MemoryUsageBar'
@@ -38,9 +40,13 @@ export {
   entriesOf,
   externalProviders,
   MEMORY_TARGETS,
+  type MemoryBackendRaw,
+  type MemoryDocument,
   type MemoryEntry,
   type MemoryListing,
   memoryListingOf,
+  type MemoryRaw,
+  memoryRawOf,
   type MemoryProvider,
   type MemorySearchAnswer,
   memorySearchOf,

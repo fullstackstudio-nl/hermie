@@ -61,13 +61,29 @@ export interface MemoryGraphViewProps {
   onSelect: (node: MemoryGraphNode | null) => void
   /** The square the drawing is laid out in; the view scales it to fit. */
   size?: number
+  /**
+   * Take the whole box rather than a square of the caller's width.
+   *
+   * The card on the page is square, because a square is what a column of
+   * scrolling content can give a picture without guessing how tall the reader's
+   * screen is. Full screen there is no such question: the box is the box, and
+   * the `viewBox` letterboxes the square drawing inside whatever shape it is.
+   */
+  fill?: boolean
   testID?: string
 }
 
 /** A topic's label is drawn beside it; an entry's excerpt is not — see below. */
 const TOPIC_LABEL_MAX = 18
 
-export function MemoryGraphView({ graph, selectedId, onSelect, size, testID = 'memory-graph' }: MemoryGraphViewProps) {
+export function MemoryGraphView({
+  graph,
+  selectedId,
+  onSelect,
+  size,
+  fill = false,
+  testID = 'memory-graph'
+}: MemoryGraphViewProps) {
   const theme = useTheme()
   const layout: GraphLayout = useMemo(() => layoutMemoryGraph(graph, size ? { size } : {}), [graph, size])
 
@@ -176,7 +192,9 @@ export function MemoryGraphView({ graph, selectedId, onSelect, size, testID = 'm
   return (
     <View
       accessibilityLabel={memoryStrings.graph.label}
-      style={{ aspectRatio: 1, overflow: 'hidden', width: '100%' }}
+      style={
+        fill ? { flex: 1, overflow: 'hidden', width: '100%' } : { aspectRatio: 1, overflow: 'hidden', width: '100%' }
+      }
       testID={testID}
       {...responder.panHandlers}
       {...(wheel as object)}

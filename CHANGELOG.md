@@ -11,6 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A bot's memory can be read as it is actually stored, and the graph opens full screen.** The
+  memory page has a third tab, **Raw**, with a card per memory backend: the built-in one shows
+  `MEMORY.md` and `USER.md` as the gateway holds them — delimiters, blank lines, the real order —
+  rather than as the parsed list of entries the Browse tab shows, because a heading or a stray
+  delimiter is invisible in a list of rows and is exactly what somebody looking at raw memory wants
+  to see. An external provider such as mem0 gets a card too, saying in the gateway's own words that
+  it is configured and cannot list what it holds; a backend the gateway does not have says that
+  instead, and the two are not the same answer. It is read-only, and says so once. The tab needs a
+  route the gateway plugin does not have yet (`GET /api/plugins/hermie/memory/raw`); a gateway
+  whose plugin predates it gets that stated with the command that updates it, not a blank tab.
+- **The memory graph opens full screen**, from a button on the card. On a phone it takes the window;
+  on an iPad or a Mac it is a large panel with the page still visible behind it. Pinch, pan, the
+  worded zoom controls and tap-to-select all come with it, the selected node's detail sits under the
+  picture with room to read it, and Escape, the hardware back gesture, the backdrop and a close
+  control all leave.
+
 - **Sequence diagrams and pie charts are drawn.** A ` ```mermaid ` fence holding a
   `sequenceDiagram` or a `pie` used to be a listing of its own source; both are now pictures, drawn
   in the app the way the flowchart already was — no web view, no download, the same height the
