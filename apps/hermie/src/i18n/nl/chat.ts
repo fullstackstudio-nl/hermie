@@ -372,6 +372,21 @@ export const chat: Translation<typeof chatStrings> = {
     messages: (count: number) => (count === 1 ? '1 bericht' : `${count} berichten`)
   },
 
+  conversations: {
+    groupChat: 'Groepschat',
+    yourChats: 'Jouw chats',
+    yoursEmpty: 'Begin een eigen chat om hem hier te zien.',
+    newChat: 'Nieuwe chat',
+    newChatFailed: 'De gateway wilde geen nieuwe chat starten.',
+    firstChat: 'Mijn chat',
+    allConversations: 'Alle gesprekken',
+    renameLabel: 'Naam van de chat',
+    columnTitle: 'Gesprekken',
+    showColumn: 'Gesprekken tonen',
+    hideColumn: 'Gesprekken verbergen',
+    openFailed: 'Dit gesprek kon niet geopend worden.'
+  },
+
   voice: {
     header: 'STEM',
     codeBlock: (lines: number) => (lines === 1 ? 'Codeblok, 1 regel' : `Codeblok, ${lines} regels`),

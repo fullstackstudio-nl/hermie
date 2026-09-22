@@ -589,6 +589,44 @@ const chatStringsEn = {
   },
 
   /**
+   * The list of a bot's conversations — `ConversationListView`, its sheet and
+   * (Task 7) its column — and the header button that opens it.
+   *
+   * Its own group rather than a corner of `sessions`, because `sessions` is the
+   * ADR-0007 switch and the archive it built, and every one of those strings
+   * stays put until Task 10 removes the switch. This surface replaces the
+   * switch; sharing its copy would make the two impossible to retire one at a
+   * time. Where the words are genuinely the same sentence — the shared note,
+   * rename, delete, cancel, open, the message count, the busy refusal — the row
+   * reads `chatStrings.sessions.*` directly rather than repeating it here.
+   */
+  conversations: {
+    /** The always-first row: the shared chat everybody on the gateway is in. */
+    groupChat: 'Group chat',
+    /** The heading over the reader's own chats. */
+    yourChats: 'Your chats',
+    /** Before the reader has started one, under `yourChats`. */
+    yoursEmpty: 'Start a chat of your own to see it here.',
+    /** The row that starts another one. */
+    newChat: 'New chat',
+    newChatFailed: 'The gateway would not start a new chat.',
+    /** An own chat still wearing its birth stamp — the bare lead, unlabelled. */
+    firstChat: 'My chat',
+    /** The footer link to the archive (branches, past conversations). */
+    allConversations: 'All conversations',
+    /** The inline rename field's accessible name. */
+    renameLabel: 'Chat name',
+    /** The sheet's title, and (Task 7) the column's. */
+    columnTitle: 'Conversations',
+    /** The header button and shortcut that shows the column. */
+    showColumn: 'Show conversations',
+    /** The header button and shortcut that hides it. */
+    hideColumn: 'Hide conversations',
+    /** A conversation could not be opened — a switch that failed for a reason other than being busy. */
+    openFailed: 'This conversation could not be opened.'
+  },
+
+  /**
    * Speaking and listening.
    *
    * Everything here is about the DEVICE doing the work — see

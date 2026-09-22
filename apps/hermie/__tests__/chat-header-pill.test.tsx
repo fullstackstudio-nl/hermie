@@ -20,9 +20,11 @@
  * buttons, because with no layout engine a measurement is the only honest way to
  * ask which line won.
  */
-import { act, render } from '@testing-library/react-native'
+import { act, fireEvent, render } from '@testing-library/react-native'
 
 import { ChatHeader, PILL_MIN_TEXT_WIDTH, pillTextWidth, widestStatus } from '../src/chat-ui/ChatHeader'
+import { chatStrings } from '../src/chat-ui/strings'
+import { OWN_CHAT_LABEL_MAX } from '../src/features/sessions'
 import { AVATAR_SIZE, type PresenceState } from '../src/ui/tokens'
 import { shortToolName, TOOL_NAME_MAX } from '../src/chat-ui/tool-label'
 import { ThemeProvider, useTheme, type Theme } from '../src/ui/theme'
@@ -424,5 +426,79 @@ describe('what a tool is called in a status line', () => {
 
   it('does not treat a double underscore that is not a namespace as one', () => {
     expect(shortToolName('read__file')).toBe('read__file')
+  })
+})
+
+/**
+ * The header's own conversations button (Task 6): the trailing group's round
+ * button, left of `(…)`, present exactly when `ChatScreen` has an entry point
+ * to offer — a gateway `canCreate` has said yes to.
+ */
+describe('the conversations button', () => {
+  it('is absent when the caller has nowhere to send the tap', () => {
+    const tree = render(
+      <ThemeProvider>
+        <ChatHeader name="Researcher" onOpenOptions={() => undefined} />
+      </ThemeProvider>
+    )
+
+    expect(tree.queryByTestId('chat-header-conversations')).toBeNull()
+  })
+
+  it('sits in the trailing group and calls back on press', () => {
+    const onOpenConversations = jest.fn()
+    const tree = render(
+      <ThemeProvider>
+        <ChatHeader name="Researcher" onOpenConversations={onOpenConversations} onOpenOptions={() => undefined} />
+      </ThemeProvider>
+    )
+
+    fireEvent.press(tree.getByTestId('chat-header-conversations'))
+
+    expect(onOpenConversations).toHaveBeenCalled()
+    // Left of `(…)`: same trailing group, the conversations button drawn first.
+    expect(tree.getByTestId('chat-header-options')).toBeTruthy()
+  })
+})
+
+/**
+ * `secondaryName` becomes a conversation's own label once sub-chats are on
+ * (`ChatScreen`), which can run up to `OWN_CHAT_LABEL_MAX` characters — longer
+ * than the bot's other name ever was. The pill still takes one number and
+ * elides inside it, the same rule R4 pinned for the status half.
+ */
+describe('a conversation label on the second line', () => {
+  it('elides a label at the cap rather than asking the pill to grow for it', () => {
+    const longest = 'A'.repeat(OWN_CHAT_LABEL_MAX)
+    const tree = render(
+      <ThemeProvider>
+        <ChatHeader name="Researcher" onOpenOptions={() => undefined} secondaryName={longest} subtitle="Online" />
+      </ThemeProvider>
+    )
+
+    const handle = tree.getByTestId('chat-header-handle')
+
+    expect(handle.props.children).toBe(longest)
+    expect(handle.props.numberOfLines).toBe(1)
+    // The same clamp the status half already had: `maxWidth: '100%'` rather
+    // than letting the label run past the pill's own rim.
+    expect(Object.assign({}, ...(handle.props.style as Record<string, unknown>[]).filter(Boolean))).toMatchObject({
+      maxWidth: '100%'
+    })
+  })
+
+  it('says "Group chat" for the group and nothing else, when the caller passes it', () => {
+    const tree = render(
+      <ThemeProvider>
+        <ChatHeader
+          name="Researcher"
+          onOpenOptions={() => undefined}
+          secondaryName={chatStrings.conversations.groupChat}
+          subtitle="Online"
+        />
+      </ThemeProvider>
+    )
+
+    expect(tree.getByTestId('chat-header-handle').props.children).toBe(chatStrings.conversations.groupChat)
   })
 })

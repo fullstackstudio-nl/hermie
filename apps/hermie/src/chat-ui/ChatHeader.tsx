@@ -146,6 +146,14 @@ export interface ChatHeaderProps {
    */
   onOpenProfile?: () => void
   /**
+   * Open the bot's conversations — the sheet on a phone or a narrow window,
+   * the column toggle on a wide one (`ChatScreen`, Task 7). Absent wherever the
+   * caller has no entry point to offer: a gateway that named nobody
+   * (`canCreate === false`), or a surface with no gateway at all. The round
+   * button sits in the trailing group, left of `(…)`.
+   */
+  onOpenConversations?: () => void
+  /**
    * Hide the wide layout's chat list.
    *
    * Absent on the compact shell, which has no sidebar — the leading group there
@@ -363,6 +371,7 @@ export function ChatHeader({
   onBack,
   onOpenOptions,
   onOpenProfile,
+  onOpenConversations,
   onToggleSidebar,
   testID = 'chat-header'
 }: ChatHeaderProps) {
@@ -616,6 +625,21 @@ export function ChatHeader({
       </View>
 
       <GlassGroup spacing={theme.space.sm} style={{ flexDirection: 'row', gap: theme.space.sm }}>
+        {/*
+          Left of `(…)`, because it is the same kind of control — chrome that
+          opens something about this chat — rather than an item inside the
+          menu. One meaning, whatever the layout: the sheet below the
+          breakpoint (Task 6), the column toggle above it (Task 7).
+        */}
+        {onOpenConversations ? (
+          <RoundButton
+            icon="chats"
+            label={chatStrings.conversations.columnTitle}
+            onPress={onOpenConversations}
+            size={size}
+            testID="chat-header-conversations"
+          />
+        ) : null}
         <RoundButton
           icon="ellipsis"
           label={chatStrings.header.options}

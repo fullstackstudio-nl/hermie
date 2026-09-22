@@ -99,6 +99,7 @@ export type PopoverRowId =
   | 'mute'
   | 'refresh'
   | 'branch'
+  | 'new-chat'
   | 'conversations'
   | 'pin'
   | 'notifications'
@@ -130,6 +131,13 @@ export interface PopoverRowsInput {
    * offered neither.
    */
   canBranch?: boolean
+  /**
+   * Absent removes the `new-chat` row: sub-chats (ADR-0007, amended). A row of
+   * its own rather than folded into `canBranch` — a gateway can brand-new one
+   * without accounts being configured at all, and a gateway with accounts can
+   * still be reached before `canBranch` has anywhere to fork FROM.
+   */
+  canNewChat?: boolean
   /** Absent removes Pin: a surface with no arrangement has nowhere to store it. */
   canPin?: boolean
 }
@@ -137,6 +145,7 @@ export interface PopoverRowsInput {
 export function popoverRows({
   canBranch = false,
   canExport,
+  canNewChat = false,
   canPin = false,
   canRefresh,
   canSetNotifications
@@ -151,12 +160,15 @@ export function popoverRows({
     ...(canPin ? [{ id: 'pin' as const }] : []),
     ...(canRefresh ? [{ id: 'refresh' as const }] : []),
     /*
-      Branch, then the page that lists what branching produced, and both of them
-      under Refresh rather than up with the switches. All three are about the
-      CONVERSATION rather than about how this chat is set up or drawn, which is
-      the distinction the separator above them already makes.
+      Branch, "New chat" under it, then the page that lists what both of them
+      produced — all three about the CONVERSATION rather than about how this
+      chat is set up or drawn, which is the distinction the separator above
+      them already makes. `new-chat` has its own gate: a gateway can offer it
+      with no `canBranch` at all, and vice versa.
     */
-    ...(canBranch ? [{ id: 'branch' as const }, { id: 'conversations' as const }] : []),
+    ...(canBranch ? [{ id: 'branch' as const }] : []),
+    ...(canNewChat ? [{ id: 'new-chat' as const }] : []),
+    ...(canBranch ? [{ id: 'conversations' as const }] : []),
     ...(canSetNotifications ? [{ id: 'notifications' as const, page: 'notifications' as const }] : []),
     { id: 'verbosity' },
     { id: 'bot-to-bot' },
@@ -262,6 +274,11 @@ export interface ChatOptionsPopoverProps extends Omit<
   /** Open the Conversations page. Present exactly when `onBranch` is. */
   onOpenConversations?: () => void
   /**
+   * Start another one of the reader's own chats (ADR-0007, amended). Present
+   * only where this gateway can offer one at all — the `new-chat` row's gate.
+   */
+  onNewChat?: () => void
+  /**
    * Whether this chat is pinned to the top of its folder, and a way to change
    * it. Both absent on a surface with no arrangement to store it in.
    */
@@ -300,6 +317,7 @@ export function ChatOptionsPopover({
   onRefresh,
   onBranch,
   onOpenConversations,
+  onNewChat,
   pinned = false,
   onTogglePin,
   accent,
@@ -329,6 +347,7 @@ export function ChatOptionsPopover({
   const rows = popoverRows({
     canBranch: Boolean(onBranch && onOpenConversations),
     canExport,
+    canNewChat: Boolean(onNewChat),
     canPin: Boolean(onTogglePin),
     canRefresh: Boolean(onRefresh),
     canSetNotifications
@@ -388,6 +407,10 @@ export function ChatOptionsPopover({
         return
       case 'branch':
         onBranch?.()
+
+        return
+      case 'new-chat':
+        onNewChat?.()
 
         return
       case 'conversations':
@@ -616,6 +639,18 @@ export function ChatOptionsPopover({
               testID="option-branch"
             >
               <Text>{chatStrings.sessions.branch}</Text>
+            </Pressable>
+          )}
+
+          {row(
+            'new-chat',
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => onNewChat?.()}
+              style={{ justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT, paddingHorizontal: theme.space.lg }}
+              testID="option-new-chat"
+            >
+              <Text>{chatStrings.conversations.newChat}</Text>
             </Pressable>
           )}
 

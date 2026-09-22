@@ -796,6 +796,21 @@ export const SIDEBAR_WIDTH_NARROW = 300
 export const SIDEBAR_WIDE_MIN_WIDTH = 1100
 
 /**
+ * Above this window width, the regular shell draws a `ConversationColumn`
+ * (sub-chats, Task 7) beside the chat; below it the column is never drawn and
+ * the chat header's conversations button opens `ConversationSheet` instead.
+ *
+ * Provisional (Owner Decision, 2026-09-22): the owner wants to look at both
+ * numbers on an iPad and the Mac build before they are fixed, which is the
+ * whole reason they are named constants rather than literals typed into the
+ * breakpoint check and the column's own width.
+ */
+export const CONVERSATION_COLUMN_MIN_WINDOW = 1100
+
+/** How wide the conversation column is drawn once there is room for one. Provisional; see `CONVERSATION_COLUMN_MIN_WINDOW`. */
+export const CONVERSATION_COLUMN_WIDTH = 260
+
+/**
  * The width band that decides whether the sidebar STARTS hidden.
  *
  * A THIRD breakpoint, and the reason it is its own number rather than a reuse of

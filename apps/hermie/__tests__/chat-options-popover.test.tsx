@@ -35,6 +35,11 @@ let mockRuntime: {
   controller: Record<string, jest.Mock>
   bots: { refresh: jest.Mock }
   push: { setOpenChat: jest.Mock }
+  // Sub-chats (Task 6): absent by default, exactly like a session-token
+  // gateway that named nobody — `canCreate` is false and nothing here is
+  // drawn. A test that wants the conversations button and the `new-chat` row
+  // sets this itself.
+  userChats?: { available: boolean; title: string }
 }
 
 jest.mock('../src/gateway', () => ({
@@ -94,7 +99,22 @@ function makeController() {
     setOption: jest.fn(async () => ({})),
     refreshOptions: jest.fn(async () => null),
     refreshUsage: jest.fn(async () => null),
-    modelOptions: jest.fn(async () => [])
+    modelOptions: jest.fn(async () => []),
+    // Sub-chats (Task 6). `listBotConversations`/`onConversationsChanged` are
+    // called on every mount once `userChats.available` is true — see
+    // `useConversationList`'s `enabled` guard — so every test that turns
+    // sub-chats on needs these to exist.
+    listBotConversations: jest.fn(async () => ({ group: null, own: [], canCreate: true })),
+    onConversationsChanged: jest.fn(() => jest.fn()),
+    startOwnChat: jest.fn(async () => ({
+      id: 'own-new',
+      resolvedId: 'own-new',
+      title: 'Chat · Researcher',
+      preview: '',
+      messageCount: 0,
+      lastActive: 0,
+      kind: 'mine' as const
+    }))
   }
 }
 
@@ -276,6 +296,62 @@ describe('the options menu is a popover in the chat', () => {
 })
 
 /**
+ * Sub-chats (Task 6): the header's own entry point and the popover's
+ * `new-chat` row, both gated on the same `canCreate` — the switch's own
+ * `available` — as `listBotConversations`.
+ */
+describe('the header button and the popover row a gateway with accounts gets', () => {
+  it('draws neither on a gateway that named nobody', async () => {
+    await openChat()
+
+    expect(screen.queryByTestId('chat-header-conversations')).toBeNull()
+
+    fireEvent.press(screen.getByTestId('chat-header-options'))
+    await waitFor(() => expect(screen.getByTestId('chat-options-popover')).toBeTruthy())
+
+    expect(screen.queryByTestId('option-new-chat')).toBeNull()
+  })
+
+  it('draws both once the switch says this reader has a name', async () => {
+    mockRuntime.userChats = { available: true, title: 'Chat · Researcher' }
+
+    await openChat()
+
+    await waitFor(() => expect(screen.getByTestId('chat-header-conversations')).toBeTruthy())
+
+    fireEvent.press(screen.getByTestId('chat-header-options'))
+    await waitFor(() => expect(screen.getByTestId('option-new-chat')).toBeTruthy())
+  })
+
+  it('starts another chat from the popover row, and closes the popover', async () => {
+    mockRuntime.userChats = { available: true, title: 'Chat · Researcher' }
+
+    await openChat()
+
+    fireEvent.press(screen.getByTestId('chat-header-options'))
+    await waitFor(() => expect(screen.getByTestId('option-new-chat')).toBeTruthy())
+
+    fireEvent.press(screen.getByTestId('option-new-chat'))
+
+    await waitFor(() =>
+      expect(mockController.startOwnChat).toHaveBeenCalledWith(expect.objectContaining({ name: 'researcher' }))
+    )
+    expect(screen.queryByTestId('chat-options-backdrop', HIDDEN)).toBeNull()
+  })
+
+  it('opens the sheet from the header button', async () => {
+    mockRuntime.userChats = { available: true, title: 'Chat · Researcher' }
+
+    await openChat()
+
+    await waitFor(() => expect(screen.getByTestId('chat-header-conversations')).toBeTruthy())
+    fireEvent.press(screen.getByTestId('chat-header-conversations'))
+
+    await waitFor(() => expect(screen.getByTestId('conversation-sheet')).toBeTruthy())
+  })
+})
+
+/**
  * The list and the row, as one function.
  *
  * They were two, and that is how they disagreed: `modelRowLabel` formatted an id
@@ -428,6 +504,29 @@ describe('the rows the keyboard walks', () => {
     expect(popoverRows({ canExport: true, canSetNotifications: false }).some(row => row.id === 'notifications')).toBe(
       false
     )
+  })
+
+  it('puts `new-chat` under `branch`, and gates it on its own flag', () => {
+    expect(
+      popoverRows({ canBranch: true, canExport: false, canNewChat: true, canSetNotifications: false }).map(
+        row => row.id
+      )
+    ).toEqual(expect.arrayContaining(['branch', 'new-chat', 'conversations']))
+    expect(
+      popoverRows({ canBranch: true, canExport: false, canNewChat: true, canSetNotifications: false })
+        .map(row => row.id)
+        .filter(id => id === 'branch' || id === 'new-chat' || id === 'conversations')
+    ).toEqual(['branch', 'new-chat', 'conversations'])
+
+    // Each has its own gate: a gateway can offer one without the other.
+    expect(popoverRows({ canExport: false, canNewChat: true, canSetNotifications: false }).map(row => row.id)).toEqual(
+      expect.arrayContaining(['new-chat'])
+    )
+    expect(
+      popoverRows({ canExport: false, canNewChat: false, canSetNotifications: false }).some(
+        row => row.id === 'new-chat'
+      )
+    ).toBe(false)
   })
 
   it('clamps rather than wrapping, so the end of the list says it is the end', () => {

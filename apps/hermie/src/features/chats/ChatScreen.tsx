@@ -64,8 +64,15 @@ import { presenceOf } from '../bots/presence'
 import { MemoryBotsScreen } from '../memory'
 import { botNames } from '../../store/bot-names'
 import { useBotsStore } from '../../store/bots'
-import { useBotLabel, useChatAccent, useChatLayoutStore, useChatMuted } from '../../store/chat-layout'
+import {
+  useBotLabel,
+  useChatAccent,
+  useChatLayoutStore,
+  useChatMuted,
+  useCurrentConversation
+} from '../../store/chat-layout'
 import { ChatChoiceRow } from '../user-chats'
+import { ownChatDisplayLabel, useConversationList } from '../sessions/ConversationListView'
 import { mutedUntil as mutedUntilOf } from '../../store/mute'
 import { useChatsStore } from '../../store/chats'
 import { useCronStore } from '../../store/cron'
@@ -96,7 +103,7 @@ import { droppedFile, pickFile, type PickedFile } from './file-attachments'
 import { FileUploadError, MAX_UPLOAD_BYTES } from './file-upload'
 import { splitPastedFiles } from './paste-attachments'
 import { ChatSheetHost, type RequestItem } from './ChatSheetHost'
-import { SLASH_NO_ANSWER, type AttachmentInput, type ModelChoice } from './chat-controller'
+import { ConversationBusyError, SLASH_NO_ANSWER, type AttachmentInput, type ModelChoice } from './chat-controller'
 import type { ManualSheet } from './sheet-host'
 import { useChatRuntime } from './ChatRuntime'
 import { findMatchingItem } from '../search'
@@ -409,6 +416,29 @@ function Conversation({
   // The chat's own colour: the avatar ring in the header and the outgoing bubble
   // gradient. One lookup per screen rather than one per row.
   const accent = useChatAccent(botName)
+
+  /*
+    Sub-chats (ADR-0007, amended). `canCreate` is the switch's own `available` —
+    the same "has this gateway named anybody" question `ChatChoiceRow` already
+    asks — read synchronously rather than through the async list, so the header
+    button and the popover's `new-chat` row can decide whether to exist without
+    waiting on a `session.list` round trip.
+  */
+  const canCreate = Boolean(runtime?.userChats?.available)
+  const currentOwnId = useCurrentConversation(botName)
+  const conversationList = useConversationList(botName, canCreate)
+
+  /*
+    The header's second line, while sub-chats are on: `Group chat` for the
+    group, or the reader's own words for the chat the bot is on. The group
+    label needs no round trip — `currentOwnId` alone says which one it is — but
+    an own chat's LABEL is not known until the list answers, so the bot's other
+    name stands in until it does rather than leaving the line blank.
+  */
+  const conversationLabel =
+    conversationList.state.kind === 'ready'
+      ? (conversationList.state.list.own.find(conversation => conversation.id === currentOwnId)?.title ?? null)
+      : null
 
   /*
     ADR-0017's heartbeat, driven from the one place that knows a chat is on
@@ -1596,6 +1626,24 @@ function Conversation({
   )
   const display = names.primary
 
+  /*
+    The header's second line, once sub-chats are on (`canCreate`): which
+    conversation the bot is on, rather than the bot's other name — `names.secondary`
+    is what a gateway with no accounts still gets, unchanged.
+
+    `Group chat` needs nothing but `currentOwnId` being empty. An own chat's
+    label needs `conversationLabel` (the list) and `lead` (the switch's own
+    title, the same string `ownChatTitle`/`ownChatLabel` build against) — while
+    either is still loading, the bot's other name stands in rather than leaving
+    the line blank for the round trip.
+  */
+  const conversationSecondaryName = canCreate
+    ? currentOwnId
+      ? (conversationLabel && ownChatDisplayLabel(conversationLabel, runtime?.userChats?.title ?? '')) ||
+        names.secondary
+      : chatStrings.conversations.groupChat
+    : names.secondary
+
   /**
    * The newest reply in what the reader is looking at.
    *
@@ -1928,6 +1976,38 @@ function Conversation({
     setSheet('profile')
   }, [refreshUsage])
 
+  /**
+   * The header's own conversations button: opens the sheet below the column's
+   * breakpoint (Task 7 forwards this to the column toggle instead, above it).
+   */
+  const openConversations = useCallback(() => setSheet('conversations'), [])
+
+  /**
+   * Start another one of the reader's own chats, from the popover's `new-chat`
+   * row. The popover closes first, for the reason `refreshChat` and
+   * `branchHere` already give: the thing the reader wants to look at next is
+   * the conversation, not the menu they pressed, and `selectConversation`
+   * (inside `startOwnChat`) puts the new chat straight on screen.
+   */
+  const newChat = useCallback(() => {
+    const bot = byName[botName]
+
+    if (!bot) {
+      return
+    }
+
+    setOptionsPopover(false)
+    void runtime?.controller
+      .startOwnChat(bot)
+      .catch(error =>
+        setNotice(
+          openFailed(
+            error instanceof ConversationBusyError ? chatStrings.sessions.busy : chatStrings.conversations.newChatFailed
+          )
+        )
+      )
+  }, [botName, byName, runtime])
+
   /*
     The profile sheet's own connection.
 
@@ -2222,7 +2302,8 @@ function Conversation({
               // what keeps the header from saying "Connecting…" over a live chat: the
               // socket's own status is not a bot's state.
               presence={presence.state}
-              {...(names.secondary ? { secondaryName: names.secondary } : {})}
+              {...(canCreate ? { onOpenConversations: openConversations } : {})}
+              {...(conversationSecondaryName ? { secondaryName: conversationSecondaryName } : {})}
               {...(presence.lastSeenAt !== undefined ? { lastSeenAt: presence.lastSeenAt } : {})}
               {...(subtitle ? { subtitle } : {})}
             />
@@ -2320,6 +2401,7 @@ function Conversation({
               onOpenPage={openOptionsPage}
               onRefresh={refreshChat}
               {...(runtime && onOpenConversation ? { onBranch: branchNewest } : {})}
+              {...(canCreate ? { onNewChat: newChat } : {})}
               {...(onOpenConversations
                 ? {
                     onOpenConversations: () => {
@@ -2433,6 +2515,24 @@ function Conversation({
           tree: chat.subagentTree
         }}
         botHandle={botName}
+        {...(canCreate
+          ? {
+              conversations: {
+                botName,
+                // The sheet closes first (`closeManualSheet`), so the archive
+                // page is not a second modal over it — the same order every
+                // other "open a page from a sheet" handoff in this screen uses.
+                ...(onOpenConversations
+                  ? {
+                      onOpenArchive: () => {
+                        closeManualSheet()
+                        onOpenConversations(botName)
+                      }
+                    }
+                  : {})
+              }
+            }
+          : {})}
         dismissedIds={dismissedRequests}
         findRequest={findRequest}
         manual={sheet}

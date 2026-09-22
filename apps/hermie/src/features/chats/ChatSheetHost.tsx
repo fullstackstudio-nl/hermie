@@ -29,6 +29,7 @@ import { AgentsSheet, type AgentsSheetProps } from '../../chat-ui'
 import { BotProfileSheet, type BotProfileSheetProps } from '../bot-profile'
 import { ApprovalSheet, ChatOptionsSheet, ClarifySheet, type ChatOptionsSheetProps } from '../../ui/sheets'
 import { SHEET_ANIMATION_MS } from '../../ui/BottomSheet'
+import { ConversationSheet, type ConversationSheetProps } from '../sessions/ConversationSheet'
 import { initialSheetHostState, isSheetVisible, sheetHostReducer, targetSheet, type ManualSheet } from './sheet-host'
 
 export type RequestItem = ApprovalItem | ClarifyItem
@@ -89,6 +90,15 @@ export interface ChatSheetHostProps {
    */
   profile?: Omit<BotProfileSheetProps, 'visible' | 'onClose' | 'onClosed'>
 
+  /**
+   * The bot's conversations, or absent where the caller offers no entry point
+   * to them — a gateway that named nobody (`canCreate === false`). `targetSheet`
+   * still routes to `'conversations'` on request, but nothing here ever sets
+   * `manual` to it without this also being present, so the missing-render guard
+   * below is defence rather than a path any caller takes.
+   */
+  conversations?: Omit<ConversationSheetProps, 'visible' | 'onClose' | 'onClosed'>
+
   /** Forwarded to the approval sheet; tests pass 0. */
   tapGuardMs?: number
 }
@@ -116,6 +126,7 @@ export function ChatSheetHost({
   agents,
   options,
   profile,
+  conversations,
   tapGuardMs,
   dismissedIds
 }: ChatSheetHostProps) {
@@ -242,6 +253,12 @@ export function ChatSheetHost({
   if (state.presented === 'profile') {
     return profile ? (
       <BotProfileSheet {...profile} onClose={onCloseManual} onClosed={settled} visible={visible} />
+    ) : null
+  }
+
+  if (state.presented === 'conversations') {
+    return conversations ? (
+      <ConversationSheet {...conversations} onClose={onCloseManual} onClosed={settled} visible={visible} />
     ) : null
   }
 

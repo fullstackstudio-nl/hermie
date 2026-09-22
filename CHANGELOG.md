@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [ADR-0027](docs/adr/0027-desktop-is-a-webview-over-hermie-web.md) and `docs/desktop.md`. The
   gateway list, the bridge, sign-in, notifications, the full menu, files and platform packaging are
   not built yet.
+- **See, open, start, rename and delete a bot's conversations from a list.** A round "conversations"
+  button in the chat header — left of `(…)`, shown only on a gateway that knows who you are — opens a
+  sheet with the shared group chat first, then your own chats (most recently used first, with a
+  preview and an unread mark), a "New chat" row, and a link to the full archive. Renaming commits on
+  Return and a delete asks first; a switch that would drop a running reply or a queued message is
+  refused with the same notice the switch already used. The `(…)` menu gained its own "New chat" row
+  under "Branch from here…". The old switch between the shared chat and "My chat" keeps working
+  exactly as it did; this list is a second way in, not a replacement yet.
 
 ## [0.1.6] - 2026-09-22
 

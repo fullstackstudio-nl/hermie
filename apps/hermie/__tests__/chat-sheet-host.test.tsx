@@ -8,7 +8,7 @@
  * screen, what replaces it, and what happens to a question after it has been
  * answered — rather than about how any one sheet looks.
  */
-import { act, fireEvent, screen } from '@testing-library/react-native'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react-native'
 import { useState } from 'react'
 
 import { SHEET_ANIMATION_MS } from '../src/ui/BottomSheet'
@@ -18,10 +18,22 @@ import {
   isSheetVisible,
   sheetHostReducer,
   targetSheet,
+  type ManualSheet,
   type SheetHostState
 } from '../src/features/chats/sheet-host'
 import { approvalItem, clarifyItem, subagentTree } from '../src/chat-ui/fixtures'
+import { type Bot, useBotsStore } from '../src/store/bots'
 import { renderScreen, withProviders } from './support/render'
+
+let mockController: {
+  listBotConversations: jest.Mock
+  onConversationsChanged: jest.Mock
+  selectConversation: jest.Mock
+}
+
+jest.mock('../src/features/chats/ChatRuntime', () => ({
+  useChatRuntime: () => ({ controller: mockController, userChats: { available: true, title: 'Chat · Researcher' } })
+}))
 
 describe('the sheet-host state machine', () => {
   it('ranks a waiting question above anything the reader opened', () => {
@@ -101,14 +113,17 @@ function Harness({
   manual = 'none',
   onCloseRequest = jest.fn(),
   onRespondApproval = jest.fn(),
-  onShowRequest
+  onShowRequest,
+  withConversations = false
 }: {
   items: RequestItem[]
   open?: string
-  manual?: 'none' | 'options' | 'agents'
+  manual?: ManualSheet
   onCloseRequest?: (item: RequestItem) => void
   onRespondApproval?: (item: RequestItem, choice: string) => void
   onShowRequest?: (item: RequestItem) => void
+  /** Task 6: hands the host a `conversations` prop, the way `ChatScreen` does when `canCreate`. */
+  withConversations?: boolean
 }) {
   const [sheet, setSheet] = useState(manual)
 
@@ -123,6 +138,7 @@ function Harness({
     <ChatSheetHost
       agents={AGENTS}
       botHandle="researcher"
+      {...(withConversations ? { conversations: { botName: 'researcher' } } : {})}
       findRequest={id => items.find(item => item.id === id)}
       manual={sheet}
       onCloseManual={() => setSheet('none')}
@@ -142,6 +158,73 @@ function Harness({
 }
 
 const renderHost = renderScreen
+
+const BOT: Bot = {
+  name: 'researcher',
+  displayName: 'Researcher',
+  description: '',
+  model: '',
+  provider: '',
+  isDefault: false,
+  hasAvatar: false,
+  uiMetaRevision: 0,
+  canonical: { id: 'stored-group', resolvedId: 'stored-group', preview: '', lastActive: 0, messageCount: 0 }
+}
+
+beforeEach(() => {
+  useBotsStore.getState().reset()
+  useBotsStore.getState().setBots([BOT])
+  mockController = {
+    listBotConversations: jest.fn(async () => ({ group: null, own: [], canCreate: true })),
+    onConversationsChanged: jest.fn(() => jest.fn()),
+    selectConversation: jest.fn(async () => undefined)
+  }
+})
+
+/**
+ * The `'conversations'` sheet (Task 6): same priority rules as the other
+ * manual ones — a request outranks it, and picking a row is the reason it
+ * was opened at all.
+ */
+describe('the conversations sheet', () => {
+  it('is presented for the manual target `conversations`', async () => {
+    renderHost(<Harness items={[]} manual="conversations" withConversations />)
+
+    await waitFor(() => expect(screen.getByTestId('conversation-sheet')).toBeTruthy())
+  })
+
+  it('gives way to a question that arrives while it is open', async () => {
+    const view = renderHost(<Harness items={[approvalItem]} manual="conversations" withConversations />)
+
+    await waitFor(() => expect(screen.getByTestId('conversation-sheet')).toBeTruthy())
+
+    view.rerender(
+      withProviders(<Harness items={[approvalItem]} manual="conversations" open={approvalItem.id} withConversations />)
+    )
+
+    await screen.findByTestId('approval-sheet')
+    expect(view.queryByTestId('conversation-sheet')).toBeNull()
+  })
+
+  it('closes on picking a row, the same way every other manual sheet does', async () => {
+    renderHost(<Harness items={[]} manual="conversations" withConversations />)
+
+    // `ConversationSheet` hands its list the testID `conversation-sheet-list`,
+    // so the row underneath it is prefixed the same way.
+    await waitFor(() => expect(screen.getByTestId('conversation-sheet-list-row-stored-group')).toBeTruthy())
+
+    fireEvent.press(screen.getByTestId('conversation-sheet-list-row-stored-group'))
+
+    await waitFor(() => expect(mockController.selectConversation).toHaveBeenCalledWith(BOT, null))
+    await waitFor(() => expect(screen.queryByTestId('conversation-sheet')).toBeNull())
+  })
+
+  it('draws nothing when the caller gave no entry point to conversations at all', () => {
+    renderHost(<Harness items={[]} manual="conversations" />)
+
+    expect(screen.queryByTestId('conversation-sheet')).toBeNull()
+  })
+})
 
 describe('ChatSheetHost', () => {
   it('presents a question that arrives while the options sheet is open', async () => {

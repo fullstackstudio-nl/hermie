@@ -18,10 +18,10 @@
  */
 
 /** The sheets a chat can present. `request` is an approval or a clarify. */
-export type SheetKind = 'none' | 'options' | 'agents' | 'profile' | 'request'
+export type SheetKind = 'none' | 'options' | 'agents' | 'profile' | 'conversations' | 'request'
 
-/** The three a reader opens themselves. */
-export type ManualSheet = 'none' | 'options' | 'agents' | 'profile'
+/** The four a reader opens themselves. */
+export type ManualSheet = 'none' | 'options' | 'agents' | 'profile' | 'conversations'
 
 export interface SheetHostState {
   /** The sheet that is mounted right now. */

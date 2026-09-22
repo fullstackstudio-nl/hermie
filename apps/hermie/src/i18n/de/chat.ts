@@ -400,6 +400,21 @@ export const chat: Translation<typeof chatStrings> = {
     messages: (count: number) => (count === 1 ? '1 Nachricht' : `${count} Nachrichten`)
   },
 
+  conversations: {
+    groupChat: 'Gruppenchat',
+    yourChats: 'Deine Chats',
+    yoursEmpty: 'Starte einen eigenen Chat, um ihn hier zu sehen.',
+    newChat: 'Neuer Chat',
+    newChatFailed: 'Das Gateway wollte keinen neuen Chat starten.',
+    firstChat: 'Mein Chat',
+    allConversations: 'Alle Unterhaltungen',
+    renameLabel: 'Chatname',
+    columnTitle: 'Unterhaltungen',
+    showColumn: 'Unterhaltungen anzeigen',
+    hideColumn: 'Unterhaltungen ausblenden',
+    openFailed: 'Diese Unterhaltung konnte nicht geöffnet werden.'
+  },
+
   voice: {
     header: 'STIMME',
     codeBlock: (lines: number) => (lines === 1 ? 'Codeblock, 1 Zeile' : `Codeblock, ${lines} Zeilen`),
