@@ -62,7 +62,12 @@ export function gatewayDisk(config: StoredGatewayConfigLike, options: GatewayDis
       set: jest.fn(async () => undefined),
       delete: jest.fn(async () => undefined),
       getJson: jest.fn(async (key: string) => answers[key] ?? null),
-      setJson: jest.fn(async () => undefined)
+      setJson: jest.fn(async () => undefined),
+      // The launch sweep asks for these. Answering with the keys this double
+      // actually holds keeps it honest: the sweep then finds the one live
+      // configuration, recognises it, and removes nothing.
+      keys: jest.fn(async () => Object.keys(answers)),
+      deleteMany: jest.fn(async () => undefined)
     }
   }
 }
@@ -71,7 +76,9 @@ export function gatewayDisk(config: StoredGatewayConfigLike, options: GatewayDis
 export function gatewaySecrets(gatewayId: string = STORED_GATEWAY_ID) {
   return {
     secretStore: {
-      get: jest.fn(async (key: string) => (key === `hermie.auth.access_token@${gatewayId}` ? 'access-1' : null)),
+      // `-`, not `@`: the secret store rejects an `@` outright. See
+      // `SECRET_NAMESPACE_SEPARATOR` in `gateway/namespace.ts`.
+      get: jest.fn(async (key: string) => (key === `hermie.auth.access_token-${gatewayId}` ? 'access-1' : null)),
       set: jest.fn(async () => undefined),
       delete: jest.fn(async () => undefined)
     }

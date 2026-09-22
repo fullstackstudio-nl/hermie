@@ -227,6 +227,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Signing in works again.** Since gateways got ids, every credential the app tried to store was
+  rejected before it reached the device's secret store at all: the id is appended with an `@`, and
+  `expo-secure-store` accepts only letters, digits, `.`, `-` and `_` in a key. It was not a
+  permissions problem and not particular to developer builds — onboarding could not finish on any
+  phone, and the one-time move that carries a pre-existing sign-in into the new layout silently
+  carried nothing, which is what was behind being asked to sign in again after an app update.
+  Credential keys now use a separator the secret store accepts, and a test runs the library's own
+  check over every key the app can produce, so a key it would refuse cannot ship again. Anyone
+  affected signs in once more; nothing else is lost.
+
+- **The chat list's header fits the iPad's narrow sidebar.** In portrait the sidebar is 300pt, and
+  four controls that cannot shrink — Boards, New bot, `+`, Edit — left the title nothing: "Chats"
+  wrapped to one character per line and "New bot…" truncated mid-word. The title now takes one line
+  whatever happens, and below a threshold the three word actions fold into a single `…` beside a `+`
+  that stays where it is. A wider sidebar, and every phone, keeps the full row exactly as it was.
+
+- **Setting a gateway up now either happens completely or leaves nothing behind — and never fails
+  silently.** The credentials go to the secret store first and the address and the list entry only
+  once they have landed; before, the address was written first, and a device whose keychain refused
+  — an unsigned developer build, a locked device — was left with a gateway it could not sign in to,
+  under an id nothing had recorded. Every launch minted another one: fifty of them had collected on
+  one simulator and thirty-nine on another, while the app returned to the Welcome screen saying
+  nothing about why. A refusal now rolls back what it wrote, writes no address, and reaches the
+  wizard as its own sentence with the platform's reason on the end — "Hermie could not store the
+  credentials securely on this device: …" — under a button that says **Try again**. A launch read
+  that throws is recorded on the auth timeline, which Settings → Connection prints, instead of
+  quietly becoming a fresh-install wizard. The configurations already stranded are reclaimed once,
+  on the first launch after this, and only those: a stored address that no entry in the list claims
+  and that nothing can ever open again.
+
 - **A private chat cached by Hermie Web is no longer readable by everybody else signed in.** The
   service keeps a copy of each chat's tail so a chat paints instantly, and until now that copy was
   shared by everyone on the gateway — which was fine while the only conversation a bot had was the

@@ -1200,19 +1200,65 @@ light theme is pure white: the gateway card read as a white rectangle stuck to t
 panel. The rung exists so a tint composites onto a known colour, not so the tint becomes it. Only the
 surfaces that have to hide a wallpaper take the rung, and only when they cannot blur.
 
-### An unsigned simulator build cannot reach the keychain
+### A simulator build reaches the keychain fine. The key was the problem (corrected 2026-09-22)
 
-`CODE_SIGNING_ALLOWED=NO` builds and installs and launches, and then onboarding fails on its last
-step with _"Calling the 'setValueWithKeyAsync' function has failed → Caused by: A required entitlement
-isn't present."_ Entitlements are attached at signing, so an unsigned build has no keychain access
-group and `expo-secure-store` cannot write the session token. Build the simulator target ad-hoc
-signed instead — no team needed:
+**This section used to say the opposite, and it was wrong in both halves.** It claimed an unsigned
+build has no keychain access group and therefore cannot write a credential, and it blamed
+_"A required entitlement isn't present."_ Neither survived being measured.
+
+What was actually measured, on the iPhone 17 Pro simulator, against a Debug build whose entitlements
+dict is **empty** (`codesign -d --entitlements -` prints `[Dict]` and nothing else, `Signature=adhoc`,
+`TeamIdentifier=not set`):
+
+```
+SecretStoreWriteError: the secret store refused the credentials:
+  Invalid key provided to SecureStore. Keys must not be empty and contain
+  only alphanumeric characters, ".", "-", and "_".
+```
+
+`expo-secure-store` validates every key against `/^[\w.-]+$/` in JavaScript and throws **before any
+native call happens** — no keychain, no OSStatus, no entitlement involved. The registry suffixes
+gateway-specific keys with `@<id>` (`gateway/namespace.ts`), and `@` is not in that set. So from the
+moment gateways got ids, **every namespaced credential write threw, on every platform** — not only on
+simulator builds, and not only on unsigned ones. Onboarding could not finish anywhere.
+
+Three things followed from it, and all three had been blamed on something else:
+
+- the app returned to the Welcome screen on every launch, because the provider's startup `reload()`
+  caught the throw and switched to onboarding without recording it;
+- a `hermie.gateway.config@<id>` was left behind each time, under an id nothing had recorded, because
+  the configuration was written before the credentials. Fifty had collected on the iPhone simulator
+  and thirty-nine on the iPad;
+- the one-time move in `gateway/migrate.ts` carried **no** credentials across, because it catches per
+  item — which is the "signed out after replacing the app bundle" report this document has been
+  speculating about since 2026-09-20. That speculation is what put the `keychain-access-groups`
+  entitlement in `app.config.ts`; the entitlement is harmless and unproven and is **not** the fix.
+
+The fix is `SECRET_NAMESPACE_SEPARATOR` — `-` for keys going to the secret store, spelled in
+`namespace.ts` beside the `@` the key-value store keeps. `__tests__/secret-store-keys.test.ts` runs
+the library's own validator over every key the app can produce, which is the assertion whose absence
+let this through two rounds.
+
+**Proof that signing was never involved**, on that same empty-entitlements ad-hoc build: after the
+fix, `--hermieGateway … --hermieToken …` reaches the chat, and a second launch with **no arguments at
+all** reconnects from the stored credential. A build that could not reach the keychain could not do
+the second one.
+
+#### Building it, which the old recipe also got wrong
+
+`CODE_SIGNING_ALLOWED=NO` is what strips the entitlements, and the recipe this section used to give
+did not put them back:
 
 ```sh
 xcodebuild -workspace Hermie.xcworkspace -scheme Hermie -configuration Debug \
   -destination 'id=<udid>' -derivedDataPath build/SimDerivedData \
-  CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO build
+  CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES build
 ```
+
+With no `DEVELOPMENT_TEAM`, Xcode still signs ad-hoc and still produces an **empty** entitlements
+dict — `$(AppIdentifierPrefix)` has nothing to expand to, so `keychain-access-groups` is dropped
+rather than embedded. That is fine, and it is the point: the simulator's keychain serves a process
+with no access group at all. Do not chase the entitlement.
 
 `npx expo run:ios` does this correctly on its own but needs Simulator.app to be openable; on this
 machine it stops at _"Can't determine id of Simulator app"_ and never reaches the build. `xcodebuild`

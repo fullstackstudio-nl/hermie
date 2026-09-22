@@ -63,7 +63,9 @@ export type SecretKeys = Record<keyof typeof SECRET_KEYS, string>
  * the suffix goes on here, at the one place the names are written down.
  */
 export function secretKeysFor(ns: GatewayNamespace): SecretKeys {
-  return Object.fromEntries(Object.entries(SECRET_KEYS).map(([slot, key]) => [slot, ns.key(key)])) as SecretKeys
+  // `secretKey`, not `key`: the secret store rejects the `@` the key-value
+  // store is suffixed with. See `SECRET_NAMESPACE_SEPARATOR`.
+  return Object.fromEntries(Object.entries(SECRET_KEYS).map(([slot, key]) => [slot, ns.secretKey(key)])) as SecretKeys
 }
 
 export interface StoredGatewayConfig {
@@ -118,6 +120,54 @@ export interface GatewaySetup {
    * of reach.
    */
   credentialError?: string
+}
+
+/**
+ * The tag on a secret-store write failure, and why it is a field rather than a
+ * class check.
+ *
+ * `instanceof` on a subclass of `Error` is only as reliable as the transform
+ * that compiled it: a downlevelled `extends Error` loses the prototype link and
+ * the check silently answers false, which for THIS error would mean the wizard
+ * printing a raw keychain message instead of the sentence written for it. A tag
+ * on the object survives every transform and every module boundary.
+ */
+const SECRET_STORE_WRITE_FAILED = 'hermie.secret_store.write_failed'
+
+/**
+ * The credentials could not be written to this device's secret store.
+ *
+ * Its own type because it is the one failure in setup that is neither the
+ * reader's fault nor the gateway's: the address was right, the sign-in worked,
+ * and the keychain refused. Everything else in the wizard's failure path is a
+ * `GatewayError` with a host in it, and phrasing this one as "the settings
+ * could not be saved: <OSStatus>" told nobody what had happened.
+ *
+ * `reason` is what the platform said, kept verbatim: an OSStatus is the only
+ * thing that distinguishes a missing entitlement from a locked device, and a
+ * sentence that swallows it leaves the reader nothing to search for.
+ */
+export class SecretStoreWriteError extends Error {
+  readonly kind = SECRET_STORE_WRITE_FAILED
+  readonly reason: string
+
+  constructor(reason: string) {
+    super(`the secret store refused the credentials: ${reason}`)
+    this.name = 'SecretStoreWriteError'
+    this.reason = reason
+  }
+}
+
+/** True for a `SecretStoreWriteError`, across module boundaries and transforms. */
+export function isSecretStoreWriteError(value: unknown): value is SecretStoreWriteError {
+  return Boolean(value) && typeof value === 'object' && (value as { kind?: unknown }).kind === SECRET_STORE_WRITE_FAILED
+}
+
+/** What the platform said, in the one form every caller here can print. */
+function reasonOf(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+
+  return message.trim() || 'no reason given'
 }
 
 export interface SaveGatewaySetupInput {
@@ -284,12 +334,27 @@ export async function loadGatewaySetup(ns: GatewayNamespace): Promise<GatewaySet
  * only point in onboarding where a secret is persisted: up to here the tokens
  * exist only in memory, so abandoning a half-finished wizard leaves nothing
  * behind.
+ *
+ * **The credentials go first, and the configuration only if they landed.** The
+ * other order was the shape of a real failure: the config was written, a secret
+ * write then rejected, and what survived on disk was a gateway with an address
+ * and no way in — under an id that, because the caller never got as far as
+ * saving the registry, no entry claimed. Fifty of those accumulated on one
+ * simulator, one per launch, while the app returned to the wizard saying
+ * nothing. Written this way round the failing case leaves the disk exactly as
+ * it found it: the secrets that did land are taken back out, no configuration
+ * is written, and the caller is TOLD, with the platform's own reason attached.
+ *
+ * Rolling back is best-effort by necessity — the store that just refused a
+ * write is not a store whose deletes can be relied on either — so it is
+ * `allSettled` and the throw happens regardless. A secret left behind under an
+ * id no configuration names is unreachable and is what the sweep in
+ * `registry.ts` is for; a configuration with no secret is what sends somebody
+ * back to the wizard, and that is the one this prevents.
  */
 export async function saveGatewaySetup(ns: GatewayNamespace, input: SaveGatewaySetupInput): Promise<void> {
   const { config, extraHeaders, frontDoor = NO_FRONT_DOOR, tokens, sessionToken } = input
   const keys = secretKeysFor(ns)
-
-  await keyValueStore.setJson(configKeyFor(ns), config)
 
   const writes: Promise<void>[] = [
     Object.keys(extraHeaders).length > 0
@@ -317,7 +382,15 @@ export async function saveGatewaySetup(ns: GatewayNamespace, input: SaveGatewayS
     writes.push(secretStore.set(keys.sessionToken, sessionToken))
   }
 
-  await Promise.all(writes)
+  try {
+    await Promise.all(writes)
+  } catch (error) {
+    await Promise.allSettled(Object.values(keys).map(key => secretStore.delete(key)))
+
+    throw new SecretStoreWriteError(reasonOf(error))
+  }
+
+  await keyValueStore.setJson(configKeyFor(ns), config)
 }
 
 /** Sign out of ONE gateway: forget its credentials, keep its address. */

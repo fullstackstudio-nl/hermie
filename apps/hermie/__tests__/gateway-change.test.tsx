@@ -86,13 +86,18 @@ jest.mock('../src/platform/key-value-store', () => ({
 
       return key === `hermie.gateway.config@${mockGatewayId}` ? mockStoredConfig : null
     }),
-    setJson: jest.fn(async () => undefined)
+    setJson: jest.fn(async () => undefined),
+    // The one live configuration and nothing else, so the launch sweep finds
+    // nothing to reclaim.
+    keys: jest.fn(async () => ['hermie.gateways', `hermie.gateway.config@${mockGatewayId}`]),
+    deleteMany: jest.fn(async () => undefined)
   }
 }))
 
 jest.mock('../src/platform/secret-store', () => ({
   secretStore: {
-    get: jest.fn(async (key: string) => (key === `hermie.auth.access_token@${mockGatewayId}` ? 'access-1' : null)),
+    // `-`, not `@`: see `SECRET_NAMESPACE_SEPARATOR` in `gateway/namespace.ts`.
+    get: jest.fn(async (key: string) => (key === `hermie.auth.access_token-${mockGatewayId}` ? 'access-1' : null)),
     set: jest.fn(async () => undefined),
     delete: jest.fn(async () => undefined)
   }
@@ -252,7 +257,7 @@ describe('the wizard it opens', () => {
     // count says nothing on its own.)
     const deleted = secretStore.delete.mock.calls.map(([key]: [string]) => key)
 
-    expect(deleted.includes(`hermie.auth.access_token@${mockGatewayId}`)).toBe(cleared)
+    expect(deleted.includes(`hermie.auth.access_token-${mockGatewayId}`)).toBe(cleared)
     expect(keyValueStore.setJson).toHaveBeenCalled()
   })
 })

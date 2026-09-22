@@ -55,6 +55,10 @@ jest.mock('../src/platform/key-value-store', () => ({
     }),
     setJson: jest.fn(async (key: string, value: unknown) => {
       mockDisk.set(key, JSON.stringify(value))
+    }),
+    keys: jest.fn(async () => [...mockDisk.keys()]),
+    deleteMany: jest.fn(async (keys: readonly string[]) => {
+      keys.forEach(key => mockDisk.delete(key))
     })
   }
 }))
@@ -99,7 +103,7 @@ function seed(activeGatewayId = mockGatewayA) {
   ]) {
     mockDisk.set(`hermie.gateway.config@${id}`, JSON.stringify({ baseUrl: address, authMode: 'native_pkce' }))
     mockDisk.set(`hermie.chat.view@${id}`, JSON.stringify({ defaults: {}, perChat: {} }))
-    mockKeychain.set(`hermie.auth.access_token@${id}`, `access-${id}`)
+    mockKeychain.set(`hermie.auth.access_token-${id}`, `access-${id}`)
   }
 
   mockDisk.set(
@@ -227,9 +231,9 @@ describe('one gateway’s own page', () => {
       fireEvent.press(screen.getByTestId('gateway-sign-out'))
     })
 
-    await waitFor(() => expect(mockKeychain.has(`hermie.auth.access_token@${mockGatewayB}`)).toBe(false))
+    await waitFor(() => expect(mockKeychain.has(`hermie.auth.access_token-${mockGatewayB}`)).toBe(false))
     // The live gateway's credential is untouched, and B keeps its address.
-    expect(mockKeychain.get(`hermie.auth.access_token@${mockGatewayA}`)).toBe(`access-${mockGatewayA}`)
+    expect(mockKeychain.get(`hermie.auth.access_token-${mockGatewayA}`)).toBe(`access-${mockGatewayA}`)
     expect(mockDisk.has(`hermie.gateway.config@${mockGatewayB}`)).toBe(true)
   })
 
@@ -251,12 +255,12 @@ describe('one gateway’s own page', () => {
 
     expect(mockDisk.has(`hermie.gateway.config@${mockGatewayB}`)).toBe(false)
     expect(mockDisk.has(`hermie.chat.view@${mockGatewayB}`)).toBe(false)
-    expect(mockKeychain.has(`hermie.auth.access_token@${mockGatewayB}`)).toBe(false)
+    expect(mockKeychain.has(`hermie.auth.access_token-${mockGatewayB}`)).toBe(false)
     expect(Object.keys(JSON.parse(mockDisk.get('hermie.chats.layout')!))).toEqual([mockGatewayA])
 
     // And the live gateway is exactly as it was.
     expect(mockDisk.has(`hermie.gateway.config@${mockGatewayA}`)).toBe(true)
-    expect(mockKeychain.get(`hermie.auth.access_token@${mockGatewayA}`)).toBe(`access-${mockGatewayA}`)
+    expect(mockKeychain.get(`hermie.auth.access_token-${mockGatewayA}`)).toBe(`access-${mockGatewayA}`)
     expect(registry().activeGatewayId).toBe(mockGatewayA)
   })
 })

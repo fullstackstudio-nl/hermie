@@ -125,7 +125,7 @@ async function moveSecrets(ns: GatewayNamespace): Promise<void> {
         continue
       }
 
-      await secretStore.set(ns.key(key), value)
+      await secretStore.set(ns.secretKey(key), value)
       await secretStore.delete(key)
     } catch {
       // A keychain that refuses one item is a sign-in to do again, not a

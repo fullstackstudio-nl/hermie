@@ -308,8 +308,21 @@ export const strings = {
         'Hermie will remember this gateway in this browser. The session itself stays where the gateway put it \u2014 in a cookie Hermie cannot read.',
       gateway: 'GATEWAY',
       finish: 'Start chatting',
+      /** The same button after a failure: it is a retry, and it says so. */
+      retry: 'Try again',
       saving: 'Saving…',
-      saveFailed: (message: string) => `The settings could not be saved: ${message}`
+      saveFailed: (message: string) => `The settings could not be saved: ${message}`,
+      /**
+       * The keychain refused, which is neither the address nor the sign-in.
+       *
+       * Named separately from `saveFailed` because the two send a reader to
+       * different places: a save that failed reads as "something about what I
+       * typed", and this one is about the device. The platform's own reason is
+       * kept on the end — an OSStatus is ugly and it is also the only thing
+       * that tells a missing entitlement from a locked device.
+       */
+      credentialsNotStored: (reason: string) =>
+        `Hermie could not store the credentials securely on this device: ${reason}`
     }
   },
 
@@ -347,6 +360,14 @@ export const strings = {
     footnote: 'Your conversations stay with your gateway.',
     sidebarHeader: 'CHATS',
     newCron: 'New cron',
+    /**
+     * The `…` that holds Boards, New bot and Edit on a narrow sidebar.
+     *
+     * A label rather than a name for what is behind it, because what IS behind
+     * it changes with the shell: a compact list has no Boards entry to offer.
+     * "More" is the one word that is true in every one of those arrangements.
+     */
+    moreActions: 'More',
 
     /**
      * A share that has arrived and cannot go yet.
