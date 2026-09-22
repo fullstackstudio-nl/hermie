@@ -47,18 +47,19 @@ The package is scoped and the command is not: `npm i -g @hermie/web` puts a `her
 
 Flags beat environment variables beat defaults.
 
-| Flag                 | Environment            | Default                  |                                                                                                         |
-| -------------------- | ---------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------- |
-| `--gateway <url>`    | `HERMIE_GATEWAY_URL`   | `http://127.0.0.1:9119`  | The gateway. Fixed at start; the only thing that can set one is `/setup`, and only while there is none. |
-| `--port <n>`         | `HERMIE_PORT`          | `9120`                   |                                                                                                         |
-| `--host <addr>`      | `HERMIE_HOST`          | `127.0.0.1`              | Anything else puts an unauthenticated port on the network.                                              |
-| `--public-url <url>` | `HERMIE_PUBLIC_URL`    | derived from `--gateway` | The gateway's own `dashboard.public_url`, written into `Host` and `Origin` on every proxied request.    |
-| `--static <dir>`     | `HERMIE_STATIC_DIR`    | the bundled `dist/web`   | The exported browser build.                                                                             |
-| `--install-root`     | `HERMIE_INSTALL_ROOT`  | the package's parent     | Where self-update unpacks releases and keeps the `current` link.                                        |
-| `--no-self-update`   | `HERMIE_SELF_UPDATE=0` | on                       | Turns `/hermie/update` into a refusal.                                                                  |
-| `--rollback`         |                        |                          | Point `current` at the previous release and exit.                                                       |
-| `--cache-max-mb <n>` | `HERMIE_CACHE_MAX_MB`  | `64`                     | Disk the message cache may take. `0` turns it off.                                                      |
-| `--help`             |                        |                          |                                                                                                         |
+| Flag                    | Environment                    | Default                  |                                                                                                                 |
+| ----------------------- | ------------------------------ | ------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `--gateway <url>`       | `HERMIE_GATEWAY_URL`           | `http://127.0.0.1:9119`  | The gateway. Fixed at start; the only thing that can set one is `/setup`, and only while there is none.         |
+| `--port <n>`            | `HERMIE_PORT`                  | `9120`                   |                                                                                                                 |
+| `--host <addr>`         | `HERMIE_HOST`                  | `127.0.0.1`              | Anything else puts an unauthenticated port on the network.                                                      |
+| `--public-url <url>`    | `HERMIE_PUBLIC_URL`            | derived from `--gateway` | The gateway's own `dashboard.public_url`, written into `Host` and `Origin` on every proxied request.            |
+| `--static <dir>`        | `HERMIE_STATIC_DIR`            | the bundled `dist/web`   | The exported browser build.                                                                                     |
+| `--install-root`        | `HERMIE_INSTALL_ROOT`          | the package's parent     | Where self-update unpacks releases and keeps the `current` link.                                                |
+| `--no-self-update`      | `HERMIE_SELF_UPDATE=0`         | on                       | Turns `/hermie/update` into a refusal.                                                                          |
+| `--rollback`            |                                |                          | Point `current` at the previous release and exit.                                                               |
+| `--cache-max-mb <n>`    | `HERMIE_CACHE_MAX_MB`          | `64`                     | Disk the message cache may take. `0` turns it off.                                                              |
+| `--allow-insecure-oidc` | `HERMIE_ALLOW_INSECURE_OIDC=1` | off                      | Let the built-in identity provider be enabled on a non-https origin. The gateway refuses such an issuer anyway. |
+| `--help`                |                                |                          |                                                                                                                 |
 
 It answers `GET /healthz`, `GET /hermie/config.json` and `GET|POST /hermie/update` itself, plus
 `/setup` and `/hermie/setup/*` while no gateway is configured. Everything under `/api`, `/auth`,
@@ -147,6 +148,81 @@ service can only decide what it does itself:
 It is **who has signed in through this service**, with when — not the gateway's account list.
 Upstream documents no route for listing accounts, and guessing at one would mean reading a 404 as
 "no users". The page labels which of the two it is showing.
+
+## Signing people in, when there is nothing to sign them in with
+
+Hermie Web can be **its own OpenID Provider**. It is **off**, and a deployment that has an identity
+provider should leave it off and point the gateway at that one instead.
+
+It exists for the operator who has neither: one gateway, a handful of people, and no Authentik or
+Keycloak to point `dashboard.oauth.self_hosted` at. The alternatives were an ungated gateway — where
+everyone is the same person, so there are no private chats, no per-person rules and nobody for a
+notification to be addressed to — or standing up a second service with its own database to put in
+front of one Python process.
+
+**Turning it on makes this service the identity root of your gateway.** Whoever can read its state
+directory can mint any account on that gateway, not merely read what is stored. That is what an
+identity provider is, there is no setting that softens it, and it is why the switch is on a page of
+its own with the consequence written beside it.
+
+### Enabling it
+
+1. **Put TLS in front of this service first.** The gateway refuses an issuer that is not `https` —
+   it allows plain `http` only on `localhost`, `127.0.0.1` and `::1` — so a provider enabled on a
+   plain-http hostname would work in a browser and be rejected by the gateway. `/admin/oidc` refuses
+   to enable on such an origin for that reason. `--allow-insecure-oidc` exists to reproduce that
+   refusal deliberately, not to work around it.
+2. **Open `/admin/oidc` on the address you want to be the issuer** and press **Turn it on**. The
+   issuer becomes `<that origin>/oidc`, because that is the address a browser can actually come back
+   to, and every token will carry it as `iss` from then on.
+3. **Copy the snippet the page prints into the gateway's `config.yaml`** and restart the gateway.
+   Enabling here changes nothing there; it tells you what to change.
+
+   ```yaml
+   dashboard:
+     public_url: https://hermes.example.com
+     oauth:
+       self_hosted:
+         issuer: https://hermes.example.com:9443/oidc
+         client_id: hermie-web-0123456789abcdef
+         scopes: openid profile email offline_access
+   ```
+
+   `offline_access` is not optional in practice. Without it the gateway is issued no refresh token,
+   and this service's own push sign-in cannot be made at all.
+
+4. **Add people.** Creating somebody mints a **one-time invitation link** they use to choose their
+   own password — nobody else, including you, ever sees it. The link is shown once, works once, and
+   lapses in a day.
+5. **Press Test sign-in.** It runs the whole round trip from the server against its own issuer —
+   discovery, the JWKS, the sign-in form, the code exchange, the ID token's signature against the
+   published key, and the refresh grant — and reports each step. It reads the authorization redirect
+   and never follows it, so the diagnostic cannot sign anybody in to the gateway as a side effect.
+
+### What it is
+
+Authorization code with PKCE and nothing else: `S256` required, no implicit flow, no password grant,
+no dynamic client registration, no federation, no SCIM. RS256, because that is what the gateway's
+own validator accepts first. Passwords are hashed with `scrypt` — argon2id would be better and is a
+native dependency this package does not have; the trade is written down in ADR-0025 rather than
+hidden. Optional TOTP (RFC 6238) with single-use recovery codes. Refresh tokens rotate, and
+presenting a token that has already been rotated revokes every token from that sign-in.
+
+The signing key can be rotated from the page. The old key stays in the published JWKS until
+everything it signed has expired plus the window a relying party caches the JWKS for, so a rotation
+signs nobody out.
+
+Every page it serves is HTML with no script in it, like `/setup` and `/admin`.
+
+### The one redirect URI, and why the app is not in it
+
+The registered redirect URI is the **gateway's** `/auth/callback`, built from its `public_url`. A
+phone signing in never talks to this issuer: the gateway brokers that flow, and the app's loopback
+redirect is registered with the gateway, not here. The list is editable for a deployment that
+genuinely has a second client.
+
+[ADR-0025](https://github.com/fullstackstudio-nl/hermie/blob/main/docs/adr/0025-hermie-web-is-a-service-layer.md)
+has the reasoning and the whole threat model.
 
 ## Documentation
 
