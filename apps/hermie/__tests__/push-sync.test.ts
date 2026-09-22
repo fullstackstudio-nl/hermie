@@ -24,7 +24,13 @@ import type { PushAddress } from '@hermie/gateway-client/push'
 
 import { NS_A } from './support/gateway-namespace'
 
-import { pushTapOf, resolvePushTap, type OpenApproval } from '../src/features/push/actions'
+import {
+  pushDestinationOf,
+  pushTapOf,
+  resolvePushTap,
+  type OpenApproval,
+  type PushTap
+} from '../src/features/push/actions'
 import type {
   PushAddressFailure,
   PushPermission,
@@ -96,27 +102,36 @@ function fakePlatform(patch: Partial<FakePlatform> = {}): FakePlatform {
 
 function fakePorts(): PushSyncPorts & {
   shown: string[]
+  conversations: [string, string][]
   responded: [string, string, string][]
   open: OpenApproval[]
-  switched: [string, string][]
+  switched: [string, string, string][]
+  /** What `canonicalSessionIds` answers; empty stages a roster not read yet. */
+  canonical: string[]
   /** What `switchToGateway` answers: true stages "this named another gateway". */
   switches: boolean
 } {
   const ports = {
     shown: [] as string[],
+    conversations: [] as [string, string][],
     responded: [] as [string, string, string][],
     open: [] as OpenApproval[],
-    switched: [] as [string, string][],
+    switched: [] as [string, string, string][],
+    canonical: [] as string[],
     switches: false,
     showChat: async (bot: string) => {
       ports.shown.push(bot)
     },
+    showConversation: async (bot: string, sessionId: string) => {
+      ports.conversations.push([bot, sessionId])
+    },
+    canonicalSessionIds: () => ports.canonical,
     openApprovals: async () => ports.open,
     respondApproval: async (bot: string, requestId: string, choice: string) => {
       ports.responded.push([bot, requestId, choice])
     },
-    switchToGateway: async (key: string, bot: string) => {
-      ports.switched.push([key, bot])
+    switchToGateway: async (key: string, bot: string, sessionId: string) => {
+      ports.switched.push([key, bot, sessionId])
 
       return ports.switches
     }
@@ -603,11 +618,16 @@ describe('what a tap may do', () => {
   })
 
   it('reads a bot out of a payload and nothing else', () => {
+    // Every other field is EMPTY rather than absent, which is what makes the
+    // tap a total value: nothing downstream has to distinguish "not said" from
+    // "said nothing", and the destination table reads one shape.
     expect(pushTapOf(response({ bot: 'researcher', type: 'message' }))).toEqual({
       bot: 'researcher',
       requestId: '',
       action: 'open',
-      gatewayKey: ''
+      gatewayKey: '',
+      sessionId: '',
+      sessionKind: ''
     })
     expect(pushTapOf(response({ type: 'message' }))).toBeNull()
   })
@@ -617,7 +637,9 @@ describe('what a tap may do', () => {
       bot: 'researcher',
       requestId: '',
       action: 'open',
-      gatewayKey: ''
+      gatewayKey: '',
+      sessionId: '',
+      sessionKind: ''
     })
   })
 
@@ -657,7 +679,148 @@ describe('what a tap may do', () => {
   })
 })
 
+describe('which conversation a tap opens', () => {
+  const tapFor = (patch: Partial<PushTap> = {}): PushTap => ({
+    bot: 'researcher',
+    requestId: '',
+    action: 'open',
+    gatewayKey: '',
+    sessionId: '',
+    sessionKind: '',
+    ...patch
+  })
+
+  const CANONICAL = ['stored-r', 'live-r']
+
+  /*
+    The whole table, and every row of it that is not "open that conversation"
+    lands on the CHAT — which is the screen this app can always say something
+    true on. A notification is a hint; nothing here is allowed to turn an
+    unreadable field into a destination.
+  */
+  const table: [string, Partial<PushTap>, readonly string[], ReturnType<typeof pushDestinationOf>][] = [
+    ['the notifier said canonical', { sessionId: 'branch-7', sessionKind: 'canonical' }, CANONICAL, { kind: 'chat' }],
+    [
+      'the notifier said branch',
+      { sessionId: 'branch-7', sessionKind: 'branch' },
+      CANONICAL,
+      { kind: 'conversation', sessionId: 'branch-7' }
+    ],
+    [
+      'the notifier said other',
+      { sessionId: 'past-2', sessionKind: 'other' },
+      CANONICAL,
+      { kind: 'conversation', sessionId: 'past-2' }
+    ],
+    // The notifier's word wins over the id: it read the session's own title,
+    // and this app second-guessing that is how a tap lands on the wrong screen.
+    [
+      'the notifier said branch about an id we think is canonical',
+      { sessionId: 'stored-r', sessionKind: 'branch' },
+      CANONICAL,
+      { kind: 'conversation', sessionId: 'stored-r' }
+    ],
+    ['no kind, the stored canonical id', { sessionId: 'stored-r' }, CANONICAL, { kind: 'chat' }],
+    // The stored id and the resolved id are different strings for one
+    // conversation, and a notifier may carry either.
+    ['no kind, the resolved canonical id', { sessionId: 'live-r' }, CANONICAL, { kind: 'chat' }],
+    [
+      'no kind, an id that is neither',
+      { sessionId: 'branch-7' },
+      CANONICAL,
+      { kind: 'conversation', sessionId: 'branch-7' }
+    ],
+    // A cold start from a notification: the roster has not been read, so there
+    // is nothing to compare against and nothing to conclude.
+    ['no kind, nothing to compare against', { sessionId: 'branch-7' }, [], { kind: 'chat' }],
+    ['no session at all', {}, CANONICAL, { kind: 'chat' }],
+    [
+      'a kind this build does not know',
+      { sessionId: 'x-1', sessionKind: 'martian' as never },
+      CANONICAL,
+      {
+        kind: 'conversation',
+        sessionId: 'x-1'
+      }
+    ]
+  ]
+
+  it.each(table)('%s', (_name, patch, canonicalIds, expected) => {
+    expect(pushDestinationOf({ tap: tapFor(patch), canonicalIds })).toEqual(expected)
+  })
+
+  it('reads both spellings of the session off a payload', () => {
+    // `sessionId` is the plugin's; `session` is what Hermie Web's own daemon
+    // has always written. A payload from the older notifier is not a payload
+    // with no session in it.
+    expect(pushTapOf({ actionIdentifier: 'default', data: { bot: 'researcher', sessionId: 'a' } })?.sessionId).toBe('a')
+    expect(pushTapOf({ actionIdentifier: 'default', data: { bot: 'researcher', session: 'b' } })?.sessionId).toBe('b')
+  })
+
+  it('reads a kind it does not recognise as no kind at all', () => {
+    const tap = pushTapOf({
+      actionIdentifier: 'default',
+      data: { bot: 'researcher', sessionId: 'a', sessionKind: 'past' }
+    })
+
+    // `past` is the APP's word for a retired conversation and not the
+    // gateway's. An unreadable kind falls through to the id comparison rather
+    // than to a guess.
+    expect(tap?.sessionKind).toBe('')
+  })
+})
+
 describe('a tap, end to end', () => {
+  it('opens the conversation and answers nothing, for a branch', async () => {
+    const platform = fakePlatform()
+    const ports = fakePorts()
+    const sync = syncFor(platform, ports)
+
+    ports.open = [{ request_id: 'req-1', choices: ['once', 'deny'] }]
+    sync.start()
+    await settled()
+
+    platform.responses[0]?.({
+      actionIdentifier: 'allow',
+      data: { bot: 'researcher', type: 'request', requestId: 'req-1', sessionId: 'branch-7', sessionKind: 'branch' }
+    })
+    await settled()
+
+    expect(ports.conversations).toEqual([['researcher', 'branch-7']])
+    /*
+      The chat is NOT opened and the Allow is not sent. An Allow has to be
+      re-validated against `approval.pending` for the session that asked, and
+      that is not the session this controller resumed — answering the canonical
+      chat's oldest open request would be answering a different question than
+      the one on the lock screen.
+    */
+    expect(ports.shown).toEqual([])
+    expect(ports.responded).toEqual([])
+
+    sync.stop()
+  })
+
+  it('opens the chat for a payload that names the canonical session', async () => {
+    const platform = fakePlatform()
+    const ports = fakePorts()
+    const sync = syncFor(platform, ports)
+
+    ports.canonical = ['stored-r']
+    sync.start()
+    await settled()
+
+    platform.responses[0]?.({
+      actionIdentifier: 'default',
+      data: { bot: 'researcher', type: 'message', sessionId: 'stored-r' }
+    })
+    await settled()
+
+    expect(ports.shown).toEqual(['researcher'])
+    expect(ports.conversations).toEqual([])
+
+    sync.stop()
+  })
+
   it('opens the chat and sends nothing for a plain notification', async () => {
     const platform = fakePlatform()
     const ports = fakePorts()

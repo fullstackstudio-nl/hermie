@@ -18,6 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   was a decision. The coarse **Routines** switch keeps meaning what it always meant, so a device
   that only ever asked for that one goes on being told about scheduled runs.
 
+- **A notification opens the conversation it was about.** A bot has branches now, and a conversation
+  `/new` put away, so a turn can happen in a session nobody is looking at — and a tap that always
+  opened the bot's chat landed on a transcript with nothing in it about the thing that just buzzed.
+  The notifier says which session and what kind it was, and a branch or a retired conversation opens
+  there instead. A notification that says nothing about a session behaves exactly as it always did.
+  A tap into one of those other conversations opens it and answers nothing: an **Allow** belongs to
+  the session that asked, so the reader lands on the request and answers it there. In a browser, two
+  conversations of one bot no longer replace each other on the lock screen.
+
 - **Boards.** The Kanban boards the gateway keeps, from Settings → **Boards** or **Boards** in the
   chat list's header: every board, its columns, its cards, and a card's own page with its notes and
   its comments. A card can be made, edited, moved and archived. It is the same data the Hermes

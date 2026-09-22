@@ -352,6 +352,21 @@ describe('a finished turn', () => {
     expect(f.sent).toHaveLength(0)
   })
 
+  it('says which session it was, and that the session is the canonical chat', async () => {
+    f.watcher.onEvent(turn('live-r', 45))
+    await f.watcher.settle()
+
+    const data = f.sent[0]?.message.data as Record<string, unknown>
+
+    // Both spellings: `session` is what this daemon has always written, and
+    // `sessionId` is the plugin's — the app reads either.
+    expect(data.session).toBe('live-r')
+    expect(data.sessionId).toBe('live-r')
+    // A fact rather than a guess: the only sessions this daemon resumes are the
+    // canonical Bot Chats it read off the roster.
+    expect(data.sessionKind).toBe('canonical')
+  })
+
   it('ignores a session nobody is watching', async () => {
     f.watcher.onEvent(turn('some-other-session', 3))
     await f.watcher.settle()
@@ -403,6 +418,23 @@ describe('a request opening', () => {
     await f.watcher.settle()
 
     expect(f.sent).toHaveLength(1)
+  })
+
+  it('names the session on a request too, so a tap lands on the chat that asked', async () => {
+    const asked = fixture()
+    await asked.watcher.resumeAll()
+    asked.watcher.onServerRequest({
+      id: 'srq-9',
+      method: 'approval',
+      params: { session_id: 'live-r', request_id: 'req-9', command: 'rm -rf /' },
+      replayed: false
+    })
+    await asked.watcher.settle()
+
+    const data = asked.sent[0]?.message.data as Record<string, unknown>
+
+    expect(data.sessionId).toBe('live-r')
+    expect(data.sessionKind).toBe('canonical')
   })
 
   it('ignores a server request that is not a question for the owner', async () => {

@@ -110,18 +110,29 @@ describe('tapping a notification from another gateway', () => {
     consumeInitialResponse: async () => null
   }
 
-  function portsThat(switches: boolean) {
-    const calls = { switched: [] as [string, string][], shown: [] as string[], responded: [] as string[] }
+  function portsThat(switches: boolean, canonical: readonly string[] = []) {
+    const calls = {
+      switched: [] as [string, string][],
+      switchedTo: [] as string[],
+      shown: [] as string[],
+      conversations: [] as [string, string][],
+      responded: [] as string[]
+    }
     const ports: PushSyncPorts = {
       showChat: async bot => {
         calls.shown.push(bot)
       },
+      showConversation: async (bot, sessionId) => {
+        calls.conversations.push([bot, sessionId])
+      },
+      canonicalSessionIds: () => canonical,
       openApprovals: async () => [{ request_id: 'req-1', choices: ['once', 'deny'] }],
       respondApproval: async (_bot, requestId) => {
         calls.responded.push(requestId)
       },
-      switchToGateway: async (key, bot) => {
+      switchToGateway: async (key, bot, sessionId) => {
         calls.switched.push([key, bot])
+        calls.switchedTo.push(sessionId)
 
         return switches
       }
@@ -151,6 +162,36 @@ describe('tapping a notification from another gateway', () => {
     // answers it there — ADR-0017's own rule, one step further along.
     expect(calls.shown).toEqual([])
     expect(calls.responded).toEqual([])
+  })
+
+  it('carries a conversation the notifier itself classified across the switch', async () => {
+    const { calls, ports } = portsThat(true)
+
+    await tap(ports, {
+      bot: 'researcher',
+      gatewayKey: WORK_KEY,
+      sessionId: 'branch-7',
+      sessionKind: 'branch'
+    })
+
+    expect(calls.switched).toEqual([[WORK_KEY, 'researcher']])
+    expect(calls.switchedTo).toEqual(['branch-7'])
+  })
+
+  it('carries no conversation across a switch when only an id was named', async () => {
+    /*
+      An id with no kind can only be placed against a roster — and the roster
+      this side holds belongs to the gateway being left. Sending it anyway
+      would open some other gateway's conversation because THIS one's canonical
+      id happened to differ, which is the wrong screen for a reason nobody
+      could see.
+    */
+    const { calls, ports } = portsThat(true, ['stored-home'])
+
+    await tap(ports, { bot: 'researcher', gatewayKey: WORK_KEY, sessionId: 'sess-work' })
+
+    expect(calls.switchedTo).toEqual([''])
+    expect(calls.conversations).toEqual([])
   })
 
   it('is an ordinary tap when the key names the gateway that is already live', async () => {

@@ -405,3 +405,36 @@ has been shown. The two rules are `pushTypesOf` and `adoptedPushTypes`, and the
 difference between them is stated in both. The upgraded row reaches the
 notifier on the address refresh the app already makes on every launch and every
 foreground; nothing new has to be written.
+
+## Amendment, 2026-09-22: a tap names its conversation
+
+ADR-0017 was written when a bot had exactly one chat, so naming the bot named
+the destination. Round R4b gave a bot branches and retired conversations, and a
+turn can now happen in a session nobody is looking at.
+
+**A payload carries `sessionId` and `sessionKind` (`canonical` | `branch` |
+`other`), and a tap opens that conversation.** `branch` and `other` open the
+non-canonical viewer; `canonical`, an absent kind, and a session id that is the
+bot's own canonical one all open the chat, which is exactly what every
+notification did before this. A payload that says nothing is therefore read the
+way it always was.
+
+The classification is the gateway's, from the session's title, and the app does
+not re-derive it: an id it cannot place is not a reason to guess. Where the kind
+is absent but the id is present, the app compares it against the canonical id it
+already holds for that bot — and where it holds none, it opens the chat rather
+than inventing a destination.
+
+**A tap into a non-canonical conversation opens it and answers nothing.** This
+is the same rule the cross-gateway tap already follows, for the same reason: an
+Allow has to be re-validated against `approval.pending` for the session that
+asked, and that session is not the one this connection resumed. The reader
+lands on the request and answers it there, which is the direction this feature
+is built to fail in.
+
+### What is unchanged
+
+The registration schema and its `v`, the app never talking to the notifier, the
+payload saying who rather than what, `preview` being per device, `seen` being a
+heartbeat rather than a protocol fact, and every action being re-validated
+against the gateway's own open requests before it is answered.

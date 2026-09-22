@@ -390,6 +390,9 @@ export class PushWatcher {
           bot: session.name,
           botLabel: session.label,
           sessionId: session.sessionId,
+          // This daemon resumes canonical Bot Chats only, so it can say which
+          // kind of conversation this is as a fact rather than as a guess.
+          sessionKind: 'canonical',
           requestId: queueId || request.id,
           requestMethod: request.method,
           preview: previewOfRequest(request.params)
@@ -515,6 +518,9 @@ export class PushWatcher {
       bot: session.name,
       botLabel: session.label,
       sessionId: session.sessionId,
+      // Canonical, for the reason the request path above gives: the only
+      // sessions this daemon watches are the ones it resumed off the roster.
+      sessionKind: 'canonical',
       ...(inbound.name ? { name: inbound.name } : {}),
       ...(cron && failed ? { failed: true } : {}),
       preview: typeof payload.text === 'string' ? payload.text : ''

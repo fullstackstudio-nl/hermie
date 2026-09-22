@@ -27,6 +27,16 @@ export interface NotifiableEvent {
   botLabel?: string
   /** Canonical session id, so a tap lands on the right chat. */
   sessionId: string
+  /**
+   * Which kind of conversation that session is, for the app's tap routing.
+   *
+   * This daemon resumes a profile's CANONICAL Bot Chat and nothing else — see
+   * `watcher.ts` — so every event it can report happened in one, and it says
+   * so rather than leaving the field out. An absent field means "the notifier
+   * did not say", which the app reads by comparing the id instead; saying the
+   * true thing is cheaper than making it work that out.
+   */
+  sessionKind?: 'canonical' | 'branch' | 'other'
   /** `request` only: the server request's id, re-validated by the app before anything is answered. */
   requestId?: string
   /** `request` only: `approval`, `clarify`, … */
@@ -112,7 +122,16 @@ export function pushMessageFor(event: NotifiableEvent, preview: boolean): PushMe
     data: {
       bot: event.bot,
       type: event.type,
+      /*
+        Both spellings. `session` is what this daemon has always written and
+        what a build of the app older than the plugin reads; `sessionId` is the
+        plugin's, and therefore the one the app now reads first. Writing one of
+        them would break a pairing that works today in whichever direction was
+        chosen, and the field is a short string.
+      */
       session: event.sessionId,
+      sessionId: event.sessionId,
+      ...(event.sessionKind ? { sessionKind: event.sessionKind } : {}),
       ...(event.requestId ? { request: event.requestId } : {}),
       ...(event.requestMethod ? { method: event.requestMethod } : {}),
       // Omitted rather than empty, so a reader checks for absence rather than

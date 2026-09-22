@@ -10,6 +10,12 @@
  *  - when one is clicked, get the reader back to the app and tell it what was
  *    clicked, focusing a tab that already exists rather than opening a second.
  *
+ * The payload's `data` bag is handed on WHOLE, unread except for the two
+ * fields the rendering itself needs. That is what carries `sessionId` and
+ * `sessionKind` to the app without this file having to know what they mean:
+ * where a tap lands is `features/push/actions.ts`'s decision, on the other side
+ * of the message below, where it can be tested.
+ *
  * It decides nothing else. Whether an Allow button may actually allow anything
  * is re-checked against the gateway by the app (`features/push/actions.ts`),
  * because a notification is a hint that something happened and never an
@@ -35,6 +41,30 @@ function payloadOf(event) {
   }
 }
 
+/**
+ * How one notification replaces another.
+ *
+ * The bot, and the session where the payload names one. Both spellings are
+ * read: `sessionId` is the plugin's and `session` is what Hermie Web's own
+ * daemon writes.
+ */
+function tagFor(data) {
+  const bot = typeof data.bot === 'string' && data.bot ? data.bot : ''
+
+  if (!bot) {
+    return 'hermie'
+  }
+
+  const session =
+    typeof data.sessionId === 'string' && data.sessionId
+      ? data.sessionId
+      : typeof data.session === 'string' && data.session
+        ? data.session
+        : ''
+
+  return session ? `hermie:${bot}:${session}` : `hermie:${bot}`
+}
+
 self.addEventListener('install', () => {
   // Take over immediately: a reader who has just turned notifications on should
   // not have to close every tab before the first one can arrive.
@@ -56,7 +86,12 @@ self.addEventListener('push', event => {
     self.registration.showNotification(title, {
       body,
       data,
-      tag: typeof data.bot === 'string' ? `hermie:${data.bot}` : 'hermie',
+      // Per CONVERSATION and not per bot. A bot has branches now and a
+      // conversation `/new` put away, and a tag is what makes one notification
+      // replace another — so a branch reporting in would quietly swallow the
+      // chat's own unread notification, which is a buzz with nothing left on
+      // screen to say what it was about.
+      tag: tagFor(data),
       // A question with a countdown on it stays on screen until it is dealt
       // with; everything else behaves like an ordinary message notification.
       requireInteraction: needsInput,
