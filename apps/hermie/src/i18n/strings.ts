@@ -13,6 +13,7 @@
  * lifted out without dragging this file along. Everything a SCREEN says lives
  * here; everything a KIT COMPONENT says lives there.
  */
+import { localised } from './catalogue'
 
 const list = (items: string[]): string => {
   if (items.length <= 1) {
@@ -24,7 +25,7 @@ const list = (items: string[]): string => {
   return `${head} or ${items[items.length - 1]}`
 }
 
-export const strings = {
+const stringsEn = {
   app: {
     name: 'Hermie',
     loading: 'Starting…'
@@ -1080,6 +1081,27 @@ export const strings = {
     showBotToBot: 'Show bot-to-bot',
     showThinking: 'Show thinking',
     appearance: 'APPEARANCE',
+
+    /**
+     * The language picker, and the sentence that says what it does NOT do.
+     *
+     * Hermie is written in English and every other language is a layer over it
+     * (`i18n/catalogue.ts`), so the footer is not decoration: a reader who
+     * picks Nederlands and then meets an English sentence on a screen nobody
+     * has translated yet should have been told to expect that, rather than
+     * reading it as a bug in the setting they just used.
+     *
+     * The three languages name THEMSELVES — English, Nederlands, Deutsch —
+     * because a reader looking for their own language is looking for the word
+     * they would use for it, not for our word for it. That list lives in
+     * `i18n/locales.ts`, not here, for exactly that reason: it must not be
+     * translatable.
+     */
+    language: 'Language',
+    languageFollowDevice: 'Follow device',
+    languageHint:
+      'Hermie is written in English. Dutch and German are translations of it, and anything not yet translated stays in English.',
+
     theme: 'Theme',
     themeOptions: { system: 'System', light: 'Light', dark: 'Dark' },
     themeHint: 'System follows the device; Light and Dark pin the app either way.',
@@ -1381,3 +1403,13 @@ function andList(items: string[]): string {
 
   return `${head} and ${items[items.length - 1]}`
 }
+
+/*
+ * The English table above is the SOURCE, and `localised` is what makes it one
+ * language among three: a read resolves against the active locale's catalogue
+ * first and falls back to the sentence written here. See `i18n/catalogue.ts`.
+ *
+ * `stringsEn` stays un-exported so there is exactly one way into these strings, and
+ * so nothing can read past the layer by accident.
+ */
+export const strings = localised('app', stringsEn)

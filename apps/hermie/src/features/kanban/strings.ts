@@ -10,7 +10,9 @@
  *  - `noOrder` says why dragging a card up and down inside a column does
  *    nothing: there is no order to change, only a priority.
  */
-export const kanbanStrings = {
+import { localised } from '../../i18n/catalogue'
+
+const kanbanStringsEn = {
   settings: {
     row: 'Boards',
     hint: 'The Kanban boards this gateway keeps'
@@ -125,3 +127,13 @@ export const kanbanStrings = {
     needsTitle: 'A card needs a title.'
   }
 }
+
+/*
+ * The English table above is the SOURCE, and `localised` is what makes it one
+ * language among three: a read resolves against the active locale's catalogue
+ * first and falls back to the sentence written here. See `i18n/catalogue.ts`.
+ *
+ * `kanbanStringsEn` stays un-exported so there is exactly one way into these strings, and
+ * so nothing can read past the layer by accident.
+ */
+export const kanbanStrings = localised('kanban', kanbanStringsEn)

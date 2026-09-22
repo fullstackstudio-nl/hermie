@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Hermie can speak Dutch and German.** Settings → Appearance → **Language** offers *Follow device*,
+  English, Nederlands and Deutsch, and switching repaints the app where you stand — no restart, no
+  losing the sheet you had open. A device set to Dutch or German gets that language on first launch;
+  anything else gets English.
+
+  English is not one of three options, it is the language Hermie is **written** in, and the other two
+  are translations of it. That is a deliberate design and it is visible: a sentence nobody has
+  translated yet appears in English rather than as a blank row or a key. Numbers, dates, relative
+  times and plurals follow the chosen language too, through the platform's own `Intl` — so a Dutch
+  reader gets `1.234` and `22-09-2026` rather than the American forms. The choice belongs to the
+  device, like light-and-dark: switching to your work gateway does not switch your language.
+
 - **Hermie Web can sign people in itself.** A gateway normally needs an identity provider — Authentik,
   Keycloak, something of that shape — and for one gateway shared by a handful of people that is a
   second service with its own database in front of a single process. So Hermie Web can now be that

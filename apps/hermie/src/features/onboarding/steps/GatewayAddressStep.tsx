@@ -31,7 +31,15 @@ import { StatusLine } from '../StatusLine'
  * stored origin and a sentence about what it cannot do. Everything else is the
  * first preset, which is the field pair this step has always had.
  */
-const PRESETS: { value: FrontDoorKind; label: string }[] = [
+/*
+ * Built on CALL rather than at import.
+ *
+ * A module-level literal would freeze whatever language was active when the
+ * bundle loaded, which on a cold start is always English — see
+ * `i18n/catalogue.ts`. The list is three entries and it is rebuilt per render;
+ * the alternative is a screen that keeps its old language until it is remounted.
+ */
+const presets = (): { value: FrontDoorKind; label: string }[] => [
   { value: 'none', label: strings.onboarding.address.frontDoor.custom },
   { value: 'cloudflare_access', label: strings.onboarding.address.frontDoor.cloudflare }
 ]
@@ -344,7 +352,7 @@ export function GatewayAddressStep({ draft, update, debounceMs = PROBE_DEBOUNCE_
             <SegmentedRow
               label={strings.onboarding.address.frontDoor.label}
               onChange={setPreset}
-              options={PRESETS}
+              options={presets()}
               testID="front-door-preset"
               value={draft.frontDoor.kind}
             />

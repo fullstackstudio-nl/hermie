@@ -41,7 +41,15 @@ import { PrivacySection } from './PrivacySection'
 import { ThemesScreen } from './ThemesScreen'
 import { WebUpdateRow } from './WebUpdateRow'
 
-const VERBOSITY_OPTIONS: { value: Verbosity; label: string }[] = [
+/*
+ * Built on CALL rather than at import.
+ *
+ * A module-level literal would freeze whatever language was active when the
+ * bundle loaded, which on a cold start is always English — see
+ * `i18n/catalogue.ts`. The list is three entries and it is rebuilt per render;
+ * the alternative is a screen that keeps its old language until it is remounted.
+ */
+const verbosityOptions = (): { value: Verbosity; label: string }[] => [
   { value: 'quiet', label: chatStrings.options.verbosityOptions.quiet },
   { value: 'normal', label: chatStrings.options.verbosityOptions.normal },
   { value: 'verbose', label: chatStrings.options.verbosityOptions.verbose }
@@ -369,7 +377,7 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
           <SegmentedRow
             label={strings.settings.defaultVerbosity}
             onChange={(level: Verbosity) => setDefaults({ level })}
-            options={VERBOSITY_OPTIONS}
+            options={verbosityOptions()}
             testID="settings-verbosity"
             value={defaults.level}
           />

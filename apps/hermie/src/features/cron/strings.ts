@@ -10,7 +10,9 @@
  * kit keeps `chat-ui/strings.ts`: the feature is self-contained, and copy that
  * lives next to the screen it belongs to moves with it.
  */
-export const cronStrings = {
+import { localised } from '../../i18n/catalogue'
+
+const cronStringsEn = {
   title: 'Crons',
   subtitle: 'A little progress, on repeat.',
   sections: {
@@ -177,3 +179,13 @@ export const cronStrings = {
     daysAgo: (value: number) => `${value}d ago`
   }
 } as const
+
+/*
+ * The English table above is the SOURCE, and `localised` is what makes it one
+ * language among three: a read resolves against the active locale's catalogue
+ * first and falls back to the sentence written here. See `i18n/catalogue.ts`.
+ *
+ * `cronStringsEn` stays un-exported so there is exactly one way into these strings, and
+ * so nothing can read past the layer by accident.
+ */
+export const cronStrings = localised('cron', cronStringsEn)

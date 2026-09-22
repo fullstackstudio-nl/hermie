@@ -6,7 +6,9 @@
  * knows the initials; spelling out Model Context Protocol in a row title would
  * help nobody and would not fit.
  */
-export const mcpStrings = {
+import { localised } from '../../i18n/catalogue'
+
+const mcpStringsEn = {
   settings: {
     row: 'MCP servers',
     hint: 'Tools your bots reach over the Model Context Protocol'
@@ -74,3 +76,13 @@ export const mcpStrings = {
   reload: 'Reload servers',
   reloadHint: 'Applies configuration changes to chats that are already running.'
 }
+
+/*
+ * The English table above is the SOURCE, and `localised` is what makes it one
+ * language among three: a read resolves against the active locale's catalogue
+ * first and falls back to the sentence written here. See `i18n/catalogue.ts`.
+ *
+ * `mcpStringsEn` stays un-exported so there is exactly one way into these strings, and
+ * so nothing can read past the layer by accident.
+ */
+export const mcpStrings = localised('mcp', mcpStringsEn)

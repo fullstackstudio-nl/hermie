@@ -5,7 +5,9 @@
  * self-contained set of components with its own gallery, and keeping its
  * copy next to it means a component and its wording move together.
  */
-export const chatStrings = {
+import { localised } from '../i18n/catalogue'
+
+const chatStringsEn = {
   /**
    * The typing indicator's accessible name. Three dots say "replying" to
    * everyone who can see them and nothing at all to anyone who cannot.
@@ -641,3 +643,13 @@ export const chatStrings = {
     close: 'Close'
   }
 } as const
+
+/*
+ * The English table above is the SOURCE, and `localised` is what makes it one
+ * language among three: a read resolves against the active locale's catalogue
+ * first and falls back to the sentence written here. See `i18n/catalogue.ts`.
+ *
+ * `chatStringsEn` stays un-exported so there is exactly one way into these strings, and
+ * so nothing can read past the layer by accident.
+ */
+export const chatStrings = localised('chat', chatStringsEn)

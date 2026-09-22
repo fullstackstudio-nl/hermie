@@ -17,6 +17,7 @@
  *    honest; hiding it would lose information the reader might need, and
  *    printing it raw is the thing this exists to stop.
  */
+import { translatedStatus } from './status-words'
 
 const KNOWN: Record<string, string> = {
   active: 'Active',
@@ -54,7 +55,12 @@ export function humaniseStatus(raw: string | null | undefined): string | null {
     return null
   }
 
-  const known = KNOWN[trimmed.toLowerCase()]
+  const lower = trimmed.toLowerCase()
+  // The reader's language first, the English table second. A status the
+  // catalogue has no word for is still a status this app KNOWS, so it gets the
+  // English label rather than falling through to the generic capitalisation
+  // below — which would print a raw `timed_out` at somebody reading Dutch.
+  const known = translatedStatus(lower) ?? KNOWN[lower]
 
   if (known) {
     return known
@@ -62,5 +68,9 @@ export function humaniseStatus(raw: string | null | undefined): string | null {
 
   const words = trimmed.replace(/[_-]+/gu, ' ').trim()
 
-  return words ? `${words.charAt(0).toUpperCase()}${words.slice(1)}` : null
+  // `toLocaleUpperCase` rather than `toUpperCase`: the capitalisation of an
+  // unknown status is the one place this function shapes a letter rather than
+  // looking one up, and Turkish dotted i is the standing reminder that those
+  // are not the same operation.
+  return words ? `${words.charAt(0).toLocaleUpperCase()}${words.slice(1)}` : null
 }

@@ -9,7 +9,9 @@
  * a reader who has only ever seen this app has no profile to relate it to. The
  * identifiers still say `profile` wherever they name a gateway parameter.
  */
-export const profileStrings = {
+import { localised } from '../../i18n/catalogue'
+
+const profileStringsEn = {
   settings: {
     group: 'BOTS',
     newBot: 'New bot…',
@@ -90,3 +92,13 @@ export const profileStrings = {
     }
   }
 }
+
+/*
+ * The English table above is the SOURCE, and `localised` is what makes it one
+ * language among three: a read resolves against the active locale's catalogue
+ * first and falls back to the sentence written here. See `i18n/catalogue.ts`.
+ *
+ * `profileStringsEn` stays un-exported so there is exactly one way into these strings, and
+ * so nothing can read past the layer by accident.
+ */
+export const profileStrings = localised('profiles', profileStringsEn)

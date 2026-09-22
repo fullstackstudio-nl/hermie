@@ -17,7 +17,15 @@ export interface TransportNoticeProps {
 }
 
 /** Which sentence a host's privacy class earns. */
-const SENTENCE: Record<HostPrivacy, string> = {
+/*
+ * Built on CALL rather than at import.
+ *
+ * A module-level literal would freeze whatever language was active when the
+ * bundle loaded, which on a cold start is always English — see
+ * `i18n/catalogue.ts`. The list is three entries and it is rebuilt per render;
+ * the alternative is a screen that keeps its old language until it is remounted.
+ */
+const sentence = (): Record<HostPrivacy, string> => ({
   loopback: strings.transport.httpLoopback,
   private: strings.transport.httpLocalNetwork,
   link_local: strings.transport.httpLocalNetwork,
@@ -25,7 +33,7 @@ const SENTENCE: Record<HostPrivacy, string> = {
   cgnat: strings.transport.httpTailnet,
   tailnet: strings.transport.httpTailnet,
   public: strings.transport.httpExposed
-}
+})
 
 /**
  * One line about a cleartext gateway — never a block.
@@ -48,7 +56,7 @@ export function TransportNotice({ baseUrl, onUseHttps, testID }: TransportNotice
   return (
     <View style={{ gap: theme.space.xs }}>
       <Text variant="meta" color={isPrivate ? 'textMuted' : 'warnText'} testID={testID}>
-        {SENTENCE[privacy]}
+        {sentence()[privacy]}
       </Text>
       {!isPrivate && onUseHttps ? (
         <Pressable accessibilityRole="button" onPress={onUseHttps} hitSlop={8}>

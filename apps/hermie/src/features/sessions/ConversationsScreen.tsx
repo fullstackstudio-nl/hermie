@@ -408,7 +408,7 @@ function Row({
               testID={`conversation-${action}-${conversation.id}`}
             >
               <Text color={action === 'delete' ? 'dangerText' : 'accentText'} variant="preview">
-                {ACTION_LABELS[action]}
+                {actionLabels()[action]}
               </Text>
             </Pressable>
           ))}
@@ -418,11 +418,19 @@ function Row({
   )
 }
 
-const ACTION_LABELS: Record<'open' | 'rename' | 'delete' | 'adopt', string> = {
+/*
+ * Built on CALL rather than at import.
+ *
+ * A module-level literal would freeze whatever language was active when the
+ * bundle loaded, which on a cold start is always English — see
+ * `i18n/catalogue.ts`. The list is three entries and it is rebuilt per render;
+ * the alternative is a screen that keeps its old language until it is remounted.
+ */
+const actionLabels = (): Record<'open' | 'rename' | 'delete' | 'adopt', string> => ({
   open: chatStrings.sessions.open,
   rename: chatStrings.sessions.rename,
   delete: chatStrings.sessions.delete,
   adopt: chatStrings.sessions.adopt
-}
+})
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
