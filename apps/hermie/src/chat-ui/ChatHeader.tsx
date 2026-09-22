@@ -72,7 +72,7 @@ import { Animated, Pressable, View } from 'react-native'
 import { GlassGroup, GlassSurface } from '../ui/glass'
 import { durationFor, easing, NATIVE_DRIVER } from '../ui/motion'
 import { PresenceBead } from '../ui/PresenceBead'
-import { RoundIconButton, Text } from '../ui/primitives'
+import { RoundIconButton, Text, type RoundIconButtonProps } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
 import { AVATAR_SIZE, BEAD_SIZE, CONTROL_SIZE, type PresenceState } from '../ui/tokens'
 import { Avatar } from './primitives/Avatar'
@@ -155,6 +155,11 @@ function stateLabel(presence: PresenceState, lastSeenAt?: number): string {
 /**
  * The header's round buttons, which are the shared ones.
  *
+ * They are `opaque` for the reason the pill is, and it has to be all three or
+ * none: these are the same row of floating controls over the same scrolling
+ * transcript, and a row where one element hides what is behind it and two do
+ * not reads as three different materials rather than as one chrome.
+ *
  * `RoundIconButton` used to be a copy living here. It moved to `ui/primitives`
  * when the composer's `+` and send turned out to be the same control drawn a
  * fourth and a fifth way — with a CHARACTER in the middle instead of a path,
@@ -165,7 +170,9 @@ function stateLabel(presence: PresenceState, lastSeenAt?: number): string {
  * one blue per scheme whatever preset was on, so under Lime a chevron was the
  * only blue thing on the screen. It is derived from the theme's accent now.
  */
-const RoundButton = RoundIconButton
+function RoundButton(props: RoundIconButtonProps) {
+  return <RoundIconButton opaque {...props} />
+}
 
 /**
  * The sidebar control on its own, for a column that has no header to put it in.
@@ -397,6 +404,22 @@ export function ChatHeader({
           style={({ pressed }) => ({ maxWidth: '100%', opacity: pressed ? 0.7 : 1 })}
           testID={`${testID}-profile`}
         >
+          {/*
+            `opaque`, for the reason `AttachMenu` gives.
+
+            The pill floats over the transcript rather than beside it: the chat
+            column scrolls UNDER the header, so whatever bubble is passing
+            behind it is the pill's backdrop. At the control wash's own alpha
+            that backdrop reaches the ink, and a long reply read through the
+            bot's name — two strings of text at the same weight in the same
+            place, which is exactly the failure the attach menu had. The solid
+            rung under the wash makes the pill's contrast a fixed number
+            instead of a function of what happens to be scrolling past.
+
+            The bead already assumed this: its ring is `glass.control.solid`,
+            which only matches the surface it sits on once the surface takes
+            that rung.
+          */}
           <GlassSurface
             contentStyle={{
               alignItems: 'center',
@@ -406,6 +429,8 @@ export function ChatHeader({
               paddingRight: theme.space.md,
               paddingVertical: theme.space.xs
             }}
+            contentTestID={`${testID}-pill-surface`}
+            opaque
             radius={theme.radii.pill}
             shadow="float"
             style={{ maxWidth: '100%' }}

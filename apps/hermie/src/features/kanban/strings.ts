@@ -75,6 +75,29 @@ export const kanbanStrings = {
   /** Why dragging inside a column does nothing. */
   noOrder: 'Cards are ordered by priority and age, so there is no order to drag within a column.',
 
+  /**
+   * How to move a card with the finger, said only where the finger can.
+   *
+   * On a stacked board the columns are screenfuls apart, so the hint would be
+   * describing a gesture that is not there. The move menu is on every card on
+   * every layout, which is why the drag can be a wide-window convenience
+   * rather than the way this works.
+   */
+  dragHint: 'Hold a card to pick it up, then drop it on a column.',
+
+  /** What a held card says to assistive technology, beside the Move to… button. */
+  dragLabel: 'Hold to pick this card up, or use Move to…',
+
+  /**
+   * Aimed at a column the dispatcher owns.
+   *
+   * Refused here rather than by the gateway: upstream raises on `running`
+   * before it looks at anything else, so this is a 400 the app can see coming.
+   * The columns already read as non-targets while a card is in the air; this
+   * is for the reader who let go on one anyway.
+   */
+  lockedTarget: (column: string) => `${column} is the dispatcher’s. A card cannot be put there.`,
+
   move: 'Move to…',
   moved: (column: string) => `Moved to ${column}.`,
   /**

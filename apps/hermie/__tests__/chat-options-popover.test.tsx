@@ -14,6 +14,7 @@
  * sheet already on that page rather than dropping the reader at the root.
  */
 import { act, fireEvent, screen, waitFor } from '@testing-library/react-native'
+import { Keyboard } from 'react-native'
 
 import { ChatScreen } from '../src/features/chats/ChatScreen'
 import { type Bot, useBotsStore } from '../src/store/bots'
@@ -161,6 +162,38 @@ describe('the options menu is a popover in the chat', () => {
     expect(contentInset()).toBe(before)
     // And it really is a popover rather than the sheet under another name.
     expect(screen.queryByTestId('chat-options-sheet')).toBeNull()
+  })
+
+  /*
+    Measured on the iPhone 17 Pro: with a draft half typed, tapping (…) drew
+    the composer and its send button over the menu's lower half and left the
+    rest of it behind the keyboard, with Model and Colour unreachable. The
+    popover is a sibling of the composer laid out from the top of the chrome,
+    so the only honest fix is for the two intentions not to be on screen at
+    once.
+  */
+  it('puts the keyboard away, whichever form the options take', async () => {
+    const dismiss = jest.spyOn(Keyboard, 'dismiss')
+
+    await openChat()
+    fireEvent.press(screen.getByTestId('chat-header-options'))
+    await waitFor(() => expect(screen.getByTestId('chat-options-popover')).toBeTruthy())
+
+    expect(dismiss).toHaveBeenCalled()
+
+    dismiss.mockRestore()
+  })
+
+  it('puts it away for the narrow column’s sheet too', async () => {
+    const dismiss = jest.spyOn(Keyboard, 'dismiss')
+
+    await openChat(360)
+    fireEvent.press(screen.getByTestId('chat-header-options'))
+    await waitFor(() => expect(screen.getByTestId('chat-options-sheet')).toBeTruthy())
+
+    expect(dismiss).toHaveBeenCalled()
+
+    dismiss.mockRestore()
   })
 
   it('still offers the sheet on a column too narrow for a popover', async () => {

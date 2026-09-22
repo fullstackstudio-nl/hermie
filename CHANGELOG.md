@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Drag a card across a board, where the columns are side by side.** On an iPad, a Mac window or a
+  wide browser, hold a card until it lifts and drop it on another column. The board scrolls sideways
+  under the card when you carry it to an edge, and the column you are over lights up — while the
+  three columns the dispatcher owns, **Running**, **Review** and **Scheduled**, dim the moment a card
+  leaves the ground, so you are told they will not take it before you aim rather than after. Let go
+  on one anyway and the board says why and sends nothing. Dropping a card back where it came from,
+  or anywhere off the columns, does nothing and says nothing. **Move to…** has not gone anywhere: it
+  is still on every card, it is still the only way on a phone, and it is still what VoiceOver and a
+  keyboard use. There is deliberately no dragging a card up or down within a column — a board has no
+  order to save, only a priority.
+
 - **Hermie Web can sign people in itself.** A gateway normally needs an identity provider — Authentik,
   Keycloak, something of that shape — and for one gateway shared by a handful of people that is a
   second service with its own database in front of a single process. So Hermie Web can now be that
@@ -244,6 +255,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that does not exist — is shown beside the field and nothing local moves.
 
 ### Fixed
+
+- **A board drawn in a panel now fits the panel.** On an iPad, opening **Boards** from Settings puts
+  the board in an overlay about half the window wide — and the board was choosing its layout from
+  the window, so it laid eight columns out side by side in half the room. The second column was cut
+  off at the panel's edge, with its cards and its **New card** button out of reach, and the three
+  lines under the board ran off the right-hand side mid-sentence. The board now measures itself
+  rather than the window, so in a narrow panel it stacks the way it does on a phone, and its
+  explanatory lines wrap instead of scrolling sideways with the columns.
+
+- **Opening a chat's (…) menu puts the keyboard away.** With a half-typed message the menu opened
+  behind the composer and the keyboard, and its lower rows — Model, Colour — were on screen and
+  impossible to reach or scroll to. Your draft is kept.
+
+- **The chat header's Back and (…) buttons no longer have a message printed through them.** The
+  same thing the pill did, on the two circles beside it: a reply scrolling under the chrome came
+  through the glass with the chevron drawn on top of it. All three now hide what passes behind
+  them, which is also what makes the header read as one piece of chrome rather than three.
+
+- **The bot's name in the chat header no longer has a message printed through it.** The transcript
+  scrolls underneath the header, so whatever bubble happens to be passing behind the pill was its
+  backdrop — and at the glass control's own transparency that bubble's words came through the name
+  and the status under it, two strings of text at the same weight in the same place. The pill now
+  takes the solid layer under its glass, the way the attach menu and every other floating menu in
+  the app already do, so what it says is legible over any transcript.
 
 - **Signing in works again.** Since gateways got ids, every credential the app tried to store was
   rejected before it reached the device's secret store at all: the id is appended with an `@`, and
