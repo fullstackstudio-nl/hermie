@@ -130,9 +130,18 @@ export class AdminSessions {
 export function setCookie(
   name: string,
   value: string,
-  options: { secure: boolean; httpOnly: boolean; maxAge?: number }
+  options: { secure: boolean; httpOnly: boolean; maxAge?: number; sameSite?: 'Strict' | 'Lax' }
 ): string {
-  const parts = [`${name}=${encodeURIComponent(value)}`, 'Path=/', 'SameSite=Strict']
+  /*
+    `Strict` unless a caller asks otherwise, and the one caller that does has a
+    reason: the built-in OIDC provider's own sign-in session arrives on a
+    TOP-LEVEL navigation from the gateway, which is cross-site, and a `Strict`
+    cookie is not sent on one. That session would then be forgotten on every
+    authorize and every reader would be re-prompted. `Lax` is sent on exactly
+    that navigation and on nothing else that matters — and the CSRF token
+    beside it stays `Strict`, which is what the double submit rests on.
+  */
+  const parts = [`${name}=${encodeURIComponent(value)}`, 'Path=/', `SameSite=${options.sameSite ?? 'Strict'}`]
 
   if (options.httpOnly) {
     parts.push('HttpOnly')

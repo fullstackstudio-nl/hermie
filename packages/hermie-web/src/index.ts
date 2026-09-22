@@ -57,3 +57,29 @@ export {
   verifyDownload
 } from './update'
 export { extractZip, readZip, safeEntryPath, type ZipEntry } from './zip'
+export {
+  clearSecondFactor,
+  createAccount,
+  disableProvider,
+  enableProvider,
+  INVITE_TTL_SECONDS,
+  issuerOriginAcceptable,
+  OidcAccountError,
+  OidcEnableError,
+  removeAccount,
+  resetToInvite,
+  setAccountDisabled,
+  setAccountRole
+} from './oidc/accounts'
+export { OidcProvider, redirectUriMatches, s256, SUPPORTED_SCOPES } from './oidc/provider'
+export { inviteUrl, OIDC_PREFIX, OidcRouter, passwordComplaint } from './oidc/routes'
+export {
+  DEFAULT_OIDC_SETTINGS,
+  emptyOidcState,
+  loadOidcState,
+  oidcStateOf,
+  oidcStatePath,
+  type OidcState,
+  saveOidcState
+} from './oidc/state'
+export { type OidcRole, OIDC_ROLES, type OidcUser } from './oidc/users'

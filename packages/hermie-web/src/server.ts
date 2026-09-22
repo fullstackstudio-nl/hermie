@@ -42,6 +42,9 @@ import {
   type AdminState
 } from './admin/state'
 import { IdentityReader, type GatewayIdentity } from './identity'
+import { OidcProvider } from './oidc/provider'
+import { OidcRouter } from './oidc/routes'
+import { loadOidcState, saveOidcState, type OidcState } from './oidc/state'
 import {
   type HermieWebOptions,
   isGatewayPath,
@@ -84,6 +87,11 @@ export interface HermieWebServer {
   push: PushDaemon | null
   /** The message cache. Always present; `enabled` is false at `--cache-max-mb 0`. */
   cache: TranscriptCache
+  /**
+   * The built-in OIDC provider. Always present; `enabled` is false until an
+   * operator turns it on, which is every deployment that has not (ADR-0025).
+   */
+  oidc: OidcProvider
   close(): Promise<void>
 }
 
@@ -200,6 +208,15 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
    * and nothing else in this process writes it.
    */
   let admin: AdminState = await loadAdminState(options.stateDir)
+  /**
+   * The built-in OIDC provider's state (ADR-0025 part 3), held the same way
+   * `admin` is and for the same reason: one authority in this process, so a
+   * request rendered between a write and its flush does not read a stale file.
+   *
+   * It is `enabled: false` on every deployment that has not turned it on, which
+   * is what makes every path below a no-op by default.
+   */
+  let oidc: OidcState = await loadOidcState(options.stateDir)
   let updating = false
   // Assigned once the listener is up; the handler reads it, so it is declared
   // here rather than beside the `await` that fills it.
@@ -247,6 +264,25 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
     admin = next
     void saveAdminState(options.stateDir, next).catch(() => undefined)
   }
+
+  const oidcProvider = new OidcProvider({
+    read: () => oidc,
+    write: async next => {
+      oidc = next
+      await saveOidcState(options.stateDir, next)
+    }
+  })
+  const oidcRouter = new OidcRouter({
+    provider: oidcProvider,
+    read: () => oidc,
+    write: async next => {
+      oidc = next
+      await saveOidcState(options.stateDir, next)
+    },
+    // The team's own name where one is set, so the sign-in page a reader lands
+    // on says what they think they are signing in to rather than what we call it.
+    issuerName: () => admin.branding.name || 'Hermie Web'
+  })
 
   const adminRouter = new AdminRouter({
     stateDir: options.stateDir,
@@ -334,6 +370,20 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
 
     if (url.pathname === '/hermie/config.json') {
       await handleConfig(response)
+
+      return
+    }
+
+    /*
+      The built-in identity provider (ADR-0025 part 3).
+
+      Ahead of `/admin` and ahead of the proxy, and reachable on an UNCONFIGURED
+      process too: `/oidc` answers for itself and needs no gateway. It answers
+      404 for every path while it is disabled, which is every deployment that
+      has not turned it on.
+    */
+    if (oidcRouter.owns(url.pathname)) {
+      await oidcRouter.handle(request, response, url)
 
       return
     }
@@ -1131,6 +1181,7 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
     options,
     push,
     cache,
+    oidc: oidcProvider,
     close: async () => {
       await push?.stop().catch(() => undefined)
       await closeServer(server)
