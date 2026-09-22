@@ -155,6 +155,21 @@ export interface ChatLayoutState {
   sidebarCollapsed?: boolean
   /** False until the disk read finishes; the list paints the roster order meanwhile. */
   loaded: boolean
+  /**
+   * How many times the LIVE ROSTER has been folded into the arrangement.
+   *
+   * `store/ui-meta-bridge.ts` reads it, and it exists because a fold looks
+   * exactly like a rearrangement from outside this store and is not one. The
+   * arrangement is one person's, shared by all their devices, and the newest
+   * CHOICE has to win on every one of them — so the bridge dates a change the
+   * reader made and pointedly does not date this, which is the roster arriving.
+   *
+   * It was: a second device folded a roster of six bots into an arrangement it
+   * had not read yet, that fold was dated as though somebody had just dragged
+   * six rows, and it won. The folders the person had made on their desktop were
+   * then gone from the gateway as well, for every device.
+   */
+  rosterFolds: number
 
   load: (gatewayKey: string) => Promise<void>
   reconcile: (botNames: readonly string[]) => void
@@ -241,7 +256,8 @@ const INITIAL = {
   accents: {} as Record<string, AccentName>,
   mutes: {} as Mutes,
   sidebarCollapsed: undefined as boolean | undefined,
-  loaded: false
+  loaded: false,
+  rosterFolds: 0
 }
 
 let writeQueue: Promise<void> = Promise.resolve()
@@ -425,9 +441,19 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
     reconcile(botNames) {
       const next = reconcileBots(arrangementOf(), botNames)
 
-      if (next !== arrangementOf()) {
-        write(next)
+      if (next === arrangementOf()) {
+        return
       }
+
+      /*
+        Counted as well as written, so that the bridge can tell this from a drag.
+
+        It is persisted and sent like any other change — a bot that has appeared
+        belongs in the list, and the gateway should hear about it — but it is not
+        a choice anybody made, and the bridge dates choices. See `rosterFolds`.
+      */
+      set({ entries: next.entries, folders: next.folders, rosterFolds: get().rosterFolds + 1 })
+      save()
     },
 
     /**

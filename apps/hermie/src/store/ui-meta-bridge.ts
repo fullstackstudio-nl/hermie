@@ -158,10 +158,10 @@ export interface HermieAppShape extends HermieAppSection {
    *
    * The section travels whole and last writer wins, and until this field existed
    * "last" meant whichever device flushed last. A device flushes for reasons that
-   * are not a choice — its own push row moved, a disk read landed late — so a
-   * second device being opened could undo a theme chosen on the first, for every
-   * device at once. `store/app-stamp.ts` holds the date; `appLocalWins` in the
-   * sync compares it.
+   * are not a choice — its own push row moved, a disk read landed late, the live
+   * roster was folded into the list — so a second device being opened could undo
+   * a theme or a set of folders chosen on the first, for every device at once.
+   * `store/app-stamp.ts` holds the date; `appLocalWins` in the sync compares it.
    *
    * ADDITIVE, and the section version deliberately stays at 1 — see `pinned`.
    * A section with no date is UNDATED rather than ancient; `appStampOf` says what
@@ -502,6 +502,8 @@ export class UiMetaBridge {
   private unsubscribe: (() => void)[] = []
   private readonly ready: (() => Promise<unknown>) | undefined
   private stopped = false
+  /** The roster folds this bridge has already accounted for; see `onStoreChanged`. */
+  private folds = 0
 
   constructor(options: UiMetaBridgeOptions) {
     this.debounceMs = options.debounceMs ?? UI_META_DEBOUNCE_MS
@@ -569,6 +571,7 @@ export class UiMetaBridge {
   }
 
   private watch(): void {
+    this.folds = useChatLayoutStore.getState().rosterFolds
     this.remember(snapshotFromStores())
 
     const watch = (): void => this.onStoreChanged()
@@ -651,6 +654,19 @@ export class UiMetaBridge {
       return
     }
 
+    /*
+      Whether the roster folding itself in is what moved the list.
+
+      Read before anything else, and per notification rather than per batch, which
+      is what makes it exact: zustand notifies on each `set`, and the fold is a
+      `set` of its own. So this is true for the fold's own notification and for
+      nothing else.
+    */
+    const folds = useChatLayoutStore.getState().rosterFolds
+    const folded = folds > this.folds
+
+    this.folds = folds
+
     let snapshot = snapshotFromStores()
     let dirty = false
 
@@ -691,7 +707,7 @@ export class UiMetaBridge {
       the one taken before the touch would leave this device one notification
       behind for ever.
     */
-    if (this.seen.get(CHOICES) !== choiceFingerprint(snapshot.app)) {
+    if (!folded && this.seen.get(CHOICES) !== choiceFingerprint(snapshot.app)) {
       useAppStampStore.getState().touch()
       snapshot = snapshotFromStores()
       dirty = true

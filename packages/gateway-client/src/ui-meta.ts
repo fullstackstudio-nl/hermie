@@ -119,10 +119,10 @@ export interface HermieAppSection {
  * racing in the same second and the wrong one for everything else: a second
  * device that has changed nothing of its own can be holding the section for
  * reasons that have nothing to do with a person choosing anything — its own push
- * row, a disk read that landed late — and then "last" is the device that
- * reconnected last rather than the choice that was made last. The report this
- * field was added for was that: a theme picked on one machine was undone by
- * opening another.
+ * row, a disk read that landed late, the live roster folded into the list — and
+ * then "last" is the device that reconnected last rather than the choice that was
+ * made last. Both reports this field was added for were that: a theme picked on
+ * one machine was undone by opening another, and a set of folders with it.
  *
  * So the section says when it was last CHOSEN, and a reconcile compares the two
  * dates rather than trusting whoever arrives second. Seconds rather than
@@ -581,9 +581,9 @@ export class UiMetaSync {
    * The dirty bit alone cannot answer it. It says "this device is holding a
    * section the gateway has not taken", and a device holds one for reasons that
    * are not a person choosing anything: the section also carries the push
-   * registrations and the context row, and a disk read can land after the
-   * reconcile. Treating that as "mine is newer" is how a theme chosen on one
-   * machine was undone by
+   * registrations and the context row, a disk read can land after the reconcile,
+   * and the live roster gets folded into the list on every connect. Treating all
+   * of that as "mine is newer" is how a theme chosen on one machine was undone by
    * opening another — and not merely undone locally: the losing device then
    * flushed its own copy, so the choice was gone for every device.
    *

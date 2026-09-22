@@ -323,12 +323,15 @@ caller, which is what upstream does and what makes any of the above mean anythin
 
 ### What was reported
 
-"I set my theme to Graphite on macOS. The moment I open another device, it resets the theme to
-whatever was active on that device."
+Two things, on the same day, and one cause under both:
 
-It was not a second device merely showing the wrong colour. The second device then wrote its own
+- "I set my theme to Graphite on macOS. The moment I open another device, it resets the theme to
+  whatever was active on that device."
+- "Folders do not seem to be synced between my devices."
+
+Neither was a second device merely showing the wrong thing. The second device then wrote its own
 copy home, so the choice was gone from the gateway as well and the device it had been made on lost
-it on its next reconnect. A theme, deleted by opening a phone.
+it on its next reconnect. A theme and an afternoon of folders, deleted by opening a phone.
 
 ### What was actually wrong
 
@@ -343,9 +346,13 @@ and a device flushes the app-wide section for several reasons that are nobody ch
    in another. The gateway's copy went into the stores and the device's own landed on top of it a
    moment later — and `store/ui-meta-bridge.ts` is a DIFF over the local stores, so it read that as
    a change somebody had just made.
+3. **The live roster was folded into the list.** `useChatLayoutStore.reconcile(botNames)` puts a new
+   bot at the end and drops one that is gone. On a second device it runs against whatever list that
+   device is holding — nothing at all, on a first sign-in — and it runs before the gateway's copy has
+   been read, because the roster arrives on the same connection and does not wait for it.
 
-In both cases `withPendingKept` took the local section as "the newest by definition", handed it to
-the stores over the top of the gateway's, and then flushed it.
+In all three cases `withPendingKept` took the local section as "the newest by definition", handed it
+to the stores over the top of the gateway's, and then flushed it.
 
 ### What is decided
 
@@ -364,7 +371,9 @@ additive and the section version stays at 1, by the rule this record already sta
 
 **The date moves for choices only.** It is taken in the bridge's own diff — one place, every field,
 nothing to forget when the next field is added — over the section MINUS `push`, `context` and the
-date itself.
+date itself. And the roster's fold is COUNTED (`rosterFolds`) rather than dated: it is still
+persisted and still sent, because a bot that has appeared belongs in the list, but it does not claim
+that anybody arranged anything.
 
 **Nothing is watched or compared until the disk has answered.** `UiMetaBridgeOptions.ready` holds
 both the subscription and the reconcile behind this gateway's reads, so the baseline the diff works
@@ -384,13 +393,18 @@ was the next launch, which read the theme the person had replaced.
 - **One more field in a section every build reads.** A build that predates it writes the section
   undated, and then loses to any dated one. That is the intended direction: the build that can say
   when something was chosen is the one to believe.
+- **The fold's own addition can be dropped once.** A new bot folded into a stale list on a second
+  device is not re-folded into the arrangement that then arrives, so its position waits for the next
+  roster change. Losing one row's place for one connect is a great deal better than losing the
+  folders.
 
 ### What is verified
 
 `packages/gateway-client/src/ui-meta.test.ts`, over a real socket against the fake gateway: the later
 choice winning in both connect orders, a tie going to the gateway, an undated local change still
 kept, a dated section beating an undated one, and a gateway with no section still being seeded.
-`apps/hermie/__tests__/app-settings-sync.test.ts` drives the real stores against a gateway that
-remembers: the theme arriving on a second device in both connect orders, neither device writing back
-over the other, the date adopted rather than re-taken, an offline change landing on the next connect,
-and a relaunch reading the arriving copy rather than the replaced one.
+`apps/hermie/__tests__/app-settings-sync.test.ts` and `apps/hermie/__tests__/arrangement-sync.test.ts`
+drive the real stores against a gateway that remembers: the theme and the folders arriving on a
+second device in both connect orders, neither device writing back over the other, the date adopted
+rather than re-taken, an offline change landing on the next connect, a relaunch reading the arriving
+copy rather than the replaced one, and the roster's fold being sent without being dated.

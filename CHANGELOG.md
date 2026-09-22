@@ -70,6 +70,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   report it is, not as speech. Every entry path is now held to one rule by a test that walks
   all of them: no row of traffic between two bots is ever drawn as a message.
 
+- **Your folders and your chat order reach your other devices.** Group four chats under Finance
+  on the desktop, open the phone, and the phone showed a flat list — and then made the gateway
+  flat too, so the desktop lost the folders as well the next time it connected.
+
+  The arrangement is part of the same block of per-person settings as the theme, and the newest
+  choice now wins wherever it was made. What was left after that was the list's own housekeeping:
+  whenever the roster arrives, a chat that is new goes at the end and one that is gone is taken
+  out, and on a second device that runs against the list that device is holding — nothing at all,
+  on a first sign-in — before the arrangement has come down from the gateway. It counted as six
+  chats you had just dragged into place, and being the newest thing anybody had "chosen" it won.
+  That housekeeping still happens and is still sent, because a new chat does belong in the list,
+  but it no longer claims that you arranged anything.
+
 - **Your theme, your text size and your chat defaults follow you between devices again.** Pick
   Graphite on the Mac, open the phone, and the phone went back to whatever colour it had been
   on — and then wrote that back, so the Mac lost the choice too the next time it connected. The
