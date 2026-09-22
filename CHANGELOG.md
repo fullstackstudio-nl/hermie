@@ -109,6 +109,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   name the reader has chosen to see — routinely the same word in a different case, which is the
   difference that would otherwise surface as a route answering 400.
 
+- **The way out of a failed probe goes when the address changes.** The onboarding address step
+  offers a button under a failure — "use the host that answered", "open the front door" — and the
+  button is built from the address that failed. Editing the address cleared the MESSAGE and left the
+  button, so a stale offer sat under a "checking…" line: pressing it would have configured a
+  Cloudflare Access credential for a host the reader had already stopped typing. The offer now goes
+  the moment a new probe starts, which is also when its message goes.
+
 - **Escape goes back one level in two more places.** Cancelling a theme deletion in Settings ▸
   Appearance ▸ Advanced, and closing the detail card on a bot's memory map, are levels of their own
   now. Both used to be skipped: the question and the card are drawn in place rather than presented,

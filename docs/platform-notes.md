@@ -8620,3 +8620,44 @@ warnings tolerated — and the alternative, an ESLint run inside vitest, would
 hand every future test run a type-aware lint pass to pay for in order to
 re-assert a rule the gate already asserts over the whole repository rather than
 over one file.
+
+### The flake hunt: one of the two reproduced, and it was a real bug
+
+Two flakes had each been seen once. They were chased by repetition, and the
+runs are reported here whether or not they found anything.
+
+| Suite                                               | Runs    | Failures |
+| --------------------------------------------------- | ------- | -------- |
+| `npx vitest run --reporter=verbose` (whole project) | 5       | 0        |
+| `onboarding-probe-hints.test.tsx --runInBand`       | 10      | **2**    |
+| `onboarding-probe-hints.test.tsx` (workers)         | 10      | 0        |
+| the same two, after the fix                         | 10 + 10 | 0        |
+
+**The vitest one did not reproduce.** 71 files, 1353 tests, five green runs,
+nothing appended or removed from `upstream-shapes.test.ts` in between. A "1
+failed" with no detail and no reproduction in 6765 subsequent test executions is
+recorded here as unexplained rather than as fixed. Shared fake-gateway state
+across describes was the hypothesis and it is not supported by anything measured:
+the file's describes were read and each builds its own upstream.
+
+**The jest one reproduced at 2 in 10, and only under `--runInBand`** — which is
+the tell, because `--runInBand` changes nothing about the test and everything
+about how fast the machine gets back to it.
+
+The cause was not the test. `GatewayAddressStep` renders `testID="probe-result"`
+for BOTH the "checking…" line and the answer, so `getByTestId('probe-result')`
+matches while a probe is still in flight. That on its own would be a sloppy
+assertion. What made it a bug is what was still on screen underneath: a new
+probe cleared `error` and left `actions` alone, so the previous failure's button
+survived into the next probe. Under workers the answer landed before `waitFor`
+ever sampled the busy frame; in-band it sometimes sampled it.
+
+And the stale button is not cosmetic. `classifyProbeFailure` is handed the
+address that failed, so "Open the front door…" left standing while a different
+host is probed offers to write a Cloudflare Access credential **against the old
+origin**. The fix is one line where it belongs — `setActions([])` beside the
+`setError(null)` that already runs when a probe starts — plus the same in the
+branch that rejects an unparseable address.
+
+**What needed a device: nothing.** The step is the test renderer's; the probe is
+a mocked resolver.

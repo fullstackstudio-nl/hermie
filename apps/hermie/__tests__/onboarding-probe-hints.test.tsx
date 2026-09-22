@@ -12,7 +12,7 @@ import { useState } from 'react'
 
 import { emptyDraft, type OnboardingDraft } from '../src/features/onboarding'
 import { GatewayAddressStep } from '../src/features/onboarding/steps/GatewayAddressStep'
-import { renderScreen } from './support/render'
+import { deferred, renderScreen } from './support/render'
 
 jest.mock('@hermie/gateway-client', () => ({
   ...jest.requireActual('@hermie/gateway-client'),
@@ -181,6 +181,35 @@ describe('the actions under the failure', () => {
 
     await waitFor(() => expect(screen.getByTestId('probe-error')).toBeTruthy())
     expect(screen.queryByTestId('probe-use-redirect')).toBeNull()
+    expect(screen.queryByTestId('probe-front-door')).toBeNull()
+  })
+
+  /**
+   * The actions belong to the failure that produced them, and they go the
+   * moment a new address is being probed \u2014 not when the next answer lands.
+   *
+   * `classifyProbeFailure` is handed the address that failed, so "Open the
+   * front door\u2026" left standing during the next probe offers to configure a
+   * credential for a host the reader has already stopped typing. It also sat
+   * under a "checking\u2026" line, which made the two readable as one state: the
+   * step appeared to be probing AND offering a way out of a failure it had
+   * already cleared the message for.
+   */
+  it('takes the actions away the moment a new address starts being probed', async () => {
+    resolveGatewayAddress.mockRejectedValue(new GatewayError('auth', 'refused', { status: 401 }))
+    renderScreen(<Harness />)
+    type('https://hermes.example.com')
+
+    await waitFor(() => expect(screen.getByTestId('probe-front-door')).toBeTruthy())
+
+    // A probe that never settles, so the in-flight state can be read rather
+    // than raced past.
+    const pending = deferred<never>()
+
+    resolveGatewayAddress.mockReturnValue(pending.promise)
+    type('https://hermes.elsewhere.example')
+
+    await waitFor(() => expect(screen.getByTestId('probe-result')).toBeTruthy())
     expect(screen.queryByTestId('probe-front-door')).toBeNull()
   })
 
