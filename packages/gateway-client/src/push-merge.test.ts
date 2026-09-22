@@ -61,6 +61,8 @@ const ALL_TYPES: Record<PushType, boolean> = {
   message: true,
   request: true,
   cron: true,
+  cron_done: true,
+  cron_failed: true,
   turn_done: true,
   turn_failed: true
 }

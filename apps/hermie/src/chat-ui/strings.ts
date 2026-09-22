@@ -509,7 +509,9 @@ export const chatStrings = {
       turnDone: 'Finished a turn',
       turnFailed: 'A turn failed',
       needsInput: 'Needs your answer',
-      cron: 'Scheduled runs'
+      cron: 'Scheduled runs',
+      cronDone: 'A scheduled run finished',
+      cronFailed: 'A scheduled run failed'
     } as Record<string, string>
   },
 

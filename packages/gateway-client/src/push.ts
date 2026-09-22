@@ -48,8 +48,28 @@ export const PUSH_SECTION_KEY = 'push'
  * `turn_done` and `turn_failed` are the amendment's two additions, from
  * `on_session_end`. An INTERRUPTED turn is deliberately neither: somebody
  * pressed stop, and they know.
+ *
+ * `cron_done` and `cron_failed` are the same two events seen from inside a
+ * SCHEDULED run, and they are separate types rather than a flag on `cron`
+ * because they answer a different question. `cron` is the delivery — the
+ * routine reported, here is what it said. The other two are the run's own
+ * outcome, and the one somebody actually wants at three in the morning is
+ * `cron_failed`: a routine that was supposed to happen and did not. Folding
+ * them into `cron` would mean switching off the nightly digest's chatter also
+ * switches off being told it stopped running.
+ *
+ * The order is the order the switches are drawn in, so this array is the
+ * screen's running order as well as the wire's list.
  */
-export const PUSH_TYPES = ['message', 'request', 'cron', 'turn_done', 'turn_failed'] as const
+export const PUSH_TYPES = [
+  'message',
+  'request',
+  'cron',
+  'cron_done',
+  'cron_failed',
+  'turn_done',
+  'turn_failed'
+] as const
 
 export type PushType = (typeof PUSH_TYPES)[number]
 
@@ -207,6 +227,36 @@ export function pushTypesOf(value: unknown): Record<PushType, boolean> {
 
   for (const type of PUSH_TYPES) {
     types[type] = source[type] === true
+  }
+
+  return types
+}
+
+/**
+ * A types bag read from THIS device's own disk, with a new type taking its
+ * default rather than reading as off.
+ *
+ * `pushTypesOf` above is the wire's rule and it is the right one there: a
+ * registration that does not name a type cannot have agreed to it, so a type
+ * this build has just invented must not start notifying every device that
+ * predates it. Locally the question is the opposite one. The bag on disk is
+ * what the reader last CHOSE, and a type that did not exist when they chose is
+ * not a refusal — it is a switch they have never been shown.
+ *
+ * So a key that is present and boolean wins, always: somebody who turned the
+ * cron deliveries off meant it, and an upgrade must not turn them back on. A
+ * key that is ABSENT takes the default, which is how the owner's rule — every
+ * push type on unless it was switched off — survives the release that adds one.
+ * Without it an upgrade is a phone that silently never mentions the routine
+ * that stopped running, with a switch in Settings that has looked on the whole
+ * time.
+ */
+export function adoptedPushTypes(stored: unknown, defaults: Record<PushType, boolean>): Record<PushType, boolean> {
+  const source = isObject(stored) ? stored : {}
+  const types = {} as Record<PushType, boolean>
+
+  for (const type of PUSH_TYPES) {
+    types[type] = typeof source[type] === 'boolean' ? (source[type] as boolean) : defaults[type] === true
   }
 
   return types

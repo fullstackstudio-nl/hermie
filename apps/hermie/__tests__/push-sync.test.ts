@@ -437,6 +437,37 @@ describe('every way a registration goes away', () => {
 
     sync.stop()
   })
+
+  it('rewrites the row on the refresh every foreground makes, so a new type reaches the notifier', async () => {
+    /*
+      A device that upgrades into a type has already adopted it on hydrate —
+      `adoptedPushTypes`, pinned in `packages/gateway-client/src/push.test.ts`
+      — but the notifier only learns about it when the ROW is written again.
+      That write is this refresh, which is why nothing has to be touched in
+      Settings for an upgrade to take effect.
+    */
+    const { sync } = await enabled()
+
+    usePushStore.getState().setType('cron_failed', false)
+    await sync.refresh()
+
+    const state = usePushStore.getState()
+    const app = snapshotFromStores().app as HermieAppShape
+    const row = app.push?.registrations[state.installationId] as { types: Record<string, boolean> }
+
+    expect(row.types.cron_failed).toBe(false)
+
+    usePushStore.getState().setType('cron_failed', true)
+    await sync.refresh()
+
+    const after = (snapshotFromStores().app as HermieAppShape).push?.registrations[state.installationId] as {
+      types: Record<string, boolean>
+    }
+
+    expect(after.types.cron_failed).toBe(true)
+
+    sync.stop()
+  })
 })
 
 describe('the heartbeat', () => {
@@ -737,6 +768,14 @@ describe('the row the store builds', () => {
     // Every type the reader did not turn off. A switch that has just been moved
     // to ON gets all of them, because the notifier only ever sends what the
     // gateway can actually produce — see `DEFAULT_PUSH_TYPES`.
-    expect(row.types).toEqual({ message: true, request: true, cron: false, turn_done: true, turn_failed: true })
+    expect(row.types).toEqual({
+      message: true,
+      request: true,
+      cron: false,
+      cron_done: true,
+      cron_failed: true,
+      turn_done: true,
+      turn_failed: true
+    })
   })
 })

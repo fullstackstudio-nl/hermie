@@ -256,12 +256,14 @@ describe('a finished turn', () => {
     expect(f.sent).toHaveLength(1)
   })
 
-  it('reads a cron delivery as a cron, not as a message', async () => {
+  it('reads a cron delivery as a cron run that finished, not as a message', async () => {
     f.setHistory(`${CRON_HEADER}\n\nEverything is fine.`)
     f.watcher.onEvent(turn('live-r', 8))
     await f.watcher.settle()
 
-    expect(f.sent[0]?.message.data.type).toBe('cron')
+    // The finer of the two facts is what the payload names — the coarse `cron`
+    // is still in the AUDIENCE, which is what the next case is about.
+    expect(f.sent[0]?.message.data.type).toBe('cron_done')
     expect(f.sent[0]?.message.body).toBe('cron “Morning digest” reported')
   })
 
@@ -270,7 +272,53 @@ describe('a finished turn', () => {
     f.watcher.onEvent(turn('live-r', 9, { status: 'error', error: 'the model refused' }))
     await f.watcher.settle()
 
+    expect(f.sent[0]?.message.data.type).toBe('cron_failed')
     expect(f.sent[0]?.message.body).toBe('cron “Morning digest” failed')
+  })
+
+  it('still reaches a device that only ever asked for the coarse cron switch', async () => {
+    // The registration predates `cron_done` and `cron_failed` entirely. Adding
+    // a finer type must never be how somebody's phone goes quiet.
+    f.setRegistrations({ 'dev-1': registrationRow({ types: { cron: true } }) })
+    f.setHistory(`${CRON_HEADER}\n\nreport`)
+    await f.watcher.resumeAll()
+    f.watcher.onEvent(turn('live-r', 40))
+    await f.watcher.settle()
+
+    expect(f.sent[0]?.installations).toEqual(['dev-1'])
+    expect(f.sent[0]?.message.data.type).toBe('cron_done')
+  })
+
+  it('reaches a device that asked only about failures, and only for the failure', async () => {
+    f.setRegistrations({ 'dev-1': registrationRow({ types: { cron_failed: true } }) })
+    f.setHistory(`${CRON_HEADER}\n\nreport`)
+    await f.watcher.resumeAll()
+    f.watcher.onEvent(turn('live-r', 41))
+    f.watcher.onEvent(turn('live-r', 42, { status: 'error', error: 'the model refused' }))
+    await f.watcher.settle()
+
+    expect(f.sent.map(entry => entry.message.data.type)).toEqual(['cron_failed'])
+  })
+
+  it('sends one notification to a device that asked for both the coarse and the fine switch', async () => {
+    // The union is where one device would otherwise hear the same fact twice.
+    f.setRegistrations({ 'dev-1': registrationRow({ types: { cron: true, cron_done: true } }) })
+    f.setHistory(`${CRON_HEADER}\n\nreport`)
+    await f.watcher.resumeAll()
+    f.watcher.onEvent(turn('live-r', 43))
+    await f.watcher.settle()
+
+    expect(f.sent).toHaveLength(1)
+    expect(f.sent[0]?.installations).toEqual(['dev-1'])
+  })
+
+  it('leaves an ordinary turn on the type it always had', async () => {
+    // `typeForTurn` only splits a CRON turn. A plain finished turn must not
+    // start answering to a cron switch because the outcome happens to be known.
+    f.watcher.onEvent(turn('live-r', 44, { status: 'error', error: 'boom' }))
+    await f.watcher.settle()
+
+    expect(f.sent[0]?.message.data.type).toBe('message')
   })
 
   it('reads a bot-to-bot delivery as a DM, and names the sender', async () => {
@@ -385,7 +433,7 @@ describe('classifying a finished turn', () => {
     // `session.history` returns the WHOLE chat; on a long one that is the
     // transcript downloaded to read its last row, once per turn.
     expect(tailed.calls.some(call => call.method === 'session.history')).toBe(false)
-    expect(tailed.sent[0]?.message.data.type).toBe('cron')
+    expect(tailed.sent[0]?.message.data.type).toBe('cron_done')
   })
 
   it('falls back to session.history for a gateway with no REST surface', async () => {
@@ -398,7 +446,7 @@ describe('classifying a finished turn', () => {
     await tailed.watcher.settle()
 
     expect(tailed.calls.some(call => call.method === 'session.history')).toBe(true)
-    expect(tailed.sent[0]?.message.data.type).toBe('cron')
+    expect(tailed.sent[0]?.message.data.type).toBe('cron_done')
   })
 })
 

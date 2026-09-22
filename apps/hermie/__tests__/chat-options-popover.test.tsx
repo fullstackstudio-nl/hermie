@@ -272,6 +272,49 @@ describe('per-chat notification types', () => {
 
     expect(usePushStore.getState().perBot.researcher).toEqual({ cron: false })
   })
+
+  it('lists the six events a reader would answer differently per bot, and never `message`', async () => {
+    await openChat()
+
+    act(() => {
+      usePushStore.getState().setEnabled(true)
+    })
+
+    fireEvent.press(screen.getByTestId('chat-header-options'))
+    await waitFor(() => expect(screen.getByTestId('option-notifications')).toBeTruthy())
+    fireEvent.press(screen.getByTestId('option-notifications'))
+
+    await waitFor(() => expect(screen.getByTestId('option-notify-cron')).toBeTruthy())
+
+    for (const type of ['turn_done', 'turn_failed', 'request', 'cron', 'cron_done', 'cron_failed']) {
+      expect(screen.getByTestId(`option-notify-${type}`)).toBeTruthy()
+    }
+
+    // `message` is mute's domain. A second switch for it here would be two
+    // controls for one decision, and they would disagree.
+    expect(screen.queryByTestId('option-notify-message')).toBeNull()
+  })
+
+  it('lets a chat keep its failures while losing its chatter', async () => {
+    await openChat()
+
+    act(() => {
+      usePushStore.getState().setEnabled(true)
+    })
+
+    fireEvent.press(screen.getByTestId('chat-header-options'))
+    await waitFor(() => expect(screen.getByTestId('option-notifications')).toBeTruthy())
+    fireEvent.press(screen.getByTestId('option-notifications'))
+    await waitFor(() => expect(screen.getByTestId('option-notify-cron')).toBeTruthy())
+
+    fireEvent.press(screen.getByTestId('option-notify-cron'))
+    fireEvent.press(screen.getByTestId('option-notify-cron_done'))
+
+    // Partial on purpose: `cron_failed` is not written, so it follows the
+    // global switch as the global switch moves — which is the whole reason the
+    // two outcomes are separate types.
+    expect(usePushStore.getState().perBot.researcher).toEqual({ cron: false, cron_done: false })
+  })
 })
 
 describe('the rows the keyboard walks', () => {

@@ -235,17 +235,24 @@ export interface ChatNotificationSettings {
 }
 
 /**
- * The four a reader recognises, in the order they matter.
+ * The events a reader recognises, in the order they matter.
  *
  * Not every `PushType`: `message` is what mute already covers and is the one
- * switch a per-chat page would duplicate, so the page names the four EVENTS a
- * reader would answer differently per bot. The wire keeps all of them.
+ * switch a per-chat page would duplicate, so the page names the EVENTS a reader
+ * would answer differently per bot. The wire keeps all of them.
+ *
+ * The three cron rows sit together and in that order because they are the
+ * reason this page exists: a bot whose nightly routine chatters is exactly the
+ * bot whose routine FAILING is worth a buzz, and the only way to say that is to
+ * have the delivery and the two outcomes as separate switches.
  */
 const CHAT_NOTIFICATION_TYPES: { type: PushType; label: string }[] = [
   { type: 'turn_done', label: chatStrings.notifications.types.turnDone as string },
   { type: 'turn_failed', label: chatStrings.notifications.types.turnFailed as string },
   { type: 'request', label: chatStrings.notifications.types.needsInput as string },
-  { type: 'cron', label: chatStrings.notifications.types.cron as string }
+  { type: 'cron', label: chatStrings.notifications.types.cron as string },
+  { type: 'cron_done', label: chatStrings.notifications.types.cronDone as string },
+  { type: 'cron_failed', label: chatStrings.notifications.types.cronFailed as string }
 ]
 
 /**

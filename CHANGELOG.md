@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Two more things to be told about: a scheduled run that finished, and one that failed.**
+  Settings → Notifications now has a switch for each, on by default like the rest, and so does a
+  chat's own notifications page — which is the point of splitting them out of **Routines**. A bot
+  whose nightly digest is chatter is exactly the bot whose digest *not running* is worth a buzz, and
+  until now switching off the one switched off the other. A device that upgrades adopts both as on
+  without anybody touching a switch; a type somebody had already turned off stays off, because that
+  was a decision. The coarse **Routines** switch keeps meaning what it always meant, so a device
+  that only ever asked for that one goes on being told about scheduled runs.
+
 - **Boards.** The Kanban boards the gateway keeps, from Settings → **Boards** or **Boards** in the
   chat list's header: every board, its columns, its cards, and a card's own page with its notes and
   its comments. A card can be made, edited, moved and archived. It is the same data the Hermes

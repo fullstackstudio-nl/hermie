@@ -7,6 +7,7 @@
  * switch off with its warning under it, and a footer that changes when the
  * platform has something the reader has to go elsewhere to fix.
  */
+import { PUSH_TYPES } from '@hermie/gateway-client/push'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native'
 
 import { NS_A } from './support/gateway-namespace'
@@ -16,7 +17,7 @@ import type { PushPermission } from '../src/features/push/platform-contract'
 import { PushSync } from '../src/features/push/push-sync'
 import { strings } from '../src/i18n/strings'
 import { keyValueStore } from '../src/platform/key-value-store'
-import { PUSH_KEY, usePushStore } from '../src/store/push'
+import { ownRegistration, PUSH_KEY, usePushStore } from '../src/store/push'
 import { ThemeProvider } from '../src/ui/theme'
 
 const TOKEN = { transport: 'expo' as const, token: 'ExponentPushToken[abc]' }
@@ -78,16 +79,69 @@ it('opens every type and the preview switch once it is on', async () => {
     no hook when a bot-to-bot DM arrives, so the plugin cannot produce one — a
     switch for it would be a switch that never does anything.
   */
-  for (const type of ['message', 'request', 'cron', 'turn_done', 'turn_failed']) {
+  expect(PUSH_TYPES).toHaveLength(7)
+
+  for (const type of PUSH_TYPES) {
     expect(screen.getByTestId(`settings-push-type-${type}`).props.accessibilityState.checked).toBe(true)
   }
 
   expect(screen.queryByTestId('settings-push-type-dm')).toBeNull()
 
+  // The owner's rule, and the reason the two cron outcomes are worth their own
+  // switches: a routine that was supposed to happen and did not is the one
+  // nobody wants to find out about the next morning.
+  expect(screen.getByTestId('settings-push-type-cron_failed').props.accessibilityState.checked).toBe(true)
+
   // ADR-0017's default: a notification says who and what kind, never what was
   // said, because it is rendered on a lock screen by somebody else's software.
   expect(screen.getByTestId('settings-push-preview').props.accessibilityState.checked).toBe(false)
   expect(screen.getByText(strings.settings.notifications.previewHint)).toBeTruthy()
+})
+
+it('turns a newly added type on for a device that upgrades into it', async () => {
+  /*
+    The bag on disk was written by a build that had never heard of the two cron
+    outcomes. Read by the WIRE's rule — absent means off — both switches would
+    come back on screen looking ON while the registration said otherwise, and
+    the owner would never be told the routine had stopped running.
+
+    A type the reader actually switched OFF is a different thing and stays off:
+    that is a decision, and an upgrade must not undo one.
+  */
+  await keyValueStore.setJson(NS_A.key(PUSH_KEY), {
+    enabled: true,
+    preview: false,
+    types: { message: true, request: true, cron: false, turn_done: true, turn_failed: true }
+  })
+  usePushStore.getState().reset()
+  await usePushStore.getState().hydrate(NS_A)
+
+  paint(syncWith('granted'))
+
+  await waitFor(() => expect(screen.getByTestId('settings-push-type-cron_failed')).toBeTruthy())
+
+  expect(screen.getByTestId('settings-push-type-cron_done').props.accessibilityState.checked).toBe(true)
+  expect(screen.getByTestId('settings-push-type-cron_failed').props.accessibilityState.checked).toBe(true)
+  expect(screen.getByTestId('settings-push-type-cron').props.accessibilityState.checked).toBe(false)
+})
+
+it('carries the newly adopted types into the row the gateway is sent', async () => {
+  await keyValueStore.setJson(NS_A.key(PUSH_KEY), {
+    enabled: true,
+    preview: false,
+    types: { message: true, request: true, cron: true, turn_done: true, turn_failed: true }
+  })
+  usePushStore.getState().reset()
+  await usePushStore.getState().hydrate(NS_A)
+  usePushStore.getState().setAddress(TOKEN, 1_789_957_143)
+
+  // The row is rewritten by the `refresh` every launch and every foreground
+  // makes — `push-sync.test.ts` pins that — so adopting a type on hydrate is
+  // what carries it to the notifier without anybody touching a switch.
+  expect(ownRegistration(usePushStore.getState(), 'ios')?.types).toMatchObject({
+    cron_done: true,
+    cron_failed: true
+  })
 })
 
 it('sends the reader to system settings when permission was refused there', async () => {

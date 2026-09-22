@@ -8837,3 +8837,63 @@ handlers rather than to match the app.
   a fourth control now sits beside New bot, the cron `+` and Edit. Whether that header still lays out
   on the narrowest supported phone has been reasoned about (the title is one short word and takes the
   remaining space) and not looked at.
+
+## Push follow-ups: seven types, a tap that lands, and an honest cron line (2026-09-22)
+
+### A new notification type is off on every phone that already exists
+
+This is the thing that makes adding one dangerous, and it is not obvious from
+either side on its own.
+
+ADR-0017's wire rule is that a type a registration does not name is **off** — a
+device that has never heard of an event cannot have agreed to it, and a new
+event kind must not start buzzing every phone that predates it. That rule is
+right and it stays.
+
+The trap is that the app's own stored preferences are read through the _same_
+function. The bag on this device's disk is not a registration: it is what the
+reader last chose, and a key that is absent from it is not a refusal, it is a
+switch they have never been shown. Read by the wire's rule, every existing
+install would come back from the upgrade with both new switches **on screen
+looking ON** — because the section draws the ones the current build knows — and
+**off in the row it writes**. The owner would never be told the routine had
+stopped running, and there would be nothing anywhere to say why.
+
+So there are two functions and the difference is the point:
+`pushTypesOf` for a row off a gateway (absent → off) and `adoptedPushTypes` for
+this device's own disk (absent → the default, present-and-boolean → whatever the
+reader chose). A type somebody actually switched off stays off; that was a
+decision, and an upgrade must not undo one.
+
+Nothing extra has to be written to carry it upstream: the app already re-reads
+its push address and re-stamps its row on every launch and every foreground,
+which is the write that takes the adopted types with it.
+
+### `cron` had to stay, and become the coarse switch
+
+`cron_done` and `cron_failed` are finer than `cron`, not a replacement for it,
+and the audience is therefore a **union**: a scheduled run that ends notifies
+every device that asked for the fine type _or_ for `cron`, deduped so a device
+with both switches on hears it once. Replacing the type instead would have made
+"we added a switch" and "your phone went quiet" the same release.
+
+The payload names the finer fact (`cron_done` / `cron_failed`) and the sentence
+keeps saying what actually happened — "cron “Morning digest” reported" — so no
+existing wording moved.
+
+### What could not be verified here
+
+- **No real push was sent.** No Expo token, no VAPID key, no APNs. Everything in
+  this round is against the daemon's own fake sender and the app's fake
+  platform, so what is proven is which registrations are addressed and what the
+  payload says, never that a phone buzzed.
+- **The plugin was not run.** `cron_done`, `cron_failed`, `sessionKind` and
+  `cronCertain` are read out of the plugin's README and `docs/DESIGN.md` §3 and
+  implemented against those documents. If the plugin spells a field differently
+  on the wire, nothing here would have noticed.
+- **The service worker is still untested**, for the reason `push-web.test.ts`
+  already gives: a stand-in for `push`, `notificationclick`, `clients.matchAll`
+  and `showNotification` is a second implementation, and it is the first one
+  that has the bug. The session fields reach the app because the worker forwards
+  the payload's `data` bag whole, which is a property of code that was read
+  rather than of code that was run.

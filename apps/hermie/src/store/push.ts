@@ -30,8 +30,8 @@
  */
 import { gatewayKeyOf } from '@hermie/gateway-client'
 import {
+  adoptedPushTypes,
   noPushTypes,
-  pushTypesOf,
   type PushAddress,
   type PushRegistrationInput,
   type PushSeenEntry,
@@ -81,6 +81,11 @@ interface PersistedInstallation {
  * there was a switch for it.
  *
  * Turning one OFF is the decision worth making, and it is one switch away.
+ *
+ * It is also what a device that UPGRADES adopts for a type it has never been
+ * offered a switch for — see `adoptedPushTypes`, which is what `hydrate` reads
+ * the stored bag through. A release that adds a type would otherwise leave
+ * every existing device with it off and nothing on screen to say so.
  */
 export const DEFAULT_PUSH_TYPES: Record<PushType, boolean> = {
   // A messenger that does not tell you about a message is not one.
@@ -88,6 +93,10 @@ export const DEFAULT_PUSH_TYPES: Record<PushType, boolean> = {
   // A question with a countdown on it is the one thing worth waking a phone for.
   request: true,
   cron: true,
+  cron_done: true,
+  // The one somebody wants at three in the morning: a routine that was supposed
+  // to happen and did not.
+  cron_failed: true,
   turn_done: true,
   turn_failed: true
 }
@@ -258,7 +267,13 @@ export const usePushStore = create<PushState>((set, get) => {
         namespace: ns,
         installationId,
         enabled: fromWizard || stored?.enabled === true,
-        types: fromWizard ? get().types : stored?.types ? pushTypesOf(stored.types) : noPushTypes(),
+        // `adoptedPushTypes` and not `pushTypesOf`: the bag on disk is what the
+        // reader last CHOSE, so a type that did not exist when they chose takes
+        // the default rather than reading as a refusal. The row that carries it
+        // upstream is rewritten by the first `refresh` of this launch, which is
+        // what makes an upgrade visible to the notifier without anybody
+        // touching a switch.
+        types: fromWizard ? get().types : adoptedPushTypes(stored?.types, DEFAULT_PUSH_TYPES),
         preview: fromWizard ? get().preview : stored?.preview === true,
         // Whoever was registered on the previous gateway is not registered
         // here, and their rows are not ours to carry across. The address the

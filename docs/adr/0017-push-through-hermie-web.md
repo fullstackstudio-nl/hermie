@@ -372,3 +372,36 @@ talking to the notifier, the payload saying who rather than what, `preview` bein
 per device, `seen` being a heartbeat rather than a protocol fact, requests and
 cron deliveries never being suppressed, and every action being re-validated
 against the gateway's own open requests before it is answered.
+
+## Amendment, 2026-09-22: seven types, and `cron` becomes the coarse one
+
+**The type list becomes seven.** `cron` was one switch doing two jobs: "the
+routine reported" and "the run ended". They are not the same question, and the
+person who wants the second rarely wants the first — a nightly digest whose
+chatter is noise is precisely the routine whose _failure to run_ is worth
+waking a phone for. Folding them together meant that silencing the chatter also
+silenced the alarm, which is the wrong way round.
+
+So `cron_done` and `cron_failed` join `message`, `request`, `cron`, `turn_done`
+and `turn_failed`. The plugin already raises them (`on_session_end` inside a
+cron run, and its `[CRON_FAILURE]` marker); what changes here is that the app
+offers a switch for each, globally and per chat, and that the registration
+written to `ui_meta` carries all seven.
+
+**`cron` stays the coarse switch and keeps its old meaning.** A notification
+raised by a scheduled run answers to the fine type AND to `cron`, so a
+registration written before these types existed goes on being notified exactly
+as it was. Adding a type must never be how somebody's phone goes quiet, and the
+audience is therefore a union rather than a replacement — `registrationsForAny`
+in Hermie Web's daemon, one notification per device however many of its switches
+matched.
+
+**A device that upgrades adopts a new type as ON; a type it had switched off
+stays off.** ADR-0017's wire rule is that an absent type means off, and that is
+still right for a REGISTRATION read off a gateway: a device that never named a
+type cannot have agreed to it. It is the wrong rule for this device's own
+stored preferences, where an absent key is not a refusal but a switch nobody
+has been shown. The two rules are `pushTypesOf` and `adoptedPushTypes`, and the
+difference between them is stated in both. The upgraded row reaches the
+notifier on the address refresh the app already makes on every launch and every
+foreground; nothing new has to be written.

@@ -1,17 +1,18 @@
 /**
  * Per-chat notification types: narrower than mute, and on top of it.
  *
- * Mute is "say nothing at all about this chat". These four are "say this but
- * not that" — a bot whose scheduled runs are noise but whose failures are not.
- * The plugin already honours per-type settings globally; what is new is a
- * per-chat override beside the registrations in the same `push` section, which
- * the notifier reads at `hermie-app.push.perBot.<bot>.<type>`.
+ * Mute is "say nothing at all about this chat". These are "say this but not
+ * that" — a bot whose scheduled runs are noise but whose failures are not, which
+ * is exactly why `cron`, `cron_done` and `cron_failed` are three switches and
+ * not one. The plugin already honours per-type settings globally; what is new
+ * is a per-chat override beside the registrations in the same `push` section,
+ * which the notifier reads at `hermie-app.push.perBot.<bot>.<type>`.
  *
  * Three properties, and each one is a different way to get this wrong:
  *
  *  1. **An override is PARTIAL.** A type a chat says nothing about follows the
  *     global switch as the global switch moves. Writing all five the moment one
- *     is touched would freeze the other four at whatever they were that day.
+ *     is touched would freeze the others at whatever they were that day.
  *  2. **An empty override leaves nothing behind**, so "back to the default" is
  *     indistinguishable from "never touched" — in the store and on the wire.
  *  3. **The section version is NOT bumped.** `v` is checked per ROW and an
@@ -40,7 +41,7 @@ beforeEach(() => {
 
 describe('the rule itself', () => {
   it('folds an override into the global types and leaves the rest alone', () => {
-    const global = { ...noPushTypes(), turn_done: true, turn_failed: true, cron: true }
+    const global = { ...noPushTypes(), turn_done: true, turn_failed: true, cron: true, cron_failed: true }
 
     expect(effectivePushTypes(global, { cron: false })).toEqual({
       ...global,

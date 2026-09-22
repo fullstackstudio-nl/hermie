@@ -1,5 +1,5 @@
 /**
- * Settings → Notifications: ADR-0017 as five switches and a sentence.
+ * Settings → Notifications: ADR-0017 as a switch per event type and a sentence.
  *
  * Off by default, and off means off: nothing here asks for permission, obtains
  * a token or writes a row until the reader moves the first switch. That is not
@@ -33,6 +33,8 @@ const TYPE_LABELS: Record<PushType, string> = {
   message: strings.settings.notifications.typeMessage,
   request: strings.settings.notifications.typeRequest,
   cron: strings.settings.notifications.typeCron,
+  cron_done: strings.settings.notifications.typeCronDone,
+  cron_failed: strings.settings.notifications.typeCronFailed,
   turn_done: strings.settings.notifications.typeTurnDone,
   turn_failed: strings.settings.notifications.typeTurnFailed
 }

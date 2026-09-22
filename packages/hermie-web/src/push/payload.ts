@@ -33,7 +33,15 @@ export interface NotifiableEvent {
   requestMethod?: string
   /** `dm` — the sender; `cron` — the job. */
   name?: string
-  /** `cron` — the run failed rather than reported. */
+  /**
+   * `cron` — the run failed rather than reported.
+   *
+   * Kept beside the three cron TYPES rather than replaced by them, because the
+   * two say different things: the type is which switch this answers to, and
+   * this is what the sentence on the lock screen has to say. A device that
+   * asked only for the coarse `cron` still receives a failure, and it should
+   * still be told it was one.
+   */
   failed?: boolean
   /** The text, carried only to devices that asked for it. */
   preview?: string
@@ -74,7 +82,9 @@ function summaryOf(event: NotifiableEvent): string {
       return event.name ? `heard from ${event.name}` : 'heard from another bot'
 
     case 'cron':
-      if (event.failed) {
+    case 'cron_done':
+    case 'cron_failed':
+      if (event.failed || event.type === 'cron_failed') {
         return event.name ? `cron “${event.name}” failed` : 'a cron run failed'
       }
 
@@ -118,4 +128,23 @@ export function pushMessageFor(event: NotifiableEvent, preview: boolean): PushMe
 /** The event type a turn's inbound row implies. */
 export function typeForInbound(kind: InboundKind): PushType {
   return kind === 'cron' ? 'cron' : kind === 'dm' ? 'dm' : 'message'
+}
+
+/**
+ * The type a FINISHED turn answers to, which for a scheduled run is finer.
+ *
+ * A cron turn ending is two facts at once — the routine reported, and the run
+ * ended this way — and the payload names the finer of the two so that a device
+ * which asked only about failures can be told about a failure and about
+ * nothing else. The coarse `cron` switch still reaches the same notification;
+ * `registrationsForAny` is where the two audiences are joined, and it is there
+ * rather than here because this function is about naming the fact, not about
+ * who hears it.
+ */
+export function typeForTurn(kind: InboundKind, failed: boolean): PushType {
+  if (kind !== 'cron') {
+    return typeForInbound(kind)
+  }
+
+  return failed ? 'cron_failed' : 'cron_done'
 }
