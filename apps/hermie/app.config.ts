@@ -50,7 +50,7 @@ const config: ExpoConfig = {
   name: 'Hermie',
   slug: 'hermie',
   owner: 'fullstack-studio',
-  version: '0.1.4',
+  version: '0.1.5',
   orientation: 'default',
   scheme: 'hermie',
   userInterfaceStyle: 'automatic',
