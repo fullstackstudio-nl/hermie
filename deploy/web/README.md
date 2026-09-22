@@ -207,6 +207,22 @@ It is **who has signed in through this service**, with when — not the gateway'
 Upstream documents no route for listing accounts, and guessing at one would mean reading a 404 as
 "no users". The page labels which of the two it is showing.
 
+**With one exception, and it is the useful one.** When the built-in identity provider is on, its
+accounts _are_ gateway users: upstream maps an ID token's `sub` onto `Session.user_id`, which is
+what `/api/auth/me` answers and what this list is keyed by. So every account on `/admin/oidc`
+appears here from the moment it is created — before it has ever signed in — marked **account
+here** and linked to the page that owns it, and an account whose role is `admin` is on this
+service's administrator list. Ticking or clearing **Administrator** on such a row changes the
+account's role, which is the same switch as the one on the identity page, so the two can never
+disagree.
+
+Deleting an account takes its administrator entry with it. It takes the row too, unless this
+service has actually seen that person sign in — a last-seen time is a record of something that
+happened, and deleting an account does not unhappen it. Ids that belong to no account are never
+touched, so a gateway with its own accounts keeps all of them on this list beside these. **A
+provider that is switched off changes nothing**, so turning it off to test something cannot cost
+you your own way into `/admin`.
+
 ## Signing people in without a separate identity provider
 
 Hermie Web can be **its own OpenID Provider**, so a gateway can be gated without standing up

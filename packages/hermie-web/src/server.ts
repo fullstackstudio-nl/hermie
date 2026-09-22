@@ -44,6 +44,7 @@ import {
   saveAdminState,
   type AdminState
 } from './admin/state'
+import { reconcileIssuerPeople } from './admin/people'
 import { IdentityReader, type GatewayIdentity } from './identity'
 import { webCopy } from './i18n'
 import { OidcProvider } from './oidc/provider'
@@ -281,20 +282,35 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
     void saveAdminState(options.stateDir, next).catch(() => undefined)
   }
 
-  const oidcProvider = new OidcProvider({
-    read: () => oidc,
-    write: async next => {
-      oidc = next
-      await saveOidcState(options.stateDir, next)
+  /**
+   * Put the people list and the administrator list back in step with the issuer.
+   *
+   * Called after every write to the provider's state and once at startup, which
+   * between them cover every way an account can appear, change role or go. It is
+   * idempotent and answers the same object when there is nothing to do, so the
+   * startup call is also the migration for a deployment that predates it and
+   * costs a deployment that does not exactly one comparison.
+   */
+  async function syncIssuerPeople(): Promise<void> {
+    const next = reconcileIssuerPeople(admin, oidc)
+
+    if (next !== admin) {
+      admin = next
+      await saveAdminState(options.stateDir, next)
     }
-  })
+  }
+
+  const writeOidc = async (next: OidcState): Promise<void> => {
+    oidc = next
+    await saveOidcState(options.stateDir, next)
+    await syncIssuerPeople()
+  }
+
+  const oidcProvider = new OidcProvider({ read: () => oidc, write: writeOidc })
   const oidcRouter = new OidcRouter({
     provider: oidcProvider,
     read: () => oidc,
-    write: async next => {
-      oidc = next
-      await saveOidcState(options.stateDir, next)
-    },
+    write: writeOidc,
     // The team's own name where one is set, so the sign-in page a reader lands
     // on says what they think they are signing in to rather than what we call it.
     issuerName: () => admin.branding.name || 'Hermie Web',
@@ -423,6 +439,16 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
       void cache.sweep(next.cache.retentionHours * 3600).catch(() => undefined)
     }
   })
+
+  /*
+    The one-time reconcile, which is also the migration.
+
+    A state directory written before the two lists were one list has accounts on
+    the issuer that the people list has never heard of, and it is corrected here
+    rather than by a version bump: the function is idempotent, so a deployment
+    that is already in step pays one comparison and writes nothing.
+  */
+  await syncIssuerPeople()
 
   // Warm the release listing at startup so the first Settings visit is instant,
   // and never let its failure take the server down with it.

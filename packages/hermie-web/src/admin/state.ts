@@ -46,6 +46,16 @@ export interface AdminUserRow extends AdminUserOptions {
   email: string
   /** Unix seconds this service last saw them make a request. */
   seenAt: number
+  /**
+   * Whether the built-in issuer vouches for this id.
+   *
+   * Set by `people.ts`, and stored rather than derived because the question is
+   * asked when the account is already gone — see that file for why the answer
+   * cannot be worked out from what is left. Absent on every row a deployment
+   * wrote before this existed, which reads as false and is correct: nothing
+   * created those from an account.
+   */
+  fromIssuer?: boolean
 }
 
 /** What the push daemon does, as far as an operator gets to decide it. */
@@ -147,7 +157,10 @@ function userRowOf(userId: string, raw: Record<string, unknown>): AdminUserRow {
     // list is "no bots at all", and an operator has to be able to say both.
     allowedBots: Array.isArray(allowed) ? allowed.filter((name): name is string => typeof name === 'string') : null,
     readOnly: bool(raw.readOnly, false),
-    pushAllowed: bool(raw.pushAllowed, true)
+    pushAllowed: bool(raw.pushAllowed, true),
+    // Only written when it is true, so a file from before this field looks
+    // exactly like one whose rows are nobody's account — which they are.
+    ...(raw.fromIssuer === true ? { fromIssuer: true } : {})
   }
 }
 

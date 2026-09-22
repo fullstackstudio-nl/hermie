@@ -373,6 +373,10 @@ export interface WebStrings {
       addButton: string
       signedInAs: (viewer: string) => string
       signedInLocally: string
+      /** The badge on a row the built-in issuer vouches for; it links to that page. */
+      onThisIssuer: string
+      /** What that badge means, and what the administrator box does on such a row. */
+      issuerNote: string
     }
   }
   /**
@@ -773,7 +777,12 @@ const EN: WebStrings = {
       addLabel: 'Add somebody by gateway user id',
       addButton: 'Add',
       signedInAs: viewer => `You are signed in as <code>${viewer}</code>. The last administrator cannot be removed.`,
-      signedInLocally: 'You are signed in with the local administrator secret.'
+      signedInLocally: 'You are signed in with the local administrator secret.',
+      onThisIssuer: 'account here',
+      issuerNote:
+        'Rows marked <strong>account here</strong> are accounts on this service’s own issuer, so their gateway ' +
+        'user id is the account’s subject. Ticking or clearing <strong>Administrator</strong> on one of those ' +
+        'changes the account’s role, which is the same switch as the one on the identity page.'
     }
   },
   identity: {
@@ -1203,7 +1212,12 @@ const NL: WebCatalogue<WebStrings> = {
       addButton: 'Toevoegen',
       signedInAs: viewer =>
         `Je bent ingelogd als <code>${viewer}</code>. De laatste beheerder kan niet worden verwijderd.`,
-      signedInLocally: 'Je bent ingelogd met het lokale beheerderswachtwoord.'
+      signedInLocally: 'Je bent ingelogd met het lokale beheerderswachtwoord.',
+      onThisIssuer: 'account hier',
+      issuerNote:
+        'Regels met <strong>account hier</strong> zijn accounts op de eigen issuer van deze service, dus hun ' +
+        'gateway-gebruikers-id is het subject van het account. <strong>Beheerder</strong> aan- of uitvinken bij ' +
+        'zo’n regel verandert de rol van het account — dezelfde schakelaar als die op de identiteitspagina.'
     }
   },
   identity: {
@@ -1615,7 +1629,12 @@ const DE: WebCatalogue<WebStrings> = {
       addButton: 'Hinzufügen',
       signedInAs: viewer =>
         `Du bist als <code>${viewer}</code> angemeldet. Der letzte Administrator kann nicht entfernt werden.`,
-      signedInLocally: 'Du bist mit dem lokalen Administrator-Passwort angemeldet.'
+      signedInLocally: 'Du bist mit dem lokalen Administrator-Passwort angemeldet.',
+      onThisIssuer: 'Konto hier',
+      issuerNote:
+        'Zeilen mit <strong>Konto hier</strong> sind Konten auf der eigenen issuer dieses Dienstes, ihre ' +
+        'gateway-Benutzer-id ist also das subject des Kontos. <strong>Administrator</strong> dort an- oder ' +
+        'abzuhaken ändert die Rolle des Kontos — derselbe Schalter wie auf der Identitätsseite.'
     }
   },
   identity: {

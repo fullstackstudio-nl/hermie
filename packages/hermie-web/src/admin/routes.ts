@@ -380,9 +380,7 @@ export class AdminRouter {
         csrf: this.mintCsrf(response, isSecureRequest(request)),
         bots: this.options.bots(),
         viewer: identity?.userId ?? '',
-        identity: (({ enabled, issuer, users }) => ({ enabled, issuer, accounts: users.length }))(
-          this.options.oidc.read()
-        ),
+        identity: this.identitySummary(),
         notice,
         ...webCopy(request)
       })
@@ -556,9 +554,7 @@ export class AdminRouter {
           csrf: this.mintCsrf(response, isSecureRequest(request)),
           bots: this.options.bots(),
           viewer: '',
-          identity: (({ enabled, issuer, users }) => ({ enabled, issuer, accounts: users.length }))(
-            this.options.oidc.read()
-          ),
+          identity: this.identitySummary(),
           notice: '',
           choices,
           setupOpens: this.options.setupReopens(),
@@ -590,6 +586,27 @@ export class AdminRouter {
     response.end()
   }
 
+  /**
+   * The provider, as the pages want it: a count, and a row-by-row lookup.
+   *
+   * Built per render rather than held, because it is a view of the provider's
+   * own state and a second copy of that is a second authority.
+   */
+  private identitySummary(): AdminPageInput['identity'] {
+    const state = this.options.oidc.read()
+
+    return {
+      enabled: state.enabled,
+      issuer: state.issuer,
+      accounts: state.users.length,
+      bySub: state.enabled
+        ? Object.fromEntries(
+            state.users.map(user => [user.sub, { username: user.username, admin: user.role === 'admin' }])
+          )
+        : {}
+    }
+  }
+
   private async saveUser(
     response: ServerResponse,
     state: AdminState,
@@ -604,6 +621,30 @@ export class AdminRouter {
 
       return
     }
+
+    const wantsAdmin = checked(form, 'admin')
+    const account = this.options.oidc.read().enabled
+      ? this.options.oidc.read().users.find(user => user.sub === userId)
+      : undefined
+
+    /*
+      An account on this service's own issuer has ONE administrator switch.
+
+      Its `sub` is the gateway user id (see `people.ts`), so the row here and the
+      account on `/admin/oidc` are the same person. Writing the id straight into
+      `admins` would be a second answer that the next reconcile would silently
+      undo, so the role is what changes and the reconcile mirrors it back — which
+      also means this page and the identity page can never disagree.
+    */
+    if (account && (account.role === 'admin') !== wantsAdmin) {
+      await this.options.oidc.provider.update(next =>
+        setAccountRole(next, userId, wantsAdmin ? 'admin' : ('user' as OidcRole))
+      )
+    }
+
+    // Re-read: the reconcile that follows an account's role change rewrites the
+    // administrator list and may have added this very row.
+    state = this.options.read()
 
     const raw = (form.get('allowedBots') ?? '').trim()
     const held = state.users[userId]
@@ -626,12 +667,20 @@ export class AdminRouter {
                 .filter(Boolean)
             : null,
           readOnly: checked(form, 'readOnly'),
-          pushAllowed: checked(form, 'pushAllowed')
+          pushAllowed: checked(form, 'pushAllowed'),
+          ...(held?.fromIssuer ? { fromIssuer: true } : {})
         }
       }
     }
 
-    const wantsAdmin = checked(form, 'admin')
+    if (account) {
+      // The role already decided the administrator list; everything else on this
+      // form is a service-level option and is saved as it stands.
+      await this.save(response, next, 'Saved.', back)
+
+      return
+    }
+
     const isAdmin = state.admins.includes(userId)
 
     if (wantsAdmin && !isAdmin) {

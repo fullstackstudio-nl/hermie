@@ -71,8 +71,20 @@ export interface AdminPageInput {
   bots: string[]
   /** Who is looking, for the "you cannot remove yourself last" hint. */
   viewer: string
-  /** A three-line summary of the built-in identity provider; the page for it is its own. */
-  identity: { enabled: boolean; issuer: string; accounts: number }
+  /**
+   * The built-in identity provider, as the pages here need it.
+   *
+   * `bySub` is what lets the people list say which of its rows are accounts on
+   * this service's own issuer rather than ids from somewhere else. It is read at
+   * render time rather than stored on the row, because it is the provider's
+   * answer and a copy of it would be a second one.
+   */
+  identity: {
+    enabled: boolean
+    issuer: string
+    accounts: number
+    bySub: Record<string, { username: string; admin: boolean } | undefined>
+  }
   notice: string
 }
 
@@ -394,11 +406,16 @@ function personRow(row: AdminUserRow, index: number, input: AdminPageInput): str
   const label = row.displayName || row.email || row.userId
   const allowed = row.allowedBots === null ? '' : row.allowedBots.join(', ')
   const admin = input.state.admins.includes(row.userId)
+  const account = input.identity.bySub[row.userId]
   const form = `person-${index}`
 
   return `<tr>
-    <td><strong>${escapeHtml(label)}</strong>${admin ? ` <span class="badge">${text.administrator}</span>` : ''}
-      <br><code class="note">${escapeHtml(row.userId)}</code></td>
+    <td><strong>${escapeHtml(label)}</strong>${admin ? ` <span class="badge">${text.administrator}</span>` : ''}${
+      account ? ` <a class="badge" href="/admin/oidc">${text.onThisIssuer}</a>` : ''
+    }
+      <br><code class="note">${escapeHtml(row.userId)}</code>${
+        account ? `<br><span class="note">${escapeHtml(account.username)}</span>` : ''
+      }</td>
     <td class="note">${row.seenAt ? new Date(row.seenAt * 1000).toISOString().slice(0, 16).replace('T', ' ') : '—'}</td>
     <td>
       <label class="sr" for="bots-${form}">${text.allowedBotsLabel}</label>
@@ -431,7 +448,9 @@ export function adminPeoplePage(input: AdminPageInput): string {
   return adminShell(chromeOf(input, 'people'), {
     title: text.heading,
     intro: text.intro,
-    body: `${card({ body: peopleTable(input) })}
+    body: `${card({
+      body: `${input.identity.enabled ? `<p class="note">${text.issuerNote}</p>` : ''}${peopleTable(input)}`
+    })}
     ${card({
       body: `<form method="post" action="/admin/user">
         ${csrfField(input.csrf)}

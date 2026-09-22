@@ -71,6 +71,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   connection, and it counts as a choice you made, so the newest one wins wherever it was given. The
   gateway's own copy of the name is untouched, as it has to be.
 
+- **An account on the built-in issuer is a person on `/admin`'s people list.** The two pages
+  kept two lists of the same people and neither knew about the other: an account created as an
+  administrator on `/admin/oidc` left `/admin` showing nobody, so an operator had to add them a
+  second time by copying an opaque 22-character subject between two pages. They are one list
+  now, because they were always one thing — upstream maps an ID token's `sub` onto
+  `Session.user_id`, which is exactly what this service keys its people and its administrators
+  by.
+
+  An account appears on the people list the moment it is created, before it has ever signed in,
+  marked **account here** and linked to the page that owns it. Its role decides whether it is on
+  the administrator list, in both directions and from either page: ticking **Administrator** on
+  a marked row changes the account's role rather than writing a second answer that the next
+  reconcile would undo. Deleting an account takes its administrator entry with it, and takes the
+  row too unless this service has actually seen that person sign in.
+
+  Ids that belong to no account are never touched, and a provider that is switched off changes
+  nothing at all — so turning it off to test something cannot cost you your own way into
+  `/admin`. A state directory written before this reconciles once, on its next start.
+
+- **The built-in provider's own pages look like the deployment they belong to.** The sign-in,
+  the invitation, the two-factor enrolment, the signed-out page and every refusal were bare
+  HTML — which is what a page looks like when its style sheet has failed to load, and these
+  are the pages a reader is sent to from somewhere else with no way to tell a real one from a
+  page that fetched them. They now carry the same chrome the administration does: the mark, the
+  operator's own branding name, the cards, and light and dark from `prefers-color-scheme`. Still
+  no script, still no external request, still no font to load.
+
 - **`/admin` is a set of pages rather than one long one.** It was a single document with the
   Service, Push, Message cache, Branding, Features and People panels stacked down it — six forms
   sharing one notice and one scroll position, so an operator who pressed Save had to work out
