@@ -82,7 +82,14 @@ const MARK = `<svg class="mark" viewBox="0 0 1024 1024" width="28" height="28" a
  * second copy of the sheet, and every gap is a step of the app's own 4pt scale
  * so two cards on two pages are the same distance apart.
  */
-const STYLE = `
+/**
+ * Exported only so a test can grep it. `barePage` is what actually ships it,
+ * inline in a `<style>` tag on every administration page — there is no build
+ * step here to import a stylesheet through, so the CSS most worth pinning
+ * (the roster row's overlap guards below) is pinned by asserting on this
+ * string directly. See `layout.test.ts`.
+ */
+export const STYLE = `
   :root {
     color-scheme: light dark;
     --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 20px; --s6: 24px; --s8: 32px;
@@ -361,13 +368,30 @@ const STYLE = `
     display: grid;
     grid-template-columns: var(--cols);
     gap: var(--s2);
-    align-items: center;
   }
+  /*
+    The header row is one line everywhere, so centring it is enough. A person's
+    row is not: its first cell carries a name and up to two lines under it, and
+    centring every cell against that whole block is what put "Last seen" and
+    "Bots" between the two lines instead of beside the name — exactly where the
+    second line, once it started clipping instead of overflowing, would still
+    have run into them. Aligning every cell to the row's first line — its top —
+    is what a fixed-width, ellipsis-clipped second line needs to be enough.
+  */
+  .roster-head { align-items: center }
+  .roster-row { align-items: start }
   .roster-head {
     padding: 0 var(--s1) var(--s2);
     border-bottom: 1px solid var(--hair);
     color: var(--muted);
-    font: 600 0.78rem/1.3 inherit;
+    /*
+      One size for every header cell. "Read-only", "Push" and "Administrator"
+      used to be smaller than "Who", "Last seen" and "Bots" — a second,
+      narrower font-size on the switches' own headers, so the row read as two
+      different tables glued together. There is one rule now, sized for the
+      narrowest header cell the switches columns give it.
+    */
+    font: 600 0.72rem/1.3 inherit;
   }
   .roster-head > span { min-width: 0 }
   .roster-list { list-style: none; margin: 0; padding: 0; color: var(--ink); font-size: 0.9rem }
@@ -376,17 +400,36 @@ const STYLE = `
   .roster-row { padding: var(--s2) var(--s1) }
   .roster.people { --cols: minmax(0, 1fr) 7rem 6rem 13rem 4.5rem }
   .roster.accounts { --cols: minmax(0, 1fr) 5rem 4.5rem 7rem 4.5rem }
-  /* Three words the columns are named by, and they may not wrap either. */
-  .roster-head .switches > span { font-size: 0.72rem; white-space: nowrap }
+  /* The three words a switch is named by, and they may not wrap either. */
+  .roster-head .switches > span { white-space: nowrap }
 
   .who { display: flex; align-items: center; gap: var(--s2); min-width: 0 }
   .who-text { min-width: 0 }
   .who-name { display: flex; align-items: baseline; gap: var(--s2); min-width: 0; overflow: hidden }
   .who-name strong { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
   .who-name .pill { flex: 0 0 auto }
-  .who-sub, .cell { color: var(--muted); font-size: 0.82rem }
-  /* Never two lines: a stamp that wraps is what pushed every row out of step. */
-  .who-sub, .cell { white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+  .who-sub, .who-note, .cell { color: var(--muted); font-size: 0.82rem }
+  /*
+    Never two lines and never wider than the column — the rule the whole
+    roster leans on, and the one line of it that matters most: display:
+    block. ".cell" gets it for free, because a grid item's inline-level
+    display computes to its block equivalent — but ".who-sub" and ".who-note"
+    are not grid items, they are ordinary children of ".who-text"'s block box,
+    so a plain span (display: inline) stays exactly as wide as its text
+    demands and overflow: hidden has nothing to clip. That is what let
+    "gateway sign-in" paint over "today 15:33" and "…-at-all@example.invalid"
+    run clean across "All bots": the second line was never actually
+    constrained to the first column's width. display: block makes it a box
+    the size of its container, and only then do overflow and
+    text-overflow have a boundary to clip against.
+  */
+  .who-sub, .who-note, .cell {
+    display: block;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   .cell-mid { text-align: center }
   .more { font-size: 0.82rem; white-space: nowrap }
 

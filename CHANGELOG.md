@@ -58,6 +58,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   actions are grouped to the right and drawn as quiet outline buttons. The invite form is its own
   card, a 2×2 field grid with Role and one Invite button below it.
 
+### Fixed
+
+- **A roster row no longer overlaps itself.** The second line under a name — `username · source`,
+  and the "also an account here" / "also a gateway sign-in" note — is a plain `<span>` with no
+  width of its own, so `overflow: hidden` had nothing to clip against and a long one painted
+  straight across "Last seen" and "Bots". It is a block now, sized to its column and clipped with
+  an ellipsis there; the shared-username note moved to its own third line for the same reason. Every
+  cell in a row aligns to the top, against the name, instead of to the centre of a name block that
+  is one, two or three lines deep. The three switch headers ("Read-only", "Push", "Administrator")
+  are the same size and weight as the rest of the header row now, not a second, smaller table glued
+  under it.
+
 ## [0.1.4] - 2026-09-22
 
 ### Added

@@ -125,7 +125,7 @@ function accountRow(user: OidcUser, index: number, input: IdentityPageInput): st
       <span class="who">
         ${avatar(user.displayName || user.username, user.sub)}
         <span class="who-text">
-          <span class="who-name"><strong>${escapeHtml(user.username)}</strong>${
+          <span class="who-name"><strong title="${escapeHtml(user.username)}">${escapeHtml(user.username)}</strong>${
             user.role === 'admin' ? pill(text.administrator, 'on') : ''
           }${user.invite ? pill(text.invited) : ''}${user.totpSecret ? pill(text.twoFactorOn) : ''}${
             user.disabled ? pill(text.disabled, 'bad') : ''

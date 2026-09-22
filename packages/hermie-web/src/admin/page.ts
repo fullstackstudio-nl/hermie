@@ -519,12 +519,15 @@ function personRow(view: PersonView, input: AdminPageInput): string {
     ? `<a href="/admin/oidc">${text.sourceIssuer}</a>`
     : `<span>${text.sourceGateway}</span>`
   /*
-    Three words on the line and the sentence behind them.
+    Three words on their own line and the sentence behind them.
 
     "same username as the account on this service" beside a name is wider than
-    the name, the pills and the column put together — it wrapped, and what it
-    wrapped over was the next column. It sits on the quiet second line, which is
-    one line and clips, with the whole sentence on the pointer and in the panel.
+    the name, the pills and the column put together, so it never sits on the
+    line with them. It does not share the `username · source` line either — two
+    clipped facts racing for one line is how the note used to lose, silently,
+    the moment either was already close to the column's width. Its own third
+    line clips on its own account, with the whole sentence on the pointer and
+    in the panel.
   */
   const shared =
     view.alsoKnownAs === 'issuer'
@@ -541,12 +544,11 @@ function personRow(view: PersonView, input: AdminPageInput): string {
         <span class="who">
           ${avatar(view.name, row.userId)}
           <span class="who-text">
-            <span class="who-name"><strong>${escapeHtml(view.name)}</strong>${
+            <span class="who-name"><strong title="${escapeHtml(view.name)}">${escapeHtml(view.name)}</strong>${
               view.admin ? pill(text.administrator, 'on') : ''
             }</span>
-            <span class="who-sub" title="${escapeHtml(row.userId)}">${escapeHtml(
-              view.username
-            )} · ${source}${shared ? ` · <span title="${escapeHtml(shared.long)}">${shared.short}</span>` : ''}</span>
+            <span class="who-sub" title="${escapeHtml(row.userId)}">${escapeHtml(view.username)} · ${source}</span>
+            ${shared ? `<span class="who-note" title="${escapeHtml(shared.long)}">${shared.short}</span>` : ''}
           </span>
         </span>
         ${whenCell(text.lastSeen, row.seenAt, input.strings)}
