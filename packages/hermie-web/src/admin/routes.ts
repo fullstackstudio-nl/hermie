@@ -21,6 +21,26 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { GatewayIdentity, IdentityReader } from '../identity'
 import { isSecureRequest } from '../proxy'
 import { PUSH_TYPES, type PushType } from '../push/registrations'
+import {
+  clearSecondFactor,
+  createAccount,
+  disableProvider,
+  enableProvider,
+  issuerOriginAcceptable,
+  type OidcAccountError,
+  type OidcEnableError,
+  removeAccount,
+  resetToInvite,
+  setAccountDisabled,
+  setAccountRole
+} from '../oidc/accounts'
+import { inviteUrl } from '../oidc/routes'
+import { runSelfTest, type SelfTestStep } from '../oidc/selftest'
+import type { OidcProvider } from '../oidc/provider'
+import type { OidcState } from '../oidc/state'
+import type { OidcRole } from '../oidc/users'
+import { ownOrigin } from '../setup'
+import { identityPage } from './identity'
 import { isAdminIdentity, localSecretMatches, withAdmin, withoutAdmin } from './access'
 import { adminForbiddenPage, adminPage, adminSignInPage, type AdminStatus } from './page'
 import {
@@ -63,6 +83,17 @@ export interface AdminRouterOptions {
   /** Told whenever the state changed, so the server can re-read what it caches. */
   onChanged: (state: AdminState) => void
   sessions?: AdminSessions
+  /** The built-in identity provider (ADR-0025 part 3) and what it needs to be set up. */
+  oidc: {
+    provider: OidcProvider
+    read: () => OidcState
+    /** `--allow-insecure-oidc`. See the option's note for what it is really for. */
+    allowInsecure: boolean
+    /** The gateway's `dashboard.public_url`, which decides the one redirect URI. */
+    gatewayPublicUrl: () => string
+    /** Injected by the tests so a self-test never leaves the process. */
+    fetchImpl?: typeof fetch
+  }
 }
 
 async function readForm(request: IncomingMessage): Promise<URLSearchParams> {
@@ -87,6 +118,17 @@ const checked = (form: URLSearchParams, name: string): boolean => form.get(name)
 
 export class AdminRouter {
   private readonly sessions: AdminSessions
+  /**
+   * The last invitation minted and the last self-test's steps, in memory.
+   *
+   * Held rather than rendered straight out of the POST so that every form on
+   * this page can keep redirecting: a rendered POST is reloaded by pressing
+   * F5, and a reloaded self-test would re-submit somebody's password. They are
+   * shown once and cleared on the next render, which is also what makes an
+   * invitation link genuinely a one-time sight.
+   */
+  private pendingInvite: { username: string; url: string } | null = null
+  private lastSelfTest: SelfTestStep[] = []
 
   constructor(private readonly options: AdminRouterOptions) {
     this.sessions = options.sessions ?? new AdminSessions()
@@ -121,6 +163,12 @@ export class AdminRouter {
     }
 
     if (method === 'GET') {
+      if (url.pathname === '/admin/oidc') {
+        this.renderIdentity(request, response, url.searchParams.get('notice') ?? '')
+
+        return
+      }
+
       await this.render(request, response, state, identity, url.searchParams.get('notice') ?? '')
 
       return
@@ -142,7 +190,7 @@ export class AdminRouter {
       return
     }
 
-    await this.apply(response, state, identity, url.pathname, form)
+    await this.apply(response, state, identity, url.pathname, form, ownOrigin(request))
   }
 
   /** Whether this request may see the page at all. */
@@ -244,6 +292,9 @@ export class AdminRouter {
         csrf: this.mintCsrf(response, isSecureRequest(request)),
         bots: this.options.bots(),
         viewer: identity?.userId ?? '',
+        identity: (({ enabled, issuer, users }) => ({ enabled, issuer, accounts: users.length }))(
+          this.options.oidc.read()
+        ),
         notice
       })
     )
@@ -254,7 +305,8 @@ export class AdminRouter {
     state: AdminState,
     identity: GatewayIdentity | null,
     pathname: string,
-    form: URLSearchParams
+    form: URLSearchParams,
+    origin: string
   ): Promise<void> {
     switch (pathname) {
       case '/admin/push': {
@@ -312,6 +364,39 @@ export class AdminRouter {
 
       case '/admin/user':
         await this.saveUser(response, state, identity, form)
+
+        return
+
+      case '/admin/oidc/enable':
+        await this.oidcEnable(response, form, origin)
+
+        return
+
+      case '/admin/oidc/settings':
+        await this.oidcSettings(response, form)
+
+        return
+
+      case '/admin/oidc/redirects':
+        await this.oidcRedirects(response, form)
+
+        return
+
+      case '/admin/oidc/rotate': {
+        const key = await this.options.oidc.provider.rotateKeys()
+
+        this.doneAt('/admin/oidc', `A new signing key is in use. Its kid is ${key.kid}.`)(response)
+
+        return
+      }
+
+      case '/admin/oidc/user':
+        await this.oidcUser(response, form, origin)
+
+        return
+
+      case '/admin/oidc/test':
+        await this.oidcTest(response, form)
 
         return
 
@@ -394,6 +479,257 @@ export class AdminRouter {
     }
 
     await this.save(response, next)
+  }
+
+  // ---- the built-in identity provider (ADR-0025 part 3) ----
+
+  /**
+   * Render `/admin/oidc`, consuming whatever was meant to be seen once.
+   *
+   * The invitation link and the self-test result are cleared as they are drawn,
+   * so a second visit shows neither. That is the whole reason they are held in
+   * memory rather than put in the redirect's query string, where they would sit
+   * in the browser's history and in any proxy log on the way.
+   */
+  private renderIdentity(request: IncomingMessage, response: ServerResponse, notice: string): void {
+    const state = this.options.oidc.read()
+    const origin = ownOrigin(request)
+    const invite = this.pendingInvite
+    const selfTest = this.lastSelfTest
+
+    this.pendingInvite = null
+    this.lastSelfTest = []
+
+    this.html(
+      response,
+      200,
+      identityPage({
+        state,
+        csrf: this.mintCsrf(response, isSecureRequest(request)),
+        origin,
+        gatewayPublicUrl: this.options.oidc.gatewayPublicUrl(),
+        allowInsecure: this.options.oidc.allowInsecure,
+        originAcceptable: issuerOriginAcceptable(origin),
+        invite,
+        selfTest,
+        notice
+      })
+    )
+  }
+
+  private async oidcEnable(response: ServerResponse, form: URLSearchParams, origin: string): Promise<void> {
+    if (form.get('enabled') !== '1') {
+      await this.options.oidc.provider.update(disableProvider)
+      this.doneAt('/admin/oidc', 'The identity provider is off. Accounts and keys were kept.')(response)
+
+      return
+    }
+
+    try {
+      const next = await this.options.oidc.provider.update(state =>
+        enableProvider(state, {
+          // The issuer is the origin the OPERATOR reached this page on, not one
+          // derived from a flag: it is the address a browser can actually come
+          // back to, and every token will carry it as `iss` for ever after.
+          origin,
+          gatewayPublicUrl: this.options.oidc.gatewayPublicUrl(),
+          allowInsecure: this.options.oidc.allowInsecure
+        })
+      )
+
+      this.doneAt(
+        '/admin/oidc',
+        `The identity provider is on at ${next.issuer}. It changed nothing on the gateway — the snippet below is what to put there.`
+      )(response)
+    } catch (error) {
+      this.doneAt('/admin/oidc', (error as OidcEnableError).message)(response)
+    }
+  }
+
+  private async oidcSettings(response: ServerResponse, form: URLSearchParams): Promise<void> {
+    const number = (name: string, floor: number, fallback: number): number => {
+      const value = Math.floor(Number(form.get(name) ?? fallback))
+
+      return Number.isFinite(value) && value >= floor ? value : fallback
+    }
+
+    await this.options.oidc.provider.update(state => ({
+      ...state,
+      settings: {
+        ...state.settings,
+        requireTotp: checked(form, 'requireTotp'),
+        idTokenTtlSeconds: number('idTokenTtlSeconds', 60, state.settings.idTokenTtlSeconds),
+        refreshTokenTtlSeconds: number('refreshTokenTtlSeconds', 300, state.settings.refreshTokenTtlSeconds)
+      }
+    }))
+
+    this.doneAt('/admin/oidc', 'Saved.')(response)
+  }
+
+  private async oidcRedirects(response: ServerResponse, form: URLSearchParams): Promise<void> {
+    const uris = (form.get('redirectUris') ?? '')
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(Boolean)
+
+    if (!uris.length) {
+      // An empty list is a provider nothing can sign in through, which is a
+      // state an operator reaches by clearing a box rather than by choosing.
+      this.doneAt('/admin/oidc', 'A redirect URI is required; nothing was changed.')(response)
+
+      return
+    }
+
+    await this.options.oidc.provider.update(state => ({
+      ...state,
+      client: { ...state.client, redirectUris: uris }
+    }))
+
+    this.doneAt('/admin/oidc', 'Saved.')(response)
+  }
+
+  /** Create, invite, disable, re-enable, re-role, clear a second factor, remove. */
+  private async oidcUser(response: ServerResponse, form: URLSearchParams, origin: string): Promise<void> {
+    const action = form.get('do') ?? ''
+    const sub = (form.get('sub') ?? '').trim()
+
+    try {
+      if (action === 'create') {
+        let minted = ''
+        let username = ''
+
+        await this.options.oidc.provider.update(state => {
+          const created = createAccount(state, {
+            username: form.get('username') ?? '',
+            email: form.get('email') ?? '',
+            displayName: form.get('displayName') ?? '',
+            role: form.get('role') === 'admin' ? 'admin' : 'user'
+          })
+
+          minted = created.inviteToken
+          username = created.user.username
+
+          return created.state
+        })
+
+        this.pendingInvite = { username, url: inviteUrl(origin, minted) }
+        this.doneAt('/admin/oidc', `${username} was created. Send them the invitation link below.`)(response)
+
+        return
+      }
+
+      if (!sub) {
+        this.doneAt('/admin/oidc', 'Nothing was named.')(response)
+
+        return
+      }
+
+      switch (action) {
+        case 'invite': {
+          let minted = ''
+
+          const next = await this.options.oidc.provider.update(state => {
+            const reset = resetToInvite(state, sub)
+            minted = reset.inviteToken
+
+            return reset.state
+          })
+
+          // Every session that was opened with the old password ends with it.
+          this.options.oidc.provider.endSessionsFor(sub)
+          this.pendingInvite = {
+            username: next.users.find(user => user.sub === sub)?.username ?? sub,
+            url: inviteUrl(origin, minted)
+          }
+          this.doneAt('/admin/oidc', 'Their password was cleared. Send them the link below.')(response)
+
+          return
+        }
+
+        case 'disable':
+        case 'enable': {
+          const off = action === 'disable'
+
+          await this.options.oidc.provider.update(state => setAccountDisabled(state, sub, off))
+
+          if (off) {
+            this.options.oidc.provider.endSessionsFor(sub)
+          }
+
+          this.doneAt('/admin/oidc', off ? 'That account is disabled.' : 'That account is active again.')(response)
+
+          return
+        }
+
+        case 'role':
+          await this.options.oidc.provider.update(state =>
+            setAccountRole(state, sub, (form.get('role') === 'admin' ? 'admin' : 'user') as OidcRole)
+          )
+          this.doneAt('/admin/oidc', 'Saved.')(response)
+
+          return
+
+        case 'clear-totp':
+          await this.options.oidc.provider.update(state => clearSecondFactor(state, sub))
+          this.doneAt(
+            '/admin/oidc',
+            'Their second factor is off. They can enrol a new one at their next sign-in.'
+          )(response)
+
+          return
+
+        case 'remove':
+          await this.options.oidc.provider.update(state => removeAccount(state, sub))
+          this.options.oidc.provider.endSessionsFor(sub)
+          this.doneAt('/admin/oidc', 'That account is gone, with everything it held.')(response)
+
+          return
+
+        default:
+          this.doneAt('/admin/oidc', 'That is not something this page does.')(response)
+      }
+    } catch (error) {
+      this.doneAt('/admin/oidc', (error as OidcAccountError).message)(response)
+    }
+  }
+
+  /**
+   * Run the round trip and hold the result for the render after the redirect.
+   *
+   * The credentials live in this call and nowhere else: they are not written to
+   * the state, not put in the redirect, and not logged.
+   */
+  private async oidcTest(response: ServerResponse, form: URLSearchParams): Promise<void> {
+    const state = this.options.oidc.read()
+
+    if (!state.enabled) {
+      this.doneAt('/admin/oidc', 'The identity provider is off, so there is nothing to test.')(response)
+
+      return
+    }
+
+    this.lastSelfTest = await runSelfTest({
+      issuer: state.issuer,
+      clientId: state.client.clientId,
+      redirectUri: state.client.redirectUris[0] ?? '',
+      username: form.get('username') ?? '',
+      password: form.get('password') ?? '',
+      totp: form.get('totp') ?? '',
+      ...(this.options.oidc.fetchImpl ? { fetchImpl: this.options.oidc.fetchImpl } : {})
+    }).catch((error: unknown) => [{ name: 'Test sign-in', ok: false, detail: String(error) }])
+
+    this.doneAt('/admin/oidc', 'The test sign-in ran; each step is below.')(response)
+  }
+
+  /** `done`, but back to a page that is not `/admin`. */
+  private doneAt(path: string, notice: string): (response: ServerResponse) => void {
+    return response => {
+      response.writeHead(303, {
+        location: `${path}?notice=${encodeURIComponent(notice)}`,
+        'cache-control': 'no-store'
+      })
+      response.end()
+    }
   }
 
   private async save(response: ServerResponse, state: AdminState, notice = 'Saved.'): Promise<void> {

@@ -244,6 +244,17 @@ export class OidcProvider {
   }
 
   /**
+   * The accounts, read-only.
+   *
+   * Exposed so `/admin` and the tests have one way in rather than two: this is
+   * the same snapshot every other method here reads, so nothing can observe the
+   * state between a write and its flush.
+   */
+  get users(): readonly OidcUser[] {
+    return this.state.users
+  }
+
+  /**
    * The discovery document, at `<issuer>/.well-known/openid-configuration`.
    *
    * Three fields are load-bearing rather than decorative, because upstream

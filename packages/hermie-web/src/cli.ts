@@ -47,6 +47,14 @@ const HELP = [
   '                       it open takes it away from you. Off by default; open questions are',
   '                       read from the resume snapshot and an approval.pending poll instead.',
   '',
+  'Built-in identity provider (ADR-0025 — off unless /admin turns it on):',
+  '',
+  '  --allow-insecure-oidc',
+  '                       let it be enabled on an origin that is not https. The gateway',
+  '                       REFUSES an issuer that is not https — loopback http it allows by',
+  '                       name, so that needs no flag — which makes this useful only for',
+  '                       reproducing that refusal deliberately. Not for a deployment.',
+  '',
   '  hermie-web login [--provider <name>] [--redirect-port <n>]',
   '                       sign in to an OIDC-gated gateway once, for --push. Prints the',
   '                       authorisation URL and listens on a loopback redirect port.',
@@ -74,6 +82,7 @@ async function main(): Promise<void> {
       'cache-max-mb': { type: 'string' },
       'vapid-subject': { type: 'string' },
       'push-server-requests': { type: 'boolean', default: false },
+      'allow-insecure-oidc': { type: 'boolean', default: false },
       provider: { type: 'string' },
       'redirect-port': { type: 'string' },
       help: { type: 'boolean', default: false }
@@ -101,6 +110,7 @@ async function main(): Promise<void> {
     vapidSubject: values['vapid-subject'],
     ...(values.push ? { push: true } : {}),
     ...(values['push-server-requests'] ? { pushServerRequests: true } : {}),
+    ...(values['allow-insecure-oidc'] ? { allowInsecureOidc: true } : {}),
     ...(values['no-self-update'] ? { selfUpdate: false } : {})
   })
 
@@ -144,7 +154,8 @@ async function main(): Promise<void> {
     stateDir: options.stateDir,
     cacheMaxMb: options.cacheMaxMb,
     vapidSubject: options.vapidSubject,
-    pushServerRequests: options.pushServerRequests
+    pushServerRequests: options.pushServerRequests,
+    allowInsecureOidc: options.allowInsecureOidc
   })
 
   console.warn(`hermie-web ${options.version} on http://${describeHost(options.host)}:${server.port}`)

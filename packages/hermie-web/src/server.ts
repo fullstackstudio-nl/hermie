@@ -332,6 +332,15 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
 
       return `Updating to ${release.version}; this service is restarting.`
     },
+    oidc: {
+      provider: oidcProvider,
+      read: () => oidc,
+      allowInsecure: options.allowInsecureOidc,
+      // The gateway's own public URL, which is the only thing the one
+      // registered redirect URI can be built from (upstream's `_redirect_uri`).
+      gatewayPublicUrl: () => target.publicUrl,
+      ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {})
+    },
     onChanged: next => {
       admin = next
       // Retention is a setting rather than a flag, so it is applied when it
