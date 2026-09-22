@@ -16,13 +16,17 @@
  * connection. The app still talks to its own origin — the one address that
  * cannot be wrong — and a sign-in step with no `authKinds` probes the gateway
  * itself, exactly as this build did before the field existed.
+ *
+ * Everything shared with the native half comes from `web-config.shared.ts` and
+ * never from `./web-config`, which from inside this file is this file. See that
+ * module for what that spelling cost.
  */
 import type { AuthProvider } from '@hermie/gateway-client'
 
-import type { HermieWebBranding, HermieWebConfig, HermieWebFlags, HermieWebService } from './web-config'
+import type { HermieWebBranding, HermieWebConfig, HermieWebFlags, HermieWebService } from './web-config.shared'
 
-export type { HermieWebBranding, HermieWebConfig, HermieWebFlags, HermieWebService } from './web-config'
-export { probeFromWebConfig } from './web-config'
+export type { HermieWebBranding, HermieWebConfig, HermieWebFlags, HermieWebService } from './web-config.shared'
+export { probeFromWebConfig } from './web-config.shared'
 
 export const WEB_GATEWAY_BASE_URL: string | null = typeof window === 'undefined' ? null : window.location.origin
 

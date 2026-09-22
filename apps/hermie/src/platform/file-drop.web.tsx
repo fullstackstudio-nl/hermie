@@ -32,10 +32,10 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { View } from 'react-native'
 
-import type { DroppedFile, NativeDropViewProps } from './file-drop'
+import type { DroppedFile, NativeDropViewProps } from './file-drop.shared'
 
-export type { DroppedFile, NativeDropViewProps } from './file-drop'
-export { normaliseDroppedFiles } from './file-drop'
+export type { DroppedFile, NativeDropViewProps } from './file-drop.shared'
+export { normaliseDroppedFiles } from './file-drop.shared'
 
 /** A browser can always take a drop; there is no module to probe for. */
 export const HAS_NATIVE_FILE_DROP = typeof document !== 'undefined'

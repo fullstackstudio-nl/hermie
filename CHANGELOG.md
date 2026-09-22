@@ -28,6 +28,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Signing in from a browser no longer ends on "Maximum call stack size exceeded".** The
+  browser build's sign-in step failed on every visit — the first one, and the one straight
+  after **Forget gateway**, which is where it was reported from. The step could not read
+  what the server had told it about the gateway, so it also offered the wrong door: the
+  in-app password form, the one a password manager fills, never appeared at all, and the
+  card above it claimed the gateway authenticates with a session token.
+
+  The cause was one line of module resolution. A bundler picks `x.web.ts` over `x.ts` for
+  the browser — and it picks the same way for a relative import written *inside*
+  `x.web.ts`, so `./x` read from there is that file itself. The web half re-exported a
+  value from what it believed was its native twin and was in fact re-exporting it from
+  itself, which compiles to a getter whose body reads the same getter: the name overflowed
+  the stack before it could be called. TypeScript, ESLint and every native build resolve
+  `./x` to the other file and saw nothing wrong. What both halves share now lives in a
+  third module with no platform twin, and a test refuses the spelling everywhere in the
+  app rather than in the two places it had reached — the second being the file-drop seam,
+  where the first file dropped on a browser window would have gone the same way.
+
 - **The chat list no longer shows a raw `[IMPORTANT: …` or `[System: …` line.** The gateway's
   preview for a chat is its newest user or assistant row squashed onto one line and cut at eighty
   characters, so an injected wrapper reached the list without its newlines and, often, without its

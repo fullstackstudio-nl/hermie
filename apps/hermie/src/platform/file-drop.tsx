@@ -18,8 +18,12 @@
  * which machine this is.
  */
 import { requireNativeView, requireOptionalNativeModule } from 'expo'
-import { type ReactNode } from 'react'
-import type { StyleProp, ViewStyle } from 'react-native'
+import type { ComponentType } from 'react'
+
+import type { NativeDropViewProps } from './file-drop.shared'
+
+export type { DroppedFile, NativeDropViewProps } from './file-drop.shared'
+export { normaliseDroppedFiles } from './file-drop.shared'
 
 type DropProbe = { supportsFileDrop?: () => boolean }
 
@@ -35,37 +39,9 @@ function probe(): boolean {
 /** Whether this build can accept a dropped file. */
 export const HAS_NATIVE_FILE_DROP = probe()
 
-/** One file as the native side hands it over. Same four fields the picker produces. */
-export interface DroppedFile {
-  uri: string
-  name: string
-  size: number
-  mimeType: string
-  /**
-   * The `FormData` part, where the platform has one of its own.
-   *
-   * Absent on the native side, which streams from the URI. A browser drop
-   * carries the `File` here for the same reason the browser PICKER does: a
-   * browser's `FormData` streams a `File` and rejects React Native's
-   * `{uri, name, type}` blob, so an upload rebuilt from the object URL alone
-   * would fail at the last step. Mirrors `PickedFile.body`.
-   */
-  body?: unknown
-}
+let cached: ComponentType<NativeDropViewProps> | null = null
 
-export interface NativeDropViewProps {
-  enabled?: boolean
-  onDrop?: (event: { nativeEvent: { files?: unknown } }) => void
-  onDropEnter?: () => void
-  onDropExit?: () => void
-  style?: StyleProp<ViewStyle>
-  children?: ReactNode
-  testID?: string
-}
-
-let cached: React.ComponentType<NativeDropViewProps> | null = null
-
-export function nativeDropView(): React.ComponentType<NativeDropViewProps> | null {
+export function nativeDropView(): ComponentType<NativeDropViewProps> | null {
   if (!HAS_NATIVE_FILE_DROP) {
     return null
   }
@@ -81,54 +57,4 @@ export function nativeDropView(): React.ComponentType<NativeDropViewProps> | nul
   }
 
   return cached
-}
-
-const FALLBACK_MIME_TYPE = 'application/octet-stream'
-
-/**
- * Read a drop payload back, defensively.
- *
- * The bridge carries `[[String: Any]]`, which is to say: anything. A drop is a
- * gesture the reader made with a file they care about, so the failure mode that
- * matters is not a wrong field — it is a payload shape that throws while the
- * chat is open. Every item without a URI is dropped, every other field falls
- * back, and a payload that is not a list at all reads as no files.
- *
- * Exported and pure so the mapping can be stated in a test, which is the only
- * half of this module that can be checked without a Mac and a Finder.
- */
-export function normaliseDroppedFiles(payload: unknown): DroppedFile[] {
-  if (!Array.isArray(payload)) {
-    return []
-  }
-
-  const files: DroppedFile[] = []
-
-  for (const raw of payload) {
-    if (!raw || typeof raw !== 'object') {
-      continue
-    }
-
-    const item = raw as Partial<Record<keyof DroppedFile, unknown>>
-    const uri = typeof item.uri === 'string' ? item.uri : ''
-
-    if (!uri) {
-      continue
-    }
-
-    const name = typeof item.name === 'string' && item.name ? item.name : (uri.split('/').pop() ?? 'attachment')
-
-    files.push({
-      mimeType: typeof item.mimeType === 'string' && item.mimeType ? item.mimeType : FALLBACK_MIME_TYPE,
-      name: decodeURIComponent(name),
-      size: typeof item.size === 'number' && Number.isFinite(item.size) && item.size > 0 ? item.size : 0,
-      uri,
-      // Carried through rather than rebuilt: the browser drop puts the `File`
-      // here and only that object can be streamed by a browser's `FormData`.
-      // The native side sends nothing, and the key stays absent.
-      ...(item.body === undefined || item.body === null ? {} : { body: item.body })
-    })
-  }
-
-  return files
 }
