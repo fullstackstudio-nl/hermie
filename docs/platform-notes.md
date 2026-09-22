@@ -10260,3 +10260,106 @@ notification badge._
   open at the moment a teammate writes can, for that window, count the row. The
   jump-pill test seeds the classified item rather than papering over this; the
   fix belongs in the reducer, which another round owns.
+
+## Round R25b: three rejections, and the one that was a seam (2026-09-22)
+
+Three items came back from a real test of the app on a phone. Two of them were features that had
+never been written — a Mermaid sequence diagram and a pie chart are listings in the subset ADR-0020
+chose, and that was a decision rather than a bug. The third was a bug, and it was not in either of
+the two files that own it.
+
+### "Ask a bot" answered with the previous reply
+
+`features/intents/await-reply.ts` said, in a comment at the top, that the watch starts BEFORE the
+prompt is sent and that this is load bearing. It was, and it was also the fault. Both of the races
+that comment names are real, and neither of them is what happens on the launch a Shortcut actually
+produces.
+
+A Shortcut cold-starts the app. `IntentRunner.runOne` started the watch, and only then opened the
+chat — and opening a chat is the thing that FILLS the store: `paintFromCache` writes the cached
+thread, `session.resume` binds it, the history read lays in the rows, `applySnapshot` adds the
+in-flight tail. The marker was therefore taken on an empty transcript, and the first of those writes
+handed the watch a last-message id that differed from "nothing" with no turn running. It settled —
+on the previous conversation's answer, before the prompt had been sent at all.
+
+The second half is a reconnect. `session.resume` re-lays the tail, so item ids change with nothing
+having been said, and "a different id from the marker" cannot tell a renumbering from an answer.
+
+What changed, and why each half matters:
+
+- **the order is open, then watch, then send.** The baseline is taken once hydration has finished.
+  The watch is still created before the send, because a fast gateway can finish the turn before
+  `send` returns and a watch that only reacted to later changes would sit out the whole budget for a
+  reply that had already landed;
+- **nothing settles until the prompt has been accepted.** `ReplyWatch.prompted` is the seam, and a
+  store change before it — a late resume, a reconnect, a teammate's turn — cannot produce an answer,
+  because there is no question yet;
+- **a reply has to stand AFTER the prompt**, by position in `order`. `ChatController.send` now
+  answers with the id of the item it painted, which is the fixed point to measure against; a prompt
+  parked behind a running turn has no item yet and is placed by what it says instead, which is the
+  same pairing the reconciler uses for an unacknowledged turn;
+- **the wait gets what is LEFT of the forty-five seconds.** Both sides spend one number and they
+  start at different moments: the Swift side when it writes the request, this side only after a
+  launch, a dial and a hydration.
+
+Where neither placement is possible the watch keeps waiting and the budget answers "still working —
+use Send to". That direction is deliberate: a sentence somebody can act on beats a Shortcut that
+quietly returns the wrong text.
+
+### What proves it, since four kinds of test did not
+
+`intent-runner.test.ts` proved the runner answers every request and `intent-await-reply.test.ts`
+proved the watch reads a transcript correctly. Both passed throughout, because the fault was in the
+SEAM between them. `__tests__/intent-cold-start.test.ts` is the one that catches it: the real runner
+and the real watch over a transcript that behaves like the app's — opening hydrates it, sending
+paints a bubble, the gateway answers — driven through a cold start, a warm start, a gateway faster
+than the send, and a reconnect that re-lays the tail. Five of its six cases fail against the old
+ordering, with the previous reply as the answer, which is exactly what was reported.
+
+### The diagrams and the mathematics
+
+`sequenceDiagram` and `pie` are drawn now, each with its own parser, layout and renderer over one
+shared canvas, and ADR-0020 carries the widened subset and what it still refuses. The mathematics
+had two genuine bugs behind the report rather than one gap:
+
+- **`\(…\)` and `\[…\]` were not tokens at all.** Only the dollar spellings were, so the markdown
+  lexer read the backslashes as escapes and printed the mathematics as prose with its delimiters
+  stripped. That is the spelling most models reach for.
+- **`\left( … \right)` never parsed**, although the code has a `fenced()` for it: `row()` only broke
+  on a closing brace, so it fed the `\right` to `atom()`, which returned `null` and killed the whole
+  expression. Every formula with a grown delimiter in it — which is most of the ones worth
+  displaying — fell back to its source.
+
+Environments (`pmatrix` and its family, `cases`, `aligned`) are a new `grid` node, and a grid is the
+one construct that refuses to be set inline: a matrix written `(a b; c d)` inside a sentence is a
+notation nobody agreed to, so an inline expression containing one still falls back to its source.
+
+### Verified, and how
+
+- **Full gates on this machine:** `npm run typecheck`, `npx eslint .` (no warnings),
+  `npx prettier --check .`, `npx vitest run` (84 files, 1628 tests), `npm run test:app`
+  (236 suites, 3083 tests) and `npm run web:build`. Green.
+- **The diagrams and the formulas were looked at**, on an iPhone 17 Pro simulator over a Debug
+  build, each fixture opened by name with `--hermieOpen gallery:<id>` in both schemes. The
+  sequence diagram draws its lifelines, activation bars, dashed replies and `loop` / `alt` frames;
+  the pie is a ring with a legend carrying every label, value and share; the matrix, the cases and
+  the aligned block draw with delimiters that grow with their contents.
+- **The web build renders the same pictures**, which had been reasoned about rather than seen: the
+  browser bundle in front of the fake gateway, with a scripted reply carrying a `sequenceDiagram`, a
+  `pie` and a `$$\begin{pmatrix}…$$` alongside an inline `\(E = mc^2\)`. All four drew as they do on
+  the phone. That matters because `react-native-svg` on the web is a different implementation of the
+  same components, and a native-only prop compiles and lints perfectly.
+
+### Not verified
+
+- **Nothing about Shortcuts was run on a device.** The reply watch has tests and no phone: no Siri
+  phrase was spoken, no Shortcut was run, and the cold start the fix is about was reproduced in a
+  test rather than on a handset. That is the same gap `modules/hermie-intents/README.md` already
+  records for the whole feature.
+- **No Swift or Kotlin was compiled this round** and nothing native was exercised. The share
+  extension's own steps are written out above under "The share sheet now delivers by itself"; the
+  Swift added there was syntax-checked with `swiftc -parse` and nothing further.
+- **Android was not looked at at all**, in any of the three items.
+- **The gallery fixtures are reachable by name only.** They are rendered by `DevGallery` itself
+  rather than added to `GalleryScreen`'s sections, because that file belongs to another round — so
+  they do not appear in Settings → Gallery. The fixture file says so at the top.
