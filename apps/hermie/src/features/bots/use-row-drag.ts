@@ -25,9 +25,14 @@
  * gets the menu and holding then moving gets the drag — the same split as the Files
  * app. Nothing arbitrates that explicitly; the two gestures are simply distinct.
  *
- * On Android a long press still opens the fallback sheet, because that sheet is the
- * only menu there and it has Move up / Move down in it. So `armEnabled` is off
- * there, and the drag is reached through the edit-mode handle instead.
+ * Arming is unconditional, on every platform, and that is the round's change. It
+ * used to be gated on there being a NATIVE menu, on the argument that a long
+ * press elsewhere already belonged to the fallback sheet — which left the phone's
+ * own gesture inert: holding a row did nothing until the list had been put into
+ * an edit mode first. Where there is no native menu the caller now DEFERS its
+ * sheet instead, and `onDragStart` is what tells it the hold became a drag. So
+ * the split is the same everywhere: hold still for the menu, hold and move for
+ * the drag.
  *
  * ## It drags a ROW, not a bot
  *
@@ -157,8 +162,15 @@ export interface RowDragOptions {
    * line somewhere the row then refused to go.
    */
   clampSlot?: (rowKey: string, slot: number) => number
-  /** Long-press arming; off where a long press already means something else. */
-  armEnabled: boolean
+  /**
+   * The hold became a drag.
+   *
+   * Reported on the grant — the first move past the slop — rather than on the
+   * arm, because the two are different answers and only this one is final: an
+   * armed row that never moves is a row whose long press still means "open the
+   * menu". The caller uses it to drop the menu it was holding for this press.
+   */
+  onDragStart?: (rowKey: string) => void
   /** Every duration collapses to zero. Read from the theme by the caller. */
   reduceMotion: boolean
 }
@@ -197,8 +209,6 @@ export interface RowDrag {
   disarm: () => void
   /** Pan handlers for a row wrapper: claims the gesture once armed. */
   rowHandlers: (rowKey: string) => PanResponderInstance['panHandlers']
-  /** Pan handlers for an edit-mode handle: claims immediately, no long press. */
-  handleHandlers: (rowKey: string) => PanResponderInstance['panHandlers']
   /** Where the list is scrolled and how tall it is, for the edge bands. */
   onListLayout: (height: number) => void
   onListScroll: (offset: number) => void
@@ -208,12 +218,12 @@ export interface RowDrag {
 
 export function useRowDrag({
   anchors,
-  armEnabled,
   clampSlot,
   fallbackTarget,
   measureList,
   onAutoScroll,
   onCommit,
+  onDragStart,
   reduceMotion
 }: RowDragOptions): RowDrag {
   const [draggingKey, setDraggingKey] = useState<string | null>(null)
@@ -224,7 +234,6 @@ export function useRowDrag({
   const offsets = useRef<Record<string, Animated.Value>>({})
   const boxes = useRef<Record<string, RowBox>>({})
   const rowResponders = useRef<Record<string, PanResponderInstance>>({})
-  const handleResponders = useRef<Record<string, PanResponderInstance>>({})
 
   // Everything the responders read has to be a ref: a PanResponder is built once
   // per row and would otherwise close over the first render's values for good.
@@ -245,9 +254,27 @@ export function useRowDrag({
   const trackAgain = useRef<(moveY: number, dy: number) => void>(() => undefined)
   const edgeTimer = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const latest = useRef({ anchors, clampSlot, fallbackTarget, measureList, onAutoScroll, onCommit, reduceMotion })
+  const latest = useRef({
+    anchors,
+    clampSlot,
+    fallbackTarget,
+    measureList,
+    onAutoScroll,
+    onCommit,
+    onDragStart,
+    reduceMotion
+  })
 
-  latest.current = { anchors, clampSlot, fallbackTarget, measureList, onAutoScroll, onCommit, reduceMotion }
+  latest.current = {
+    anchors,
+    clampSlot,
+    fallbackTarget,
+    measureList,
+    onAutoScroll,
+    onCommit,
+    onDragStart,
+    reduceMotion
+  }
 
   /**
    * One value per anchor, created on demand and kept for the life of the screen.
@@ -383,6 +410,10 @@ export function useRowDrag({
       lastMove.current = null
       translateY.setValue(0)
       setDraggingKey(rowKey)
+      // Before the lift animates rather than after it: what the caller does with
+      // this is take a menu off the screen, and a menu dismissed a spring later
+      // has covered the row for the whole of the lift.
+      latest.current.onDragStart?.(rowKey)
       settle(lift, 1, latest.current.reduceMotion).start()
     },
     [lift, translateY]
@@ -469,27 +500,17 @@ export function useRowDrag({
   trackAgain.current = track
 
   const buildResponder = useCallback(
-    (rowKey: string, immediate: boolean): PanResponderInstance => {
+    (rowKey: string): PanResponderInstance => {
       return PanResponder.create({
-        // A handle claims the touch outright; a row waits to be armed, so an
-        // ordinary tap still reaches the `Pressable` underneath it.
-        onStartShouldSetPanResponder: () => immediate,
-        onStartShouldSetPanResponderCapture: () => immediate,
-        onMoveShouldSetPanResponder: () => immediate || armed.current === rowKey,
+        // A row waits to be armed, so an ordinary tap still reaches the
+        // `Pressable` underneath it and an unarmed drag still scrolls the list.
+        onStartShouldSetPanResponder: () => false,
+        onStartShouldSetPanResponderCapture: () => false,
+        onMoveShouldSetPanResponder: () => armed.current === rowKey,
         onMoveShouldSetPanResponderCapture: (_event, gesture) =>
           armed.current === rowKey && Math.abs(gesture.dy) > MOVE_SLOP,
 
-        onPanResponderGrant: () => {
-          // A handle claims the touch outright, so nothing armed it and nothing has
-          // asked where the list is. Ask now: the reading lands before the first
-          // move, and a stale one is the difference between dropping where the
-          // finger is and dropping a header's height away from it.
-          if (immediate) {
-            latest.current.measureList()
-          }
-
-          begin(rowKey)
-        },
+        onPanResponderGrant: () => begin(rowKey),
 
         onPanResponderMove: (_event, gesture) => {
           if (active.current !== rowKey) {
@@ -519,26 +540,9 @@ export function useRowDrag({
         return existing.panHandlers
       }
 
-      const responder = buildResponder(rowKey, false)
+      const responder = buildResponder(rowKey)
 
       rowResponders.current[rowKey] = responder
-
-      return responder.panHandlers
-    },
-    [buildResponder]
-  )
-
-  const handleHandlers = useCallback(
-    (rowKey: string) => {
-      const existing = handleResponders.current[rowKey]
-
-      if (existing) {
-        return existing.panHandlers
-      }
-
-      const responder = buildResponder(rowKey, true)
-
-      handleResponders.current[rowKey] = responder
 
       return responder.panHandlers
     },
@@ -549,23 +553,19 @@ export function useRowDrag({
     boxes.current[key] = { height: layout.height, y: layout.y }
   }, [])
 
-  const arm = useCallback(
-    (rowKey: string) => {
-      if (!armEnabled) {
-        return
-      }
-
-      armed.current = rowKey
-      // Where the list is can have changed since the last layout — a sidebar shown,
-      // a keyboard up, a window resized — and the answer is needed before the first
-      // move rather than after it.
-      latest.current.measureList()
-      // The only haptic in the list, and it is the one the gesture needs: a lift
-      // that says nothing is a lift nobody trusts they have started.
-      haptic('choice')
-    },
-    [armEnabled]
-  )
+  const arm = useCallback((rowKey: string) => {
+    armed.current = rowKey
+    // Where the list is can have changed since the last layout — a sidebar shown,
+    // a keyboard up, a window resized — and the answer is needed before the first
+    // move rather than after it.
+    latest.current.measureList()
+    // The haptic the gesture needs, at the moment the row becomes movable: a lift
+    // that says nothing is a lift nobody trusts they have started. It is the tap
+    // the Home Screen gives when an icon starts to wobble, and it belongs to the
+    // HOLD rather than to the first move for the same reason — the hold is when
+    // the reader has to be told they may now move.
+    haptic('choice')
+  }, [])
 
   const disarm = useCallback(() => {
     if (!active.current) {
@@ -579,7 +579,6 @@ export function useRowDrag({
       disarm,
       draggingKey,
       dropKey,
-      handleHandlers,
       lift,
       liftedKey: draggingKey,
       measure,
@@ -596,6 +595,6 @@ export function useRowDrag({
       rowHandlers,
       translateY
     }),
-    [arm, disarm, draggingKey, dropKey, handleHandlers, lift, measure, offsetFor, rowHandlers, translateY]
+    [arm, disarm, draggingKey, dropKey, lift, measure, offsetFor, rowHandlers, translateY]
   )
 }

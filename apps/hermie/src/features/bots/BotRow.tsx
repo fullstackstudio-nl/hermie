@@ -9,20 +9,19 @@
  * chat header cannot disagree about what a bot is doing.
  */
 import { memo, useMemo, useState } from 'react'
-import { Pressable, View, type PanResponderInstance } from 'react-native'
+import { Pressable, View } from 'react-native'
 
 import { unreadBadgeLabel } from '@hermie/transcript'
 
 import { Avatar, formatListTime } from '../../chat-ui'
 import { strings } from '../../i18n/strings'
 import { useFollowsLocale } from '../../i18n/use-locale'
-import { ContextMenuHost, HAS_NATIVE_CONTEXT_MENU } from '../../platform/context-menu'
+import { ContextMenuHost } from '../../platform/context-menu'
 import { secondaryClick } from '../../platform/secondary-click'
 import { botNames, useNameOrder } from '../../store/bot-names'
 import type { Bot } from '../../store/bots'
 import { useBotLabel } from '../../store/chat-layout'
 import { usePendingShareCount } from '../../store/share'
-import { DragGrip } from '../../ui/DragGrip'
 import { GlassSurface } from '../../ui/glass'
 import { Icon, ICON_SIZE, type IconName } from '../../ui/Icon'
 import { PresenceBead } from '../../ui/PresenceBead'
@@ -35,11 +34,22 @@ import { useRowPreview } from './row-preview'
 
 export type BotRowProps = {
   bot: Bot
+  /**
+   * This row's key in the arrangement — `bot:<name>`, or `archived:<name>` in
+   * the drawer.
+   *
+   * Handed down rather than rebuilt here, and that is a fix rather than tidying.
+   * The long press used to arm the drag with the bot's NAME while the pan
+   * responder was keyed by the row key, so the two never matched and the
+   * responder could not claim the gesture: holding a row did nothing at all, and
+   * the only way to move one was the edit-mode grip. The list already knows this
+   * key — it is what it keyed the cell by — so it is the list that says it.
+   */
+  rowKey: string
   accent: AccentName
   archived: boolean
   avatarUri?: string | undefined
   compact: boolean
-  editing: boolean
   presence: Presence
   selected: boolean
   unread: boolean
@@ -75,15 +85,21 @@ export type BotRowProps = {
   onPress: (bot: Bot) => void
   /** A selection from either menu, by the id `rowMenuItems` gave it. */
   onMenuSelect: (botName: string, id: string) => void
-  /** The fallback sheet's opener. Used where there is no native menu. */
+  /**
+   * The fallback sheet's opener, for a secondary click.
+   *
+   * A long press no longer calls it: the sheet is opened by the list when a
+   * press ENDS without having become a drag, so that one gesture can still mean
+   * both things. A right click is not a press and cannot become a drag, so it
+   * opens the sheet outright.
+   */
   onOpenMenu: (botName: string) => void
-  /** Edit mode only: one position up or down, across dividers included. */
+  /** One position up or down, for the readers a drag does not serve. */
   onMove?: (botName: string, offset: number) => void
   /** Long press armed the drag; the wrapper's pan responder claims it on the first move. */
-  onArm?: (botName: string) => void
+  onArm?: (rowKey: string) => void
+  /** The press ended. Where a drag never started, this is what opens the menu. */
   onDisarm?: () => void
-  /** Edit mode's grab handle, which drags with no long press first. */
-  handleHandlers?: PanResponderInstance['panHandlers']
 }
 
 function stampOf(presence: Presence, bot: Bot): string {
@@ -98,8 +114,6 @@ export const BotRow = memo(function BotRow({
   avatarUri,
   bot,
   compact,
-  editing,
-  handleHandlers,
   menuFolders,
   mutedUntil,
   pinned = false,
@@ -110,6 +124,7 @@ export const BotRow = memo(function BotRow({
   onOpenMenu,
   onPress,
   presence,
+  rowKey,
   selected,
   unread,
   unreadCount
@@ -246,27 +261,6 @@ export const BotRow = memo(function BotRow({
         paddingVertical: theme.space.sm
       }}
     >
-      {editing ? (
-        // The grab handle drags immediately: in edit mode a press on this column
-        // cannot mean anything else, so there is nothing for a long press to
-        // disambiguate.
-        //
-        // It used to hold a pair of ↑/↓ buttons, which put three tap targets in
-        // one 26pt column and made the outer one — the thing a reader is
-        // actually meant to hold — the hardest of the three to hit. The grip
-        // says "hold me" and nothing else; reordering a step at a time moved to
-        // the accessibility actions and the context menu below, where a
-        // keyboard and a screen reader both already look.
-        //
-        // `DragGrip` rather than the markup, because the folder row has the same
-        // one: two copies is where the pointer states would have diverged.
-        <DragGrip
-          accessibilityLabel={strings.layout.dragHint}
-          {...(handleHandlers ? { handlers: handleHandlers } : {})}
-          testID={`bot-drag-handle-${bot.name}`}
-        />
-      ) : null}
-
       <View>
         <Avatar
           // The PRIMARY line, so the initial and the tint agree with the name
@@ -415,11 +409,14 @@ export const BotRow = memo(function BotRow({
    * buttons it replaces, it is offered on the ROW rather than on a 26pt column,
    * which is the element assistive technology is focused on anyway.
    *
-   * Only while the list is in edit mode and the row can move: an archived chat
-   * is drawn in the drawer and has no position to move within, and advertising
-   * an action that does nothing is worse than not advertising it.
+   * Offered on every row that HAS a position, at all times. It used to appear
+   * only in edit mode, which meant a screen-reader reader had to find and turn
+   * on a mode before the list could be arranged at all — and that mode has gone,
+   * so the actions would have gone with it. An archived chat is still excluded:
+   * it is drawn in the drawer and has no position to move within, and offering
+   * an action that does nothing is worse than offering none.
    */
-  const reorderable = editing && !archived && Boolean(onMove)
+  const reorderable = !archived && Boolean(onMove)
   const moveActions = reorderable
     ? [
         { name: 'moveUp', label: strings.layout.moveUp },
@@ -448,17 +445,20 @@ export const BotRow = memo(function BotRow({
       // reads as a list that did not notice them.
       delayLongPress={300}
       /*
-       * One gesture, two meanings, split by platform — and the split is not a
-       * preference, it is what each platform has.
+       * One gesture, two meanings, and the same two on every platform.
        *
-       * Where the native menu exists, a long press already opens it (UIKit's own
-       * interaction, see `platform/context-menu`), so this one arms the drag and the
-       * two separate by themselves: holding still gets the menu, holding and then
-       * moving gets the drag. Where it does not, a long press is the ONLY way to
-       * reach a row's options at all, so it opens the fallback sheet and the drag is
-       * reached through edit mode's handle instead.
+       * A hold arms the drag here and nothing else: where UIKit draws the native
+       * menu it has already opened one by now (`platform/context-menu`), and
+       * where it does not, the list HOLDS its sheet until this press is over and
+       * opens it from `onDisarm` — so a hold that turns into a move never leaves
+       * a menu over the row it lifted. The two gestures separate by themselves,
+       * exactly as they do in the Files app: hold still for the menu, hold and
+       * move for the drag.
+       *
+       * The KEY, not the name. Arming with `bot.name` while the pan responder
+       * was keyed by `bot:<name>` is what made the hold inert — see `rowKey`.
        */
-      onLongPress={() => (HAS_NATIVE_CONTEXT_MENU ? onArm?.(bot.name) : onOpenMenu(bot.name))}
+      onLongPress={() => onArm?.(rowKey)}
       /*
        * And the desktop gesture for the same menu, where the platform has one.
        * A long press is what a finger does; a right click is what a mouse does,

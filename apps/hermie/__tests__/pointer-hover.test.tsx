@@ -13,15 +13,17 @@
  * owner reported. The line between them is size and purpose — a 44pt control
  * says it is pressable, a message does not.
  *
- * Four surfaces are pinned here, which are the four the round found bare:
+ * The surfaces pinned here are the ones the round found bare:
  *
- *  - the drag grip on a chat row and on a folder row, which is one component
- *    now (`DragGrip`) precisely so the two cannot diverge;
  *  - the chat popover's rows, wrapped once so a switch, a disclosure and a
  *    segmented control all answer the same way;
  *  - every `Button`, which is what the memory rows and the inline approval
  *    answers are made of — a hover added per screen is a hover missing from the
  *    next screen somebody writes.
+ *
+ * The drag grip used to be a fourth. It is gone with the chat list's edit mode:
+ * a row is held and moved now, so there is no 26pt column for a pointer to
+ * announce itself over.
  *
  * `onPointerEnter` / `onPointerLeave` are view props on every platform in React
  * Native 0.81 and simply never fire where there is no pointer, so none of this
@@ -32,7 +34,6 @@ import { StyleSheet } from 'react-native'
 
 import { ToolCard } from '../src/chat-ui/ToolCard'
 import { searchToolItem } from '../src/chat-ui/fixtures'
-import { DragGrip } from '../src/ui/DragGrip'
 import { Button } from '../src/ui/primitives'
 import { ChatOptionsPopover } from '../src/ui/sheets'
 import { renderScreen, withProviders } from './support/render'
@@ -45,56 +46,6 @@ function styleOf(testID: string): Record<string, unknown> {
 /** Move the pointer onto a node and off it again. */
 const enter = (testID: string) => fireEvent(screen.getByTestId(testID), 'pointerEnter')
 const leave = (testID: string) => fireEvent(screen.getByTestId(testID), 'pointerLeave')
-
-describe('the drag grip', () => {
-  it('shows a pointer cursor', () => {
-    renderScreen(<DragGrip accessibilityLabel="Reorder" testID="grip" />)
-
-    expect(styleOf('grip').cursor).toBe('pointer')
-  })
-
-  it('lights its glyph while the pointer is on it, and gives it back', () => {
-    renderScreen(<DragGrip accessibilityLabel="Reorder" testID="grip" />)
-
-    // The glyph's own colour is the tint — there is no surface here to wash. The
-    // grip is six filled dots, so the fill of all six is the whole of its state.
-    const colour = () =>
-      screen
-        .getByTestId('grip')
-        .findAllByProps({ r: 1.5 })
-        .map(dot => dot.props.fill)
-        .join(',')
-
-    const before = colour()
-
-    enter('grip')
-    const during = colour()
-
-    leave('grip')
-    const after = colour()
-
-    expect(during).not.toBe(before)
-    expect(after).toBe(before)
-  })
-
-  /**
-   * A grip has to stay a `View`.
-   *
-   * A `Pressable` would claim the touch before the pan responder behind it saw
-   * one, and the row would stop being draggable by its own handle — which is the
-   * whole affordance. So the hover cannot come from a pressable's state, and
-   * this is the assertion that keeps somebody from "simplifying" it into one.
-   */
-  it('still carries the pan handlers it is given', () => {
-    const onStartShouldSetResponder = jest.fn(() => true)
-
-    renderScreen(
-      <DragGrip accessibilityLabel="Reorder" handlers={{ onStartShouldSetResponder } as never} testID="grip" />
-    )
-
-    expect(screen.getByTestId('grip').props.onStartShouldSetResponder).toBe(onStartShouldSetResponder)
-  })
-})
 
 describe('a button', () => {
   it('tints itself under the pointer, and clears when it leaves', () => {

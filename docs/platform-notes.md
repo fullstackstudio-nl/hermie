@@ -365,6 +365,54 @@ cleared; whether the wash is visible enough on a Lime theme's accent bubble and 
 so strong that a hovered primary reads as disabled is a judgement that needs a
 pointer and a screen.
 
+## Holding a chat row is how it moves (2026-09-22)
+
+The chat list had an Edit mode: a word in the header that revealed a grip on
+every row and a bar under the list. The owner rejected it — _"The Edit button is
+not needed. When I hold a chat I want to be able to move it right away."_ — and
+the gesture he asked for was already written. It had never worked, for a reason
+worth writing down.
+
+**The key mismatch.** `use-row-drag` arms a row by KEY and its pan responder is
+built per key, so `armed.current === rowKey` is what lets the responder claim the
+gesture on the first move. `BotRow` armed with the bot's NAME (`researcher`)
+while its wrapper's responder was keyed `bot:researcher`. The two could never be
+equal, the responder never claimed anything, and a long press on a chat therefore
+did nothing at all — which is why the grip in edit mode was the only way to move
+one. A folder header armed with `folderRowKey(...)` and could be dragged, which
+is exactly the asymmetry the owner was reporting without knowing the cause.
+
+**The gesture, per platform, now that arming is unconditional:**
+
+- **iPhone / iPad / Mac** have the native menu (`HermieContextMenuView`).
+  `UIContextMenuInteraction` runs its own hold and cancels itself when the touch
+  moves before it commits, so holding still gets the menu and holding then moving
+  gets the drag. Nothing arbitrates that; the two gestures are simply distinct.
+  Measured on the simulator: a hold of ~380 ms followed by a move lifts the row
+  and reorders the list; a hold of ~900 ms with no movement presents the menu.
+- **Android and the browser** have no such menu, and their fallback sheet is a
+  `Modal` — which takes the touch the moment it appears, so a sheet opened during
+  the hold would end the drag before it started. The sheet is therefore DEFERRED:
+  the long press arms the drag and remembers the row, the hook reports back
+  through `onDragStart` if the hold becomes a drag, and the press-out opens the
+  sheet only when it did not. A hold that never moves still opens the menu; it
+  opens on the release rather than under the finger.
+- **The Mac pointer path** is the same code with a mouse: press and hold on a row
+  for the long-press delay, then move. UIKit delivers an indirect-pointer drag to
+  the app as a touch, so `Pressable`'s `onLongPress` fires and the pan responder
+  claims the move exactly as a finger's would. The one thing that makes it usable
+  is already there for another reason — `useDirectTouchPanOnly`
+  (`platform/pointer-drag.ts`) narrows the list's own pan recognizer to DIRECT
+  touches, so the pointer drag that lifts a row does not also scroll the list
+  under it. **Not verified on a Mac window**: there is none in this environment.
+
+**What the mode took with it.** Nothing was lost: the reorder accessibility
+actions are on every row at all times rather than only in edit mode, a folder is
+renamed in place from its own menu (one folder at a time, the field closing on
+Return or on blur), New folder moved into the header's `…`, and Delete is on the
+folder's menu plus beside the field while a folder is being named. `DragGrip` and
+`handleHandlers` are gone with it.
+
 ## An inactive Mac window (2026-09-22) — settled, half of it unwatched
 
 The 2026-09-20 note below left one thing open: whether UIKit dims a native

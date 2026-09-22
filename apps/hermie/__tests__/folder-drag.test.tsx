@@ -199,28 +199,37 @@ async function renderList() {
 }
 
 describe('the folder row on screen', () => {
-  it('has a grip in edit mode, the way a chat row does', async () => {
+  /**
+   * There is no grip any more, and nothing took its place on the row.
+   *
+   * A folder was moved by revealing a 26pt column in edit mode and holding it.
+   * The mode has gone, so the row carries nothing — the gesture is the row
+   * itself, held.
+   */
+  it('carries no handle at all', async () => {
     const id = await renderList()
 
     expect(screen.queryByTestId(`folder-drag-handle-${id}`, { includeHiddenElements: true })).toBeNull()
-
-    fireEvent.press(screen.getByTestId('bots-edit'))
-
-    await waitFor(() =>
-      expect(screen.getByTestId(`folder-drag-handle-${id}`, { includeHiddenElements: true })).toBeTruthy()
-    )
+    expect(screen.queryByTestId('bots-edit')).toBeNull()
   })
 
-  it('carries pan handlers, which is what the hook could not give it before', async () => {
+  /**
+   * The pan handlers are on the row's own wrapper, unconditionally.
+   *
+   * That is what makes a hold able to become a drag: the responder is already
+   * there, waiting to be armed, rather than appearing with a mode. The cell is
+   * how the wrapper is found — `DragCell` names itself after the row key, and
+   * the wrapper is the child inside it.
+   */
+  it('carries pan handlers on the row itself, with no mode to reveal them', async () => {
     const id = await renderList()
 
-    fireEvent.press(screen.getByTestId('bots-edit'))
+    const cell = await screen.findByTestId(`cell-${folderRowKey(id)}`, { includeHiddenElements: true })
+    const wrapper = cell.children.find(
+      child => typeof child !== 'string' && typeof child.props.onMoveShouldSetResponderCapture === 'function'
+    )
 
-    const grip = await screen.findByTestId(`folder-drag-handle-${id}`, { includeHiddenElements: true })
-
-    // The grip is where the responder lives; a folder without one is a folder
-    // that can be looked at in edit mode and not moved.
-    expect(typeof grip.props.onStartShouldSetResponder).toBe('function')
+    expect(wrapper).toBeTruthy()
   })
 })
 

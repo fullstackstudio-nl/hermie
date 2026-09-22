@@ -467,9 +467,6 @@ const stringsEn = {
 
   /** Arranging the list. All of it is local to this device — see ADR-0012. */
   layout: {
-    edit: 'Edit',
-    done: 'Done',
-    editHint: 'Reorder rows and move them between folders.',
     // Never seeded INTO the field — only ever the placeholder, and only ever
     // the heading a folder nobody has named yet shows. An older build pre-filled
     // the field with "New section", so the first thing typed was appended to it
@@ -480,7 +477,7 @@ const stringsEn = {
     remove: 'Remove',
     removeFolder: (name: string) => `Delete the ${name || 'untitled'} folder`,
     folderName: 'Folder name',
-    editFolderHint: 'Type to rename this folder.',
+    nameFolderHint: 'Type to rename this folder.',
     folderEmpty: 'No chats in this folder',
     moveUp: 'Move up',
     moveDown: 'Move down',
@@ -491,10 +488,6 @@ const stringsEn = {
     moveToFolderMenu: 'Move to folder',
     openChat: 'Open',
     markRead: 'Mark as read',
-    // The grip's own label, and the whole of what it says: hold it. The arrows
-    // that used to live in this column are gone, and stepping one position at a
-    // time is on the row's accessibility actions and in its menu instead.
-    dragHint: 'Hold to drag',
     dragging: (name: string) => `Moving ${name}`,
     /**
      * Pin and Unpin, as one line that says what pressing it will do.

@@ -35,8 +35,7 @@ import {
   TextInput,
   View,
   type NativeScrollEvent,
-  type NativeSyntheticEvent,
-  type PanResponderInstance
+  type NativeSyntheticEvent
 } from 'react-native'
 
 import { snippetSegments, tidySnippet } from '@hermie/gateway-client'
@@ -59,17 +58,16 @@ import type { Folder } from '../../store/folders'
 import { isMuted, MUTE_FOREVER, muteUntil, mutedUntil as mutedUntilOf, type Mutes } from '../../store/mute'
 import { useChatsStore } from '../../store/chats'
 import { Appear } from '../../ui/Appear'
-import { DragGrip } from '../../ui/DragGrip'
 import { GlassSurface } from '../../ui/glass'
 import { Icon, ICON_SIZE } from '../../ui/Icon'
 import { durationFor, easing, NATIVE_DRIVER } from '../../ui/motion'
-import { Text } from '../../ui/primitives'
+import { RoundIconButton, Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { useFocusRing } from '../../ui/useFocusRing'
 import { useEscapeKey } from '../../ui/useEscapeKey'
 import { useHover } from '../../ui/useHover'
 import { useNumberedShortcuts, useShortcut } from '../../ui/useShortcut'
-import { CONTROL_MIN_HEIGHT, TAP_SLOP, type AccentName } from '../../ui/tokens'
+import { CONTROL_MIN_HEIGHT, CONTROL_SIZE, TAP_SLOP, type AccentName } from '../../ui/tokens'
 import { formatListTime } from '../../chat-ui'
 import { useChatRuntime } from '../chats/ChatRuntime'
 import { type MessageMatch, useMessageSearch } from '../search'
@@ -159,6 +157,14 @@ export interface BotsScreenProps {
  */
 const ARCHIVED_PRESENCE: Presence = { state: 'offline' }
 
+/**
+ * How the drawer's rows are keyed.
+ *
+ * An archived chat is not in the arrangement's rows, so it cannot carry a
+ * `bot:` key without standing for a position the drag can aim at.
+ */
+const ARCHIVED_ROW_PREFIX = 'archived:'
+
 type ListItem =
   | { key: string; kind: 'folder'; folder: Folder; open: boolean; counts: FolderCounts }
   | { key: string; kind: 'folderEmpty'; id: string; colour: AccentName }
@@ -192,6 +198,26 @@ function matches(bot: Bot, query: string): boolean {
     bot.name.toLowerCase().includes(needle) ||
     bot.description.toLowerCase().includes(needle)
   )
+}
+
+/**
+ * The chat a row key's fallback menu belongs to, or `null` for a row that has no
+ * sheet.
+ *
+ * Two spellings, because the drawer draws its own rows: a chat in the list is
+ * `bot:<name>` and an archived one is `archived:<name>`, which is the key this
+ * screen gives it so that the two cannot collide in the list. `parseRowKey` only
+ * speaks the arrangement's half — a folder is not a chat and has no sheet — so
+ * the drawer's spelling is read here, next to the code that writes it.
+ */
+function menuTargetOf(rowKey: string): string | null {
+  const row = parseRowKey(rowKey)
+
+  if (row?.kind === 'bot') {
+    return row.name
+  }
+
+  return rowKey.startsWith(ARCHIVED_ROW_PREFIX) ? rowKey.slice(ARCHIVED_ROW_PREFIX.length) : null
 }
 
 /** The part of a host component `measureListTop` needs; see its narrowing. */
@@ -234,11 +260,17 @@ export function BotsScreen({
 
   const [refreshing, setRefreshing] = useState(false)
   const [query, setQuery] = useState('')
-  const [editing, setEditing] = useState(false)
-  // Which divider was added by the button, so that one — and only that one —
-  // opens with the keyboard in it. Cleared when edit mode ends, so leaving and
-  // coming back does not steal focus for a section that already has a name.
-  const [addedFolderId, setAddedFolderId] = useState<string | null>(null)
+  /**
+   * The one folder whose name is a field right now, or `null`.
+   *
+   * What is left of edit mode, and deliberately not a mode: a folder is renamed
+   * where it is drawn, one at a time, from its own menu or because it has just
+   * been made and has no name yet. Everything else that mode used to switch on —
+   * the grips, the reorder actions, the bar at the bottom — is either
+   * unconditional now or reached from a menu, so there is nothing left for a
+   * reader to turn on before the list will let them arrange it.
+   */
+  const [renamingFolder, setRenamingFolder] = useState<string | null>(null)
   /*
     The New-bot form. A sheet rather than a destination, because making a bot
     is a thing you do once and then leave — and the flow it wraps ends by
@@ -479,15 +511,15 @@ export function BotsScreen({
       /*
         A search narrows the list on purpose, so a folder with nothing matching
         in it goes away rather than saying "no matches" once per folder and
-        burying the matches. Edit mode is the exception: that is when somebody
-        is arranging, and a folder that vanished while they were moving rows
-        into it would be a folder they could not aim at.
+        burying the matches. A folder being renamed stays: the field is on its
+        header, and a header that disappeared under the caret would take the
+        keyboard with it.
       */
       const hits = row.open
         ? row.folder.bots.filter(name => !archivedSet[name] && shown(name))
         : row.folder.bots.filter(name => !archivedSet[name] && shown(name))
 
-      if (narrowed && !editing && !hits.length) {
+      if (narrowed && row.folder.id !== renamingFolder && !hits.length) {
         // Skip the folder AND the rows it owns, which are the ones that follow.
         while (index + 1 < rows.length && rows[index + 1]?.kind !== 'folder') {
           index += 1
@@ -528,7 +560,7 @@ export function BotsScreen({
               bot,
               folderColour: 'default',
               folderId: null,
-              key: `archived:${name}`,
+              key: `${ARCHIVED_ROW_PREFIX}${name}`,
               kind: 'bot',
               lastInFolder: false
             })
@@ -579,7 +611,7 @@ export function BotsScreen({
     }
 
     return out
-  }, [archiveOpen, archivedNames, archivedSet, byName, editing, folderColours, messageSearch, query, rows])
+  }, [archiveOpen, archivedNames, archivedSet, byName, folderColours, messageSearch, query, renamingFolder, rows])
 
   const hasRows = items.some(item => item.kind === 'bot')
 
@@ -684,12 +716,23 @@ export function BotsScreen({
   */
   const anchors = useMemo(() => dragAnchors(rowsInput), [rowsInput])
 
+  /**
+   * The row whose fallback sheet this press has asked for, until the gesture says
+   * which of the two things it was.
+   *
+   * Only where there is no native menu. UIKit opens its own on the hold and
+   * cancels it the moment the touch moves, which is the behaviour being copied
+   * here: the sheet is held back until the press ENDS, and a press that became a
+   * drag clears it on the way (`onDragStart`). Without that, holding a row on a
+   * phone would lift it under a sheet that had already covered it.
+   *
+   * A ref rather than state: nothing is drawn from it, and a re-render per press
+   * is forty rows re-rendered for a question that is answered a moment later.
+   */
+  const pendingMenu = useRef<string | null>(null)
+
   const drag = useRowDrag({
     anchors,
-    // Long press means the native menu where there is one, and the fallback sheet
-    // where there is not. Either way it is not free for the drag to take, so on
-    // Android the handle in edit mode is the only way in.
-    armEnabled: HAS_NATIVE_CONTEXT_MENU,
     /*
       A pinned row stays among the pinned rows, and an unpinned one below them.
 
@@ -712,6 +755,10 @@ export function BotsScreen({
       const next = Math.max(0, scrollOffset.current + delta)
 
       listRef.current?.scrollToOffset({ animated: false, offset: next })
+    }, []),
+    onDragStart: useCallback(() => {
+      // The hold was a drag after all, so the sheet it was holding never opens.
+      pendingMenu.current = null
     }, []),
     onCommit: useCallback(
       (rowKey: string, target: DropTarget) => {
@@ -752,6 +799,51 @@ export function BotsScreen({
   })
 
   dragTop.current = drag.onListTop
+
+  /*
+    The two halves of the gesture, taken out of the drag ONE level up.
+
+    `arm` and `disarm` never change identity; the object holding them changes
+    whenever a row is lifted or put down. Reading them here is what lets the two
+    handlers below keep their own identity across a drag — and a handler that did
+    not would re-render every row in the list twice per gesture, which is the
+    cost `BotRow`'s memo exists to avoid.
+  */
+  const { arm, disarm } = drag
+
+  /**
+   * A row was held: arm the drag, and remember the menu that hold might mean.
+   *
+   * One handler for both kinds of row, because a row key is all either of them
+   * needs.
+   */
+  const armRow = useCallback(
+    (rowKey: string) => {
+      pendingMenu.current = HAS_NATIVE_CONTEXT_MENU ? null : rowKey
+      arm(rowKey)
+    },
+    [arm]
+  )
+
+  /**
+   * The press ended. If it never became a drag, THIS is the long press's menu.
+   *
+   * Fired from every press-out, including the ones that end an ordinary tap —
+   * which is why the pending key is only ever set by a long press. A folder has
+   * no sheet to fall back to, so it simply has nothing to open here.
+   */
+  const releaseRow = useCallback(() => {
+    const rowKey = pendingMenu.current
+
+    pendingMenu.current = null
+    disarm()
+
+    const name = rowKey ? menuTargetOf(rowKey) : null
+
+    if (name) {
+      setMenuFor(name)
+    }
+  }, [disarm])
 
   /** The name of whatever is currently lifted, for the live region below. */
   const draggingLabel = useMemo(() => {
@@ -827,11 +919,11 @@ export function BotsScreen({
     directTouchPanRef(view)
   }, [])
 
-  /** Rename from a divider's own menu: edit mode on, and the caret in that field. */
-  const renameFolder = useCallback((id: string) => {
-    setEditing(true)
-    setAddedFolderId(id)
-  }, [])
+  /** Rename from a folder's own menu: the caret goes into that folder's header. */
+  const renameFolder = useCallback((id: string) => setRenamingFolder(id), [])
+
+  /** A folder made from a menu is a folder with no name yet, so it opens in one. */
+  const addFolder = useCallback(() => setRenamingFolder(useChatLayoutStore.getState().addFolder('')), [])
 
   const onListScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -981,11 +1073,10 @@ export function BotsScreen({
         case 'newFolder': {
           const id = layout.addFolderAround(name, '')
 
-          // Straight into the field, and into edit mode to show it: a folder that
-          // stays untitled is what put two headings next to each other.
+          // Straight into the field: a folder that stays untitled is what put two
+          // headings next to each other.
           if (id) {
-            setEditing(true)
-            setAddedFolderId(id)
+            setRenamingFolder(id)
           }
 
           return
@@ -1079,8 +1170,7 @@ export function BotsScreen({
         return
 
       case 'newFolder':
-        setAddedFolderId(layout.addFolder(''))
-        setEditing(true)
+        setRenamingFolder(layout.addFolder(''))
 
         return
 
@@ -1152,16 +1242,7 @@ export function BotsScreen({
     // The sidebar sits inside a panel the shell has already inset; the phone
     // screen is full-bleed and has to clear the notch and the home bar itself.
     <View style={sidebar ? { flex: 1 } : { flex: 1, paddingBottom: insets.bottom, paddingTop: insets.top }}>
-      <Head
-        editing={editing}
-        onToggleEdit={() => {
-          setEditing(current => !current)
-          setAddedFolderId(null)
-        }}
-        sidebar={sidebar}
-        onBoards={openBoards}
-        onNewBot={() => setCreatingBot(true)}
-      />
+      <Head sidebar={sidebar} onBoards={openBoards} onNewBot={() => setCreatingBot(true)} onNewFolder={addFolder} />
 
       {/*
         One connection line, on every layout, under the title. It draws nothing
@@ -1287,15 +1368,14 @@ export function BotsScreen({
                     testID={`folder-group-${item.folder.id}`}
                   >
                     <FolderHeader
-                      autoFocus={item.folder.id === addedFolderId}
                       counts={item.counts}
-                      editing={editing}
                       folder={item.folder}
-                      {...(editing ? { handleHandlers: drag.handleHandlers(item.key) } : {})}
-                      onArm={drag.arm}
-                      onDisarm={drag.disarm}
+                      naming={item.folder.id === renamingFolder}
+                      onArm={armRow}
+                      onDisarm={releaseRow}
                       onMenuSelect={onFolderMenuSelect}
                       onMove={moveFolder}
+                      onNamed={() => setRenamingFolder(null)}
                       onRename={renameFolder}
                       onToggle={toggleFolder}
                       open={item.open}
@@ -1368,18 +1448,17 @@ export function BotsScreen({
                     archived={item.archived}
                     bot={item.bot}
                     compact={!sidebar}
-                    editing={editing && !item.archived}
-                    {...(editing && !item.archived ? { handleHandlers: drag.handleHandlers(item.key) } : {})}
                     menuFolders={menuFolders}
                     mutedUntil={mutedUntilOf(mutes, item.bot.name, Math.floor(Date.now() / 1000))}
                     pinned={Boolean(pinned[item.bot.name])}
-                    onArm={drag.arm}
-                    onDisarm={drag.disarm}
+                    onArm={armRow}
+                    onDisarm={releaseRow}
                     onMenuSelect={onMenuSelect}
                     onMove={moveBot}
                     onOpenMenu={setMenuFor}
                     onPress={openBot}
                     presence={item.archived ? ARCHIVED_PRESENCE : state}
+                    rowKey={item.key}
                     selected={item.bot.name === selectedBot}
                     unread={item.archived ? false : unread}
                     unreadCount={item.archived ? 0 : count}
@@ -1434,8 +1513,6 @@ export function BotsScreen({
           {strings.layout.dragging(draggingLabel)}
         </Text>
       ) : null}
-
-      {editing ? <EditBar onAddFolder={setAddedFolderId} /> : null}
 
       {onOpenSection ? (
         <SidebarFooter
@@ -1548,9 +1625,12 @@ export function BotsScreenOrSignedOut(props: BotsScreenProps) {
  * menu is unconditional — one arrangement at 300pt, at 900pt and everywhere
  * between, which is also one arrangement to hold in mind.
  *
- * Edit stays out of it: it is the header's only MODE, a reader toggles it and
- * toggles it back, and a two-tap round trip through a menu for that is the
- * trade the fold got wrong in the other direction.
+ * Edit used to stay out of it, on the argument that a MODE is toggled too often
+ * to sit two taps deep. There is no mode any more — a row is held and moved, a
+ * folder is renamed in place from its own menu — so what is left of it is the one
+ * action that had nowhere else to live: **New folder**. It belongs here rather
+ * than beside the title for the reason the rest of this menu does: it is used
+ * once in a while, and a word that never shrinks is what made this row cramped.
  *
  * Drawn the way every other floating menu in the app is drawn — an opaque glass
  * surface, absolutely positioned so that opening it lays nothing out, arriving
@@ -1561,7 +1641,15 @@ export function BotsScreenOrSignedOut(props: BotsScreenProps) {
  * a tap at all, and on an iPad it would render no menu, so the actions would
  * simply be gone.
  */
-function HeadOverflowMenu({ onBoards, onNewBot }: { onBoards?: () => void; onNewBot?: () => void }) {
+function HeadOverflowMenu({
+  onBoards,
+  onNewBot,
+  onNewFolder
+}: {
+  onBoards?: () => void
+  onNewBot?: () => void
+  onNewFolder?: () => void
+}) {
   const theme = useTheme()
   const [open, setOpen] = useState(false)
 
@@ -1569,6 +1657,7 @@ function HeadOverflowMenu({ onBoards, onNewBot }: { onBoards?: () => void; onNew
 
   const rows: { id: string; label: string; onPress: () => void }[] = [
     ...(onNewBot ? [{ id: 'new-bot', label: profileStrings.settings.newBot, onPress: onNewBot }] : []),
+    ...(onNewFolder ? [{ id: 'new-folder', label: strings.layout.newFolder, onPress: onNewFolder }] : []),
     ...(onBoards ? [{ id: 'boards', label: kanbanStrings.menu, onPress: onBoards }] : [])
   ]
 
@@ -1580,32 +1669,42 @@ function HeadOverflowMenu({ onBoards, onNewBot }: { onBoards?: () => void; onNew
 
   return (
     <View>
-      <Pressable
-        accessibilityLabel={strings.bots.moreActions}
-        accessibilityRole="button"
-        // `aria-expanded`, not `accessibilityState`: react-native-web drops the
-        // object spelling on the floor. See `accessibility-state.test.tsx`.
-        aria-expanded={open}
-        hitSlop={TAP_SLOP}
+      {/*
+        The chat header's button, not a glyph in a gap.
+
+        It was a bare `ellipsis` with a tap target around it — the owner's
+        verdict was that it "could be prettier" — and the shape this app already
+        has for "a control that floats over a surface" is `RoundIconButton`: a
+        glass circle at `CONTROL_SIZE.regular` with a 19pt mark centred in it,
+        which is exactly what the chat's own back, sidebar and options buttons
+        are. One component, so the two headers cannot drift apart, and `opaque`
+        for the same reason they are: the list scrolls under this row.
+
+        `aria-expanded` travels with it (`expanded`), because a button that
+        opens a menu has to say so and react-native-web drops the
+        `accessibilityState` spelling on the floor — see
+        `accessibility-state.test.tsx`.
+      */}
+      <RoundIconButton
+        expanded={open}
+        icon="ellipsis"
+        label={strings.bots.moreActions}
         onPress={() => setOpen(current => !current)}
-        // The search field's note applies here too: on the web a `cursor:
-        // pointer` is only as big as the box under it, and the box under this
-        // one is a 19pt glyph. `hitSlop` answers a finger, not a mouse.
-        style={{ cursor: 'pointer', justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT }}
+        opaque
+        size={CONTROL_SIZE.regular}
         testID="bots-head-overflow"
-      >
-        <Icon color={theme.colors.accentText} name="ellipsis" size={ICON_SIZE.control} />
-      </Pressable>
+      />
 
       <Appear
         rise={-6}
         style={{
           position: 'absolute',
           right: 0,
-          // Clear of the button rather than measured off it: the button's box
-          // IS `CONTROL_MIN_HEIGHT` (see its style), and a menu that overlapped
-          // the thing that opened it would take its own next tap.
-          top: CONTROL_MIN_HEIGHT,
+          // Clear of the button rather than measured off it: the button's box IS
+          // the circle's diameter, and a menu that overlapped the thing that
+          // opened it would take its own next tap. One `space.xs` below it, so
+          // the two read as a control and its menu rather than as one shape.
+          top: CONTROL_SIZE.regular + 4,
           zIndex: 2
         }}
         visible={open}
@@ -1654,14 +1753,24 @@ function HeadOverflowMenu({ onBoards, onNewBot }: { onBoards?: () => void; onNew
 /**
  * The chat list's head row: the screen's name, and two controls.
  *
- * ## Two, and always the same two
+ * ## One, and always the same one
  *
- * `…` and Edit. Everything else this row used to offer is behind the `…` (see
- * `HeadOverflowMenu`), and the `+` that used to sit between them is GONE rather
- * than moved: it was labelled New cron, it made a cron, and a cron is made on
- * the Crons tab — which has its own `cron-create` button for exactly that. A
- * second door to one screen's primary action, parked in another screen's
- * header, is a door that has to be kept in step with the room behind it.
+ * The `…`. Everything this row used to offer is behind it (see
+ * `HeadOverflowMenu`), including New folder; the `+` that used to sit beside it
+ * is GONE rather than moved, because it was labelled New cron, it made a cron,
+ * and a cron is made on the Crons tab — which has its own `cron-create` button
+ * for exactly that. A second door to one screen's primary action, parked in
+ * another screen's header, is a door that has to be kept in step with the room
+ * behind it.
+ *
+ * **Edit went with it, and that is this round's change.** It was the header's
+ * only mode: a word the reader pressed to reveal a grip on every row and a bar
+ * at the bottom of the list, pressed again when they had finished. The owner's
+ * verdict was that it should not be there at all — _"When I hold a chat I want
+ * to be able to move it right away"_ — which is how the rest of the platform
+ * behaves, and what the list does now. Nothing that mode switched on was lost:
+ * the drag is a hold, the reorder actions are on every row, a folder is renamed
+ * in place from its own menu, and New folder is in the `…`.
  *
  * ## The air
  *
@@ -1671,25 +1780,21 @@ function HeadOverflowMenu({ onBoards, onNewBot }: { onBoards?: () => void; onNew
  *  - the row's horizontal padding is `space.lg`, the search pill's own
  *    `marginHorizontal`, so the title's left edge and Edit's right edge sit on
  *    that pill's edges;
- *  - the two actions sit `space.md` apart, the pill's own `paddingHorizontal` —
- *    the measure that field keeps between its edge and what is inside it;
- *  - the title is `space.lg` from them, one step MORE than they are from each
- *    other, so the pair reads as a group rather than as the tail of the title;
- *  - and each control is at least `CONTROL_MIN_HEIGHT` tall, the pill's own
- *    minimum, so a pointer has the same target a finger already had. That also
- *    gives the row back the height the 38pt `+` used to give it.
+ *  - the title is `space.lg` from the control, so the two read as a row rather
+ *    than as one run-on line;
+ *  - and the control is a `CONTROL_SIZE.regular` circle, the same button the
+ *    chat header carries, which gives the row the height the 38pt `+` used to
+ *    give it.
  */
 function Head({
-  editing,
   onBoards,
   onNewBot,
-  onToggleEdit,
+  onNewFolder,
   sidebar
 }: {
-  editing: boolean
   onBoards?: () => void
   onNewBot?: () => void
-  onToggleEdit: () => void
+  onNewFolder?: () => void
   sidebar: boolean
 }) {
   const theme = useTheme()
@@ -1719,21 +1824,11 @@ function Head({
         <GatewayTitle sidebar={sidebar} />
       </View>
 
-      <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.md }}>
-        <HeadOverflowMenu {...(onBoards ? { onBoards } : {})} {...(onNewBot ? { onNewBot } : {})} />
-
-        <Pressable
-          accessibilityRole="button"
-          hitSlop={TAP_SLOP}
-          onPress={onToggleEdit}
-          style={{ cursor: 'pointer', justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT }}
-          testID="bots-edit"
-        >
-          <Text color="accentText" style={{ fontWeight: '600' }} variant="preview">
-            {editing ? strings.layout.done : strings.layout.edit}
-          </Text>
-        </Pressable>
-      </View>
+      <HeadOverflowMenu
+        {...(onBoards ? { onBoards } : {})}
+        {...(onNewBot ? { onNewBot } : {})}
+        {...(onNewFolder ? { onNewFolder } : {})}
+      />
     </View>
   )
 }
@@ -1870,13 +1965,6 @@ function SearchField({
 }
 
 /**
- * A named section break.
- *
- * In edit mode the name becomes editable in place rather than opening a rename
- * dialog: the field is already the thing being renamed, and a dialog would be a
- * second modal on a screen that already has one for the row menu.
- */
-/**
  * A folder's own row: the top of the plate, with the disclosure on it.
  *
  * It replaced the named divider ADR-0012 drew, and the first attempt replaced
@@ -1890,40 +1978,43 @@ function SearchField({
  * The badge appears ONLY while the folder is closed. Open, every row inside is
  * on screen carrying its own count, and a total above them would be the same
  * information twice.
+ *
+ * ## Naming happens here, on this row, one folder at a time
+ *
+ * The name used to become a field for EVERY folder at once, because that is
+ * what a list-wide edit mode can express. There is no such mode any more, so
+ * `naming` is the folder the caret is in: a folder that has just been made and
+ * has no name yet, or the one whose menu said Rename. It is still a field in
+ * place rather than a dialog — the name is already drawn here, and a modal to
+ * change one word would be a second sheet on a screen that has one for the row
+ * menu — and it closes itself when the reader is done with it.
  */
 function FolderHeader({
-  autoFocus,
   counts,
-  editing,
   folder,
-  handleHandlers,
+  naming = false,
   onArm,
   onDisarm,
   onMenuSelect,
   onMove,
+  onNamed,
   onRename,
   onToggle,
   open
 }: {
-  autoFocus?: boolean
   counts: FolderCounts
-  editing: boolean
   folder: Folder
-  /**
-   * Edit mode only: the pan handlers the grip column carries.
-   *
-   * The same prop a chat row takes, from the same hook, keyed by this folder's
-   * row key. A folder that had a grip of its own would be a second gesture to
-   * keep in step with the first.
-   */
-  handleHandlers?: PanResponderInstance['panHandlers']
+  /** This folder's name is a field right now, with the caret in it. */
+  naming?: boolean
   /** Arm the drag for this folder's row key. The header's `onLongPress`. */
   onArm?: (rowKey: string) => void
   onDisarm?: () => void
   onMenuSelect: (folderId: string, id: string) => void
-  /** Edit mode only: one position up or down among the top-level entries. */
+  /** One position up or down among the top-level entries. */
   onMove?: (folderId: string, offset: number) => void
-  /** Turns edit mode on with this folder's field focused; the menu's Rename. */
+  /** The field is finished with: Return, or the caret leaving it. */
+  onNamed?: () => void
+  /** Puts the caret in this folder's name; the menu's Rename. */
   onRename?: (id: string) => void
   onToggle: (id: string, open: boolean) => void
   open: boolean
@@ -1972,8 +2063,8 @@ function FolderHeader({
     .filter(Boolean)
     .join(', ')
 
-  /* The same pair the chat rows carry, for the readers a grip does not serve. */
-  const reorderable = editing && Boolean(onMove)
+  /* The same pair the chat rows carry, for the readers a drag does not serve. */
+  const reorderable = Boolean(onMove)
 
   const heading = (
     <Pressable
@@ -1998,13 +2089,13 @@ function FolderHeader({
       aria-expanded={open}
       delayLongPress={300}
       /*
-        The same split a chat row makes, for the same reason: where the platform
-        draws a context menu a long press already means that, so this arms the
-        drag and the two separate by themselves — hold still for the menu, hold
-        and move for the drag. Where there is no native menu the long press is
-        left alone and the grip in edit mode is the way in.
+        The same split a chat row makes, for the same reason: a hold arms the
+        drag, and where the platform draws a context menu it is already showing
+        one — hold still for the menu, hold and move for the drag. A folder has
+        no fallback sheet, so where there is no native menu a hold means the drag
+        and nothing else.
       */
-      onLongPress={() => (HAS_NATIVE_CONTEXT_MENU ? onArm?.(folderRowKey(folder.id)) : undefined)}
+      onLongPress={() => onArm?.(folderRowKey(folder.id))}
       onPress={() => onToggle(folder.id, !open)}
       onPressOut={onDisarm}
       /*
@@ -2025,23 +2116,6 @@ function FolderHeader({
       testID={`folder-${folder.id}`}
       {...hover.props}
     >
-      {/*
-        The grip, in edit mode, exactly where a chat row's is.
-
-        A `View` and not a `Pressable`, for the reason `BotRow` gives: a
-        pressable would claim the touch before the pan responder saw it. It is
-        the first thing in the row so the two columns of grips line up, which is
-        what makes "hold this and move it" read as one affordance for both kinds
-        of row rather than two.
-      */}
-      {editing && handleHandlers ? (
-        <DragGrip
-          accessibilityLabel={strings.layout.dragHint}
-          handlers={handleHandlers}
-          testID={`folder-drag-handle-${folder.id}`}
-        />
-      ) : null}
-
       {/* Decorative, both of them: the row's own expanded state is what a screen
           reader reads, and `Icon` keeps itself out of the tree so it cannot say
           it twice. */}
@@ -2063,14 +2137,21 @@ function FolderHeader({
       */}
       <Icon color={swatch.fill} name="folder" size={ICON_SIZE.listMark} testID={`folder-mark-${folder.id}`} />
 
-      {editing ? (
+      {naming ? (
         <TextInput
-          accessibilityHint={strings.layout.editFolderHint}
+          accessibilityHint={strings.layout.nameFolderHint}
           accessibilityLabel={strings.layout.folderName}
-          // A folder that has just been added is focused straight into: the
-          // whole reason it exists is that it needs a name.
-          autoFocus={autoFocus === true}
+          // Focused straight into, always: this field is only ever on screen
+          // because the reader asked for this folder's name, either by making it
+          // or by choosing Rename.
+          autoFocus
           autoCapitalize="words"
+          // Both endings, because they are different gestures and both mean
+          // "done": Return on the keyboard, and the caret leaving for anywhere
+          // else. Without the blur a field opened by Rename would stay open
+          // until something else re-rendered the row.
+          onBlur={onNamed}
+          onSubmitEditing={onNamed}
           onChangeText={next => useChatLayoutStore.getState().renameFolder(folder.id, next)}
           // The PLACEHOLDER, never the value. Seeding the field is what left
           // "New sectionFinance" on a real device.
@@ -2130,7 +2211,15 @@ function FolderHeader({
         </View>
       ) : null}
 
-      {editing ? (
+      {/*
+        Delete, while the name is being typed, and only then.
+
+        A folder made by mistake is deleted from its own menu everywhere that
+        menu exists — but this is the one moment a reader is certainly looking at
+        a folder they may not want, and on a platform with no native menu it is
+        the only way out of one. It leaves with the field.
+      */}
+      {naming ? (
         <Pressable
           accessibilityLabel={strings.layout.removeFolder(folder.name)}
           accessibilityRole="button"
@@ -2268,48 +2357,6 @@ function ArchiveHeader({ count, onToggle, open }: { count: number; onToggle: () 
         {strings.layout.archived(count)}
       </Text>
     </Pressable>
-  )
-}
-
-function EditBar({ onAddFolder }: { onAddFolder: (id: string) => void }) {
-  const theme = useTheme()
-
-  return (
-    <View
-      style={{
-        alignItems: 'center',
-        backgroundColor: theme.tintSunk,
-        borderColor: theme.hairlineSoft,
-        borderRadius: theme.radii.card,
-        borderWidth: 1,
-        flexDirection: 'row',
-        gap: theme.space.sm,
-        marginHorizontal: theme.space.md,
-        marginTop: theme.space.sm,
-        paddingHorizontal: theme.space.md,
-        paddingVertical: theme.space.sm
-      }}
-      testID="edit-bar"
-    >
-      <Text color="textMuted" style={{ flex: 1 }} variant="meta">
-        {strings.layout.editHint}
-      </Text>
-
-      <Pressable
-        accessibilityRole="button"
-        hitSlop={TAP_SLOP}
-        // Empty rather than pre-filled with "New section": the field is focused
-        // straight into, and a seeded name means the first thing typed is
-        // APPENDED to a word nobody asked for.
-        onPress={() => onAddFolder(useChatLayoutStore.getState().addFolder(''))}
-        style={{ cursor: 'pointer' }}
-        testID="add-folder"
-      >
-        <Text color="accentText" style={{ fontWeight: '600' }} variant="meta">
-          {strings.layout.newFolder}
-        </Text>
-      </Pressable>
-    </View>
   )
 }
 

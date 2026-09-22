@@ -88,6 +88,21 @@ function seedRoster() {
   useBotsStore.getState().setBots(ROSTER)
 }
 
+/**
+ * A hold that ends where it started, which is what opens the fallback sheet.
+ *
+ * The sheet is deferred until the press is over, because the same hold is also
+ * how a row is picked up: on a platform with no native menu there is nothing to
+ * cancel a menu that is already on screen, so the list holds it back instead and
+ * opens it only if the hold never became a drag. Two events, therefore, where
+ * one used to do — and a test that fires only the long press is testing the
+ * moment the reader is still deciding.
+ */
+function hold(testID: string) {
+  fireEvent(screen.getByTestId(testID), 'longPress')
+  fireEvent(screen.getByTestId(testID), 'pressOut')
+}
+
 /** An open approval in Writer's chat — the "needs your input" badge's source. */
 function seedOpenApproval() {
   useChatsStore.getState().ensure('writer', { storedSessionId: 'stored-writer', resolvedSessionId: 'stored-writer' })
@@ -258,53 +273,68 @@ describe('the two names a bot has', () => {
   })
 })
 
-describe('edit mode', () => {
+/**
+ * Arranging the list, with nothing to switch on first.
+ *
+ * There was an Edit mode: a word in the header that revealed a grip on every row
+ * and a bar under the list, pressed again to put them away. The owner rejected
+ * it — _"The Edit button is not needed. When I hold a chat I want to be able to
+ * move it right away."_ — so what it used to switch on is either always on (the
+ * reorder actions), reached by holding the row (the drag), or in the header's
+ * `…` (New folder).
+ */
+describe('arranging the list', () => {
   beforeEach(seedRoster)
 
-  it('reveals the grab handle and the folder action, and hides them again', () => {
+  /** The header's `…`, opened. Everything that is not a row lives behind it. */
+  function openHeadMenu() {
+    fireEvent.press(screen.getByTestId('bots-head-overflow'))
+  }
+
+  /** New folder, from that menu, which is the only way to make one from nowhere. */
+  function addFolder() {
+    openHeadMenu()
+    fireEvent.press(screen.getByTestId('bots-head-overflow-new-folder'))
+
+    return (useChatLayoutStore.getState().entries.find(entry => entry.kind === 'folder') as { id: string }).id
+  }
+
+  it('has no mode to enter, and nothing left that only a mode could reveal', () => {
     renderScreen(<BotsScreen />)
 
-    expect(screen.queryByTestId('bot-drag-handle-writer')).toBeNull()
-
-    fireEvent.press(screen.getByTestId('bots-edit'))
-    expect(screen.getByTestId('bot-drag-handle-writer')).toBeTruthy()
-    expect(screen.getByTestId('add-folder')).toBeTruthy()
-
-    fireEvent.press(screen.getByTestId('bots-edit'))
+    expect(screen.queryByTestId('bots-edit')).toBeNull()
+    expect(screen.queryByTestId('edit-bar')).toBeNull()
     expect(screen.queryByTestId('bot-drag-handle-writer')).toBeNull()
   })
 
   /**
-   * The column is ONE thing to hold, not three things to aim at.
+   * The column is gone, and the arrows it replaced are still gone.
    *
-   * It used to carry a pair of ↑/↓ buttons inside a 26pt handle, which put
-   * three tap targets in the space of one and made the outer one — the thing a
-   * reader is meant to grab — the hardest of the three to hit.
+   * It used to carry a pair of ↑/↓ buttons inside a 26pt handle, which put three
+   * tap targets in the space of one; the grip that replaced them has now gone
+   * with the mode that revealed it. Both are worth pinning: a row has no
+   * furniture on it at all.
    */
-  it('draws no arrows at all, on any row', () => {
+  it('draws no grip and no arrows, on any row', () => {
     renderScreen(<BotsScreen />)
-    fireEvent.press(screen.getByTestId('bots-edit'))
 
     for (const name of ['researcher', 'writer']) {
+      expect(screen.queryByTestId(`bot-drag-handle-${name}`)).toBeNull()
       expect(screen.queryByTestId(`bot-move-up-${name}`)).toBeNull()
       expect(screen.queryByTestId(`bot-move-down-${name}`)).toBeNull()
     }
   })
 
-  it('says what the grip is for, so holding it is discoverable', () => {
-    renderScreen(<BotsScreen />)
-    fireEvent.press(screen.getByTestId('bots-edit'))
-
-    expect(screen.getByTestId('bot-drag-handle-writer').props.accessibilityLabel).toBe(strings.layout.dragHint)
-  })
-
   /**
-   * Reordering a step at a time did not go with the arrows: it moved to the
-   * row, where VoiceOver's rotor and a keyboard both already look.
+   * Reordering a step at a time, for the readers a drag does not serve.
+   *
+   * VoiceOver's rotor and a keyboard both read `accessibilityActions`, and they
+   * used to be offered only in edit mode — so a screen-reader reader had to find
+   * and turn on a mode before the list would let them arrange it. They are on
+   * every row that has a position now, at all times.
    */
   it('reorders a bot from the row’s accessibility actions', () => {
     renderScreen(<BotsScreen />)
-    fireEvent.press(screen.getByTestId('bots-edit'))
 
     expect(useChatLayoutStore.getState().entries.map(entry => entry.kind === 'chat' && entry.name)).toEqual([
       'researcher',
@@ -335,26 +365,21 @@ describe('edit mode', () => {
     ])
   })
 
-  it('offers no reorder actions at all while the list is not being edited', () => {
+  /** An archived chat is in the drawer and has no position, so it offers none. */
+  it('offers no reorder actions on an archived row', () => {
     renderScreen(<BotsScreen />)
+
+    hold('bot-row-writer')
+    fireEvent.press(screen.getByTestId('row-menu-archive'))
+    fireEvent.press(screen.getByTestId('archived-row'))
 
     expect(screen.getByTestId('bot-row-writer').props.accessibilityActions).toBeUndefined()
   })
 
-  /**
-   * A folder reorders from its own menu and its own accessibility actions.
-   *
-   * It has no grip: dragging a FOLDER is not implemented — `use-row-drag` is
-   * keyed by bot name throughout and commits through `dropBot` — and a handle
-   * labelled "Hold to drag" that cannot be dragged is a worse affordance than
-   * none. These two paths are what a folder can actually be reordered by.
-   */
   it('reorders a folder from its accessibility actions', () => {
     renderScreen(<BotsScreen />)
-    fireEvent.press(screen.getByTestId('bots-edit'))
-    fireEvent.press(screen.getByTestId('add-folder'))
 
-    const id = useChatLayoutStore.getState().folders[0]?.id ?? ''
+    const id = addFolder()
 
     expect(useChatLayoutStore.getState().entries.at(-1)).toEqual({ kind: 'folder', id })
 
@@ -366,18 +391,16 @@ describe('edit mode', () => {
     expect(useChatLayoutStore.getState().entries[1]).toEqual({ kind: 'folder', id })
   })
 
-  it('adds a folder and keeps it on screen while it is still empty', () => {
+  it('adds a folder from the header menu and keeps it on screen while it is empty', () => {
     renderScreen(<BotsScreen />)
-    fireEvent.press(screen.getByTestId('bots-edit'))
-    fireEvent.press(screen.getByTestId('add-folder'))
 
-    const folder = useChatLayoutStore.getState().entries.find(entry => entry.kind === 'folder')
+    const id = addFolder()
 
     // Named by typing, not by editing a seeded word: a pre-filled name means
     // the first thing typed lands after it.
-    expect(folder).toEqual({ kind: 'folder', id: expect.any(String) })
+    expect(useChatLayoutStore.getState().entries).toContainEqual({ kind: 'folder', id })
     // Empty, but visible: there has to be something to move a row into.
-    expect(screen.getByTestId(`folder-${(folder as { id: string }).id}`)).toBeTruthy()
+    expect(screen.getByTestId(`folder-${id}`)).toBeTruthy()
   })
 
   it('opens the new folder focused, empty, with a placeholder that is not a name', () => {
@@ -385,23 +408,66 @@ describe('edit mode', () => {
     // from a build that seeded the field with "New section". The placeholder has
     // to say what the field is FOR without ever becoming its value.
     renderScreen(<BotsScreen />)
-    fireEvent.press(screen.getByTestId('bots-edit'))
-    fireEvent.press(screen.getByTestId('add-folder'))
 
-    const id = (useChatLayoutStore.getState().entries.find(entry => entry.kind === 'folder') as { id: string }).id
-    const field = screen.getByTestId(`folder-name-${id}`)
+    const field = screen.getByTestId(`folder-name-${addFolder()}`)
 
     expect(field.props.value).toBe('')
     expect(field.props.placeholder).toBe('Folder name')
     expect(field.props.autoFocus).toBe(true)
   })
 
-  it('offers Remove on an empty folder', () => {
+  /**
+   * The field belongs to ONE folder, and closes itself.
+   *
+   * Edit mode turned every folder's name into a field at once and left them that
+   * way until the reader pressed Done. A name is typed once, so the field is
+   * open for the folder being named and for as long as the caret is in it.
+   */
+  it('takes the field away again when the name is finished', () => {
     renderScreen(<BotsScreen />)
-    fireEvent.press(screen.getByTestId('bots-edit'))
-    fireEvent.press(screen.getByTestId('add-folder'))
+
+    const id = addFolder()
+
+    fireEvent.changeText(screen.getByTestId(`folder-name-${id}`), 'Finance')
+    fireEvent(screen.getByTestId(`folder-name-${id}`), 'submitEditing')
+
+    expect(screen.queryByTestId(`folder-name-${id}`)).toBeNull()
+    expect(screen.getByTestId(`folder-${id}`)).toHaveTextContent('Finance')
+  })
+
+  /**
+   * The caret leaving is an ending too, not only Return.
+   *
+   * A field opened by Rename would otherwise stay open until something else
+   * re-rendered the row, which is a mode by another name — one folder wide.
+   */
+  it('takes the field away when the caret leaves it', () => {
+    renderScreen(<BotsScreen />)
+
+    const id = addFolder()
+
+    fireEvent(screen.getByTestId(`folder-name-${id}`), 'blur')
+
+    expect(screen.queryByTestId(`folder-name-${id}`)).toBeNull()
+  })
+
+  /** A folder made from a row's own menu opens in its field, like any other. */
+  it('opens the field for a folder made around a chat', () => {
+    renderScreen(<BotsScreen />)
+
+    hold('bot-row-writer')
+    fireEvent.press(screen.getByTestId('row-menu-newFolder'))
 
     const id = (useChatLayoutStore.getState().entries.find(entry => entry.kind === 'folder') as { id: string }).id
+
+    expect(screen.getByTestId(`folder-name-${id}`).props.autoFocus).toBe(true)
+  })
+
+  /** A folder made by mistake goes away where it was made. */
+  it('offers Remove while the folder is being named', () => {
+    renderScreen(<BotsScreen />)
+
+    const id = addFolder()
 
     fireEvent.press(screen.getByTestId(`folder-remove-${id}`))
 
@@ -412,12 +478,12 @@ describe('edit mode', () => {
 /**
  * Two headings that met with nothing between them.
  *
- * An empty named section used to be dropped from the list unless the list was
- * in edit mode. That cost two things: a section whose last chat moved out
- * vanished, so there was nothing left to move a chat back INTO; and in edit mode
- * two headings then landed back to back with only a heading's own padding
- * between them and read as one run-on line — which is how "NEW SECTIONFINANCE"
- * got onto the screen and then into the stored arrangement as a single name.
+ * An empty named section used to be dropped from the list. That cost two things:
+ * a section whose last chat moved out vanished, so there was nothing left to
+ * move a chat back INTO; and two headings then landed back to back with only a
+ * heading's own padding between them and read as one run-on line — which is how
+ * "NEW SECTIONFINANCE" got onto the screen and then into the stored arrangement
+ * as a single name.
  */
 describe('a folder with nothing in it', () => {
   beforeEach(seedRoster)
@@ -438,7 +504,7 @@ describe('a folder with nothing in it', () => {
     return { empty, full }
   }
 
-  it('keeps its header and gets a row of its own, outside edit mode too', () => {
+  it('keeps its header and gets a row of its own', () => {
     const { empty } = twoFolders()
 
     renderScreen(<BotsScreen />)
@@ -487,7 +553,7 @@ describe('the row context menu', () => {
   it('opens on a long press and archives the bot out of the list', () => {
     renderScreen(<BotsScreen />)
 
-    fireEvent(screen.getByTestId('bot-row-writer'), 'longPress')
+    hold('bot-row-writer')
     fireEvent.press(screen.getByTestId('row-menu-archive'))
 
     expect(useChatLayoutStore.getState().archived).toEqual({ writer: true })
@@ -499,7 +565,7 @@ describe('the row context menu', () => {
   it('keeps an archived bot out of the list and the unread count', () => {
     renderScreen(<BotsScreen />)
 
-    fireEvent(screen.getByTestId('bot-row-writer'), 'longPress')
+    hold('bot-row-writer')
     fireEvent.press(screen.getByTestId('row-menu-archive'))
 
     expect(screen.queryByTestId('bot-row-writer')).toBeNull()
@@ -513,14 +579,14 @@ describe('the row context menu', () => {
   it('sets a per-chat colour, and Default stores nothing', () => {
     renderScreen(<BotsScreen />)
 
-    fireEvent(screen.getByTestId('bot-row-writer'), 'longPress')
+    hold('bot-row-writer')
     fireEvent.press(screen.getByTestId('swatch-writer-teal'))
     expect(useChatLayoutStore.getState().accents).toEqual({ writer: 'teal' })
 
     // A selection closes the menu, the way the platform's own does — so a second
-    // colour is a second long press rather than a second tap in a sheet that
-    // stayed open behind the first.
-    fireEvent(screen.getByTestId('bot-row-writer'), 'longPress')
+    // colour is a second hold rather than a second tap in a sheet that stayed
+    // open behind the first.
+    hold('bot-row-writer')
     fireEvent.press(screen.getByTestId('swatch-writer-default'))
     expect(useChatLayoutStore.getState().accents).toEqual({})
   })
@@ -530,7 +596,7 @@ describe('the row context menu', () => {
     const id = useChatLayoutStore.getState().addFolder('Finance')
 
     renderScreen(<BotsScreen />)
-    fireEvent(screen.getByTestId('bot-row-researcher'), 'longPress')
+    hold('bot-row-researcher')
     fireEvent.press(screen.getByTestId('row-menu-folder'))
     fireEvent.press(screen.getByTestId(`row-menu-folder-${id}`))
 
@@ -553,7 +619,7 @@ describe('the row context menu', () => {
     useChatLayoutStore.getState().reconcile(['researcher', 'writer'])
 
     renderScreen(<BotsScreen />)
-    fireEvent(screen.getByTestId('bot-row-writer'), 'longPress')
+    hold('bot-row-writer')
 
     for (const id of ['row-menu-open', 'row-menu-markRead', 'row-menu-newFolder', 'row-menu-archive']) {
       expect(screen.getByTestId(id)).toBeTruthy()
@@ -571,7 +637,7 @@ describe('the row context menu', () => {
     useChatLayoutStore.getState().reconcile(['researcher', 'writer'])
 
     renderScreen(<BotsScreen />)
-    fireEvent(screen.getByTestId('bot-row-researcher'), 'longPress')
+    hold('bot-row-researcher')
     fireEvent.press(screen.getByTestId('row-menu-move-1'))
 
     expect(useChatLayoutStore.getState().entries).toEqual([
@@ -582,7 +648,7 @@ describe('the row context menu', () => {
 
   it('opens the chat from the menu, which is what its first line says', () => {
     renderScreen(<BotsScreen />)
-    fireEvent(screen.getByTestId('bot-row-writer'), 'longPress')
+    hold('bot-row-writer')
 
     expect(screen.getByTestId('row-menu-open')).toBeTruthy()
   })

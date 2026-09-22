@@ -80,6 +80,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so two providers offering a model of the same name are two different rows instead of one
   ambiguous segment. The chat's own picker gained the provider sections too.
 
+- **Hold a chat and move it.** The chat list's Edit button is gone, and with it the mode that
+  revealed a grab handle on every row: a press and hold now lifts the row itself and it follows your
+  finger, the way an icon does on the Home Screen. Drop it between two chats to reorder, onto a
+  folder to put it in one, at the bottom of the list to take it back out; folders move the same way.
+  Holding a row without moving it still opens that row's menu — where the system draws one it is the
+  system's, and where it does not the app waits until you let go before opening its own, so a hold
+  that becomes a drag never leaves a menu over the row it just lifted. Nothing the mode held is
+  lost: **Move up** and **Move down** are on every row for VoiceOver and for a keyboard, a folder is
+  renamed where it is drawn from its own menu, and **New folder** is in the header's `…` — which is
+  now the same round glass button the chat header carries.
+
 - **Everything a chat row says about itself is in one place now.** The muted bell, the pin and the
   waiting-share mark used to be in two: the bell against the name, the other two in a column beside
   the unread badge — two thirds of a row lower, and nowhere near the time. They are one run on the
