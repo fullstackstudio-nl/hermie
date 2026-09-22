@@ -6376,16 +6376,40 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       }
 
       case 'model.options':
-        // The inventory's own shape: a provider slug plus plain model ids, the
-        // way `hermes_cli/inventory.py::build_models_payload` writes them.
+        /*
+          The inventory's own shape: a provider slug plus plain model ids, the
+          way `hermes_cli/inventory.py::build_models_payload` writes them.
+
+          THREE providers and eleven models, not one provider and two. The size
+          is the fixture's whole point: a real gateway offers a list this long
+          or longer, and a two-model inventory is what let a model PICKER built
+          as a horizontal segmented strip look perfectly readable here while
+          every label on the owner's gateway was cut to three characters. A
+          fixture that cannot reproduce the failure is a fixture that certifies
+          it.
+        */
         return {
           providers: [
             {
               slug: 'example-provider',
               name: 'Example Provider',
-              models: ['example-model', 'expensive-model'],
-              total_models: 2,
+              models: ['example-model', 'expensive-model', 'example-model-mini'],
+              total_models: 3,
               is_current: true
+            },
+            {
+              slug: 'second-provider',
+              name: 'Second Provider',
+              models: ['reasoner-2', 'reasoner-2-turbo', 'summariser-1', 'summariser-1-mini'],
+              total_models: 4,
+              is_current: false
+            },
+            {
+              slug: 'local-runner',
+              name: 'Local Runner',
+              models: ['local-8b-instruct', 'local-70b-instruct', 'local-8b-instruct-quantised', 'local-embed-1'],
+              total_models: 4,
+              is_current: false
             }
           ],
           model: 'example-provider/example-model',
