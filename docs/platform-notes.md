@@ -8881,6 +8881,31 @@ The payload names the finer fact (`cron_done` / `cron_failed`) and the sentence
 keeps saying what actually happened — "cron “Morning digest” reported" — so no
 existing wording moved.
 
+### The app composes no notification text, and that decided where the cron wording went
+
+Worth writing down because the brief reads as though it could go either side.
+Nothing in the app turns a payload into a sentence: on iOS and Android the
+notifier sends `title` and `body` and the OS draws them, and in a browser the
+service worker renders the `title` and `body` it was handed. So "a guessed cron
+is worded as a bot message" is the NOTIFIER's rule, and it is implemented in the
+one composer this repository owns — Hermie Web's `payload.ts`. The plugin's own
+composer is in the plugin.
+
+The app's half is the id: `cronJobFor` and `cronJobName` in `features/cron`, the
+inverse of the transcript's existing name-to-id lookup, answering nothing rather
+than the id for a job the crons list has not been read for yet. A raw job id is
+never printed as a name on either side.
+
+### A risk found while reading, and not resolved here
+
+The service worker falls back to the title `Hermie` and an empty body when a
+payload carries no `title` / `body` at the top level. The plugin's README
+documents its payload as the `data` bag only. If the plugin's Web Push body is
+that flat bag rather than `{title, body, data}`, a browser would draw "Hermie"
+with no text and a tap would carry no `bot` — which reads as a notification that
+does nothing. Nothing in this round changes that, because it cannot be told
+apart from the documents: it needs one real Web Push from a real plugin.
+
 ### What could not be verified here
 
 - **No real push was sent.** No Expo token, no VAPID key, no APNs. Everything in

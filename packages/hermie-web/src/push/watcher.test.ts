@@ -276,6 +276,29 @@ describe('a finished turn', () => {
     expect(f.sent[0]?.message.body).toBe('cron “Morning digest” failed')
   })
 
+  it('says the cron was a fact, because the header it matched is fixed text', async () => {
+    f.setHistory(`${CRON_HEADER}\n\nreport`)
+    f.watcher.onEvent(turn('live-r', 46))
+    await f.watcher.settle()
+
+    const data = f.sent[0]?.message.data as Record<string, unknown>
+
+    expect(data.cron).toBe(true)
+    expect(data.cronCertain).toBe(true)
+    // And the line is allowed to name the run, because of that.
+    expect(f.sent[0]?.message.body).toBe('cron “Morning digest” reported')
+  })
+
+  it('says nothing about cron at all for an ordinary turn', async () => {
+    f.watcher.onEvent(turn('live-r', 47))
+    await f.watcher.settle()
+
+    const data = f.sent[0]?.message.data as Record<string, unknown>
+
+    expect(data.cron).toBeUndefined()
+    expect(data.cronCertain).toBeUndefined()
+  })
+
   it('still reaches a device that only ever asked for the coarse cron switch', async () => {
     // The registration predates `cron_done` and `cron_failed` entirely. Adding
     // a finer type must never be how somebody's phone goes quiet.

@@ -26,8 +26,14 @@ const DEAD_TOKEN_ERRORS = new Set(['DeviceNotRegistered', 'InvalidCredentials'])
 export interface PushMessage {
   title: string
   body: string
-  /** What a tap should open; the app resolves it against the gateway first. */
-  data: Record<string, string>
+  /**
+   * What a tap should open; the app resolves it against the gateway first.
+   *
+   * Booleans as well as strings, because `cronCertain: false` has to be read
+   * back as false rather than as the non-empty string `"false"` — and both
+   * transports carry this bag as JSON, so there is nothing to encode around.
+   */
+  data: Record<string, string | boolean>
   /** Notification category, for the Allow / Deny actions on a request. */
   categoryId?: string
 }

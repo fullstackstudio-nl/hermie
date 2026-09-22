@@ -30,7 +30,15 @@ import type { CronJobInput } from './cron-controller'
 import { CronDetailScreen } from './CronDetailScreen'
 import { CronEditorSheet } from './CronEditorSheet'
 import { CronRunScreen } from './CronRunScreen'
-import { type CronJob, type CronRun, cronStatusOf, lastErrorSummary, relativeTime, scheduleText } from './model'
+import {
+  type CronJob,
+  cronJobFor,
+  type CronRun,
+  cronStatusOf,
+  lastErrorSummary,
+  relativeTime,
+  scheduleText
+} from './model'
 import { StatusDot } from './StatusDot'
 import { cronStrings } from './strings'
 import { useCronController } from './useCron'
@@ -184,7 +192,7 @@ export function CronScreen({ initialCreate, initialJobId }: CronScreenProps = {}
   // shown only where it tells two rows apart.
   const showProfiles = useMemo(() => new Set(jobs.map(job => job.profile)).size > 1, [jobs])
 
-  const selected = view.screen === 'list' ? null : (jobs.find(job => job.id === view.jobId) ?? null)
+  const selected = view.screen === 'list' ? null : cronJobFor(jobs, view.jobId)
 
   // Escape goes back ONE level. A sub page registers on top of whatever is
   // already holding the key — the overlay panel on the wide layout — so the

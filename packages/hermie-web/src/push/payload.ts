@@ -43,6 +43,35 @@ export interface NotifiableEvent {
   requestMethod?: string
   /** `dm` — the sender; `cron` — the job. */
   name?: string
+  /** True for anything raised inside a scheduled run, whatever its type. */
+  cron?: boolean
+  /**
+   * Whether "this was a scheduled run" is a FACT or a guess.
+   *
+   * The plugin's word, and the app reads it off the payload under this name.
+   * The three cron types say which switch a notification answers to; this says
+   * whether the sentence is allowed to claim a scheduled run at all.
+   *
+   * A notifier recognises a cron run by whatever signal it has. Some are facts
+   * — this daemon's are, because the two headers it matches are fixed text the
+   * scheduler writes and the job name is the only variable in them. Some are
+   * not: the plugin's last resort is the session's `platform` string, which is
+   * free text, and a match on it is a guess.
+   *
+   * Absent means the notifier did not say, which is every payload sent before
+   * the field existed and is read as the fact it was always treated as.
+   * Explicit `false` is the one that changes the wording — see `summaryOf`.
+   */
+  cronCertain?: boolean
+  /**
+   * The scheduler's own id for the job, where the notifier has one.
+   *
+   * Carried and never PRINTED. It is an id, and a lock screen that says
+   * `cron “8f3a-…” reported` has told the reader less than "a cron job
+   * reported" would have. The name is what goes in the sentence, and where
+   * there is no name there is no name.
+   */
+  jobId?: string
   /**
    * `cron` — the run failed rather than reported.
    *
@@ -94,6 +123,20 @@ function summaryOf(event: NotifiableEvent): string {
     case 'cron':
     case 'cron_done':
     case 'cron_failed':
+      /*
+        A GUESSED cron is worded as what it certainly is: a bot wrote something.
+
+        Saying "cron “Morning digest” failed" when the only evidence was a
+        free-text platform string is a notification telling the reader a thing
+        nobody knows — and the reader has no way to tell that sentence from one
+        backed by the scheduler's own header. An ordinary message notification
+        is the weaker claim and it is true either way: something arrived in that
+        chat, which is exactly what a tap will show.
+      */
+      if (event.cronCertain === false) {
+        return summaryOf({ ...event, type: 'message' })
+      }
+
       if (event.failed || event.type === 'cron_failed') {
         return event.name ? `cron “${event.name}” failed` : 'a cron run failed'
       }
@@ -132,6 +175,16 @@ export function pushMessageFor(event: NotifiableEvent, preview: boolean): PushMe
       session: event.sessionId,
       sessionId: event.sessionId,
       ...(event.sessionKind ? { sessionKind: event.sessionKind } : {}),
+      /*
+        The plugin's three cron fields, under the plugin's own names, so the app
+        reads one shape whichever notifier sent it. Omitted rather than written
+        empty or false, because a reader of a payload checks for absence — and
+        `cronCertain: false` has to mean "this is a guess" rather than "nobody
+        filled this in".
+      */
+      ...(event.cron ? { cron: true } : {}),
+      ...(typeof event.cronCertain === 'boolean' ? { cronCertain: event.cronCertain } : {}),
+      ...(event.jobId ? { jobId: event.jobId } : {}),
       ...(event.requestId ? { request: event.requestId } : {}),
       ...(event.requestMethod ? { method: event.requestMethod } : {}),
       // Omitted rather than empty, so a reader checks for absence rather than

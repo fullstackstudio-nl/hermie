@@ -27,6 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the session that asked, so the reader lands on the request and answers it there. In a browser, two
   conversations of one bot no longer replace each other on the lock screen.
 
+- **A notification only claims a scheduled run when it knows there was one.** A notifier recognises
+  a cron run by whatever signal it has, and not all of them are facts — the last resort is the
+  session's platform string, which is free text. Where the notifier says its answer was a guess, the
+  line reads as an ordinary message from the bot instead of naming a routine that may not have run,
+  because a lock screen gives the reader no way to tell a guessed sentence from a certain one. A job
+  id is carried but never printed: `a cron run failed` says more than the id would.
+
 - **Boards.** The Kanban boards the gateway keeps, from Settings → **Boards** or **Boards** in the
   chat list's header: every board, its columns, its cards, and a card's own page with its notes and
   its comments. A card can be made, edited, moved and archived. It is the same data the Hermes

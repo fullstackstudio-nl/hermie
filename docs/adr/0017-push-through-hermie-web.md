@@ -432,6 +432,30 @@ asked, and that session is not the one this connection resumed. The reader
 lands on the request and answers it there, which is the direction this feature
 is built to fail in.
 
+## Amendment, 2026-09-22: a guessed cron is not a cron
+
+ADR-0017's payload policy is that a notification says WHO and what KIND. The
+kind is the part that can be wrong: Hermes fires no cron hook, so every notifier
+recognises a scheduled run by a signal it chose, and the signals are not equally
+good. Hermie Web's daemon matches one of two headers the scheduler writes, word
+for word, and is therefore stating a fact. The plugin prefers `task_id` and
+`HERMES_CRON_SESSION`, which are also facts, and falls back to the session's
+`platform` string, which is free text.
+
+**So the payload carries `cronCertain`, and a notification worded from a guess
+does not claim a scheduled run.** `cron "Morning digest" failed` and `sent you a
+message` are indistinguishable to the reader in the one way that matters — the
+lock screen shows no workings — so the weaker sentence is the honest one, and it
+is true either way: something arrived in that chat, which is what a tap shows.
+An ABSENT `cronCertain` is read as certain, because that is every payload sent
+before the field existed and is how they were already being read.
+
+**`jobId` is carried and never printed.** It is an id. `cron "8f3a-77" failed`
+has told the reader less than `a cron run failed` would, so the NAME goes in the
+sentence and where there is no name the general line is used. Resolving an id to
+a name is the app's to do — `cronJobFor` / `cronJobName` in `features/cron` —
+and it answers nothing, rather than the id, before the crons list has been read.
+
 ### What is unchanged
 
 The registration schema and its `v`, the app never talking to the notifier, the

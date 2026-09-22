@@ -99,6 +99,72 @@ describe('the notification', () => {
     expect(pushMessageFor({ bot: 'researcher', sessionId: 'x', type: 'message' }, false).title).toBe('researcher')
   })
 
+  describe('a cron line only claims what the notifier knows', () => {
+    const cron = { ...base, name: 'Morning digest', cron: true }
+
+    it('names the job when the classification was a fact', () => {
+      expect(pushMessageFor({ ...cron, type: 'cron_done', cronCertain: true }, false).body).toBe(
+        'cron “Morning digest” reported'
+      )
+      expect(pushMessageFor({ ...cron, type: 'cron_failed', cronCertain: true }, false).body).toBe(
+        'cron “Morning digest” failed'
+      )
+    })
+
+    it('words a GUESSED cron as an ordinary bot message, however sure the name looks', () => {
+      /*
+        A notifier whose only signal was a free-text platform string cannot say
+        a scheduled run happened, and the reader has no way to tell that
+        sentence apart from one backed by the scheduler's own header. The weaker
+        claim is true either way: something arrived in that chat.
+      */
+      expect(pushMessageFor({ ...cron, type: 'cron_done', cronCertain: false }, false).body).toBe('sent you a message')
+      expect(pushMessageFor({ ...cron, type: 'cron_failed', cronCertain: false }, false).body).toBe(
+        'sent you a message'
+      )
+    })
+
+    it('treats a notifier that did not say as the fact it was always taken to be', () => {
+      // Every payload sent before the field existed, and this daemon's own —
+      // which reads two fixed headers and is therefore never guessing.
+      expect(pushMessageFor({ ...cron, type: 'cron_done' }, false).body).toBe('cron “Morning digest” reported')
+    })
+
+    it('never prints a job id where a name belongs', () => {
+      // The gateway's redactor can blank a name, and a plugin may know only the
+      // scheduler's id. `cron “8f3a-…” failed` says less than the general line.
+      const message = pushMessageFor(
+        { ...base, type: 'cron_failed', cron: true, cronCertain: true, jobId: '8f3a-77' },
+        false
+      )
+
+      expect(message.body).toBe('a cron run failed')
+      // Carried for the app, never rendered.
+      expect(message.data.jobId).toBe('8f3a-77')
+    })
+
+    it('carries the plugin’s own three fields, and omits them where they say nothing', () => {
+      const guessed = pushMessageFor({ ...cron, type: 'cron_done', cronCertain: false }, false)
+
+      expect(guessed.data.cron).toBe(true)
+      // `false` and absent are different answers: one is "this is a guess" and
+      // the other is "nobody filled this in".
+      expect(guessed.data.cronCertain).toBe(false)
+
+      const plain = pushMessageFor({ ...base, type: 'message' }, false)
+
+      expect(plain.data.cron).toBeUndefined()
+      expect(plain.data.cronCertain).toBeUndefined()
+      expect(plain.data.jobId).toBeUndefined()
+    })
+
+    it('still carries the preview a device asked for, whatever the wording says', () => {
+      expect(pushMessageFor({ ...cron, type: 'cron_done', cronCertain: false, preview: 'all clear' }, true).body).toBe(
+        'all clear'
+      )
+    })
+  })
+
   it('keeps a preview to one short line', () => {
     expect(trimPreview('a\n\n   b   c')).toBe('a b c')
     expect(trimPreview('x'.repeat(400)).length).toBeLessThanOrEqual(120)

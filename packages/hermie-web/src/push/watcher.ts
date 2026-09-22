@@ -522,6 +522,16 @@ export class PushWatcher {
       // sessions this daemon watches are the ones it resumed off the roster.
       sessionKind: 'canonical',
       ...(inbound.name ? { name: inbound.name } : {}),
+      /*
+        A FACT here, and said so rather than left out.
+
+        This daemon recognises a cron run by matching one of two headers the
+        scheduler writes, word for word — see `inbound.ts` — so the answer is
+        as certain as the transcript it read. A notifier whose only signal is a
+        free-text platform string cannot say this, and the app words that case
+        as an ordinary message instead of claiming a scheduled run.
+      */
+      ...(cron ? { cron: true, cronCertain: true } : {}),
       ...(cron && failed ? { failed: true } : {}),
       preview: typeof payload.text === 'string' ? payload.text : ''
     }
