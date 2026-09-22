@@ -43,9 +43,18 @@ async function signIn(account: { username: string; password: string }): Promise<
   return (login.headers.get('set-cookie') ?? '').split(';')[0] as string
 }
 
-/** Open `/admin` and come back with the page and the token it minted. */
-async function openAdmin(cookie: string): Promise<{ status: number; body: string; csrf: string; cookie: string }> {
-  const response = await fetch(`${web.url}/admin`, { headers: { cookie } as Record<string, string> })
+/**
+ * Open one administration page and come back with it and the token it minted.
+ *
+ * The path is a parameter because `/admin` is a set of pages now: a control is
+ * on the page it belongs to, so a test that asserts a saved value has to ask for
+ * that page rather than for the overview.
+ */
+async function openAdmin(
+  cookie: string,
+  path = '/admin'
+): Promise<{ status: number; body: string; csrf: string; cookie: string }> {
+  const response = await fetch(`${web.url}${path}`, { headers: { cookie } as Record<string, string> })
   const body = await response.text()
   const setCookie = response.headers.get('set-cookie') ?? ''
   const csrf = decodeURIComponent(/hermie_admin_csrf=([^;]*)/.exec(setCookie)?.[1] ?? '')
@@ -198,7 +207,7 @@ describe('the settings round trip', () => {
     expect(state.push.types).toMatchObject({ message: true, request: true, dm: false, cron: false })
     expect(state.push.preview).toBe('never')
 
-    const after = await openAdmin(page.cookie)
+    const after = await openAdmin(page.cookie, '/admin/push')
 
     expect(after.body).toContain('<option value="never" selected>')
   })
@@ -209,7 +218,7 @@ describe('the settings round trip', () => {
     await post(page.cookie, '/admin/cache', { csrf: page.csrf, retentionHours: '48' })
 
     expect((await loadAdminState(stateDir)).cache.retentionHours).toBe(48)
-    expect((await openAdmin(page.cookie)).body).toContain('value="48"')
+    expect((await openAdmin(page.cookie, '/admin/cache')).body).toContain('value="48"')
   })
 
   it('writes branding, and it reaches the app bootstrap', async () => {
@@ -281,7 +290,7 @@ describe('the people list', () => {
     // Any proxied request is enough; the roster read is what a page load makes.
     await fetch(`${web.url}/api/auth/me`, { headers: { cookie: grace } as Record<string, string> })
 
-    const page = await openAdmin(await signIn(ADA))
+    const page = await openAdmin(await signIn(ADA), '/admin/people')
 
     expect(page.body).toContain(GRACE.userId)
     expect(page.body).toContain('Grace Hopper')
@@ -305,7 +314,7 @@ describe('the people list', () => {
       // Unticked: an HTML form sends nothing for it, which is "off".
       pushAllowed: false
     })
-    expect((await openAdmin(page.cookie)).body).toContain('researcher, notes')
+    expect((await openAdmin(page.cookie, '/admin/people')).body).toContain('researcher, notes')
   })
 
   it('refuses to remove the last administrator', async () => {
@@ -387,5 +396,105 @@ describe('what the options enforce', () => {
     const parsed = JSON.parse(await readFile(adminStatePath(stateDir), 'utf8')) as { v: number }
 
     expect(parsed.v).toBe(1)
+  })
+})
+
+/**
+ * The chrome, and the fact that there is now more than one page behind it.
+ *
+ * What is worth pinning is not that the CSS is there. It is that every page
+ * carries the nav and marks the one it is, that a path nobody serves says so
+ * rather than quietly drawing the overview, and that each control still lives on
+ * exactly one page — which is the whole of what the restructure bought.
+ */
+describe('the administration pages', () => {
+  const PAGES = ['/admin', '/admin/people', '/admin/push', '/admin/cache', '/admin/branding', '/admin/features']
+
+  it('draws every page with the same chrome, the mark and the version in the footer', async () => {
+    const cookie = await signIn(ADA)
+
+    for (const path of [...PAGES, '/admin/danger', '/admin/oidc']) {
+      const page = await openAdmin(cookie, path)
+
+      expect(page.status, path).toBe(200)
+      // The logo is inlined, so a page an operator opens when something is
+      // already wrong needs no second request to look like itself.
+      expect(page.body, path).toContain('<svg class="mark"')
+      expect(page.body, path).toContain('href="/admin/oidc"')
+      expect(page.body, path).toContain('Hermie Web 9.9.9')
+      // One nav, with one current entry. Anchored to the link, because the
+      // style sheet names the same attribute in a selector.
+      expect(page.body.match(/<a href="[^"]*" aria-current="page">/g), path).toHaveLength(1)
+      // And no script, on any of them.
+      expect(page.body, path).not.toContain('<script')
+    }
+  })
+
+  it('marks the page the reader is on, and nothing else', async () => {
+    const cookie = await signIn(ADA)
+    const push = await openAdmin(cookie, '/admin/push')
+
+    expect(push.body).toContain('<a href="/admin/push" aria-current="page">')
+    expect(push.body).toContain('<a href="/admin/cache">')
+  })
+
+  it('puts each control on exactly one page', async () => {
+    const cookie = await signIn(ADA)
+    const bodies = new Map<string, string>()
+
+    for (const path of PAGES) {
+      bodies.set(path, (await openAdmin(cookie, path)).body)
+    }
+
+    const hasForm = (path: string, action: string): boolean => (bodies.get(path) ?? '').includes(`action="${action}"`)
+
+    expect(hasForm('/admin/push', '/admin/push')).toBe(true)
+    expect(hasForm('/admin', '/admin/push')).toBe(false)
+    expect(hasForm('/admin/cache', '/admin/cache')).toBe(true)
+    expect(hasForm('/admin/branding', '/admin/branding')).toBe(true)
+    expect(hasForm('/admin/features', '/admin/flags')).toBe(true)
+    expect(hasForm('/admin/people', '/admin/user')).toBe(true)
+    expect(hasForm('/admin', '/admin/user')).toBe(false)
+  })
+
+  it('sends a saved form back to the page it was on', async () => {
+    const page = await openAdmin(await signIn(ADA), '/admin/branding')
+    const response = await post(page.cookie, '/admin/branding', {
+      csrf: page.csrf,
+      name: 'Acme Chat',
+      accent: '',
+      theme: ''
+    })
+
+    expect(response.status).toBe(303)
+    expect(response.headers.get('location')).toMatch(/^\/admin\/branding\?notice=/)
+  })
+
+  it('names the deployment rather than Hermie once branding has one', async () => {
+    const page = await openAdmin(await signIn(ADA))
+
+    expect(page.body).toContain('<span class="brand-name">Acme Chat</span>')
+    expect(page.body).toContain('<title>Overview — Acme Chat</title>')
+  })
+
+  it('answers 404 for an /admin path nobody serves, rather than drawing the overview', async () => {
+    const response = await fetch(`${web.url}/admin/nowhere`, {
+      headers: { cookie: await signIn(ADA) } as Record<string, string>
+    })
+
+    expect(response.status).toBe(404)
+    expect(await response.text()).not.toContain('<svg class="mark"')
+  })
+
+  it('translates the nav, so a page is not half in one language', async () => {
+    const response = await fetch(`${web.url}/admin/people`, {
+      headers: { cookie: await signIn(ADA), 'accept-language': 'nl' } as Record<string, string>
+    })
+    const body = await response.text()
+
+    expect(body).toContain('<html lang="nl">')
+    expect(body).toContain('>Overzicht</a>')
+    expect(body).toContain('>Gevarenzone</a>')
+    expect(body).toContain('Bijwerken en herstarten')
   })
 })

@@ -1,5 +1,5 @@
 /**
- * `/admin`, as HTML a browser can use with JavaScript switched off.
+ * The administration pages, as HTML a browser can use with JavaScript off.
  *
  * The same zero-dependency approach `setup.ts` takes, and for the same reason:
  * this file ships inside `dist/server` with no `node_modules` beside it and no
@@ -10,6 +10,14 @@
  * That is not austerity for its own sake. An admin page is the surface an
  * operator reaches for when something is already wrong, which is exactly when a
  * bundle that has to load first is the thing that will not.
+ *
+ * **One subject per page.** This used to be a single document with the Service,
+ * Push, Cache, Branding, Features and People panels stacked down it. Six forms
+ * on one page share one notice and one scroll position, so an operator who
+ * pressed Save had to work out which of the six it belonged to; the chrome and
+ * the nav are in `layout.ts` and each function below renders the body of one
+ * page. The POST routes did not move, so nothing an operator has bookmarked or
+ * scripted against changed.
  *
  * Three rules this file keeps, because they are the ones an admin page gets
  * wrong:
@@ -23,8 +31,8 @@
  *    without it before it reads the body.
  */
 import { escapeHtml } from '../setup'
-import { htmlLang, type WebLocale, type WebStrings } from '../i18n'
-import { CSRF_FIELD } from './session'
+import type { WebLocale, WebStrings } from '../i18n'
+import { adminBarePage, adminShell, card, csrfField, type AdminChrome } from './layout'
 import { PUSH_TYPES } from '../push/registrations'
 import type { AdminState, AdminUserRow } from './state'
 
@@ -82,36 +90,28 @@ function hitRate(status: AdminStatus, strings: WebStrings): string {
     : strings.admin.service.nothingAsked
 }
 
-const STYLE = `
-  :root { color-scheme: light dark; --ink: #16181d; --muted: #5d636e; --line: #d9dce2; --bg: #f6f7f9; --card: #fff; --accent: #2f6df6; --bad: #b3261e; }
-  @media (prefers-color-scheme: dark) { :root { --ink: #eceef2; --muted: #9aa1ad; --line: #2c3038; --bg: #101216; --card: #181b21; } }
-  * { box-sizing: border-box }
-  body { font: 16px/1.55 system-ui, sans-serif; margin: 0; background: var(--bg); color: var(--ink) }
-  main { max-width: 46rem; margin: 0 auto; padding: 2.5rem 1rem 4rem }
-  h1 { font-size: 1.4rem; margin: 0 0 .25rem }
-  h2 { font-size: 1rem; margin: 0 0 .5rem }
-  p { color: var(--muted); margin: .25rem 0 1rem }
-  section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 1.25rem; margin: 1.25rem 0 }
-  label { display: block; font-size: .85rem; color: var(--muted); margin-bottom: .35rem }
-  input[type=text], input[type=password], input[type=number], select { width: 100%; font: inherit; padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: inherit }
-  button { font: inherit; padding: .5rem .9rem; border: 0; border-radius: 8px; background: var(--accent); color: #fff; cursor: pointer }
-  table { width: 100%; border-collapse: collapse; font-size: .9rem }
-  th, td { text-align: left; padding: .45rem .4rem; border-bottom: 1px solid var(--line); vertical-align: top }
-  th { color: var(--muted); font-weight: 600 }
-  .row { display: flex; gap: .6rem; align-items: flex-end; flex-wrap: wrap }
-  .row > div { flex: 1; min-width: 9rem }
-  .note { font-size: .85rem }
-  .bad { color: var(--bad) }
-  .ok { color: var(--accent) }
-  dl { display: grid; grid-template-columns: max-content 1fr; gap: .25rem .9rem; margin: 0; font-size: .9rem }
-  dt { color: var(--muted) }
-  code { font-family: ui-monospace, monospace; font-size: .9em }
-`
+/**
+ * The deployment's own name, for the chrome.
+ *
+ * The branding name where an operator set one, else Hermie. A team that renamed
+ * the app should see the renamed thing on the page that renamed it.
+ */
+export const brandOf = (state: AdminState): string => state.branding.name || 'Hermie'
 
-const head = (locale: WebLocale, title: string): string =>
-  `<!doctype html>\n<html lang="${htmlLang(locale)}">\n<meta charset="utf-8">\n` +
-  `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
-  `<title>${escapeHtml(title)}</title>\n<style>${STYLE}</style>\n`
+/** The chrome, built from the same input every page already takes. */
+function chromeOf(input: AdminPageInput, current: AdminChrome['current']): AdminChrome {
+  return {
+    brand: brandOf(input.state),
+    version: input.status.version,
+    current,
+    csrf: input.csrf,
+    canSelfUpdate: input.status.canSelfUpdate,
+    updateReason: input.status.updateReason,
+    notice: input.notice,
+    locale: input.locale,
+    strings: input.strings
+  }
+}
 
 /**
  * The sign-in for a deployment with no gateway accounts.
@@ -123,43 +123,249 @@ const head = (locale: WebLocale, title: string): string =>
 export function adminSignInPage(input: {
   csrf: string
   notice: string
+  brand: string
   locale: WebLocale
   strings: WebStrings
 }): string {
   const { common, admin } = input.strings
 
-  return `${head(input.locale, common.administrationTitle)}<main>
-  <h1>${common.administration}</h1>
-  <p>${admin.signIn.intro}</p>
-  ${input.notice ? `<p class="note bad">${escapeHtml(input.notice)}</p>` : ''}
-  <section>
-    <form method="post" action="/admin/sign-in">
-      <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
-      <label for="secret">${common.administratorSecret}</label>
-      <input id="secret" name="secret" type="password" autocomplete="current-password">
-      <p class="note">${admin.signIn.secretNote}</p>
-      <button type="submit">${common.signIn}</button>
-    </form>
-  </section>
-</main>
-</html>
-`
+  return adminBarePage({
+    brand: input.brand,
+    title: common.administration,
+    locale: input.locale,
+    strings: input.strings,
+    body: `<p class="lede">${admin.signIn.intro}</p>
+    ${input.notice ? `<p class="banner bad">${escapeHtml(input.notice)}</p>` : ''}
+    ${card({
+      body: `<form method="post" action="/admin/sign-in">
+        ${csrfField(input.csrf)}
+        <label for="secret">${common.administratorSecret}</label>
+        <input id="secret" name="secret" type="password" autocomplete="current-password">
+        <p class="note">${admin.signIn.secretNote}</p>
+        <div class="actions"><button type="submit">${common.signIn}</button></div>
+      </form>`
+    })}`
+  })
 }
 
 /** The page somebody who is signed in but is not an administrator gets. */
-export function adminForbiddenPage(input: { viewer: string; locale: WebLocale; strings: WebStrings }): string {
+export function adminForbiddenPage(input: {
+  viewer: string
+  brand: string
+  locale: WebLocale
+  strings: WebStrings
+}): string {
   const text = input.strings.admin.forbidden
 
-  return `${head(input.locale, text.title)}<main>
-  <h1>${text.title}</h1>
-  <p>${input.viewer ? text.knownAs(escapeHtml(input.viewer)) : text.unknown}</p>
-  <p class="note">${text.note}</p>
-</main>
-</html>
-`
+  return adminBarePage({
+    brand: input.brand,
+    title: text.title,
+    locale: input.locale,
+    strings: input.strings,
+    body: `<p class="lede">${input.viewer ? text.knownAs(escapeHtml(input.viewer)) : text.unknown}</p>
+    <p class="note">${text.note}</p>`
+  })
 }
 
-function usersTable(input: AdminPageInput): string {
+/** Overview: the figures, and a link to the page each of them belongs to. */
+export function adminOverviewPage(input: AdminPageInput): string {
+  const { status, strings } = input
+  const text = strings.admin
+  const service = text.service
+
+  return adminShell(chromeOf(input, 'overview'), {
+    title: text.overview.title,
+    intro: text.overview.intro,
+    body: `${card({
+      heading: service.heading,
+      body: `<dl>
+        <dt>${service.version}</dt><dd>${escapeHtml(status.version)} — ${
+          status.updateAvailable ? service.updateAvailable(escapeHtml(status.latestVersion)) : service.upToDate
+        }</dd>
+        <dt>${text.gateway}</dt><dd><code>${escapeHtml(status.gatewayUrl)}</code></dd>
+        <dt>${service.serviceLogin}</dt><dd>${yes(status.serviceLogin, strings)}</dd>
+        <dt>${service.pushDaemon}</dt><dd>${status.pushRunning ? service.running : service.notRunning}</dd>
+        <dt>${service.vapidKey}</dt><dd>${yes(status.vapidPresent, strings)}</dd>
+      </dl>`
+    })}
+    ${card({
+      heading: service.messageCache,
+      body: `<dl>
+        <dt>${service.messageCache}</dt><dd>${
+          status.cacheEnabled
+            ? service.cacheFill(status.cacheEntries, megabytes(status.cacheBytes), megabytes(status.cacheMaxBytes))
+            : service.cacheOff
+        }</dd>
+        <dt>${service.cacheHits}</dt><dd>${escapeHtml(hitRate(status, strings))}</dd>
+      </dl>
+      <p><a href="/admin/cache">${text.nav.cache} →</a></p>`
+    })}
+    ${card({
+      heading: text.people.heading,
+      body: `<dl>
+        <dt>${service.userList}</dt><dd>${status.usersFrom === 'gateway' ? service.fromGateway : service.fromSeen}</dd>
+        <dt>${text.nav.people}</dt><dd>${text.overview.peopleSeen(Object.keys(input.state.users).length)}</dd>
+      </dl>
+      <p><a href="/admin/people">${text.nav.people} →</a></p>`
+    })}
+    ${card({
+      heading: text.identity.heading,
+      intro: input.identity.enabled
+        ? text.identity.on(escapeHtml(input.identity.issuer), input.identity.accounts)
+        : text.identity.off,
+      body: `<p><a href="/admin/oidc">${text.identity.link}</a></p>`
+    })}`
+  })
+}
+
+/** Push: the ceiling on what the daemon will send, and the preview policy. */
+export function adminPushPage(input: AdminPageInput): string {
+  const text = input.strings.admin.push
+  const { state } = input
+
+  return adminShell(chromeOf(input, 'push'), {
+    title: text.heading,
+    intro: text.intro,
+    body: card({
+      body: `<form method="post" action="/admin/push">
+      ${csrfField(input.csrf)}
+      ${PUSH_TYPES.map(
+        type =>
+          `<label class="check"><input type="checkbox" name="type-${type}" value="1"${
+            state.push.types[type] ? ' checked' : ''
+          }> ${type}</label>`
+      ).join('\n      ')}
+      <div class="fields">
+        <div>
+          <label for="preview">${text.previewLabel}</label>
+          <select id="preview" name="preview">
+            <option value="device"${state.push.preview === 'device' ? ' selected' : ''}>${text.previewDevice}</option>
+            <option value="never"${state.push.preview === 'never' ? ' selected' : ''}>${text.previewNever}</option>
+          </select>
+        </div>
+      </div>
+      <div class="actions"><button type="submit">${text.saveButton}</button></div>
+    </form>`
+    })
+  })
+}
+
+/** Cache: retention, what the size cap is, and the one button that deletes. */
+export function adminCachePage(input: AdminPageInput): string {
+  const { strings, status } = input
+  const text = strings.admin.cache
+  const service = strings.admin.service
+
+  return adminShell(chromeOf(input, 'cache'), {
+    title: service.messageCache,
+    body: `${card({
+      body: `<dl>
+        <dt>${service.messageCache}</dt><dd>${
+          status.cacheEnabled
+            ? service.cacheFill(status.cacheEntries, megabytes(status.cacheBytes), megabytes(status.cacheMaxBytes))
+            : service.cacheOff
+        }</dd>
+        <dt>${service.cacheHits}</dt><dd>${escapeHtml(hitRate(status, strings))}</dd>
+      </dl>
+      <form method="post" action="/admin/cache">
+        ${csrfField(input.csrf)}
+        <div class="fields">
+          <div>
+            <label for="retention">${text.retentionLabel}</label>
+            <input id="retention" name="retentionHours" type="number" min="0" value="${
+              input.state.cache.retentionHours
+            }">
+          </div>
+        </div>
+        <p class="note">${text.capNote}</p>
+        <div class="actions">
+          <button type="submit">${strings.common.save}</button>
+          <button class="quiet" type="submit" name="clear" value="1">${text.clearButton}</button>
+        </div>
+      </form>`
+    })}`
+  })
+}
+
+/** Branding: the three values the app bootstraps with. */
+export function adminBrandingPage(input: AdminPageInput): string {
+  const text = input.strings.admin.branding
+  const { state } = input
+
+  return adminShell(chromeOf(input, 'branding'), {
+    title: text.heading,
+    intro: text.intro,
+    body: card({
+      body: `<form method="post" action="/admin/branding">
+      ${csrfField(input.csrf)}
+      <div class="fields">
+        <div>
+          <label for="brand-name">${text.nameLabel}</label>
+          <input id="brand-name" name="name" type="text" value="${escapeHtml(
+            state.branding.name
+          )}" placeholder="Hermie">
+        </div>
+        <div>
+          <label for="brand-accent">${text.accentLabel}</label>
+          <input id="brand-accent" name="accent" type="text" value="${escapeHtml(
+            state.branding.accent
+          )}" placeholder="default">
+        </div>
+        <div>
+          <label for="brand-theme">${text.themeLabel}</label>
+          <input id="brand-theme" name="theme" type="text" value="${escapeHtml(
+            state.branding.theme
+          )}" placeholder="system">
+        </div>
+      </div>
+      <p class="note">${text.note}</p>
+      <div class="actions"><button type="submit">${text.saveButton}</button></div>
+    </form>`
+    })
+  })
+}
+
+/** Features: what an operator can switch off for everybody. */
+export function adminFeaturesPage(input: AdminPageInput): string {
+  const text = input.strings.admin.features
+  const { state } = input
+
+  return adminShell(chromeOf(input, 'features'), {
+    title: text.heading,
+    body: card({
+      body: `<form method="post" action="/admin/flags">
+      ${csrfField(input.csrf)}
+      <label class="check"><input type="checkbox" name="userChats" value="1"${
+        state.flags.userChats ? ' checked' : ''
+      }> ${text.userChats}</label>
+      <label class="check"><input type="checkbox" name="messageCache" value="1"${
+        state.flags.messageCache ? ' checked' : ''
+      }> ${text.messageCache}</label>
+      <label class="check"><input type="checkbox" name="selfUpdate" value="1"${
+        state.flags.selfUpdate ? ' checked' : ''
+      }> ${text.selfUpdate}</label>
+      <div class="actions"><button type="submit">${text.saveButton}</button></div>
+    </form>`
+    })
+  })
+}
+
+/**
+ * The people table.
+ *
+ * Real columns, and the trick that makes them possible without a script: a
+ * `<form>` cannot be a child of a `<tr>`, so one row's form would have had to
+ * live inside a single cell — which is what it used to do, and why every switch
+ * for one person was stacked into one column while the headers above described
+ * something else. HTML5's `form` attribute puts the element in the last cell and
+ * points every input in the row at it by id, so the row is a row and the form is
+ * still one form that posts.
+ *
+ * The id is the row's ORDINAL rather than the user id: a gateway user id is an
+ * email address or worse, and an HTML id that contains an `@` or a space is one
+ * no `form=` attribute can name.
+ */
+function peopleTable(input: AdminPageInput): string {
   const text = input.strings.admin.people
   const rows = Object.values(input.state.users).sort((left, right) => right.seenAt - left.seenAt)
 
@@ -168,202 +374,113 @@ function usersTable(input: AdminPageInput): string {
   }
 
   return `<table>
-  <tr><th>${text.who}</th><th>${text.lastSeen}</th><th>${text.bots}</th><th>${text.readOnly}</th><th>${
-    text.push
-  }</th><th></th></tr>
-  ${rows.map(row => userRow(row, input)).join('\n  ')}
+  <thead><tr>
+    <th>${text.who}</th>
+    <th>${text.lastSeen}</th>
+    <th>${text.bots}</th>
+    <th class="tick">${text.readOnly}</th>
+    <th class="tick">${text.push}</th>
+    <th class="tick">${text.administratorBox}</th>
+    <th></th>
+  </tr></thead>
+  <tbody>
+  ${rows.map((row, index) => personRow(row, index, input)).join('\n  ')}
+  </tbody>
 </table>`
 }
 
-function userRow(row: AdminUserRow, input: AdminPageInput): string {
+function personRow(row: AdminUserRow, index: number, input: AdminPageInput): string {
   const text = input.strings.admin.people
   const label = row.displayName || row.email || row.userId
   const allowed = row.allowedBots === null ? '' : row.allowedBots.join(', ')
   const admin = input.state.admins.includes(row.userId)
+  const form = `person-${index}`
 
   return `<tr>
-    <td><strong>${escapeHtml(label)}</strong><br><code>${escapeHtml(row.userId)}</code>${
-      admin ? ` <span class="ok note">${text.administrator}</span>` : ''
-    }</td>
+    <td><strong>${escapeHtml(label)}</strong>${admin ? ` <span class="badge">${text.administrator}</span>` : ''}
+      <br><code class="note">${escapeHtml(row.userId)}</code></td>
     <td class="note">${row.seenAt ? new Date(row.seenAt * 1000).toISOString().slice(0, 16).replace('T', ' ') : '—'}</td>
-    <td colspan="4">
-      <form method="post" action="/admin/user">
-        <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
+    <td>
+      <label class="sr" for="bots-${form}">${text.allowedBotsLabel}</label>
+      <input id="bots-${form}" form="${form}" name="allowedBots" type="text" value="${escapeHtml(allowed)}"
+             placeholder="${escapeHtml(input.bots.join(', ') || 'researcher, writer')}">
+    </td>
+    <td class="tick"><input type="checkbox" form="${form}" name="readOnly" value="1"${
+      row.readOnly ? ' checked' : ''
+    } aria-label="${escapeHtml(text.readOnly)}"></td>
+    <td class="tick"><input type="checkbox" form="${form}" name="pushAllowed" value="1"${
+      row.pushAllowed ? ' checked' : ''
+    } aria-label="${escapeHtml(text.pushAllowed)}"></td>
+    <td class="tick"><input type="checkbox" form="${form}" name="admin" value="1"${
+      admin ? ' checked' : ''
+    } aria-label="${escapeHtml(text.administratorBox)}"></td>
+    <td>
+      <form id="${form}" method="post" action="/admin/user">
+        ${csrfField(input.csrf)}
         <input type="hidden" name="userId" value="${escapeHtml(row.userId)}">
-        <div class="row">
-          <div>
-            <label for="bots-${escapeHtml(row.userId)}">${text.allowedBotsLabel}</label>
-            <input id="bots-${escapeHtml(row.userId)}" name="allowedBots" type="text" value="${escapeHtml(allowed)}"
-                   placeholder="${escapeHtml(input.bots.join(', ') || 'researcher, writer')}">
-          </div>
-          <div>
-            <label><input type="checkbox" name="readOnly" value="1"${row.readOnly ? ' checked' : ''}> ${
-              text.readOnly
-            }</label>
-            <label><input type="checkbox" name="pushAllowed" value="1"${row.pushAllowed ? ' checked' : ''}> ${
-              text.pushAllowed
-            }</label>
-          </div>
-          <div>
-            <label><input type="checkbox" name="admin" value="1"${admin ? ' checked' : ''}> ${
-              text.administratorBox
-            }</label>
-            <button type="submit">${input.strings.common.save}</button>
-          </div>
-        </div>
+        <button type="submit">${input.strings.common.save}</button>
       </form>
     </td>
   </tr>`
 }
 
-export function adminPage(input: AdminPageInput): string {
-  const { state, status, strings } = input
-  const { common } = strings
-  const text = strings.admin
+/** People: everyone this service has seen, and what it will do for each of them. */
+export function adminPeoplePage(input: AdminPageInput): string {
+  const text = input.strings.admin.people
 
-  return `${head(input.locale, common.administrationTitle)}<main>
-  <h1>${common.administration}</h1>
-  <p>${text.header(escapeHtml(status.version), escapeHtml(status.gatewayUrl))}</p>
-  ${input.notice ? `<p class="note ok">${escapeHtml(input.notice)}</p>` : ''}
-
-  <section>
-    <h2>${text.service.heading}</h2>
-    <dl>
-      <dt>${text.service.version}</dt><dd>${escapeHtml(status.version)} — ${
-        status.updateAvailable ? text.service.updateAvailable(escapeHtml(status.latestVersion)) : text.service.upToDate
-      }</dd>
-      <dt>${text.service.serviceLogin}</dt><dd>${yes(status.serviceLogin, strings)}</dd>
-      <dt>${text.service.pushDaemon}</dt><dd>${status.pushRunning ? text.service.running : text.service.notRunning}</dd>
-      <dt>${text.service.vapidKey}</dt><dd>${yes(status.vapidPresent, strings)}</dd>
-      <dt>${text.service.messageCache}</dt><dd>${
-        status.cacheEnabled
-          ? text.service.cacheFill(status.cacheEntries, megabytes(status.cacheBytes), megabytes(status.cacheMaxBytes))
-          : text.service.cacheOff
-      }</dd>
-      <dt>${text.service.cacheHits}</dt><dd>${escapeHtml(hitRate(status, strings))}</dd>
-      <dt>${text.service.userList}</dt><dd>${
-        status.usersFrom === 'gateway' ? text.service.fromGateway : text.service.fromSeen
-      }</dd>
-    </dl>
-    <form method="post" action="/admin/update">
-      <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
-      <button type="submit"${status.canSelfUpdate ? '' : ' disabled'}>${text.service.updateButton}</button>
-      ${
-        status.canSelfUpdate
-          ? ''
-          : `<span class="note">${escapeHtml(status.updateReason || text.service.updateUnavailable)}</span>`
-      }
-    </form>
-  </section>
-
-  <section>
-    <h2>${text.push.heading}</h2>
-    <p>${text.push.intro}</p>
-    <form method="post" action="/admin/push">
-      <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
-      ${PUSH_TYPES.map(
-        type =>
-          `<label><input type="checkbox" name="type-${type}" value="1"${
-            state.push.types[type] ? ' checked' : ''
-          }> ${type}</label>`
-      ).join('\n      ')}
-      <label for="preview">${text.push.previewLabel}</label>
-      <select id="preview" name="preview">
-        <option value="device"${state.push.preview === 'device' ? ' selected' : ''}>${text.push.previewDevice}</option>
-        <option value="never"${state.push.preview === 'never' ? ' selected' : ''}>${text.push.previewNever}</option>
-      </select>
-      <p class="note">&nbsp;</p>
-      <button type="submit">${text.push.saveButton}</button>
-    </form>
-  </section>
-
-  <section>
-    <h2>${text.cache.heading}</h2>
-    <form method="post" action="/admin/cache">
-      <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
-      <label for="retention">${text.cache.retentionLabel}</label>
-      <input id="retention" name="retentionHours" type="number" min="0" value="${state.cache.retentionHours}">
-      <p class="note">${text.cache.capNote}</p>
-      <button type="submit">${common.save}</button>
-      <button type="submit" name="clear" value="1">${text.cache.clearButton}</button>
-    </form>
-  </section>
-
-  <section>
-    <h2>${text.identity.heading}</h2>
-    <p>${
-      input.identity.enabled
-        ? text.identity.on(escapeHtml(input.identity.issuer), input.identity.accounts)
-        : text.identity.off
-    }</p>
-    <p><a href="/admin/oidc">${text.identity.link}</a></p>
-  </section>
-
-  <section>
-    <h2>${text.branding.heading}</h2>
-    <p>${text.branding.intro}</p>
-    <form method="post" action="/admin/branding">
-      <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
-      <div class="row">
-        <div>
-          <label for="brand-name">${text.branding.nameLabel}</label>
-          <input id="brand-name" name="name" type="text" value="${escapeHtml(state.branding.name)}" placeholder="Hermie">
+  return adminShell(chromeOf(input, 'people'), {
+    title: text.heading,
+    intro: text.intro,
+    body: `${card({ body: peopleTable(input) })}
+    ${card({
+      body: `<form method="post" action="/admin/user">
+        ${csrfField(input.csrf)}
+        <div class="fields">
+          <div>
+            <label for="add-user">${text.addLabel}</label>
+            <input id="add-user" name="userId" type="text" placeholder="someone@example.org">
+          </div>
+          <div class="narrow">
+            <label class="check"><input type="checkbox" name="admin" value="1"> ${text.administratorBox}</label>
+            <label class="check"><input type="checkbox" name="pushAllowed" value="1" checked> ${
+              text.pushAllowed
+            }</label>
+          </div>
+          <div class="narrow"><button type="submit">${text.addButton}</button></div>
         </div>
-        <div>
-          <label for="brand-accent">${text.branding.accentLabel}</label>
-          <input id="brand-accent" name="accent" type="text" value="${escapeHtml(state.branding.accent)}" placeholder="default">
-        </div>
-        <div>
-          <label for="brand-theme">${text.branding.themeLabel}</label>
-          <input id="brand-theme" name="theme" type="text" value="${escapeHtml(state.branding.theme)}" placeholder="system">
-        </div>
-      </div>
-      <p class="note">${text.branding.note}</p>
-      <button type="submit">${text.branding.saveButton}</button>
-    </form>
-  </section>
+      </form>
+      <p class="note">${input.viewer ? text.signedInAs(escapeHtml(input.viewer)) : text.signedInLocally}</p>`
+    })}`
+  })
+}
 
-  <section>
-    <h2>${text.features.heading}</h2>
-    <form method="post" action="/admin/flags">
-      <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
-      <label><input type="checkbox" name="userChats" value="1"${
-        state.flags.userChats ? ' checked' : ''
-      }> ${text.features.userChats}</label>
-      <label><input type="checkbox" name="messageCache" value="1"${
-        state.flags.messageCache ? ' checked' : ''
-      }> ${text.features.messageCache}</label>
-      <label><input type="checkbox" name="selfUpdate" value="1"${
-        state.flags.selfUpdate ? ' checked' : ''
-      }> ${text.features.selfUpdate}</label>
-      <p class="note">&nbsp;</p>
-      <button type="submit">${text.features.saveButton}</button>
-    </form>
-  </section>
+/** The danger zone: the self-update, and starting over. */
+export function adminDangerPage(input: AdminPageInput): string {
+  const text = input.strings.admin
 
-  <section>
-    <h2>${text.people.heading}</h2>
-    <p>${text.people.intro}</p>
-    ${usersTable(input)}
-    <form method="post" action="/admin/user">
-      <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
-      <label for="add-user">${text.people.addLabel}</label>
-      <div class="row">
-        <div><input id="add-user" name="userId" type="text" placeholder="someone@example.org"></div>
-        <div>
-          <label><input type="checkbox" name="admin" value="1"> ${text.people.administratorBox}</label>
-          <label><input type="checkbox" name="pushAllowed" value="1" checked> ${text.people.pushAllowed}</label>
+  return adminShell(chromeOf(input, 'danger'), {
+    title: text.danger.title,
+    intro: text.danger.intro,
+    body: card({
+      heading: text.service.updateButton,
+      body: `<dl>
+        <dt>${text.service.version}</dt><dd>${escapeHtml(input.status.version)} — ${
+          input.status.updateAvailable
+            ? text.service.updateAvailable(escapeHtml(input.status.latestVersion))
+            : text.service.upToDate
+        }</dd>
+      </dl>
+      <form method="post" action="/admin/update">
+        ${csrfField(input.csrf)}
+        <div class="actions">
+          <button type="submit"${input.status.canSelfUpdate ? '' : ' disabled'}>${text.service.updateButton}</button>
+          ${
+            input.status.canSelfUpdate
+              ? ''
+              : `<span class="note">${escapeHtml(input.status.updateReason || text.service.updateUnavailable)}</span>`
+          }
         </div>
-        <div><button type="submit">${text.people.addButton}</button></div>
-      </div>
-    </form>
-    ${
-      input.viewer
-        ? `<p class="note">${text.people.signedInAs(escapeHtml(input.viewer))}</p>`
-        : `<p class="note">${text.people.signedInLocally}</p>`
-    }
-  </section>
-</main>
-</html>
-`
+      </form>`
+    })
+  })
 }

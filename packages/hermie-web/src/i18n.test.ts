@@ -121,7 +121,8 @@ describe('the catalogues', () => {
     for (const locale of WEB_LOCALES) {
       const strings = webStrings(locale)
 
-      expect(typeof strings.admin.header).toBe('function')
+      expect(typeof strings.admin.footer.version).toBe('function')
+      expect(typeof strings.admin.overview.peopleSeen).toBe('function')
       expect(typeof strings.admin.forbidden.knownAs).toBe('function')
       expect(typeof strings.oidc.signIn.title).toBe('function')
       expect(typeof strings.admin.people.empty).toBe('string')

@@ -220,6 +220,38 @@ export interface WebStrings {
     }
   }
   admin: {
+    /**
+     * The left-hand nav.
+     *
+     * Each label is the page's own heading or a shortening of it. A nav that
+     * renames the page it links to is the inconsistency this restructure was
+     * supposed to remove, so `cache` is the one abbreviation and it is a
+     * shortening rather than a different word.
+     */
+    nav: {
+      overview: string
+      people: string
+      push: string
+      cache: string
+      branding: string
+      features: string
+      identity: string
+      danger: string
+    }
+    footer: {
+      version: (brand: string, version: string) => string
+    }
+    overview: {
+      title: string
+      intro: string
+      /** The two figures a first glance is for, and the link onward from each. */
+      peopleSeen: (count: number) => string
+      accountsHere: (count: number) => string
+    }
+    danger: {
+      title: string
+      intro: string
+    }
     signIn: {
       intro: string
       secretNote: string
@@ -231,7 +263,8 @@ export interface WebStrings {
       unknown: string
       note: string
     }
-    header: (version: string, gatewayUrl: string) => string
+    /** The label on the overview's gateway row. The address itself is not copy. */
+    gateway: string
     service: {
       heading: string
       version: string
@@ -551,6 +584,29 @@ const EN: WebStrings = {
     }
   },
   admin: {
+    nav: {
+      overview: 'Overview',
+      people: 'People',
+      push: 'Push',
+      cache: 'Cache',
+      branding: 'Branding',
+      features: 'Features',
+      identity: 'Identity',
+      danger: 'Danger zone'
+    },
+    footer: {
+      version: (brand, version) => `${brand} — Hermie Web ${version}`
+    },
+    overview: {
+      title: 'Overview',
+      intro: 'What this service is running, what it is connected to, and what it has been asked to do.',
+      peopleSeen: count => `${count} ${count === 1 ? 'person' : 'people'} seen`,
+      accountsHere: count => `${count} account${count === 1 ? '' : 's'} on this issuer`
+    },
+    danger: {
+      title: 'Danger zone',
+      intro: 'Two things that cannot be undone from this page afterwards. Both ask again before they do anything.'
+    },
     signIn: {
       intro:
         'This service has no gateway accounts to recognise you by, so it asks for the administrator secret set ' +
@@ -567,7 +623,7 @@ const EN: WebStrings = {
         'An existing administrator can add an id on this page. On a service with no gateway accounts, the ' +
         'administrator secret set during setup is the way in.'
     },
-    header: (version, gatewayUrl) => `Hermie Web ${version} · <code>${gatewayUrl}</code>`,
+    gateway: 'Gateway',
     service: {
       heading: 'Service',
       version: 'Version',
@@ -919,6 +975,32 @@ const NL: WebCatalogue<WebStrings> = {
     }
   },
   admin: {
+    nav: {
+      overview: 'Overzicht',
+      people: 'Mensen',
+      push: 'Push',
+      cache: 'Cache',
+      branding: 'Branding',
+      features: 'Functies',
+      identity: 'Identiteit',
+      danger: 'Gevarenzone'
+    },
+    footer: {
+      version: (brand, version) => `${brand} — Hermie Web ${version}`
+    },
+    overview: {
+      title: 'Overzicht',
+      intro: 'Wat deze service draait, waar hij mee verbonden is, en wat hem gevraagd is te doen.',
+      peopleSeen: count => `${count} ${count === 1 ? 'persoon' : 'mensen'} gezien`,
+      accountsHere: count => `${count} account${count === 1 ? '' : 's'} op deze issuer`
+    },
+    danger: {
+      title: 'Gevarenzone',
+      intro:
+        'Twee dingen die je hier daarna niet meer kunt terugdraaien. Beide vragen het eerst nog een keer voordat ' +
+        'er iets gebeurt.'
+    },
+    gateway: 'Gateway',
     signIn: {
       intro:
         'Deze service heeft geen gateway-accounts om je aan te herkennen, dus vraagt hij om het ' +
@@ -1267,6 +1349,32 @@ const DE: WebCatalogue<WebStrings> = {
     }
   },
   admin: {
+    nav: {
+      overview: 'Übersicht',
+      people: 'Menschen',
+      push: 'Push',
+      cache: 'Cache',
+      branding: 'Branding',
+      features: 'Funktionen',
+      identity: 'Identität',
+      danger: 'Gefahrenzone'
+    },
+    footer: {
+      version: (brand, version) => `${brand} — Hermie Web ${version}`
+    },
+    overview: {
+      title: 'Übersicht',
+      intro: 'Was dieser Dienst läuft, womit er verbunden ist, und was ihm aufgetragen wurde.',
+      peopleSeen: count => `${count} ${count === 1 ? 'Person' : 'Menschen'} gesehen`,
+      accountsHere: count => `${count} Kont${count === 1 ? 'o' : 'en'} auf diesem issuer`
+    },
+    danger: {
+      title: 'Gefahrenzone',
+      intro:
+        'Zwei Dinge, die von dieser Seite aus danach nicht rückgängig zu machen sind. Beide fragen noch einmal, ' +
+        'bevor etwas passiert.'
+    },
+    gateway: 'Gateway',
     signIn: {
       intro:
         'Dieser Dienst hat keine gateway-Konten, an denen er dich erkennen könnte, und fragt deshalb nach dem ' +

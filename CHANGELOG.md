@@ -56,6 +56,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   connection, and it counts as a choice you made, so the newest one wins wherever it was given. The
   gateway's own copy of the name is untouched, as it has to be.
 
+- **`/admin` is a set of pages rather than one long one.** It was a single document with the
+  Service, Push, Message cache, Branding, Features and People panels stacked down it — six forms
+  sharing one notice and one scroll position, so an operator who pressed Save had to work out
+  which of the six the line at the top was about, and anybody looking for one switch read the
+  whole thing. Each subject now has its own page behind a left nav — Overview, People, Push,
+  Cache, Branding, Features, Identity, Danger zone — and a saved form sends you back to the page
+  it was on, so the notice lands beside the control it is about.
+
+  **It looks like Hermie.** A header with the app's own mark, inlined so a page an operator opens
+  when something is already wrong needs no second request, and the deployment's branding name
+  beside it. Cards, one spacing scale, tables whose columns line up with their headers, and a
+  footer with the version and **Update and restart**. The colours are the app's own Blue preset in
+  light and dark, from `prefers-color-scheme`. There is still no script anywhere, every control is
+  still a form that posts, and every POST route is unchanged.
+
+  **The people table is a table.** Each person's allowed bots, read-only, push and administrator
+  boxes used to be stacked into one cell under headers that described something else; they are
+  columns now, one row per person, still one form per row.
+
+  At phone width the nav becomes a row across the top and everything below it is a single column.
+  An `/admin/…` path nobody serves now answers 404 instead of quietly drawing the overview.
+
 - **Bot-to-bot messages are asides, not chat bubbles.** Both directions — the message this
   bot sent a teammate and the teammate's answer — now read as a muted line on the left with
   a chevron, the same shape a reply's thoughts have: no bubble, no tail, no card. An inbound

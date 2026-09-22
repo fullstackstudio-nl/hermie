@@ -43,7 +43,20 @@ import type { OidcRole } from '../oidc/users'
 import { ownOrigin } from '../setup'
 import { identityPage } from './identity'
 import { isAdminIdentity, localSecretMatches, withAdmin, withoutAdmin } from './access'
-import { adminForbiddenPage, adminPage, adminSignInPage, type AdminStatus } from './page'
+import {
+  adminBrandingPage,
+  adminCachePage,
+  adminDangerPage,
+  adminFeaturesPage,
+  adminForbiddenPage,
+  adminOverviewPage,
+  adminPeoplePage,
+  adminPushPage,
+  adminSignInPage,
+  brandOf,
+  type AdminPageInput,
+  type AdminStatus
+} from './page'
 import {
   ADMIN_SESSION_COOKIE,
   AdminSessions,
@@ -58,6 +71,41 @@ import { saveAdminState, type AdminState } from './state'
 
 /** At most 64 KiB of form body. More than that is not one of these forms. */
 const MAX_FORM_BYTES = 64 * 1024
+
+/**
+ * Which GET path draws which page.
+ *
+ * A table rather than a chain of `if`s, so an unknown `/admin/…` path answers
+ * 404 instead of silently drawing the overview — which is what a chain ending in
+ * a default does, and what would make a typo in a bookmark look like a page that
+ * lost its contents. `/admin/oidc` is not here: it takes a different input.
+ */
+/**
+ * Where each POST sends the browser afterwards.
+ *
+ * The page the form was on, so a notice lands beside the control it is about.
+ * Everything still redirects rather than rendering — a rendered POST is repeated
+ * by pressing F5, which is how an operator clears a cache twice — and the only
+ * thing that changed is that the destination is no longer always `/admin`.
+ */
+const POST_RETURNS: Record<string, string | undefined> = {
+  '/admin/push': '/admin/push',
+  '/admin/cache': '/admin/cache',
+  '/admin/branding': '/admin/branding',
+  '/admin/flags': '/admin/features',
+  '/admin/user': '/admin/people',
+  '/admin/update': '/admin/danger'
+}
+
+const ADMIN_PAGES: Record<string, ((input: AdminPageInput) => string) | undefined> = {
+  '/admin': adminOverviewPage,
+  '/admin/people': adminPeoplePage,
+  '/admin/push': adminPushPage,
+  '/admin/cache': adminCachePage,
+  '/admin/branding': adminBrandingPage,
+  '/admin/features': adminFeaturesPage,
+  '/admin/danger': adminDangerPage
+}
 
 export interface AdminRouterOptions {
   stateDir: string
@@ -164,13 +212,23 @@ export class AdminRouter {
     }
 
     if (method === 'GET') {
+      const notice = url.searchParams.get('notice') ?? ''
+
       if (url.pathname === '/admin/oidc') {
-        this.renderIdentity(request, response, url.searchParams.get('notice') ?? '')
+        await this.renderIdentity(request, response, notice)
 
         return
       }
 
-      await this.render(request, response, state, identity, url.searchParams.get('notice') ?? '')
+      const page = ADMIN_PAGES[url.pathname]
+
+      if (!page) {
+        this.json(response, 404, { error: 'not_found' })
+
+        return
+      }
+
+      await this.render(request, response, state, identity, notice, page)
 
       return
     }
@@ -214,12 +272,16 @@ export class AdminRouter {
     if (state.localAdmin) {
       // A deployment with a local secret offers the way in rather than a wall:
       // its whole point is that there is no gateway account to recognise.
-      this.html(response, 401, adminSignInPage({ csrf: this.mintCsrf(response, false), notice: '', ...copy }))
+      this.html(
+        response,
+        401,
+        adminSignInPage({ csrf: this.mintCsrf(response, false), notice: '', brand: brandOf(state), ...copy })
+      )
 
       return
     }
 
-    this.html(response, 403, adminForbiddenPage({ viewer: identity?.userId ?? '', ...copy }))
+    this.html(response, 403, adminForbiddenPage({ viewer: identity?.userId ?? '', brand: brandOf(state), ...copy }))
   }
 
   private async signIn(
@@ -255,6 +317,7 @@ export class AdminRouter {
         adminSignInPage({
           csrf: this.mintCsrf(response, isSecureRequest(request)),
           notice: copy.strings.admin.signIn.wrongSecret,
+          brand: brandOf(state),
           ...copy
         })
       )
@@ -292,12 +355,13 @@ export class AdminRouter {
     response: ServerResponse,
     state: AdminState,
     identity: GatewayIdentity | null,
-    notice: string
+    notice: string,
+    page: (input: AdminPageInput) => string
   ): Promise<void> {
     this.html(
       response,
       200,
-      adminPage({
+      page({
         state,
         status: await this.options.status(),
         csrf: this.mintCsrf(response, isSecureRequest(request)),
@@ -320,6 +384,8 @@ export class AdminRouter {
     form: URLSearchParams,
     origin: string
   ): Promise<void> {
+    const back = POST_RETURNS[pathname] ?? '/admin'
+
     switch (pathname) {
       case '/admin/push': {
         const types = Object.fromEntries(PUSH_TYPES.map(type => [type, checked(form, `type-${type}`)])) as Record<
@@ -327,10 +393,12 @@ export class AdminRouter {
           boolean
         >
 
-        await this.save(response, {
-          ...state,
-          push: { types, preview: form.get('preview') === 'never' ? 'never' : 'device' }
-        })
+        await this.save(
+          response,
+          { ...state, push: { types, preview: form.get('preview') === 'never' ? 'never' : 'device' } },
+          'Saved.',
+          back
+        )
 
         return
       }
@@ -338,44 +406,54 @@ export class AdminRouter {
       case '/admin/cache': {
         if (form.get('clear') === '1') {
           await this.options.clearCache()
-          this.done(response, 'The message cache was cleared.')
+          this.done(response, 'The message cache was cleared.', back)
 
           return
         }
 
         const hours = Math.max(0, Math.floor(Number(form.get('retentionHours') ?? 0) || 0))
 
-        await this.save(response, { ...state, cache: { retentionHours: hours } })
+        await this.save(response, { ...state, cache: { retentionHours: hours } }, 'Saved.', back)
 
         return
       }
 
       case '/admin/branding':
-        await this.save(response, {
-          ...state,
-          branding: {
-            name: (form.get('name') ?? '').trim().slice(0, 64),
-            accent: (form.get('accent') ?? '').trim().slice(0, 32),
-            theme: (form.get('theme') ?? '').trim().slice(0, 32)
-          }
-        })
+        await this.save(
+          response,
+          {
+            ...state,
+            branding: {
+              name: (form.get('name') ?? '').trim().slice(0, 64),
+              accent: (form.get('accent') ?? '').trim().slice(0, 32),
+              theme: (form.get('theme') ?? '').trim().slice(0, 32)
+            }
+          },
+          'Saved.',
+          back
+        )
 
         return
 
       case '/admin/flags':
-        await this.save(response, {
-          ...state,
-          flags: {
-            userChats: checked(form, 'userChats'),
-            messageCache: checked(form, 'messageCache'),
-            selfUpdate: checked(form, 'selfUpdate')
-          }
-        })
+        await this.save(
+          response,
+          {
+            ...state,
+            flags: {
+              userChats: checked(form, 'userChats'),
+              messageCache: checked(form, 'messageCache'),
+              selfUpdate: checked(form, 'selfUpdate')
+            }
+          },
+          'Saved.',
+          back
+        )
 
         return
 
       case '/admin/user':
-        await this.saveUser(response, state, identity, form)
+        await this.saveUser(response, state, identity, form, back)
 
         return
 
@@ -420,7 +498,7 @@ export class AdminRouter {
       case '/admin/update': {
         const message = await this.options.update().catch((error: unknown) => String(error))
 
-        this.done(response, message)
+        this.done(response, message, back)
 
         return
       }
@@ -434,12 +512,13 @@ export class AdminRouter {
     response: ServerResponse,
     state: AdminState,
     identity: GatewayIdentity | null,
-    form: URLSearchParams
+    form: URLSearchParams,
+    back: string
   ): Promise<void> {
     const userId = (form.get('userId') ?? '').trim()
 
     if (!userId) {
-      this.done(response, 'A person needs a gateway user id.')
+      this.done(response, 'A person needs a gateway user id.', back)
 
       return
     }
@@ -474,7 +553,7 @@ export class AdminRouter {
     const isAdmin = state.admins.includes(userId)
 
     if (wantsAdmin && !isAdmin) {
-      await this.save(response, withAdmin(next, userId))
+      await this.save(response, withAdmin(next, userId), 'Saved.', back)
 
       return
     }
@@ -489,13 +568,14 @@ export class AdminRouter {
           ? userId === identity?.userId
             ? 'Saved. You are no longer an administrator of this service.'
             : 'Saved.'
-          : 'Saved, but the last administrator cannot be removed.'
+          : 'Saved, but the last administrator cannot be removed.',
+        back
       )
 
       return
     }
 
-    await this.save(response, next)
+    await this.save(response, next, 'Saved.', back)
   }
 
   // ---- the built-in identity provider (ADR-0025 part 3) ----
@@ -508,11 +588,12 @@ export class AdminRouter {
    * memory rather than put in the redirect's query string, where they would sit
    * in the browser's history and in any proxy log on the way.
    */
-  private renderIdentity(request: IncomingMessage, response: ServerResponse, notice: string): void {
+  private async renderIdentity(request: IncomingMessage, response: ServerResponse, notice: string): Promise<void> {
     const state = this.options.oidc.read()
     const origin = ownOrigin(request)
     const invite = this.pendingInvite
     const selfTest = this.lastSelfTest
+    const status = await this.options.status()
 
     this.pendingInvite = null
     this.lastSelfTest = []
@@ -530,6 +611,12 @@ export class AdminRouter {
         invite,
         selfTest,
         notice,
+        chrome: {
+          brand: brandOf(this.options.read()),
+          version: status.version,
+          canSelfUpdate: status.canSelfUpdate,
+          updateReason: status.updateReason
+        },
         ...webCopy(request)
       })
     )
@@ -792,10 +879,10 @@ export class AdminRouter {
     }
   }
 
-  private async save(response: ServerResponse, state: AdminState, notice = 'Saved.'): Promise<void> {
+  private async save(response: ServerResponse, state: AdminState, notice = 'Saved.', at = '/admin'): Promise<void> {
     await saveAdminState(this.options.stateDir, state)
     this.options.onChanged(state)
-    this.done(response, notice)
+    this.done(response, notice, at)
   }
 
   /** One mint per render, so a token never outlives the page that carries it. */
@@ -807,8 +894,8 @@ export class AdminRouter {
     return value
   }
 
-  private done(response: ServerResponse, notice: string): void {
-    response.writeHead(303, { location: `/admin?notice=${encodeURIComponent(notice)}`, 'cache-control': 'no-store' })
+  private done(response: ServerResponse, notice: string, at = '/admin'): void {
+    response.writeHead(303, { location: `${at}?notice=${encodeURIComponent(notice)}`, 'cache-control': 'no-store' })
     response.end()
   }
 
