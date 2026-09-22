@@ -12,17 +12,17 @@
  * reason, not as a convenience.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ScrollView, View } from 'react-native'
+import { View } from 'react-native'
 
 import { useGateway } from '../../gateway'
 import { chatGatewayFor } from '../../gateway/link'
 import { directTouchPanRef } from '../../platform/pointer-drag'
 import { useBotsStore } from '../../store/bots'
-import { Button, InsetGroup, InsetRow, Screen, Text, TextField } from '../../ui/primitives'
+import { PageFrame, PageScrollView, type PageChromeBack } from '../../ui/chrome'
+import { Button, InsetGroup, InsetRow, Text, TextField } from '../../ui/primitives'
 import { SegmentedRow, SwitchRow } from '../../ui/sheets'
 import { FORM_MAX_WIDTH } from '../../ui/tokens'
 import { useTheme } from '../../ui/theme'
-import { ScreenHeader } from '../cron/ScreenHeader'
 import {
   isUnknownAction,
   skillInstallCommand,
@@ -33,12 +33,13 @@ import {
 import { skillStrings } from './strings'
 
 export interface SkillsScreenProps {
-  onClose: () => void
+  /** The page's one back control, labelled with the page it returns to. */
+  back?: PageChromeBack
   /** Preselect a bot, e.g. when the page is opened from that bot's sheet. */
   initialProfile?: string | null
 }
 
-export function SkillsScreen({ onClose, initialProfile = null }: SkillsScreenProps) {
+export function SkillsScreen({ back, initialProfile = null }: SkillsScreenProps) {
   const theme = useTheme()
   const { connection } = useGateway()
   const bots = useBotsStore(state => state.bots)
@@ -140,15 +141,8 @@ export function SkillsScreen({ onClose, initialProfile = null }: SkillsScreenPro
   const installedNames = new Set((installed ?? []).map(row => row.name))
 
   return (
-    <Screen edgeToEdgeTop padded={false}>
-      <ScreenHeader
-        back={skillStrings.back}
-        onBack={onClose}
-        subtitle={skillStrings.subtitle}
-        title={skillStrings.title}
-      />
-
-      <ScrollView
+    <PageFrame {...(back ? { back } : {})} subtitle={skillStrings.subtitle} title={skillStrings.title}>
+      <PageScrollView
         contentContainerStyle={{
           alignSelf: 'center',
           gap: theme.space.xl,
@@ -294,7 +288,7 @@ export function SkillsScreen({ onClose, initialProfile = null }: SkillsScreenPro
             {notice}
           </Text>
         ) : null}
-      </ScrollView>
-    </Screen>
+      </PageScrollView>
+    </PageFrame>
   )
 }

@@ -17,7 +17,6 @@ import { type Appearance, useSettingsStore } from '../../store/settings'
 import { InsetButtonRow, InsetGroup, Text } from '../../ui/primitives'
 import { SegmentedRow } from '../../ui/sheets'
 import { useTheme } from '../../ui/theme'
-import type { NameOrder } from '../../store/bot-names'
 import { TEXT_SIZE_ORDER, type TextSize } from '../../store/text-size'
 import { chatStrings } from '../../chat-ui/strings'
 import { THEME_PRESET_ORDER } from '../../ui/themes'
@@ -47,10 +46,6 @@ const appearanceOptions = (): { value: Appearance; label: string }[] => [
  * keep: a gateway where nobody has set a display name shows the same thing
  * either way, and a segment reading "lance-vance" would be a lie on it.
  */
-const nameOrderOptions = (): { value: NameOrder; label: string }[] => [
-  { value: 'profile', label: strings.settings.botNameOptions.profile },
-  { value: 'display', label: strings.settings.botNameOptions.display }
-]
 
 export interface AppearanceSectionProps {
   /** Open the page where a reader makes a theme of their own. */
@@ -61,8 +56,6 @@ export function AppearanceSection({ onOpenAdvanced }: AppearanceSectionProps) {
   const theme = useTheme()
   const appearance = useSettingsStore(state => state.appearance)
   const setAppearance = useSettingsStore(state => state.setAppearance)
-  const botNameOrder = useSettingsStore(state => state.botNameOrder)
-  const setBotNameOrder = useSettingsStore(state => state.setBotNameOrder)
   const textSize = useSettingsStore(state => state.textSize)
   const setTextSize = useSettingsStore(state => state.setTextSize)
   const themeChoice = useSettingsStore(state => state.themeChoice)
@@ -87,23 +80,6 @@ export function AppearanceSection({ onOpenAdvanced }: AppearanceSectionProps) {
         account, and both are read before there is an account to read them for.
       */}
       <LanguageGroup />
-
-      {/*
-        Its own group, for its own footer.
-
-        The two names need explaining in a way the light/dark choice does not —
-        which of them the rest of the app addresses a bot by is the whole reason
-        somebody would move this — and a group has one footer.
-      */}
-      <InsetGroup footer={strings.settings.botNamesHint}>
-        <SegmentedRow
-          label={strings.settings.botNames}
-          onChange={(value: NameOrder) => setBotNameOrder(value)}
-          options={nameOrderOptions()}
-          testID="settings-bot-names"
-          value={botNameOrder}
-        />
-      </InsetGroup>
 
       {/*
         The transcript's type scale, in the same group shape as the two above it.

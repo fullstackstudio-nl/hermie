@@ -59,8 +59,8 @@ describe('Escape in the theme editor', () => {
   })
 
   /** A user theme, and the screen showing it, which is what makes Delete reachable. */
-  function openWithATheme(onClose: () => void) {
-    renderScreen(<ThemesScreen onClose={onClose} />)
+  function openWithATheme(onPress: () => void) {
+    renderScreen(<ThemesScreen back={{ label: 'Appearance', onPress }} />)
 
     fireEvent.press(screen.getByTestId('theme-new-blue'))
 
@@ -70,7 +70,7 @@ describe('Escape in the theme editor', () => {
   it('closes the screen when nothing is open inside it', () => {
     const onClose = jest.fn()
 
-    renderScreen(<ThemesScreen onClose={onClose} />)
+    renderScreen(<ThemesScreen back={{ label: 'Appearance', onPress: onClose }} />)
 
     pressEscape()
 

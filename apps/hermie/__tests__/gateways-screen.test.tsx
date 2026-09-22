@@ -11,7 +11,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-
 import type { ConnectionStatus, GatewayError } from '@hermie/gateway-client'
 
 import { GatewayTitle } from '../src/features/bots/GatewayTitle'
-import { GatewaysScreen } from '../src/features/settings/GatewaysScreen'
+import { SettingsScreen } from '../src/features/settings'
 import { GatewayProvider, useGateway } from '../src/gateway'
 import { withProviders } from './support/render'
 
@@ -124,6 +124,10 @@ function Harness({ onRead }: { onRead: (value: ReturnType<typeof useGateway>) =>
   return null
 }
 
+/**
+ * Settings → Gateways, opened the way a dev intent opens it: the list is a page
+ * in the Settings stack now (HERM-108) rather than a screen of its own.
+ */
 async function openList() {
   let gateway: ReturnType<typeof useGateway> | null = null
 
@@ -131,7 +135,7 @@ async function openList() {
     withProviders(
       <GatewayProvider>
         <Harness onRead={value => (gateway = value)} />
-        <GatewaysScreen onClose={jest.fn()} />
+        <SettingsScreen initialRoute="Gateways" />
       </GatewayProvider>
     )
   )

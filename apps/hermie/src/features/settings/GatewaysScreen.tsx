@@ -1,12 +1,11 @@
 /**
  * Every gateway this device knows about, and the one it is talking to.
  *
- * Three pages in one file, because they are one flow and the flow is short:
- * the list, one gateway's own page, and the setup wizard in "add" mode. They
- * REPLACE each other rather than pushing onto a navigator, for the reason
- * `SettingsScreen` gives: Settings has to work both inside a native stack on a
- * phone and as the content of an overlay panel on a wide window, where there
- * is no navigator above it at all.
+ * Three pieces, because they are one flow: the list (drawn on the Gateways
+ * category page), one gateway's own page (`GatewayDetail`), and the setup
+ * wizard in "add" mode (`GatewayAdd`). The two pages are ROUTES in the Settings
+ * stack, so their back control is the stack's and neither draws one of its own
+ * — see `navigation/SettingsPage.tsx`.
  *
  * Two decisions are worth stating because the alternative is what a reader
  * would expect:
@@ -19,20 +18,20 @@
  *    row that can both connect and delete is a row where a mis-tap costs a
  *    conversation.
  */
-import { useCallback, useState } from 'react'
-import { Pressable, ScrollView, View } from 'react-native'
+import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Pressable, View } from 'react-native'
 
 import { useGateway } from '../../gateway'
 import { gatewayLabel, gatewaysInOrder, type GatewayRecord } from '../../gateway/registry'
 import { strings } from '../../i18n/strings'
-import { directTouchPanRef } from '../../platform/pointer-drag'
 import { Icon, ICON_SIZE } from '../../ui/Icon'
-import { InsetButtonRow, InsetGroup, InsetValueRow, Screen, Text, TextField } from '../../ui/primitives'
+import { usePageChromeHeight } from '../../ui/chrome'
+import { InsetButtonRow, InsetGroup, InsetValueRow, Text, TextField } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
-import { FORM_MAX_WIDTH } from '../../ui/tokens'
-import { useEscapeKey } from '../../ui/useEscapeKey'
-import { useHardwareBack } from '../../ui/useHardwareBack'
 import { OnboardingNavigator } from '../onboarding'
+import type { SettingsParamList } from './navigation/route-names'
+import { SettingsPage } from './navigation/SettingsPage'
 
 /** What a row says under the name: the address, the sign-in, and the auth kind. */
 export function describeGateway(gateway: GatewayRecord): string {
@@ -47,91 +46,77 @@ export function describeGateway(gateway: GatewayRecord): string {
   return `${gateway.address} · ${who}`
 }
 
-export interface GatewaysScreenProps {
-  onClose: () => void
+export interface GatewayListProps {
+  onManage: (id: string) => void
+  onAdd: () => void
 }
 
-export function GatewaysScreen({ onClose }: GatewaysScreenProps) {
-  const theme = useTheme()
+/** The list and the add row, as the Gateways category page draws them. */
+export function GatewayList({ onManage, onAdd }: GatewayListProps) {
   const text = strings.settings.gateways
-  const { registry, gatewayId, switchGateway, refreshRegistry } = useGateway()
-  const [openId, setOpenId] = useState<string | null>(null)
-  const [adding, setAdding] = useState(false)
+  const { registry, gatewayId, switchGateway } = useGateway()
+  /*
+    Defensively, for the reason `GatewayTitle` gives: Settings is rendered by
+    suites that stand in for the gateway context with the two or three fields
+    they care about, and an empty list is a better answer than a crash in one of
+    them.
+  */
+  const gateways = registry ? gatewaysInOrder(registry) : []
 
-  const back = useCallback(() => {
-    if (adding) {
-      setAdding(false)
-    } else if (openId) {
-      setOpenId(null)
-    } else {
-      onClose()
-    }
-  }, [adding, onClose, openId])
+  return (
+    <>
+      <InsetGroup footer={text.hint} header={text.header} testID="settings-gateways">
+        {gateways.map(gateway => (
+          <GatewayRow
+            active={gateway.id === gatewayId}
+            gateway={gateway}
+            key={gateway.id}
+            onManage={() => onManage(gateway.id)}
+            onSwitch={() => void switchGateway(gateway.id)}
+          />
+        ))}
+      </InsetGroup>
 
-  // Escape and Android's back both go back ONE level, the same way Settings
-  // handles the pages it opens over itself.
-  useEscapeKey(back, true)
-  useHardwareBack(back, true)
+      <InsetGroup footer={text.addHint}>
+        <InsetButtonRow onPress={onAdd} testID="gateways-add" title={text.add} />
+      </InsetGroup>
+    </>
+  )
+}
 
-  const finishAdd = useCallback(async () => {
+/**
+ * Settings → Gateways → Add: the setup wizard, minting a new entry.
+ *
+ * No `onCancel`: the page's own back control is the way out, and a Cancel in
+ * the card beside it would be a second one.
+ */
+export function GatewayAddPage() {
+  const navigation = useNavigation()
+  const { refreshRegistry } = useGateway()
+  const headerHeight = usePageChromeHeight()
+
+  const finish = useCallback(async () => {
     // The wizard wrote a new entry; this provider's copy of the list is the one
     // every screen reads, so it has to be told. Nothing switches — see the note
     // at the top of the file.
     await refreshRegistry()
-    setAdding(false)
-  }, [refreshRegistry])
 
-  if (adding) {
-    return (
-      <OnboardingNavigator
-        // `null` is what makes this an ADD rather than an edit: the wizard mints
-        // an entry instead of writing into the one that is live.
-        gatewayId={null}
-        onCancel={() => setAdding(false)}
-        onComplete={finishAdd}
-      />
-    )
-  }
-
-  if (openId) {
-    return <GatewayDetail id={openId} onClose={() => setOpenId(null)} />
-  }
-
-  const gateways = gatewaysInOrder(registry)
+    if (navigation.canGoBack()) {
+      navigation.goBack()
+    }
+  }, [navigation, refreshRegistry])
 
   return (
-    <Screen padded={false}>
-      <ScrollView
-        contentContainerStyle={{
-          padding: theme.space.lg,
-          gap: theme.space.xl,
-          width: '100%',
-          maxWidth: FORM_MAX_WIDTH,
-          alignSelf: 'center'
-        }}
-        ref={directTouchPanRef}
-      >
-        <InsetGroup footer={text.hint} header={text.header}>
-          {gateways.map(gateway => (
-            <GatewayRow
-              active={gateway.id === gatewayId}
-              gateway={gateway}
-              key={gateway.id}
-              onManage={() => setOpenId(gateway.id)}
-              onSwitch={() => void switchGateway(gateway.id)}
-            />
-          ))}
-        </InsetGroup>
-
-        <InsetGroup footer={text.addHint}>
-          <InsetButtonRow onPress={() => setAdding(true)} testID="gateways-add" title={text.add} />
-        </InsetGroup>
-
-        <InsetGroup>
-          <InsetButtonRow onPress={onClose} testID="gateways-close" title={strings.common.back} tone="text" />
-        </InsetGroup>
-      </ScrollView>
-    </Screen>
+    <SettingsPage route="GatewayAdd" scroll={false}>
+      <View style={{ flex: 1, paddingTop: headerHeight }}>
+        <OnboardingNavigator
+          // `null` is what makes this an ADD rather than an edit: the wizard mints
+          // an entry instead of writing into the one that is live.
+          gatewayId={null}
+          onComplete={finish}
+        />
+      </View>
+    </SettingsPage>
   )
 }
 
@@ -229,115 +214,116 @@ function GatewayRow({ gateway, active, onSwitch, onManage }: GatewayRowProps) {
   )
 }
 
-interface GatewayDetailProps {
-  id: string
-  onClose: () => void
-}
-
-/** One gateway's own page: what it is called, and the three things you can do to it. */
-function GatewayDetail({ id, onClose }: GatewayDetailProps) {
-  const theme = useTheme()
+/** Settings → Gateways → one gateway: what it is called, and the three things you can do to it. */
+export function GatewayDetailPage() {
+  const route = useRoute<RouteProp<SettingsParamList, 'GatewayDetail'>>()
+  const navigation = useNavigation()
+  const id = route.params.id
   const text = strings.settings.gateways
   const { registry, gatewayId, renameGateway, signOutOf, removeGateway, switchGateway } = useGateway()
-  const gateway = registry.gateways.find(entry => entry.id === id)
+  const gateway = registry?.gateways.find(entry => entry.id === id)
   const [name, setName] = useState(gateway?.name ?? '')
   const [confirming, setConfirming] = useState(false)
+  /*
+    Once, whichever asks first. "Remove" goes back AND empties the entry, and a
+    page that is still sliding out when the registry catches up would otherwise
+    see itself missing and go back a second time — out of Gateways as well.
+  */
+  const leaving = useRef(false)
+  const onClose = useCallback(() => {
+    if (!leaving.current && navigation.canGoBack()) {
+      leaving.current = true
+      navigation.goBack()
+    }
+  }, [navigation])
+
+  // Removed from under us — by this page, on the way out. The list is where
+  // the reader should be, and it is already correct. An effect rather than a
+  // call during render: going back is a navigation, not a render result.
+  const missing = !gateway
+
+  useEffect(() => {
+    if (missing) {
+      onClose()
+    }
+  }, [missing, onClose])
 
   if (!gateway) {
-    // Removed from under us — by this page, on the way out. The list is where
-    // the reader should be, and it is already correct.
-    onClose()
-
     return null
   }
 
   const active = gateway.id === gatewayId
 
   return (
-    <Screen padded={false}>
-      <ScrollView
-        contentContainerStyle={{
-          padding: theme.space.lg,
-          gap: theme.space.xl,
-          width: '100%',
-          maxWidth: FORM_MAX_WIDTH,
-          alignSelf: 'center'
-        }}
-        ref={directTouchPanRef}
-      >
-        <InsetGroup footer={text.nameHint} header={text.detailTitle}>
-          <TextField
-            label={text.name}
-            onChangeText={setName}
-            onSubmitEditing={() => void renameGateway(gateway.id, name)}
-            testID="gateway-name"
-            value={name}
-          />
+    <SettingsPage route="GatewayDetail" title={gatewayLabel(gateway)}>
+      <InsetGroup footer={text.nameHint} header={text.detailTitle}>
+        <TextField
+          label={text.name}
+          onChangeText={setName}
+          onSubmitEditing={() => void renameGateway(gateway.id, name)}
+          testID="gateway-name"
+          value={name}
+        />
+        <InsetButtonRow
+          disabled={name.trim() === gateway.name}
+          onPress={() => void renameGateway(gateway.id, name)}
+          testID="gateway-rename"
+          title={text.save}
+        />
+      </InsetGroup>
+
+      <InsetGroup>
+        <InsetValueRow label={strings.settings.address} value={gateway.address} />
+        <InsetValueRow
+          label={strings.settings.provider}
+          value={gateway.authKind === 'session_token' ? text.authModeToken : gateway.authKind}
+        />
+        <InsetValueRow label={strings.settings.user} value={gateway.signedInUser ?? text.signedOut} />
+      </InsetGroup>
+
+      {active ? null : (
+        <InsetGroup footer={text.connectHint}>
           <InsetButtonRow
-            disabled={name.trim() === gateway.name}
-            onPress={() => void renameGateway(gateway.id, name)}
-            testID="gateway-rename"
-            title={text.save}
+            onPress={() => {
+              void switchGateway(gateway.id)
+              onClose()
+            }}
+            testID="gateway-connect"
+            title={text.connect}
           />
         </InsetGroup>
+      )}
 
-        <InsetGroup>
-          <InsetValueRow label={strings.settings.address} value={gateway.address} />
-          <InsetValueRow
-            label={strings.settings.provider}
-            value={gateway.authKind === 'session_token' ? text.authModeToken : gateway.authKind}
+      <InsetGroup footer={`${text.removeHint} ${text.removeNotifyNote}`}>
+        <InsetButtonRow
+          detail={text.signOutHint}
+          onPress={() => void signOutOf(gateway.id)}
+          testID="gateway-sign-out"
+          title={text.signOut}
+        />
+        {confirming ? (
+          <InsetButtonRow
+            detail={text.removeConfirm}
+            onPress={() => {
+              void removeGateway(gateway.id)
+              onClose()
+            }}
+            testID="gateway-remove-confirm"
+            title={text.removeConfirmAction}
+            tone="danger"
           />
-          <InsetValueRow label={strings.settings.user} value={gateway.signedInUser ?? text.signedOut} />
-        </InsetGroup>
-
-        {active ? null : (
-          <InsetGroup footer={text.connectHint}>
-            <InsetButtonRow
-              onPress={() => {
-                void switchGateway(gateway.id)
-                onClose()
-              }}
-              testID="gateway-connect"
-              title={text.connect}
-            />
-          </InsetGroup>
+        ) : null}
+        {confirming ? (
+          <InsetButtonRow onPress={() => setConfirming(false)} title={text.keepIt} tone="text" />
+        ) : (
+          <InsetButtonRow
+            onPress={() => setConfirming(true)}
+            testID="gateway-remove"
+            title={text.remove}
+            tone="danger"
+          />
         )}
-
-        <InsetGroup footer={`${text.removeHint} ${text.removeNotifyNote}`}>
-          <InsetButtonRow
-            detail={text.signOutHint}
-            onPress={() => void signOutOf(gateway.id)}
-            testID="gateway-sign-out"
-            title={text.signOut}
-          />
-          {confirming ? (
-            <InsetButtonRow
-              detail={text.removeConfirm}
-              onPress={() => {
-                void removeGateway(gateway.id)
-                onClose()
-              }}
-              testID="gateway-remove-confirm"
-              title={text.removeConfirmAction}
-              tone="danger"
-            />
-          ) : null}
-          {confirming ? (
-            <InsetButtonRow onPress={() => setConfirming(false)} title={text.keepIt} tone="text" />
-          ) : (
-            <InsetButtonRow
-              onPress={() => setConfirming(true)}
-              testID="gateway-remove"
-              title={text.remove}
-              tone="danger"
-            />
-          )}
-        </InsetGroup>
-
-        <InsetGroup>
-          <InsetButtonRow onPress={onClose} testID="gateway-detail-close" title={text.back} tone="text" />
-        </InsetGroup>
-      </ScrollView>
-    </Screen>
+      </InsetGroup>
+    </SettingsPage>
   )
 }

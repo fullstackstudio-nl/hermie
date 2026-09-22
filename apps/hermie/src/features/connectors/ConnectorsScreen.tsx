@@ -7,30 +7,41 @@
  * for a conversation that is open and for nothing else. A page that asked for
  * "your connectors" would have no call to make.
  *
- * One screen with an early-return sub-screen, the way the MCP and Crons pages
- * are built: the compact and regular shells own their own navigation and
- * disagree about what "push" means, so a feature that pushed for itself would
- * be right on exactly one of them.
+ * Two pages, and two routes in the Settings stack: the list pushes a connector
+ * through `onOpenConnector` with the session it was listed for, and neither
+ * draws a back control of its own. The connect flow lives on the connector's
+ * page, and tells the list it changed something through `useConnectorsRevision`.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AppState, Linking, Pressable, RefreshControl, ScrollView } from 'react-native'
+import { AppState, Linking, Pressable, RefreshControl } from 'react-native'
+import { create } from 'zustand'
 
 import { useGateway } from '../../gateway'
 import { chatGatewayFor } from '../../gateway/link'
 import { directTouchPanRef } from '../../platform/pointer-drag'
 import { useBotsStore } from '../../store/bots'
 import { useChatsStore } from '../../store/chats'
-import { Button, InsetGroup, InsetRow, InsetValueRow, Screen, Text } from '../../ui/primitives'
-import { useEscapeKey } from '../../ui/useEscapeKey'
-import { useHardwareBack } from '../../ui/useHardwareBack'
+import { PageFrame, PageScrollView, type PageChromeBack } from '../../ui/chrome'
+import { Button, InsetGroup, InsetRow, InsetValueRow, Text } from '../../ui/primitives'
 import { FORM_MAX_WIDTH } from '../../ui/tokens'
 import { useTheme } from '../../ui/theme'
-import { ScreenHeader } from '../cron/ScreenHeader'
 import { ConnectorsController, type ConnectorList, type ConnectorView } from './connectors-controller'
 import { connectorStrings } from './strings'
 
+/**
+ * Bumped by a connector's page when a connect finished, so the list under it
+ * reads the account again instead of showing the state it had before.
+ */
+export const useConnectorsRevision = create<{ revision: number; changed: () => void }>(set => ({
+  revision: 0,
+  changed: () => set(state => ({ revision: state.revision + 1 }))
+}))
+
 export interface ConnectorsScreenProps {
-  onClose: () => void
+  /** The page's one back control, labelled with the page it returns to. */
+  back?: PageChromeBack
+  /** Push one connector's page, for the chat it was listed under. */
+  onOpenConnector: (sessionId: string, slug: string) => void
 }
 
 /** One chat this socket is attached to, which is what a connector list needs. */
@@ -40,9 +51,50 @@ interface LiveChat {
   sessionId: string
 }
 
-export function ConnectorsScreen({ onClose }: ConnectorsScreenProps) {
-  const theme = useTheme()
+/** The controller both pages talk through, one per connection. */
+function useConnectorsController(): ConnectorsController | null {
   const { connection } = useGateway()
+
+  return useMemo(
+    () =>
+      connection
+        ? new ConnectorsController({
+            gateway: chatGatewayFor(connection),
+            openUrl: url => void Linking.openURL(url).catch(() => undefined)
+          })
+        : null,
+    [connection]
+  )
+}
+
+/** One session's connector list, reloaded whenever a connector's page changed it. */
+function useConnectorList(controller: ConnectorsController | null, sessionId: string | null) {
+  const revision = useConnectorsRevision(state => state.revision)
+  const [list, setList] = useState<ConnectorList | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    if (!controller || !sessionId) {
+      return
+    }
+
+    try {
+      setList(await controller.load(sessionId))
+      setError(null)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }, [controller, sessionId])
+
+  useEffect(() => {
+    void load()
+  }, [load, revision])
+
+  return { list, setList, error, load }
+}
+
+export function ConnectorsScreen({ back, onOpenConnector }: ConnectorsScreenProps) {
+  const theme = useTheme()
   const runtimeToBot = useChatsStore(state => state.runtimeToBot)
   const byName = useBotsStore(state => state.byName)
 
@@ -65,138 +117,18 @@ export function ConnectorsScreen({ onClose }: ConnectorsScreenProps) {
   )
 
   const [chosen, setChosen] = useState<string | null>(null)
-  const [list, setList] = useState<ConnectorList | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [selected, setSelected] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
-  const [busy, setBusy] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
 
   // One chat means no choice to make. More than one and the reader picks, so a
   // session that went away does not silently move the page to another bot.
   const chat = chats.find(entry => entry.sessionId === chosen) ?? (chats.length === 1 ? chats[0] : null)
 
-  const controller = useMemo(
-    () =>
-      connection
-        ? new ConnectorsController({
-            gateway: chatGatewayFor(connection),
-            openUrl: url => void Linking.openURL(url).catch(() => undefined)
-          })
-        : null,
-    [connection]
-  )
-
-  /*
-    The operation a flow is currently walking, so returning from the browser can
-    tell the gateway to read the account NOW instead of on its next watcher
-    tick. A ref rather than state: nothing draws it, and re-rendering the page
-    every time it moved would restart the very poll that sets it.
-  */
-  const flow = useRef<{ sessionId: string; opId: string } | null>(null)
-
-  const load = useCallback(async () => {
-    if (!controller || !chat) {
-      return
-    }
-
-    try {
-      setList(await controller.load(chat.sessionId))
-      setError(null)
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    }
-  }, [controller, chat])
-
-  useEffect(() => {
-    void load()
-  }, [load])
-
-  /*
-    Coming back to the app during an authorisation is this client's version of
-    the desktop's `hermes://connections/done` deep link. Hermie has no such
-    link, and the foreground edge is the same fact arriving a different way: the
-    reader was in a browser and is now here.
-  */
-  useEffect(() => {
-    const subscription = AppState.addEventListener('change', state => {
-      const open = flow.current
-
-      if (state === 'active' && open && controller) {
-        void controller.wake(open.sessionId, open.opId)
-      }
-    })
-
-    return () => subscription.remove()
-  }, [controller])
-
-  useEscapeKey(() => setSelected(null), selected !== null)
-  useHardwareBack(() => setSelected(null), selected !== null)
-
-  const connector = list?.connectors.find(entry => entry.slug === selected) ?? null
-
-  const connect = (slug: string, reconnect: boolean) => {
-    if (!controller || !chat) {
-      return
-    }
-
-    setBusy(slug)
-    setNotice(connectorStrings.connecting)
-
-    void controller
-      .connect(chat.sessionId, slug, {
-        reconnect,
-        onOperation: opId => {
-          flow.current = { opId, sessionId: chat.sessionId }
-        }
-      })
-      .then(outcome => {
-        if (outcome.status === 'connected') {
-          setNotice(connectorStrings.connectOk(slug))
-        } else if (outcome.status === 'expired') {
-          setNotice(connectorStrings.connectExpired)
-        } else if (outcome.status === 'skipped') {
-          setNotice(connectorStrings.connectSkipped)
-        } else {
-          setNotice(connectorStrings.connectFailed(outcome.reason))
-        }
-
-        return load()
-      })
-      .catch((cause: unknown) =>
-        setNotice(connectorStrings.connectFailed(cause instanceof Error ? cause.message : String(cause)))
-      )
-      .finally(() => {
-        flow.current = null
-        setBusy(null)
-      })
-  }
-
-  if (connector && chat) {
-    return (
-      <ConnectorDetail
-        busy={busy === connector.slug}
-        connector={connector}
-        notice={notice}
-        onBack={() => {
-          setSelected(null)
-          setNotice(null)
-        }}
-        onConnect={() => connect(connector.slug, connector.connected)}
-      />
-    )
-  }
+  const controller = useConnectorsController()
+  const { list, setList, error, load } = useConnectorList(controller, chat?.sessionId ?? null)
 
   return (
-    <Screen edgeToEdgeTop padded={false}>
-      <ScreenHeader
-        back={connectorStrings.back}
-        onBack={onClose}
-        subtitle={connectorStrings.subtitle}
-        title={connectorStrings.title}
-      />
-
-      <ScrollView
+    <PageFrame {...(back ? { back } : {})} subtitle={connectorStrings.subtitle} title={connectorStrings.title}>
+      <PageScrollView
         contentContainerStyle={{
           alignSelf: 'center',
           gap: theme.space.xl,
@@ -250,7 +182,6 @@ export function ConnectorsScreen({ onClose }: ConnectorsScreenProps) {
                     onPress={() => {
                       setChosen(entry.sessionId)
                       setList(null)
-                      setNotice(null)
                     }}
                     style={{
                       backgroundColor: entry.sessionId === chat?.sessionId ? theme.elevation.e2 : 'transparent',
@@ -307,20 +238,18 @@ export function ConnectorsScreen({ onClose }: ConnectorsScreenProps) {
                 }
               >
                 {list.connectors.map(entry => (
-                  <ConnectorRowView key={entry.slug} connector={entry} onPress={() => setSelected(entry.slug)} />
+                  <ConnectorRowView
+                    key={entry.slug}
+                    connector={entry}
+                    onPress={() => (chat ? onOpenConnector(chat.sessionId, entry.slug) : undefined)}
+                  />
                 ))}
               </InsetGroup>
             )}
-
-            {notice ? (
-              <Text color="textMuted" testID="connectors-notice" variant="meta">
-                {notice}
-              </Text>
-            ) : null}
           </>
         )}
-      </ScrollView>
-    </Screen>
+      </PageScrollView>
+    </PageFrame>
   )
 }
 
@@ -362,31 +291,124 @@ function ConnectorRowView({ connector, onPress }: { connector: ConnectorView; on
   )
 }
 
+export interface ConnectorScreenProps {
+  /** The chat the connector was listed under; the gateway answers per session. */
+  sessionId: string
+  slug: string
+  back?: PageChromeBack
+}
+
+/** One connector's page, and the connect flow that runs from it. */
+export function ConnectorScreen({ sessionId, slug, back }: ConnectorScreenProps) {
+  const controller = useConnectorsController()
+  const { list, load } = useConnectorList(controller, sessionId)
+  const changed = useConnectorsRevision(state => state.changed)
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const connector = list?.connectors.find(entry => entry.slug === slug) ?? null
+
+  /*
+    The operation a flow is currently walking, so returning from the browser can
+    tell the gateway to read the account NOW instead of on its next watcher
+    tick. A ref rather than state: nothing draws it, and re-rendering the page
+    every time it moved would restart the very poll that sets it.
+  */
+  const flow = useRef<{ sessionId: string; opId: string } | null>(null)
+
+  /*
+    Coming back to the app during an authorisation is this client's version of
+    the desktop's `hermes://connections/done` deep link. Hermie has no such
+    link, and the foreground edge is the same fact arriving a different way: the
+    reader was in a browser and is now here.
+  */
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', state => {
+      const open = flow.current
+
+      if (state === 'active' && open && controller) {
+        void controller.wake(open.sessionId, open.opId)
+      }
+    })
+
+    return () => subscription.remove()
+  }, [controller])
+
+  const connect = (reconnect: boolean) => {
+    if (!controller) {
+      return
+    }
+
+    setBusy(true)
+    setNotice(connectorStrings.connecting)
+
+    void controller
+      .connect(sessionId, slug, {
+        reconnect,
+        onOperation: opId => {
+          flow.current = { opId, sessionId }
+        }
+      })
+      .then(outcome => {
+        if (outcome.status === 'connected') {
+          setNotice(connectorStrings.connectOk(slug))
+        } else if (outcome.status === 'expired') {
+          setNotice(connectorStrings.connectExpired)
+        } else if (outcome.status === 'skipped') {
+          setNotice(connectorStrings.connectSkipped)
+        } else {
+          setNotice(connectorStrings.connectFailed(outcome.reason))
+        }
+
+        changed()
+
+        return load()
+      })
+      .catch((cause: unknown) =>
+        setNotice(connectorStrings.connectFailed(cause instanceof Error ? cause.message : String(cause)))
+      )
+      .finally(() => {
+        flow.current = null
+        setBusy(false)
+      })
+  }
+
+  return (
+    <ConnectorDetail
+      busy={busy}
+      connector={connector}
+      notice={notice}
+      onConnect={() => connect(connector?.connected === true)}
+      slug={slug}
+      {...(back ? { back } : {})}
+    />
+  )
+}
+
 function ConnectorDetail({
+  slug,
   connector,
   busy,
   notice,
-  onBack,
+  back,
   onConnect
 }: {
-  connector: ConnectorView
+  slug: string
+  /** `null` until the list has loaded; the page is titled by slug meanwhile. */
+  connector: ConnectorView | null
   busy: boolean
   notice: string | null
-  onBack: () => void
+  back?: PageChromeBack
   onConnect: () => void
 }) {
   const theme = useTheme()
 
   return (
-    <Screen edgeToEdgeTop padded={false}>
-      <ScreenHeader
-        back={connectorStrings.detail.back}
-        onBack={onBack}
-        subtitle={stateLabel(connector)}
-        title={connector.label}
-      />
-
-      <ScrollView
+    <PageFrame
+      {...(back ? { back } : {})}
+      {...(connector ? { subtitle: stateLabel(connector) } : {})}
+      title={connector?.label ?? slug}
+    >
+      <PageScrollView
         contentContainerStyle={{
           alignSelf: 'center',
           gap: theme.space.xl,
@@ -396,51 +418,57 @@ function ConnectorDetail({
         }}
         ref={directTouchPanRef}
       >
-        {connector.description ? <Text color="textMuted">{connector.description}</Text> : null}
+        {connector === null ? <Text color="textMuted">{connectorStrings.loading}</Text> : null}
 
-        <InsetGroup>
-          <InsetValueRow label={connectorStrings.detail.slug} mono value={connector.slug} />
-          <InsetValueRow
-            label={connectorStrings.detail.status}
-            value={connector.connectionStatus ?? stateLabel(connector)}
-          />
-          {connector.enabled === null ? null : (
+        {connector?.description ? <Text color="textMuted">{connector.description}</Text> : null}
+
+        {connector ? (
+          <InsetGroup>
+            <InsetValueRow label={connectorStrings.detail.slug} mono value={connector.slug} />
             <InsetValueRow
-              label={connectorStrings.detail.enabled}
-              value={connector.enabled ? connectorStrings.detail.yes : connectorStrings.detail.no}
+              label={connectorStrings.detail.status}
+              value={connector.connectionStatus ?? stateLabel(connector)}
             />
-          )}
-        </InsetGroup>
+            {connector.enabled === null ? null : (
+              <InsetValueRow
+                label={connectorStrings.detail.enabled}
+                value={connector.enabled ? connectorStrings.detail.yes : connectorStrings.detail.no}
+              />
+            )}
+          </InsetGroup>
+        ) : null}
 
-        {connector.statusReason ? (
+        {connector?.statusReason ? (
           <Text color="textMuted" variant="meta">
             {connectorStrings.reason(connector.statusReason)}
           </Text>
         ) : null}
 
-        <InsetGroup
-          footer={
-            <Text color="textMuted" variant="meta">
-              {connectorStrings.connectHint}
-            </Text>
-          }
-        >
-          <InsetRow>
-            <Button
-              busy={busy}
-              onPress={onConnect}
-              testID="connector-connect"
-              title={
-                busy
-                  ? connectorStrings.connecting
-                  : connector.connected
-                    ? connectorStrings.reconnect
-                    : connectorStrings.connect
-              }
-              variant={connector.connected ? 'secondary' : 'primary'}
-            />
-          </InsetRow>
-        </InsetGroup>
+        {connector ? (
+          <InsetGroup
+            footer={
+              <Text color="textMuted" variant="meta">
+                {connectorStrings.connectHint}
+              </Text>
+            }
+          >
+            <InsetRow>
+              <Button
+                busy={busy}
+                onPress={onConnect}
+                testID="connector-connect"
+                title={
+                  busy
+                    ? connectorStrings.connecting
+                    : connector.connected
+                      ? connectorStrings.reconnect
+                      : connectorStrings.connect
+                }
+                variant={connector.connected ? 'secondary' : 'primary'}
+              />
+            </InsetRow>
+          </InsetGroup>
+        ) : null}
 
         {notice ? (
           <Text color="textMuted" testID="connector-detail-notice" variant="meta">
@@ -456,7 +484,7 @@ function ConnectorDetail({
         <Text color="textMuted" testID="connector-disconnect-note" variant="meta">
           {connectorStrings.disconnect}
         </Text>
-      </ScrollView>
-    </Screen>
+      </PageScrollView>
+    </PageFrame>
   )
 }

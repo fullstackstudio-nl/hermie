@@ -84,6 +84,8 @@ const connectorStringsEn = {
   disconnect: 'Signing out of a connector is done where you manage the account, not from Hermes.',
 
   detail: {
+    /** The route's name, for a page below it; the page itself shows the connector's label. */
+    title: 'Connector',
     back: 'Connectors',
     slug: 'Identifier',
     status: 'Status',

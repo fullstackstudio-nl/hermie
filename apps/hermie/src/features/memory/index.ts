@@ -1,5 +1,11 @@
 // A bot's memory: both files, searchable and editable, through the Hermie plugin.
-export { MemoryBotsScreen, type MemoryBotsScreenProps } from './MemoryBotsScreen'
+export {
+  MemoryBotList,
+  type MemoryBotListProps,
+  MemoryBotsScreen,
+  type MemoryBotsScreenProps,
+  useMemoryBotTitle
+} from './MemoryBotsScreen'
 export { MemoryEntryRow, type MemoryEntryRowProps } from './MemoryEntryRow'
 export {
   GRAPH_MAX_NODES,
@@ -25,7 +31,6 @@ export { MemoryGraphView, type MemoryGraphViewProps } from './MemoryGraphView'
 export { MemoryNodeCard, type MemoryNodeCardProps } from './MemoryNodeCard'
 export { MemoryRawTab, type MemoryRawTabProps } from './MemoryRawTab'
 export { MemoryScreen, type MemoryScreenProps, type MemoryTab } from './MemoryScreen'
-export { MemoryScreenHeader, type MemoryScreenHeaderProps } from './MemoryScreenHeader'
 export { MemoryUsageBar, type MemoryUsageBarProps } from './MemoryUsageBar'
 export {
   asRouteError,

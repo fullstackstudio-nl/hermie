@@ -19,13 +19,14 @@
  *     the screen they are looking at.
  */
 import { useState } from 'react'
-import { ScrollView, View } from 'react-native'
+import { View } from 'react-native'
 
 import { strings } from '../../i18n/strings'
 import { directTouchPanRef } from '../../platform/pointer-drag'
 import { useSettingsStore } from '../../store/settings'
 import { judgeThemeColour, type ThemeColourField } from '../../ui/contrast'
-import { Button, InsetButtonRow, InsetGroup, InsetRow, Screen, Text, TextField } from '../../ui/primitives'
+import { PageFrame, PageScrollView, type PageChromeBack } from '../../ui/chrome'
+import { InsetButtonRow, InsetGroup, InsetRow, Text, TextField } from '../../ui/primitives'
 import { useEscapeKey } from '../../ui/useEscapeKey'
 import { useHardwareBack } from '../../ui/useHardwareBack'
 import { useTheme } from '../../ui/theme'
@@ -48,18 +49,16 @@ const fields = (): { field: ThemeColourField; label: string }[] => [
 ]
 
 export interface ThemesScreenProps {
-  onClose?: () => void
+  /** The page's one back control, labelled with the page it returns to. */
+  back?: PageChromeBack
 }
 
-export function ThemesScreen({ onClose }: ThemesScreenProps) {
+export function ThemesScreen({ back }: ThemesScreenProps) {
   const theme = useTheme()
   const userThemes = useSettingsStore(state => state.userThemes)
   const choice = useSettingsStore(state => state.themeChoice)
   const [editing, setEditing] = useState<string | null>(choice.kind === 'user' ? choice.id : null)
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null)
-
-  useEscapeKey(() => onClose?.(), Boolean(onClose))
-  useHardwareBack(() => onClose?.(), Boolean(onClose))
 
   /*
     The delete confirmation is a LEVEL, so Escape cancels it before it leaves the
@@ -78,8 +77,8 @@ export function ThemesScreen({ onClose }: ThemesScreenProps) {
   const target = userThemes.find(entry => entry.id === editing) ?? null
 
   return (
-    <Screen padded={false}>
-      <ScrollView
+    <PageFrame {...(back ? { back } : {})} title={strings.settings.themes.title}>
+      <PageScrollView
         ref={directTouchPanRef}
         contentContainerStyle={{
           alignSelf: 'center',
@@ -178,11 +177,9 @@ export function ThemesScreen({ onClose }: ThemesScreenProps) {
           </InsetGroup>
         ) : null}
 
-        {onClose ? <Button onPress={onClose} title={strings.settings.themes.back} variant="secondary" /> : null}
-
         <View style={{ height: theme.space.xxl }} />
-      </ScrollView>
-    </Screen>
+      </PageScrollView>
+    </PageFrame>
   )
 }
 

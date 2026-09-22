@@ -31,16 +31,8 @@ import { PLUGIN_GUIDE_URL, PLUGIN_INSTALL_COMMANDS } from '../push/PluginInstall
 import { strings } from '../../i18n/strings'
 import { MONOSPACE } from '../../markdown/context'
 import { useMemoryStore } from '../../store/memory'
-import {
-  Button,
-  InsetButtonRow,
-  InsetGroup,
-  InsetRow,
-  InsetValueRow,
-  Screen,
-  Text,
-  TextField
-} from '../../ui/primitives'
+import { Button, InsetButtonRow, InsetGroup, InsetRow, InsetValueRow, Text, TextField } from '../../ui/primitives'
+import { PageChromeSpacer, PageFrame, type PageChromeProps } from '../../ui/chrome'
 import { useHardwareBack } from '../../ui/useHardwareBack'
 import { useEscapeKey } from '../../ui/useEscapeKey'
 import { useTheme } from '../../ui/theme'
@@ -58,7 +50,6 @@ import {
   MEMORY_TARGETS,
   type MemoryTarget
 } from './model'
-import { MemoryScreenHeader } from './MemoryScreenHeader'
 import { memoryStrings } from './strings'
 import { useMemoryAvailability, useMemoryController } from './useMemory'
 
@@ -70,11 +61,14 @@ export interface MemoryScreenProps {
   profile: string
   /** What the reader calls this bot, for the title only. */
   title?: string
-  onClose: () => void
+  /** Where the page's back control goes. Absent, the page has none. */
+  onClose?: () => void
+  /** What that back control is labelled: the page it returns to. */
+  backLabel?: string
   testID?: string
 }
 
-export function MemoryScreen({ profile, title, onClose, testID = 'memory' }: MemoryScreenProps) {
+export function MemoryScreen({ profile, title, onClose, backLabel, testID = 'memory' }: MemoryScreenProps) {
   const theme = useTheme()
   const availability = useMemoryAvailability()
   const controller = useMemoryController(profile)
@@ -122,16 +116,11 @@ export function MemoryScreen({ profile, title, onClose, testID = 'memory' }: Mem
   }, [controller, tab])
 
   /*
-    Scoped to `!fullGraph`, which is the same idiom `MemoryBotsScreen` uses for
-    its own two levels — and here it is not a nicety but the only thing that
-    works. `useEscapeKey` delivers to whoever registered LAST and effects flush
-    child-first, so the full-screen graph mounted BELOW this component registers
-    before these do and would lose the key to them: one press on a full-screen
-    picture would have closed the whole page. A handler that is switched off
-    while a deeper surface is open cannot swallow that surface's key.
+    Back — Escape and Android's back included — is `PageFrame`'s, registered on
+    mount. A deeper surface still wins because it registers LATER: the
+    full-screen graph and a selected node both switch their handlers on after
+    the page is up, and the stack hands the key to whatever was pushed last.
   */
-  useEscapeKey(onClose, !fullGraph)
-  useHardwareBack(onClose, !fullGraph)
 
   /*
     A selected node on the map is a LEVEL, so Escape leaves it before it leaves
@@ -152,14 +141,11 @@ export function MemoryScreen({ profile, title, onClose, testID = 'memory' }: Mem
   )
   const onRemove = useCallback((entry: MemoryEntry) => void controller?.remove(entry), [controller])
 
-  const header = (
-    <MemoryScreenHeader
-      back={strings.common.back}
-      onBack={onClose}
-      subtitle={title ? memoryStrings.forBot(title) : profile}
-      title={memoryStrings.title}
-    />
-  )
+  const chrome: PageChromeProps = {
+    subtitle: title ? memoryStrings.forBot(title) : profile,
+    title: memoryStrings.title,
+    ...(onClose ? { back: { label: backLabel ?? strings.common.back, onPress: onClose } } : {})
+  }
 
   /**
    * Jump from a node to the entry it stands for.
@@ -194,21 +180,21 @@ export function MemoryScreen({ profile, title, onClose, testID = 'memory' }: Mem
 
   if (availability === 'unknown') {
     return (
-      <Screen padded={false}>
-        {header}
+      <PageFrame {...chrome}>
+        <PageChromeSpacer />
         <View style={{ paddingHorizontal: theme.space.lg }}>
           <Text color="textMuted" testID={`${testID}-unknown`} variant="meta">
             {memoryStrings.missing.unknown}
           </Text>
         </View>
-      </Screen>
+      </PageFrame>
     )
   }
 
   if (availability === 'missing') {
     return (
-      <Screen padded={false}>
-        {header}
+      <PageFrame {...chrome}>
+        <PageChromeSpacer />
         <ScrollView contentContainerStyle={{ gap: theme.space.lg, padding: theme.space.lg }}>
           <Text testID={`${testID}-missing`} variant="body">
             {memoryStrings.missing.title}
@@ -237,15 +223,15 @@ export function MemoryScreen({ profile, title, onClose, testID = 'memory' }: Mem
             />
           </InsetGroup>
         </ScrollView>
-      </Screen>
+      </PageFrame>
     )
   }
 
   const readOnly = availability === 'readOnly'
 
   return (
-    <Screen padded={false}>
-      {header}
+    <PageFrame {...chrome}>
+      <PageChromeSpacer />
 
       <MemoryTabs onChange={setTab} tab={tab} testID={testID} />
 
@@ -365,7 +351,7 @@ export function MemoryScreen({ profile, title, onClose, testID = 'memory' }: Mem
           visible={fullGraph}
         />
       ) : null}
-    </Screen>
+    </PageFrame>
   )
 }
 

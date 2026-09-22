@@ -1,14 +1,21 @@
 /**
- * Settings, and the one group that must not ship.
+ * Settings, page by page: what each category holds, and the one group that must
+ * not ship.
  *
  * The connection test prints the gateway's address and identity, and the
  * component gallery is a catalogue of fixtures. Both are tools for whoever is
- * building the app; neither belongs in a release someone installs.
+ * building the app; neither belongs in a release someone installs — and since
+ * HERM-108 that is a whole CATEGORY that disappears rather than a group inside
+ * a long screen.
+ *
+ * Where a back control goes is not asserted here: `settings-routes.test.tsx`
+ * walks every route for that. This file is about the content of the pages.
  */
 import { act, fireEvent, screen, waitFor } from '@testing-library/react-native'
 
-import { SettingsScreen } from '../src/features/settings/SettingsScreen'
+import { SettingsScreen } from '../src/features/settings'
 import { GALLERY_ROW_TITLE } from '../src/features/settings/GalleryScreen'
+import type { SettingsRouteName } from '../src/features/settings/navigation'
 import { useSettingsStore } from '../src/store/settings'
 import { renderScreen } from './support/render'
 
@@ -54,6 +61,15 @@ beforeEach(() => {
   useSettingsStore.getState().reset()
 })
 
+/** Open Settings on one page, with its ancestors under it. */
+async function open(route: SettingsRouteName) {
+  const view = renderScreen(<SettingsScreen initialRoute={route} />)
+
+  await waitFor(() => expect(screen.getByTestId(`settings-page-${route}`)).toBeTruthy())
+
+  return view
+}
+
 /** Press Escape, the way the native module would deliver it. */
 function pressEscape() {
   act(() => {
@@ -63,57 +79,60 @@ function pressEscape() {
   })
 }
 
-describe('SettingsScreen', () => {
-  it('shows the developer group in a development build', () => {
-    renderScreen(<SettingsScreen />)
+describe('the category list', () => {
+  it('offers the developer tools in a development build', async () => {
+    await open('Advanced')
 
     expect(screen.getByText(GALLERY_ROW_TITLE)).toBeTruthy()
-    expect(screen.getByText('Connection test')).toBeTruthy()
+    expect(screen.getByTestId('settings-connection-test')).toBeTruthy()
   })
 
-  it('hides it everywhere else', () => {
+  it('hides the whole category everywhere else', async () => {
     const previous = __DEV__
 
     ;(globalThis as unknown as { __DEV__: boolean }).__DEV__ = false
 
     try {
-      const view = renderScreen(<SettingsScreen />)
+      await open('Root')
 
-      expect(view.queryByText(GALLERY_ROW_TITLE)).toBeNull()
-      expect(view.queryByText('Connection test')).toBeNull()
-      // The rest of the screen is untouched.
-      expect(screen.getByText('https://gateway.example.com')).toBeTruthy()
+      expect(screen.queryByTestId('settings-cat-Advanced')).toBeNull()
+      // The rest of the list is untouched.
+      expect(screen.getByTestId('settings-cat-Account')).toBeTruthy()
     } finally {
       ;(globalThis as unknown as { __DEV__: boolean }).__DEV__ = previous
     }
+  })
+
+  it('takes no part in the Escape stack while the root is on top', async () => {
+    await open('Root')
+
+    // Nothing registered: with no back control on the root, Escape belongs to
+    // whatever is holding Settings.
+    expect(mockEscapeListeners.size).toBe(0)
   })
 })
 
 describe('About', () => {
   it('opens the licences from a row that ships in every build', async () => {
-    const view = renderScreen(<SettingsScreen />)
+    const view = await open('About')
 
     // Not behind `__DEV__`: an attribution obligation is not a developer tool.
-    expect(screen.getByText('Licences')).toBeTruthy()
-
-    fireEvent.press(screen.getByText('Licences'))
+    fireEvent.press(screen.getByTestId('settings-licences'))
 
     await waitFor(() => expect(view.getByTestId('licences-list')).toBeTruthy())
     expect(screen.getByText('expo')).toBeTruthy()
   })
 
-  it('comes back to Settings on Escape', async () => {
-    const view = renderScreen(<SettingsScreen />)
+  it('comes back to About on Escape', async () => {
+    const view = await open('About')
 
-    fireEvent.press(screen.getByText('Licences'))
+    fireEvent.press(screen.getByTestId('settings-licences'))
     await waitFor(() => expect(view.getByTestId('licences-list')).toBeTruthy())
 
     pressEscape()
 
-    expect(view.queryByTestId('licences-list')).toBeNull()
-    // The first group of the Settings root. It used to be the screen's own large
-    // title, which is gone: both shells already name this screen above it.
-    expect(screen.getByText('GATEWAY')).toBeTruthy()
+    await waitFor(() => expect(view.queryByTestId('licences-list')).toBeNull())
+    expect(screen.getByTestId('settings-page-About')).toBeTruthy()
   })
 })
 
@@ -122,54 +141,27 @@ describe('About', () => {
  * is only for the case the reader can do something about: cleartext to an
  * address anybody can be on the path to.
  */
-describe('Settings and a cleartext gateway', () => {
-  it('says nothing under an https address', () => {
-    renderScreen(<SettingsScreen />)
+describe('Gateways and a cleartext gateway', () => {
+  it('says nothing under an https address', async () => {
+    await open('Gateways')
 
     expect(screen.getByText('https://gateway.example.com')).toBeTruthy()
     expect(screen.queryByTestId('transport-notice')).toBeNull()
   })
 
-  it('says nothing under a tailnet address, which is the ordinary setup', () => {
+  it('says nothing under a tailnet address, which is the ordinary setup', async () => {
     mockGatewayConfig = { ...HTTPS_CONFIG, baseUrl: 'http://hermes.tail9f3c.ts.net' }
-    renderScreen(<SettingsScreen />)
+    await open('Gateways')
 
     expect(screen.getByText('http://hermes.tail9f3c.ts.net')).toBeTruthy()
     expect(screen.queryByTestId('transport-notice')).toBeNull()
   })
 
-  it('warns under a public http address', () => {
+  it('warns under a public http address', async () => {
     mockGatewayConfig = { ...HTTPS_CONFIG, baseUrl: 'http://gateway.example.com' }
-    renderScreen(<SettingsScreen />)
+    await open('Gateways')
 
     expect(screen.getByTestId('transport-notice')).toHaveTextContent(/Anyone on the path/)
-  })
-})
-
-describe('Settings and Escape', () => {
-  /**
-   * Escape goes back ONE level. A developer screen opened from Settings
-   * registers on the Escape stack above whatever is holding Settings — the
-   * overlay panel on the wide layout — so the first press returns here rather
-   * than closing the panel out from under the reader.
-   */
-  it('returns from a developer screen to Settings', () => {
-    renderScreen(<SettingsScreen />)
-
-    fireEvent.press(screen.getByText('Connection test'))
-    expect(screen.getByTestId('debug-status')).toBeTruthy()
-
-    pressEscape()
-
-    expect(screen.queryByTestId('debug-status')).toBeNull()
-    expect(screen.getByText(GALLERY_ROW_TITLE)).toBeTruthy()
-  })
-
-  it('takes no part in the stack while Settings itself is on top', () => {
-    renderScreen(<SettingsScreen />)
-
-    // Nothing registered: Escape belongs to whatever is holding this screen.
-    expect(mockEscapeListeners.size).toBe(0)
   })
 })
 
@@ -182,9 +174,9 @@ describe('Settings and Escape', () => {
  * following the theme it points at, a reader would pick a window they were never
  * shown.
  */
-describe('Settings → Appearance', () => {
-  it('offers a card per preset, and marks the one that is on', () => {
-    renderScreen(<SettingsScreen />)
+describe('Appearance', () => {
+  it('offers a card per preset, and marks the one that is on', async () => {
+    await open('Appearance')
 
     for (const name of ['blue', 'graphite', 'lime']) {
       expect(screen.getByTestId(`theme-card-${name}`)).toBeTruthy()
@@ -199,16 +191,16 @@ describe('Settings → Appearance', () => {
     expect(screen.getByTestId('theme-card-lime').props.accessibilityState.checked).toBe(false)
   })
 
-  it('switches the theme, and the preview follows', () => {
-    renderScreen(<SettingsScreen />)
+  it('switches the theme, and the preview follows', async () => {
+    await open('Appearance')
 
     fireEvent.press(screen.getByTestId('theme-card-lime'))
 
     expect(useSettingsStore.getState().themeChoice).toEqual({ kind: 'preset', name: 'lime' })
   })
 
-  it('paints each card in its own theme rather than in the app’s', () => {
-    renderScreen(<SettingsScreen />)
+  it('paints each card in its own theme rather than in the app’s', async () => {
+    await open('Appearance')
 
     const backgroundOf = (name: string): unknown =>
       // `style` is an array on a `View` with two style objects; the flat form is
@@ -219,36 +211,35 @@ describe('Settings → Appearance', () => {
     expect(backgroundOf('graphite')).not.toBe(backgroundOf('lime'))
   })
 
-  it('shows a theme the reader made beside the presets', () => {
+  it('shows a theme the reader made beside the presets', async () => {
     act(() => {
       useSettingsStore.getState().createUserTheme('lime', 'Studio')
     })
 
-    renderScreen(<SettingsScreen />)
+    await open('Appearance')
 
     const id = useSettingsStore.getState().userThemes[0]?.id ?? ''
 
     expect(screen.getByTestId(`theme-card-user-${id}`)).toBeTruthy()
   })
 
-  it('opens the advanced page and comes back with Escape', () => {
-    renderScreen(<SettingsScreen />)
+  it('opens the themes page and comes back with Escape', async () => {
+    const view = await open('Appearance')
 
     fireEvent.press(screen.getByTestId('settings-themes-advanced'))
-    expect(screen.getByTestId('theme-new-lime')).toBeTruthy()
+    await waitFor(() => expect(screen.getByTestId('theme-new-lime')).toBeTruthy())
 
     pressEscape()
 
-    expect(screen.queryByTestId('theme-new-lime')).toBeNull()
+    await waitFor(() => expect(view.queryByTestId('theme-new-lime')).toBeNull())
     expect(screen.getByTestId('theme-card-blue')).toBeTruthy()
   })
 })
 
 describe('the theme editor', () => {
-  it('keeps a colour the contrast check would refuse, and says why', () => {
-    renderScreen(<SettingsScreen />)
+  it('keeps a colour the contrast check would refuse, and says why', async () => {
+    await open('Theme')
 
-    fireEvent.press(screen.getByTestId('settings-themes-advanced'))
     fireEvent.press(screen.getByTestId('theme-new-blue'))
 
     const id = useSettingsStore.getState().userThemes[0]?.id ?? ''
@@ -261,10 +252,9 @@ describe('the theme editor', () => {
     expect(useSettingsStore.getState().userThemes.find(theme => theme.id === id)?.light?.accentBubble).toBe(before)
   })
 
-  it('takes one the check would pass, and writes it', () => {
-    renderScreen(<SettingsScreen />)
+  it('takes one the check would pass, and writes it', async () => {
+    await open('Theme')
 
-    fireEvent.press(screen.getByTestId('settings-themes-advanced'))
     fireEvent.press(screen.getByTestId('theme-new-blue'))
     fireEvent.changeText(screen.getByTestId('theme-colour-accentBubble'), '#4A7F15')
 

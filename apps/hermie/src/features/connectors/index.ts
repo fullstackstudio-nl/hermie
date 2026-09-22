@@ -1,4 +1,11 @@
-export { ConnectorsScreen, stateLabel, type ConnectorsScreenProps } from './ConnectorsScreen'
+export {
+  ConnectorScreen,
+  type ConnectorScreenProps,
+  ConnectorsScreen,
+  type ConnectorsScreenProps,
+  stateLabel,
+  useConnectorsRevision
+} from './ConnectorsScreen'
 export {
   CONNECT_POLL_INTERVAL_MS,
   CONNECT_TIMEOUT_MS,

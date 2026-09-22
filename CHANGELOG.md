@@ -25,6 +25,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under "Branch from here…". The old switch between the shared chat and "My chat" keeps working
   exactly as it did; this list is a second way in, not a replacement yet.
 
+### Changed
+
+- **Settings is a settings app (HERM-108).** It opens on a list of twelve categories — Account,
+  Gateways, Chats & messages, Notifications, Context about you, Memory, Appearance, Privacy &
+  security, Voice, Bots & capabilities, Advanced, About — each with a line saying where it stands
+  (the gateway you are on and how many you have, the default verbosity, Dark · English), and each
+  opening a page of its own. Every page is a ROUTE in one stack now, so every one of them has
+  exactly one back button, labelled with the page it returns to, and Escape and Android's back
+  both walk one level per press. A wide window shows the list and the open page side by side. The
+  bot-name order moved from Appearance to Chats & messages, the theme editor is a page under
+  Appearance, and the global voice settings — speaking rate, dictation language, confirm before
+  sending, stop when the app closes — are reachable outside a chat's options sheet for the first
+  time. Development builds keep the connection test and the component gallery, under Advanced.
+
 ### Removed
 
 - **The gateway's logs page (HERM-103).** Settings no longer has a "gateway's logs" row, and the

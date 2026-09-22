@@ -1,10 +1,10 @@
 /**
  * Settings ▸ MCP servers, and one server's detail.
  *
- * One screen with an early-return sub-screen, which is the shape the Crons
- * feature uses and for the same reason: the compact and regular shells own
- * their own navigation and disagree about what "push" means, so a feature that
- * pushed for itself would be right on one of them.
+ * Two pages, and two routes in the Settings stack: the list pushes the detail
+ * through `onOpenServer`, and neither draws a back control of its own — each
+ * takes the one its route hands it. What the two share (the probes, and the
+ * fact that an authorisation changed the list) is in `probe-store.ts`.
  *
  * Nothing here probes on the reader's behalf. `mcp.servers.test` connects, and
  * a cold `npx` server takes seconds — testing three of them on arrival would
@@ -12,38 +12,33 @@
  * config and the cached runtime view, and connecting is a button.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Linking, Pressable, RefreshControl, ScrollView, View } from 'react-native'
+import { Linking, Pressable, RefreshControl, View } from 'react-native'
 
 import { useGateway } from '../../gateway'
 import { chatGatewayFor } from '../../gateway/link'
 import { directTouchPanRef } from '../../platform/pointer-drag'
-import { Button, InsetGroup, InsetRow, InsetValueRow, Screen, Text } from '../../ui/primitives'
-import { useEscapeKey } from '../../ui/useEscapeKey'
-import { useHardwareBack } from '../../ui/useHardwareBack'
+import { PageFrame, PageScrollView, type PageChromeBack } from '../../ui/chrome'
+import { Button, InsetGroup, InsetRow, InsetValueRow, Text } from '../../ui/primitives'
 import { FORM_MAX_WIDTH } from '../../ui/tokens'
 import { useTheme } from '../../ui/theme'
-import { ScreenHeader } from '../cron/ScreenHeader'
 import { McpController, type McpProbe, type McpServerView } from './mcp-controller'
+import { useMcpProbeStore } from './probe-store'
 import { mcpStrings } from './strings'
 
 export interface McpScreenProps {
-  onClose: () => void
+  /** The page's one back control, labelled with the page it returns to. */
+  back?: PageChromeBack
+  /** Push one server's page. */
+  onOpenServer: (name: string) => void
   /** Scope every call to one bot. Omitted means the gateway's own profile. */
   profile?: string | null
 }
 
-export function McpScreen({ onClose, profile = null }: McpScreenProps) {
-  const theme = useTheme()
+/** The controller both pages talk through, one per connection. */
+function useMcpController(): McpController | null {
   const { connection } = useGateway()
-  const [servers, setServers] = useState<McpServerView[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [selected, setSelected] = useState<string | null>(null)
-  const [refreshing, setRefreshing] = useState(false)
-  const [probes, setProbes] = useState<Record<string, McpProbe>>({})
-  const [busy, setBusy] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
 
-  const controller = useMemo(
+  return useMemo(
     () =>
       connection
         ? new McpController({
@@ -53,6 +48,13 @@ export function McpScreen({ onClose, profile = null }: McpScreenProps) {
         : null,
     [connection]
   )
+}
+
+/** The configured servers and their cached runtime view; reloaded when a server's page changed it. */
+function useMcpServers(controller: McpController | null, profile: string | null) {
+  const revision = useMcpProbeStore(state => state.revision)
+  const [servers, setServers] = useState<McpServerView[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!controller) {
@@ -69,75 +71,22 @@ export function McpScreen({ onClose, profile = null }: McpScreenProps) {
 
   useEffect(() => {
     void load()
-  }, [load])
+  }, [load, revision])
 
-  useEscapeKey(() => setSelected(null), selected !== null)
-  useHardwareBack(() => setSelected(null), selected !== null)
+  return { servers, error, load }
+}
 
-  const server = servers?.find(entry => entry.name === selected) ?? null
-
-  const test = (name: string) => {
-    if (!controller) {
-      return
-    }
-
-    setBusy(name)
-    setNotice(null)
-    void controller
-      .test(name, profile)
-      .then(probe => {
-        setProbes(current => ({ ...current, [name]: probe }))
-        setNotice(probe.ok ? mcpStrings.testOk(probe.tools.length) : mcpStrings.testFailed(probe.error ?? ''))
-      })
-      .catch((cause: unknown) =>
-        setNotice(mcpStrings.testFailed(cause instanceof Error ? cause.message : String(cause)))
-      )
-      .finally(() => setBusy(null))
-  }
-
-  const authorise = (name: string) => {
-    if (!controller) {
-      return
-    }
-
-    setBusy(name)
-    setNotice(mcpStrings.authorising)
-    void controller
-      .authorise(name, profile)
-      .then(probe => {
-        setProbes(current => ({ ...current, [name]: probe }))
-        setNotice(mcpStrings.authoriseOk)
-
-        return load()
-      })
-      .catch((cause: unknown) =>
-        setNotice(mcpStrings.authoriseFailed(cause instanceof Error ? cause.message : String(cause)))
-      )
-      .finally(() => setBusy(null))
-  }
-
-  if (server) {
-    return (
-      <McpDetail
-        busy={busy === server.name}
-        notice={notice}
-        onAuthorise={() => authorise(server.name)}
-        onBack={() => {
-          setSelected(null)
-          setNotice(null)
-        }}
-        onTest={() => test(server.name)}
-        probe={probes[server.name] ?? null}
-        server={server}
-      />
-    )
-  }
+export function McpScreen({ back, onOpenServer, profile = null }: McpScreenProps) {
+  const theme = useTheme()
+  const controller = useMcpController()
+  const { servers, error, load } = useMcpServers(controller, profile)
+  const probes = useMcpProbeStore(state => state.probes)
+  const [refreshing, setRefreshing] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
 
   return (
-    <Screen edgeToEdgeTop padded={false}>
-      <ScreenHeader back={mcpStrings.back} onBack={onClose} subtitle={mcpStrings.subtitle} title={mcpStrings.title} />
-
-      <ScrollView
+    <PageFrame {...(back ? { back } : {})} subtitle={mcpStrings.subtitle} title={mcpStrings.title}>
+      <PageScrollView
         contentContainerStyle={{
           alignSelf: 'center',
           gap: theme.space.xl,
@@ -180,14 +129,17 @@ export function McpScreen({ onClose, profile = null }: McpScreenProps) {
               <ServerRow
                 key={entry.name}
                 needsAuth={probes[entry.name]?.needsAuth === true}
-                onPress={() => setSelected(entry.name)}
+                onPress={() => {
+                  setNotice(null)
+                  onOpenServer(entry.name)
+                }}
                 server={entry}
               />
             ))}
           </InsetGroup>
         )}
 
-        {notice && !selected ? (
+        {notice ? (
           <Text color="textMuted" testID="mcp-notice" variant="meta">
             {notice}
           </Text>
@@ -218,8 +170,78 @@ export function McpScreen({ onClose, profile = null }: McpScreenProps) {
             />
           </InsetRow>
         </InsetGroup>
-      </ScrollView>
-    </Screen>
+      </PageScrollView>
+    </PageFrame>
+  )
+}
+
+export interface McpServerScreenProps {
+  name: string
+  back?: PageChromeBack
+  profile?: string | null
+}
+
+/** One server's page: what it is, a test that connects, and the authorisation when it asks for one. */
+export function McpServerScreen({ name, back, profile = null }: McpServerScreenProps) {
+  const controller = useMcpController()
+  const { servers } = useMcpServers(controller, profile)
+  const probe = useMcpProbeStore(state => state.probes[name] ?? null)
+  const setProbe = useMcpProbeStore(state => state.setProbe)
+  const changed = useMcpProbeStore(state => state.changed)
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const server = servers?.find(entry => entry.name === name) ?? null
+
+  const test = () => {
+    if (!controller) {
+      return
+    }
+
+    setBusy(true)
+    setNotice(null)
+    void controller
+      .test(name, profile)
+      .then(result => {
+        setProbe(name, result)
+        setNotice(result.ok ? mcpStrings.testOk(result.tools.length) : mcpStrings.testFailed(result.error ?? ''))
+      })
+      .catch((cause: unknown) =>
+        setNotice(mcpStrings.testFailed(cause instanceof Error ? cause.message : String(cause)))
+      )
+      .finally(() => setBusy(false))
+  }
+
+  const authorise = () => {
+    if (!controller) {
+      return
+    }
+
+    setBusy(true)
+    setNotice(mcpStrings.authorising)
+    void controller
+      .authorise(name, profile)
+      .then(result => {
+        setProbe(name, result)
+        setNotice(mcpStrings.authoriseOk)
+        changed()
+      })
+      .catch((cause: unknown) =>
+        setNotice(mcpStrings.authoriseFailed(cause instanceof Error ? cause.message : String(cause)))
+      )
+      .finally(() => setBusy(false))
+  }
+
+  return (
+    <McpDetail
+      busy={busy}
+      name={name}
+      notice={notice}
+      onAuthorise={authorise}
+      onTest={test}
+      probe={probe}
+      server={server}
+      {...(back ? { back } : {})}
+    />
   )
 }
 
@@ -254,34 +276,34 @@ function ServerRow({ server, needsAuth, onPress }: { server: McpServerView; need
 }
 
 function McpDetail({
+  name,
   server,
   probe,
   busy,
   notice,
-  onBack,
+  back,
   onTest,
   onAuthorise
 }: {
-  server: McpServerView
+  name: string
+  /** `null` until the list has loaded; the page is titled by name meanwhile. */
+  server: McpServerView | null
   probe: McpProbe | null
   busy: boolean
   notice: string | null
-  onBack: () => void
+  back?: PageChromeBack
   onTest: () => void
   onAuthorise: () => void
 }) {
   const theme = useTheme()
 
   return (
-    <Screen edgeToEdgeTop padded={false}>
-      <ScreenHeader
-        back={mcpStrings.detail.back}
-        onBack={onBack}
-        subtitle={mcpStrings.runtime[server.runtime]}
-        title={server.name}
-      />
-
-      <ScrollView
+    <PageFrame
+      {...(back ? { back } : {})}
+      {...(server ? { subtitle: mcpStrings.runtime[server.runtime] } : {})}
+      title={name}
+    >
+      <PageScrollView
         contentContainerStyle={{
           alignSelf: 'center',
           gap: theme.space.xl,
@@ -291,13 +313,17 @@ function McpDetail({
         }}
         ref={directTouchPanRef}
       >
-        <InsetGroup>
-          <InsetValueRow label={mcpStrings.detail.transport} value={server.transport} />
-          <InsetValueRow label={mcpStrings.detail.address} mono value={server.address} />
-          <InsetValueRow label={mcpStrings.detail.auth} value={server.auth ?? mcpStrings.detail.authNone} />
-        </InsetGroup>
+        {server ? (
+          <InsetGroup>
+            <InsetValueRow label={mcpStrings.detail.transport} value={server.transport} />
+            <InsetValueRow label={mcpStrings.detail.address} mono value={server.address} />
+            <InsetValueRow label={mcpStrings.detail.auth} value={server.auth ?? mcpStrings.detail.authNone} />
+          </InsetGroup>
+        ) : (
+          <Text color="textMuted">{mcpStrings.loading}</Text>
+        )}
 
-        {server.env.length ? (
+        {server?.env.length ? (
           <InsetGroup
             footer={
               <Text color="textMuted" variant="meta">
@@ -365,7 +391,7 @@ function McpDetail({
             ))
           )}
         </InsetGroup>
-      </ScrollView>
-    </Screen>
+      </PageScrollView>
+    </PageFrame>
   )
 }

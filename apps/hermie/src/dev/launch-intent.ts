@@ -89,14 +89,15 @@
 import { hasExplicitScheme, normalizeBaseUrl } from '@hermie/gateway-client'
 import { requireOptionalNativeModule } from 'expo'
 
+import { settingsRouteFrom, type SettingsRouteName } from '../features/settings/navigation/route-names'
 import { THEME_PRESET_ORDER, type ThemePresetName } from '../ui/themes'
 import { type Scheme } from '../ui/tokens'
 
 /** The three destinations that are not the gallery. */
 export type DevOverlaySection = 'activity' | 'cron' | 'settings'
 
-/** A page Settings opens over itself; the wide layout has no navigator for it. */
-export type DevSettingsPage = 'connection' | 'gallery' | 'licences' | 'memory' | 'themes'
+/** A page inside Settings, as a route in its own stack (`features/settings/navigation`). */
+export type DevSettingsPage = SettingsRouteName
 
 export type DevOpenTarget =
   | { kind: 'gallery'; section: string }
@@ -148,20 +149,16 @@ const OVERLAY_SECTIONS: Record<string, DevOverlaySection> = {
 }
 
 /*
-  Memory is here for the reason the whole file is: it was rejected after a
-  build, and it is behind taps a simulator on this machine cannot make. A page
-  nobody can open is a page nobody photographs, which is how the screenshots
-  went stale through three design passes.
+  Any route name, plus the spellings the old boolean pages were opened by —
+  `settingsRouteFrom` in `features/settings/navigation/route-names.ts` owns
+  both, so a page added to Settings is openable from the command line without
+  anything here being told about it.
+
+  This exists for the reason the whole file does: these pages are behind taps a
+  simulator on this machine cannot make, and a page nobody can open is a page
+  nobody photographs — which is how the screenshots went stale through three
+  design passes.
 */
-const SETTINGS_PAGES: Record<string, DevSettingsPage> = {
-  connection: 'connection',
-  'connection-test': 'connection',
-  gallery: 'gallery',
-  licences: 'licences',
-  licenses: 'licences',
-  memory: 'memory',
-  themes: 'themes'
-}
 
 /** `sheet:approval` → the gallery section that holds the approval sheet. */
 const SHEET_SECTIONS: Record<string, string> = {
@@ -232,7 +229,7 @@ function parseTarget(value: string): DevOpenTarget | undefined {
       return undefined
     }
 
-    const page = section === 'settings' ? SETTINGS_PAGES[tail.toLowerCase()] : undefined
+    const page = section === 'settings' ? settingsRouteFrom(tail) : undefined
 
     return { kind: 'overlay', section, ...(page ? { page } : {}) }
   }

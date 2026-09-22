@@ -528,7 +528,7 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
               />
             ) : null}
             {section === 'settings' ? (
-              <SettingsScreen {...(initial?.page ? { initialPage: initial.page } : {})} />
+              <SettingsScreen {...(initial?.page ? { initialRoute: initial.page } : {})} />
             ) : null}
           </OverlayPanel>
         </View>

@@ -6,6 +6,19 @@ import { useConnectionStore } from '../src/gateway/store'
 import { useChatsStore } from '../src/store/chats'
 import { renderScreen } from './support/render'
 
+/**
+ * Settings → Advanced → Connection test, which is two taps now that Settings is
+ * a category list over a stack (HERM-108) rather than one long screen.
+ */
+async function openConnectionTest(user: ReturnType<typeof userEvent.setup>) {
+  // The provider reads the (empty) configuration off disk before anything
+  // renders its values; the category list is what is up until then.
+  await waitFor(() => expect(screen.getByTestId('settings-cat-Advanced')).toBeTruthy())
+  await user.press(screen.getByTestId('settings-cat-Advanced'))
+  await user.press(await screen.findByTestId('settings-connection-test'))
+  await waitFor(() => expect(screen.getByTestId('debug-status')).toBeTruthy())
+}
+
 describe('SettingsScreen → Connection test', () => {
   // Before, not after: resetting a store while the screen reading it is still
   // mounted is a state update outside `act`.
@@ -23,11 +36,7 @@ describe('SettingsScreen → Connection test', () => {
       </GatewayProvider>
     )
 
-    // The provider reads the (empty) configuration off disk before anything
-    // renders its values. Waiting on the first group header rather than on a
-    // title: Settings has none of its own, because both shells name it above.
-    await waitFor(() => expect(screen.getByText('GATEWAY')).toBeTruthy())
-    await user.press(screen.getByText('Connection test'))
+    await openConnectionTest(user)
 
     expect(screen.getByText('Connection test')).toBeTruthy()
     expect(screen.getByDisplayValue('http://localhost:9119')).toBeTruthy()
@@ -46,8 +55,7 @@ describe('SettingsScreen → Connection test', () => {
       </GatewayProvider>
     )
 
-    await waitFor(() => expect(screen.getByText('GATEWAY')).toBeTruthy())
-    await user.press(screen.getByText('Connection test'))
+    await openConnectionTest(user)
 
     const lines = screen.getAllByTestId('debug-transcript-line').map(node => node.props.children)
 
@@ -72,7 +80,7 @@ describe('SettingsScreen → Connection test', () => {
 
     // After the provider has settled, not before: its own startup restores the
     // ring from disk and publishes it, which would replace anything seeded here.
-    await waitFor(() => expect(screen.getByText('GATEWAY')).toBeTruthy())
+    await waitFor(() => expect(screen.getByTestId('settings-cat-Advanced')).toBeTruthy())
 
     useConnectionStore.getState().setAuthTimeline({
       events: [
@@ -86,7 +94,7 @@ describe('SettingsScreen → Connection test', () => {
       lastSignOut: { at: Date.parse('2026-09-20T11:00:05Z'), reason: 'refresh_rejected' }
     })
 
-    await user.press(screen.getByText('Connection test'))
+    await openConnectionTest(user)
 
     expect(screen.getByTestId('debug-auth-signout')).toHaveTextContent(/last sign-out: refresh_rejected/)
 
@@ -112,8 +120,7 @@ describe('SettingsScreen → Connection test', () => {
       </GatewayProvider>
     )
 
-    await waitFor(() => expect(screen.getByText('GATEWAY')).toBeTruthy())
-    await user.press(screen.getByText('Connection test'))
+    await openConnectionTest(user)
 
     expect(screen.getByTestId('debug-auth-signout')).toHaveTextContent(/none recorded on this device/)
     expect(screen.queryAllByTestId('debug-auth-event')).toHaveLength(0)

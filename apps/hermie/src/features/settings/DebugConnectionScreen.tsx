@@ -7,7 +7,7 @@ import {
 } from '@hermie/gateway-client'
 import { formatTranscriptDiagnostics } from '@hermie/transcript'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Platform, Pressable, ScrollView, View } from 'react-native'
+import { Platform, Pressable, View } from 'react-native'
 
 import { createGatewayConnection, useGateway } from '../../gateway'
 // Straight from the store rather than the barrel: the barrel pulls in the whole
@@ -18,7 +18,8 @@ import { hasHardwareKeyboard } from '../../platform/keyboard-modifiers'
 import { directTouchPanRef } from '../../platform/pointer-drag'
 import { RUNS_ON_MAC } from '../../platform/runs-on-mac'
 import { useChatsStore } from '../../store/chats'
-import { Button, Screen, Text, TextField } from '../../ui/primitives'
+import { PageFrame, PageScrollView, type PageChromeBack } from '../../ui/chrome'
+import { Button, Text, TextField } from '../../ui/primitives'
 import { GLASS_MATERIAL, GLASS_PROBES } from '../../ui/glass'
 import { useTheme } from '../../ui/theme'
 
@@ -193,7 +194,7 @@ function RpcFailuresBlock() {
   )
 }
 
-export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
+export function DebugConnectionScreen({ back }: { back?: PageChromeBack }) {
   const theme = useTheme()
   const chats = useChatsStore(state => state.chats)
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL)
@@ -260,14 +261,8 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
   const transcriptLines = Object.entries(chats).flatMap(([botName, chat]) => formatTranscriptDiagnostics(botName, chat))
 
   return (
-    <Screen>
-      <ScrollView
-        contentContainerStyle={{ gap: theme.space.md, paddingVertical: theme.space.lg }}
-        ref={directTouchPanRef}
-      >
-        <Text accessibilityRole="header" aria-level={1} variant="title">
-          Connection test
-        </Text>
+    <PageFrame {...(back ? { back } : {})} title={strings.settings.connectionTest}>
+      <PageScrollView contentContainerStyle={{ gap: theme.space.md, padding: theme.space.lg }} ref={directTouchPanRef}>
         <Text color="textMuted">
           Points a raw gateway connection at an address and reports what happens. Session-token gateways only; signing
           in with a provider arrives with onboarding.
@@ -398,9 +393,7 @@ export function DebugConnectionScreen({ onClose }: { onClose?: () => void }) {
             ))}
           </View>
         ) : null}
-
-        {onClose ? <Button title="Back to settings" variant="secondary" onPress={onClose} /> : null}
-      </ScrollView>
-    </Screen>
+      </PageScrollView>
+    </PageFrame>
   )
 }

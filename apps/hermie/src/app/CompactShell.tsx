@@ -357,8 +357,19 @@ export function CompactShell({ initial }: { initial?: DevInitialView } = {}) {
               />
             )}
           </Stack.Screen>
-          <Stack.Screen name="Settings" options={{ title: strings.tabs.settings }}>
-            {() => <SettingsScreen {...(initial?.page ? { initialPage: initial.page } : {})} />}
+          {/*
+            No native header: Settings draws its own chrome on every page
+            (`PageChrome`), and the stray "‹ Bots" the platform header put on it
+            is HERM-75. The root's back is handed in instead, until the tab bar
+            arrives and a tab root stops having one at all.
+          */}
+          <Stack.Screen name="Settings" options={{ headerShown: false, title: strings.tabs.settings }}>
+            {({ navigation }: { navigation: NativeStackNavigationProp<CompactStackParamList> }) => (
+              <SettingsScreen
+                rootBack={{ label: strings.tabs.chats, onPress: () => navigation.goBack() }}
+                {...(initial?.page ? { initialRoute: initial.page } : {})}
+              />
+            )}
           </Stack.Screen>
           {/*
             Both PUSHED rather than replacing the chat, so Back walks the way

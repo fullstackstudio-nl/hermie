@@ -112,11 +112,17 @@ describe('Boards on a wide window', () => {
     expect(screen.getByTestId('bot-row-writer')).toBeTruthy()
   })
 
+  /** Settings → Bots & capabilities → Boards, which is where the row lives now. */
+  function openBoardsFromSettings() {
+    fireEvent.press(screen.getByTestId('tab-settings'))
+    fireEvent.press(within(screen.getByTestId('overlay-panel')).getByTestId('settings-cat-Capabilities'))
+    fireEvent.press(within(screen.getByTestId('overlay-panel')).getByTestId('settings-boards'))
+  }
+
   it('takes the column from Settings rather than sitting inside its 520pt panel', async () => {
     renderScreen(<RegularShell />)
 
-    fireEvent.press(screen.getByTestId('tab-settings'))
-    fireEvent.press(within(screen.getByTestId('overlay-panel')).getByText(kanbanStrings.settings.row))
+    openBoardsFromSettings()
 
     expect(within(screen.getByTestId('shell-content')).getByText(board())).toBeTruthy()
     // The panel goes, rather than staying up over the column the board was just
@@ -128,8 +134,7 @@ describe('Boards on a wide window', () => {
   it('goes back one level — to Settings when that is the door it came through', () => {
     renderScreen(<RegularShell />)
 
-    fireEvent.press(screen.getByTestId('tab-settings'))
-    fireEvent.press(within(screen.getByTestId('overlay-panel')).getByText(kanbanStrings.settings.row))
+    openBoardsFromSettings()
     // The board's own back button, which is labelled with the door it returns
     // to. Scoped to the column, because the sidebar has a Settings tab with the
     // same label.

@@ -44,6 +44,8 @@ const mcpStringsEn = {
   toolCount: (count: number) => `${count} ${count === 1 ? 'tool' : 'tools'}`,
 
   detail: {
+    /** The route's name, for a page below it; the page itself shows the server's name. */
+    title: 'MCP server',
     back: 'MCP servers',
     transport: 'Transport',
     address: 'Address',

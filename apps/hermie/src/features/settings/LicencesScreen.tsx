@@ -19,18 +19,20 @@ import { ActivityIndicator, FlatList, Pressable, View } from 'react-native'
 
 import { strings } from '../../i18n/strings'
 import { directTouchPanRef } from '../../platform/pointer-drag'
-import { Button, Screen, Text } from '../../ui/primitives'
+import { PageChromeSpacer, PageFrame, type PageChromeBack } from '../../ui/chrome'
+import { Button, Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { CONTROL_MIN_HEIGHT } from '../../ui/tokens'
 import { type LicenceData, type LicencePackage, loadLicenceData } from './licences-data'
 
 export interface LicencesScreenProps {
-  onClose?: () => void
+  /** The page's one back control, labelled with the page it returns to. */
+  back?: PageChromeBack
 }
 
 type LoadState = { status: 'loading' } | { status: 'failed'; message: string } | { status: 'ready'; data: LicenceData }
 
-export function LicencesScreen({ onClose }: LicencesScreenProps) {
+export function LicencesScreen({ back }: LicencesScreenProps) {
   const theme = useTheme()
   const [state, setState] = useState<LoadState>({ status: 'loading' })
   const [attempt, setAttempt] = useState(0)
@@ -61,23 +63,27 @@ export function LicencesScreen({ onClose }: LicencesScreenProps) {
 
   const toggle = useCallback((key: string) => setExpanded(current => (current === key ? null : key)), [])
 
+  /*
+    The page's name is the chrome's, and the back button with it. What is left
+    here is the one line that belongs to the LIST — how many packages ship —
+    and it rides above the rows with the spacer that keeps it clear of the glass.
+  */
   const header = (
     <View style={{ gap: theme.space.sm, paddingBottom: theme.space.lg }}>
-      <Text accessibilityRole="header" aria-level={1} variant="title">
-        {strings.settings.licences}
-      </Text>
+      <PageChromeSpacer />
       <Text color="textMuted" variant="preview">
         {state.status === 'ready'
           ? strings.settings.licencesSummary(state.data.packages.length)
           : strings.settings.licencesHint}
       </Text>
-      {onClose ? <Button onPress={onClose} title={strings.settings.licencesBack} variant="secondary" /> : null}
     </View>
   )
 
+  const chrome = { title: strings.settings.licences, ...(back ? { back } : {}) }
+
   if (state.status !== 'ready') {
     return (
-      <Screen edgeToEdgeTop={false} padded={false}>
+      <PageFrame {...chrome}>
         <View style={{ gap: theme.space.lg, padding: theme.space.lg }}>
           {header}
           {state.status === 'loading' ? (
@@ -100,12 +106,12 @@ export function LicencesScreen({ onClose }: LicencesScreenProps) {
             </View>
           )}
         </View>
-      </Screen>
+      </PageFrame>
     )
   }
 
   return (
-    <Screen edgeToEdgeTop={false} padded={false}>
+    <PageFrame {...chrome}>
       <FlatList
         ref={directTouchPanRef}
         ListFooterComponent={<Footer data={state.data} />}
@@ -125,7 +131,7 @@ export function LicencesScreen({ onClose }: LicencesScreenProps) {
         )}
         testID="licences-list"
       />
-    </Screen>
+    </PageFrame>
   )
 }
 

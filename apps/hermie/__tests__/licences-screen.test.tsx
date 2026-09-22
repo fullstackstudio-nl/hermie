@@ -86,15 +86,16 @@ describe('LicencesScreen', () => {
     expect(screen.getByText(/ships no licence file/)).toBeTruthy()
   })
 
-  it('offers a way back when it was opened from Settings', async () => {
-    const onClose = jest.fn()
+  it('offers one way back, the chrome’s, when it was opened from Settings', async () => {
+    const onPress = jest.fn()
 
-    renderScreen(<LicencesScreen onClose={onClose} />)
+    renderScreen(<LicencesScreen back={{ label: 'About', onPress }} />)
 
     await waitFor(() => expect(screen.getByTestId('licences-list')).toBeTruthy())
 
-    fireEvent.press(screen.getByText('Back to settings'))
+    expect(screen.getAllByTestId('page-back')).toHaveLength(1)
+    fireEvent.press(screen.getByTestId('page-back'))
 
-    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onPress).toHaveBeenCalledTimes(1)
   })
 })

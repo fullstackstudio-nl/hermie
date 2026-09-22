@@ -26,12 +26,10 @@ import { Animated, Pressable, RefreshControl, ScrollView, View, useWindowDimensi
 
 import { useGateway } from '../../gateway'
 import { directTouchPanRef } from '../../platform/pointer-drag'
-import { Button, InsetGroup, InsetRow, InsetValueRow, Screen, Text, TextField } from '../../ui/primitives'
+import { PageFrame, PageScrollView } from '../../ui/chrome'
+import { Button, InsetGroup, InsetRow, InsetValueRow, Text, TextField } from '../../ui/primitives'
 import { FORM_MAX_WIDTH } from '../../ui/tokens'
-import { useEscapeKey } from '../../ui/useEscapeKey'
-import { useHardwareBack } from '../../ui/useHardwareBack'
 import { useTheme } from '../../ui/theme'
-import { ScreenHeader } from '../cron/ScreenHeader'
 import { CARD_LIFT_SCALE, useCardDrag, type CardDrag } from './use-card-drag'
 import type { ColumnDragState, ColumnTarget } from './card-drag'
 import {
@@ -55,7 +53,8 @@ const WIDE_BOARD_PX = 700
 const COLUMN_WIDTH = 260
 
 export interface KanbanScreenProps {
-  onClose: () => void
+  /** Where the board list's back control goes. Absent, the list has none. */
+  onClose?: () => void
   /** What the back button on the board list says, since two doors lead here. */
   backLabel?: string
 }
@@ -173,8 +172,12 @@ export function KanbanScreen({ onClose, backLabel = kanbanStrings.back }: Kanban
     setNotice(null)
   }, [openCard, slug])
 
-  useEscapeKey(back, Boolean(slug || openCard))
-  useHardwareBack(back, Boolean(slug || openCard))
+  /*
+    No Escape or Android-back wiring here: every level below draws its own
+    `PageFrame`, whose back control registers both keys while it is mounted,
+    and only the innermost level is mounted at a time.
+  */
+  const listBack = onClose ? { back: { label: backLabel, onPress: onClose } } : {}
 
   const move = (card: Card, column: string) => {
     if (!controller || !slug) {
@@ -206,8 +209,7 @@ export function KanbanScreen({ onClose, backLabel = kanbanStrings.back }: Kanban
 
   if (absent) {
     return (
-      <Screen edgeToEdgeTop padded={false}>
-        <ScreenHeader back={backLabel} onBack={onClose} title={kanbanStrings.title} />
+      <PageFrame {...listBack} title={kanbanStrings.title}>
         <Pad>
           <InsetGroup
             footer={
@@ -228,7 +230,7 @@ export function KanbanScreen({ onClose, backLabel = kanbanStrings.back }: Kanban
             </InsetRow>
           </InsetGroup>
         </Pad>
-      </Screen>
+      </PageFrame>
     )
   }
 
@@ -307,10 +309,8 @@ export function KanbanScreen({ onClose, backLabel = kanbanStrings.back }: Kanban
   }
 
   return (
-    <Screen edgeToEdgeTop padded={false}>
-      <ScreenHeader back={backLabel} onBack={onClose} subtitle={kanbanStrings.subtitle} title={kanbanStrings.title} />
-
-      <ScrollView
+    <PageFrame {...listBack} subtitle={kanbanStrings.subtitle} title={kanbanStrings.title}>
+      <PageScrollView
         contentContainerStyle={{
           alignSelf: 'center',
           gap: theme.space.xl,
@@ -374,8 +374,8 @@ export function KanbanScreen({ onClose, backLabel = kanbanStrings.back }: Kanban
             ))}
           </InsetGroup>
         )}
-      </ScrollView>
-    </Screen>
+      </PageScrollView>
+    </PageFrame>
   )
 }
 
@@ -383,7 +383,7 @@ function Pad({ children }: { children: React.ReactNode }) {
   const theme = useTheme()
 
   return (
-    <ScrollView
+    <PageScrollView
       contentContainerStyle={{
         alignSelf: 'center',
         gap: theme.space.xl,
@@ -394,7 +394,7 @@ function Pad({ children }: { children: React.ReactNode }) {
       ref={directTouchPanRef}
     >
       {children}
-    </ScrollView>
+    </PageScrollView>
   )
 }
 
@@ -637,26 +637,23 @@ function BoardScreen({
   )
 
   return (
-    <Screen edgeToEdgeTop padded={false}>
-      <ScreenHeader
-        action={
-          <Pressable
-            accessibilityLabel={archived ? kanbanStrings.board.hideArchived : kanbanStrings.board.showArchived}
-            accessibilityRole="button"
-            onPress={onToggleArchived}
-            testID="kanban-archived-toggle"
-          >
-            <Text color="accentText" variant="preview">
-              {archived ? kanbanStrings.board.hideArchived : kanbanStrings.board.showArchived}
-            </Text>
-          </Pressable>
-        }
-        back={kanbanStrings.board.back}
-        onBack={onBack}
-        title={title}
-      />
-
-      <ScrollView
+    <PageFrame
+      back={{ label: kanbanStrings.board.back, onPress: onBack }}
+      title={title}
+      trailing={
+        <Pressable
+          accessibilityLabel={archived ? kanbanStrings.board.hideArchived : kanbanStrings.board.showArchived}
+          accessibilityRole="button"
+          onPress={onToggleArchived}
+          testID="kanban-archived-toggle"
+        >
+          <Text color="accentText" variant="preview">
+            {archived ? kanbanStrings.board.hideArchived : kanbanStrings.board.showArchived}
+          </Text>
+        </Pressable>
+      }
+    >
+      <PageScrollView
         contentContainerStyle={{
           alignSelf: 'center',
           gap: theme.space.lg,
@@ -710,8 +707,8 @@ function BoardScreen({
         )}
 
         {notes}
-      </ScrollView>
-    </Screen>
+      </PageScrollView>
+    </PageFrame>
   )
 }
 
@@ -907,14 +904,11 @@ function CreateCard({
   const [error, setError] = useState<string | null>(null)
 
   return (
-    <Screen edgeToEdgeTop padded={false}>
-      <ScreenHeader
-        back={kanbanStrings.board.back}
-        onBack={onCancel}
-        subtitle={columnLabel(column)}
-        title={kanbanStrings.create.title}
-      />
-
+    <PageFrame
+      back={{ label: kanbanStrings.board.back, onPress: onCancel }}
+      subtitle={columnLabel(column)}
+      title={kanbanStrings.create.title}
+    >
       <Pad>
         <TextField
           label={kanbanStrings.create.titleField}
@@ -956,7 +950,7 @@ function CreateCard({
           title={busy ? kanbanStrings.create.submitting : kanbanStrings.create.submit}
         />
       </Pad>
-    </Screen>
+    </PageFrame>
   )
 }
 
@@ -983,14 +977,11 @@ function CardScreen({
   const [notice, setNotice] = useState<string | null>(null)
 
   return (
-    <Screen edgeToEdgeTop padded={false}>
-      <ScreenHeader
-        back={kanbanStrings.card.back}
-        onBack={onBack}
-        subtitle={columnLabel(card.card.status)}
-        title={card.card.title}
-      />
-
+    <PageFrame
+      back={{ label: kanbanStrings.card.back, onPress: onBack }}
+      subtitle={columnLabel(card.card.status)}
+      title={card.card.title}
+    >
       <Pad>
         <TextField label={kanbanStrings.card.title} onChangeText={setTitle} testID="kanban-card-title" value={title} />
         <TextField
@@ -1122,6 +1113,6 @@ function CardScreen({
           </InsetRow>
         </InsetGroup>
       </Pad>
-    </Screen>
+    </PageFrame>
   )
 }

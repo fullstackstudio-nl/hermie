@@ -62,10 +62,16 @@ describe('parseDevLaunchArguments', () => {
       kind: 'overlay',
       section: 'cron'
     })
+    // Route names, and the spellings the old boolean pages were opened by.
     expect(parseDevLaunchArguments(['--hermieOpen', 'overlay:settings/licenses'])?.open).toEqual({
       kind: 'overlay',
       section: 'settings',
-      page: 'licences'
+      page: 'Licences'
+    })
+    expect(parseDevLaunchArguments(['--hermieOpen', 'overlay:settings/gateways'])?.open).toEqual({
+      kind: 'overlay',
+      section: 'settings',
+      page: 'Gateways'
     })
   })
 

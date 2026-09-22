@@ -21,7 +21,7 @@
  * incremental Markdown path is exercised the way a live turn exercises it.
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ScrollView, View } from 'react-native'
+import { View } from 'react-native'
 
 import {
   AgentsBar,
@@ -111,6 +111,7 @@ import {
   WelcomeStep,
   type OnboardingDraft
 } from '../onboarding'
+import { PageFrame, PageScrollView, type PageChromeBack } from '../../ui/chrome'
 import { Button, InsetButtonRow, InsetGroup, Screen, Text } from '../../ui/primitives'
 import { ApprovalSheet, ChatOptionsSheet, ClarifySheet } from '../../ui/sheets'
 import { useTheme } from '../../ui/theme'
@@ -118,7 +119,8 @@ import { DM_LINE_GAP, type AccentName } from '../../ui/tokens'
 import { AppearanceSection } from './AppearanceSection'
 
 export interface GalleryScreenProps {
-  onClose?: () => void
+  /** The page's one back control, labelled with the page it returns to. */
+  back?: PageChromeBack
   /**
    * Render only this section. Unknown ids fall back to the whole gallery, so a
    * typo in a launch argument produces a screenshot of something rather than a
@@ -1104,7 +1106,7 @@ export const GALLERY_SECTION_IDS: readonly string[] = SECTIONS.map(section => se
 /** `chat` is the whole chat screen, which is a mode rather than a section. */
 export const GALLERY_CHAT_SECTION = 'chat'
 
-export function GalleryScreen({ onClose, section }: GalleryScreenProps) {
+export function GalleryScreen({ back, section }: GalleryScreenProps) {
   const theme = useTheme()
 
   const [draft, setDraft] = useState('')
@@ -1238,25 +1240,21 @@ export function GalleryScreen({ onClose, section }: GalleryScreenProps) {
     target.full ? (
       <>{target.render(ctx)}</>
     ) : (
-      <Screen edgeToEdgeTop={false} padded={false} testID={`gallery-section-${target.id}`}>
-        <ScrollView contentContainerStyle={{ gap: theme.space.md, padding: theme.space.lg }}>
+      <PageFrame {...(back ? { back } : {})} testID={`gallery-section-${target.id}`} title={target.title}>
+        <PageScrollView contentContainerStyle={{ gap: theme.space.md, padding: theme.space.lg }}>
           {target.render(ctx)}
-        </ScrollView>
-      </Screen>
+        </PageScrollView>
+      </PageFrame>
     )
   ) : null
 
   const componentList = (
-    <Screen edgeToEdgeTop={false} padded={false}>
-      <ScrollView contentContainerStyle={{ gap: theme.space.xl, padding: theme.space.lg }}>
+    <PageFrame {...(back ? { back } : {})} title={GALLERY_ROW_TITLE}>
+      <PageScrollView contentContainerStyle={{ gap: theme.space.xl, padding: theme.space.lg }}>
         <View style={{ gap: theme.space.sm }}>
-          <Text accessibilityRole="header" aria-level={1} variant="title">
-            Component gallery
-          </Text>
           <Text color="textMuted" variant="preview">
             Every chat surface with fixture data. Last action: {lastAction}
           </Text>
-          {onClose ? <Button onPress={onClose} title="Back to settings" variant="secondary" /> : null}
         </View>
 
         {SECTIONS.filter(entry => !entry.full && !entry.sheet && !entry.needsGateway).map(entry => (
@@ -1266,8 +1264,8 @@ export function GalleryScreen({ onClose, section }: GalleryScreenProps) {
         ))}
 
         <View style={{ height: theme.space.xxxl }} />
-      </ScrollView>
-    </Screen>
+      </PageScrollView>
+    </PageFrame>
   )
 
   // The sheets are rendered once, outside the body switch: a `Modal` that
