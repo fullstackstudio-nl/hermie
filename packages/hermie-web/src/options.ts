@@ -11,11 +11,27 @@
 import { hostname } from 'node:os'
 import path from 'node:path'
 
+import { DEFAULT_CACHE_MAX_MB } from './cache'
 import { defaultStateDir } from './push/state'
 
 export interface HermieWebOptions {
   /** The gateway to proxy to. Fixed for the life of the process. */
   gatewayUrl: string
+  /**
+   * Did anybody actually CHOOSE that gateway?
+   *
+   * `gatewayUrl` always has a value, because the default is the port
+   * `hermes serve` listens on — which is right often enough to be the default
+   * and is still a guess. This is the difference between the guess and a
+   * decision: a flag, an environment variable, or a setup an operator saved
+   * through `/setup`.
+   *
+   * It decides one thing only: whether the operator setup page of
+   * [ADR-0025](../../../docs/adr/0025-hermie-web-is-a-service-layer.md) is
+   * served or answers 404. The gateway is still fixed at process start — there
+   * is one transition, from unconfigured to configured, and no route back.
+   */
+  gatewayConfigured: boolean
   port: number
   host: string
   /**
@@ -62,6 +78,17 @@ export interface HermieWebOptions {
   gatewayToken: string
   /** Where the watch state, the VAPID key pair and any stored sign-in live. */
   stateDir: string
+  /**
+   * How much disk the message cache may take, in megabytes
+   * ([ADR-0025](../../../docs/adr/0025-hermie-web-is-a-service-layer.md)).
+   *
+   * `0` turns it off, and turning it off is a real option rather than a
+   * degenerate one: the cache holds transcript CONTENT, which is the first
+   * thing this process has ever stored that is not a credential. An operator
+   * who would rather every chat opened cold than have Bot Chat tails on the
+   * service's disk says so here.
+   */
+  cacheMaxMb: number
   /**
    * The `sub` claim of the VAPID token (RFC 8292 §2.1): a `mailto:` or `https:`
    * URI a push service can use to reach whoever runs this. The default names the
@@ -184,6 +211,8 @@ export function normalizeLoginReturn(raw: string): string {
 
 export interface ResolveOptionsInput {
   gatewayUrl?: string | undefined
+  /** Overrides the "was it chosen or defaulted" reading; `startHermieWeb` sets it from the saved setup. */
+  gatewayConfigured?: boolean | undefined
   port?: string | number | undefined
   host?: string | undefined
   publicUrl?: string | undefined
@@ -195,6 +224,7 @@ export interface ResolveOptionsInput {
   push?: boolean | undefined
   gatewayToken?: string | undefined
   stateDir?: string | undefined
+  cacheMaxMb?: string | number | undefined
   vapidSubject?: string | undefined
   pushServerRequests?: boolean | undefined
   env?: NodeJS.ProcessEnv
@@ -219,6 +249,9 @@ export function resolveOptions(input: ResolveOptionsInput = {}): HermieWebOption
 
   return {
     gatewayUrl,
+    // A flag or an environment variable is a decision; the default is not. A
+    // caller that has read a saved setup says so outright.
+    gatewayConfigured: input.gatewayConfigured ?? (input.gatewayUrl ?? env.HERMIE_GATEWAY_URL) !== undefined,
     port,
     host: input.host ?? env.HERMIE_HOST ?? DEFAULT_HOST,
     publicUrl: normalizePublicUrl(input.publicUrl ?? env.HERMIE_PUBLIC_URL ?? '', gatewayUrl),
@@ -233,11 +266,33 @@ export function resolveOptions(input: ResolveOptionsInput = {}): HermieWebOption
     // forgot its VAPID key after an update would orphan every browser
     // subscription it had ever handed out.
     stateDir: path.resolve(input.stateDir ?? defaultStateDir(env)),
+    cacheMaxMb: readCacheMaxMb(input.cacheMaxMb ?? env.HERMIE_CACHE_MAX_MB),
     vapidSubject: input.vapidSubject ?? env.HERMIE_VAPID_SUBJECT ?? DEFAULT_VAPID_SUBJECT,
     pushServerRequests:
       input.pushServerRequests ??
       (env.HERMIE_PUSH_SERVER_REQUESTS === '1' || env.HERMIE_PUSH_SERVER_REQUESTS === 'true')
   }
+}
+
+/**
+ * `--cache-max-mb`, checked.
+ *
+ * A typo here would either turn the cache off in silence or hand an eviction
+ * loop a `NaN` to compare against, so anything that is not a number is a
+ * startup failure with the value in it. `0` is legal and means off.
+ */
+function readCacheMaxMb(raw: string | number | undefined): number {
+  if (raw === undefined || raw === '') {
+    return DEFAULT_CACHE_MAX_MB
+  }
+
+  const value = typeof raw === 'number' ? raw : Number.parseFloat(raw)
+
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`--cache-max-mb must be a number of megabytes, 0 or more (got ${String(raw)}).`)
+  }
+
+  return value
 }
 
 function readOwnVersion(packageRoot: string): string {

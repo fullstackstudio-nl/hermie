@@ -12,6 +12,113 @@ by Hermie Web (ADR-0015), and it is the only one nobody installs. Sections dated
 that talk about a native macOS target described a platform that no longer exists — they were removed
 rather than rewritten, and git history has them.
 
+## Hermie Web as a service layer, part 1 (2026-09-22)
+
+[ADR-0025](adr/0025-hermie-web-is-a-service-layer.md) is the decision; this is what a reader of the
+code has to know that the record does not say.
+
+### The wizard in a browser is not a wizard
+
+`ONBOARDING_ORDER` is now `['signin', 'test', 'notifications', 'done']` on the web — no address step
+and no welcome cover. Two consequences that are easy to trip over:
+
+- **`OnboardingNavigator` must open on `ORDER[0]`, not on the literal `'welcome'`.** It used to name
+  the step directly. With the browser order that step is not in the sequence at all, so `advance`
+  would look it up, get `-1`, land on index 0 and replay the first step, and `goBack` would have
+  nothing behind it.
+- **`NUMBERED_STEPS` is now the whole order on the web.** The filter that removed `welcome` finds
+  nothing to remove, which is right: every step that is left really is the reader's.
+
+### The bootstrap is the probe
+
+`GET /hermie/config.json` grew from three labels into the browser build's bootstrap: the gateway
+host and origin, `authRequired` / `authKinds` / `providers` as the SERVER read them, whether a
+server-side setup is still needed, and what the service is running. `SignInStep.web` asks
+`probeFromWebConfig` first and only probes the gateway itself when that answers `null`.
+
+**`null` and `[]` are different answers, and the code depends on it.** `[]` is a gateway that asks
+for nothing; `null` is "the server could not read it, or is too old to report it", and only `null`
+sends the app to its own probe. A parser that coerced a missing field to `[]` would make an old
+Hermie Web look like an ungated gateway and strand the sign-in screen with no providers on it.
+
+Anything that mocks `src/gateway/web-config` has to spread the real module now — `SignInStep.web`
+imports `probeFromWebConfig` from it, and a mock that only supplies `loadHermieWebConfig` leaves the
+step calling `undefined()`. That is what it looks like when it happens: the step never leaves
+`probing` and the test times out rather than failing.
+
+### The message cache stores ROWS, and the seam does the rest
+
+`packages/hermie-web` ships as a self-contained `dist/server` with no `node_modules` beside it — the
+same packaging constraint `link.ts` and `credentials.ts` already carry — so it cannot import
+`@hermie/transcript` to build items. It stores the gateway's rows untransformed, with the SHAPE they
+came off (`rest` or `rpc`) beside them, and `service-chat-cache.web.ts` runs `rowsToItems`.
+
+**The shape is not decoration.** The REST transcript and `session.history` name the same fields
+differently, and a tail read under the wrong one projects to items with no row ids on them — which
+is exactly what would make the reconcile hand out fresh ids and move the thread on open.
+
+Two more things that are easy to get wrong in the same file:
+
+- **The snapshot carries no `lastSeqSessionId`, deliberately.** `stateFromCache` only adopts a
+  cached watermark when a session id comes with it, so leaving it out makes the snapshot read as
+  COLD: the chat paints, and the hydration adopts the gateway's own `latest_seq` instead of
+  trusting a number the service keeps on a different path from its rows. A watermark ahead of its
+  rows drops a turn in silence.
+- **The fallback wrapper goes inside, not outside.** `new ServiceChatCache(new FallbackChatCache(…))`
+  — a `FallbackChatCache` wrapped around the pair would downgrade the service read too, the first
+  time a private window refused IndexedDB, which is precisely the case the service copy exists for.
+
+The proxy tee attaches its `data` listener **before** `upstream.pipe(response)` and in the same
+synchronous block. A `data` listener switches the stream to flowing mode on the next tick, so both
+receive every chunk as long as nothing awaits between them; attaching after an `await` would feed
+the pipe alone and cache a truncated entry.
+
+`hasGatewaySession` short-circuits to `false` when the request carries no cookie, so the cache read
+cannot simply demand it: on an UNGATED gateway there is no cookie to have and
+`/api/sessions/<id>/messages` is proxied to anyone who can reach the port anyway. The route asks the
+bootstrap probe first and only requires a session when the gateway is gated, or when it could not be
+read at all.
+
+### The chat list's footer names a person, and `useGateway` throws
+
+`SidebarIdentity` reads `useDeviceContextStore`, which is a Zustand store and needs no provider —
+deliberately, because `useGateway()` **throws** outside a `<GatewayProvider>` and several narrow
+shells and tests render the chat list without one. The sign-out handler is therefore a prop that
+`BotsScreen` supplies when it has one, and the row draws the name with no button under it when it
+does not.
+
+Two details that are decisions rather than omissions:
+
+- **`/api/auth/me` has no avatar field** — `user_id`, `email`, `display_name`, `org_id`, `provider`,
+  `expires_at` and nothing else. The mark is the app's own initial-drawn `Avatar`; no picture is
+  fetched and none is invented.
+- **An ungated gateway names nobody.** `readIdentity` answers `owner` there, which is a placeholder,
+  so the row keys on `gated` and stays away rather than introducing the reader to themselves as
+  "owner".
+
+The "Hermie Web x.y.z · gateway" line is in this same block, not a second one: `loadHermieWebConfig`
+answers `null` off the web, so the line simply does not exist on a phone. Settings keeps the row
+that can UPDATE that version; this one only says which is running.
+
+### The `/setup` window, and the loopback rule that constrains it
+
+`/setup` is served only while the gateway is unconfigured — no `--gateway`, no `HERMIE_GATEWAY_URL`,
+no saved `setup.json` in the state directory — and answers **404** afterwards. `resolveOptions` now
+reports `gatewayConfigured`, which is the difference between the default address and a chosen one;
+`startHermieWeb` resolves options twice so a saved setup can supply the gateway before anything else
+reads it.
+
+The service login runs in the operator's browser instead of on `hermie-web login`'s loopback port,
+and it inherits a constraint from the gateway: **the native redirect URI has to be a loopback IP
+literal.** `hermes_cli`'s authorize route refuses anything whose host is not `127.0.0.1` or `[::1]`
+(RFC 8252 §8.3), so an operator who opens `http://localhost:9120/setup` gets a 400 from the gateway
+and one who opens `http://127.0.0.1:9120/setup` does not. The page and the README both say so, and
+`hermie-web login` remains the route for a deployment where neither is possible.
+
+Push is deliberately **not** started on an unconfigured process. There is nothing to watch, and a
+daemon dialling a default address nobody chose would fill the log with failures about a gateway that
+does not exist yet. The save answers with `restartFor: ['push']` so it is said rather than noticed.
+
 ## A horizontal ScrollView with no width does not scroll (2026-09-21)
 
 The owner photographed a Markdown table on the phone: cells ending mid-word at the

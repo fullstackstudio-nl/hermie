@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Hermie Web sets its gateway up once, and everybody else just signs in.** Start `hermie-web` with
+  no `--gateway` and it serves an operator setup page at `/setup`: the gateway address, a probe of
+  it, and the service login that push and the message cache are spent on — the same sign-in
+  `hermie-web login` does from a terminal, run in a browser for the machine that has no shell open.
+  Saving writes it to the service's state directory and closes the page for good, so the next person
+  to open the address sees a sign-in and nothing else. The browser build reads the rest from the
+  server rather than asking: which gateway is behind the proxy, and what signing in to it takes. The
+  wizard there has no address step, no probe to wait for and no welcome cover — it opens on the
+  sign-in — and "Change gateway" stays hidden, because on the web the gateway is not the reader's to
+  change. A Hermie Web that is too old to answer, or one that could not read its gateway, costs
+  nothing: the app probes for itself exactly as it did before. Everything this page can do, it can
+  only do while no gateway is set; afterwards those addresses do not exist.
+
+- **The chat list says who you are signed in as.** At the bottom of the list, above the tabs: the
+  name the gateway has for you, with a **Sign out** beside it. Which name that is follows the same
+  ladder the rest of the app uses — the display name the gateway gives, else the first part of the
+  address you signed in with, else your account id with the provider's prefix taken off, never a
+  guess. There is no picture, because the gateway does not have one; the mark is the same
+  initial-drawn avatar a bot gets. On a gateway with no accounts there is nobody to name and the row
+  stays away. In a browser it is also where "Hermie Web 0.1.2 · your-gateway" lives, so what you are
+  connected to and who you are connected as are one block instead of two.
+
+- **In a browser, a chat opens with the conversation already in it.** Hermie Web now keeps a copy of
+  each Bot Chat's tail, filled from the gateway connection it already holds for notifications and
+  from the transcript reads it already passes along. The app asks for that copy before it dials, so
+  a chat opened on a laptop, a borrowed machine or a phone that has never seen it draws immediately
+  and stays still while the rest loads, instead of showing a spinner and then jumping. Nothing is
+  lost when the copy is not there — the chat opens the way it always did. It lives on the server's
+  own disk, it is capped (`--cache-max-mb`, 64 MB by default, `0` to turn it off), the least
+  recently opened chat is the first to go, and reading it needs the same gateway sign-in the rest of
+  the app does. It is a copy per gateway rather than per person, for the plain reason that the
+  gateway does not say who owns a session and the Bot Chat is shared anyway — which the
+  documentation says out loud rather than implying a privacy it does not have.
+
 - **Attachments open in Quick Look.** Tapping a file in a conversation previews it — the system's
   own previewer, the one Space opens in the Finder — instead of putting up a share sheet and asking
   which app you would like to read it in. On the Mac, the iPhone and the iPad alike: `QLPreviewController`

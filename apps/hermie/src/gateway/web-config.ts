@@ -4,10 +4,23 @@
  * On every other platform there is no such server, so the whole module answers
  * "not applicable" — `web-config.web.ts` is the real one.
  */
+import type { AuthProvider, ProbeResult } from '@hermie/gateway-client'
+
+/** What Hermie Web reports about its own long-lived gateway link. */
+export interface HermieWebService {
+  /** A service sign-in is stored, so push and the message cache have a credential. */
+  login: boolean
+  /** The push daemon is running. */
+  push: boolean
+  /** The message cache is on. */
+  cache: boolean
+}
 
 export interface HermieWebConfig {
   /** The gateway host Hermie Web proxies to, for display only. */
   gatewayHost: string
+  /** The same host with its scheme, which is what a label naming an origin wants. */
+  gatewayOrigin: string
   /**
    * Where a finished sign-in should put the browser: the `next=` the app hands
    * `/auth/login`.
@@ -22,6 +35,26 @@ export interface HermieWebConfig {
   loginReturn: string
   /** The Hermie Web version serving this bundle. */
   version: string
+  /**
+   * No gateway has been chosen server-side yet, so `/setup` is open and this
+   * app has nothing to talk to.
+   */
+  setupRequired: boolean
+  /**
+   * What the gateway takes, as the SERVER read it — or `null` when it could not
+   * be read.
+   *
+   * The distinction is the whole point of the field. `[]` is a gateway that
+   * asks for nothing; `null` is "we do not know", and only `null` makes the app
+   * probe the gateway itself.
+   * [ADR-0025](../../../../docs/adr/0025-hermie-web-is-a-service-layer.md): with
+   * this in hand the browser build skips the address step AND the probe, and
+   * opens on the sign-in step.
+   */
+  authKinds: string[] | null
+  authRequired: boolean | null
+  providers: AuthProvider[] | null
+  service: HermieWebService
 }
 
 /**
@@ -33,4 +66,27 @@ export const WEB_GATEWAY_BASE_URL: string | null = null
 
 export async function loadHermieWebConfig(): Promise<HermieWebConfig | null> {
   return null
+}
+
+/**
+ * The server's bootstrap read as a probe result, or `null` when it does not
+ * carry one.
+ *
+ * It lives here rather than in the web seam so the shape is written once and
+ * both halves compile against it. `supportsNativePkce` is reported honestly
+ * even though a browser cannot complete that flow — the sign-in step is the
+ * thing that refuses it, and it refuses it by name.
+ */
+export function probeFromWebConfig(config: HermieWebConfig | null): ProbeResult | null {
+  if (!config || config.authKinds === null || config.authRequired === null) {
+    return null
+  }
+
+  return {
+    version: '',
+    authRequired: config.authRequired,
+    authFlows: config.authKinds,
+    providers: config.providers ?? [],
+    supportsNativePkce: config.authKinds.includes('native_pkce')
+  }
 }

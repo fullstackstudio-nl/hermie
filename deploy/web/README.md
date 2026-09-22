@@ -20,8 +20,31 @@ npx @hermie/web --gateway http://127.0.0.1:9119
 # → http://127.0.0.1:9120
 ```
 
-Open that address in a browser. The wizard has no address step: Hermie Web already fixed the
-gateway, so it goes Welcome → Sign in → Test → Done.
+Open that address in a browser. There is no wizard to speak of: Hermie Web already fixed the
+gateway, so a reader lands on the sign-in and goes Sign in → Test → Done.
+
+### Or set it up from the browser
+
+Leave `--gateway` off and Hermie Web serves an **operator setup page** at `/setup` instead of the
+app — the gateway address, a probe of it, and the service login that push and the message cache are
+spent on. Saving writes it to the state directory and `/setup` answers 404 from then on, for this
+process and for every later one.
+
+```sh
+npx @hermie/web            # → http://127.0.0.1:9120/setup
+```
+
+Three things to know before you use it:
+
+- **Do not expose the port before it is configured.** While the page is open, whoever reaches the
+  port can point the proxy at a URL — including something else on this machine's loopback
+  interface. It is the same power `--gateway` gives, handed to the first arrival. `--gateway` skips
+  the page entirely.
+- **Open it on `http://127.0.0.1:9120`, not `localhost`.** The service login is the gateway's native
+  PKCE flow, and the gateway refuses a redirect URI whose host is not a loopback IP literal
+  (RFC 8252 §8.3). Where that is impossible, use `hermie-web login` from a terminal.
+- **Restart once you have saved**, if you want `--push`: the daemon is not started on a process that
+  had no gateway when it booted.
 
 ## What to configure on the gateway
 
@@ -54,6 +77,7 @@ A mismatch shows up as HTTP 403 on `/api/status`, or a WebSocket that refuses th
 | `--install-root`     | `HERMIE_INSTALL_ROOT`  | the package's parent     | Where self-update unpacks releases and keeps the `current` link. |
 | `--no-self-update`   | `HERMIE_SELF_UPDATE=0` | on                       | Turns `/hermie/update` into a refusal.                           |
 | `--rollback`         |                        |                          | Point `current` at the previous release and exit.                |
+| `--cache-max-mb <n>` | `HERMIE_CACHE_MAX_MB`  | `64`                     | Disk the message cache may take. `0` turns it off.               |
 
 And, for push (see below):
 
@@ -66,8 +90,27 @@ And, for push (see below):
 | `--push-server-requests` | `HERMIE_PUSH_SERVER_REQUESTS=1` | off                         | **Only if your gateway fans server requests out to every peer** — see below. |
 
 Endpoints it answers itself: `GET /healthz`, `GET /hermie/config.json`, `GET|POST /hermie/update`,
-and — with `--push` — `GET /push/vapid-public-key`. Everything under `/api`, `/auth`, `/login` and
-`/logout` is proxied; everything else is the app.
+`GET /hermie/cache/<id>`, `/setup` and `/hermie/setup/*` while no gateway is configured, and — with
+`--push` — `GET /push/vapid-public-key`. Everything under `/api`, `/auth`, `/login` and `/logout` is
+proxied; everything else is the app.
+
+## The message cache
+
+Hermie Web keeps each Bot Chat's tail in its state directory, so a chat opened on a device that has
+never seen it paints at once instead of spinning. It is filled from the gateway link `--push`
+already holds and from proxied `GET /api/sessions/<id>/messages` answers, so it works with or
+without `--push` — with it, chats nobody has opened yet are cached too.
+
+What it means for you:
+
+- **This is transcript content on your disk.** The state directory is `0700` with `0600` files, the
+  same as the push credentials beside it. `--cache-max-mb 0` turns the cache off entirely.
+- **Entries are per gateway, not per person.** The gateway offers no field saying who owns a
+  session, and the canonical Bot Chat is shared among everyone who can reach that bot anyway. On a
+  gated gateway the read route still demands the caller's own gateway session.
+- **Eviction is least-recently-read**, up to `--cache-max-mb` (default 64 MB).
+
+[ADR-0025](../../docs/adr/0025-hermie-web-is-a-service-layer.md) has the reasoning.
 
 ## Push notifications
 

@@ -25,6 +25,7 @@ import {
   type ChatCache,
   FallbackChatCache
 } from './chat-cache-core'
+import { ServiceChatCache } from './service-chat-cache.web'
 
 export {
   cacheRowKey,
@@ -271,6 +272,18 @@ async function readOrphans(database: IDBDatabase, name: string): Promise<Stored<
 /**
  * The app's cache for one gateway. Memoised, so the two controllers that ask
  * for the same gateway share one instance and therefore one database handle.
+ *
+ * Two stores, in this order: the browser's own, and then Hermie Web's
+ * ([ADR-0025](../../../../docs/adr/0025-hermie-web-is-a-service-layer.md)).
+ * IndexedDB is per browser and per device, so it has nothing at all on a first
+ * visit, on a new laptop, in a private window or after site data is cleared —
+ * which is exactly when a chat used to open on a spinner. The service's copy
+ * covers precisely that gap and nothing else; `service-chat-cache.web.ts` says
+ * why it is consulted second rather than first.
+ *
+ * The fallback wrapper goes INSIDE. A browser that refuses IndexedDB should
+ * still be able to read the service's copy, and a `FallbackChatCache` wrapped
+ * around the pair would downgrade both on the first local failure.
  */
 const caches = new Map<string, ChatCache>()
 
@@ -281,7 +294,7 @@ export function chatCacheFor(gatewayId: string): ChatCache {
     return existing
   }
 
-  const cache = new FallbackChatCache(new IndexedDbChatCache(gatewayId))
+  const cache = new ServiceChatCache(new FallbackChatCache(new IndexedDbChatCache(gatewayId)))
   caches.set(gatewayId, cache)
 
   return cache

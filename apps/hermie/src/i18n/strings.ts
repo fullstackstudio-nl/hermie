@@ -711,6 +711,15 @@ export const strings = {
     settings: 'Settings'
   },
 
+  sidebar: {
+    /**
+     * Which Hermie Web is serving this page, under the name of whoever is
+     * signed in — one block in the chat list's footer rather than two
+     * (ADR-0025). The gateway's own host is joined onto it at the call site.
+     */
+    hermieWeb: (version: string) => `Hermie Web ${version}`
+  },
+
   chat: {
     send: 'Send',
     stop: 'Stop',

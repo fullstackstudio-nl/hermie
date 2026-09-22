@@ -13,6 +13,12 @@
  * (`ConnectionLine`, under the title) and says nothing at all while the
  * connection is healthy. The host belongs in Settings → Gateway, where it is
  * looked up rather than glanced at.
+ *
+ * What came back above the strip is something else, and it is a PERSON rather
+ * than a connection: who the gateway says this is, with a way out
+ * ([ADR-0025](../../../../docs/adr/0025-hermie-web-is-a-service-layer.md)).
+ * `SidebarIdentity` draws itself or nothing, so a gateway with no accounts —
+ * and every screen that has no gateway in scope at all — is unchanged.
  */
 import { Pressable, View } from 'react-native'
 
@@ -20,6 +26,7 @@ import { strings } from '../../i18n/strings'
 import { Icon, ICON_SIZE, type IconName } from '../../ui/Icon'
 import { Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
+import { SidebarIdentity } from './SidebarIdentity'
 
 export type BotsSection = 'activity' | 'cron' | 'settings'
 
@@ -50,13 +57,17 @@ export const TABS: { key: TabKey; label: string; icon: IconName }[] = [
 
 export function SidebarFooter({
   current = 'chats',
-  onOpenSection
+  onOpenSection,
+  onSignOut
 }: {
   current?: TabKey
   onOpenSection: (section: BotsSection) => void
+  /** Passed through to the identity row; absent means it draws no way out. */
+  onSignOut?: (() => void) | undefined
 }) {
   return (
     <View>
+      <SidebarIdentity onSignOut={onSignOut} />
       <TabStrip current={current} onOpenSection={onOpenSection} />
     </View>
   )

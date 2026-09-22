@@ -111,7 +111,17 @@ export function OnboardingNavigator({
   probeDebounceMs
 }: OnboardingNavigatorProps) {
   const [draft, setDraft] = useState<OnboardingDraft>(() => initialDraft ?? initialDraftFor(resumeConfig, resumeAccess))
-  const [step, setStep] = useState<OnboardingStep>(() => initialStep ?? (resumeConfig ? 'signin' : 'welcome'))
+  /*
+    The first step of the ORDER, not the literal `welcome`.
+
+    In a browser the order starts at `signin` (ADR-0025) and there is no welcome
+    step at all, so naming one would open the wizard on a step that is not in
+    its own sequence: `advance` would look it up, find -1, land on index 0 and
+    replay the first step, and `goBack` would have nothing to go back to.
+  */
+  const [step, setStep] = useState<OnboardingStep>(
+    () => initialStep ?? (resumeConfig ? 'signin' : (ORDER[0] ?? 'welcome'))
+  )
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 

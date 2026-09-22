@@ -13,6 +13,7 @@
  * reach a device is `expo.ts` and `web-push.ts`, and who asked to be told is
  * `registrations.ts`.
  */
+import { CACHE_ROW_LIMIT, type TranscriptCacheSink } from '../cache'
 import { PUSH_PUBLIC_KEY_PATH } from '../options'
 import { type PushCredentials, resolveCredentials } from './credentials'
 import { GatewayLink, type LinkEvent, type LinkServerRequest } from './link'
@@ -27,6 +28,15 @@ import {
   type WatcherOptions
 } from './watcher'
 import { generateVapidKeys, vapidKeysUsable } from './web-push'
+
+/**
+ * How long a session's cache refresh waits for the turn to settle.
+ *
+ * Long enough that one answer is one read, short enough that a person who
+ * finished reading a reply and opened the chat on another device finds it
+ * already there.
+ */
+const CACHE_DEBOUNCE_MS = 3_000
 
 export interface PushDaemonOptions {
   gatewayUrl: string
@@ -62,6 +72,19 @@ export interface PushDaemonOptions {
   sender?: PushSender
   /** Off for a link-only test that has no business resuming anything. */
   watch?: boolean
+  /**
+   * The message cache to feed
+   * ([ADR-0025](../../../../docs/adr/0025-hermie-web-is-a-service-layer.md)).
+   *
+   * The daemon is the half of the feed that works when nobody is looking: it
+   * already resumes every canonical Bot Chat for push, so it already knows
+   * which chats exist and already hears when one moves. Absent means the cache
+   * is fed only by proxied traffic, which is what a deployment without
+   * `--push` gets.
+   */
+  cache?: TranscriptCacheSink
+  /** How long a session's cache refresh waits for more events. Tests drive it to zero. */
+  cacheDebounceMs?: number
   /** Off in the tests, which have no use for a quarter-hourly timer. */
   pollReceipts?: boolean
   /** The watcher's clocks, so a test does not have to wait out the real ones. */
@@ -159,10 +182,83 @@ export async function startPushDaemon(options: PushDaemonOptions): Promise<PushD
     }
   }
 
+  /**
+   * Put one session's tail in the cache.
+   *
+   * The REST transcript first, because it is paginated and `session.history` is
+   * not: a chat with thousands of rows would otherwise be a multi-megabyte
+   * download every time it moved, for a cache entry that keeps two hundred
+   * rows. The RPC is the fallback for a gateway with no REST surface, and its
+   * shape travels with the rows because the two name their fields differently.
+   */
+  const refreshCache = async (bot: { name: string; sessionId: string; storedId: string }): Promise<void> => {
+    if (!options.cache?.enabled) {
+      return
+    }
+
+    const rest = await fetchTail(bot.sessionId, CACHE_ROW_LIMIT)
+    let rows = rest
+    let shape: 'rest' | 'rpc' = 'rest'
+
+    if (rows === null) {
+      const result = await (link as GatewayLink)
+        .request<{ messages?: unknown }>('session.history', { session_id: bot.sessionId, profile: bot.name })
+        .catch(() => null)
+
+      rows = Array.isArray(result?.messages) ? (result.messages as Record<string, unknown>[]) : []
+      shape = 'rpc'
+    }
+
+    await options.cache.put({
+      sessionId: bot.sessionId,
+      bot: bot.name,
+      storedId: bot.storedId,
+      shape,
+      rows,
+      updatedAt: 0
+    })
+  }
+
+  /*
+    One pending refresh per session, at most.
+
+    A finished turn arrives as a run of events, and a chat being talked to
+    produces one every few seconds. Refreshing on each of them would re-read the
+    same two hundred rows several times for one answer; waiting a moment past
+    the last one reads them once, after the turn has actually settled.
+  */
+  const cacheTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+  const scheduleCacheRefresh = (sessionId: string): void => {
+    if (!options.cache?.enabled || cacheTimers.has(sessionId)) {
+      return
+    }
+
+    const timer = setTimeout(() => {
+      cacheTimers.delete(sessionId)
+
+      const bot = watcher?.watched.find(entry => entry.sessionId === sessionId)
+
+      if (bot) {
+        void refreshCache(bot).catch(() => undefined)
+      }
+    }, options.cacheDebounceMs ?? CACHE_DEBOUNCE_MS)
+
+    timer.unref?.()
+    cacheTimers.set(sessionId, timer)
+  }
+
   link = new GatewayLink({
     dial: () => credentials.dial(),
     onEvent: event => {
       watcher?.onEvent(event)
+
+      // The same event the watcher decides to notify about: a turn that has
+      // finished is a transcript that has changed, and nothing else here is.
+      if (event.type === 'message.complete' && event.session_id) {
+        scheduleCacheRefresh(event.session_id)
+      }
+
       options.onEvent?.(event)
     },
     onServerRequest: request => {
@@ -173,6 +269,20 @@ export async function startPushDaemon(options: PushDaemonOptions): Promise<PushD
       // Resuming is what subscribes this connection to a session's events, so
       // it happens on EVERY connect and not only on the first.
       await watcher?.resumeAll()
+
+      /*
+        Fill the cache for every chat the roster names.
+
+        Deliberately AFTER the resume and deliberately not awaited by the
+        caller's `onOpen`: a browser that opens a chat while this is still
+        running gets a 404 from the cache and paints the way it always did,
+        which is the right failure. Holding the connect open for a few hundred
+        rows per bot would delay the thing this connection exists for.
+      */
+      for (const bot of watcher?.watched ?? []) {
+        void refreshCache(bot).catch(() => undefined)
+      }
+
       await options.onOpen?.(link as GatewayLink)
     },
     log,
@@ -283,6 +393,12 @@ export async function startPushDaemon(options: PushDaemonOptions): Promise<PushD
     vapidPublicKey: vapid.keys.publicKey,
     save,
     async stop() {
+      for (const timer of cacheTimers.values()) {
+        clearTimeout(timer)
+      }
+
+      cacheTimers.clear()
+
       if (receipts) {
         clearInterval(receipts)
       }

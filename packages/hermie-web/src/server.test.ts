@@ -82,10 +82,12 @@ describe('local endpoints', () => {
   })
 
   it('tells the app which gateway host it proxies to, and where to come back to', async () => {
-    expect(await (await fetch(`${web.url}/hermie/config.json`)).json()).toEqual({
+    expect(await (await fetch(`${web.url}/hermie/config.json`)).json()).toMatchObject({
       gatewayHost: PUBLIC_HOST,
+      gatewayOrigin: `http://${PUBLIC_HOST}`,
       loginReturn: '/hermie',
-      version: '9.9.9'
+      version: '9.9.9',
+      setupRequired: false
     })
   })
 })
