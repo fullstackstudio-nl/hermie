@@ -24,7 +24,7 @@ import { useBotLabel } from '../../store/chat-layout'
 import { usePendingShareCount } from '../../store/share'
 import { DragGrip } from '../../ui/DragGrip'
 import { GlassSurface } from '../../ui/glass'
-import { Icon, ICON_SIZE } from '../../ui/Icon'
+import { Icon, ICON_SIZE, type IconName } from '../../ui/Icon'
 import { PresenceBead } from '../../ui/PresenceBead'
 import { Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
@@ -198,13 +198,42 @@ export const BotRow = memo(function BotRow({
     [names.primary, names.secondary].filter(Boolean).join(', '),
     strings.presence[presence.state],
     unreadCount > 0 ? strings.bots.unreadLabel(unreadCount) : unread ? strings.bots.unread : '',
-    // Said in words here rather than left to the glyph, which keeps itself out
-    // of the accessibility tree like every other decorative icon.
+    // Said in words here rather than left to the glyphs, which keep themselves
+    // out of the accessibility tree like every other decorative icon. One line
+    // per mark in the run below, in the same order, so the row reads to a screen
+    // reader the way it is drawn.
     mutedUntil === null ? '' : strings.layout.mutedRow,
+    pinned ? strings.layout.pinnedRow : '',
     pendingShares > 0 ? strings.bots.sharePending(pendingShares) : ''
   ]
     .filter(Boolean)
     .join(', ')
+
+  /**
+   * Every mark the row can show about itself, in one run.
+   *
+   * The owner's report was about WHERE they were: _"All icons must be to the
+   * LEFT of the time, on the row of the big name."_ They were in three places —
+   * the bell after the name, the pin and the share in a trailing column beside
+   * the unread pill — so a muted, pinned chat drew one mark against its name and
+   * another two thirds of a row lower, and neither of them near the time they
+   * were supposed to sit beside.
+   *
+   * A list rather than three conditionals in the markup, because the run has to
+   * keep ONE order, ONE gap and ONE ink however many of them are on: the next
+   * mark this row learns to draw joins the array and is placed by the same
+   * rules. The order is fixed rather than dependent on what is on, so a chat
+   * that gains a pin does not shuffle the mark that was already there.
+   *
+   * An archived chat has no mark of its own: it is drawn inside the archive
+   * drawer, under a heading that says so, and a glyph repeating the container
+   * the row is already in says nothing the reader cannot see.
+   */
+  const marks: { key: string; name: IconName; testID: string }[] = [
+    ...(mutedUntil === null ? [] : [{ key: 'muted', name: 'bellMuted' as const, testID: `bot-muted-${bot.name}` }]),
+    ...(pinned ? [{ key: 'pinned', name: 'pin' as const, testID: `bot-pinned-${bot.name}` }] : []),
+    ...(pendingShares > 0 ? [{ key: 'share', name: 'queue' as const, testID: `bot-share-pending-${bot.name}` }] : [])
+  ]
 
   const body = (
     <View
@@ -275,37 +304,62 @@ export const BotRow = memo(function BotRow({
 
       <View style={{ flex: 1, minWidth: 0 }}>
         <View style={{ alignItems: 'baseline', flexDirection: 'row', gap: theme.space.sm }}>
-          <Text numberOfLines={1} style={{ flexShrink: 1, fontWeight: unread ? '700' : '600' }} variant="name">
+          {/*
+            The name takes the room, and gives it up first.
+
+            `flex: 1` rather than the `flexShrink` plus a spacer view this line
+            used to carry: the spacer was what pushed the stamp to the edge, and
+            with a run of marks between the two it would have pushed them
+            through it. One growing, shrinking child and two fixed ones says the
+            same thing in the layout itself — the name elides, the marks and the
+            time never do.
+          */}
+          <Text numberOfLines={1} style={{ flex: 1, fontWeight: unread ? '700' : '600' }} variant="name">
             {names.primary}
           </Text>
 
           {/*
-            The muted bell, on the NAME line and directly after the name.
+            Every mark this row shows, in one right-aligned run immediately left
+            of the time.
 
-            It used to sit in the trailing group beside the time, at the 13pt
-            marker size and in `textFaint`, and the owner reported it as "small
-            and not clear". Two separate reasons, and the placement is the one
-            that mattered more: a mark in the stamp corner reads as something
-            about the stamp, while mute is a state of the ROW — so it belongs
-            against the thing it is a state of, which is the name. Bigger and in
-            `textMuted` for the rest of it.
+            `space.xs` between them — 4pt, tight enough that two marks read as
+            one group rather than as two separate claims — at the row-mark size
+            and in `textMuted`, which is the ink the bell already used after the
+            owner reported the 13pt `textFaint` version as "small and not clear".
+            The share glyph gives up its accent to be here: a run drawn in two
+            inks is two runs, and "these are the states of this row" is the thing
+            the grouping has to say.
 
-            `flexSpacer` below takes the remaining width, so the name still
-            truncates before the stamp rather than pushing it off the row.
+            `alignSelf: 'center'` inside a baseline row, because an icon has no
+            baseline of its own — Yoga would align its BOTTOM edge with the
+            letters' feet and hang the mark a couple of points above the name.
+            The name and the stamp keep their shared baseline.
           */}
-          {mutedUntil === null ? null : (
-            <Icon
-              color={theme.colors.textMuted}
-              name="bellMuted"
-              size={ICON_SIZE.listMark}
-              testID={`bot-muted-${bot.name}`}
-            />
-          )}
-
-          <View style={{ flexGrow: 1, flexShrink: 0 }} />
+          {marks.length ? (
+            <View
+              style={{
+                alignItems: 'center',
+                alignSelf: 'center',
+                flexDirection: 'row',
+                flexShrink: 0,
+                gap: theme.space.xs
+              }}
+              testID={`bot-marks-${bot.name}`}
+            >
+              {marks.map(mark => (
+                <Icon
+                  color={theme.colors.textMuted}
+                  key={mark.key}
+                  name={mark.name}
+                  size={ICON_SIZE.listMark}
+                  testID={mark.testID}
+                />
+              ))}
+            </View>
+          ) : null}
 
           {stamp ? (
-            <Text color="textFaint" variant="meta">
+            <Text color="textFaint" style={{ flexShrink: 0 }} testID={`bot-time-${bot.name}`} variant="meta">
               {stamp}
             </Text>
           ) : null}
@@ -337,32 +391,18 @@ export const BotRow = memo(function BotRow({
       </View>
 
       {/*
-        A share that has arrived for this chat and has not gone out yet.
+        The pill, and nothing beside it any more.
 
-        The accent rather than `textFaint`, unlike the bell: a muted chat is a
-        state the reader chose and the glyph only has to be findable, while this
-        is work of theirs that the app is still holding. It is deliberately the
-        same `queue` glyph the composer uses for a parked message, because it is
-        the same fact — something written and not yet sent.
-      */}
-      {pendingShares > 0 ? (
-        <Icon color={swatch.text} name="queue" size={ICON_SIZE.marker} testID={`bot-share-pending-${bot.name}`} />
-      ) : null}
-
-      {/*
-        And the pin, still before the unread pill: the mark describes the ROW
-        and the pill describes what arrived in it, so the pill stays nearest the
-        edge where the eye already looks for a count. The bell used to stand
-        here too and has moved up to the name line — see the note there.
+        The pin and the pending share used to stand in this column, which is
+        vertically centred on a 72pt row — so a mark about the row sat opposite
+        the middle of the preview rather than beside the time it describes. They
+        are in the name line's run now; what is left here is the one thing that
+        counts what ARRIVED rather than describing the row.
 
         A muted chat still counts on its own row. What mute stops is the buzzing
         and the totals, not the reader's ability to see that four things arrived
         while they were not listening.
       */}
-      {pinned ? (
-        <Icon color={theme.colors.textFaint} name="pin" size={ICON_SIZE.marker} testID={`bot-pinned-${bot.name}`} />
-      ) : null}
-
       {unread || unreadCount > 0 ? <UnreadBadge accent={swatch.fill} count={unreadCount} /> : null}
     </View>
   )

@@ -80,6 +80,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so two providers offering a model of the same name are two different rows instead of one
   ambiguous segment. The chat's own picker gained the provider sections too.
 
+- **Everything a chat row says about itself is in one place now.** The muted bell, the pin and the
+  waiting-share mark used to be in two: the bell against the name, the other two in a column beside
+  the unread badge — two thirds of a row lower, and nowhere near the time. They are one run on the
+  big name line, immediately left of the time, in one size and one ink, four points apart, so a
+  muted and pinned chat reads as one row with two marks on it rather than as two separate claims.
+  The name gives way before the marks do, nothing sits between the two name lines, and the trailing
+  column carries what ARRIVED — the unread count — and nothing else. The same on a phone, on a
+  tablet, on the Mac, and for a chat inside a folder.
+
 - **A share now reaches the bot without opening Hermie.** Sharing a link or a document into
   Hermie from another app wrote the share down and waited for the next launch to send it — so
   nothing happened until you opened the app, which is not what tapping Send in a share sheet

@@ -14,6 +14,7 @@ import { type Bot, useBotsStore } from '../src/store/bots'
 import { useChatLayoutStore } from '../src/store/chat-layout'
 import { useSettingsStore } from '../src/store/settings'
 import { useChatsStore } from '../src/store/chats'
+import { useShareStore } from '../src/store/share'
 import { renderScreen } from './support/render'
 
 // Two modules, because the gateway card reaches for the provider directly
@@ -643,6 +644,170 @@ describe('the muted marker', () => {
     renderRows()
 
     expect(screen.getByTestId('bot-row-researcher').props.accessibilityLabel).toContain(strings.layout.mutedRow)
+  })
+})
+
+/**
+ * Where a row's marks are, which is what the owner rejected twice.
+ *
+ * The bell moved to the name line in R22 and the rest did not follow, so a
+ * muted, pinned chat drew one mark against its name and another in a column
+ * beside the unread pill — two thirds of a row lower, and nowhere near the time
+ * either of them was supposed to sit beside. The verdict: _"All icons must be to
+ * the LEFT of the time, on the row of the big name."_
+ *
+ * So there is ONE run, and these are its three properties: everything is in it,
+ * it is on the name line, and it comes before the time.
+ */
+describe('the row’s status marks', () => {
+  beforeEach(seedRoster)
+
+  const HIDDEN = { includeHiddenElements: true } as const
+
+  /**
+   * Every named thing inside one row, in the order it is drawn.
+   *
+   * Reading positions rather than boxes, because "left of the time" is a
+   * statement about ORDER on a line and this environment lays nothing out —
+   * every measurement in it is zero. The row is drawn as name line (name, marks,
+   * time), then the second name, then the preview, then the unread pill, so the
+   * order of those names is enough to place any mark among them.
+   */
+  function drawnOrder(name: string): string[] {
+    const ids: string[] = []
+    const walk = (node: { props?: { testID?: string }; children?: unknown[] }) => {
+      // Once each: a component and the view it renders both carry the name, and
+      // this is a question about order rather than about depth.
+      if (typeof node.props?.testID === 'string' && !ids.includes(node.props.testID)) {
+        ids.push(node.props.testID)
+      }
+
+      for (const child of node.children ?? []) {
+        if (typeof child !== 'string') {
+          walk(child as { props?: { testID?: string }; children?: unknown[] })
+        }
+      }
+    }
+
+    walk(screen.getByTestId(`bot-row-${name}`, HIDDEN))
+
+    return ids
+  }
+
+  function mute(name: string) {
+    act(() => {
+      useChatLayoutStore.getState().setMute(name, Math.floor(Date.now() / 1000) + 3600)
+    })
+  }
+
+  function pin(name: string) {
+    act(() => {
+      useChatLayoutStore.getState().togglePinned(name)
+    })
+  }
+
+  function shareTo(name: string) {
+    act(() => {
+      useShareStore.getState().setWaiting([
+        {
+          id: 'share-1',
+          bot: name,
+          note: 'Read this',
+          createdAt: 0,
+          items: [{ kind: 'text', text: 'Read this' }]
+        }
+      ])
+    })
+  }
+
+  afterEach(() => {
+    act(() => {
+      useShareStore.getState().reset()
+    })
+  })
+
+  it('puts every mark in one run, in one order', () => {
+    renderScreen(<BotsScreen />)
+
+    mute('researcher')
+    pin('researcher')
+    shareTo('researcher')
+
+    const run = screen.getByTestId('bot-marks-researcher', HIDDEN)
+
+    // All three of them, in the order the row lists them, and nothing else. The
+    // order is fixed rather than dependent on what is on, so a chat that gains a
+    // pin does not shuffle the mark that was already there.
+    expect(run.children.map(child => (typeof child === 'string' ? child : child.props.testID))).toEqual([
+      'bot-muted-researcher',
+      'bot-pinned-researcher',
+      'bot-share-pending-researcher'
+    ])
+  })
+
+  it('draws the run on the name line, immediately before the time', () => {
+    renderScreen(<BotsScreen />)
+
+    mute('researcher')
+    pin('researcher')
+
+    const order = drawnOrder('researcher')
+    const marks = order.indexOf('bot-marks-researcher')
+    const time = order.indexOf('bot-time-researcher')
+
+    expect(marks).toBeGreaterThan(-1)
+    expect(time).toBeGreaterThan(marks)
+
+    // And nothing of the row's OTHER lines in between, which is what says the
+    // run is on the name line rather than under it: the owner's report was that
+    // the bell sat "between the name and the display name".
+    for (const elsewhere of ['bot-secondary-name-researcher', 'bot-preview-researcher', 'bot-unread']) {
+      expect(order.slice(marks, time)).not.toContain(elsewhere)
+    }
+
+    // The time is on the FIRST line, so everything below it follows both.
+    expect(order.indexOf('bot-preview-researcher')).toBeGreaterThan(time)
+  })
+
+  it('draws every mark at the row-mark size', () => {
+    renderScreen(<BotsScreen />)
+
+    mute('researcher')
+    pin('researcher')
+
+    for (const id of ['bot-muted-researcher', 'bot-pinned-researcher']) {
+      const mark = screen.getByTestId(id, HIDDEN)
+
+      expect(mark.props.height).toBe(ICON_SIZE.listMark)
+      expect(mark.props.width).toBe(ICON_SIZE.listMark)
+    }
+  })
+
+  /**
+   * The trailing column carries the unread pill and nothing else.
+   *
+   * That column is centred on a 72pt row, so anything in it is drawn opposite
+   * the middle of the preview — which is where the pin and the pending share
+   * used to be. A count of what ARRIVED belongs there; a mark that describes the
+   * row does not.
+   */
+  it('leaves nothing after the preview but the unread badge', () => {
+    renderScreen(<BotsScreen />)
+
+    mute('researcher')
+    pin('researcher')
+    shareTo('researcher')
+
+    const order = drawnOrder('researcher')
+
+    expect(order.slice(order.indexOf('bot-preview-researcher') + 1)).toEqual(['bot-unread'])
+  })
+
+  /** No marks, no run: an empty box would still take its gap beside the time. */
+  it('draws no run at all for a row with nothing to say', () => {
+    renderScreen(<BotsScreen />)
+
+    expect(screen.queryByTestId('bot-marks-writer', HIDDEN)).toBeNull()
   })
 })
 
