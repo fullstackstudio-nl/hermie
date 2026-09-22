@@ -32,41 +32,46 @@
  * focused text field would make ⌘K work everywhere except inside the composer.
  */
 
-import type { ShortcutAction, ShortcutEvent } from './desktop-shortcuts.shared'
+import { SHORTCUTS, type ShortcutAction, type ShortcutChord, type ShortcutEvent } from './desktop-shortcuts.shared'
 
 export {
   DOUBLE_FIRE_MS,
   isDoubleFire,
   isMenuBarInstalled,
+  MENU_CHORDS,
   setMenuBar,
+  SHORTCUTS,
   type MenuBarTitles,
   type ShortcutAction,
+  type ShortcutChord,
   type ShortcutEvent
 } from './desktop-shortcuts.shared'
 
-/** The digits ⌘1…⌘9 map to, in order. */
-const NUMBERED: readonly ShortcutAction[] = [
-  'chat1',
-  'chat2',
-  'chat3',
-  'chat4',
-  'chat5',
-  'chat6',
-  'chat7',
-  'chat8',
-  'chat9'
-]
+/** Does this keystroke hold the modifier `chord` asks for, and only that one? */
+function modifiersMatch(chord: ShortcutChord, metaKey: boolean, ctrlKey: boolean): boolean {
+  switch (chord.modifier) {
+    case 'command':
+      return metaKey && !ctrlKey
+    case 'commandOrControl':
+      return metaKey || ctrlKey
+    case 'control':
+      return ctrlKey && !metaKey
+    case 'none':
+      return !metaKey && !ctrlKey
+  }
+}
 
 /**
  * Which action this keystroke is, or null.
  *
- * Exported for its own test: the table is the part that can silently disagree
- * with the Swift one, and a test that has to synthesise a `keydown` to read it
- * would be testing the browser rather than the table.
+ * A walk of `SHORTCUTS` rather than a `switch`, which is the whole point of
+ * this round: the chords used to be written out here a second time, and a
+ * second copy of a table is a table that disagrees with the first one the next
+ * time somebody adds a row. Exported for its own test — synthesising a
+ * `keydown` to reach it would be testing the browser instead of the table.
  *
- * `event.code` for the digits rather than `event.key`, because a keyboard layout
- * that puts a symbol on the unshifted digit row — French AZERTY does — would
- * otherwise have no ⌘1…9 at all.
+ * Shift is matched EXACTLY, so ⇧⌘K is not ⌘K: a chord that fired for both would
+ * steal a keystroke some other part of the app may want later.
  */
 export function shortcutForKey(event: {
   key: string
@@ -78,62 +83,24 @@ export function shortcutForKey(event: {
 }): ShortcutAction | null {
   const { altKey, code, ctrlKey, key, metaKey, shiftKey } = event
 
+  // Option is not on the table at all, and ⌥↓ is a real editing key.
   if (altKey) {
     return null
   }
 
-  if (shiftKey && (metaKey || ctrlKey) && key.toLowerCase() === 's') {
-    return 'toggleSidebar'
-  }
-
-  if (shiftKey) {
-    return null
-  }
-
-  if (ctrlKey && !metaKey && key === 'Tab') {
-    return 'nextChat'
-  }
-
-  // Bare ↑, ↓ and Tab: the composer's slash list, and the only unmodified keys
-  // on this table. None of the three inserts a character, so nothing typed into
-  // a field crosses over, and all three are ignored unless a list is open.
-  if (!metaKey && !ctrlKey) {
-    switch (key) {
-      case 'ArrowUp':
-        return 'suggestionUp'
-      case 'ArrowDown':
-        return 'suggestionDown'
-      case 'Tab':
-        return 'suggestionAccept'
-      default:
-        return null
+  const match = SHORTCUTS.find(chord => {
+    if (Boolean(chord.shift) !== shiftKey || !modifiersMatch(chord, metaKey, ctrlKey)) {
+      return false
     }
-  }
 
-  if (!metaKey) {
-    return null
-  }
+    // `code` wins where a chord carries one: the digit row is punctuation on an
+    // AZERTY keyboard, and a table keyed on `key` would leave it with no ⌘1…9.
+    return chord.code
+      ? chord.code === code
+      : chord.keys.some(candidate => candidate.toLowerCase() === key.toLowerCase())
+  })
 
-  switch (key) {
-    case 'k':
-    case 'K':
-      return 'search'
-    case ',':
-      return 'settings'
-    case 'w':
-    case 'W':
-      return 'close'
-    case 'ArrowUp':
-      return 'previousChat'
-    case 'ArrowDown':
-      return 'nextChat'
-    default:
-      break
-  }
-
-  const digit = code.startsWith('Digit') ? Number.parseInt(code.slice(5), 10) : Number.NaN
-
-  return digit >= 1 && digit <= 9 ? (NUMBERED[digit - 1] ?? null) : null
+  return match?.action ?? null
 }
 
 /**

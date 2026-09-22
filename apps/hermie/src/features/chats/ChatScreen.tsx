@@ -49,7 +49,6 @@ import {
   TranscriptList,
   type TranscriptListHandle
 } from '../../chat-ui'
-import { shareFile } from '../../platform/share-file'
 import { shareText } from '../../platform/share-text'
 import { lastMessageAt, prettyModelName } from '@hermie/transcript'
 import type { ConnectionStatus } from '@hermie/gateway-client'
@@ -85,6 +84,7 @@ import {
   type ChatOptionsPane
 } from '../../ui/sheets'
 import { CONTROL_MIN_HEIGHT, TAP_SLOP } from '../../ui/tokens'
+import { useShortcut } from '../../ui/useShortcut'
 import { DropZone } from '../../chat-ui/DropZone'
 import { messageText } from '../../chat-ui/message-menu'
 import type { DroppedFile } from '../../platform/file-drop'
@@ -97,6 +97,7 @@ import type { ManualSheet } from './sheet-host'
 import { useChatRuntime } from './ChatRuntime'
 import { findMatchingItem } from '../search'
 import { connectionNotice, RETRY_OFFER_MS } from './connection-notice'
+import { openAttachmentFile } from './open-attachment'
 import { countsAsRead, readWatermark } from './read-watermark'
 import { regenerateLastTurn } from './regenerate'
 import { useComposerDictation } from '../voice/useComposerDictation'
@@ -639,15 +640,13 @@ function Conversation({
   /**
    * A non-picture attachment, opened.
    *
-   * The share sheet on a phone or a Mac, a download in a browser — the verb is
-   * the platform's, and `share-file.ts` picks it. A reference with no local URI
-   * has nothing to hand over, so the tap does nothing rather than opening an
+   * Quick Look first and the share sheet only if that cannot show it — see
+   * `open-attachment.ts`, which owns that ordering. A reference with no local
+   * URI has nothing to open, so the tap does nothing rather than putting up an
    * empty sheet.
    */
   const openAttachment = useCallback((attachment: { name: string; uri?: string }) => {
-    if (attachment.uri) {
-      void shareFile(attachment.uri, attachment.name)
-    }
+    void openAttachmentFile(attachment)
   }, [])
 
   const images = useMemo(
@@ -1814,6 +1813,27 @@ function Conversation({
 
     branchHere(newest.id, messageText(newest))
   }, [branchHere, chat.items])
+
+  /**
+   * ⌘N: a new conversation in the chat that is open.
+   *
+   * The same `/new` the composer runs, through the same `runSlash` — not a
+   * second road to it. `ChatController.dispatchSlash` intercepts the name before
+   * any round trip and calls `startNewConversation`, which retires the session,
+   * keeps the chat and writes the notice; a shortcut that reimplemented any of
+   * that would be a second set of rules about what happens to the old
+   * conversation.
+   *
+   * It is deliberately NOT "new chat". A Mac reader expects ⌘N to make a new
+   * something in the window they are looking at, and the window they are looking
+   * at is one conversation. Creating a chat is a gateway-side act with a name to
+   * choose, which is a sheet rather than a keystroke.
+   */
+  const newConversation = useCallback(() => {
+    void chat.runSlash('/new').catch(error => setNotice(openFailed(messageOf(error))))
+  }, [chat])
+
+  useShortcut('newConversation', newConversation)
   const openProfile = useCallback(() => {
     void refreshUsage()
     setSheet('profile')

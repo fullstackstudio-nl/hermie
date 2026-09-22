@@ -45,7 +45,15 @@ import UIKit
    `src/ui/useShortcut.ts` decides. The menu bar's own path reports `typing: false`, because a
    `UIKeyCommand` IS in the responder chain and the focused view has already declined it.
 
- **`devLaunchArguments`** is the fifth thing, and the only one that is not about keyboards. It is
+ **`isWindowActive`/`onWindowActive`** is not about keyboards either. It reports whether any of this
+ process's scenes is `foregroundActive`, and it exists because a Mac window that is not key draws
+ every `UIVisualEffectView` in it with the dimmed variant of its material — which is the app
+ restyling itself when the reader clicks another window. There is no API to turn that off (the
+ search is written out in `HermieWindowActivity`), so the fact is reported and `GlassSurface` stops
+ putting a visual effect view on screen while it is false. Mac only: `foregroundInactive` is a state
+ a phone enters every time the notification shade comes down.
+
+ **`devLaunchArguments`** is the last thing, and the only one that is not about keyboards. It is
  this process's own `ProcessInfo.processInfo.arguments`, which is how `xcrun simctl launch` can tell a
  running app to open on a particular screen — see `src/dev/launch-intent.ts` and the "Driving a
  simulator" section of docs/platform-notes.md. It is inside `#if DEBUG`, so a Release build has no
@@ -98,7 +106,7 @@ public class HermieMacModule: Module {
   public func definition() -> ModuleDefinition {
     Name("HermieMac")
 
-    Events("onEscape", "onShortcut")
+    Events("onEscape", "onShortcut", "onWindowActive")
 
     #if DEBUG
       Constants([
@@ -114,6 +122,14 @@ public class HermieMacModule: Module {
     OnCreate {
       self.watchForKeyboards()
       self.watchForActivation()
+
+      // A Mac window that is not key is drawn with the dimmed variant of every material in it, and
+      // no API turns that off — see `HermieWindowActivity`. The fact crosses into JavaScript and
+      // `GlassSurface` stops putting a visual effect view on screen while it is false.
+      HermieWindowActivity.shared.onChange = { [weak self] active in
+        self?.sendEvent("onWindowActive", ["active": active])
+      }
+      HermieWindowActivity.shared.start()
 
       // The menu bar's items and the keyboard's shortcuts are the same actions, so they land on the
       // same event. `install()` is a no-op anywhere but a Mac, where the menu bar exists.
@@ -138,6 +154,7 @@ public class HermieMacModule: Module {
       self.activationObservers = []
       GCKeyboard.coalesced?.keyboardInput?.keyChangedHandler = nil
       HermieMenuBar.onCommand = nil
+      HermieWindowActivity.shared.stop()
     }
 
     /**
@@ -254,6 +271,51 @@ public class HermieMacModule: Module {
     /** Whether the menu bar hook reached the app delegate's class. Reported on the developer screen. */
     Function("isMenuBarInstalled") { () -> Bool in
       HermieMenuBar.isInstalled
+    }
+
+    /**
+     Preview a file the way the platform previews files.
+
+     `QLPreviewController`, presented over whatever is on screen — see `HermieQuickLook` for why it
+     is presented from here rather than handed over as a view, and for what happens to a remote URL.
+
+     Answers whether it was actually shown, so the caller can fall back to the share sheet for the
+     refusals that are expected rather than exceptional: an unreadable path, a type with no
+     previewer, a fetch that failed. It never throws, for the same reason — a rejected promise would
+     make the caller tell those apart by reading a message.
+
+     iOS API, not a Mac one: the phones and the iPad get the same previewer, which is what they
+     should have had instead of a share sheet all along. The Mac is only what made it obvious.
+     */
+    AsyncFunction("previewFile") { (uri: String, name: String?) async -> Bool in
+      // No `.runOnQueue(.main)`: an `async` closure builds a `ConcurrentFunctionDefinition`, which
+      // has no such modifier at all — it runs on Swift's own executor. The main-thread hop happens
+      // inside instead, because `HermieQuickLook` is `@MainActor`, which is the stronger guarantee:
+      // the isolation is on the type that touches UIKit rather than on the call site.
+      await HermieQuickLook.present(uri: uri, title: name)
+    }
+
+    /**
+     Whether this binary can preview a file at all.
+
+     The same kind of probe `supportsSelectableText` is, added in the same change as the function it
+     answers for: an older binary under a newer bundle would otherwise have `previewFile` reject as
+     a missing function, and the caller cannot tell that from a file it could not show.
+     */
+    Function("supportsQuickLook") { () -> Bool in
+      true
+    }
+
+    /**
+     Is this app's window the one the reader is working in?
+
+     Read once for the first render, because the event only fires on a CHANGE and a bundle that
+     reloaded while the window was behind another would otherwise start out believing it was in
+     front. `true` on everything that is not a Mac; see `HermieWindowActivity` for why a phone must
+     not answer this honestly.
+     */
+    Function("isWindowActive") { () -> Bool in
+      HermieWindowActivity.shared.isActive
     }
 
     /**
@@ -524,6 +586,12 @@ public class HermieMacModule: Module {
    ⌃Tab is the one non-Command entry, because that is what it is on every platform, and ⌃⇧S is
    accepted alongside ⌘⇧S because an iPad with a PC keyboard in a case has no Command key to press.
 
+   This table is a TRANSCRIPTION of `src/platform/desktop-shortcuts.shared.ts`'s `SHORTCUTS`, which
+   is where a chord is decided. It cannot be generated from it — GameController hands over a
+   `GCKeyCode` and nothing bridges that to a string on this side — but it is not allowed to drift in
+   silence either: `__tests__/shortcut-table.test.ts` reads this file and fails when an action exists
+   here and not there, or the other way round.
+
    An instance method since build 163, because a modifier is only believed when the poll and
    `heldModifiers` agree — and an allow-list that trusts the poll alone turns every bare letter on
    the table into its own chord the first time a Command is released over another window.
@@ -573,6 +641,8 @@ public class HermieMacModule: Module {
       return "settings"
     case .keyW:
       return "close"
+    case .keyN:
+      return "newConversation"
     case .upArrow:
       return "previousChat"
     case .downArrow:

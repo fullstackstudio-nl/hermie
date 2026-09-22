@@ -53,6 +53,20 @@ export function ThemesScreen({ onClose }: ThemesScreenProps) {
   useEscapeKey(() => onClose?.(), Boolean(onClose))
   useHardwareBack(() => onClose?.(), Boolean(onClose))
 
+  /*
+    The delete confirmation is a LEVEL, so Escape cancels it before it leaves the
+    screen.
+
+    It is two rows drawn in place rather than a sheet, which is exactly why it
+    was missed: nothing mounts, so there was no new registration and the first
+    Escape closed the whole of Appearance → Advanced with a destructive question
+    still on screen. Registered after the pair above, so it sits on top of them
+    while the question is up — hook order is effect order, and flipping `enabled`
+    is what pushes and pops.
+  */
+  useEscapeKey(() => setConfirmingDelete(null), confirmingDelete !== null)
+  useHardwareBack(() => setConfirmingDelete(null), confirmingDelete !== null)
+
   const target = userThemes.find(entry => entry.id === editing) ?? null
 
   return (

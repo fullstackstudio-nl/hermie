@@ -593,6 +593,25 @@ export const TINT_SUNK: Record<Scheme, string> = {
 }
 
 /**
+ * The wash a pointer leaves on the control it is over.
+ *
+ * Its own token rather than `TINT_SUNK` re-used, because the two say opposite
+ * things and only one of them can be a single colour. A sunk tint DARKENS in
+ * both schemes, which is right for a well; a hover has to move the control
+ * towards the reader, so it darkens on a light floor and lightens on a dark one.
+ * Laid over whatever the control already is, so the same value works on a
+ * neutral secondary, a tinted danger and a saturated accent bubble alike.
+ *
+ * Low on purpose. A hover is an answer to "can I press this", not emphasis, and
+ * the dark value is deliberately well under `TINT_SUNK`'s 0.44 — a wash that
+ * strong over an accent bubble reads as the button being disabled.
+ */
+export const TINT_HOVER: Record<Scheme, string> = {
+  light: 'rgba(14,32,64,0.06)',
+  dark: 'rgba(255,255,255,0.09)'
+}
+
+/**
  * The soft destructive fill, and the soft ok one beside it.
  *
  * §3's `.btn--danger` is a TINT carrying `dangerText`, not the saturated

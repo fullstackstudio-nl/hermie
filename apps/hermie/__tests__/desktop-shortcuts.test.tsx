@@ -257,6 +257,21 @@ describe('shortcutIsDeliverable', () => {
     }
   })
 
+  /**
+   * ⌘N is not a move, and is gated like one anyway.
+   *
+   * It retires the session and empties the transcript of the chat UNDERNEATH
+   * whatever is open, so a reader with a sheet up who presses it would come back
+   * to a conversation that is not the one they left. The typing gate takes it
+   * too: on a Mac and an iPad it comes back through the menu bar's key
+   * equivalent, where the focused field has already declined the keystroke.
+   */
+  it('gates ⌘N like a surface switch, although it moves nobody', () => {
+    expect(shortcutIsDeliverable('newConversation', { typing: false, modalDepth: 0 })).toBe(true)
+    expect(shortcutIsDeliverable('newConversation', { typing: false, modalDepth: 1 })).toBe(false)
+    expect(shortcutIsDeliverable('newConversation', { typing: true, modalDepth: 0 })).toBe(false)
+  })
+
   it('leaves ⌘, and ⌘W alone under a modal: neither goes to the surface underneath', () => {
     expect(shortcutIsDeliverable('settings', { ...idle, modalDepth: 1 })).toBe(true)
     expect(shortcutIsDeliverable('close', { ...idle, modalDepth: 2 })).toBe(true)

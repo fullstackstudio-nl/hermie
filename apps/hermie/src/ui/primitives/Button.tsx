@@ -1,6 +1,7 @@
-import { ActivityIndicator, Pressable, type PressableProps, View } from 'react-native'
+import { ActivityIndicator, Pressable, StyleSheet, type PressableProps, View } from 'react-native'
 
 import { useTheme } from '../theme'
+import { useHover } from '../useHover'
 import { CONTROL_MIN_HEIGHT, withAlpha } from '../tokens'
 import { Text } from './Text'
 
@@ -13,6 +14,7 @@ export type ButtonProps = Omit<PressableProps, 'children'> & {
 
 export function Button({ title, variant = 'primary', busy = false, disabled, style, ...rest }: ButtonProps) {
   const theme = useTheme()
+  const hover = useHover()
   const inactive = Boolean(disabled) || busy
 
   // `danger` is a TINT here, not the solid fill (§3's `.btn--danger`). A sheet
@@ -39,6 +41,7 @@ export function Button({ title, variant = 'primary', busy = false, disabled, sty
       // `pointer`, so a disabled button falls back to `auto` rather than to an
       // explicit arrow — a pointing hand over something that does nothing is a lie.
       style={[{ cursor: inactive ? 'auto' : 'pointer' }, style as never]}
+      {...hover.props}
       {...rest}
     >
       {({ pressed }) => (
@@ -58,6 +61,27 @@ export function Button({ title, variant = 'primary', busy = false, disabled, sty
             opacity: inactive ? 0.4 : pressed ? 0.85 : 1
           }}
         >
+          {/*
+            The pointer's answer to the cursor above.
+
+            A WASH laid over whatever the button already is, rather than a second
+            set of background colours per variant: the three variants are a
+            saturated accent bubble, a danger tint and a neutral rung, and one
+            hover colour that works on all three has to be translucent. It also
+            keeps the button's own recipe in one place — a hovered primary is the
+            primary, plus a film.
+
+            Off while inactive, for the same reason the cursor is: a control that
+            lights up under the pointer and then does nothing is a lie the cursor
+            has already been taught not to tell.
+          */}
+          {hover.hovered && !inactive ? (
+            <View
+              pointerEvents="none"
+              style={[StyleSheet.absoluteFill, { backgroundColor: theme.tintHover, borderRadius: theme.radii.inset }]}
+            />
+          ) : null}
+
           {busy ? (
             <ActivityIndicator color={variant === 'primary' ? theme.colors.onAccent : theme.colors.text} />
           ) : (

@@ -15,8 +15,9 @@
  *
  * ## An allow-list, not a key event
  *
- * The native side emits only for a fixed table: ⌘K, ⌘,, ⌘W, ⌘⇧S, ⌘1…9, ⌘↑, ⌘↓,
- * ⌃Tab — and bare ↑, ↓ and Tab for the composer's slash list. It never emits for
+ * The native side emits only for a fixed table — `SHORTCUTS` below, which is
+ * the one place any of it is written down, and which the browser's matcher and
+ * the Mac's menu bar are both generated from. It never emits for
  * a key that INSERTS TEXT, which matters more than it looks: the handler it reads
  * from is GameController's, below the responder chain, so it sees every keystroke
  * in the app including the ones typed into the composer and into a password
@@ -65,6 +66,7 @@ export type ShortcutAction =
   | 'search'
   | 'settings'
   | 'close'
+  | 'newConversation'
   | 'toggleSidebar'
   | 'nextChat'
   | 'previousChat'
@@ -77,18 +79,81 @@ export type ShortcutAction =
   | 'chat7'
   | 'chat8'
   | 'chat9'
-  /** The composer's slash list: bare ↑, ↓ and Tab, ignored while it is closed. */
+  /** The composer's slash list: bare \u2191, \u2193 and Tab, ignored while it is closed. */
   | 'suggestionUp'
   | 'suggestionDown'
   | 'suggestionAccept'
 
-const ACTIONS: readonly ShortcutAction[] = [
-  'search',
-  'settings',
-  'close',
-  'toggleSidebar',
-  'nextChat',
-  'previousChat',
+/**
+ * Which modifier a chord needs, spelled as a rule rather than as three booleans.
+ *
+ *  - `command`          \u2318 and nothing else. Control is NOT accepted: \u2303K is
+ *    "kill to end of line" on a Mac and \u2303, is nothing anybody means.
+ *  - `commandOrControl` either, because an iPad in a PC keyboard case has no
+ *    Command key at all. Only \u21e7\u2318S is defined this way.
+ *  - `control`          Control and not Command. \u2303Tab, which is what "next tab"
+ *    is on every platform including this one.
+ *  - `none`             no Command and no Control. The composer's three list
+ *    keys, which are bare by definition.
+ */
+export type ShortcutModifier = 'command' | 'commandOrControl' | 'control' | 'none'
+
+/**
+ * One chord, and what it means.
+ *
+ * ## Why this is a table and not three of them
+ *
+ * There were three: a `switch` in `HermieMacModule.swift`, a second `switch` in
+ * `desktop-shortcuts.web.ts`, and a hand-written list of menu items in
+ * `HermieMenuBar.swift` — three places to change for one shortcut, and the one
+ * that drifts is whichever the author did not have open. Two of the three are
+ * TypeScript and are now derived from this array: the browser's matcher walks
+ * it (`shortcutForKey`) and the Mac's menu bar is built from the entries that
+ * carry a `menu` (`MENU_CHORDS`). The Swift key table stays a transcription,
+ * because GameController hands over a `GCKeyCode` and nothing bridges that to a
+ * string here — but it is no longer allowed to drift in silence:
+ * `__tests__/shortcut-table.test.ts` reads both Swift files and fails when an
+ * action exists on one side and not the other.
+ *
+ * ## The order is meaningful in one place
+ *
+ * `shift` is matched EXACTLY, so \u21e7\u2318K does not resolve to \u2318K and cannot steal
+ * a keystroke some other part of the app may want later. That used to be a
+ * blanket "Shift disqualifies everything" rule with \u21e7\u2318S carved out ahead of
+ * it; as a table it is one field per row and there is no carve-out to forget.
+ */
+export interface ShortcutChord {
+  action: ShortcutAction
+  /**
+   * The `KeyboardEvent.key` values this chord accepts.
+   *
+   * Several, because a letter's `key` is its own case: \u21e7\u2318S arrives as `S`
+   * and \u2318s as `s`. Compared case-insensitively, so one entry is enough for the
+   * letters; the array is for a key that genuinely has two spellings.
+   */
+  keys: readonly string[]
+  /**
+   * Match `KeyboardEvent.code` instead, for the digit row.
+   *
+   * A keyboard layout that puts punctuation on the unshifted digits — French
+   * AZERTY does — would otherwise have no \u23181\u20269 at all.
+   */
+  code?: string
+  modifier: ShortcutModifier
+  /** Shift must be held, and where this is absent it must NOT be. */
+  shift?: boolean
+  /**
+   * This chord is printed in the Mac's menu bar, beside the item named here.
+   *
+   * The key equivalent the menu shows is `keys[0]`, and `HermieMenuBar` builds
+   * the item; what lives here is only which string names it, so the menu and
+   * the keyboard cannot end up promising different chords for one action.
+   */
+  menu?: keyof MenuBarTitles
+}
+
+/** The digits \u23181\u20269 map to, in order. Used to generate their nine rows. */
+const NUMBERED: readonly ShortcutAction[] = [
   'chat1',
   'chat2',
   'chat3',
@@ -97,11 +162,49 @@ const ACTIONS: readonly ShortcutAction[] = [
   'chat6',
   'chat7',
   'chat8',
-  'chat9',
-  'suggestionUp',
-  'suggestionDown',
-  'suggestionAccept'
+  'chat9'
 ]
+
+/** Every chord this app answers to, and the only place any of them is written down. */
+export const SHORTCUTS: readonly ShortcutChord[] = [
+  { action: 'search', keys: ['k'], menu: 'search', modifier: 'command' },
+  { action: 'settings', keys: [','], menu: 'settings', modifier: 'command' },
+  { action: 'close', keys: ['w'], menu: 'close', modifier: 'command' },
+  /*
+    \u2318N is "new conversation in THIS chat", not "new chat".
+
+    It runs the same `/new` the composer runs, because a second road to a new
+    conversation is a second set of rules about what happens to the old one —
+    and `/new` already retires the session, keeps the chat and says so in the
+    transcript. A Mac reader expects \u2318N to make a new something in the window
+    they are looking at, and the window they are looking at is one conversation.
+  */
+  { action: 'newConversation', keys: ['n'], menu: 'newConversation', modifier: 'command' },
+  { action: 'toggleSidebar', keys: ['s'], menu: 'toggleSidebar', modifier: 'commandOrControl', shift: true },
+  { action: 'previousChat', keys: ['ArrowUp'], modifier: 'command' },
+  { action: 'nextChat', keys: ['ArrowDown'], modifier: 'command' },
+  { action: 'nextChat', keys: ['Tab'], modifier: 'control' },
+  ...NUMBERED.map((action, index) => ({
+    action,
+    code: `Digit${index + 1}`,
+    keys: [String(index + 1)],
+    modifier: 'command' as const
+  })),
+  /*
+    The three bare keys, and the reason they are allowed on a table whose whole
+    point is that it needs a modifier: none of them inserts a character, so
+    nothing typed into a field can cross into JavaScript through here. All three
+    are ignored unless a suggestion list is actually open.
+  */
+  { action: 'suggestionUp', keys: ['ArrowUp'], modifier: 'none' },
+  { action: 'suggestionDown', keys: ['ArrowDown'], modifier: 'none' },
+  { action: 'suggestionAccept', keys: ['Tab'], modifier: 'none' }
+]
+
+/** The entries the Mac's menu bar draws, in the order it draws them. */
+export const MENU_CHORDS: readonly ShortcutChord[] = SHORTCUTS.filter(chord => chord.menu)
+
+const ACTIONS: readonly ShortcutAction[] = [...new Set(SHORTCUTS.map(chord => chord.action))]
 
 /** The wording the Mac's menu bar shows. Sent from JavaScript so `strings.ts` stays the only copy. */
 export interface MenuBarTitles {
@@ -110,6 +213,8 @@ export interface MenuBarTitles {
   search: string
   settings: string
   close: string
+  /** "New Conversation" — ⌘N, which runs `/new` in the chat that is open. */
+  newConversation: string
   /**
    * "Hide Sidebar" or "Show Sidebar" — the caller picks, because only the caller
    * knows which one is true.

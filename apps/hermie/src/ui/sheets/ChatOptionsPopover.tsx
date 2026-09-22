@@ -59,6 +59,7 @@ import { Text } from '../primitives'
 import { useTheme } from '../theme'
 import { CONTROL_MIN_HEIGHT } from '../tokens'
 import { useEscapeKey } from '../useEscapeKey'
+import { useHover } from '../useHover'
 import { useShortcut } from '../useShortcut'
 import type { ChatOptionsSheetProps, ChatOptionsPane } from './ChatOptionsSheet'
 import { DisclosureRow, SegmentedRow, SwitchRow } from './controls'
@@ -163,6 +164,46 @@ export function popoverRows({
     { id: 'text-size' },
     ...(canExport ? [{ id: 'export' as const, page: 'export' as const }] : [])
   ]
+}
+
+/**
+ * One row's box: the keyboard's ring, and the pointer's.
+ *
+ * Its own component because a hover needs a hook and the rows are built by a
+ * helper inside the render. It wraps rather than replaces whatever the row
+ * draws — a switch, a disclosure, a segmented control — so there is one place
+ * that answers "is the pointer on this line" for all of them rather than a
+ * hover added to three different controls and forgotten on the fourth.
+ *
+ * The keyboard's own ring wins where both are true: a reader driving with ↓ has
+ * a mouse sitting somewhere over the list, and a hover that painted over the
+ * selection would leave them unable to see where Return is going. Both use a
+ * background rather than a border, for the reason `focusStyle` gives: a border
+ * changes a row's height, and a menu whose rows resize as the selection moves is
+ * the thing this component exists to stop doing.
+ */
+function PopoverRowBox({
+  children,
+  focused,
+  testID
+}: {
+  children: React.ReactNode
+  focused: { backgroundColor: string }
+  testID: string
+}) {
+  const theme = useTheme()
+  const hover = useHover()
+  const lit = focused.backgroundColor !== 'transparent'
+
+  return (
+    <View
+      style={[focused, !lit && hover.hovered ? { backgroundColor: theme.tintHover } : null, { cursor: 'pointer' }]}
+      testID={testID}
+      {...hover.props}
+    >
+      {children}
+    </View>
+  )
 }
 
 /**
@@ -368,9 +409,9 @@ export function ChatOptionsPopover({
     }
 
     return (
-      <View key={id} style={focusStyle(index)} testID={`${testID}-row-${id}`}>
+      <PopoverRowBox focused={focusStyle(index)} key={id} testID={`${testID}-row-${id}`}>
         {node}
-      </View>
+      </PopoverRowBox>
     )
   }
 

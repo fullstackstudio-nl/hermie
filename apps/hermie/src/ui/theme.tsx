@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { AccessibilityInfo, Appearance, useColorScheme } from 'react-native'
 
 import { SystemStatusBar } from '../platform/status-bar'
+import { isWindowActive, subscribeToWindowActivity } from '../platform/window-activity'
 import { useSettingsStore } from '../store/settings'
 import {
   ACCENTS,
@@ -17,6 +18,7 @@ import {
   lightShadows,
   radii,
   space,
+  TINT_HOVER,
   TINT_SUNK,
   type,
   type AccentName,
@@ -80,6 +82,8 @@ export type Theme = {
   edge: string
   edgeSoft: string
   tintSunk: string
+  /** The wash a pointer leaves on the control it is over. */
+  tintHover: string
   /** The soft destructive fill; `colors.dangerText` is the ink that goes on it. */
   dangerSoft: string
   /** Its counterpart, for a confirmed or locked state. `colors.okText` reads on it. */
@@ -91,6 +95,22 @@ export type Theme = {
   reduceTransparency: boolean
   /** "Reduce Motion". Durations collapse and the amber pulse goes static. */
   reduceMotion: boolean
+  /**
+   * This app's window is the one the reader is working in.
+   *
+   * False only on a Mac, and only while another window is in front. It is here
+   * rather than read per surface for the reason both accessibility flags are: a
+   * list of forty rows must not open forty native subscriptions, and the answer
+   * changes rarely enough that a context re-render is the cheapest delivery.
+   *
+   * `GlassSurface` is the one thing that reads it, and what it does with it is
+   * stop drawing a `UIVisualEffectView`. See `platform/window-activity.ts` for
+   * why that is the only lever: UIKit exposes no way to tell a visual effect
+   * view to ignore its window's key state, so the alternative to swapping the
+   * material is letting macOS dim it — which is the app restyling itself,
+   * which is the thing being fixed.
+   */
+  windowActive: boolean
   /** Resolve a chat's accent for this scheme. `undefined` means Default. */
   accent: (name?: AccentName) => ResolvedAccent
 }
@@ -122,9 +142,18 @@ export interface BuildThemeOptions {
   userThemes: readonly UserTheme[]
   reduceTransparency: boolean
   reduceMotion: boolean
+  /** Defaults to true, which is the answer everywhere but an inactive Mac window. */
+  windowActive?: boolean
 }
 
-export function buildTheme({ scheme, choice, userThemes, reduceTransparency, reduceMotion }: BuildThemeOptions): Theme {
+export function buildTheme({
+  scheme,
+  choice,
+  userThemes,
+  reduceTransparency,
+  reduceMotion,
+  windowActive = true
+}: BuildThemeOptions): Theme {
   const dark = scheme === 'dark'
   const face = resolveThemeFace(choice, scheme, userThemes)
   const themeAccent: ResolvedAccent = {
@@ -154,10 +183,12 @@ export function buildTheme({ scheme, choice, userThemes, reduceTransparency, red
     edge: EDGE[scheme],
     edgeSoft: EDGE_SOFT[scheme],
     tintSunk: TINT_SUNK[scheme],
+    tintHover: TINT_HOVER[scheme],
     dangerSoft: DANGER_SOFT[scheme],
     okSoft: OK_SOFT[scheme],
     reduceTransparency,
     reduceMotion,
+    windowActive,
     /*
       "Default" is the THEME's accent, and a chat's own colour is everything else.
 
@@ -237,6 +268,30 @@ function useAccessibilityPreferences(): { reduceTransparency: boolean; reduceMot
   return { reduceTransparency, reduceMotion }
 }
 
+/**
+ * Whether this app's window is in front, as one subscription for the whole app.
+ *
+ * Seeded from the seam rather than from `true`, because the native event only
+ * fires on a CHANGE: a bundle reloaded while the window was behind another
+ * would otherwise spend its first activation drawing a material macOS is
+ * dimming. Off a Mac both halves are constants and this costs one `useState`
+ * and one no-op subscription.
+ */
+function useWindowActive(): boolean {
+  const [active, setActive] = useState(isWindowActive)
+
+  useEffect(() => {
+    // Asked again on mount as well as subscribed: the render that read the
+    // initial value and this effect are not the same tick, and a window can
+    // lose focus in between.
+    setActive(isWindowActive())
+
+    return subscribeToWindowActivity(setActive)
+  }, [])
+
+  return active
+}
+
 export interface ThemeProviderProps {
   children: ReactNode
   /**
@@ -262,6 +317,7 @@ export function ThemeProvider({ children, forceScheme, forcePreset }: ThemeProvi
   const userThemes = useSettingsStore(state => state.userThemes)
   const appearanceLoaded = useSettingsStore(state => state.appearanceLoaded)
   const { reduceTransparency, reduceMotion } = useAccessibilityPreferences()
+  const windowActive = useWindowActive()
 
   useEffect(() => {
     // Hydrating here rather than further down the tree keeps the very first
@@ -328,8 +384,8 @@ export function ThemeProvider({ children, forceScheme, forcePreset }: ThemeProvi
   }, [pinned])
 
   const theme = useMemo(
-    () => buildTheme({ scheme, choice, userThemes, reduceTransparency, reduceMotion }),
-    [scheme, choice, userThemes, reduceTransparency, reduceMotion]
+    () => buildTheme({ scheme, choice, userThemes, reduceTransparency, reduceMotion, windowActive }),
+    [scheme, choice, userThemes, reduceTransparency, reduceMotion, windowActive]
   )
 
   // The status bar follows the PINNED appearance, not the system's, and it is

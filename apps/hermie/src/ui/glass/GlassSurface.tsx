@@ -159,7 +159,32 @@ export function GlassSurface({
   // definition (a chip, a list row), so it never counts towards the depth and
   // never opens a blur view of its own.
   const wantsBlur = recipe.blurIntensity > 0
-  const blurred = wantsBlur && !theme.reduceTransparency && depth < MAX_GLASS_DEPTH && GLASS_MATERIAL !== 'solid'
+  /*
+    `windowActive` is the Mac's, and it is a material question rather than a
+    style one.
+
+    Both blurring materials are `UIVisualEffectView`s, and macOS draws every
+    visual effect view in a window that is not key with the dimmed variant of
+    its material. UIKit offers nothing to opt out of that — the search through
+    the iOS 27 headers is written out in `platform/window-activity.ts` — so the
+    only way for the chrome not to change when the reader clicks another window
+    is for there to be no visual effect view on screen while it is inactive.
+
+    What is left is the branch this component already has for Android and for
+    Reduce Transparency: the surface's own rung of the elevation ladder, which
+    the ladder is defined to make interchangeable with the blurred recipe. It is
+    the ONLY inactive-safe recipe — the `blur` fallback is a `UIVisualEffectView`
+    too and dims exactly the same way, so dropping the native material to
+    `expo-blur` on a Mac would have fixed nothing.
+
+    This is true off a Mac and on the web, where it costs one boolean AND.
+  */
+  const blurred =
+    wantsBlur &&
+    !theme.reduceTransparency &&
+    theme.windowActive &&
+    depth < MAX_GLASS_DEPTH &&
+    GLASS_MATERIAL !== 'solid'
   const childDepth = wantsBlur ? depth + 1 : depth
 
   /**
@@ -305,7 +330,10 @@ function Material({
 export function GlassGroup({ spacing = 12, style, children, ...rest }: ViewProps & { spacing?: number }) {
   const theme = useTheme()
 
-  if (GLASS_MATERIAL !== 'native' || theme.reduceTransparency) {
+  // A glass container is a `UIVisualEffectView` carrying a `UIGlassContainerEffect`,
+  // so an inactive window dims it for the same reason it dims the surfaces inside
+  // it — and a plain row is what those controls look like everywhere else anyway.
+  if (GLASS_MATERIAL !== 'native' || theme.reduceTransparency || !theme.windowActive) {
     return (
       <View {...rest} style={style}>
         {children}

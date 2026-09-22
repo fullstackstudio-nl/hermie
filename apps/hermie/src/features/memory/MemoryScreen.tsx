@@ -111,6 +111,19 @@ export function MemoryScreen({ profile, title, onClose, testID = 'memory' }: Mem
   useEscapeKey(onClose, true)
   useHardwareBack(onClose, true)
 
+  /*
+    A selected node on the map is a LEVEL, so Escape leaves it before it leaves
+    the screen.
+
+    `MemoryNodeCard` has a close control of its own, which is what makes it one:
+    anything with a way out has to be the thing Escape takes. Registered after
+    the pair above, so it sits on top of them while a node is selected and hands
+    the key straight back when nothing is — which is the whole of the ordering,
+    and why neither of the two above has to know this exists.
+  */
+  useEscapeKey(() => setSelected(null), selected !== null)
+  useHardwareBack(() => setSelected(null), selected !== null)
+
   const onReplace = useCallback(
     (entry: MemoryEntry, text: string) => void controller?.replace(entry, text),
     [controller]
