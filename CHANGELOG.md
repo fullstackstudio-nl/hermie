@@ -179,6 +179,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   check over every key the app can produce, so a key it would refuse cannot ship again. Anyone
   affected signs in once more; nothing else is lost.
 
+- **The chat list's header fits the iPad's narrow sidebar.** In portrait the sidebar is 300pt, and
+  four controls that cannot shrink — Boards, New bot, `+`, Edit — left the title nothing: "Chats"
+  wrapped to one character per line and "New bot…" truncated mid-word. The title now takes one line
+  whatever happens, and below a threshold the three word actions fold into a single `…` beside a `+`
+  that stays where it is. A wider sidebar, and every phone, keeps the full row exactly as it was.
+
 - **Setting a gateway up now either happens completely or leaves nothing behind — and never fails
   silently.** The credentials go to the secret store first and the address and the list entry only
   once they have landed; before, the address was written first, and a device whose keychain refused

@@ -360,6 +360,14 @@ export const strings = {
     footnote: 'Your conversations stay with your gateway.',
     sidebarHeader: 'CHATS',
     newCron: 'New cron',
+    /**
+     * The `…` that holds Boards, New bot and Edit on a narrow sidebar.
+     *
+     * A label rather than a name for what is behind it, because what IS behind
+     * it changes with the shell: a compact list has no Boards entry to offer.
+     * "More" is the one word that is true in every one of those arrangements.
+     */
+    moreActions: 'More',
 
     /**
      * A share that has arrived and cannot go yet.

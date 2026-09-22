@@ -57,12 +57,14 @@ import { archivedOf, foldersOf, useChatLayoutStore } from '../../store/chat-layo
 import type { Folder } from '../../store/folders'
 import { isMuted, MUTE_FOREVER, muteUntil, mutedUntil as mutedUntilOf, type Mutes } from '../../store/mute'
 import { useChatsStore } from '../../store/chats'
+import { Appear } from '../../ui/Appear'
 import { DragGrip } from '../../ui/DragGrip'
 import { GlassSurface } from '../../ui/glass'
 import { Icon, ICON_SIZE } from '../../ui/Icon'
 import { Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { useFocusRing } from '../../ui/useFocusRing'
+import { useEscapeKey } from '../../ui/useEscapeKey'
 import { useHover } from '../../ui/useHover'
 import { useNumberedShortcuts, useShortcut } from '../../ui/useShortcut'
 import { CONTROL_MIN_HEIGHT, TAP_SLOP } from '../../ui/tokens'
@@ -1347,6 +1349,130 @@ export function BotsScreenOrSignedOut(props: BotsScreenProps) {
   return gatewayStop({ config, error: lastError, status }) ? <GatewayStoppedPanel /> : <BotsScreen {...props} />
 }
 
+/**
+ * The width at or above which the header's actions stay on one row.
+ *
+ * Four incompressible controls sit beside a `flex: 1` title — Boards, New bot,
+ * `+`, Edit — and three of them are WORDS, which do not shrink. At the narrow
+ * sidebar's 300pt the title had nothing left: "Chats" wrapped to one character
+ * per line and "New bot…" truncated mid-word. Measured against the header's own
+ * width rather than the window's or the platform's, because the thing that runs
+ * out of room is this row: the same 300pt happens on an iPad in portrait, on a
+ * Mac window dragged narrow, and in the gallery's mimic of the sidebar, and
+ * `Platform.OS` answers none of them.
+ *
+ * 330 sits between the two widths that exist — `SIDEBAR_WIDTH_NARROW` at 300,
+ * which must collapse, and `SIDEBAR_WIDTH` at 340, which comfortably does not.
+ */
+export const BOTS_HEAD_INLINE_MIN_WIDTH = 330
+
+/**
+ * The secondary actions, behind one `…` when the row cannot hold them.
+ *
+ * `+` deliberately stays out of it and stays visible: it is the one control here
+ * that makes something rather than navigating, it is a glyph and therefore costs
+ * a fixed 38pt whatever the width, and burying the primary action of a screen
+ * inside an overflow menu to save room for a title is the wrong trade.
+ *
+ * Drawn the way every other floating menu in the app is drawn — an opaque glass
+ * surface, absolutely positioned so that opening it lays nothing out, arriving
+ * from above because that is where the button is. It is not `ContextMenuHost`:
+ * that one is a long-press and secondary-click host backed by a native Mac view,
+ * so on an iPad it would render no menu at all and the actions would simply be
+ * gone.
+ */
+function HeadOverflowMenu({
+  editing,
+  onBoards,
+  onNewBot,
+  onToggleEdit
+}: {
+  editing: boolean
+  onBoards?: () => void
+  onNewBot?: () => void
+  onToggleEdit: () => void
+}) {
+  const theme = useTheme()
+  const [open, setOpen] = useState(false)
+
+  useEscapeKey(() => setOpen(false), open)
+
+  const rows: { id: string; label: string; onPress: () => void }[] = [
+    ...(onBoards ? [{ id: 'boards', label: kanbanStrings.menu, onPress: onBoards }] : []),
+    ...(onNewBot ? [{ id: 'new-bot', label: profileStrings.settings.newBot, onPress: onNewBot }] : []),
+    { id: 'edit', label: editing ? strings.layout.done : strings.layout.edit, onPress: onToggleEdit }
+  ]
+
+  return (
+    <View>
+      <Pressable
+        accessibilityLabel={strings.bots.moreActions}
+        accessibilityRole="button"
+        // `aria-expanded`, not `accessibilityState`: react-native-web drops the
+        // object spelling on the floor. See `accessibility-state.test.tsx`.
+        aria-expanded={open}
+        hitSlop={TAP_SLOP}
+        onPress={() => setOpen(current => !current)}
+        style={{ cursor: 'pointer' }}
+        testID="bots-head-overflow"
+      >
+        <Icon color={theme.colors.accentText} name="ellipsis" size={ICON_SIZE.control} />
+      </Pressable>
+
+      <Appear
+        rise={-6}
+        style={{
+          position: 'absolute',
+          right: 0,
+          // Clear of the button rather than measured off it: the row's height is
+          // the 38pt control beside it, and a menu that overlapped the thing
+          // that opened it would take its own next tap.
+          top: theme.space.xl,
+          zIndex: 2
+        }}
+        visible={open}
+      >
+        {/*
+          `float`, which is the app's own name for a surface that hangs over
+          content rather than holding a screen together, and which already
+          carries the radius and the shadow that go with it.
+
+          `opaque` for the reason `AttachMenu` gives: a text-heavy surface takes
+          the solid rung under its wash, so its contrast is a fixed number
+          rather than a function of whatever is behind it. Without it this menu
+          floats over the chat list at the wash's own alpha, and the simulator
+          showed "Edit" printed across the name of the chat underneath — two
+          strings at the same weight in the same place.
+        */}
+        <GlassSurface contentStyle={{ minWidth: 168, paddingVertical: theme.space.xxs }} opaque variant="float">
+          {rows.map(row => (
+            <Pressable
+              accessibilityRole="button"
+              hitSlop={TAP_SLOP}
+              key={row.id}
+              onPress={() => {
+                setOpen(false)
+                row.onPress()
+              }}
+              style={{
+                cursor: 'pointer',
+                justifyContent: 'center',
+                minHeight: CONTROL_MIN_HEIGHT,
+                paddingHorizontal: theme.space.md
+              }}
+              testID={`bots-head-overflow-${row.id}`}
+            >
+              <Text color="accentText" style={{ fontWeight: '600' }} variant="preview">
+                {row.label}
+              </Text>
+            </Pressable>
+          ))}
+        </GlassSurface>
+      </Appear>
+    </View>
+  )
+}
+
 function Head({
   editing,
   onBoards,
@@ -1363,20 +1489,49 @@ function Head({
   sidebar: boolean
 }) {
   const theme = useTheme()
+  /*
+    `null` until the row has been laid out once, and the inline row is what it
+    draws meanwhile.
+
+    Deliberately optimistic: every width except the narrow sidebar's keeps the
+    actions inline, so guessing that way means one arrangement on the common
+    path and a single swap on the narrow one. Guessing the other way would flash
+    a `…` into every phone header for a frame.
+  */
+  const [width, setWidth] = useState<number | null>(null)
+  const inline = width === null || width >= BOTS_HEAD_INLINE_MIN_WIDTH
 
   return (
     <View
+      onLayout={event => {
+        const measured = event.nativeEvent.layout.width
+
+        // Only on a real change: `onLayout` fires for every pass, and setting
+        // state from each one is a render loop on a row that also holds a menu.
+        setWidth(current => (current !== null && Math.abs(current - measured) < 1 ? current : measured))
+      }}
       style={{
         alignItems: 'center',
         flexDirection: 'row',
         gap: theme.space.md,
         paddingBottom: theme.space.md,
         paddingHorizontal: theme.space.lg,
-        paddingTop: theme.space.panel
+        paddingTop: theme.space.panel,
+        // The overflow menu is absolutely positioned inside this row and has to
+        // be allowed to hang below it.
+        zIndex: 1
       }}
+      testID="bots-head"
     >
       <View style={{ flex: 1 }}>
-        <Text accessibilityRole="header" aria-level={1} variant={sidebar ? 'titleWide' : 'title'}>
+        {/*
+          One line, always. Without it the title is a `flex: 1` column next to
+          four things that do not compress, and at the narrow sidebar's width
+          "Chats" wrapped to one character per line — six rows of one letter.
+          Eliding is the honest failure here: the word is the screen's name and
+          a reader who sees "Cha…" has still been told which screen this is.
+        */}
+        <Text accessibilityRole="header" aria-level={1} numberOfLines={1} variant={sidebar ? 'titleWide' : 'title'}>
           {strings.bots.title}
         </Text>
         {/* Which gateway this list belongs to, and only once there is more
@@ -1395,7 +1550,7 @@ function Head({
         same reason New bot is one: there is no mark that reads as "kanban", and
         the `+` beside it already means New cron.
       */}
-      {onBoards ? (
+      {inline && onBoards ? (
         <Pressable
           accessibilityLabel={kanbanStrings.menu}
           accessibilityRole="button"
@@ -1410,7 +1565,7 @@ function Head({
         </Pressable>
       ) : null}
 
-      {onNewBot ? (
+      {inline && onNewBot ? (
         <Pressable
           accessibilityLabel={profileStrings.settings.newBot}
           accessibilityRole="button"
@@ -1443,17 +1598,28 @@ function Head({
         </Pressable>
       ) : null}
 
-      <Pressable
-        accessibilityRole="button"
-        hitSlop={TAP_SLOP}
-        onPress={onToggleEdit}
-        style={{ cursor: 'pointer' }}
-        testID="bots-edit"
-      >
-        <Text color="accentText" style={{ fontWeight: '600' }} variant="preview">
-          {editing ? strings.layout.done : strings.layout.edit}
-        </Text>
-      </Pressable>
+      {inline ? null : (
+        <HeadOverflowMenu
+          editing={editing}
+          onToggleEdit={onToggleEdit}
+          {...(onBoards ? { onBoards } : {})}
+          {...(onNewBot ? { onNewBot } : {})}
+        />
+      )}
+
+      {inline ? (
+        <Pressable
+          accessibilityRole="button"
+          hitSlop={TAP_SLOP}
+          onPress={onToggleEdit}
+          style={{ cursor: 'pointer' }}
+          testID="bots-edit"
+        >
+          <Text color="accentText" style={{ fontWeight: '600' }} variant="preview">
+            {editing ? strings.layout.done : strings.layout.edit}
+          </Text>
+        </Pressable>
+      ) : null}
     </View>
   )
 }
