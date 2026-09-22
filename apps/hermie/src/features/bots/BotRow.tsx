@@ -15,6 +15,7 @@ import { unreadBadgeLabel } from '@hermie/transcript'
 
 import { Avatar, formatListTime } from '../../chat-ui'
 import { strings } from '../../i18n/strings'
+import { useFollowsLocale } from '../../i18n/use-locale'
 import { ContextMenuHost, HAS_NATIVE_CONTEXT_MENU } from '../../platform/context-menu'
 import { secondaryClick } from '../../platform/secondary-click'
 import { botNames, useNameOrder } from '../../store/bot-names'
@@ -112,6 +113,18 @@ export const BotRow = memo(function BotRow({
   unread,
   unreadCount
 }: BotRowProps) {
+  /*
+    A memo boundary does not follow the root's re-render.
+
+    `App` subscribes to the locale so a switch repaints the tree under it, and
+    that reaches everywhere the tree is actually walked — everywhere except
+    behind a `React.memo` whose props did not change. The chat list is exactly
+    that: nothing about a bot changes when the reader picks another language,
+    so without this the rows would keep their old menu and their old badge
+    wording until the roster moved.
+  */
+  useFollowsLocale()
+
   const theme = useTheme()
   const [hovered, setHovered] = useState(false)
   const swatch = theme.accent(accent)

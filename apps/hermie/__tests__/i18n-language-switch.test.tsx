@@ -15,7 +15,7 @@
  * while a reader sat in front of an English screen with a Dutch setting.
  */
 import { act, fireEvent, render, screen } from '@testing-library/react-native'
-import { useRef } from 'react'
+import { memo, useRef } from 'react'
 import { View } from 'react-native'
 
 import { resetActiveLocale, setActiveLocale } from '../src/i18n/active-locale'
@@ -129,5 +129,56 @@ describe('a switch at the root', () => {
     // Not a gap in the screen, and not a key: the sentence the app is written
     // in. See `i18n/coverage.ts` for how one of these becomes a to-do.
     expect(strings.settings.theme).toBe('Theme')
+  })
+})
+
+/**
+ * The exception to the root subscription, and the rule it forces.
+ *
+ * A `React.memo` whose props did not change is not walked, and a language
+ * switch changes nobody's props. Two components in this app paint words behind
+ * such a boundary — the transcript rows and the chat-list rows — and both would
+ * have kept the old language on screen for as long as nothing else moved them,
+ * which in an open conversation is a long time.
+ *
+ * Both call `useFollowsLocale()` themselves now. These two assertions are the
+ * rule written down: one shows the failure a memo boundary causes, the other
+ * shows the fix, and together they say what anything memoised that reads
+ * `strings` has to do.
+ */
+const Sealed = memo(function Sealed() {
+  return <Text testID="sealed">{strings.settings.language}</Text>
+})
+
+const SealedAndSubscribed = memo(function SealedAndSubscribed() {
+  useFollowsLocale()
+
+  return <Text testID="subscribed">{strings.settings.language}</Text>
+})
+
+function MemoRoot() {
+  useFollowsLocale()
+
+  return (
+    <View>
+      <Sealed />
+      <SealedAndSubscribed />
+    </View>
+  )
+}
+
+describe('a memo boundary', () => {
+  it('does not follow the root, which is why the rows subscribe themselves', () => {
+    render(withProviders(<MemoRoot />))
+
+    act(() => {
+      setActiveLocale('nl')
+    })
+
+    // The root re-rendered — the subscribed twin proves the switch happened —
+    // and this one did not, because its props are unchanged and React skipped
+    // it. That is the bug an open transcript would have had.
+    expect(screen.getByTestId('sealed').props.children).toBe('Language')
+    expect(screen.getByTestId('subscribed').props.children).toBe('Taal')
   })
 })

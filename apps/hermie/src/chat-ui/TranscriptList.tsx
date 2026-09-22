@@ -58,6 +58,7 @@ import {
 } from 'react-native'
 
 import { traceBlankRow, traceItems, traceRow, traceScroll, TRACING } from '../dev/trace-scroll'
+import { useFollowsLocale } from '../i18n/use-locale'
 import type { MarkdownImageSource } from '../markdown'
 import { copyToClipboard } from '../platform/clipboard'
 import { ContextMenuHost } from '../platform/context-menu'
@@ -760,6 +761,21 @@ function sameRow(previous: RowProps, next: RowProps): boolean {
 }
 
 function TranscriptRowFrameView({ entry, context, receipt, layout, dmRole }: RowProps) {
+  /*
+    A memo boundary does not follow the root's re-render.
+
+    `App` subscribes to the locale so a language switch repaints the tree under
+    it, and that works everywhere the tree is walked — which is everywhere
+    except behind a `React.memo` whose props did not change. A transcript is
+    exactly that case: the rows are memoised on purpose, so after a switch an
+    open conversation would have gone on saying "Delivered" and "Show more" in
+    the old language until something else moved.
+
+    One subscription per mounted row, which is a set entry each on a
+    virtualised list of a few dozen.
+  */
+  useFollowsLocale()
+
   const runId = dmRole?.role === 'rollupMember' ? dmRole.runId : ''
   const runExpanded = useRollupExpanded(runId)
   const menu = useMessageMenu(entry.item, context)
