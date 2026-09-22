@@ -31,6 +31,7 @@ import {
   sessionIdOfMessagesPath,
   TranscriptCache
 } from './cache'
+import { IdentityReader } from './identity'
 import {
   type HermieWebOptions,
   isGatewayPath,
@@ -177,6 +178,12 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
     dir: cacheDir(options.stateDir),
     maxBytes: Math.round(options.cacheMaxMb * 1024 * 1024)
   })
+  /**
+   * Who each cookie belongs to, as the gateway says (ADR-0007's per-user
+   * chats). One short-lived memo, so a page's burst of transcript reads costs
+   * one round trip rather than one each.
+   */
+  const identities = new IdentityReader()
   let updating = false
   // Assigned once the listener is up; the handler reads it, so it is declared
   // here rather than beside the `await` that fills it.
@@ -272,7 +279,7 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
     }
 
     if (isGatewayPath(url.pathname)) {
-      proxyHttp(request, response, target, observeForCache(method, url))
+      proxyHttp(request, response, target, observeForCache(method, url, request.headers.cookie))
 
       return
     }
@@ -417,18 +424,25 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
       one that asks for a credential.
     */
     const probe = await gatewayProbe()
+    const identity = await identities.read({ gatewayUrl: target.gatewayUrl, cookie: request.headers.cookie })
 
-    if (
-      probe?.authRequired !== false &&
-      !(await hasGatewaySession({ gatewayUrl: target.gatewayUrl, cookie: request.headers.cookie }))
-    ) {
+    if (probe?.authRequired !== false && !identity) {
       json(response, 401, { error: 'unauthorized' })
 
       return
     }
 
     const key = decodeURIComponent(url.pathname.slice('/hermie/cache/'.length))
-    const entry = await cache.get(key)
+    /*
+      The reader's own name goes in, and the cache decides.
+
+      A shared Bot Chat answers to anybody signed in, which is what ADR-0025
+      settled and why the check above is "signed in" rather than "signed in as
+      somebody in particular". A conversation that belongs to one person answers
+      to that person and comes back as a MISS to everybody else — see
+      `TranscriptCache.get`.
+    */
+    const entry = await cache.get(key, identity?.userId ?? '')
 
     if (!entry) {
       json(response, 404, { error: 'not_cached' })
@@ -457,7 +471,7 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
    * that paint this browser's chat become the thing that paints the next one's.
    * Nothing is added to the request and nothing is changed in the answer.
    */
-  function observeForCache(method: string, url: URL): ProxyObserver | undefined {
+  function observeForCache(method: string, url: URL, cookie: string | undefined): ProxyObserver | undefined {
     if (!cache.enabled || method !== 'GET') {
       return undefined
     }
@@ -508,7 +522,36 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
         try {
           const rows = rowsOfMessagesBody(JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown)
 
-          void cache.put({ sessionId, bot: '', storedId: '', shape: 'rest', rows, updatedAt: 0 }).catch(() => undefined)
+          /*
+            The bytes are stored under the NAME OF WHOEVER ASKED FOR THEM.
+
+            A response body says nothing about which conversation it is, and
+            since ADR-0007's amendment a profile has two kinds: the canonical
+            Bot Chat everybody shares, and `Chat · <name>`, which is one
+            person's. So the tee cannot tell, and the safe half of the guess is
+            the one it makes — private to the reader, unless the service link
+            has already named this session as a bot's canonical chat, which is
+            the one case where the cache KNOWS it is shared. `cache.write` holds
+            that rule; here we only supply the name.
+
+            On an ungated gateway there is nobody to name and the entry is
+            shared, which is the behaviour ADR-0025 described and the only one a
+            gateway with no accounts can have.
+          */
+          void identities
+            .read({ gatewayUrl: target.gatewayUrl, cookie })
+            .then(identity =>
+              cache.put({
+                sessionId,
+                bot: '',
+                owner: identity?.userId ?? '',
+                storedId: '',
+                shape: 'rest',
+                rows,
+                updatedAt: 0
+              })
+            )
+            .catch(() => undefined)
         } catch {
           // Not the answer we thought it was. Nothing is stored, and the
           // browser already has the bytes.

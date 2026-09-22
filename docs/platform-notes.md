@@ -8752,3 +8752,73 @@ Two costs, both paid on purpose:
 - **The switch has no UI test.** `ChatChoiceRow` is exercised through the
   controller, not through a render; the popover slot and the Conversations page
   group are wired and typechecked but nobody has tapped them.
+
+## Round R10b, part two: whose transcript is that (2026-09-22)
+
+ADR-0025 wrote down that the message cache is gateway-wide and said why that was
+acceptable: the only conversation a bot had was the canonical Bot Chat, which
+ADR-0007 had already made shared. Part one of this round put a second kind of
+conversation on every profile, and the sentence stopped being true the same day
+it was written.
+
+### What the two-reader test actually found
+
+The `ui_meta` half held with nothing to fix. The key is named by the browser —
+the app asks `/api/auth/me` through the proxy with its own cookie and writes
+`hermie-app:<user_id>` — and the proxy carries `profiles.configure` byte for
+byte, so there is no seam in Hermie Web where two people's settings could meet.
+The test proves it rather than assuming it, which is the point of writing it.
+
+The cache half did not. A reader's private transcript, fetched over
+`GET /api/sessions/<id>/messages`, was teed into an entry any other signed-in
+reader could ask for by session id. So entries carry an **owner** now:
+
+- the service link's writes are canonical Bot Chats and carry no owner;
+- a proxied capture carries the reader the gateway names;
+- a session the link has already named a bot for stays shared however many
+  people read it, which is the rule that stops a shared chat being captured into
+  one reader's name by the first person to open it;
+- a private entry is never aliased by the bot's name, because
+  `/hermie/cache/<bot>` is the seam asking for the SHARED chat;
+- a reader who is not the owner gets a **miss**, not a refusal. A 403 on
+  somebody else's conversation also says that the conversation exists.
+
+### The cost, stated plainly
+
+**Without `--push` there is no service link, so Hermie Web cannot tell the two
+kinds apart and keys every capture to its reader.** A second person's first open
+of a shared Bot Chat is then cold — which is exactly where it was before
+ADR-0025, so nothing regressed against the state before the cache existed, only
+against the best case with the cache. An ungated gateway names nobody and its
+entries stay shared, which is the only behaviour available there.
+
+### One round trip, memoised for fifteen seconds
+
+`identity.ts` asks `/api/auth/me` with the caller's cookie and believes the
+answer for fifteen seconds, keyed by the whole cookie header. Without the memo,
+every proxied transcript read would cost a second request on the hot path of the
+thing the cache exists to make fast. The window is why nothing destructive is
+decided on a memo: the admin gate asks with `{ fresh: true }`.
+
+`hasGatewaySession` in `update.ts` is untouched and still answers a boolean; it
+is the same round trip asked a smaller question, and merging the two would have
+meant changing the update route's behaviour in a round that is not about it.
+
+### The fake gateway had one identity
+
+`/api/auth/me` answered `tester@example.invalid` whoever asked, which is not what
+upstream does and which would have made any isolation test meaningless. It now
+answers the caller: cookie mode reads the cookie, and `accounts` lets a test sign
+two people in. Every existing test sees the same single tester it always did.
+
+### What is unverified here
+
+- **No real gateway, and in particular no real `roles` field.** `identityOf`
+  reads `roles` because upstream sends it on some deployments; nothing in this
+  repository has seen one.
+- **The `--push`-less degradation has not been measured**, only reasoned about.
+  Two readers on a service with no link will each populate their own copy of a
+  shared chat; whether that is worth a flag is a question for whoever runs one.
+- **Nothing tests eviction against ownership.** An owner has no bearing on the
+  LRU, which is correct, but a cache that is full of one person's private chats
+  will evict another person's shared ones on the ordinary rules.

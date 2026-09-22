@@ -105,9 +105,14 @@ What it means for you:
 
 - **This is transcript content on your disk.** The state directory is `0700` with `0600` files, the
   same as the push credentials beside it. `--cache-max-mb 0` turns the cache off entirely.
-- **Entries are per gateway, not per person.** The gateway offers no field saying who owns a
-  session, and the canonical Bot Chat is shared among everyone who can reach that bot anyway. On a
-  gated gateway the read route still demands the caller's own gateway session.
+- **A shared Bot Chat is cached for everybody; a private chat is cached for one person.** A bot now
+  has two kinds of conversation, so each entry carries whose it is. The chats the `--push` link
+  resumes are the shared ones; a transcript captured off a proxied read belongs to the reader the
+  gateway named, and anybody else asking for it is told there is nothing cached. On a gated gateway
+  the read route still demands the caller's own gateway session.
+- **Without `--push` every captured entry belongs to its reader**, because nothing can tell the two
+  kinds apart. A second person's first open of a shared chat is cold, exactly as it was before this
+  cache existed. An ungated gateway has nobody to name and its entries stay shared.
 - **Eviction is least-recently-read**, up to `--cache-max-mb` (default 64 MB).
 
 [ADR-0025](../../docs/adr/0025-hermie-web-is-a-service-layer.md) has the reasoning.

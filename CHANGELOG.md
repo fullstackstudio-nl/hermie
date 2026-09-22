@@ -143,6 +143,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A private chat cached by Hermie Web is no longer readable by everybody else signed in.** The
+  service keeps a copy of each chat's tail so a chat paints instantly, and until now that copy was
+  shared by everyone on the gateway — which was fine while the only conversation a bot had was the
+  one everybody was already in. Now that you can have a chat of your own, the copy carries whose it
+  is: yours comes back to you, and to anybody else it simply is not there. Shared Bot Chats are
+  unchanged. On a service started without `--push` there is no gateway connection to tell the two
+  apart, so every cached copy belongs to whoever fetched it — another person's first open of a
+  shared chat is a little slower there, exactly as it was before the cache existed.
+
 - **Escape goes back one level in two more places.** Cancelling a theme deletion in Settings ▸
   Appearance ▸ Advanced, and closing the detail card on a bot's memory map, are levels of their own
   now. Both used to be skipped: the question and the card are drawn in place rather than presented,

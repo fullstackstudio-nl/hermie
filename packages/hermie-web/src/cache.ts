@@ -74,6 +74,23 @@ export interface CacheEntry {
   sessionId: string
   /** The profile name, when the writer knew it. The seam reads by this. */
   bot: string
+  /**
+   * Whose conversation this is, or `''` for one everybody on the gateway
+   * shares (ADR-0025, amended by ADR-0007's per-user chats).
+   *
+   * ADR-0025 could write "cache entries are per gateway, not per user" because
+   * there was exactly one conversation per bot and everybody was in it. There
+   * is now a second kind — `Chat · <name>`, one person's — and a cache that
+   * could not tell them apart would serve one reader's private transcript to
+   * anybody else signed in to the same gateway.
+   *
+   * The service link's own writes carry a `bot` and no owner: those are the
+   * canonical Bot Chats it resumes for push, and they are shared by definition.
+   * A proxied transcript read carries the reader's user id, because from a
+   * response body alone this service cannot tell which of the two it is
+   * watching. `write` reconciles the pair — see the rule there.
+   */
+  owner: string
   /** The registry row id, which is a third name the same chat answers to. */
   storedId: string
   shape: RowShape
@@ -97,6 +114,7 @@ export interface TranscriptCacheSink {
 interface IndexRow {
   sessionId: string
   bot: string
+  owner: string
   storedId: string
   shape: RowShape
   file: string
@@ -193,6 +211,7 @@ export class TranscriptCache {
       this.remember({
         sessionId,
         bot: str(raw.bot),
+        owner: str(raw.owner),
         storedId: str(raw.storedId),
         shape: raw.shape === 'rpc' ? 'rpc' : 'rest',
         file: str(raw.file) || fileFor(sessionId),
@@ -214,7 +233,16 @@ export class TranscriptCache {
     this.rows.set(row.sessionId, row)
     this.bytes += row.bytes
 
-    for (const alias of [row.sessionId, row.storedId, row.bot]) {
+    /*
+      A PRIVATE entry is never aliased by the bot's name.
+
+      The seam asks for `/hermie/cache/<bot>` when all it holds is a profile,
+      and that name means "this bot's shared chat". Letting one reader's private
+      transcript answer to it would put their conversation under a key every
+      other reader also asks for — a miss they can see through, rather than a
+      hit they must not have.
+    */
+    for (const alias of [row.sessionId, row.storedId, ...(row.owner ? [] : [row.bot])]) {
       if (alias) {
         this.aliases.set(alias, row.sessionId)
       }
@@ -247,6 +275,7 @@ export class TranscriptCache {
       v: CACHE_VERSION,
       sessionId: entry.sessionId,
       bot: entry.bot,
+      owner: entry.owner,
       storedId: entry.storedId,
       shape: entry.shape,
       updatedAt: entry.updatedAt || this.now,
@@ -274,6 +303,15 @@ export class TranscriptCache {
       // did: the proxy tee sees a session id and nothing else, and the seam
       // reads by bot name.
       bot: entry.bot || held?.bot || '',
+      /*
+        A session the SERVICE LINK has named a bot for is one of the canonical
+        Bot Chats, and it stays shared however many people read it. Anything
+        else takes the owner this writer gave, with no inheritance in either
+        direction: the owner describes the bytes that were just written, and a
+        private transcript that inherited `''` from an earlier entry would be
+        readable by the whole gateway.
+      */
+      owner: held?.bot ? '' : entry.owner,
       storedId: entry.storedId || held?.storedId || '',
       shape: entry.shape,
       file,
@@ -289,8 +327,16 @@ export class TranscriptCache {
     await this.saveIndex()
   }
 
-  /** Serve one session's tail by any of its names. */
-  async get(key: string): Promise<(CacheEntry & { rows: Record<string, unknown>[] }) | null> {
+  /**
+   * Serve one session's tail by any of its names, to a reader entitled to it.
+   *
+   * `reader` is the caller's gateway user id. An entry with an owner is served
+   * to that owner and to nobody else, and the refusal is a MISS rather than an
+   * error: the seam's whole contract is "paint if there is something, dial
+   * either way", and a 403 on somebody else's chat would also confirm that the
+   * chat exists.
+   */
+  async get(key: string, reader = ''): Promise<(CacheEntry & { rows: Record<string, unknown>[] }) | null> {
     if (!this.enabled || !key) {
       return null
     }
@@ -301,6 +347,10 @@ export class TranscriptCache {
     const row = sessionId ? this.rows.get(sessionId) : undefined
 
     if (!row) {
+      return null
+    }
+
+    if (row.owner && row.owner !== reader) {
       return null
     }
 
@@ -324,6 +374,7 @@ export class TranscriptCache {
     return {
       sessionId: row.sessionId,
       bot: row.bot,
+      owner: row.owner,
       storedId: row.storedId,
       shape: row.shape,
       updatedAt: num(parsed.updatedAt),
@@ -403,12 +454,12 @@ export class TranscriptCache {
   }
 
   /** What is on disk right now, newest first. For the tests and for a log line. */
-  async report(): Promise<{ sessionId: string; bot: string; bytes: number }[]> {
+  async report(): Promise<{ sessionId: string; bot: string; owner: string; bytes: number }[]> {
     await this.load()
 
     return [...this.rows.values()]
       .sort((a, b) => b.updatedAt - a.updatedAt)
-      .map(row => ({ sessionId: row.sessionId, bot: row.bot, bytes: row.bytes }))
+      .map(row => ({ sessionId: row.sessionId, bot: row.bot, owner: row.owner, bytes: row.bytes }))
   }
 }
 

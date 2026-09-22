@@ -212,6 +212,11 @@ export async function startPushDaemon(options: PushDaemonOptions): Promise<PushD
     await options.cache.put({
       sessionId: bot.sessionId,
       bot: bot.name,
+      // No owner: this is the canonical Bot Chat, resumed off the roster, and
+      // ADR-0007 makes it one conversation shared by everybody who can reach
+      // the bot. The cache says so explicitly rather than by omission, because
+      // every OTHER feed now has to name somebody.
+      owner: '',
       storedId: bot.storedId,
       shape,
       rows,

@@ -27,6 +27,28 @@ import { WebSocket, WebSocketServer } from 'ws'
  */
 export type FakeAuthMode = 'none' | 'token' | 'native' | 'cookie'
 
+/** The same row with every field settled, which is what the handlers read. */
+interface ResolvedAccount {
+  username: string
+  password: string
+  userId: string
+  email: string
+  displayName: string
+  roles: string[]
+}
+
+/** One sign-in the fake accepts, and the identity it answers with afterwards. */
+export interface FakeAccount {
+  username: string
+  password: string
+  /** `/api/auth/me`'s `user_id`. Defaults to `<username>@example.invalid`. */
+  userId?: string
+  email?: string
+  displayName?: string
+  /** `/api/auth/me`'s `roles`, which upstream sends on some deployments. */
+  roles?: string[]
+}
+
 export interface ScenarioReply {
   /** Substring of the prompt this reply answers; omitted means "anything". */
   match?: string
@@ -96,6 +118,16 @@ export interface FakeGatewayOptions {
   publicHost?: string
   /** User name and password accepted by `/auth/password-login` in cookie mode. */
   password?: { username: string; password: string }
+  /**
+   * Several accounts, for a test about two people on one gateway.
+   *
+   * `password` is one account and stays the default; this replaces it with a
+   * list, and each one signs in to a session of its own. `/api/auth/me` then
+   * answers the CALLER's identity rather than a fixed one, which is what
+   * upstream does and what the fake could get away with not doing for as long
+   * as nothing in this repository had two readers.
+   */
+  accounts?: FakeAccount[]
   scenario?: Scenario
   version?: string
   /** How many events per session the replay ring keeps. */
@@ -2305,7 +2337,32 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
   const gated = () => state.auth === 'native' || state.auth === 'cookie'
   const publicHost = options.publicHost ?? ''
   const passwordAccount = options.password ?? { username: 'tester', password: 'hunter2' }
-  const sessionCookies = new Set<string>()
+  /**
+   * Every account this gateway accepts, and what `/api/auth/me` says about it.
+   *
+   * One by default, named the way the fake has always named its single tester,
+   * so nothing that predates this option sees a different answer.
+   */
+  const accounts: ResolvedAccount[] = (
+    options.accounts ?? [
+      {
+        username: passwordAccount.username,
+        password: passwordAccount.password,
+        userId: 'tester@example.invalid',
+        email: 'tester@example.invalid',
+        displayName: 'Fake Tester'
+      }
+    ]
+  ).map(account => ({
+    username: account.username,
+    password: account.password,
+    userId: account.userId ?? `${account.username}@example.invalid`,
+    email: account.email ?? account.userId ?? `${account.username}@example.invalid`,
+    displayName: account.displayName ?? account.username,
+    roles: account.roles ?? []
+  }))
+  /** Cookie value → the account it signs in. A Map, because who matters now. */
+  const sessionCookies = new Map<string, ResolvedAccount>()
 
   /** Read one cookie out of a request's `Cookie` header. */
   function cookieOf(req: IncomingMessage, name: string): string {
@@ -2677,17 +2734,18 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     if (state.auth === 'cookie' && path === '/auth/password-login' && method === 'POST') {
       const body = await readBody(req)
 
-      if (
-        String(body.username ?? '') !== passwordAccount.username ||
-        String(body.password ?? '') !== passwordAccount.password
-      ) {
+      const account = accounts.find(
+        row => row.username === String(body.username ?? '') && row.password === String(body.password ?? '')
+      )
+
+      if (!account) {
         json(res, 401, { detail: 'Invalid credentials' })
 
         return
       }
 
       const value = `sess-${randomUUID()}`
-      sessionCookies.add(value)
+      sessionCookies.set(value, account)
       // `HttpOnly` and `SameSite=Lax`, no `Secure`: this fake is only ever
       // reached over plain HTTP, and a `Secure` cookie there is discarded.
       res.setHeader('set-cookie', `${SESSION_COOKIE}=${value}; HttpOnly; SameSite=Lax; Path=/`)
@@ -2969,12 +3027,28 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     }
 
     if (path === '/api/auth/me') {
+      /*
+        The CALLER's identity, not a fixed one.
+
+        `dashboard_auth/routes.py` answers whoever the request's own credential
+        belongs to, which is the only way two people on one gateway can be told
+        apart. Cookie mode reads the cookie; a bearer reads the account the
+        token was issued to; a token or ungated gateway has no accounts at all
+        and answers with the single tester, which is what every test that
+        predates this option already expects.
+      */
+      const signedIn = state.auth === 'cookie' ? sessionCookies.get(cookieOf(req, SESSION_COOKIE)) : undefined
+      const who = signedIn ?? accounts[0]!
+
       json(res, 200, {
-        user_id: 'tester@example.invalid',
-        email: 'tester@example.invalid',
-        display_name: 'Fake Tester',
+        user_id: who.userId,
+        email: who.email,
+        display_name: who.displayName,
         org_id: '',
         provider: gated() ? 'self-hosted' : 'none',
+        // Absent on most deployments; the fake sends it only when a test asked
+        // for one, so nothing reads a `[]` as "this gateway has roles".
+        ...(who.roles.length ? { roles: who.roles } : {}),
         expires_at: nowSeconds() + 3600
       })
 

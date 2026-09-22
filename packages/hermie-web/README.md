@@ -80,13 +80,19 @@ What that means for an operator:
 
 - **This is transcript content on your disk**, not just a credential. The state directory is `0700`
   with `0600` files, and `--cache-max-mb 0` turns the whole thing off.
-- **Entries are per gateway, not per person.** The gateway offers no field saying who owns a
-  session, so there is nothing to key on — and by ADR-0007 the canonical Bot Chat is shared among
-  everyone who can reach that bot anyway. The read route still demands the caller's own gateway
-  session on a gated gateway.
+- **A shared Bot Chat is cached for everybody; a private chat is cached for one person.** Since
+  ADR-0007's amendment a bot has two kinds of conversation, so every entry carries whose it is. The
+  ones the `--push` link resumes are the canonical Bot Chats and stay shared; a transcript captured
+  off a proxied read is stored under the reader the gateway names and comes back to that reader
+  alone — as a miss for anybody else, because a refusal would also say the chat exists. The read
+  route still demands the caller's own gateway session on a gated gateway.
+- **Without `--push` every captured entry belongs to its reader.** With no gateway link there is
+  nothing that can tell a shared chat from a private one, so the safe reading is taken: a second
+  person's first open of a shared chat is cold, which is where it was before this cache existed. An
+  ungated gateway has nobody to name and its entries stay shared.
 - **Eviction is least-recently-read**, up to `--cache-max-mb`, default 64.
-- **Without `--push` it still works**, filled by proxied reads alone: a chat somebody has opened is
-  a chat the next person opens instantly.
+- **Without `--push` it still works**, filled by proxied reads alone: a chat you have opened is a
+  chat your next device opens instantly.
 
 [ADR-0025](https://github.com/fullstackstudio-nl/hermie/blob/main/docs/adr/0025-hermie-web-is-a-service-layer.md)
 has the reasoning.
