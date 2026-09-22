@@ -19,7 +19,9 @@
  *  4. Anything that names a file in the static build — served from disk.
  *  5. Everything else — `index.html`, so a deep link into the SPA works.
  */
+import { rm } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import path from 'node:path'
 import type { AddressInfo } from 'node:net'
 import type { Duplex } from 'node:stream'
 
@@ -35,6 +37,7 @@ import { AdminRouter } from './admin/routes'
 import { hashLocalSecret, mayProxyMethod, withAdmin } from './admin/access'
 import {
   DEFAULT_USER_OPTIONS,
+  emptyAdminState,
   loadAdminState,
   mayReachBot,
   optionsFor,
@@ -56,7 +59,7 @@ import {
 import { type PushDaemon, startPushDaemon } from './push/daemon'
 import { buildAuthorizeUrl, createPkce, exchangeCode, type Pkce } from './push/login'
 import { sameGateway } from './push/credentials'
-import { loadPushState, savePushState } from './push/state'
+import { loadPushState, PUSH_STATE_VERSION, savePushState } from './push/state'
 import { proxyHttp, type ProxyObserver, proxyUpgrade } from './proxy'
 import {
   normalizeGatewayInput,
@@ -65,6 +68,7 @@ import {
   readSetup,
   SETUP_CALLBACK_PATH,
   setupCallbackPage,
+  SETUP_FILE,
   setupPage,
   type SetupProbe,
   writeSetup
@@ -189,6 +193,17 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
   // configured transition in `handleSetup`. Nothing else in this process can
   // move it, and once moved there is no route back.
   const target = { gatewayUrl: options.gatewayUrl, publicUrl: options.publicUrl }
+  /*
+    Did a FLAG name the gateway, or did `/setup` save one?
+
+    `first` is the resolve before the saved setup was consulted, so its
+    `gatewayConfigured` is true only when `--gateway` or the environment
+    answered. The difference matters in exactly one place: "run setup again"
+    can reopen `/setup` on a deployment that was set up through it, and cannot
+    on one whose gateway is on the command line — the flag would still be there
+    after a restart, so the page would close again on its own.
+  */
+  const gatewayFromFlag = first.gatewayConfigured
   let configured = options.gatewayConfigured
   /** The operator's in-flight service sign-in, minted by `/hermie/setup/login`. */
   let pendingLogin: (Pkce & { gatewayUrl: string; redirectUri: string }) | null = null
@@ -294,6 +309,54 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
     appPath: '/'
   })
 
+  /**
+   * Throw away what `/setup` wrote.
+   *
+   * The list is short and each line is a file, which is the only way to keep it
+   * honest: the saved gateway, everything `/admin` holds, and the service login.
+   * What it does NOT touch is the built-in identity provider — `/setup` never
+   * wrote `oidc.json`, and discarding an issuer's signing key because somebody
+   * wanted to re-run a wizard would sign out every account on the gateway.
+   *
+   * The message cache and the push key are each behind a tick, because each has
+   * a cost an operator may not want: a cold cache for everybody, and a VAPID key
+   * change that orphans every browser registration ever handed out.
+   */
+  async function resetSetup(choices: { cache: boolean; push: boolean }): Promise<{ setupOpen: boolean }> {
+    admin = emptyAdminState()
+    await saveAdminState(options.stateDir, admin)
+    await rm(path.join(options.stateDir, SETUP_FILE), { force: true })
+
+    const held = await loadPushState(options.stateDir)
+
+    if (choices.push) {
+      await savePushState(options.stateDir, { v: PUSH_STATE_VERSION, seq: {}, sent: {}, invalid: {}, tickets: [] })
+    } else {
+      // The service login and nothing else: `oidc` is the stored refresh token,
+      // and it is what `/setup` put there.
+      const { oidc: _serviceLogin, ...rest } = held
+
+      await savePushState(options.stateDir, rest)
+    }
+
+    if (choices.cache) {
+      await cache.clear()
+    }
+
+    if (!gatewayFromFlag) {
+      configured = false
+      probeCache = null
+    }
+
+    console.warn(
+      `hermie-web: the setup was reset through /admin; ${
+        gatewayFromFlag ? 'the gateway from the command line was kept' : '/setup is open again'
+      }.`
+    )
+
+    return { setupOpen: !gatewayFromFlag }
+  }
+
   const adminRouter = new AdminRouter({
     stateDir: options.stateDir,
     // One authority in this process: the variable above. See the option's note.
@@ -324,6 +387,8 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
         usersFrom: 'seen'
       }
     },
+    resetSetup,
+    setupReopens: () => !gatewayFromFlag,
     update: async () => {
       if (!shape.canSelfUpdate) {
         return shape.reason || 'This install cannot update itself.'

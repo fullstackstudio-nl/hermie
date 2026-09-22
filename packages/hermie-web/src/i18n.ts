@@ -252,6 +252,39 @@ export interface WebStrings {
       title: string
       intro: string
     }
+    /**
+     * Starting the setup over.
+     *
+     * Every sentence here names one file's worth of consequence, because the
+     * operator is about to lose configuration nothing can hand back and the one
+     * honest way to ask is to list it. The keys are separate rather than one
+     * block of markup so a translator sees each consequence as its own sentence.
+     */
+    reset: {
+      heading: string
+      intro: string
+      alsoCache: string
+      alsoPush: string
+      button: string
+      confirmTitle: string
+      confirmIntro: string
+      clearsHeading: string
+      clearsGateway: string
+      clearsAdministrators: string
+      clearsBranding: string
+      clearsServiceLogin: string
+      clearsPeople: string
+      keepsHeading: string
+      keepsIdentity: string
+      keepsCache: string
+      keepsPush: string
+      /** What will happen at the end, which depends on where the gateway came from. */
+      thenSetup: string
+      thenStays: (gatewayUrl: string) => string
+      pushKeepsRunning: string
+      cancel: string
+      confirmButton: string
+    }
     signIn: {
       intro: string
       secretNote: string
@@ -606,6 +639,40 @@ const EN: WebStrings = {
     danger: {
       title: 'Danger zone',
       intro: 'Two things that cannot be undone from this page afterwards. Both ask again before they do anything.'
+    },
+    reset: {
+      heading: 'Run setup again',
+      intro:
+        'Clears what <code>/setup</code> wrote and reopens it, so this deployment can be pointed at another ' +
+        'gateway or handed to somebody else. Nothing about this is recoverable from this page.',
+      alsoCache: 'Also delete every cached message',
+      alsoPush: 'Also delete the VAPID key and the push bookkeeping',
+      button: 'Run setup again…',
+      confirmTitle: 'Reset the setup?',
+      confirmIntro: 'Read this list. There is no way back from the next button.',
+      clearsHeading: 'This is cleared',
+      clearsGateway: 'The gateway address and the public URL that <code>/setup</code> saved.',
+      clearsAdministrators:
+        'The administrator list and the local administrator secret — <strong>including your own way back into ' +
+        'this page</strong>.',
+      clearsBranding: 'The branding, the feature switches, the push policy and the cache retention.',
+      clearsServiceLogin: 'The service login this server holds for push and for the message cache.',
+      clearsPeople: 'The list of people this service has seen, with their per-person options.',
+      keepsHeading: 'This is kept',
+      keepsIdentity:
+        'The built-in identity provider: its accounts, its signing key and its client id. <code>/setup</code> ' +
+        'never wrote those, and throwing away an issuer’s key would sign out every account on the gateway.',
+      keepsCache: 'The cached messages, unless you ticked the box.',
+      keepsPush: 'The VAPID key and the push bookkeeping, unless you ticked the box.',
+      thenSetup: 'Afterwards <code>/setup</code> is open again and this page is closed until somebody completes it.',
+      thenStays: gatewayUrl =>
+        `This service was started with a gateway on the command line (<code>${gatewayUrl}</code>), so that one is ` +
+        'kept and <code>/setup</code> stays closed. Remove the flag and restart to open it.',
+      pushKeepsRunning:
+        'A push daemon that is already connected keeps its connection until this service restarts; the stored ' +
+        'login is gone either way.',
+      cancel: 'No, leave it alone',
+      confirmButton: 'Yes, reset the setup'
     },
     signIn: {
       intro:
@@ -1000,6 +1067,42 @@ const NL: WebCatalogue<WebStrings> = {
         'Twee dingen die je hier daarna niet meer kunt terugdraaien. Beide vragen het eerst nog een keer voordat ' +
         'er iets gebeurt.'
     },
+    reset: {
+      heading: 'Setup opnieuw draaien',
+      intro:
+        'Wist wat <code>/setup</code> geschreven heeft en zet die pagina weer open, zodat deze deployment naar een ' +
+        'andere gateway kan wijzen of aan iemand anders kan worden overgedragen. Niets hiervan is vanaf deze ' +
+        'pagina terug te halen.',
+      alsoCache: 'Ook elk gecachet bericht verwijderen',
+      alsoPush: 'Ook de VAPID-sleutel en de push-administratie verwijderen',
+      button: 'Setup opnieuw draaien…',
+      confirmTitle: 'Setup resetten?',
+      confirmIntro: 'Lees deze lijst. Na de volgende knop is er geen weg terug.',
+      clearsHeading: 'Dit wordt gewist',
+      clearsGateway: 'Het gateway-adres en de publieke URL die <code>/setup</code> heeft opgeslagen.',
+      clearsAdministrators:
+        'De beheerderslijst en het lokale beheerderswachtwoord — <strong>inclusief je eigen weg terug naar deze ' +
+        'pagina</strong>.',
+      clearsBranding: 'De branding, de functieschakelaars, het pushbeleid en de cache-bewaartijd.',
+      clearsServiceLogin: 'De service-login die deze server heeft voor push en voor de berichtencache.',
+      clearsPeople: 'De lijst met mensen die deze service gezien heeft, met hun persoonlijke instellingen.',
+      keepsHeading: 'Dit blijft',
+      keepsIdentity:
+        'De ingebouwde identity provider: de accounts, de ondertekeningssleutel en het client id. Die heeft ' +
+        '<code>/setup</code> nooit geschreven, en de sleutel van een issuer weggooien logt elk account op de ' +
+        'gateway uit.',
+      keepsCache: 'De gecachete berichten, tenzij je het vakje hebt aangevinkt.',
+      keepsPush: 'De VAPID-sleutel en de push-administratie, tenzij je het vakje hebt aangevinkt.',
+      thenSetup: 'Daarna staat <code>/setup</code> weer open en is deze pagina dicht tot iemand hem heeft afgerond.',
+      thenStays: gatewayUrl =>
+        `Deze service is gestart met een gateway op de commandoregel (<code>${gatewayUrl}</code>), dus die blijft ` +
+        'staan en <code>/setup</code> blijft dicht. Haal de vlag weg en herstart om hem te openen.',
+      pushKeepsRunning:
+        'Een push-daemon die al verbonden is, houdt die verbinding tot deze service herstart; de opgeslagen login ' +
+        'is hoe dan ook weg.',
+      cancel: 'Nee, laat maar',
+      confirmButton: 'Ja, reset de setup'
+    },
     gateway: 'Gateway',
     signIn: {
       intro:
@@ -1373,6 +1476,43 @@ const DE: WebCatalogue<WebStrings> = {
       intro:
         'Zwei Dinge, die von dieser Seite aus danach nicht rückgängig zu machen sind. Beide fragen noch einmal, ' +
         'bevor etwas passiert.'
+    },
+    reset: {
+      heading: 'Setup noch einmal ausführen',
+      intro:
+        'Löscht, was <code>/setup</code> geschrieben hat, und öffnet die Seite wieder — damit diese Installation ' +
+        'auf ein anderes gateway zeigen oder an jemand anderen übergeben werden kann. Nichts davon ist von dieser ' +
+        'Seite aus wiederherstellbar.',
+      alsoCache: 'Auch jede zwischengespeicherte Nachricht löschen',
+      alsoPush: 'Auch den VAPID-Schlüssel und die Push-Buchführung löschen',
+      button: 'Setup noch einmal ausführen…',
+      confirmTitle: 'Setup zurücksetzen?',
+      confirmIntro: 'Lies diese Liste. Nach dem nächsten Knopf gibt es keinen Weg zurück.',
+      clearsHeading: 'Das wird gelöscht',
+      clearsGateway: 'Die gateway-Adresse und die öffentliche URL, die <code>/setup</code> gespeichert hat.',
+      clearsAdministrators:
+        'Die Administratorliste und das lokale Administrator-Passwort — <strong>einschließlich deines eigenen ' +
+        'Wegs zurück auf diese Seite</strong>.',
+      clearsBranding: 'Das Branding, die Funktionsschalter, die Push-Regeln und die Cache-Aufbewahrung.',
+      clearsServiceLogin: 'Die Dienst-Anmeldung, die dieser Server für Push und den Nachrichten-Cache hält.',
+      clearsPeople: 'Die Liste der Menschen, die dieser Dienst gesehen hat, mit ihren Einstellungen.',
+      keepsHeading: 'Das bleibt',
+      keepsIdentity:
+        'Die eingebaute identity provider: ihre Konten, ihr Signierschlüssel und ihre client id. Die hat ' +
+        '<code>/setup</code> nie geschrieben, und den Schlüssel eines issuer wegzuwerfen meldet jedes Konto am ' +
+        'gateway ab.',
+      keepsCache: 'Die zwischengespeicherten Nachrichten, außer du hast das Kästchen angehakt.',
+      keepsPush: 'Der VAPID-Schlüssel und die Push-Buchführung, außer du hast das Kästchen angehakt.',
+      thenSetup:
+        'Danach ist <code>/setup</code> wieder offen und diese Seite geschlossen, bis jemand es abgeschlossen hat.',
+      thenStays: gatewayUrl =>
+        `Dieser Dienst wurde mit einem gateway auf der Kommandozeile gestartet (<code>${gatewayUrl}</code>), das ` +
+        'bleibt also stehen und <code>/setup</code> bleibt zu. Nimm die Flag weg und starte neu, um sie zu öffnen.',
+      pushKeepsRunning:
+        'Ein bereits verbundener Push-Daemon behält seine Verbindung, bis dieser Dienst neu startet; die ' +
+        'gespeicherte Anmeldung ist so oder so weg.',
+      cancel: 'Nein, lass es',
+      confirmButton: 'Ja, Setup zurücksetzen'
     },
     gateway: 'Gateway',
     signIn: {

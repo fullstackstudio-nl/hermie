@@ -134,21 +134,59 @@ Setup can take an **administrator secret** instead, stored as a scrypt hash and 
 deployment on such a gateway with no secret has no way into `/admin` short of editing `admin.json`;
 the setup page says so when it saves.
 
-**The page is HTML with no script in it.** Every control is a form that posts, changes one thing and
+**Every page here is HTML with no script in it.** Every control is a form that posts, changes one thing and
 redirects, with a double-submit CSRF token checked before the body is read. Nothing secret is
 rendered — not the VAPID private key, not the service refresh token, not the secret above — only
 whether each exists.
 
-### What it can set
+### The pages
 
-| Panel         | What it changes                                                                                                                                                              |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Service       | Shows the version, the service login, the push daemon, the VAPID key, cache size and hit rate; **Update and restart** runs the same self-update the app's Settings row does. |
-| Push          | Which event types this service will send at all, and whether a notification may carry message text. A ceiling on what devices asked for, never a second opt-in.              |
-| Message cache | How long an unread entry is kept (`0` = only the size cap), and **Clear the cache now**.                                                                                     |
-| Branding      | A name, an accent and a starting theme, served in `/hermie/config.json` and read by the app before it draws. A starting point, never an override.                            |
-| Features      | Turn private chats, the message cache or the update button off for everybody on this deployment.                                                                             |
-| People        | Everyone this service has seen sign in, with per-person options.                                                                                                             |
+One subject per page, behind a nav on the left. The footer carries the version and
+**Update and restart** wherever you are.
+
+| Page        | Path              | What it changes                                                                                                                                      |
+| ----------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Overview    | `/admin`          | Read-only: the version, the gateway, the service login, the push daemon, the VAPID key, cache size and hit rate, and how many people have been seen. |
+| People      | `/admin/people`   | Everyone this service has seen sign in, with per-person options.                                                                                     |
+| Push        | `/admin/push`     | Which event types this service will send at all, and whether a notification may carry message text. A ceiling on what devices asked for.             |
+| Cache       | `/admin/cache`    | How long an unread entry is kept (`0` = only the size cap), and **Clear the cache now**.                                                             |
+| Branding    | `/admin/branding` | A name, an accent and a starting theme, served in `/hermie/config.json` and read by the app before it draws. A starting point, never an override.    |
+| Features    | `/admin/features` | Turn private chats, the message cache or the update button off for everybody on this deployment.                                                     |
+| Identity    | `/admin/oidc`     | The built-in OpenID Provider — see **Signing people in without a separate identity provider** below.                                                 |
+| Danger zone | `/admin/danger`   | **Update and restart**, and **Run setup again**.                                                                                                     |
+
+### Run setup again
+
+`/admin/danger` can clear what `/setup` wrote and open it again, which is how a
+deployment is pointed at another gateway or handed to somebody else. It asks a second
+time first, on a page that lists the consequences, and that second page is the only
+thing that deletes anything.
+
+**It clears**
+
+- the gateway address and the public URL `/setup` saved;
+- the administrator list **and the local administrator secret** — including your own
+  way back into `/admin`;
+- the branding, the feature switches, the push policy and the cache retention;
+- the service login this server holds for push and for the message cache;
+- the list of people this service has seen, with their per-person options.
+
+**It keeps**
+
+- **the built-in identity provider**: its accounts, its signing key and its client id.
+  `/setup` never wrote `oidc.json`, and discarding an issuer's key because somebody
+  wanted to re-run a wizard would sign out every account on the gateway. Turn the
+  provider off from `/admin/oidc` if that is what you actually want.
+- the cached messages, unless you tick the box for them;
+- the VAPID key and the push bookkeeping, unless you tick that box — dropping the key
+  orphans every browser registration this service has ever handed out.
+
+Afterwards `/setup` is open again and `/admin` is closed until somebody completes it.
+**On a deployment started with `--gateway` or `HERMIE_GATEWAY_URL` the gateway is kept
+and `/setup` stays closed**, because the flag would put it back at the next restart;
+the confirmation page says which of the two will happen before you press anything. A
+push daemon that is already connected keeps its connection until the service restarts,
+though the stored login is gone either way.
 
 ### The per-person options, and their honest limit
 

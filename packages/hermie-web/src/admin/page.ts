@@ -454,14 +454,21 @@ export function adminPeoplePage(input: AdminPageInput): string {
   })
 }
 
-/** The danger zone: the self-update, and starting over. */
+/** What an operator may also throw away, ticked one at a time. */
+export interface ResetChoices {
+  cache: boolean
+  push: boolean
+}
+
+/** The danger zone: the self-update, and starting the setup over. */
 export function adminDangerPage(input: AdminPageInput): string {
   const text = input.strings.admin
+  const reset = text.reset
 
   return adminShell(chromeOf(input, 'danger'), {
     title: text.danger.title,
     intro: text.danger.intro,
-    body: card({
+    body: `${card({
       heading: text.service.updateButton,
       body: `<dl>
         <dt>${text.service.version}</dt><dd>${escapeHtml(input.status.version)} — ${
@@ -479,6 +486,71 @@ export function adminDangerPage(input: AdminPageInput): string {
               ? ''
               : `<span class="note">${escapeHtml(input.status.updateReason || text.service.updateUnavailable)}</span>`
           }
+        </div>
+      </form>`
+    })}
+    ${card({
+      kind: 'danger',
+      heading: reset.heading,
+      intro: reset.intro,
+      body: `<form method="post" action="/admin/reset-setup">
+        ${csrfField(input.csrf)}
+        <label class="check"><input type="checkbox" name="alsoCache" value="1"> ${reset.alsoCache}</label>
+        <label class="check"><input type="checkbox" name="alsoPush" value="1"> ${reset.alsoPush}</label>
+        <div class="actions"><button class="bad" type="submit">${reset.button}</button></div>
+      </form>`
+    })}`
+  })
+}
+
+/**
+ * The second step: what is about to go, and the one control that does it.
+ *
+ * A rendered POST rather than a redirect, which is the opposite of the rule
+ * every other form here follows — and deliberately. The rule exists because
+ * reloading a rendered POST repeats it; reloading THIS one repeats a question,
+ * which costs nothing. Putting the choices in a redirect's query string would
+ * put them in the browser's history instead, on a page whose entire job is to
+ * be read once and acted on once.
+ *
+ * The two ticks are carried as hidden fields, so the thing that is confirmed is
+ * the thing that was asked for rather than whatever the next form happens to
+ * post.
+ */
+export function adminResetConfirmPage(input: AdminPageInput & { choices: ResetChoices; setupOpens: boolean }): string {
+  const text = input.strings.admin.reset
+
+  return adminShell(chromeOf(input, 'danger'), {
+    title: text.confirmTitle,
+    intro: text.confirmIntro,
+    body: card({
+      kind: 'danger',
+      body: `<h2>${text.clearsHeading}</h2>
+      <ul>
+        <li>${text.clearsGateway}</li>
+        <li>${text.clearsAdministrators}</li>
+        <li>${text.clearsBranding}</li>
+        <li>${text.clearsServiceLogin}</li>
+        <li>${text.clearsPeople}</li>
+        ${input.choices.cache ? `<li>${text.alsoCache}</li>` : ''}
+        ${input.choices.push ? `<li>${text.alsoPush}</li>` : ''}
+      </ul>
+      <h2>${text.keepsHeading}</h2>
+      <ul>
+        <li>${text.keepsIdentity}</li>
+        ${input.choices.cache ? '' : `<li>${text.keepsCache}</li>`}
+        ${input.choices.push ? '' : `<li>${text.keepsPush}</li>`}
+      </ul>
+      <p>${input.setupOpens ? text.thenSetup : text.thenStays(escapeHtml(input.status.gatewayUrl))}</p>
+      <p class="note">${text.pushKeepsRunning}</p>
+      <form method="post" action="/admin/reset-setup">
+        ${csrfField(input.csrf)}
+        <input type="hidden" name="confirm" value="1">
+        ${input.choices.cache ? '<input type="hidden" name="alsoCache" value="1">' : ''}
+        ${input.choices.push ? '<input type="hidden" name="alsoPush" value="1">' : ''}
+        <div class="actions">
+          <button class="bad" type="submit">${text.confirmButton}</button>
+          <a href="/admin/danger">${text.cancel}</a>
         </div>
       </form>`
     })

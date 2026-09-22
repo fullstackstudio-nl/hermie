@@ -284,7 +284,17 @@ const STYLE = `
   }
   button:disabled { opacity: 0.45; cursor: default }
   button.quiet { background: transparent; color: var(--accent-ink); border: 1px solid var(--hair) }
-  button.bad { background: var(--danger) }
+  /*
+    The colour is restated, and it has to be.
+
+    .bad is also the utility that paints a line of text in the danger ink, and
+    on a button that rule beats the element rule it would otherwise inherit
+    white from — a single class outranks a bare element. The result was the
+    destructive button's own label in dark red ON dark red: legible to nobody,
+    and invisible to the contrast check, which reads the app's tokens and not this
+    file.
+  */
+  button.bad { background: var(--danger); color: var(--on-accent) }
   /* The one indication a keyboard gets, since nothing here is hovered into. */
   :focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px }
 
@@ -292,6 +302,17 @@ const STYLE = `
   .fields > div { flex: 1 1 10rem; min-width: 0 }
   .fields > div.narrow { flex: 0 0 auto }
   .actions { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; margin-top: var(--s3) }
+
+  /* The enrolment page's numbered steps and its one-time recovery codes. */
+  ol, ul { color: var(--muted); padding-left: 1.2rem; font-size: 0.9rem; margin: 0 0 var(--s4) }
+  li { margin-bottom: var(--s1) }
+  .codes {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--s1);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.9rem;
+  }
   .badge {
     display: inline-block;
     padding: 0 var(--s2);

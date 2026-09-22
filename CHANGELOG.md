@@ -21,6 +21,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exactly as before, because a picture that quietly leaves out what was asked for is worse than the
   text it was made from.
 
+### Added
+
+- **A deployment can be set up again.** `/admin/danger` has **Run setup again**: it clears the
+  gateway `/setup` saved, the administrator list and the local administrator secret, the
+  branding, the feature switches, the push policy and cache retention, the per-person options,
+  and the service login this server holds for push and the cache — then reopens `/setup`. Two
+  boxes let the cached messages and the VAPID key go with it. It asks a second time first, on a
+  page that lists every one of those consequences and names the one thing it will not touch:
+  the built-in identity provider, whose accounts and signing key `/setup` never wrote and whose
+  loss would sign out every account on the gateway.
+
+  On a deployment started with `--gateway` the flag still names one after a restart, so that
+  gateway is kept and `/setup` stays closed — and the confirmation page says so before the
+  button rather than afterwards.
+
 ### Changed
 
 - **A share now reaches the bot without opening Hermie.** Sharing a link or a document into

@@ -52,8 +52,10 @@ import {
   adminOverviewPage,
   adminPeoplePage,
   adminPushPage,
+  adminResetConfirmPage,
   adminSignInPage,
   brandOf,
+  type ResetChoices,
   type AdminPageInput,
   type AdminStatus
 } from './page'
@@ -129,6 +131,17 @@ export interface AdminRouterOptions {
   clearCache: () => Promise<void>
   /** Run the self-update. Answers a message; the page shows it. */
   update: () => Promise<string>
+  /**
+   * Throw away what `/setup` wrote, and say whether `/setup` is open again.
+   *
+   * It answers `setupOpen: false` on a deployment whose gateway came from
+   * `--gateway` or the environment: the flag still names one, so there is
+   * nothing for the setup page to decide and it stays closed. The page says so
+   * before the operator presses the button rather than afterwards.
+   */
+  resetSetup: (choices: ResetChoices) => Promise<{ setupOpen: boolean }>
+  /** Whether a reset would reopen `/setup`. Asked before anything is deleted. */
+  setupReopens: () => boolean
   /** Told whenever the state changed, so the server can re-read what it caches. */
   onChanged: (state: AdminState) => void
   sessions?: AdminSessions
@@ -249,7 +262,7 @@ export class AdminRouter {
       return
     }
 
-    await this.apply(response, state, identity, url.pathname, form, ownOrigin(request))
+    await this.apply(request, response, state, identity, url.pathname, form, ownOrigin(request))
   }
 
   /** Whether this request may see the page at all. */
@@ -377,6 +390,7 @@ export class AdminRouter {
   }
 
   private async apply(
+    request: IncomingMessage,
     response: ServerResponse,
     state: AdminState,
     identity: GatewayIdentity | null,
@@ -495,6 +509,11 @@ export class AdminRouter {
 
         return
 
+      case '/admin/reset-setup':
+        await this.resetSetup(request, response, state, form)
+
+        return
+
       case '/admin/update': {
         const message = await this.options.update().catch((error: unknown) => String(error))
 
@@ -506,6 +525,69 @@ export class AdminRouter {
       default:
         this.json(response, 404, { error: 'not_found' })
     }
+  }
+
+  /**
+   * Starting the setup over: ask first, then do it.
+   *
+   * One route and two steps, told apart by the `confirm` field, because a
+   * confirmation that lives on another route is one somebody can reach by
+   * typing it. The first step renders the list of consequences; the second is
+   * the only thing in this file that deletes an operator's configuration, and it
+   * is reached only from a form that carried this page's own token.
+   */
+  private async resetSetup(
+    request: IncomingMessage,
+    response: ServerResponse,
+    state: AdminState,
+    form: URLSearchParams
+  ): Promise<void> {
+    const choices: ResetChoices = { cache: checked(form, 'alsoCache'), push: checked(form, 'alsoPush') }
+
+    if (!checked(form, 'confirm')) {
+      const status = await this.options.status()
+
+      this.html(
+        response,
+        200,
+        adminResetConfirmPage({
+          state,
+          status,
+          csrf: this.mintCsrf(response, isSecureRequest(request)),
+          bots: this.options.bots(),
+          viewer: '',
+          identity: (({ enabled, issuer, users }) => ({ enabled, issuer, accounts: users.length }))(
+            this.options.oidc.read()
+          ),
+          notice: '',
+          choices,
+          setupOpens: this.options.setupReopens(),
+          ...webCopy(request)
+        })
+      )
+
+      return
+    }
+
+    const { setupOpen } = await this.options.resetSetup(choices)
+
+    /*
+      Out of `/admin` entirely where the setup page is open again.
+
+      There is nothing on the other side of this: the administrator list is
+      empty and the local secret is gone, so the next GET of `/admin` is a
+      refusal. Sending the operator to the page that can fix that is the only
+      useful thing left to do.
+    */
+    response.writeHead(303, {
+      location: setupOpen
+        ? '/setup'
+        : `/admin?notice=${encodeURIComponent(
+            'The setup was cleared. The gateway came from the command line, so it was kept and /setup stays closed.'
+          )}`,
+      'cache-control': 'no-store'
+    })
+    response.end()
   }
 
   private async saveUser(
