@@ -6182,11 +6182,15 @@ In rough order of how much they cost a user.
   `ui/primitives/TextField.tsx:49` ends `?? ''`, and `aria-label=""` REMOVES a
   name rather than falling through to the content. Only reachable when a field
   has neither label nor placeholder, which is why nothing visibly broke.
-- **Focus rings stop at text fields.** `ui/useFocusRing.ts` draws a proper ring
-  and is used in exactly two places (the composer, the bots search). Buttons and
-  list rows are real `<button>` elements and do get the browser's default ring —
-  drawn tight to the box, in the UA colour, ignoring the row's radius and the
-  glass under it. Markdown links get no focus at all, per the item above.
+- **Focus rings stop at text fields, and now stop there in the other
+  direction.** Buttons and list rows are real `<button>` elements and ring on
+  `:focus-visible` at the theme accent (see the 2026-09-21 entry). A text box
+  does not: it has a caret, which says where the keyboard is, and the ring the
+  browser draws is around the INPUT — the text line inside the pill rather than
+  the pill — so it was a rectangle floating in the middle of the control. The
+  document exempts `input`, `textarea`, `select` and `[contenteditable]`, and
+  `ui/useFocusRing.ts` no longer draws a replacement. Markdown links get no
+  focus at all, per the item above.
 - **Day separators are `<h1>`.** A transcript has one per day and the page has no
   real first-level heading, so a reader navigating by heading gets a list of
   dates and nothing else.
@@ -6332,8 +6336,10 @@ because they turned out to be bigger than the line above them.
   both schemes in the document template and corrected from the live theme by
   `status-bar.web.tsx` — the same path the page background already used, so a
   pinned preset rings in its own accent. `:focus-visible` and not `:focus`: a
-  ring on every mouse click is noise on a chat list, while a field somebody
-  just clicked into is one they are about to type in.
+  ring on every mouse click is noise on a chat list. **Inputs are exempted by a
+  second rule**, because a caret already says where the keyboard is; the
+  exemption names the four form selectors rather than using `*`, and
+  `web-document.test.ts` reads the template to pin that it still does.
 - **A heading with no level is an `<h1>`.** The fix is not "make the date
   stamp an `<h2>`" but "give the page something to be second to": each
   screen's own title is now the first level, a grouped section's quiet label

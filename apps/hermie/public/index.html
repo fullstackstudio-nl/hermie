@@ -35,14 +35,13 @@
   - Scrollbars. macOS hides them until you scroll, which is why they were never
     noticed here; every other platform draws them, and the default is a
     light-grey slab that belongs to no theme.
-  - The focus ring for everything that is not a text field. `ui/useFocusRing.ts`
-    draws the app's own ring on the two controls that are a text box inside a
-    pill; every button, row, tab and link in the app is a real focusable element
-    and was getting the user agent's, in the SYSTEM accent rather than the
-    theme's. One rule here rings all of them, and it is `:focus-visible` rather
-    than `:focus` on purpose: a ring on every mouse click is noise on a list of
-    chats, while a field somebody has just clicked into is one they are about to
-    type in — which is the difference the two rings are drawing.
+  - The focus ring, and the one kind of element that does not get one. Every
+    button, row, tab and link in the app is a real focusable element and was
+    getting the user agent's ring, in the SYSTEM accent rather than the theme's;
+    one rule here rings all of them, and it is `:focus-visible` rather than
+    `:focus` on purpose, because a ring on every mouse click is noise on a list
+    of chats. Inputs are then exempted: a text field has a caret, which says
+    where the keyboard is without a second mark around it.
 -->
 <html lang="%LANG_ISO_CODE%">
   <head>
@@ -149,6 +148,30 @@
       :focus-visible {
         outline: 2px solid var(--hermie-focus);
         outline-offset: 2px;
+      }
+
+      /*
+        …but not around anything you type into.
+
+        A form control is the one element that says what it is without being
+        ringed: it has a box, a caret blinking in it, and a keyboard aimed at
+        it. The ring on the composer added a second, louder announcement of
+        something the caret had already said, on the element a reader is looking
+        at for most of the time they spend in this app — and on the web build it
+        was drawn around the INPUT, which is the text line inside the pill
+        rather than the pill, so it was a rectangle floating in the middle of
+        the control.
+
+        This is a decision about inputs and about nothing else. Every button,
+        row, tab and link above keeps its ring, because those have no caret and
+        no other way to say where the keyboard is, and a page that took the ring
+        off those would be one nobody could drive without a mouse.
+      */
+      input:focus-visible,
+      textarea:focus-visible,
+      select:focus-visible,
+      [contenteditable]:focus-visible {
+        outline: none;
       }
 
       /*

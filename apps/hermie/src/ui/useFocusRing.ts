@@ -1,33 +1,45 @@
 /**
- * The app's own focus ring, for the platform that would otherwise draw one.
+ * What a text field does about focus, which on every platform is now nothing
+ * visible.
+ *
+ * ## The ring that was here, and why it went
  *
  * A browser rings the `<input>`, which is not the control: every editable thing
  * in this app is a TEXT BOX INSIDE A PILL, and the input's own box is the text
- * line — 20pt inside a 44pt search field. So the user agent's ring is a small
- * rectangle floating in the middle of the control it is supposed to be marking,
- * in the system accent, with square corners on a pill. It is not a styling
- * preference: it rings the wrong box.
+ * line — 20pt inside a 44pt search field. So the user agent's ring was a small
+ * rectangle floating in the middle of the control it was supposed to be marking,
+ * in the system accent, with square corners on a pill. This hook replaced it
+ * with the app's own ring drawn on the pill.
  *
- * What replaces it is the same ring the design already uses for selection —
- * the accent, at the control's own radius, on the control — and it is applied
- * only while the field has focus. On iOS and Android nothing is suppressed and
- * nothing is drawn: the caret is the focus indicator there, and a second one
- * would be new.
+ * That was the right fix to the wrong question. **A text field is the one
+ * control that says what it is without being ringed**: it has a box, a caret
+ * blinking in it, and a keyboard aimed at it. The ring was a second and louder
+ * announcement of something the caret had already made, on the element somebody
+ * looks at for most of the time they spend in this app — and on the composer,
+ * which is nearly always the focused element, it never went away. So the ring is
+ * gone and the suppression stays: the user agent draws nothing, and neither do
+ * we.
  *
- * Keyboard-versus-pointer is deliberately not distinguished. `:focus-visible`
- * exists because a ring on every mouse click is noise on a page of links; a
- * composer or a search field that somebody has just clicked into is a control
- * they are about to type in, and saying so is not noise.
+ * ## What this is NOT
+ *
+ * It is not a decision about focus indication in general, and the difference
+ * matters enough to state where somebody will read it before changing it back.
+ * Every button, row, tab and link in the app still rings on `:focus-visible`
+ * (`public/index.html`), because those have no caret and no other way to say
+ * where the keyboard is. A build that dropped those would be one nobody could
+ * drive without a mouse. The exemption is for inputs, and only inputs.
+ *
+ * ## Why the hook is still here
+ *
+ * Two things that are not a ring: it suppresses the user agent's own, which is
+ * the half of the job that never stopped being necessary, and it reports whether
+ * the field has focus, which a caller may want for something that is not an
+ * outline.
  */
 import { useCallback, useState } from 'react'
 import type { TextStyle, ViewStyle } from 'react-native'
 
-import { HAS_USER_AGENT_FOCUS_RING, NO_USER_AGENT_FOCUS_RING } from '../platform/text-field-web'
-import { useTheme } from './theme'
-
-/** How thick the ring is, and how far it sits off the control. */
-export const FOCUS_RING_WIDTH = 2
-export const FOCUS_RING_OFFSET = 2
+import { NO_USER_AGENT_FOCUS_RING } from '../platform/text-field-web'
 
 export interface FocusRing {
   focused: boolean
@@ -40,48 +52,28 @@ export interface FocusRing {
     style: TextStyle
   }
   /**
-   * The ring, for the box that IS the control — the pill, not the input.
+   * What to put on the box that IS the control — the pill, not the input.
    *
-   * `{}` while unfocused and on every platform that draws its own indicator, so
-   * a caller can spread it unconditionally.
+   * Empty, on every platform and in both states. It is kept in the shape rather
+   * than removed so a caller that spreads it keeps working, and so that the
+   * place somebody would add a ring back is the place that explains why there
+   * is not one.
    */
   ringStyle: ViewStyle
 }
 
+/** Nothing, and the same nothing every time, so no caller re-renders on it. */
+const NO_RING: ViewStyle = {}
+
 export function useFocusRing(): FocusRing {
-  const theme = useTheme()
   const [focused, setFocused] = useState(false)
 
   const onFocus = useCallback(() => setFocused(true), [])
   const onBlur = useCallback(() => setFocused(false), [])
 
-  /*
-    An OUTLINE rather than a border, and that is the whole reason this is
-    drawable at all.
-
-    Every control this rings already has a hairline border of its own, so
-    thickening it on focus would move the control's contents by a point and
-    unmove them on blur — a pill that twitches when you click into it. An
-    outline is painted outside the border box and takes part in no layout, which
-    is exactly the job, and it is also what the user agent was using before it
-    was pointed at the wrong box.
-
-    `outlineOffset` keeps it clear of the hairline so the two read as one ring
-    with a gap rather than as a thick smudge.
-  */
-  const ring: ViewStyle =
-    HAS_USER_AGENT_FOCUS_RING && focused
-      ? {
-          outlineColor: theme.colors.accentText,
-          outlineOffset: FOCUS_RING_OFFSET,
-          outlineStyle: 'solid',
-          outlineWidth: FOCUS_RING_WIDTH
-        }
-      : {}
-
   return {
     focused,
     fieldProps: { onBlur, onFocus, style: NO_USER_AGENT_FOCUS_RING },
-    ringStyle: ring
+    ringStyle: NO_RING
   }
 }

@@ -302,13 +302,9 @@ const STYLE = `
   .fields > div { flex: 1 1 10rem; min-width: 0 }
   .fields > div.narrow { flex: 0 0 auto }
   .actions { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; margin-top: var(--s3) }
-
   /* The enrolment page's numbered steps and its one-time recovery codes. */
   ol, ul { color: var(--muted); padding-left: 1.2rem; font-size: 0.9rem; margin: 0 0 var(--s4) }
   li { margin-bottom: var(--s1) }
-
-  /* The enrolment page's numbered steps and its one-time recovery codes. */
-  ol { color: var(--muted); padding-left: 1.2rem; font-size: 0.9rem; margin: 0 0 var(--s4) }
   .codes {
     display: grid;
     grid-template-columns: 1fr 1fr;

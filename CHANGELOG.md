@@ -71,6 +71,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   connection, and it counts as a choice you made, so the newest one wins wherever it was given. The
   gateway's own copy of the name is untouched, as it has to be.
 
+- **No focus ring around the composer, or around anything else you type into.** On the browser
+  build every input was ringed on focus — the composer most of all, because it is the focused
+  element for most of the time anybody spends in the app. A text box is the one control that
+  says what it is without a ring: it has a box, a caret blinking in it, and a keyboard aimed at
+  it, so the ring was a second and louder announcement of something the caret had already made.
+  The one the browser draws was in the wrong place besides: it goes around the input, which is
+  the text line inside the pill rather than the pill.
+
+  **Buttons, rows, tabs and links still ring**, at the theme's accent, on `:focus-visible` —
+  they have no caret and no other way to say where the keyboard is, and taking that away would
+  make the app undrivable without a mouse. The exemption names the four form selectors and
+  nothing else, and a test reads the document template to keep it that way.
+
 - **An account on the built-in issuer is a person on `/admin`'s people list.** The two pages
   kept two lists of the same people and neither knew about the other: an account created as an
   administrator on `/admin/oidc` left `/admin` showing nobody, so an operator had to add them a

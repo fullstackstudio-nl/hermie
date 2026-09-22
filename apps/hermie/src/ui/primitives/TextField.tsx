@@ -1,7 +1,7 @@
 import { forwardRef } from 'react'
 import { TextInput, type TextInputProps, View } from 'react-native'
 
-import { INVALID_FIELD } from '../../platform/text-field-web'
+import { INVALID_FIELD, NO_USER_AGENT_FOCUS_RING } from '../../platform/text-field-web'
 import { useTheme } from '../theme'
 import { CONTROL_MIN_HEIGHT } from '../tokens'
 import { useInsetRow } from './InsetGroup'
@@ -62,6 +62,17 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
         accessibilityLabel={label ?? rest.accessibilityLabel ?? rest.placeholder}
         placeholderTextColor={theme.colors.textMuted}
         style={[
+          /*
+           * No ring around the field, on any platform.
+           *
+           * The document's own rule exempts every input from `:focus-visible`
+           * already, so this is the second of two — and it is here rather than
+           * only there because a component that decides how a field looks
+           * should be where somebody reads what it decided. A caret is the
+           * focus indication a text box has; see `ui/useFocusRing.ts` for the
+           * whole argument, and for why buttons and links still ring.
+           */
+          NO_USER_AGENT_FOCUS_RING,
           {
             color: theme.colors.text,
             fontSize: theme.type.body.fontSize,

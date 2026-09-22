@@ -36,6 +36,37 @@ describe('the document the browser build ships in', () => {
     expect(template).not.toMatch(/[^-]:focus\s*\{/)
   })
 
+  it('draws no ring around anything you type into', () => {
+    /*
+      The exemption, and its exact extent.
+
+      A text box has a caret, which says where the keyboard is; a ring around it
+      is a second and louder announcement of the same thing, on the element
+      somebody looks at for most of the time they spend in this app. Buttons,
+      rows, tabs and links have no caret, so the rule above still covers them —
+      and the assertion below is deliberately about which selectors are
+      exempted, because a rule that grew to `*:focus-visible { outline: none }`
+      would pass a looser test and make the app undrivable without a mouse.
+    */
+    const withoutComments = template.replace(/\/\*[\s\S]*?\*\//g, '')
+    const rules = [...withoutComments.matchAll(/([^{}]+)\{\s*outline:\s*none;?\s*\}/g)]
+
+    // Exactly one rule turns a ring off, and these are the only things it names.
+    expect(rules).toHaveLength(1)
+    expect(
+      (rules[0]?.[1] ?? '')
+        .split(',')
+        .map(selector => selector.trim())
+        .filter(Boolean)
+        .sort()
+    ).toEqual([
+      '[contenteditable]:focus-visible',
+      'input:focus-visible',
+      'select:focus-visible',
+      'textarea:focus-visible'
+    ])
+  })
+
   it('gives a heading element no size, weight or margin of its own', () => {
     // `accessibilityRole="header"` makes react-native-web render a real
     // `<h1>`…`<h6>`. RNW's own reset covers `Text` and not the `View` a heading
