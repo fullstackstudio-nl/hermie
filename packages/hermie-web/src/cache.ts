@@ -74,6 +74,23 @@ export interface CacheEntry {
   sessionId: string
   /** The profile name, when the writer knew it. The seam reads by this. */
   bot: string
+  /**
+   * Whose conversation this is, or `''` for one everybody on the gateway
+   * shares (ADR-0025, amended by ADR-0007's per-user chats).
+   *
+   * ADR-0025 could write "cache entries are per gateway, not per user" because
+   * there was exactly one conversation per bot and everybody was in it. There
+   * is now a second kind — `Chat · <name>`, one person's — and a cache that
+   * could not tell them apart would serve one reader's private transcript to
+   * anybody else signed in to the same gateway.
+   *
+   * The service link's own writes carry a `bot` and no owner: those are the
+   * canonical Bot Chats it resumes for push, and they are shared by definition.
+   * A proxied transcript read carries the reader's user id, because from a
+   * response body alone this service cannot tell which of the two it is
+   * watching. `write` reconciles the pair — see the rule there.
+   */
+  owner: string
   /** The registry row id, which is a third name the same chat answers to. */
   storedId: string
   shape: RowShape
@@ -97,6 +114,7 @@ export interface TranscriptCacheSink {
 interface IndexRow {
   sessionId: string
   bot: string
+  owner: string
   storedId: string
   shape: RowShape
   file: string
@@ -129,6 +147,8 @@ export class TranscriptCache {
   /** Every name a session answers to → its session id. */
   private readonly aliases = new Map<string, string>()
   private bytes = 0
+  private served = 0
+  private missed = 0
   private loaded = false
   /** Serialises index writes, so two puts cannot interleave a read-modify-write. */
   private tail: Promise<void> = Promise.resolve()
@@ -145,6 +165,22 @@ export class TranscriptCache {
 
   get count(): number {
     return this.rows.size
+  }
+
+  /**
+   * Reads served and reads that found nothing, since this process started.
+   *
+   * Counted rather than derived, and deliberately NOT persisted: a hit rate
+   * across restarts would average away the one thing it is useful for, which is
+   * whether the cache is earning its disk on THIS run. A refusal on ownership
+   * counts as a miss, because from the seam's side it is one.
+   */
+  get hits(): number {
+    return this.served
+  }
+
+  get misses(): number {
+    return this.missed
   }
 
   private get now(): number {
@@ -193,6 +229,7 @@ export class TranscriptCache {
       this.remember({
         sessionId,
         bot: str(raw.bot),
+        owner: str(raw.owner),
         storedId: str(raw.storedId),
         shape: raw.shape === 'rpc' ? 'rpc' : 'rest',
         file: str(raw.file) || fileFor(sessionId),
@@ -214,7 +251,16 @@ export class TranscriptCache {
     this.rows.set(row.sessionId, row)
     this.bytes += row.bytes
 
-    for (const alias of [row.sessionId, row.storedId, row.bot]) {
+    /*
+      A PRIVATE entry is never aliased by the bot's name.
+
+      The seam asks for `/hermie/cache/<bot>` when all it holds is a profile,
+      and that name means "this bot's shared chat". Letting one reader's private
+      transcript answer to it would put their conversation under a key every
+      other reader also asks for — a miss they can see through, rather than a
+      hit they must not have.
+    */
+    for (const alias of [row.sessionId, row.storedId, ...(row.owner ? [] : [row.bot])]) {
       if (alias) {
         this.aliases.set(alias, row.sessionId)
       }
@@ -247,6 +293,7 @@ export class TranscriptCache {
       v: CACHE_VERSION,
       sessionId: entry.sessionId,
       bot: entry.bot,
+      owner: entry.owner,
       storedId: entry.storedId,
       shape: entry.shape,
       updatedAt: entry.updatedAt || this.now,
@@ -274,6 +321,15 @@ export class TranscriptCache {
       // did: the proxy tee sees a session id and nothing else, and the seam
       // reads by bot name.
       bot: entry.bot || held?.bot || '',
+      /*
+        A session the SERVICE LINK has named a bot for is one of the canonical
+        Bot Chats, and it stays shared however many people read it. Anything
+        else takes the owner this writer gave, with no inheritance in either
+        direction: the owner describes the bytes that were just written, and a
+        private transcript that inherited `''` from an earlier entry would be
+        readable by the whole gateway.
+      */
+      owner: held?.bot ? '' : entry.owner,
       storedId: entry.storedId || held?.storedId || '',
       shape: entry.shape,
       file,
@@ -289,8 +345,16 @@ export class TranscriptCache {
     await this.saveIndex()
   }
 
-  /** Serve one session's tail by any of its names. */
-  async get(key: string): Promise<(CacheEntry & { rows: Record<string, unknown>[] }) | null> {
+  /**
+   * Serve one session's tail by any of its names, to a reader entitled to it.
+   *
+   * `reader` is the caller's gateway user id. An entry with an owner is served
+   * to that owner and to nobody else, and the refusal is a MISS rather than an
+   * error: the seam's whole contract is "paint if there is something, dial
+   * either way", and a 403 on somebody else's chat would also confirm that the
+   * chat exists.
+   */
+  async get(key: string, reader = ''): Promise<(CacheEntry & { rows: Record<string, unknown>[] }) | null> {
     if (!this.enabled || !key) {
       return null
     }
@@ -301,6 +365,14 @@ export class TranscriptCache {
     const row = sessionId ? this.rows.get(sessionId) : undefined
 
     if (!row) {
+      this.missed += 1
+
+      return null
+    }
+
+    if (row.owner && row.owner !== reader) {
+      this.missed += 1
+
       return null
     }
 
@@ -314,9 +386,12 @@ export class TranscriptCache {
       // answering for it.
       this.forget(row)
       void this.saveIndex().catch(() => undefined)
+      this.missed += 1
 
       return null
     }
+
+    this.served += 1
 
     row.readAt = this.now
     void this.saveIndex().catch(() => undefined)
@@ -324,6 +399,7 @@ export class TranscriptCache {
     return {
       sessionId: row.sessionId,
       bot: row.bot,
+      owner: row.owner,
       storedId: row.storedId,
       shape: row.shape,
       updatedAt: num(parsed.updatedAt),
@@ -340,6 +416,41 @@ export class TranscriptCache {
         this.aliases.delete(alias)
       }
     }
+  }
+
+  /**
+   * Drop everything nobody has read for this long.
+   *
+   * The size cap is a start-up flag and this is a setting an operator can
+   * change while the service runs (`/admin`), so it is a method rather than an
+   * option: the caller passes the number it holds now. `0` is "no age limit",
+   * which is ADR-0025's behaviour and the default.
+   */
+  async sweep(maxAgeSeconds: number): Promise<number> {
+    if (!this.enabled || maxAgeSeconds <= 0) {
+      return 0
+    }
+
+    await this.load()
+
+    const cutoff = this.now - maxAgeSeconds
+    let dropped = 0
+
+    for (const row of [...this.rows.values()]) {
+      // `readAt` rather than `updatedAt`: retention here is about what nobody
+      // is opening, not about what nobody is saying.
+      if (row.readAt <= cutoff) {
+        this.forget(row)
+        await rm(path.join(this.options.dir, row.file), { force: true }).catch(() => undefined)
+        dropped += 1
+      }
+    }
+
+    if (dropped) {
+      await this.saveIndex()
+    }
+
+    return dropped
   }
 
   /**
@@ -403,12 +514,12 @@ export class TranscriptCache {
   }
 
   /** What is on disk right now, newest first. For the tests and for a log line. */
-  async report(): Promise<{ sessionId: string; bot: string; bytes: number }[]> {
+  async report(): Promise<{ sessionId: string; bot: string; owner: string; bytes: number }[]> {
     await this.load()
 
     return [...this.rows.values()]
       .sort((a, b) => b.updatedAt - a.updatedAt)
-      .map(row => ({ sessionId: row.sessionId, bot: row.bot, bytes: row.bytes }))
+      .map(row => ({ sessionId: row.sessionId, bot: row.bot, owner: row.owner, bytes: row.bytes }))
   }
 }
 

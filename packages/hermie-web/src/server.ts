@@ -31,6 +31,17 @@ import {
   sessionIdOfMessagesPath,
   TranscriptCache
 } from './cache'
+import { AdminRouter } from './admin/routes'
+import { hashLocalSecret, mayProxyMethod, withAdmin } from './admin/access'
+import {
+  DEFAULT_USER_OPTIONS,
+  loadAdminState,
+  mayReachBot,
+  optionsFor,
+  saveAdminState,
+  type AdminState
+} from './admin/state'
+import { IdentityReader, type GatewayIdentity } from './identity'
 import {
   type HermieWebOptions,
   isGatewayPath,
@@ -177,10 +188,121 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
     dir: cacheDir(options.stateDir),
     maxBytes: Math.round(options.cacheMaxMb * 1024 * 1024)
   })
+  /**
+   * Who each cookie belongs to, as the gateway says (ADR-0007's per-user
+   * chats). One short-lived memo, so a page's burst of transcript reads costs
+   * one round trip rather than one each.
+   */
+  const identities = new IdentityReader()
+  /**
+   * What `/admin` has decided, held in memory so the hot paths do not read a
+   * file per request. The router hands back every new copy through `onChanged`,
+   * and nothing else in this process writes it.
+   */
+  let admin: AdminState = await loadAdminState(options.stateDir)
   let updating = false
   // Assigned once the listener is up; the handler reads it, so it is declared
   // here rather than beside the `await` that fills it.
   let push: PushDaemon | null = null
+
+  /**
+   * Note that we have seen somebody, so `/admin` has a list to show.
+   *
+   * This is the whole of the "user list" on a gateway with no way to ask for
+   * one. Upstream has no documented `/api/auth/users`, and inventing a call for
+   * it would be this service guessing at another project's routes — so the
+   * honest answer is the one it can actually make: the people who have signed
+   * in HERE, and when. The page says which of the two it is showing.
+   *
+   * Best effort and never awaited. A row that could not be written costs a name
+   * missing from a list.
+   */
+  function noteSeen(identity: GatewayIdentity | null): void {
+    if (!identity?.userId) {
+      return
+    }
+
+    const held = admin.users[identity.userId]
+    const at = Math.floor(Date.now() / 1000)
+
+    // A minute's resolution, so a page of forty requests writes the file once.
+    if (held && at - held.seenAt < 60 && held.displayName === identity.displayName) {
+      return
+    }
+
+    const next: AdminState = {
+      ...admin,
+      users: {
+        ...admin.users,
+        [identity.userId]: {
+          ...(held ?? { ...DEFAULT_USER_OPTIONS, userId: identity.userId }),
+          userId: identity.userId,
+          displayName: identity.displayName,
+          email: identity.email,
+          seenAt: at
+        }
+      }
+    }
+
+    admin = next
+    void saveAdminState(options.stateDir, next).catch(() => undefined)
+  }
+
+  const adminRouter = new AdminRouter({
+    stateDir: options.stateDir,
+    // One authority in this process: the variable above. See the option's note.
+    read: () => admin,
+    gatewayUrl: () => target.gatewayUrl,
+    identities,
+    bots: () => (push?.watcher?.watched ?? []).map(bot => bot.name),
+    clearCache: () => cache.clear(),
+    status: async () => {
+      const release = options.selfUpdate ? await releases.get().catch(() => null) : null
+
+      return {
+        version: options.version,
+        serviceLogin: Boolean(push?.credentials.mode === 'oidc' || options.gatewayToken),
+        pushRunning: Boolean(push),
+        vapidPresent: Boolean(push?.vapidPublicKey),
+        cacheEnabled: cache.enabled,
+        cacheEntries: cache.count,
+        cacheBytes: cache.size,
+        cacheMaxBytes: Math.round(options.cacheMaxMb * 1024 * 1024),
+        cacheHits: cache.hits,
+        cacheMisses: cache.misses,
+        gatewayUrl: target.publicUrl,
+        updateAvailable: Boolean(release && release.version !== options.version),
+        latestVersion: release?.version ?? '',
+        canSelfUpdate: shape.canSelfUpdate,
+        updateReason: shape.reason ?? '',
+        usersFrom: 'seen'
+      }
+    },
+    update: async () => {
+      if (!shape.canSelfUpdate) {
+        return shape.reason || 'This install cannot update itself.'
+      }
+
+      const release = await releases.get({ force: true })
+
+      if (!release) {
+        return 'The release listing could not be read.'
+      }
+
+      await applyUpdate({ installRoot: options.installRoot, release })
+
+      const restart = input.restart ?? (() => restartProcess({ supervised: isSupervised() }))
+      setTimeout(restart, 100).unref()
+
+      return `Updating to ${release.version}; this service is restarting.`
+    },
+    onChanged: next => {
+      admin = next
+      // Retention is a setting rather than a flag, so it is applied when it
+      // changes rather than on a timer nobody can see.
+      void cache.sweep(next.cache.retentionHours * 3600).catch(() => undefined)
+    }
+  })
 
   // Warm the release listing at startup so the first Settings visit is instant,
   // and never let its failure take the server down with it.
@@ -212,6 +334,20 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
 
     if (url.pathname === '/hermie/config.json') {
       await handleConfig(response)
+
+      return
+    }
+
+    if (adminRouter.owns(url.pathname)) {
+      if (!configured) {
+        // Nothing to administer and nobody to check against: the gateway is
+        // what this page's gate is built on.
+        json(response, 503, { error: 'setup_required', detail: 'This Hermie Web has no gateway yet. Open /setup.' })
+
+        return
+      }
+
+      await adminRouter.handle(request, response, url)
 
       return
     }
@@ -272,7 +408,33 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
     }
 
     if (isGatewayPath(url.pathname)) {
-      proxyHttp(request, response, target, observeForCache(method, url))
+      /*
+        The one thing a proxy CAN police, and the honest limit on it.
+
+        `readOnly` is a service-level setting (see `admin/access.ts`): it
+        refuses every mutating request that arrives over HTTP — which is the
+        REST surface and the file uploads — and it cannot touch the gateway
+        WebSocket, which is a raw byte pipe by design (ADR-0015). The admin page
+        says so beside the switch, because an operator who reads it as a
+        security boundary has been misled by us rather than by themselves.
+
+        The identity is read for this and for the seen-list, and it is the same
+        memoised round trip the cache tee makes, so a page load costs one.
+      */
+      const who = await identities.read({ gatewayUrl: target.gatewayUrl, cookie: request.headers.cookie })
+
+      noteSeen(who)
+
+      if (who && !mayProxyMethod(optionsFor(admin, who.userId).readOnly, method)) {
+        json(response, 403, {
+          error: 'read_only',
+          detail: 'This Hermie Web is configured to accept only reads from this account.'
+        })
+
+        return
+      }
+
+      proxyHttp(request, response, target, observeForCache(method, url, request.headers.cookie))
 
       return
     }
@@ -361,8 +523,27 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
         /** A stored service sign-in, which is what push and the cache are spent on. */
         login: Boolean(push?.credentials.mode === 'oidc' || options.gatewayToken),
         push: Boolean(push),
-        cache: cache.enabled
-      }
+        // The flag can turn the cache off for the app without deleting what is
+        // already on disk, which is what makes it a flag rather than a restart.
+        cache: cache.enabled && admin.flags.messageCache
+      },
+      /*
+        What this team's build looks like and which service features are on
+        (ADR-0025's part 2). Both are read by the app BEFORE it draws anything,
+        beside the auth fields above, and both are omitted when nobody has set
+        them — an absent key is "the app decides", which is not the same answer
+        as an empty string.
+      */
+      ...(admin.branding.name || admin.branding.accent || admin.branding.theme
+        ? {
+            branding: {
+              ...(admin.branding.name ? { name: admin.branding.name } : {}),
+              ...(admin.branding.accent ? { accent: admin.branding.accent } : {}),
+              ...(admin.branding.theme ? { theme: admin.branding.theme } : {})
+            }
+          }
+        : {}),
+      flags: { ...admin.flags, selfUpdate: admin.flags.selfUpdate && options.selfUpdate }
     })
   }
 
@@ -394,7 +575,7 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
       return
     }
 
-    if (!cache.enabled) {
+    if (!cache.enabled || !admin.flags.messageCache) {
       json(response, 404, { error: 'cache_disabled' })
 
       return
@@ -417,20 +598,46 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
       one that asks for a credential.
     */
     const probe = await gatewayProbe()
+    const identity = await identities.read({ gatewayUrl: target.gatewayUrl, cookie: request.headers.cookie })
 
-    if (
-      probe?.authRequired !== false &&
-      !(await hasGatewaySession({ gatewayUrl: target.gatewayUrl, cookie: request.headers.cookie }))
-    ) {
+    if (probe?.authRequired !== false && !identity) {
       json(response, 401, { error: 'unauthorized' })
 
       return
     }
 
     const key = decodeURIComponent(url.pathname.slice('/hermie/cache/'.length))
-    const entry = await cache.get(key)
+    /*
+      A bot this reader may not reach is not served from here.
+
+      This is one of the two places a service-level allow list is COMPLETE
+      rather than advisory (the other is push): the cache is ours, so nothing
+      has to be policed on a pipe we do not read.
+
+      The check is on the ENTRY's bot rather than on the key, because the key
+      may be a session id and only the entry knows which bot it belongs to. A
+      private chat has no bot on it at all and is already gated by its owner,
+      which is the stronger check of the two.
+    */
+    const permissions = optionsFor(admin, identity?.userId ?? '')
+    /*
+      The reader's own name goes in, and the cache decides.
+
+      A shared Bot Chat answers to anybody signed in, which is what ADR-0025
+      settled and why the check above is "signed in" rather than "signed in as
+      somebody in particular". A conversation that belongs to one person answers
+      to that person and comes back as a MISS to everybody else — see
+      `TranscriptCache.get`.
+    */
+    const entry = await cache.get(key, identity?.userId ?? '')
 
     if (!entry) {
+      json(response, 404, { error: 'not_cached' })
+
+      return
+    }
+
+    if (entry.bot && !mayReachBot(permissions, entry.bot)) {
       json(response, 404, { error: 'not_cached' })
 
       return
@@ -457,7 +664,7 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
    * that paint this browser's chat become the thing that paints the next one's.
    * Nothing is added to the request and nothing is changed in the answer.
    */
-  function observeForCache(method: string, url: URL): ProxyObserver | undefined {
+  function observeForCache(method: string, url: URL, cookie: string | undefined): ProxyObserver | undefined {
     if (!cache.enabled || method !== 'GET') {
       return undefined
     }
@@ -508,7 +715,36 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
         try {
           const rows = rowsOfMessagesBody(JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown)
 
-          void cache.put({ sessionId, bot: '', storedId: '', shape: 'rest', rows, updatedAt: 0 }).catch(() => undefined)
+          /*
+            The bytes are stored under the NAME OF WHOEVER ASKED FOR THEM.
+
+            A response body says nothing about which conversation it is, and
+            since ADR-0007's amendment a profile has two kinds: the canonical
+            Bot Chat everybody shares, and `Chat · <name>`, which is one
+            person's. So the tee cannot tell, and the safe half of the guess is
+            the one it makes — private to the reader, unless the service link
+            has already named this session as a bot's canonical chat, which is
+            the one case where the cache KNOWS it is shared. `cache.write` holds
+            that rule; here we only supply the name.
+
+            On an ungated gateway there is nobody to name and the entry is
+            shared, which is the behaviour ADR-0025 described and the only one a
+            gateway with no accounts can have.
+          */
+          void identities
+            .read({ gatewayUrl: target.gatewayUrl, cookie })
+            .then(identity =>
+              cache.put({
+                sessionId,
+                bot: '',
+                owner: identity?.userId ?? '',
+                storedId: '',
+                shape: 'rest',
+                rows,
+                updatedAt: 0
+              })
+            )
+            .catch(() => undefined)
         } catch {
           // Not the answer we thought it was. Nothing is stored, and the
           // browser already has the bytes.
@@ -611,6 +847,33 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
     }
 
     if (url.pathname === '/hermie/setup/save') {
+      /*
+        Whoever completes the setup becomes this service's first administrator.
+
+        It is the one moment the process can point at somebody without being
+        told: the operator is standing in front of the page, and on a gateway
+        with accounts their cookie names them. On one without — a token gateway,
+        an ungated one — there is nobody to name, so the form may carry a local
+        administrator secret instead, which is stored as a scrypt hash and is
+        the only way back to `/admin` on that deployment.
+      */
+      const operator = await identities.read({ gatewayUrl, cookie: request.headers.cookie, fresh: true })
+      const secret = typeof body.adminSecret === 'string' ? body.adminSecret : ''
+      let next = admin
+
+      if (operator?.userId) {
+        next = withAdmin(next, operator.userId)
+      }
+
+      if (secret) {
+        next = { ...next, localAdmin: hashLocalSecret(secret) }
+      }
+
+      if (next !== admin) {
+        admin = next
+        await saveAdminState(options.stateDir, next)
+      }
+
       await writeSetup(options.stateDir, {
         gatewayUrl,
         publicUrl: typeof body.publicUrl === 'string' ? body.publicUrl : '',
@@ -632,7 +895,15 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
       // Push and the cache hold a connection that was not started, because at
       // startup there was nothing to connect to. Said plainly rather than left
       // for the operator to notice from an absence.
-      json(response, 200, { ok: true, gateway: target.gatewayUrl, restartFor: options.push ? ['push'] : [] })
+      json(response, 200, {
+        ok: true,
+        gateway: target.gatewayUrl,
+        restartFor: options.push ? ['push'] : [],
+        // What the page says next: whether there is a way back into `/admin`,
+        // and how. A deployment with neither is one nobody can administer, and
+        // it should hear that while the operator is still on the page.
+        admin: admin.admins.length ? 'gateway' : admin.localAdmin ? 'secret' : 'none'
+      })
 
       return
     }
@@ -827,6 +1098,25 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
           version: options.version,
           serverRequests: options.pushServerRequests,
           cache,
+          /*
+            The operator's per-person rules, read at send time (ADR-0025 part
+            2). `admin` is reassigned whenever `/admin` saves, so this closure
+            sees the current answer rather than the one that existed when the
+            daemon started.
+
+            An owner of `''` is a device registered under the legacy anonymous
+            key: nobody to have decided anything about, so nothing is refused.
+          */
+          policy: () => admin.push,
+          allowedTo: (owner, bot) => {
+            if (!owner) {
+              return true
+            }
+
+            const rules = optionsFor(admin, owner)
+
+            return rules.pushAllowed && mayReachBot(rules, bot)
+          },
           ...(input.socketFactory ? { socketFactory: input.socketFactory } : {})
         }).catch((error: unknown) => {
           console.error(`hermie-web: push did not start — ${String(error)}`)

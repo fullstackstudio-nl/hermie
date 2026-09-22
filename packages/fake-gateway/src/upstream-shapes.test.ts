@@ -1676,18 +1676,54 @@ describe('session.title / set_hidden / close over the socket — methods_session
     expect((free.result as { sessions: unknown[] }).sessions).toHaveLength(0)
   })
 
-  /** `_set_session_title`'s other refusal: a title is unique across sessions. */
-  it('refuses a title another session already holds', async () => {
-    const chat = await botChatOf('researcher')
-    const resumed = await call('session.resume', { session_id: String(chat.id), omit_messages: true })
+  /**
+   * `_set_session_title`'s other refusal: a title is unique — ON A PROFILE.
+   *
+   * The scope is an inference rather than a probe, and it is the one this whole
+   * app rests on: ADR-0007's canonical chat is the session titled exactly
+   * `Bot Chat`, and every bot has one, so the uniqueness cannot be across the
+   * gateway or Bot Mode would work for a single profile. The case below it
+   * pins the other half of that reading. See `docs/platform-notes.md`.
+   */
+  it('refuses a title another session on the same profile already holds', async () => {
+    // Two ordinary sessions on ONE profile, so the clash is unambiguously
+    // within it rather than borrowed from whatever another test renamed.
+    await call('session.create', { profile: 'notes', title: 'Clash probe A', hidden: false })
+    const second = await call('session.create', { profile: 'notes', title: 'Clash probe B', hidden: false })
+    const stored = String((second.result as { stored_session_id: string }).stored_session_id)
+    const resumed = await call('session.resume', { session_id: stored, omit_messages: true })
     const runtime = String((resumed.result as { session_id: string }).session_id)
 
-    await call('session.set_hidden', { session_id: runtime, hidden: false })
-
-    const clash = await call('session.title', { session_id: runtime, title: 'Bot Chat · 2026-09-21 23:16' })
+    const clash = await call('session.title', { session_id: runtime, title: 'Clash probe A' })
 
     expect(clash.error).toMatchObject({ code: 4022 })
     expect(String((clash.error as { message: string }).message)).toContain('already in use')
+  })
+
+  /**
+   * And the other half: two PROFILES may hold the same title at once.
+   *
+   * The fixtures already prove it — `researcher`, `writer` and `notes` are each
+   * born with a `Bot Chat` — so a `session.create` that refused the second one
+   * would be refusing something this gateway ships. Round R10b's per-user chats
+   * need the same of `Chat · <name>`, which is one title across every bot a
+   * person talks to.
+   */
+  it('lets two profiles hold one title, the way every bot holds Bot Chat', async () => {
+    const mine = 'Chat · Fake Tester'
+
+    const first = await call('session.create', { profile: 'researcher', title: mine, hidden: false })
+    const second = await call('session.create', { profile: 'notes', title: mine, hidden: false })
+
+    expect((first.result as { stored_session_id: string }).stored_session_id).toBeTruthy()
+    expect((second.result as { stored_session_id: string }).stored_session_id).toBeTruthy()
+
+    for (const profile of ['researcher', 'notes']) {
+      const listed = await call('session.list', { profile, title: mine, include_hidden: true })
+
+      expect((listed.result as { sessions: { title?: string }[] }).sessions).toHaveLength(1)
+      expect((listed.result as { sessions: { title?: string }[] }).sessions[0]?.title).toBe(mine)
+    }
   })
 
   /**

@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A chat of your own with every bot, beside the one everybody shares.** On a gateway that knows
+  who you are, each bot's (…) menu and its Conversations page carry one switch: **Shared Bot Chat**
+  or **My chat**. The shared one is what it has always been — the same conversation Hermes Desktop,
+  the CLI and your colleagues are in. Yours is a second conversation on the same bot, named after
+  you, that only you open; the bot still has its own memory and its own settings, and it starts from
+  the shared chat rather than from nothing. The choice is remembered per account and follows you to
+  your other devices, so a phone and a laptop signed in as you open the same conversation. The chat
+  list opens whichever you chose, and the badge and the "needs you" dot count that one. On a gateway
+  with no accounts the switch is not there at all and nothing changes.
+
+- **Hermie Web has an administration page.** `/admin` on a configured service: what it is running
+  (push, the message cache and how much of it is used, whether an update is waiting), which
+  notification types it will send at all and whether a notification may carry message text, how long
+  a cached chat is kept, and an update button. It also carries a list of the people who have signed
+  in through it, with what this service will do for each of them — which bots they may reach,
+  whether their notifications go out, and whether it will pass their changes on to the gateway.
+  Those are **this service's settings, not the gateway's**: notifications and the cached chats are
+  its own and are enforced completely, while "read-only" stops everything it can see and cannot stop
+  somebody typing into a chat, because the gateway connection is a pipe this service deliberately
+  does not read. The page says so where you set it.
+
+  Whoever finishes `/setup` becomes the first administrator; others are added by their gateway
+  account id. On a gateway with no accounts there is nobody to recognise, so setup can take an
+  administrator secret instead — stored as a hash, and never shown back. The page is plain HTML with
+  no scripts, so it works on the day something is wrong.
+
+- **A team can make the app look like theirs.** A name, an accent and a starting theme, set on
+  `/admin` and read by the app before it draws anything. It is a starting point and never an
+  override: if you have chosen a theme it stays, and a chat you have given a colour keeps it. There
+  are also switches to turn service features off for everybody — private chats, the message cache,
+  the update button — and an app talking to a service too old to mention them keeps everything it
+  has.
+
 - **Boards.** The Kanban boards the gateway keeps, from Settings → **Boards** or **Boards** in the
   chat list's header: every board, its columns, its cards, and a card's own page with its notes and
   its comments. A card can be made, edited, moved and archived. It is the same data the Hermes
@@ -168,6 +201,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that does not exist — is shown beside the field and nothing local moves.
 
 ### Fixed
+
+- **A private chat cached by Hermie Web is no longer readable by everybody else signed in.** The
+  service keeps a copy of each chat's tail so a chat paints instantly, and until now that copy was
+  shared by everyone on the gateway — which was fine while the only conversation a bot had was the
+  one everybody was already in. Now that you can have a chat of your own, the copy carries whose it
+  is: yours comes back to you, and to anybody else it simply is not there. Shared Bot Chats are
+  unchanged. On a service started without `--push` there is no gateway connection to tell the two
+  apart, so every cached copy belongs to whoever fetched it — another person's first open of a
+  shared chat is a little slower there, exactly as it was before the cache existed.
 
 - **Reduce Motion, checked over every surface that moves.** Eighteen of them, against three rules:
   the duration collapses to zero rather than the animation being skipped — a skipped animation is a

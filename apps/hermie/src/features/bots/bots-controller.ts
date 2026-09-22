@@ -52,11 +52,34 @@ export type ChatSessionIdSource = {
   getState: () => { chats: Readonly<Record<string, ChatSessionIds>> }
 }
 
+/**
+ * The private-chat half of the roster, as the one method this controller needs.
+ *
+ * A narrow interface rather than the class itself, so `features/user-chats`
+ * depends on the roster and never the other way round — and so a test can hand
+ * in two lines instead of a directory.
+ */
+export interface UserChatSource {
+  /** Is this bot's chosen chat the reader's own? */
+  chose(botName: string): boolean
+  /** What was resolved for this bot already, if anything. */
+  cached(botName: string): BotCanonicalSession | null
+  /** Resolve it, minting it if this reader has never had one. */
+  resolve(bot: Bot): Promise<BotCanonicalSession>
+}
+
 export interface BotsControllerOptions {
   gateway: ChatGateway
   store: StoreApi<BotsState>
   cache?: ChatCache | null
   now?: () => number
+  /**
+   * Where the reader's own chats live (ADR-0007, amended).
+   *
+   * Optional, and absent is the whole of the old behaviour: no private chats,
+   * no switch, every bot resolved to its shared canonical chat.
+   */
+  userChats?: UserChatSource | null
   /**
    * The chat store. Only its session ids are read, and only to attribute a busy
    * session to a bot — see `refreshRunning`. Optional so the roster still works
@@ -200,6 +223,7 @@ export class BotsController {
   private readonly cache: ChatCache | null
   private readonly now: () => number
   private readonly chats: ChatSessionIdSource | null
+  private readonly userChats: UserChatSource | null
 
   /** One canonical resolution per bot at a time; a double tap must not mint two chats. */
   private readonly resolutions = new Map<string, Promise<BotCanonicalSession>>()
@@ -213,6 +237,7 @@ export class BotsController {
     this.cache = options.cache ?? null
     this.now = options.now ?? (() => Date.now())
     this.chats = options.chats ?? null
+    this.userChats = options.userChats ?? null
   }
 
   /** Paint the roster from disk. Safe to call before the socket is up. */
@@ -284,6 +309,7 @@ export class BotsController {
 
       void this.persist(placed)
       void this.loadAvatars(placed)
+      void this.placeUserChats(placed)
 
       return placed
     } catch (error) {
@@ -338,6 +364,57 @@ export class BotsController {
           // next roster refresh tries again.
         }
       })
+    )
+  }
+
+  /**
+   * Point every bot the reader chose at their OWN chat, on the roster.
+   *
+   * The roster answers with the profile's `canonical_session`, which is the
+   * SHARED chat and nothing else — the gateway has no idea this reader has one
+   * of their own. Left alone, a bot whose switch says "My chat" would show the
+   * shared conversation's preview, count its unread, and only open the right
+   * one once it was tapped.
+   *
+   * So the chosen ones are resolved and pinned, through the same
+   * `setCanonical` the canonical swap uses: the pin survives the next roster
+   * read (see `canonicalPins`), which is exactly what it is for.
+   *
+   * Best effort and never awaited by the load. A private chat that could not be
+   * resolved leaves that row showing the shared one, which is wrong but legible;
+   * a roster that refused to paint until every private chat answered would be a
+   * home screen held up by a bot that is merely slow.
+   *
+   * Public because the load is not the only caller. Who this is and which bots
+   * they chose both arrive AFTER the first roster read — `/api/auth/me` and the
+   * `ui_meta` reconcile, in that order — so `ChatRuntime` runs this again once
+   * both are in, rather than spending a second `profiles.list` to do it.
+   */
+  async placeUserChats(bots: readonly Bot[] = this.store.getState().bots): Promise<void> {
+    const directory = this.userChats
+
+    if (!directory) {
+      return
+    }
+
+    await Promise.all(
+      bots
+        .filter(bot => directory.chose(bot.name))
+        .map(async bot => {
+          try {
+            const session = await directory.resolve(bot)
+
+            // The roster may have been replaced while this was in the air —
+            // another gateway, a sign-out. Only place it if the bot is still
+            // here and still chosen.
+            if (directory.chose(bot.name) && this.store.getState().byName[bot.name]) {
+              this.store.getState().setCanonical(bot.name, session)
+            }
+          } catch {
+            // See above: the row keeps the shared chat until the reader opens
+            // it, at which point the same resolution runs and reports.
+          }
+        })
     )
   }
 
@@ -453,10 +530,35 @@ export class BotsController {
   }
 
   private async runResolution(bot: Bot): Promise<BotCanonicalSession> {
+    /*
+      The reader's own chat wins BEFORE the roster's answer is trusted.
+
+      `bot.canonical` still names the shared chat until `placeUserChats` has
+      pinned the private one, so a short-circuit on it here would open the
+      shared transcript for a bot whose switch says otherwise — once, on the
+      first tap after a cold launch, which is the hardest kind of wrong to
+      notice. The directory memoises, so this costs nothing after the first.
+    */
+    if (this.userChats?.chose(bot.name)) {
+      return this.userChats.resolve(bot)
+    }
+
     if (bot.canonical?.id) {
       return bot.canonical
     }
 
+    return this.resolveShared(bot)
+  }
+
+  /**
+   * The bot's SHARED canonical chat, whatever the reader chose.
+   *
+   * The three steps `resolveCanonical` documents, with the private-chat branch
+   * and the roster short-circuit both taken out: the switch coming back to
+   * "Shared Bot Chat" has to find the shared one even while `bot.canonical` is
+   * still pinned to the reader's own.
+   */
+  async resolveShared(bot: Bot): Promise<BotCanonicalSession> {
     const found = await this.lookupCanonical(bot)
 
     if (found) {

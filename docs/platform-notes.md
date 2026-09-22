@@ -9217,3 +9217,253 @@ what the repository produces; nobody has run `-allowProvisioningUpdates` against
 a portal that has never seen these App IDs, so the claim about what it creates
 by itself is Apple's documented behaviour plus this project's own archives, not
 a clean-room observation.
+
+## Round R10b, part one: a chat of one's own (2026-09-22)
+
+ADR-0007 gives a bot one chat and ADR-0025 said per-user chats were a later
+part of the service-layer direction. This is that part, and the whole of it is
+six hundred lines in `apps/hermie/src/features/user-chats/` plus three seams.
+
+### The title is the only key there is
+
+`session.list` takes `{profile, title, limit, include_hidden}` and answers rows
+with no owner, no parent and no kind. So a private chat is found the same way
+the canonical one is — by an exact title on a profile — and the title carries
+the person: `Chat · <display name, else user id>`. There is no second index and
+there is deliberately no `ui_meta` table of "which session is whose", because
+that table would go stale against any other client on the same gateway.
+
+The chat is created **visible**, with `follow_profile_config: true` and
+`parent_session_id` set to the canonical chat. Visible matters: `hidden` is the
+flag upstream's rename guard keys on, and a second hidden session under another
+title is a conversation no other client can show the reader.
+
+### The reading this rests on, and it is an inference
+
+**Session titles are unique per profile, not per gateway.** Nothing in the
+generated contract says so. What says so is ADR-0007 itself: every bot's
+canonical chat is the session titled exactly `Bot Chat`, and a gateway with
+three bots has three of them. A gateway-wide uniqueness rule would make Bot Mode
+work for one profile.
+
+The fake gateway disagreed with its own fixtures here — `titleHolder` scanned
+every session, while the fixtures ship `researcher`, `writer` and `notes` each
+holding `Bot Chat`. It is now scoped to the profile, and
+`upstream-shapes.test.ts` pins both halves: a clash within one profile is
+refused with 4022, and two profiles may hold one title.
+
+**This has not been probed against a real gateway.** If upstream's
+`_set_session_title` really is gateway-wide, the second bot a person switches
+would be refused, and the refusal would arrive as a visible error rather than as
+a silent fork — `resolveUserChat` fails closed on a lookup it cannot make, and a
+create whose title did not land is found by the next lookup and not duplicated,
+because the lookup runs twice before any mint.
+
+### Why the store key stays the bot's name
+
+`store/chats.ts` is keyed by bot, and a branch gets `bot#storedId`. The private
+chat deliberately does **not**: it takes the bot's own key and only the SESSION
+underneath it changes. That is what makes "unread and needs-input follow the
+chosen one" true by construction rather than by three surfaces remembering to
+ask — the composer, the approvals, the badge, the widget and the notification
+route are all written against a key, and the key did not move.
+
+The mechanism is `canonicalPins`, which round R4b built for "Make this the Bot
+Chat". `BotsController.placeUserChats` resolves the chosen bots after a roster
+read and pins each one, so the row's preview and its unread are the reader's own
+rather than the shared conversation's. Coming back to the shared chat resolves
+it **by title** rather than trusting `bot.canonical`, which is sitting on the
+pin; the pin then drops itself on the next roster read, because the roster and
+the pin finally agree.
+
+Two costs, both paid on purpose:
+
+- **The transcript cache on disk is keyed by bot**, so a switch has to forget
+  it. `switchCanonical` already did, for the same reason, and the test asserts
+  it: left there, the next cold open would paint the conversation the reader
+  just left under the new session's ids.
+- **`placeUserChats` runs twice per connection.** Once inside the roster load,
+  which is a no-op before anybody is named, and once after `/api/auth/me` and
+  the `ui_meta` reconcile have both answered — because who this is and which
+  bots they chose are two things the first roster read cannot know. It is one
+  `session.list` per chosen bot and nothing for anybody else.
+
+### What is unverified here
+
+- **Nothing has run against a real gateway**, including the title-uniqueness
+  reading above, which is the one that decides whether the feature works for
+  more than one bot per person.
+- **`parent_session_id` is written and never read back.** `session.list` does
+  not report it, so "the private chat descends from the shared one" is a fact on
+  the gateway's row that this app cannot see and does not depend on.
+- **The switch has no UI test.** `ChatChoiceRow` is exercised through the
+  controller, not through a render; the popover slot and the Conversations page
+  group are wired and typechecked but nobody has tapped them.
+
+## Round R10b, part two: whose transcript is that (2026-09-22)
+
+ADR-0025 wrote down that the message cache is gateway-wide and said why that was
+acceptable: the only conversation a bot had was the canonical Bot Chat, which
+ADR-0007 had already made shared. Part one of this round put a second kind of
+conversation on every profile, and the sentence stopped being true the same day
+it was written.
+
+### What the two-reader test actually found
+
+The `ui_meta` half held with nothing to fix. The key is named by the browser —
+the app asks `/api/auth/me` through the proxy with its own cookie and writes
+`hermie-app:<user_id>` — and the proxy carries `profiles.configure` byte for
+byte, so there is no seam in Hermie Web where two people's settings could meet.
+The test proves it rather than assuming it, which is the point of writing it.
+
+The cache half did not. A reader's private transcript, fetched over
+`GET /api/sessions/<id>/messages`, was teed into an entry any other signed-in
+reader could ask for by session id. So entries carry an **owner** now:
+
+- the service link's writes are canonical Bot Chats and carry no owner;
+- a proxied capture carries the reader the gateway names;
+- a session the link has already named a bot for stays shared however many
+  people read it, which is the rule that stops a shared chat being captured into
+  one reader's name by the first person to open it;
+- a private entry is never aliased by the bot's name, because
+  `/hermie/cache/<bot>` is the seam asking for the SHARED chat;
+- a reader who is not the owner gets a **miss**, not a refusal. A 403 on
+  somebody else's conversation also says that the conversation exists.
+
+### The cost, stated plainly
+
+**Without `--push` there is no service link, so Hermie Web cannot tell the two
+kinds apart and keys every capture to its reader.** A second person's first open
+of a shared Bot Chat is then cold — which is exactly where it was before
+ADR-0025, so nothing regressed against the state before the cache existed, only
+against the best case with the cache. An ungated gateway names nobody and its
+entries stay shared, which is the only behaviour available there.
+
+### One round trip, memoised for fifteen seconds
+
+`identity.ts` asks `/api/auth/me` with the caller's cookie and believes the
+answer for fifteen seconds, keyed by the whole cookie header. Without the memo,
+every proxied transcript read would cost a second request on the hot path of the
+thing the cache exists to make fast. The window is why nothing destructive is
+decided on a memo: the admin gate asks with `{ fresh: true }`.
+
+`hasGatewaySession` in `update.ts` is untouched and still answers a boolean; it
+is the same round trip asked a smaller question, and merging the two would have
+meant changing the update route's behaviour in a round that is not about it.
+
+### The fake gateway had one identity
+
+`/api/auth/me` answered `tester@example.invalid` whoever asked, which is not what
+upstream does and which would have made any isolation test meaningless. It now
+answers the caller: cookie mode reads the cookie, and `accounts` lets a test sign
+two people in. Every existing test sees the same single tester it always did.
+
+### What is unverified here
+
+- **No real gateway, and in particular no real `roles` field.** `identityOf`
+  reads `roles` because upstream sends it on some deployments; nothing in this
+  repository has seen one.
+- **The `--push`-less degradation has not been measured**, only reasoned about.
+  Two readers on a service with no link will each populate their own copy of a
+  shared chat; whether that is worth a flag is a question for whoever runs one.
+- **Nothing tests eviction against ownership.** An owner has no bearing on the
+  LRU, which is correct, but a cache that is full of one person's private chats
+  will evict another person's shared ones on the ordinary rules.
+
+## Round R10b, part three: an admin page with no script in it (2026-09-22)
+
+### The gate is somebody else's authentication
+
+`/admin` is a list of gateway user ids and nothing more. Hermie Web does not
+issue a session for them, does not know what a valid cookie looks like, and does
+not cache the answer: the gate asks `/api/auth/me` with `{ fresh: true }` on
+every request, so an administrator removed a minute ago does not get one more
+write out of the fifteen-second memo the cache tee uses.
+
+The one exception is the deployment that has nobody to name. A token or ungated
+gateway answers `/api/auth/me` with the same identity for everybody, so a list
+of ids would be a list of one shared name — which is not a gate. Those get a
+local secret instead, scrypt with a per-credential salt, offered on `/setup` and
+stored as a hash. It unlocks the page and nothing else.
+
+**A reachable state worth knowing about:** a gateway that named nobody, set up
+without a secret, has no way into `/admin` short of editing `admin.json` on the
+host. The setup page says so at the moment of saving rather than leaving it to
+be discovered.
+
+### No script, on purpose
+
+`/setup` has an inline ES5 IIFE. `/admin` has nothing: every control is a
+`<form method="post">`. An admin page is what somebody opens when something is
+already wrong, and a page that needs JavaScript to render is a page that will
+not render on the day it is needed.
+
+The cost is the HTML form's own semantics, and it shows up in the tests: an
+unticked checkbox sends NOTHING, so every boolean is read as a whitelist and a
+form that posts partial state turns off what it does not mention. That is why
+the tests that flip flags put them back.
+
+### What "read-only" is, and what it is not
+
+Worth repeating here because it is the thing an operator could be misled by.
+ADR-0015 makes the gateway WebSocket a raw byte pipe — `upstreamSocket.pipe(socket)`
+in both directions — and everything the app does of consequence travels over it.
+Policing it would mean terminating the protocol and re-implementing the gateway's
+own contract inside a proxy, which is the opposite of what this process is for.
+
+So:
+
+- **push and the cache** are ours and are enforced completely;
+- **mutating HTTP** (`POST`/`PUT`/`PATCH`/`DELETE` to `/api/*`) is refused, which
+  covers uploads and the REST surface;
+- **prompts, approvals and `profiles.configure` are not touched.**
+
+The page says this in those words, beside the switches. A deployment that needs
+a real boundary needs two gateways, which is the same answer ADR-0025 already
+gives for two people who must not share a Bot Chat.
+
+### The user list is what we have seen, and says so
+
+Upstream documents no route for listing accounts — nothing in
+`gateway-contract.generated.ts`, nothing in `docs/web.md`, no `/api/auth/users`
+anywhere in this repository. Guessing at one would be this service inventing
+another project's API and then reading a 404 as "no users".
+
+So the list is the people who have signed in through this service, with when,
+noted on the proxy's own hot path at a minute's resolution. The page labels it
+rather than presenting it as the gateway's roster, because a short list that
+looks authoritative is worse than a short list that explains itself.
+
+### Branding is a starting point
+
+`name`, `accent` and `theme` ride in `/hermie/config.json`, which ADR-0025 had
+already made the app's bootstrap. The rule that makes them safe is that they are
+applied once, to a reader who has chosen nothing:
+
+- the **theme** is set only when this reader has no theme of their own on disk,
+  and the check is made after `hydrateAppearance` rather than against a store
+  still holding its seeded defaults — asking too early finds "the default" for
+  everybody and repaints the brand over a choice on every launch;
+- the **accent** stands in for `default`, which is what an uncoloured chat is,
+  so a chat the reader coloured is untouched by construction;
+- the **name** is not stored at all — it is read from the bootstrap on every
+  render, so an operator who changes it changes every tab on the next load.
+
+`setDefaultAccent` is a module value rather than a store, which is a deliberate
+exception: it is written exactly once, before the list paints, and a store would
+add a subscription to every row to carry something that cannot change.
+
+### What is unverified here
+
+- **No real gateway, and no browser.** The local-administrator sign-in, the
+  CSRF cookie's `SameSite=Strict` behaviour and the forms' redirects are
+  exercised by `fetch` with `redirect: 'manual'`, not by a browser.
+- **The push ceiling is unit-level.** `policy()` and `allowedTo()` are asserted
+  through the watcher's own filter; no notification has been withheld from a
+  real device by them.
+- **Cache retention is applied on change, not on a timer.** An operator who sets
+  48 hours and then never opens the page again has a sweep that ran once. The
+  size cap is still what bounds the cache; retention is a tidy-up, and the page
+  does not claim otherwise.
+- **Nobody has been removed from `admins` while holding an open page.** The gate
+  is fresh on every request, so the next click refuses — reasoned, not watched.

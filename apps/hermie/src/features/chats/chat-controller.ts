@@ -67,6 +67,8 @@ import {
   type Conversation,
   type ConversationGroups
 } from '../sessions/session-model'
+import type { ChatChoice } from '../user-chats/user-chat'
+import type { UserChatSwitch } from '../user-chats/user-chat-switch'
 import {
   fileReferenceFor,
   FileUploadError,
@@ -172,6 +174,14 @@ export interface ChatControllerOptions {
   http?: GatewayHttp | null
   cache?: ChatCache | null
   now?: () => number
+  /**
+   * Where the reader's own chats live (ADR-0007, amended).
+   *
+   * Only `chooseChat` reads it. Absent means this deployment offers no private
+   * chats, which is every session-token gateway with no owner identity and
+   * every build that predates them.
+   */
+  userChats?: UserChatSwitch | null
   /**
    * Somewhere to put a gateway refusal this controller decided to absorb.
    *
@@ -318,6 +328,7 @@ export class ChatController {
    * `assertDesktopContract`), and this is what stands in for it.
    */
   private knownContract: number | null = null
+  private readonly userChats: UserChatSwitch | null
 
   constructor(options: ChatControllerOptions) {
     this.gateway = options.gateway
@@ -327,6 +338,7 @@ export class ChatController {
     this.http = options.http ?? null
     this.cache = options.cache ?? null
     this.now = options.now ?? (() => Date.now())
+    this.userChats = options.userChats ?? null
     this.onRpcFailure = options.onRpcFailure
   }
 
@@ -2277,6 +2289,52 @@ export class ChatController {
   }
 
   /**
+   * Move this bot between the shared Bot Chat and the reader's own.
+   *
+   * The choice is remembered FIRST, because it is what every other reader of
+   * the roster consults — `BotsController.runResolution` among them — and a
+   * resolution that ran before it would resolve the chat the reader is leaving.
+   * It is put back if the gateway refuses, so a switch that did not happen does
+   * not leave a row claiming it did.
+   *
+   * The move itself is `switchCanonical`, unchanged and unaware: everything
+   * keyed by the old session is dropped, the roster is pinned to the new one,
+   * and the ordinary open path runs again. A chat that was already the chosen
+   * one is a no-op rather than a reload, because tapping the segment you are
+   * already on should not throw away the transcript you are reading.
+   */
+  async chooseChat(bot: Bot, choice: ChatChoice): Promise<void> {
+    const directory = this.userChats
+
+    if (!directory?.available) {
+      // No identity, no private chat, nothing to choose between. Said as a
+      // refusal rather than silently, because a caller that drew the switch on
+      // a gateway that has none has a bug worth hearing about.
+      throw new Error('This gateway has not said who you are, so there is only the shared Bot Chat.')
+    }
+
+    const was = directory.chose(bot.name) ? 'mine' : 'shared'
+
+    if (was === choice) {
+      return
+    }
+
+    directory.remember(bot.name, choice)
+
+    let target: BotCanonicalSession
+
+    try {
+      target = choice === 'mine' ? await directory.resolve(bot) : await this.botsController.resolveShared(bot)
+    } catch (error) {
+      directory.remember(bot.name, was)
+
+      throw error
+    }
+
+    await this.switchCanonical(bot, target)
+  }
+
+  /**
    * Point this bot at a different canonical chat and open it.
    *
    * Everything keyed by the OLD session or by the bot is dropped and the normal
@@ -2453,11 +2511,23 @@ export class ChatController {
     })
 
     const canonical = this.bots.getState().byName[botName]?.canonical
+    const mine = this.userChats?.cached(botName) ?? null
+    /*
+      The roster's `canonical` is PINNED to the private chat while this bot is
+      switched to "My chat" (`BotsController.placeUserChats`), so handing it in
+      as the canonical id would name the wrong row — and would leave the real
+      `Bot Chat` in `past`, where Delete is offered. When the two are the same
+      session, no id is passed and the classifier falls back to the title, which
+      is the canonical chat's identity anyway.
+    */
+    const shared = mine && canonical?.id === mine.id ? null : canonical
 
     return classifyConversations({
       rows: (result?.sessions ?? []) as SessionListRow[],
-      ...(canonical?.id ? { canonicalId: canonical.id } : {}),
-      ...(canonical?.resolvedId ? { canonicalResolvedId: canonical.resolvedId } : {})
+      ...(shared?.id ? { canonicalId: shared.id } : {}),
+      ...(shared?.resolvedId ? { canonicalResolvedId: shared.resolvedId } : {}),
+      ...(mine?.id ? { userChatId: mine.id } : {}),
+      ...(this.userChats?.title ? { userChatTitle: this.userChats.title } : {})
     })
   }
 

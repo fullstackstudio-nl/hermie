@@ -13,6 +13,7 @@ import { AppState, type AppStateStatus, Text } from 'react-native'
 import { ChatRuntimeProvider } from '../src/features/chats/ChatRuntime'
 
 const mockRefresh = jest.fn(async () => [])
+const mockPlaceUserChats = jest.fn(async () => undefined)
 const mockPaintFromCache = jest.fn(async () => undefined)
 const mockOnForeground = jest.fn(async () => undefined)
 const mockOnBackground = jest.fn()
@@ -37,9 +38,18 @@ jest.mock('../src/gateway/link', () => ({
 }))
 
 jest.mock('../src/features/bots/bots-controller', () => ({
+  // The three the private-chat directory reads off this module; the mock
+  // replaces the whole of it, so leaving them out makes a title with
+  // `undefined` in it rather than a failure anyone would notice.
+  CANONICAL_CHAT_TITLE: 'Bot Chat',
+  PROFILE_SESSION_LIST_LIMIT: 200,
+  SESSION_COLUMNS: 96,
   BotsController: class {
     paintFromCache = mockPaintFromCache
     refresh = mockRefresh
+    // ADR-0007, amended: the runtime re-points the roster at the reader's own
+    // chats once the identity and the arrangement are both in.
+    placeUserChats = mockPlaceUserChats
     dispose = jest.fn()
   }
 }))

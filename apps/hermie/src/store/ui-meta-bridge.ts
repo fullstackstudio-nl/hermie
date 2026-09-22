@@ -103,6 +103,17 @@ export interface HermieAppShape extends HermieAppSection {
    */
   pinned?: string[]
   /**
+   * Which bots this reader opens as a chat of their own (ADR-0007, amended).
+   *
+   * Here rather than on each bot's own profile for the reason `mutes` gives
+   * below, only more so: whose transcript somebody is in is the most personal
+   * thing in the section. The key is already `hermie-app:<user_id>`, so this
+   * field is per account by construction rather than by care.
+   *
+   * ADDITIVE, and the section version deliberately stays at 1 — see `pinned`.
+   */
+  myChats?: string[]
+  /**
    * Which chats are silent, and until when.
    *
    * Here rather than on each bot's own profile because a mute is about the
@@ -215,6 +226,9 @@ export function snapshotFromStores(): UiMetaSnapshot {
     // reads as "this build knows nothing about pins" rather than as "there are
     // none".
     pinned: Object.keys(layout.pinned),
+    // Always sent, empty included, for the same reason: a reader who moves
+    // their last chat back to the shared one has to be able to say so.
+    myChats: Object.keys(layout.myChats),
     // Always sent, empty included: a reader who unmutes their last chat has to
     // be able to say so, and an omitted key reads as "this device knows
     // nothing about mutes" rather than as "there are none".
@@ -302,6 +316,11 @@ export function applySnapshot(snapshot: UiMetaSnapshot): void {
     // about pins, and taking that as "none" would unpin everything.
     ...(Array.isArray(app?.pinned)
       ? { pinned: app.pinned.filter((name): name is string => typeof name === 'string' && name.length > 0) }
+      : {}),
+    // And again: a build that predates the field says nothing about which
+    // chats are this reader's own, which is not the same as saying none.
+    ...(Array.isArray(app?.myChats)
+      ? { myChats: app.myChats.filter((name): name is string => typeof name === 'string' && name.length > 0) }
       : {}),
     archived,
     accents

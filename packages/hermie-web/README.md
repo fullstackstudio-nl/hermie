@@ -80,16 +80,73 @@ What that means for an operator:
 
 - **This is transcript content on your disk**, not just a credential. The state directory is `0700`
   with `0600` files, and `--cache-max-mb 0` turns the whole thing off.
-- **Entries are per gateway, not per person.** The gateway offers no field saying who owns a
-  session, so there is nothing to key on — and by ADR-0007 the canonical Bot Chat is shared among
-  everyone who can reach that bot anyway. The read route still demands the caller's own gateway
-  session on a gated gateway.
+- **A shared Bot Chat is cached for everybody; a private chat is cached for one person.** Since
+  ADR-0007's amendment a bot has two kinds of conversation, so every entry carries whose it is. The
+  ones the `--push` link resumes are the canonical Bot Chats and stay shared; a transcript captured
+  off a proxied read is stored under the reader the gateway names and comes back to that reader
+  alone — as a miss for anybody else, because a refusal would also say the chat exists. The read
+  route still demands the caller's own gateway session on a gated gateway.
+- **Without `--push` every captured entry belongs to its reader.** With no gateway link there is
+  nothing that can tell a shared chat from a private one, so the safe reading is taken: a second
+  person's first open of a shared chat is cold, which is where it was before this cache existed. An
+  ungated gateway has nobody to name and its entries stay shared.
 - **Eviction is least-recently-read**, up to `--cache-max-mb`, default 64.
-- **Without `--push` it still works**, filled by proxied reads alone: a chat somebody has opened is
-  a chat the next person opens instantly.
+- **Without `--push` it still works**, filled by proxied reads alone: a chat you have opened is a
+  chat your next device opens instantly.
 
 [ADR-0025](https://github.com/fullstackstudio-nl/hermie/blob/main/docs/adr/0025-hermie-web-is-a-service-layer.md)
 has the reasoning.
+
+## Administration
+
+A configured service serves **`/admin`**: what it is running, what it will send, what it keeps, how
+this team's build looks, and what it will do for each person who signs in through it.
+
+**Who gets in.** A gateway user id on this service's own list. Whoever completes `/setup` is added
+automatically — that is the one moment the process can point at somebody without being told — and
+others are added on the page. The gate is the gateway's `/api/auth/me`, asked fresh on every
+request: this service issues no session of its own and has no user database, which is the same rule
+`/hermie/update` and the cache route already follow.
+
+**A gateway with no accounts** names everybody the same thing, so an id list would be a list of one.
+Setup can take an **administrator secret** instead, stored as a scrypt hash and never shown back. A
+deployment on such a gateway with no secret has no way into `/admin` short of editing `admin.json`;
+the setup page says so when it saves.
+
+**The page is HTML with no script in it.** Every control is a form that posts, changes one thing and
+redirects, with a double-submit CSRF token checked before the body is read. Nothing secret is
+rendered — not the VAPID private key, not the service refresh token, not the secret above — only
+whether each exists.
+
+### What it can set
+
+| Panel         | What it changes                                                                                                                                                              |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Service       | Shows the version, the service login, the push daemon, the VAPID key, cache size and hit rate; **Update and restart** runs the same self-update the app's Settings row does. |
+| Push          | Which event types this service will send at all, and whether a notification may carry message text. A ceiling on what devices asked for, never a second opt-in.              |
+| Message cache | How long an unread entry is kept (`0` = only the size cap), and **Clear the cache now**.                                                                                     |
+| Branding      | A name, an accent and a starting theme, served in `/hermie/config.json` and read by the app before it draws. A starting point, never an override.                            |
+| Features      | Turn private chats, the message cache or the update button off for everybody on this deployment.                                                                             |
+| People        | Everyone this service has seen sign in, with per-person options.                                                                                                             |
+
+### The per-person options, and their honest limit
+
+They are **service-level settings, not gateway permissions**. The gateway has none to set, and this
+service can only decide what it does itself:
+
+- **Push allowed** and **allowed bots** are enforced completely. The daemon and the cache are this
+  service's own, so nothing is sent and nothing is served outside them.
+- **Read-only** refuses every mutating request that arrives over HTTP — the REST surface and file
+  uploads.
+- **Read-only does not police the gateway WebSocket**, which is a raw byte pipe by design and
+  carries prompts, approvals and profile changes. It is a guard rail against accident, not a
+  boundary against intent. A deployment that needs the second thing needs two gateways.
+
+### The people list
+
+It is **who has signed in through this service**, with when — not the gateway's account list.
+Upstream documents no route for listing accounts, and guessing at one would mean reading a 404 as
+"no users". The page labels which of the two it is showing.
 
 ## Documentation
 

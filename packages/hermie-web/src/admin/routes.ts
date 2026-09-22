@@ -1,0 +1,441 @@
+/**
+ * `/admin` and its forms, as one handler the server hands a request to.
+ *
+ * Kept out of `server.ts` because that file is already the routing table for
+ * three other things, and because everything here shares one shape: read the
+ * state, check the gate, check the token, change exactly one thing, redirect.
+ *
+ * The order of the checks is load-bearing and is the same on every POST:
+ *
+ *  1. **The gate**, freshly — `/api/auth/me` with `{ fresh: true }`, so an
+ *     administrator who was removed or signed out a minute ago does not get one
+ *     more write out of a memo.
+ *  2. **The CSRF token**, before the body is parsed, so a cross-site post costs
+ *     nothing and reaches nothing.
+ *  3. **The change**, one per route, then a redirect with a notice. A redirect
+ *     rather than a rendered answer, because a reload of a rendered POST is the
+ *     way an operator repeats an action they only meant once.
+ */
+import type { IncomingMessage, ServerResponse } from 'node:http'
+
+import type { GatewayIdentity, IdentityReader } from '../identity'
+import { isSecureRequest } from '../proxy'
+import { PUSH_TYPES, type PushType } from '../push/registrations'
+import { isAdminIdentity, localSecretMatches, withAdmin, withoutAdmin } from './access'
+import { adminForbiddenPage, adminPage, adminSignInPage, type AdminStatus } from './page'
+import {
+  ADMIN_SESSION_COOKIE,
+  AdminSessions,
+  CSRF_COOKIE,
+  CSRF_FIELD,
+  cookieOf,
+  newToken,
+  setCookie,
+  tokensMatch
+} from './session'
+import { saveAdminState, type AdminState } from './state'
+
+/** At most 64 KiB of form body. More than that is not one of these forms. */
+const MAX_FORM_BYTES = 64 * 1024
+
+export interface AdminRouterOptions {
+  stateDir: string
+  /**
+   * The state as the SERVER holds it, not as the file has it.
+   *
+   * There is one authority in this process and it is the variable in
+   * `startHermieWeb`. The router used to re-read the file on every request,
+   * which is a second authority and therefore a race: `noteSeen` updates memory
+   * synchronously and writes the file in the background, so a page rendered in
+   * between showed a list that was one visitor out of date.
+   */
+  read: () => AdminState
+  gatewayUrl: () => string
+  identities: IdentityReader
+  /** Everything the status panel reports. Read fresh on every render. */
+  status: () => Promise<AdminStatus>
+  /** Bot names for the allow-list placeholder; `[]` where the roster is unknown. */
+  bots: () => string[]
+  /** Clear the message cache. The one action that is not a settings write. */
+  clearCache: () => Promise<void>
+  /** Run the self-update. Answers a message; the page shows it. */
+  update: () => Promise<string>
+  /** Told whenever the state changed, so the server can re-read what it caches. */
+  onChanged: (state: AdminState) => void
+  sessions?: AdminSessions
+}
+
+async function readForm(request: IncomingMessage): Promise<URLSearchParams> {
+  const chunks: Buffer[] = []
+  let size = 0
+
+  for await (const chunk of request) {
+    const buffer = chunk as Buffer
+    size += buffer.length
+
+    if (size > MAX_FORM_BYTES) {
+      throw new Error('the request body is too large')
+    }
+
+    chunks.push(buffer)
+  }
+
+  return new URLSearchParams(Buffer.concat(chunks).toString('utf8'))
+}
+
+const checked = (form: URLSearchParams, name: string): boolean => form.get(name) === '1'
+
+export class AdminRouter {
+  private readonly sessions: AdminSessions
+
+  constructor(private readonly options: AdminRouterOptions) {
+    this.sessions = options.sessions ?? new AdminSessions()
+  }
+
+  /** Every path this router owns. Checked before the proxy sees the request. */
+  owns(pathname: string): boolean {
+    return pathname === '/admin' || pathname.startsWith('/admin/')
+  }
+
+  async handle(request: IncomingMessage, response: ServerResponse, url: URL): Promise<void> {
+    const method = (request.method ?? 'GET').toUpperCase()
+    const state = this.options.read()
+    const identity = await this.options.identities.read({
+      gatewayUrl: this.options.gatewayUrl(),
+      cookie: request.headers.cookie,
+      fresh: true
+    })
+
+    // The local sign-in is the one route reachable without being an
+    // administrator yet, and only on a service that has a secret to check.
+    if (url.pathname === '/admin/sign-in') {
+      await this.signIn(request, response, state, method)
+
+      return
+    }
+
+    if (!this.allowed(request, state, identity)) {
+      await this.refuse(response, state, identity)
+
+      return
+    }
+
+    if (method === 'GET') {
+      await this.render(request, response, state, identity, url.searchParams.get('notice') ?? '')
+
+      return
+    }
+
+    if (method !== 'POST') {
+      this.json(response, 405, { error: 'method_not_allowed' })
+
+      return
+    }
+
+    let form: URLSearchParams
+
+    try {
+      form = await this.checkedForm(request)
+    } catch (error) {
+      this.json(response, 403, { error: 'bad_request', detail: (error as Error).message })
+
+      return
+    }
+
+    await this.apply(response, state, identity, url.pathname, form)
+  }
+
+  /** Whether this request may see the page at all. */
+  private allowed(request: IncomingMessage, state: AdminState, identity: GatewayIdentity | null): boolean {
+    if (isAdminIdentity(state, identity)) {
+      return true
+    }
+
+    return Boolean(state.localAdmin) && this.sessions.has(cookieOf(request.headers.cookie, ADMIN_SESSION_COOKIE))
+  }
+
+  private async refuse(response: ServerResponse, state: AdminState, identity: GatewayIdentity | null): Promise<void> {
+    if (state.localAdmin) {
+      // A deployment with a local secret offers the way in rather than a wall:
+      // its whole point is that there is no gateway account to recognise.
+      this.html(response, 401, adminSignInPage({ csrf: this.mintCsrf(response, false), notice: '' }))
+
+      return
+    }
+
+    this.html(response, 403, adminForbiddenPage(identity?.userId ?? ''))
+  }
+
+  private async signIn(
+    request: IncomingMessage,
+    response: ServerResponse,
+    state: AdminState,
+    method: string
+  ): Promise<void> {
+    if (method !== 'POST' || !state.localAdmin) {
+      this.json(response, 404, { error: 'not_found' })
+
+      return
+    }
+
+    let form: URLSearchParams
+
+    try {
+      form = await this.checkedForm(request)
+    } catch (error) {
+      this.json(response, 403, { error: 'bad_request', detail: (error as Error).message })
+
+      return
+    }
+
+    if (!localSecretMatches(state, form.get('secret') ?? '')) {
+      // The same page again, with the same generic line. Nothing here says
+      // whether a secret exists, how long it is, or how close this one was.
+      this.html(
+        response,
+        401,
+        adminSignInPage({
+          csrf: this.mintCsrf(response, isSecureRequest(request)),
+          notice: 'That secret was not right.'
+        })
+      )
+
+      return
+    }
+
+    const value = this.sessions.create()
+
+    response.writeHead(303, {
+      location: '/admin',
+      'cache-control': 'no-store',
+      'set-cookie': [
+        setCookie(ADMIN_SESSION_COOKIE, value, { secure: isSecureRequest(request), httpOnly: true }),
+        setCookie(CSRF_COOKIE, newToken(), { secure: isSecureRequest(request), httpOnly: false })
+      ]
+    })
+    response.end()
+  }
+
+  /** The body, but only once the double-submit token has matched. */
+  private async checkedForm(request: IncomingMessage): Promise<URLSearchParams> {
+    const cookie = cookieOf(request.headers.cookie, CSRF_COOKIE)
+    const form = await readForm(request)
+
+    if (!tokensMatch(cookie, form.get(CSRF_FIELD) ?? '')) {
+      throw new Error('that form did not carry this page’s token')
+    }
+
+    return form
+  }
+
+  private async render(
+    request: IncomingMessage,
+    response: ServerResponse,
+    state: AdminState,
+    identity: GatewayIdentity | null,
+    notice: string
+  ): Promise<void> {
+    this.html(
+      response,
+      200,
+      adminPage({
+        state,
+        status: await this.options.status(),
+        csrf: this.mintCsrf(response, isSecureRequest(request)),
+        bots: this.options.bots(),
+        viewer: identity?.userId ?? '',
+        notice
+      })
+    )
+  }
+
+  private async apply(
+    response: ServerResponse,
+    state: AdminState,
+    identity: GatewayIdentity | null,
+    pathname: string,
+    form: URLSearchParams
+  ): Promise<void> {
+    switch (pathname) {
+      case '/admin/push': {
+        const types = Object.fromEntries(PUSH_TYPES.map(type => [type, checked(form, `type-${type}`)])) as Record<
+          PushType,
+          boolean
+        >
+
+        await this.save(response, {
+          ...state,
+          push: { types, preview: form.get('preview') === 'never' ? 'never' : 'device' }
+        })
+
+        return
+      }
+
+      case '/admin/cache': {
+        if (form.get('clear') === '1') {
+          await this.options.clearCache()
+          this.done(response, 'The message cache was cleared.')
+
+          return
+        }
+
+        const hours = Math.max(0, Math.floor(Number(form.get('retentionHours') ?? 0) || 0))
+
+        await this.save(response, { ...state, cache: { retentionHours: hours } })
+
+        return
+      }
+
+      case '/admin/branding':
+        await this.save(response, {
+          ...state,
+          branding: {
+            name: (form.get('name') ?? '').trim().slice(0, 64),
+            accent: (form.get('accent') ?? '').trim().slice(0, 32),
+            theme: (form.get('theme') ?? '').trim().slice(0, 32)
+          }
+        })
+
+        return
+
+      case '/admin/flags':
+        await this.save(response, {
+          ...state,
+          flags: {
+            userChats: checked(form, 'userChats'),
+            messageCache: checked(form, 'messageCache'),
+            selfUpdate: checked(form, 'selfUpdate')
+          }
+        })
+
+        return
+
+      case '/admin/user':
+        await this.saveUser(response, state, identity, form)
+
+        return
+
+      case '/admin/update': {
+        const message = await this.options.update().catch((error: unknown) => String(error))
+
+        this.done(response, message)
+
+        return
+      }
+
+      default:
+        this.json(response, 404, { error: 'not_found' })
+    }
+  }
+
+  private async saveUser(
+    response: ServerResponse,
+    state: AdminState,
+    identity: GatewayIdentity | null,
+    form: URLSearchParams
+  ): Promise<void> {
+    const userId = (form.get('userId') ?? '').trim()
+
+    if (!userId) {
+      this.done(response, 'A person needs a gateway user id.')
+
+      return
+    }
+
+    const raw = (form.get('allowedBots') ?? '').trim()
+    const held = state.users[userId]
+    const next: AdminState = {
+      ...state,
+      users: {
+        ...state.users,
+        [userId]: {
+          userId,
+          displayName: held?.displayName ?? '',
+          email: held?.email ?? '',
+          seenAt: held?.seenAt ?? 0,
+          // Blank is "every bot" and a list is a list. There is no way to say
+          // "no bots" by typing nothing, which is the right way round: the
+          // accident an operator can have is emptying a field.
+          allowedBots: raw
+            ? raw
+                .split(',')
+                .map(name => name.trim())
+                .filter(Boolean)
+            : null,
+          readOnly: checked(form, 'readOnly'),
+          pushAllowed: checked(form, 'pushAllowed')
+        }
+      }
+    }
+
+    const wantsAdmin = checked(form, 'admin')
+    const isAdmin = state.admins.includes(userId)
+
+    if (wantsAdmin && !isAdmin) {
+      await this.save(response, withAdmin(next, userId))
+
+      return
+    }
+
+    if (!wantsAdmin && isAdmin) {
+      const { state: after, removed } = withoutAdmin(next, userId)
+
+      await this.save(
+        response,
+        after,
+        removed
+          ? userId === identity?.userId
+            ? 'Saved. You are no longer an administrator of this service.'
+            : 'Saved.'
+          : 'Saved, but the last administrator cannot be removed.'
+      )
+
+      return
+    }
+
+    await this.save(response, next)
+  }
+
+  private async save(response: ServerResponse, state: AdminState, notice = 'Saved.'): Promise<void> {
+    await saveAdminState(this.options.stateDir, state)
+    this.options.onChanged(state)
+    this.done(response, notice)
+  }
+
+  /** One mint per render, so a token never outlives the page that carries it. */
+  private mintCsrf(response: ServerResponse, secure: boolean): string {
+    const value = newToken()
+
+    response.setHeader('set-cookie', setCookie(CSRF_COOKIE, value, { secure, httpOnly: false }))
+
+    return value
+  }
+
+  private done(response: ServerResponse, notice: string): void {
+    response.writeHead(303, { location: `/admin?notice=${encodeURIComponent(notice)}`, 'cache-control': 'no-store' })
+    response.end()
+  }
+
+  private html(response: ServerResponse, status: number, body: string): void {
+    const existing = response.getHeader('set-cookie')
+
+    response.writeHead(status, {
+      'content-type': 'text/html; charset=utf-8',
+      'content-length': String(Buffer.byteLength(body)),
+      'cache-control': 'no-store',
+      ...(existing ? { 'set-cookie': existing as string | string[] } : {})
+    })
+    response.end(body)
+  }
+
+  private json(response: ServerResponse, status: number, body: unknown): void {
+    const payload = JSON.stringify(body)
+
+    response.writeHead(status, {
+      'content-type': 'application/json; charset=utf-8',
+      'content-length': String(Buffer.byteLength(payload)),
+      'cache-control': 'no-store'
+    })
+    response.end(payload)
+  }
+}

@@ -262,3 +262,59 @@ different — at which point being re-seeded is the correct outcome rather than 
 `folders`, `botNameOrder`, `textSize`, `push.perBot` and now `pinned` all follow this rule.
 `apps/hermie/__tests__/pinned-chats.test.ts` asserts the version is still 1, so the decision has to
 be taken again deliberately rather than by accident.
+
+## Amendment (2026-09-22): the same key, read through a service
+
+[ADR-0025](0025-hermie-web-is-a-service-layer.md) turned Hermie Web from a proxy into a process that
+holds state on behalf of readers it has no user database for. That raises a question this record did
+not have to answer before: **when several people use one Hermie Web, whose settings does it carry?**
+
+### What was checked, and what it found
+
+The answer is "each person's own, and the service does nothing to make that true", which is the
+right answer but worth stating rather than assuming:
+
+- **The key is named by the browser, not by the service.** The app reads `/api/auth/me` through the
+  proxy with its own cookie, gets its own `user_id` back, and writes `hermie-app:<user_id>`. Two
+  tabs signed in as two people name two keys without Hermie Web knowing either of them.
+- **`profiles.configure` is carried, never rewritten.** The proxy pipes the request body and the
+  WebSocket frames byte for byte; there is no code path that could merge, reorder or attribute a
+  write. Per-key compare-and-swap therefore behaves through the proxy exactly as it does on a
+  socket to the gateway.
+- **The per-BOT key `hermie` is still shared**, and that is unchanged and correct: `archived` and
+  `colour` describe the bot.
+- **The service's own caches are per gateway** and hold nothing of anybody's settings. The identity
+  memo (`identity.ts`) is keyed by the whole cookie and lives fifteen seconds.
+
+**One thing was found, and it was introduced by the same round.** [ADR-0007](0007-canonical-bot-chats-only.md)'s
+amendment gives each person a private conversation on each bot. ADR-0025 wrote that message-cache
+entries are "per gateway, not per user, and that is written down rather than hidden", on the grounds
+that the only conversation a bot had was one ADR-0007 already made shared. That reasoning expired the
+moment a second kind of conversation existed: a private transcript read through the proxy landed in a
+cache any other signed-in reader could ask for by session id.
+
+So **cache entries now carry an owner**. The service link's own writes are the canonical Bot Chats
+and stay shared; a proxied transcript read is stored under the reader the gateway names, and is
+served back to that reader alone — as a miss rather than a refusal, because a refusal also confirms
+that the conversation exists. A private entry is never aliased by the bot's name, because
+`/hermie/cache/<bot>` means "this bot's shared chat".
+
+The cost is the honest one: **without `--push` there is no service link, so Hermie Web cannot tell a
+shared chat from a private one and keys every proxied capture to its reader.** A second person's
+first open of a shared chat is then cold, which is where it was before ADR-0025. An ungated gateway
+has nobody to name and its entries stay shared, which is the only behaviour a gateway with no
+accounts can have.
+
+### What is verified
+
+`packages/hermie-web/src/users/isolation.test.ts`, over real sockets through the real proxy with two
+cookie sessions belonging to two accounts: that each is answered with their own identity, that their
+app-wide sections land in separate keys and neither write touches the other's, that one reader's
+revision moves while the other's stands still, that the per-bot section is still shared, and that a
+private chat cached from one reader's transcript read comes back to them and is a miss for the other.
+`packages/hermie-web/src/cache.test.ts` pins the ownership rules themselves, including that a
+canonical chat stays shared however many people read it and that an owner survives a restart.
+`packages/hermie-web/src/identity.test.ts` pins the ladder and the memo.
+
+The fake gateway's `/api/auth/me` answered a fixed tester until this round; it now answers the
+caller, which is what upstream does and what makes any of the above mean anything.

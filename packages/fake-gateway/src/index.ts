@@ -1,4 +1,5 @@
 export {
+  type FakeAccount,
   type FakeAuthMode,
   type FakeGateway,
   type FakeGatewayOptions,

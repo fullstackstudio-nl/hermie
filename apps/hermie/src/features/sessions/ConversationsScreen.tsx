@@ -42,12 +42,14 @@ import { Pressable, ScrollView, View } from 'react-native'
 
 import { chatStrings } from '../../chat-ui/strings'
 import { strings } from '../../i18n/strings'
-import { useBotDisplayName } from '../../store/bots'
+import { useBotsStore, useBotDisplayName } from '../../store/bots'
+import { useMyChat } from '../../store/chat-layout'
 import { Button, Screen, Text, TextField } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { CONTROL_MIN_HEIGHT } from '../../ui/tokens'
 import { useChatRuntime } from '../chats/ChatRuntime'
 import { relativeEpoch } from '../cron/model'
+import { ChatChoiceRow } from '../user-chats'
 import { conversationActions, type Conversation, type ConversationGroups } from './session-model'
 
 export interface ConversationsScreenProps {
@@ -68,10 +70,13 @@ export function ConversationsScreen({ botName, onBack, onOpenConversation }: Con
   const theme = useTheme()
   const runtime = useChatRuntime()
   const display = useBotDisplayName(botName)
+  const mine = useMyChat(botName)
+  const bot = useBotsStore(store => store.byName[botName])
   const [state, setState] = useState<LoadState>({ kind: 'loading' })
   const [mode, setMode] = useState<RowMode>(null)
   const [notice, setNotice] = useState<string>('')
   const controller = runtime?.controller
+  const userChats = runtime?.userChats ?? null
 
   const load = useCallback(async () => {
     if (!controller) {
@@ -148,6 +153,40 @@ export function ConversationsScreen({ botName, onBack, onOpenConversation }: Con
           <Text color="dangerText" testID="conversations-failed" variant="preview">
             {state.message}
           </Text>
+        ) : null}
+
+        {/*
+          The switch sits ABOVE the groups, because it decides which of them the
+          bot's row in the chat list opens — it is not one of the conversations,
+          it is the question the list below is an answer to.
+        */}
+        <ChatChoiceRow
+          available={Boolean(controller && bot && userChats?.available)}
+          choice={mine ? 'mine' : 'shared'}
+          onChoose={async choice => {
+            if (!bot) {
+              return
+            }
+
+            await controller?.chooseChat(bot, choice)
+            await load()
+          }}
+          onFailed={setNotice}
+          testID="conversations-choice"
+        />
+
+        {groups?.mine ? (
+          <Group title={chatStrings.sessions.mineGroup}>
+            <Row
+              conversation={groups.mine}
+              mode={mode}
+              onAdopt={() => undefined}
+              onDelete={() => undefined}
+              onOpen={() => onOpenConversation?.(botName, groups.mine?.id ?? '')}
+              onRename={() => undefined}
+              setMode={setMode}
+            />
+          </Group>
         ) : null}
 
         {groups?.canonical ? (

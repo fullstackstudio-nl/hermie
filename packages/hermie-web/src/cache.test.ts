@@ -48,6 +48,7 @@ describe('the transcript cache', () => {
     await cache.put({
       sessionId: 'tip-1',
       bot: 'researcher',
+      owner: '',
       storedId: 'stored-1',
       shape: 'rest',
       rows: rows(3),
@@ -67,6 +68,7 @@ describe('the transcript cache', () => {
     await cache.put({
       sessionId: 'tip-1',
       bot: 'researcher',
+      owner: '',
       storedId: 'stored-1',
       shape: 'rest',
       rows: rows(2),
@@ -85,6 +87,7 @@ describe('the transcript cache', () => {
     await cache.put({
       sessionId: 'tip-1',
       bot: 'researcher',
+      owner: '',
       storedId: '',
       shape: 'rest',
       rows: rows(CACHE_ROW_LIMIT + 50),
@@ -98,9 +101,129 @@ describe('the transcript cache', () => {
     expect(entry?.rows.at(-1)).toMatchObject({ row_id: CACHE_ROW_LIMIT + 49 })
   })
 
+  it('serves an owned entry to its owner and nobody else', async () => {
+    const cache = open()
+    await cache.put({
+      sessionId: 'tip-mine',
+      bot: '',
+      owner: 'ada@example.invalid',
+      storedId: 'stored-mine',
+      shape: 'rest',
+      rows: rows(2),
+      updatedAt: 1
+    })
+
+    expect(await cache.get('tip-mine', 'ada@example.invalid')).toBeTruthy()
+    // A MISS, not an error: the seam's contract is "paint if there is
+    // something", and a refusal would also confirm the chat exists.
+    expect(await cache.get('tip-mine', 'grace@example.invalid')).toBeNull()
+    expect(await cache.get('tip-mine')).toBeNull()
+  })
+
+  it('never lets an owned entry answer to the bot’s own name', async () => {
+    const cache = open()
+    await cache.put({
+      sessionId: 'tip-mine',
+      // A writer that knows BOTH — which nothing does today, and which is
+      // exactly why the rule is in the cache rather than in its callers.
+      bot: 'researcher',
+      owner: 'ada@example.invalid',
+      storedId: 'stored-mine',
+      shape: 'rest',
+      rows: rows(2),
+      updatedAt: 1
+    })
+
+    // `/hermie/cache/<bot>` means "this bot's SHARED chat": it is what the seam
+    // asks when all it holds is a profile name.
+    expect(await cache.get('researcher', 'ada@example.invalid')).toBeNull()
+    expect(await cache.get('tip-mine', 'ada@example.invalid')).toBeTruthy()
+  })
+
+  it('keeps a canonical chat shared however many people read it', async () => {
+    const cache = open()
+    // The service link resumes the Bot Chat for push and names the bot.
+    await cache.put({
+      sessionId: 'tip-shared',
+      bot: 'researcher',
+      owner: '',
+      storedId: 'stored-shared',
+      shape: 'rpc',
+      rows: rows(2),
+      updatedAt: 1
+    })
+    // Then a reader fetches the same transcript over REST, and the tee — which
+    // cannot tell the two kinds apart — offers its own name for it.
+    await cache.put({
+      sessionId: 'tip-shared',
+      bot: '',
+      owner: 'ada@example.invalid',
+      storedId: '',
+      shape: 'rest',
+      rows: rows(3),
+      updatedAt: 2
+    })
+
+    expect((await cache.get('tip-shared', 'grace@example.invalid'))?.rows).toHaveLength(3)
+    expect((await cache.get('researcher', 'grace@example.invalid'))?.rows).toHaveLength(3)
+  })
+
+  it('does not let a shared entry launder a private one', async () => {
+    const cache = open()
+    await cache.put({
+      sessionId: 'tip-mine',
+      bot: '',
+      owner: 'ada@example.invalid',
+      storedId: '',
+      shape: 'rest',
+      rows: rows(2),
+      updatedAt: 1
+    })
+    // A second reader of the SAME private session. The owner is replaced, not
+    // widened: the entry describes the bytes that were last written.
+    await cache.put({
+      sessionId: 'tip-mine',
+      bot: '',
+      owner: 'grace@example.invalid',
+      storedId: '',
+      shape: 'rest',
+      rows: rows(4),
+      updatedAt: 2
+    })
+
+    expect(await cache.get('tip-mine', 'ada@example.invalid')).toBeNull()
+    expect((await cache.get('tip-mine', 'grace@example.invalid'))?.rows).toHaveLength(4)
+  })
+
+  it('carries the owner across a restart', async () => {
+    const first = open()
+    await first.put({
+      sessionId: 'tip-mine',
+      bot: '',
+      owner: 'ada@example.invalid',
+      storedId: '',
+      shape: 'rest',
+      rows: rows(2),
+      updatedAt: 1
+    })
+
+    const second = open()
+
+    expect(await second.get('tip-mine', 'grace@example.invalid')).toBeNull()
+    expect(await second.get('tip-mine', 'ada@example.invalid')).toBeTruthy()
+  })
+
   it('stores nothing for an answer with no rows in it', async () => {
     const cache = open()
-    await cache.put({ sessionId: 'tip-1', bot: 'researcher', storedId: '', shape: 'rest', rows: [], updatedAt: 1 })
+    await cache.put({
+      sessionId: 'tip-1',
+      bot: 'researcher',
+      owner: '',
+      storedId: '',
+      shape: 'rest',
+      rows: [],
+      updatedAt: 1
+    })
 
     // A gateway that answered nothing is not a chat with nothing in it, and
     // writing the second for the first would paint an empty thread over a
@@ -114,13 +237,22 @@ describe('the transcript cache', () => {
     await cache.put({
       sessionId: 'tip-1',
       bot: 'researcher',
+      owner: '',
       storedId: 'stored-1',
       shape: 'rest',
       rows: rows(2),
       updatedAt: 1
     })
     // The proxy tee sees a session id and nothing else.
-    await cache.put({ sessionId: 'tip-1', bot: '', storedId: '', shape: 'rest', rows: rows(4), updatedAt: 2 })
+    await cache.put({
+      sessionId: 'tip-1',
+      bot: '',
+      owner: '',
+      storedId: '',
+      shape: 'rest',
+      rows: rows(4),
+      updatedAt: 2
+    })
 
     const entry = await cache.get('tip-1')
 
@@ -131,7 +263,15 @@ describe('the transcript cache', () => {
 
   it('survives a restart, because the index is on disk beside the entries', async () => {
     const first = open()
-    await first.put({ sessionId: 'tip-1', bot: 'researcher', storedId: '', shape: 'rpc', rows: rows(2), updatedAt: 5 })
+    await first.put({
+      sessionId: 'tip-1',
+      bot: 'researcher',
+      owner: '',
+      storedId: '',
+      shape: 'rpc',
+      rows: rows(2),
+      updatedAt: 5
+    })
 
     const second = open()
 
@@ -141,7 +281,15 @@ describe('the transcript cache', () => {
 
   it('starts empty rather than refusing to run on an index it cannot read', async () => {
     const broken = open()
-    await broken.put({ sessionId: 'tip-1', bot: 'a', storedId: '', shape: 'rest', rows: rows(1), updatedAt: 1 })
+    await broken.put({
+      sessionId: 'tip-1',
+      bot: 'a',
+      owner: '',
+      storedId: '',
+      shape: 'rest',
+      rows: rows(1),
+      updatedAt: 1
+    })
     await broken.clear()
 
     expect(await open().get('tip-1')).toBeNull()
@@ -154,16 +302,40 @@ describe('eviction', () => {
     // Each of these is a shade over 2 kB, so there is room for two and not three.
     const cache = open({ maxBytes: 5000, now: () => clock })
 
-    await cache.put({ sessionId: 'a', bot: 'a', storedId: '', shape: 'rest', rows: fatRows(1), updatedAt: 1 })
+    await cache.put({
+      sessionId: 'a',
+      bot: 'a',
+      owner: '',
+      storedId: '',
+      shape: 'rest',
+      rows: fatRows(1),
+      updatedAt: 1
+    })
     clock += 1
-    await cache.put({ sessionId: 'b', bot: 'b', storedId: '', shape: 'rest', rows: fatRows(1), updatedAt: 1 })
+    await cache.put({
+      sessionId: 'b',
+      bot: 'b',
+      owner: '',
+      storedId: '',
+      shape: 'rest',
+      rows: fatRows(1),
+      updatedAt: 1
+    })
 
     // `a` is the OLDER write and the NEWER read: somebody has it open.
     clock += 1
     expect(await cache.get('a')).not.toBeNull()
 
     clock += 1
-    await cache.put({ sessionId: 'c', bot: 'c', storedId: '', shape: 'rest', rows: fatRows(1), updatedAt: 1 })
+    await cache.put({
+      sessionId: 'c',
+      bot: 'c',
+      owner: '',
+      storedId: '',
+      shape: 'rest',
+      rows: fatRows(1),
+      updatedAt: 1
+    })
 
     const kept = (await cache.report()).map(row => row.sessionId).sort()
 
@@ -174,8 +346,24 @@ describe('eviction', () => {
   it('takes the file with the entry', async () => {
     const cache = open({ maxBytes: 4000 })
 
-    await cache.put({ sessionId: 'a', bot: 'a', storedId: '', shape: 'rest', rows: fatRows(1), updatedAt: 1 })
-    await cache.put({ sessionId: 'b', bot: 'b', storedId: '', shape: 'rest', rows: fatRows(1), updatedAt: 1 })
+    await cache.put({
+      sessionId: 'a',
+      bot: 'a',
+      owner: '',
+      storedId: '',
+      shape: 'rest',
+      rows: fatRows(1),
+      updatedAt: 1
+    })
+    await cache.put({
+      sessionId: 'b',
+      bot: 'b',
+      owner: '',
+      storedId: '',
+      shape: 'rest',
+      rows: fatRows(1),
+      updatedAt: 1
+    })
 
     // The index plus exactly one entry: an eviction that only forgot would
     // leave the disk growing for ever while the cap looked respected.
@@ -185,7 +373,15 @@ describe('eviction', () => {
   it('keeps the entry it was just given, even when that one alone is over the cap', async () => {
     const cache = open({ maxBytes: 10 })
 
-    await cache.put({ sessionId: 'a', bot: 'a', storedId: '', shape: 'rest', rows: fatRows(1), updatedAt: 1 })
+    await cache.put({
+      sessionId: 'a',
+      bot: 'a',
+      owner: '',
+      storedId: '',
+      shape: 'rest',
+      rows: fatRows(1),
+      updatedAt: 1
+    })
 
     // The alternative is a cache that accepts a write, deletes it, and reports
     // a size of zero for ever.
@@ -196,7 +392,7 @@ describe('eviction', () => {
     const off = new TranscriptCache({ dir, maxBytes: 0 })
 
     expect(off.enabled).toBe(false)
-    await off.put({ sessionId: 'a', bot: 'a', storedId: '', shape: 'rest', rows: rows(3), updatedAt: 1 })
+    await off.put({ sessionId: 'a', bot: 'a', owner: '', storedId: '', shape: 'rest', rows: rows(3), updatedAt: 1 })
 
     expect(await off.get('a')).toBeNull()
     expect(await readdir(dir)).toEqual([])
