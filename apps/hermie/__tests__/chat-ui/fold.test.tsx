@@ -121,6 +121,38 @@ describe('Fold', () => {
   })
 
   /**
+   * A Mac report named this as one possible reason `Show more` sometimes did
+   * not respond to a click: the fade sits over the last two and a half lines
+   * of a clipped body, and if it ever reached past that into the toggle below
+   * it, only part of the label would be clickable — which would explain a
+   * miss that depends on exactly where the pointer landed.
+   *
+   * It does not, and this is why: the gradient is painted INSIDE the box that
+   * `maxHeight` clips (`overflow: 'hidden'`), and the toggle is a SIBLING
+   * rendered after that box closes, with its own `marginTop`. Walking up from
+   * the toggle must never cross a view with that clip, and the gradient itself
+   * is `pointerEvents="none"` even for the sliver of body it does sit over.
+   */
+  it('never sits under the fade: the toggle is outside the clipped box, and the fade lets touches through', () => {
+    renderFold(4000)
+
+    const gradient = screen.UNSAFE_getByType('ExpoLinearGradient')
+
+    expect(gradient.props.pointerEvents).toBe('none')
+
+    const root = screen.getByTestId('fold')
+    let node = screen.getByTestId('fold-toggle').parent
+
+    while (node && node !== root) {
+      const style = node.props?.style
+      const styles = Array.isArray(style) ? style : [style]
+
+      expect(styles.some(entry => entry?.overflow === 'hidden')).toBe(false)
+      node = node.parent
+    }
+  })
+
+  /**
    * The owner's rule, and the reverse of what this file used to assert.
    *
    * A long reply folds WHILE it streams: the text grows inside the folded height

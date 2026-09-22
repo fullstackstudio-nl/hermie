@@ -173,6 +173,14 @@ public class HermieMacModule: Module {
       Prop("cornerRadius") { (view: HermieContextMenuView, radius: Double?) in
         view.setCornerRadius(radius)
       }
+
+      // Defaults to OFF, for the reason `setPassThroughButtons` gives: a list row IS the button, and
+      // excluding it would exclude the whole row. `TranscriptList` is the one caller that turns it
+      // on, because a transcript row's `Pressable`s — `Show more`, a tool card's own toggle — are
+      // small controls inside a much larger menu target instead of being the target themselves.
+      Prop("passThroughButtons") { (view: HermieContextMenuView, value: Bool?) in
+        view.setPassThroughButtons(value ?? false)
+      }
     }
 
     /**

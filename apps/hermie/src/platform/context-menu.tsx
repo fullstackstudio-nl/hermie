@@ -78,6 +78,19 @@ export interface ContextMenuHostProps {
    * the row hands over the radius it already uses.
    */
   cornerRadius?: number
+  /**
+   * Let a nested button escape this host's menu instead of racing it for the same click.
+   *
+   * False for a LIST ROW, where the row itself is the button a secondary click is supposed to
+   * land on — `BotRow`, a cron row. True only where the host's target holds small controls of its
+   * own: `TranscriptList` is the one caller, because a reply's `Show more`, a tool card's own
+   * disclosure and a reasoning toggle are `Pressable`s living INSIDE the row the menu belongs to,
+   * not the row itself. See `HermieContextMenuView.setPassThroughButtons` for the mechanism —
+   * a click that lands on one of those is never offered to the interaction at all, rather than
+   * being raced against it and sometimes lost, which was the owner's report on a Mac: `Show more`
+   * sometimes did not respond to a click.
+   */
+  passThroughButtons?: boolean
   style?: StyleProp<ViewStyle>
   children: ReactNode
   testID?: string
@@ -89,6 +102,7 @@ type NativeProps = {
   enabled?: boolean
   hoverEffect?: boolean
   cornerRadius?: number
+  passThroughButtons?: boolean
   style?: StyleProp<ViewStyle>
   onSelect?: (event: { nativeEvent: { id: string } }) => void
   children?: ReactNode
@@ -124,6 +138,7 @@ export function ContextMenuHost({
   items,
   menuTitle,
   onSelect,
+  passThroughButtons = false,
   style,
   testID
 }: ContextMenuHostProps) {
@@ -146,6 +161,7 @@ export function ContextMenuHost({
       items={items}
       {...(menuTitle ? { menuTitle } : {})}
       onSelect={event => onSelect(event.nativeEvent.id)}
+      passThroughButtons={passThroughButtons}
       style={style}
       testID={testID}
     >

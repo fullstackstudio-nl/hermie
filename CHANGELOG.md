@@ -37,6 +37,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   button says. A name-only Save no longer needs a live connection, because that name is the app's
   own; the description and the picture are writes to the profile on the gateway's disk and still do.
 
+- **`Show more` on a long reply now always answers a click, on the Mac.** Every transcript row —
+  the fold's toggle included — sits inside the row's own right-click menu, which on the Mac build
+  is a native interaction spanning the whole row. A mouse click there arrives as a touch, the same
+  kind that interaction has to evaluate for a possible press-and-hold, so it and the toggle's own
+  control were racing the same click with nothing deciding which one won — which is why the miss
+  was occasional rather than constant. The row's menu now leaves a nested button alone entirely
+  instead of racing it, so a click on `Show more`, a tool card's own disclosure or a reasoning
+  toggle reaches its control every time; a chat row's own menu is unaffected; the row is still the
+  button there.
+
 ## [0.1.5] - 2026-09-22
 
 ### Changed

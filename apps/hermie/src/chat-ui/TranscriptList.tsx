@@ -806,6 +806,14 @@ function TranscriptRowFrameView({ entry, context, receipt, layout, dmRole }: Row
         items={menu.items}
         menuTitle={chatStrings.menu.message}
         onSelect={menu.select}
+        // Unlike a chat row, this one is NOT the button — it holds several small
+        // ones of its own: `Show more` on a folded reply, a tool card's own
+        // disclosure, a reasoning toggle. Without this a click on one of those
+        // sometimes did nothing at all, on a Mac: the interaction and the
+        // `Pressable` underneath raced the same indirect-pointer click, and
+        // whichever lost left the reader's tap unanswered. See
+        // `HermieContextMenuView.setPassThroughButtons`.
+        passThroughButtons
         testID={`transcript-menu-${entry.item.id}`}
       >
         <View {...trace.content}>

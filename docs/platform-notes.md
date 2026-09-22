@@ -10579,3 +10579,121 @@ management screen and its rows say **Use this gateway** in words.
 - Two suites — `chat-screen` and `inline-approvals`, both on the approval sheet's
   timing — failed once under a loaded machine and passed on their own and on the
   next full run. They are untouched by this round.
+
+## `Show more` sometimes did nothing, on the Mac (2026-09-22)
+
+The owner's report: a long reply's `Show more` sometimes did not respond to a
+click, on the Mac. No pattern to when — not the first click on a row, not tied to
+scroll position, not reproducible on demand. That shape is the tell: a fixed bug
+answers every time; a race answers sometimes, depending on which side of it the
+runloop happens to schedule first on a given click.
+
+### Three suspects ruled out by reading, one confirmed by the architecture
+
+- **`useDirectTouchPanOnly` (`platform/pointer-drag.ts`).** This narrows the
+  transcript's OWN pan recognizer to direct touches, so a pointer drag does not
+  scroll the list. It cannot eat a plain click: `UIScrollView.panGestureRecognizer`
+  requires MOVEMENT past its own slop before it recognizes at all, and a click is a
+  touch down and up at (near enough) one point. Nothing here is even asked about a
+  touch that never moves.
+- **Mouse-drag text selection.** The bubble's body never gets the drag-selectable
+  treatment inline — that lives entirely in `SelectTextOverlay`'s own modal panel,
+  reached through the message menu, not composited over the transcript row. And
+  `Markdown`'s own `Text selectable` already defaults to OFF wherever the native
+  context menu exists (`Markdown.tsx`, `selectable = !HAS_NATIVE_CONTEXT_MENU`) —
+  exactly to keep two gesture-owning interactions from racing one press, per the
+  2026-09-21 finding above. There is no second gesture here to race the toggle.
+- **The fade sitting over the button.** It doesn't. `Fold`'s gradient is painted
+  INSIDE the box `maxHeight` clips (`overflow: 'hidden'`), and the toggle
+  `Pressable` is a SIBLING rendered after that box closes, with its own
+  `marginTop`. The two never overlap, and the gradient is `pointerEvents="none"`
+  regardless — `__tests__/chat-ui/fold.test.tsx` now asserts both facts by walking
+  the rendered tree.
+- **A `Pressable` nested inside another one — confirmed.** `TranscriptRowFrameView`
+  wraps EVERY transcript row, `Fold`'s toggle included, in `ContextMenuHost`. On
+  the Mac that is a native `UIContextMenuInteraction` spanning the WHOLE row (see
+  "Normal Mac behaviour, end to end", 2026-09-20). A "Designed for iPad" app
+  delivers a mouse click as an indirect-pointer TOUCH, and that is exactly the kind
+  of touch the interaction has to evaluate for a possible press-and-hold — even a
+  plain click could turn into the gesture that opens the menu, so UIKit has to ask
+  before it knows which one the reader meant. The interaction and the toggle's own
+  `Pressable` were two gesture recognizers over the SAME touch with no relationship
+  declared between them, which is a race by definition: whichever one's internal
+  state machine settles first wins, and a loss looks like nothing happening at all
+  — no menu, no fold. Confirmed against React Native's own source: `accessibilityRole="button"`
+  sets `UIAccessibilityTraitButton` directly on the `Pressable`'s native view
+  (`RCTUIAccessibilityTraitsFromAccessibilityTraits`, `RCTConversions.h`), which is
+  what the fix below reads back off the hit-tested view.
+
+### The fix is a location the interaction is told is not its concern
+
+`UIContextMenuInteraction`'s delegate already answers, per LOCATION, whether a menu
+is possible there (`configurationForMenuAtLocation`) — `HermieContextMenuView`
+already used it to answer "no items, no menu". Returning `nil` for a location is
+documented as the way to exclude a subview from the interaction entirely, not a
+workaround for it: UIKit does not arm anything over a point it has been told is not
+its concern, so there is no race left to lose.
+
+`passThroughButtons` is the new, OFF-by-default prop. `isOverPassedThroughButton`
+hit-tests the location and walks from the hit view up to (but not including) the
+host itself, and answers yes if anything on that walk carries the `.button`
+accessibility trait or is a `UIControl`. OFF is the default because a chat-list row
+(`BotRow`, a cron row) IS the button its own menu should open on — excluding
+button-shaped touches there would exclude the row from its own right-click menu
+entirely, not just protect a nested control. `TranscriptList` is the one caller
+that turns it on, because a transcript row's `Pressable`s — `Show more`, a tool
+card's own disclosure, a reasoning toggle — are small controls INSIDE a much
+larger menu target, never the target itself.
+
+### What this fixes beyond the report
+
+`passThroughButtons` gates on the accessibility trait, not on which component the
+click happens to be, so it protects every small toggle a transcript row can hold —
+`ToolCard`'s own disclosure, `ReasoningDisclosure`'s toggle, a cron delivery card's
+chevrons — the same way it protects `Fold`'s. All of them sit inside the same
+`ContextMenuHost`, and all of them were racing it the same way.
+
+### Verified
+
+- Every gate: `typecheck`, `eslint`, `prettier`, the root `vitest` suite (1777
+  tests), `jest --maxWorkers=2` (247 suites, 3249 tests), the web build.
+- The Swift COMPILES and links: a Debug build of the `Hermie` scheme for the iPad
+  Pro 13-inch (M5) simulator succeeded — `** BUILD SUCCEEDED **`, zero errors, and
+  the two pre-existing warnings in `HermieMacModule.swift` are both on lines this
+  change does not touch. `HermieContextMenuView`'s new prop and guard are in the
+  built product: `nm` on the built `libHermieMac.a` shows both
+  `HermieContextMenuView.setPassThroughButtons(_:)` and
+  `HermieContextMenuView.isOverPassedThroughButton(at:)`, demangled.
+
+### Not verified
+
+- **The actual click race, on real hardware.** This is native UIKit gesture
+  arbitration for an INDIRECT-POINTER touch, and nothing on this machine can
+  reproduce that half: the simulator's own touch injection is a direct-touch
+  synthesiser (the same limit `mac-pointer-drag.test.ts` states for the pan
+  recognizer), and a Mac build is TestFlight-only by the owner's own rule, so it was
+  never installed here. What is verified is the MECHANISM — `configurationForMenuAtLocation`
+  returning `nil` for a location is UIKit's documented way to leave that location
+  alone entirely, read against React Native's own source for what trait a
+  `Pressable` actually carries. Whether a click on `Show more` now answers every
+  time, on the owner's own Mac, is the owner's to confirm.
+- **The built app itself was not seen running past its own bootstrap.** The
+  `Hermie.app` this round built — outside `expo run:ios`, by hand
+  (`pod install` then a bare `xcodebuild`, because `expo run:ios` itself could not
+  find the Simulator app in this shell: `CommandError: Can't determine id of
+Simulator app`) — throws `[runtime not ready]: Error: Cannot find native module
+'ExpoPushTokenManager'` at JS bootstrap, on the iPad Pro 13-inch simulator, before
+  a single screen draws. `ExpoModulesProvider.swift` (autogenerated) DOES list
+  `PushTokenModule.self`, and `expo-notifications`' own `Name("ExpoPushTokenManager")`
+  matches — so the module is built and named correctly, and the gap is somewhere in
+  how a hand-assembled `pod install` + `xcodebuild` differs from what `expo run:ios`
+  normally does around it, not a missing dependency. This is `expo-notifications`
+  reaching for its native module at import time, the same fragility
+  `jest.setup.js` already mocks around, and it is unconnected to
+  `HermieContextMenuView` or anything this round touched — nothing in the diff
+  is on the path from app launch to this crash. It means the fix's ACTUAL button
+  press, in a running transcript, was not watched this round either; only the
+  compile was.
+- **Whether the chat-list row's own menu still opens on every part of the row.**
+  `passThroughButtons` defaults to off there and nothing about this change touches
+  `BotRow` or the cron row, but neither was re-tested by hand this round.

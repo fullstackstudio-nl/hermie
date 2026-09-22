@@ -51,6 +51,8 @@ public final class HermieContextMenuView: ExpoView, UIContextMenuInteractionDele
   private var cornerRadius: CGFloat = 0
   /** Held so it can be taken away again; a prop can turn the effect off after it was on. */
   private var pointerInteraction: UIPointerInteraction?
+  /** Off by default; see `setPassThroughButtons` for what turns it on and why. */
+  private var passThroughButtons = false
 
   public required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
@@ -169,6 +171,56 @@ public final class HermieContextMenuView: ExpoView, UIContextMenuInteractionDele
   }
 
   /**
+   Whether a touch that lands on a nested button should be invisible to this interaction.
+
+   OFF for a LIST ROW, where the row itself IS the button — `BotRow`, a cron row — and a secondary
+   click anywhere on it is supposed to open the menu; excluding button-shaped touches there would
+   exclude the whole row and leave nothing to right-click at all. ON for a TRANSCRIPT row, whose
+   `Pressable`s are small controls INSIDE a much larger menu target: `Show more` on a folded reply,
+   a tool card's own disclosure, a reasoning toggle. `TranscriptList` is the one caller that turns
+   this on; see `configurationForMenuAtLocation` for the mechanism it enables.
+   */
+  func setPassThroughButtons(_ value: Bool) {
+    passThroughButtons = value
+  }
+
+  /**
+   Is `location` over a control this interaction should leave alone?
+
+   The owner's report was a mouse click on `Show more` that sometimes did nothing — no menu, no
+   fold, nothing UIKit or the fold's own `Pressable` visibly did. `Show more` sits fully inside this
+   view's bounds, and a "Designed for iPad" app delivers an indirect-pointer click as a touch (see
+   `pointer-drag.ts`), which is exactly the kind of touch `UIContextMenuInteraction` also has to
+   evaluate — even a plain click can turn into the press-and-hold that opens the menu, so this
+   delegate is asked about a location before UIKit knows which one the reader meant. Answering
+   `nil` there is not a workaround: it is the documented way to tell the interaction a location is
+   not its concern, and it is what stops it competing with the `Pressable` underneath for the same
+   touch AT ALL, rather than racing it and sometimes losing.
+
+   Walked from the HIT view up to (but not including) this one, because the touch lands on whatever
+   is drawn on top — the toggle's own `Text`, say — and the `.button` trait is set on the `Pressable`
+   above it, not on every descendant. `UIControl` is checked too for a control that is not React
+   Native's, though nothing in this app currently renders one inside a transcript row.
+   */
+  private func isOverPassedThroughButton(at location: CGPoint) -> Bool {
+    guard passThroughButtons, let hit = hitTest(location, with: nil) else {
+      return false
+    }
+
+    var view: UIView? = hit
+
+    while let current = view, current !== self {
+      if current.accessibilityTraits.contains(.button) || current is UIControl {
+        return true
+      }
+
+      view = current.superview
+    }
+
+    return false
+  }
+
+  /**
    The platter UIKit draws behind the view while the MENU is coming up.
 
    Only the menu. It was once believed to cover the pointer's hover platter as well, and that
@@ -207,8 +259,9 @@ public final class HermieContextMenuView: ExpoView, UIContextMenuInteractionDele
     configurationForMenuAtLocation location: CGPoint
   ) -> UIContextMenuConfiguration? {
     // No items is not an empty menu, it is no menu: returning a configuration would put an empty
-    // grey rectangle under the pointer and swallow the gesture.
-    guard enabled, !items.isEmpty else {
+    // grey rectangle under the pointer and swallow the gesture. A button this view was told to
+    // pass through is the same answer for a different reason — see `isOverPassedThroughButton`.
+    guard enabled, !items.isEmpty, !isOverPassedThroughButton(at: location) else {
       return nil
     }
 
