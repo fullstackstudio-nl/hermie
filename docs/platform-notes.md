@@ -8602,3 +8602,21 @@ which is every test run. So the id never reaches a host node and
 `queryByTestId('chat-drop-zone')` is null whether the conversation is on screen
 or not. An assertion written on it passes for the wrong reason. The assertions
 here are on `composer-input` and `chat-header`, which are real host elements.
+
+### Two warnings that were a comment holding an export in place
+
+`platform-contracts.ts` re-exports `NetworkKind` so both `net-info` seams name
+the same four values, and the re-export had been written directly under the
+import it mirrors — with its one-line comment attached — which put two `import
+type` lines below a statement and produced two `import/first` warnings.
+
+`--fix` would have moved the imports and left the comment stranded above an
+export it no longer touches, so the re-export was moved down instead, comment
+and all. The file's own header still reads correctly: the two imports it calls
+"the exception that proves the rule" are still the two below it.
+
+**No new test.** The guard here is the gate — `npx eslint .` is run with zero
+warnings tolerated — and the alternative, an ESLint run inside vitest, would
+hand every future test run a type-aware lint pass to pay for in order to
+re-assert a rule the gate already asserts over the whole repository rather than
+over one file.
