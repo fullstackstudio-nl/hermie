@@ -24,6 +24,9 @@ import { useTheme } from '../../ui/theme'
 import { useEscapeKey } from '../../ui/useEscapeKey'
 import { useHardwareBack } from '../../ui/useHardwareBack'
 import { FORM_MAX_WIDTH } from '../../ui/tokens'
+import { ConnectorsScreen, connectorStrings } from '../connectors'
+import { KanbanScreen, kanbanStrings } from '../kanban'
+import { LogsScreen, logStrings } from '../logs'
 import { McpScreen, mcpStrings } from '../mcp'
 import { NewBotFlow, profileStrings } from '../profiles'
 import { SkillsScreen, skillStrings } from '../skills'
@@ -77,6 +80,9 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
   */
   const [showSkills, setShowSkills] = useState(false)
   const [showMcp, setShowMcp] = useState(false)
+  const [showConnectors, setShowConnectors] = useState(false)
+  const [showLogs, setShowLogs] = useState(false)
+  const [showBoards, setShowBoards] = useState(false)
   const [showNewBot, setShowNewBot] = useState(false)
 
   // Escape goes back ONE level: out of a screen Settings opened and into
@@ -90,11 +96,23 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
       setShowMemory(false)
       setShowSkills(false)
       setShowMcp(false)
+      setShowConnectors(false)
+      setShowLogs(false)
+      setShowBoards(false)
     },
     // The gateways page is deliberately absent from both lists: it owns its own
     // Escape and back, because it has pages of its own inside it and one of
     // them is the setup wizard.
-    showConnectionTest || showGallery || showLicences || showThemes || showMemory || showSkills || showMcp
+    showConnectionTest ||
+      showGallery ||
+      showLicences ||
+      showThemes ||
+      showMemory ||
+      showSkills ||
+      showMcp ||
+      showConnectors ||
+      showLogs ||
+      showBoards
   )
 
   // The same one level for Android's back button, which is not Escape and has
@@ -111,11 +129,23 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
       setShowMemory(false)
       setShowSkills(false)
       setShowMcp(false)
+      setShowConnectors(false)
+      setShowLogs(false)
+      setShowBoards(false)
     },
     // The gateways page is deliberately absent from both lists: it owns its own
     // Escape and back, because it has pages of its own inside it and one of
     // them is the setup wizard.
-    showConnectionTest || showGallery || showLicences || showThemes || showMemory || showSkills || showMcp
+    showConnectionTest ||
+      showGallery ||
+      showLicences ||
+      showThemes ||
+      showMemory ||
+      showSkills ||
+      showMcp ||
+      showConnectors ||
+      showLogs ||
+      showBoards
   )
 
   // A screen opened from here REPLACES Settings rather than pushing onto a
@@ -148,6 +178,18 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
 
   if (showMcp) {
     return <McpScreen onClose={() => setShowMcp(false)} />
+  }
+
+  if (showConnectors) {
+    return <ConnectorsScreen onClose={() => setShowConnectors(false)} />
+  }
+
+  if (showLogs) {
+    return <LogsScreen onClose={() => setShowLogs(false)} />
+  }
+
+  if (showBoards) {
+    return <KanbanScreen onClose={() => setShowBoards(false)} />
   }
 
   if (showGateways) {
@@ -249,6 +291,17 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
                   ? strings.settings.pluginInstalled(advert?.version ?? '')
                   : strings.settings.pluginAbsent
             }
+          />
+          {/*
+            The gateway's own log files, over `GET /api/logs`. It is the only
+            surface a client has for them — there is no socket method — and a
+            gateway that does not serve the route gets the command instead of
+            an empty page.
+          */}
+          <InsetButtonRow
+            detail={logStrings.settings.hint}
+            onPress={() => setShowLogs(true)}
+            title={logStrings.settings.row}
           />
         </InsetGroup>
 
@@ -388,6 +441,16 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
             detail={mcpStrings.settings.hint}
             onPress={() => setShowMcp(true)}
             title={mcpStrings.settings.row}
+          />
+          <InsetButtonRow
+            detail={connectorStrings.settings.hint}
+            onPress={() => setShowConnectors(true)}
+            title={connectorStrings.settings.row}
+          />
+          <InsetButtonRow
+            detail={kanbanStrings.settings.hint}
+            onPress={() => setShowBoards(true)}
+            title={kanbanStrings.settings.row}
           />
         </InsetGroup>
 

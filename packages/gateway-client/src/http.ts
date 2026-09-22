@@ -192,7 +192,8 @@ export class GatewayHttp {
 
     if (!response.ok) {
       throw new GatewayError('protocol', `${method} ${path} failed with HTTP ${response.status}.`, {
-        status: response.status
+        status: response.status,
+        ...(detailOf(response.text) === null ? {} : { hint: detailOf(response.text) as string })
       })
     }
 
@@ -203,5 +204,33 @@ export class GatewayHttp {
     // Object or array: a REST route may legitimately answer with either, and the
     // caller's own reader decides which it wanted (see `parseJsonBody`).
     return parseJsonBody(response.text, response.url, 'protocol') as T
+  }
+}
+
+/**
+ * A refusal's own sentence, out of a JSON error body.
+ *
+ * FastAPI puts the actionable half of a 4xx in `detail`, and until this existed
+ * it was thrown away: every caller got "failed with HTTP 409" and none of them
+ * could say WHY. Some of those sentences cannot be reconstructed by a client at
+ * all — the Kanban router's refusal names the parent cards that are blocking a
+ * move — so the body is the only place the information exists.
+ *
+ * It rides on `hint`, which already means "one extra sentence, when the
+ * classification alone is not enough to act on". Anything that is not a JSON
+ * object with a string `detail` yields `null` rather than a guess: an HTML
+ * error page from a proxy in the way is not a sentence worth showing anybody.
+ */
+function detailOf(text: string): string | null {
+  if (!text.trim().startsWith('{')) {
+    return null
+  }
+
+  try {
+    const detail = (JSON.parse(text) as { detail?: unknown }).detail
+
+    return typeof detail === 'string' && detail.trim() ? detail : null
+  } catch {
+    return null
   }
 }

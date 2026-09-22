@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Boards.** The Kanban boards the gateway keeps, from Settings → **Boards** or **Boards** in the
+  chat list's header: every board, its columns, its cards, and a card's own page with its notes and
+  its comments. A card can be made, edited, moved and archived. It is the same data the Hermes
+  desktop app shows — the same per-board store, addressed the same way — so a card moved on a phone
+  is the card the desktop redraws. The columns are the gateway's own eight and cannot be added to or
+  reordered, because there is nowhere to save that; **Running**, **Review** and **Scheduled** belong
+  to the dispatcher and are never offered as somewhere to put a card, with the reason said once
+  under the board rather than left as three targets that refuse. There is no dragging a card up and
+  down inside a column either: cards are ordered by priority and age and there is no rank to save,
+  which the page says instead of pretending. When the board refuses a move it is shown in the
+  board's own words — "blocked by parent(s) not done", naming the cards that are in the way — and
+  when the board puts a card somewhere other than where it was sent, that is said too. Archiving
+  keeps the card and its history; nothing here deletes one. A gateway with no Kanban plugin gets the
+  install command rather than an empty page.
+
+- **The gateway's logs.** Settings → Gateway → **Logs**: the six files `hermes logs` knows — the
+  agent, the gateway, errors, the dashboard, the desktop and MCP output — with a minimum level, a
+  component filter, a search that runs on the gateway rather than over what is on screen, and a copy.
+  **Follow** re-reads the file every few seconds and says so: the gateway offers no live stream, and
+  calling a poll a tail would be a claim about the gateway rather than about the page. Errors and
+  warnings are coloured by the level the line itself declares, so a traceback's body is left alone
+  and a message that merely contains the word "error" is not painted red. A file the gateway has
+  never written says it is empty; a filter that matched nothing says that instead. A gateway that
+  does not serve its logs over the API is told apart from one that is simply unreachable, and gets
+  the command to read them on the host.
+
+- **Connectors.** Settings → **Connectors**: the apps a bot signs in to on your behalf, whether each
+  one is connected, and a **Connect** that opens the provider's page in your browser and waits for
+  the account to come good — coming back to Hermie tells the gateway to look now rather than on its
+  next sweep. The page is about one chat, and says so, because that is what the gateway offers:
+  a connector list exists for a conversation that is open and for nothing else. A bot whose
+  Connections toolset is switched off is told that, rather than being shown an empty account.
+  Signing a connector OUT is deliberately not here — the gateway offers no such call and no command
+  behind it, because it is a decision the provider leaves to you — so the page says where it is done
+  instead of offering a button that could only fail.
+
 - **Hermie Web sets its gateway up once, and everybody else just signs in.** Start `hermie-web` with
   no `--gateway` and it serves an operator setup page at `/setup`: the gateway address, a probe of
   it, and the service login that push and the message cache are spent on — the same sign-in

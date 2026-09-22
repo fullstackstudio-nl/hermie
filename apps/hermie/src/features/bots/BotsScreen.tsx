@@ -71,6 +71,7 @@ import { useChatRuntime } from '../chats/ChatRuntime'
 import { type MessageMatch, useMessageSearch } from '../search'
 import { BotRow } from './BotRow'
 import { NewBotFlow } from '../profiles/NewBotFlow'
+import { KanbanScreen, kanbanStrings } from '../kanban'
 import { profileStrings } from '../profiles/strings'
 import { ConnectionLine } from './ConnectionLine'
 import { GatewayNameLine } from './GatewayNameLine'
@@ -234,6 +235,7 @@ export function BotsScreen({
   const [profileFor, setProfileFor] = useState<string | null>(null)
   /* The memory browser REPLACES this screen, the way Settings' pages do. */
   const [memoryFor, setMemoryFor] = useState<string | null>(null)
+  const [showBoards, setShowBoards] = useState(false)
 
   /*
     The profile sheet's connection. Built from the live socket rather than taken
@@ -993,6 +995,16 @@ export function BotsScreen({
     return <MemoryBotsScreen initialProfile={memoryFor} onClose={() => setMemoryFor(null)} />
   }
 
+  /*
+    Boards REPLACES the chat list, which is what Memory above already does and
+    for the same reason: this screen lives in a native stack on a phone and
+    inside a panel with no navigator on a wide window, so pushing would only
+    ever be right on one of them.
+  */
+  if (showBoards) {
+    return <KanbanScreen backLabel={strings.bots.title} onClose={() => setShowBoards(false)} />
+  }
+
   return (
     // The sidebar sits inside a panel the shell has already inset; the phone
     // screen is full-bleed and has to clear the notch and the home bar itself.
@@ -1004,6 +1016,7 @@ export function BotsScreen({
           setAddedFolderId(null)
         }}
         sidebar={sidebar}
+        onBoards={() => setShowBoards(true)}
         onNewBot={() => setCreatingBot(true)}
         {...(onOpenSection ? { onNewCron: () => onOpenSection('cron', { create: true }) } : {})}
       />
@@ -1336,12 +1349,14 @@ export function BotsScreenOrSignedOut(props: BotsScreenProps) {
 
 function Head({
   editing,
+  onBoards,
   onNewBot,
   onNewCron,
   onToggleEdit,
   sidebar
 }: {
   editing: boolean
+  onBoards?: () => void
   onNewBot?: () => void
   onNewCron?: () => void
   onToggleEdit: () => void
@@ -1375,6 +1390,26 @@ function Head({
         one-tap action away from the thing it is for, and two `+` glyphs side by
         side would say nothing about which is which. This one is a word.
       */}
+      {/*
+        The chat list's way into the boards. A word rather than a glyph, for the
+        same reason New bot is one: there is no mark that reads as "kanban", and
+        the `+` beside it already means New cron.
+      */}
+      {onBoards ? (
+        <Pressable
+          accessibilityLabel={kanbanStrings.menu}
+          accessibilityRole="button"
+          hitSlop={TAP_SLOP}
+          onPress={onBoards}
+          style={{ cursor: 'pointer' }}
+          testID="bots-boards"
+        >
+          <Text color="accentText" style={{ fontWeight: '600' }} variant="preview">
+            {kanbanStrings.menu}
+          </Text>
+        </Pressable>
+      ) : null}
+
       {onNewBot ? (
         <Pressable
           accessibilityLabel={profileStrings.settings.newBot}

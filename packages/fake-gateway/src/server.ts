@@ -432,6 +432,56 @@ export interface FakeMcpServer {
   probeError?: string
 }
 
+/**
+ * One row of the connector catalogue, as the vendor's list route shapes it.
+ *
+ * `statusReason` is declared here although the VENDORED `ConnectorRow` has no
+ * such field: upstream's `ConnectorListItem` carries it, and both models are
+ * open on purpose because the connector service owns the key set.
+ */
+export interface FakeConnector {
+  connector: string
+  connected: boolean
+  enabled: boolean
+  connectionStatus: string
+  statusReason: string | null
+  name?: string
+  description?: string
+}
+
+/**
+ * A live connection operation, the way `tools/connectors/live.py` holds one.
+ *
+ * `seq` is the monotonic write counter every snapshot is stamped with, and the
+ * reason it matters here is that a client has to ORDER frames: the gateway's
+ * own account watcher moves a target on its own tick while a client is
+ * polling, so a snapshot can arrive older than one already applied.
+ *
+ * `reads` plus `woken` is how this fake reproduces the watcher's latency
+ * WITHOUT a timer: a target settles after two status reads, or immediately
+ * after `connectors.operation.wake` — which is exactly what that method is for.
+ */
+export interface FakeConnectorOp {
+  opId: string
+  sessionId: string
+  seq: number
+  deadlineAt: number
+  settled: boolean
+  settledBy: string | null
+  reads: number
+  woken: boolean
+  targets: {
+    name: string
+    kind: 'connector' | 'mcp'
+    action: string
+    state: string
+    connectUrl: string | null
+    detail: string | null
+    /** Where the target lands once the flow resolves. */
+    resolvesTo: string
+  }[]
+}
+
 /** A PKCE flow `mcp.servers.oauth.start` opened and `…poll` walks. */
 interface FakeOauthFlow {
   name: string
@@ -588,6 +638,51 @@ export interface FakeGatewayState {
   mcpOauthFlows: Map<string, FakeOauthFlow>
   /** Skill names installed from the hub over the socket, newest last. */
   skillsInstalled: string[]
+  /**
+   * The gateway's log files, by the name `GET /api/logs?file=` looks up.
+   *
+   * Keyed by `hermes_cli/logs.py::LOG_FILES`' KEYS rather than the filenames
+   * they map to, because that is the vocabulary a client sends. A key that is
+   * absent here is a file that does not exist on disk, which the route answers
+   * with an empty list and a 200 — not a 404.
+   */
+  logs: Map<string, string[]>
+  /**
+   * The connector catalogue one session can see.
+   *
+   * Upstream reaches this through `manage_connections`, so the rows are the
+   * vendor's `ConnectorListItem` shape — an OPEN model whose key set the
+   * connector service owns, which is why `statusReason` rides here without
+   * being in the vendored contract's `ConnectorRow`.
+   */
+  connectors: FakeConnector[]
+  /**
+   * `manage_connections` being off for the session.
+   *
+   * When it is true `connectors.list` answers `{available: false,
+   * connectors: []}` with NO error frame, and `connectors.connect` refuses
+   * with 4031.
+   */
+  connectorsUnavailable: boolean
+  /**
+   * The Kanban plugin's boards, or `null` when the plugin is not mounted.
+   *
+   * `null` is the state worth having: `web_server_dashboard.py` only mounts the
+   * router for a plugin that is bundled or enabled, so a gateway without it
+   * 404s the PREFIX and every route with it.
+   */
+  kanbanBoards: FakeKanbanBoard[] | null
+  /** Completed `POST /dispatch` nudges, so a test can prove a write kicked one. */
+  kanbanDispatches: number
+  /** Live connection operations by `op_id`. */
+  connectorOps: Map<string, FakeConnectorOp>
+  /**
+   * The monotonic write counter every operation snapshot is stamped with.
+   *
+   * It is gateway-wide rather than per operation, the way upstream's is, so a
+   * client cannot get away with comparing two operations' counters.
+   */
+  connectorSeq: number
   cronJobs: CronJob[]
   /**
    * The profile `hermes serve` was launched with. `cron.manage` binds
@@ -1146,6 +1241,57 @@ function nowSeconds(): number {
 function s256(verifier: string): string {
   return createHash('sha256').update(verifier, 'ascii').digest('base64url')
 }
+
+/**
+ * One Kanban card, as `hermes_cli/kanban_db.py::Task` shapes it.
+ *
+ * Only the columns a client reads are modelled; upstream's dataclass carries
+ * about forty. `parents` is here because it is what makes a `ready` move
+ * REFUSABLE, which is the behaviour worth pinning.
+ */
+export interface FakeKanbanTask {
+  id: string
+  title: string
+  body: string | null
+  status: string
+  assignee: string | null
+  priority: number
+  /** Epoch SECONDS, as every timestamp on this router is. */
+  created_at: number
+  /** Cards that must be done or archived before this one may become ready. */
+  parents: string[]
+  comments: { id: number; author: string; body: string; created_at: number }[]
+}
+
+/** One board on disk: a slug, a display name and its own pile of cards. */
+export interface FakeKanbanBoard {
+  slug: string
+  name: string
+  description: string
+  tasks: FakeKanbanTask[]
+}
+
+/** `plugin_api.BOARD_COLUMNS` — fixed, server-owned, left to right. */
+const KANBAN_COLUMNS = ['triage', 'todo', 'scheduled', 'ready', 'running', 'blocked', 'review', 'done']
+
+/** `_apply_status` raises before anything else for this one. */
+const KANBAN_RUNNING_REFUSAL = "Cannot set status to 'running' directly; use the dispatcher/claim path"
+
+/** `hermes_cli/logs.py::LOG_FILES`' keys — the vocabulary `?file=` is looked up in. */
+const LOG_FILE_NAMES = new Set(['agent', 'errors', 'gateway', 'gui', 'desktop', 'mcp'])
+
+/** `hermes_logging._LEVEL_ORDER`. The `level` filter is a MINIMUM, not an equality. */
+const LOG_LEVEL_ORDER = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+
+/** `hermes_logging.COMPONENT_PREFIXES`, which is what makes an unknown component a 400. */
+const LOG_COMPONENT_PREFIXES = new Map<string, string[]>([
+  ['gateway', ['gateway', 'hermes_plugins', 'plugins.platforms']],
+  ['agent', ['agent', 'run_agent', 'model_tools', 'batch_runner']],
+  ['tools', ['tools']],
+  ['cli', ['hermes_cli', 'cli']],
+  ['cron', ['cron']],
+  ['gui', ['hermes_cli.web_server', 'hermes_cli.pty_bridge', 'hermes_cli.desktop', 'tui_gateway', 'uvicorn']]
+])
 
 function json(res: ServerResponse, status: number, body: unknown): void {
   const text = JSON.stringify(body)
@@ -2108,6 +2254,87 @@ function initialState(options: FakeGatewayOptions): FakeGatewayState {
     mcpReloads: 0,
     mcpOauthFlows: new Map<string, FakeOauthFlow>(),
     skillsInstalled: [],
+    connectors: [
+      { connector: 'gmail', connected: true, enabled: true, connectionStatus: 'active', statusReason: null },
+      {
+        connector: 'notion',
+        connected: false,
+        enabled: true,
+        connectionStatus: 'not_connected',
+        statusReason: null
+      },
+      {
+        connector: 'slack',
+        connected: false,
+        enabled: false,
+        connectionStatus: 'failed',
+        statusReason: 'the workspace revoked the token'
+      }
+    ],
+    logs: new Map<string, string[]>([
+      [
+        'gateway',
+        [
+          '2026-09-22 09:00:00,001 INFO gateway.run: listening on 127.0.0.1:8760',
+          '2026-09-22 09:00:01,114 DEBUG tui_gateway.ws: client attached sess-1',
+          '2026-09-22 09:00:02,900 WARNING gateway.auth: ticket reused within 2s',
+          '2026-09-22 09:00:03,210 ERROR gateway.run: handler raised',
+          'Traceback (most recent call last):',
+          '  File "server.py", line 12, in _dispatch'
+        ]
+      ],
+      ['agent', ['2026-09-22 09:00:00,000 INFO agent.loop: turn started']],
+      // Present as a NAME with nothing in it, which is the 200-with-no-lines case.
+      ['errors', []]
+    ]),
+    kanbanBoards: [
+      {
+        slug: 'default',
+        name: 'Default',
+        description: '',
+        tasks: [
+          {
+            id: 't_aa11bb22',
+            title: 'Write the release notes',
+            body: 'Pull them from the changelog.',
+            status: 'todo',
+            assignee: null,
+            priority: 0,
+            created_at: 1_760_000_000,
+            parents: [],
+            comments: [{ id: 1, author: 'writer', body: 'Started on this.', created_at: 1_760_000_100 }]
+          },
+          {
+            id: 't_cc33dd44',
+            title: 'Ship the build',
+            body: null,
+            status: 'todo',
+            assignee: 'writer',
+            priority: 2,
+            // Gated on the notes above, which is what makes a `ready` move refusable.
+            created_at: 1_760_000_050,
+            parents: ['t_aa11bb22'],
+            comments: []
+          },
+          {
+            id: 't_ee55ff66',
+            title: 'Tidy the worktrees',
+            body: null,
+            status: 'running',
+            assignee: 'writer',
+            priority: 0,
+            created_at: 1_760_000_075,
+            parents: [],
+            comments: []
+          }
+        ]
+      },
+      { slug: 'sprint', name: 'Sprint', description: 'This fortnight', tasks: [] }
+    ],
+    kanbanDispatches: 0,
+    connectorsUnavailable: false,
+    connectorOps: new Map<string, FakeConnectorOp>(),
+    connectorSeq: 0,
     runningSessions: new Set<string>(),
     sessionConfig: new Map<string, Record<string, string>>(),
     pendingApprovals: new Map<string, { session_id: string; payload: Record<string, unknown> }>(),
@@ -2566,6 +2793,71 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     }))
   }
 
+  /**
+   * The `session_id` every connector call is addressed by.
+   *
+   * Upstream refuses a missing or blank one with `4000 INVALID_PARAMS` before
+   * it looks at anything else, because the id is only a lookup hint — authority
+   * is whether the calling transport is ATTACHED to that session. A fake that
+   * accepted a call without one would let a client ship a gateway-wide
+   * connector page that cannot exist.
+   */
+  function requireConnectorSession(params: Record<string, unknown>): string {
+    const sessionId = params.session_id
+
+    if (typeof sessionId !== 'string' || !sessionId.trim()) {
+      throw new RpcFault(4000, 'session_id required')
+    }
+
+    return sessionId
+  }
+
+  /** The open operation `op_id` names, or upstream's `4004 UNKNOWN_OPERATION`. */
+  function requireConnectorOp(params: Record<string, unknown>): FakeConnectorOp {
+    requireConnectorSession(params)
+
+    const opId = params.op_id
+
+    if (typeof opId !== 'string' || !opId) {
+      throw new RpcFault(4000, 'op_id required')
+    }
+
+    const op = state.connectorOps.get(opId)
+
+    if (!op) {
+      throw new RpcFault(4004, 'no open operation with that op_id in this session')
+    }
+
+    return op
+  }
+
+  /**
+   * One operation, as `_operation_view` shapes it.
+   *
+   * `connect_url` is present on a target that has one and absent on one that
+   * does not, rather than being sent as `null`: upstream's redaction exempts
+   * the key by name, and a client that read a null as "no link yet" and kept
+   * polling would behave differently from one that read a missing key.
+   */
+  function connectorOpView(op: FakeConnectorOp): Record<string, unknown> {
+    return {
+      op_id: op.opId,
+      seq: op.seq,
+      deadline_at: op.deadlineAt,
+      settled: op.settled,
+      settled_at: op.settled ? Math.floor(Date.now() / 1000) : null,
+      settled_by: op.settledBy,
+      targets: op.targets.map(target => ({
+        name: target.name,
+        kind: target.kind,
+        action: target.action,
+        state: target.state,
+        detail: target.detail,
+        ...(target.connectUrl ? { connect_url: target.connectUrl } : {})
+      }))
+    }
+  }
+
   /** `mcp.servers.list`'s projection of one config entry. */
   function summariseMcpServer(server: FakeMcpServer): Record<string, unknown> {
     return {
@@ -2709,6 +3001,102 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
         })),
         overall: 'ok'
       })
+
+      return
+    }
+
+    /**
+     * The Kanban plugin's own router — `plugins/kanban/dashboard/plugin_api.py`,
+     * mounted at `/api/plugins/kanban` by `web_server_dashboard.py`.
+     *
+     * Mounted ONLY when the plugin is bundled or enabled, which is why a null
+     * board list 404s the whole prefix rather than answering an empty board:
+     * there is no router to answer with.
+     */
+    if (path.startsWith('/api/plugins/kanban')) {
+      if (state.kanbanBoards === null) {
+        json(res, 404, { detail: 'Not Found' })
+
+        return
+      }
+
+      await handleKanban(req, res, path.slice('/api/plugins/kanban'.length), method, url.searchParams)
+
+      return
+    }
+
+    /**
+     * `GET /api/logs` — `hermes_cli/web_routers/status.py::get_logs`.
+     *
+     * The ONLY way a client reads the gateway's logs. There is no socket
+     * method and nothing here streams, which is why the app's page calls its
+     * refresh a poll rather than a tail.
+     *
+     * Three refusals and one non-refusal are worth having: an unknown `file`
+     * is a 400, an unknown `component` is a 400, a file that is not on disk is
+     * a 200 with no lines, and `lines` is clamped to 500 in SILENCE — a client
+     * asking for more is not told it did not get it.
+     */
+    if (path === '/api/logs') {
+      const file = url.searchParams.get('file') ?? 'agent'
+
+      if (!LOG_FILE_NAMES.has(file)) {
+        json(res, 400, { detail: `Unknown log file: ${file}` })
+
+        return
+      }
+
+      const component = url.searchParams.get('component')
+
+      if (component && component.toLowerCase() !== 'all' && !LOG_COMPONENT_PREFIXES.has(component)) {
+        json(res, 400, {
+          detail: `Unknown component: ${component}. Available: ${[...LOG_COMPONENT_PREFIXES.keys()].sort().join(', ')}`
+        })
+
+        return
+      }
+
+      // A file the gateway has never written. `get_logs` checks `exists()`
+      // before it reads, so this is a 200 and not a 404.
+      const stored = state.logs.get(file)
+
+      if (!stored) {
+        json(res, 200, { file, lines: [] })
+
+        return
+      }
+
+      const level = url.searchParams.get('level')
+      const minLevel = level && level.toUpperCase() !== 'ALL' ? level.toUpperCase() : null
+      const search = url.searchParams.get('search')
+      const wanted = Number.parseInt(url.searchParams.get('lines') ?? '100', 10) || 100
+
+      let lines = stored
+
+      if (minLevel) {
+        const floor = LOG_LEVEL_ORDER.indexOf(minLevel)
+
+        lines = lines.filter(line => {
+          const found = /\s(DEBUG|INFO|WARNING|ERROR|CRITICAL)\s/u.exec(line)
+
+          return found ? LOG_LEVEL_ORDER.indexOf(found[1] as string) >= floor : false
+        })
+      }
+
+      if (component && component.toLowerCase() !== 'all') {
+        const prefixes = LOG_COMPONENT_PREFIXES.get(component) ?? []
+
+        lines = lines.filter(line => prefixes.some(prefix => line.includes(` ${prefix}`)))
+      }
+
+      if (search) {
+        const needle = search.toLowerCase()
+
+        lines = lines.filter(line => line.toLowerCase().includes(needle))
+      }
+
+      // The clamp upstream applies twice, and never mentions.
+      json(res, 200, { file, lines: lines.slice(-Math.min(wanted, 500)) })
 
       return
     }
@@ -3194,6 +3582,245 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
    * (no `{job: …}` wrapper), `/runs` answers `{runs, limit}` of session rows,
    * and `DELETE` answers `{ok: true}`.
    */
+  /**
+   * The Kanban plugin's routes, as `plugins/kanban/dashboard/plugin_api.py`
+   * answers them.
+   *
+   * Four behaviours here are the ones a client gets wrong, and each exists so a
+   * test can hold the app to them:
+   *
+   *  - a card's column IS its `status`, and the columns are a fixed list;
+   *  - `POST /tasks` has NO `status` field — the server derives `triage` or
+   *    `ready` — so landing anywhere else takes a second call;
+   *  - `running` is refused outright with a 400, and a `ready` whose parents
+   *    are not done is a 409 whose `detail` NAMES them;
+   *  - archiving is `status: 'archived'`, which is recoverable, while
+   *    `DELETE /tasks/{id}` is not.
+   */
+  async function handleKanban(
+    req: IncomingMessage,
+    res: ServerResponse,
+    path: string,
+    method: string,
+    query: URLSearchParams
+  ): Promise<void> {
+    const boards = state.kanbanBoards ?? []
+    const slug = (query.get('board') ?? '').trim() || boards[0]?.slug || 'default'
+    const board = boards.find(entry => entry.slug === slug)
+
+    if (path === '/boards' && method === 'GET') {
+      json(res, 200, {
+        boards: boards.map(entry => ({
+          slug: entry.slug,
+          name: entry.name,
+          description: entry.description,
+          is_current: entry.slug === boards[0]?.slug,
+          // `list_boards` counts everything that is not archived.
+          total: entry.tasks.filter(task => task.status !== 'archived').length
+        })),
+        current: boards[0]?.slug ?? ''
+      })
+
+      return
+    }
+
+    if (!board) {
+      json(res, 404, { detail: `Unknown board: ${slug}` })
+
+      return
+    }
+
+    if (path === '/board' && method === 'GET') {
+      const withArchived = query.get('include_archived') === 'true'
+      const columns = withArchived ? [...KANBAN_COLUMNS, 'archived'] : KANBAN_COLUMNS
+
+      json(res, 200, {
+        columns: columns.map(name => ({
+          name,
+          // `ORDER BY priority DESC, created_at ASC` — the only order there is.
+          tasks: board.tasks
+            .filter(task => task.status === name)
+            .sort((a, b) => b.priority - a.priority || a.created_at - b.created_at)
+            .map(kanbanTaskView)
+        })),
+        tenants: [],
+        assignees: [...new Set(board.tasks.map(task => task.assignee).filter(Boolean))],
+        latest_event_id: 0,
+        now: Math.floor(Date.now() / 1000)
+      })
+
+      return
+    }
+
+    if (path === '/dispatch' && method === 'POST') {
+      state.kanbanDispatches += 1
+      json(res, 200, { spawned: [] })
+
+      return
+    }
+
+    if (path === '/tasks' && method === 'POST') {
+      const body = await readBody(req)
+      const title = typeof body.title === 'string' ? body.title.trim() : ''
+
+      if (!title) {
+        json(res, 422, { detail: 'title is required' })
+
+        return
+      }
+
+      const made: FakeKanbanTask = {
+        id: `t_${(board.tasks.length + 1).toString(16).padStart(8, '0')}`,
+        title,
+        body: typeof body.body === 'string' ? body.body : null,
+        // The whole of create's say over the landing column. There is no
+        // `status` on `CreateTaskBody`, so anything else is a second call.
+        status: body.triage === true ? 'triage' : 'ready',
+        assignee: typeof body.assignee === 'string' ? body.assignee : null,
+        priority: typeof body.priority === 'number' ? body.priority : 0,
+        created_at: Math.floor(Date.now() / 1000),
+        parents: [],
+        comments: []
+      }
+
+      board.tasks.push(made)
+      json(res, 200, { task: kanbanTaskView(made) })
+
+      return
+    }
+
+    const taskMatch = /^\/tasks\/([^/]+)(\/[a-z]+)?$/u.exec(path)
+
+    if (!taskMatch) {
+      json(res, 404, { detail: 'Not Found' })
+
+      return
+    }
+
+    const task = board.tasks.find(entry => entry.id === decodeURIComponent(taskMatch[1] as string))
+
+    if (!task) {
+      // A 404 WITH a detail: the router answering about one card, which is not
+      // the same as the plugin being absent.
+      json(res, 404, { detail: 'task not found' })
+
+      return
+    }
+
+    if (taskMatch[2] === '/comments' && method === 'POST') {
+      const body = await readBody(req)
+      const text = typeof body.body === 'string' ? body.body.trim() : ''
+
+      if (!text) {
+        json(res, 400, { detail: 'comment body is required' })
+
+        return
+      }
+
+      task.comments.push({
+        id: task.comments.length + 1,
+        // Defaulted server-side, which is why a client that cares sends its own.
+        author: typeof body.author === 'string' && body.author ? body.author : 'dashboard',
+        body: text,
+        created_at: Math.floor(Date.now() / 1000)
+      })
+
+      // The comment it made is NOT returned; a caller has to re-read the task.
+      json(res, 200, { ok: true })
+
+      return
+    }
+
+    if (taskMatch[2] === undefined && method === 'GET') {
+      json(res, 200, {
+        task: kanbanTaskView(task),
+        comments: task.comments,
+        events: [],
+        links: { parents: task.parents, children: [] },
+        runs: []
+      })
+
+      return
+    }
+
+    if (taskMatch[2] === undefined && method === 'PATCH') {
+      const body = await readBody(req)
+      const status = typeof body.status === 'string' ? body.status : null
+
+      if (status === 'running') {
+        json(res, 400, { detail: KANBAN_RUNNING_REFUSAL })
+
+        return
+      }
+
+      if (status && status !== 'archived' && !KANBAN_COLUMNS.includes(status)) {
+        json(res, 400, { detail: `unknown status: ${status}` })
+
+        return
+      }
+
+      if (status === 'ready') {
+        const blocking = task.parents
+          .map(id => board.tasks.find(entry => entry.id === id))
+          .filter(parent => parent && parent.status !== 'done' && parent.status !== 'archived')
+
+        if (blocking.length) {
+          const named = blocking
+            .map(parent => `'${parent?.title}' (${parent?.id}, status=${parent?.status})`)
+            .join(', ')
+
+          // The sentence the app shows verbatim: nothing on the client side can
+          // work out which parent is in the way.
+          json(res, 409, { detail: `Cannot move to 'ready': blocked by parent(s) not done — ${named}` })
+
+          return
+        }
+      }
+
+      if (status) {
+        task.status = status
+      }
+
+      if (typeof body.title === 'string') {
+        task.title = body.title
+      }
+
+      if (body.body === null || typeof body.body === 'string') {
+        task.body = body.body as string | null
+      }
+
+      if (typeof body.assignee === 'string') {
+        task.assignee = body.assignee
+      }
+
+      if (typeof body.priority === 'number') {
+        task.priority = body.priority
+      }
+
+      json(res, 200, { task: kanbanTaskView(task) })
+
+      return
+    }
+
+    json(res, 404, { detail: 'Not Found' })
+  }
+
+  /** One card on the wire, with the three keys the board route derives. */
+  function kanbanTaskView(task: FakeKanbanTask): Record<string, unknown> {
+    return {
+      id: task.id,
+      title: task.title,
+      body: task.body,
+      status: task.status,
+      assignee: task.assignee,
+      priority: task.priority,
+      created_at: task.created_at,
+      latest_summary: null,
+      comment_count: task.comments.length,
+      link_counts: { parents: task.parents.length, children: 0 }
+    }
+  }
+
   async function handleCron(
     req: IncomingMessage,
     res: ServerResponse,
@@ -4536,6 +5163,136 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
         state.mcpReloads += 1
 
         return { status: 'reloaded', loaded_rev: `rev-${state.mcpReloads}`, coalesced: false }
+      }
+
+      /**
+       * `connectors.list` — `methods_connectors.py::connectors.list`.
+       *
+       * Two things a client gets wrong here. It needs a `session_id` and
+       * upstream refuses without one (`4000 INVALID_PARAMS`), because authority
+       * is transport ATTACHMENT to that session and not the id itself. And when
+       * the session's `manage_connections` toolset is off it answers
+       * `{available: false, connectors: []}` as a SUCCESS — a client reading
+       * only the array reports an empty account for a switch that is off.
+       */
+      case 'connectors.list': {
+        requireConnectorSession(params)
+
+        if (state.connectorsUnavailable) {
+          return { available: false, connectors: [] }
+        }
+
+        return {
+          available: true,
+          connectors: state.connectors.map(entry => ({
+            connector: entry.connector,
+            connected: entry.connected,
+            enabled: entry.enabled,
+            connectionStatus: entry.connectionStatus,
+            statusReason: entry.statusReason,
+            ...(entry.name === undefined ? {} : { name: entry.name }),
+            ...(entry.description === undefined ? {} : { description: entry.description })
+          }))
+        }
+      }
+
+      /**
+       * `connectors.connect` — opens (or re-mints on) an operation.
+       *
+       * The authorisation link rides at `targets[].connect_url` and NOWHERE
+       * else. `connector_ui_payload` redacts the whole payload but exempts that
+       * one key by name, which is the only reason it survives the trip.
+       */
+      case 'connectors.connect': {
+        const sessionId = requireConnectorSession(params)
+
+        if (state.connectorsUnavailable) {
+          throw new RpcFault(4031, 'Connectors are not available in this session.')
+        }
+
+        const slugs = Array.isArray(params.connectors) ? (params.connectors as string[]) : []
+
+        if (!slugs.length || slugs.some(slug => !/^[a-z0-9][a-z0-9_-]*$/u.test(String(slug)))) {
+          throw new RpcFault(4000, 'connectors must be nonempty slugs; reconnect must be boolean')
+        }
+
+        const unknown = slugs.find(slug => !state.connectors.some(entry => entry.connector === slug))
+
+        if (unknown) {
+          throw new RpcFault(4004, `no such connector: ${unknown}`)
+        }
+
+        state.connectorSeq += 1
+
+        const op: FakeConnectorOp = {
+          opId: `op-${state.connectorOps.size + 1}`,
+          sessionId,
+          seq: state.connectorSeq,
+          deadlineAt: Math.floor(Date.now() / 1000) + 300,
+          settled: false,
+          settledBy: null,
+          reads: 0,
+          woken: false,
+          targets: slugs.map(slug => ({
+            name: slug,
+            kind: 'connector' as const,
+            action: params.reconnect === true ? 'reconnect' : 'connect',
+            state: 'initiated',
+            connectUrl: `https://vendor.test/authorize/${slug}?op=${state.connectorOps.size + 1}`,
+            detail: null,
+            // `slack` is the fixture that fails, so a client has a failure to
+            // draw without reaching in and mutating the catalogue first.
+            resolvesTo: slug === 'slack' ? 'failed' : 'connected'
+          }))
+        }
+
+        state.connectorOps.set(op.opId, op)
+
+        return { ...connectorOpView(op), status: 'initiated', note: 'Show each connect_url to the user.' }
+      }
+
+      /** `connectors.operation.status` — the snapshot, one `seq` newer each read. */
+      case 'connectors.operation.status': {
+        const op = requireConnectorOp(params)
+
+        op.reads += 1
+
+        // The gateway's own watcher reads the vendor account on a tick; two
+        // reads, or one `wake`, is this fake's stand-in for that latency.
+        if (op.woken || op.reads >= 2) {
+          for (const target of op.targets) {
+            if (target.state === 'initiated') {
+              target.state = target.resolvesTo
+              target.detail = target.resolvesTo === 'failed' ? 'the workspace refused the grant' : null
+            }
+          }
+
+          if (op.targets.every(target => target.state !== 'initiated' && target.state !== 'pending')) {
+            op.settled = true
+            op.settledBy = 'all_resolved'
+          }
+        }
+
+        state.connectorSeq += 1
+        op.seq = state.connectorSeq
+
+        return connectorOpView(op)
+      }
+
+      /**
+       * `connectors.operation.wake` — the browser leg came back.
+       *
+       * A LATENCY shortcut and nothing else; upstream's docstring says the link
+       * "is not trusted for anything else". It is pinned here because it is
+       * MISSING from the vendored contract while upstream registers it, so
+       * without a fixture nothing in this repo would notice either way.
+       */
+      case 'connectors.operation.wake': {
+        const op = requireConnectorOp(params)
+
+        op.woken = true
+
+        return { status: 'ok' }
       }
 
       case 'mcp.servers.list':
