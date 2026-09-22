@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reader gets `1.234` and `22-09-2026` rather than the American forms. The choice belongs to the
   device, like light-and-dark: switching to your work gateway does not switch your language.
 
+  The pages Hermie Web serves itself — `/setup`, `/admin` and the sign-in — speak the same three
+  languages, negotiated from your browser's `Accept-Language` rather than from a setting, because
+  the first of them is reached before there is anywhere to keep one. English is the default there
+  too, and the same sentence in the same glossary: a gateway is a gateway in all three.
+
 - **Hermie Web can sign people in itself.** A gateway normally needs an identity provider — Authentik,
   Keycloak, something of that shape — and for one gateway shared by a handful of people that is a
   second service with its own database in front of a single process. So Hermie Web can now be that

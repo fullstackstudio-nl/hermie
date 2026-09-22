@@ -23,6 +23,7 @@
  *    without it before it reads the body.
  */
 import { escapeHtml } from '../setup'
+import { htmlLang, type WebLocale, type WebStrings } from '../i18n'
 import { CSRF_FIELD } from './session'
 import { PUSH_TYPES } from '../push/registrations'
 import type { AdminState, AdminUserRow } from './state'
@@ -54,6 +55,10 @@ export interface AdminPageInput {
   state: AdminState
   status: AdminStatus
   csrf: string
+  /** The language this request negotiated, for `<html lang>`. */
+  locale: WebLocale
+  /** Every sentence on the page, in that language. */
+  strings: WebStrings
   /** Bot names, for the per-user allow list. Empty where the roster is unknown. */
   bots: string[]
   /** Who is looking, for the "you cannot remove yourself last" hint. */
@@ -63,16 +68,18 @@ export interface AdminPageInput {
   notice: string
 }
 
-const yes = (value: boolean): string => (value ? 'yes' : 'no')
+const yes = (value: boolean, strings: WebStrings): string => (value ? strings.common.yes : strings.common.no)
 
 const megabytes = (bytes: number): string => `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 
-function hitRate(status: AdminStatus): string {
+function hitRate(status: AdminStatus, strings: WebStrings): string {
   const total = status.cacheHits + status.cacheMisses
 
   // "0 of 0" rather than a percentage of nothing: a service that has answered
   // no cache reads has no hit rate, and printing 0% would read as a problem.
-  return total ? `${Math.round((status.cacheHits / total) * 100)}% of ${total}` : 'nothing asked yet'
+  return total
+    ? strings.admin.service.hitRate(Math.round((status.cacheHits / total) * 100), total)
+    : strings.admin.service.nothingAsked
 }
 
 const STYLE = `
@@ -101,8 +108,8 @@ const STYLE = `
   code { font-family: ui-monospace, monospace; font-size: .9em }
 `
 
-const head = (title: string): string =>
-  `<!doctype html>\n<html lang="en">\n<meta charset="utf-8">\n` +
+const head = (locale: WebLocale, title: string): string =>
+  `<!doctype html>\n<html lang="${htmlLang(locale)}">\n<meta charset="utf-8">\n` +
   `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
   `<title>${escapeHtml(title)}</title>\n<style>${STYLE}</style>\n`
 
@@ -113,18 +120,25 @@ const head = (title: string): string =>
  * accounts never sees this page: its operator is already signed in to the
  * gateway and the gate is their user id.
  */
-export function adminSignInPage(input: { csrf: string; notice: string }): string {
-  return `${head('Hermie Web administration')}<main>
-  <h1>Administration</h1>
-  <p>This service has no gateway accounts to recognise you by, so it asks for the administrator secret set during setup.</p>
+export function adminSignInPage(input: {
+  csrf: string
+  notice: string
+  locale: WebLocale
+  strings: WebStrings
+}): string {
+  const { common, admin } = input.strings
+
+  return `${head(input.locale, common.administrationTitle)}<main>
+  <h1>${common.administration}</h1>
+  <p>${admin.signIn.intro}</p>
   ${input.notice ? `<p class="note bad">${escapeHtml(input.notice)}</p>` : ''}
   <section>
     <form method="post" action="/admin/sign-in">
       <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
-      <label for="secret">Administrator secret</label>
+      <label for="secret">${common.administratorSecret}</label>
       <input id="secret" name="secret" type="password" autocomplete="current-password">
-      <p class="note">Stored as a scrypt hash. This page never shows it back.</p>
-      <button type="submit">Sign in</button>
+      <p class="note">${admin.signIn.secretNote}</p>
+      <button type="submit">${common.signIn}</button>
     </form>
   </section>
 </main>
@@ -133,41 +147,43 @@ export function adminSignInPage(input: { csrf: string; notice: string }): string
 }
 
 /** The page somebody who is signed in but is not an administrator gets. */
-export function adminForbiddenPage(viewer: string): string {
-  return `${head('Not an administrator')}<main>
-  <h1>Not an administrator</h1>
-  <p>${
-    viewer
-      ? `The gateway knows you as <code>${escapeHtml(viewer)}</code>, and that id is not on this service’s administrator list.`
-      : 'This gateway did not say who you are, so this service has nobody to check against.'
-  }</p>
-  <p class="note">An existing administrator can add an id on this page. On a service with no gateway accounts, the administrator secret set during setup is the way in.</p>
+export function adminForbiddenPage(input: { viewer: string; locale: WebLocale; strings: WebStrings }): string {
+  const text = input.strings.admin.forbidden
+
+  return `${head(input.locale, text.title)}<main>
+  <h1>${text.title}</h1>
+  <p>${input.viewer ? text.knownAs(escapeHtml(input.viewer)) : text.unknown}</p>
+  <p class="note">${text.note}</p>
 </main>
 </html>
 `
 }
 
 function usersTable(input: AdminPageInput): string {
+  const text = input.strings.admin.people
   const rows = Object.values(input.state.users).sort((left, right) => right.seenAt - left.seenAt)
 
   if (!rows.length) {
-    return '<p class="note">Nobody has signed in through this service yet.</p>'
+    return `<p class="note">${text.empty}</p>`
   }
 
   return `<table>
-  <tr><th>Who</th><th>Last seen</th><th>Bots</th><th>Read-only</th><th>Push</th><th></th></tr>
+  <tr><th>${text.who}</th><th>${text.lastSeen}</th><th>${text.bots}</th><th>${text.readOnly}</th><th>${
+    text.push
+  }</th><th></th></tr>
   ${rows.map(row => userRow(row, input)).join('\n  ')}
 </table>`
 }
 
 function userRow(row: AdminUserRow, input: AdminPageInput): string {
+  const text = input.strings.admin.people
   const label = row.displayName || row.email || row.userId
   const allowed = row.allowedBots === null ? '' : row.allowedBots.join(', ')
   const admin = input.state.admins.includes(row.userId)
 
   return `<tr>
     <td><strong>${escapeHtml(label)}</strong><br><code>${escapeHtml(row.userId)}</code>${
-      admin ? ' <span class="ok note">administrator</span>' : ''
+      admin ? ` <span class="ok note">${text.administrator}</span>` : ''
     }</td>
     <td class="note">${row.seenAt ? new Date(row.seenAt * 1000).toISOString().slice(0, 16).replace('T', ' ') : '—'}</td>
     <td colspan="4">
@@ -176,17 +192,23 @@ function userRow(row: AdminUserRow, input: AdminPageInput): string {
         <input type="hidden" name="userId" value="${escapeHtml(row.userId)}">
         <div class="row">
           <div>
-            <label for="bots-${escapeHtml(row.userId)}">Allowed bots (blank = all)</label>
+            <label for="bots-${escapeHtml(row.userId)}">${text.allowedBotsLabel}</label>
             <input id="bots-${escapeHtml(row.userId)}" name="allowedBots" type="text" value="${escapeHtml(allowed)}"
                    placeholder="${escapeHtml(input.bots.join(', ') || 'researcher, writer')}">
           </div>
           <div>
-            <label><input type="checkbox" name="readOnly" value="1"${row.readOnly ? ' checked' : ''}> Read-only</label>
-            <label><input type="checkbox" name="pushAllowed" value="1"${row.pushAllowed ? ' checked' : ''}> Push allowed</label>
+            <label><input type="checkbox" name="readOnly" value="1"${row.readOnly ? ' checked' : ''}> ${
+              text.readOnly
+            }</label>
+            <label><input type="checkbox" name="pushAllowed" value="1"${row.pushAllowed ? ' checked' : ''}> ${
+              text.pushAllowed
+            }</label>
           </div>
           <div>
-            <label><input type="checkbox" name="admin" value="1"${admin ? ' checked' : ''}> Administrator</label>
-            <button type="submit">Save</button>
+            <label><input type="checkbox" name="admin" value="1"${admin ? ' checked' : ''}> ${
+              text.administratorBox
+            }</label>
+            <button type="submit">${input.strings.common.save}</button>
           </div>
         </div>
       </form>
@@ -195,42 +217,48 @@ function userRow(row: AdminUserRow, input: AdminPageInput): string {
 }
 
 export function adminPage(input: AdminPageInput): string {
-  const { state, status } = input
+  const { state, status, strings } = input
+  const { common } = strings
+  const text = strings.admin
 
-  return `${head('Hermie Web administration')}<main>
-  <h1>Administration</h1>
-  <p>Hermie Web ${escapeHtml(status.version)} · <code>${escapeHtml(status.gatewayUrl)}</code></p>
+  return `${head(input.locale, common.administrationTitle)}<main>
+  <h1>${common.administration}</h1>
+  <p>${text.header(escapeHtml(status.version), escapeHtml(status.gatewayUrl))}</p>
   ${input.notice ? `<p class="note ok">${escapeHtml(input.notice)}</p>` : ''}
 
   <section>
-    <h2>Service</h2>
+    <h2>${text.service.heading}</h2>
     <dl>
-      <dt>Version</dt><dd>${escapeHtml(status.version)}${
-        status.updateAvailable ? ` — <strong>${escapeHtml(status.latestVersion)} available</strong>` : ' — up to date'
+      <dt>${text.service.version}</dt><dd>${escapeHtml(status.version)} — ${
+        status.updateAvailable ? text.service.updateAvailable(escapeHtml(status.latestVersion)) : text.service.upToDate
       }</dd>
-      <dt>Service login</dt><dd>${yes(status.serviceLogin)}</dd>
-      <dt>Push daemon</dt><dd>${status.pushRunning ? 'running' : 'not running'}</dd>
-      <dt>VAPID key</dt><dd>${yes(status.vapidPresent)}</dd>
-      <dt>Message cache</dt><dd>${
+      <dt>${text.service.serviceLogin}</dt><dd>${yes(status.serviceLogin, strings)}</dd>
+      <dt>${text.service.pushDaemon}</dt><dd>${status.pushRunning ? text.service.running : text.service.notRunning}</dd>
+      <dt>${text.service.vapidKey}</dt><dd>${yes(status.vapidPresent, strings)}</dd>
+      <dt>${text.service.messageCache}</dt><dd>${
         status.cacheEnabled
-          ? `${status.cacheEntries} entries · ${megabytes(status.cacheBytes)} of ${megabytes(status.cacheMaxBytes)}`
-          : 'off'
+          ? text.service.cacheFill(status.cacheEntries, megabytes(status.cacheBytes), megabytes(status.cacheMaxBytes))
+          : text.service.cacheOff
       }</dd>
-      <dt>Cache hits</dt><dd>${escapeHtml(hitRate(status))}</dd>
-      <dt>User list</dt><dd>${
-        status.usersFrom === 'gateway' ? 'from the gateway' : 'people this service has seen sign in'
+      <dt>${text.service.cacheHits}</dt><dd>${escapeHtml(hitRate(status, strings))}</dd>
+      <dt>${text.service.userList}</dt><dd>${
+        status.usersFrom === 'gateway' ? text.service.fromGateway : text.service.fromSeen
       }</dd>
     </dl>
     <form method="post" action="/admin/update">
       <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
-      <button type="submit"${status.canSelfUpdate ? '' : ' disabled'}>Update and restart</button>
-      ${status.canSelfUpdate ? '' : `<span class="note">${escapeHtml(status.updateReason || 'not available here')}</span>`}
+      <button type="submit"${status.canSelfUpdate ? '' : ' disabled'}>${text.service.updateButton}</button>
+      ${
+        status.canSelfUpdate
+          ? ''
+          : `<span class="note">${escapeHtml(status.updateReason || text.service.updateUnavailable)}</span>`
+      }
     </form>
   </section>
 
   <section>
-    <h2>Push</h2>
-    <p>A ceiling, not a second opt-in: a device still has to have asked. Turning one off silences it for everybody.</p>
+    <h2>${text.push.heading}</h2>
+    <p>${text.push.intro}</p>
     <form method="post" action="/admin/push">
       <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
       ${PUSH_TYPES.map(
@@ -239,104 +267,100 @@ export function adminPage(input: AdminPageInput): string {
             state.push.types[type] ? ' checked' : ''
           }> ${type}</label>`
       ).join('\n      ')}
-      <label for="preview">Preview policy</label>
+      <label for="preview">${text.push.previewLabel}</label>
       <select id="preview" name="preview">
-        <option value="device"${state.push.preview === 'device' ? ' selected' : ''}>Each device decides</option>
-        <option value="never"${state.push.preview === 'never' ? ' selected' : ''}>Never include message text</option>
+        <option value="device"${state.push.preview === 'device' ? ' selected' : ''}>${text.push.previewDevice}</option>
+        <option value="never"${state.push.preview === 'never' ? ' selected' : ''}>${text.push.previewNever}</option>
       </select>
       <p class="note">&nbsp;</p>
-      <button type="submit">Save push settings</button>
+      <button type="submit">${text.push.saveButton}</button>
     </form>
   </section>
 
   <section>
-    <h2>Message cache</h2>
+    <h2>${text.cache.heading}</h2>
     <form method="post" action="/admin/cache">
       <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
-      <label for="retention">Drop entries unread for (hours, 0 = size cap only)</label>
+      <label for="retention">${text.cache.retentionLabel}</label>
       <input id="retention" name="retentionHours" type="number" min="0" value="${state.cache.retentionHours}">
-      <p class="note">The size cap is <code>--cache-max-mb</code> and is set at start-up, not here.</p>
-      <button type="submit">Save</button>
-      <button type="submit" name="clear" value="1">Clear the cache now</button>
+      <p class="note">${text.cache.capNote}</p>
+      <button type="submit">${common.save}</button>
+      <button type="submit" name="clear" value="1">${text.cache.clearButton}</button>
     </form>
   </section>
 
   <section>
-    <h2>Identity</h2>
+    <h2>${text.identity.heading}</h2>
     <p>${
       input.identity.enabled
-        ? `This service is signing people in itself, as <code>${escapeHtml(input.identity.issuer)}</code>, for
-      ${input.identity.accounts} account${input.identity.accounts === 1 ? '' : 's'}. <strong>That makes it the
-      identity root of your gateway.</strong>`
-        : 'This service can sign people in itself, for a deployment with no identity provider of its own. It is <strong>off</strong>.'
+        ? text.identity.on(escapeHtml(input.identity.issuer), input.identity.accounts)
+        : text.identity.off
     }</p>
-    <p><a href="/admin/oidc">Identity settings, accounts and the gateway snippet →</a></p>
+    <p><a href="/admin/oidc">${text.identity.link}</a></p>
   </section>
 
   <section>
-    <h2>Branding</h2>
-    <p>Served in <code>/hermie/config.json</code> and read by the app before it draws anything.</p>
+    <h2>${text.branding.heading}</h2>
+    <p>${text.branding.intro}</p>
     <form method="post" action="/admin/branding">
       <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
       <div class="row">
         <div>
-          <label for="brand-name">Name</label>
+          <label for="brand-name">${text.branding.nameLabel}</label>
           <input id="brand-name" name="name" type="text" value="${escapeHtml(state.branding.name)}" placeholder="Hermie">
         </div>
         <div>
-          <label for="brand-accent">Accent</label>
+          <label for="brand-accent">${text.branding.accentLabel}</label>
           <input id="brand-accent" name="accent" type="text" value="${escapeHtml(state.branding.accent)}" placeholder="default">
         </div>
         <div>
-          <label for="brand-theme">Default theme preset</label>
+          <label for="brand-theme">${text.branding.themeLabel}</label>
           <input id="brand-theme" name="theme" type="text" value="${escapeHtml(state.branding.theme)}" placeholder="system">
         </div>
       </div>
-      <p class="note">A reader who has chosen their own keeps it; this is the starting point, not an override.</p>
-      <button type="submit">Save branding</button>
+      <p class="note">${text.branding.note}</p>
+      <button type="submit">${text.branding.saveButton}</button>
     </form>
   </section>
 
   <section>
-    <h2>Features</h2>
+    <h2>${text.features.heading}</h2>
     <form method="post" action="/admin/flags">
       <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
       <label><input type="checkbox" name="userChats" value="1"${
         state.flags.userChats ? ' checked' : ''
-      }> Private chats beside the shared Bot Chat</label>
+      }> ${text.features.userChats}</label>
       <label><input type="checkbox" name="messageCache" value="1"${
         state.flags.messageCache ? ' checked' : ''
-      }> Serve the message cache to the app</label>
+      }> ${text.features.messageCache}</label>
       <label><input type="checkbox" name="selfUpdate" value="1"${
         state.flags.selfUpdate ? ' checked' : ''
-      }> Offer the update button in the app</label>
+      }> ${text.features.selfUpdate}</label>
       <p class="note">&nbsp;</p>
-      <button type="submit">Save features</button>
+      <button type="submit">${text.features.saveButton}</button>
     </form>
   </section>
 
   <section>
-    <h2>People</h2>
-    <p><strong>These are service-level settings, not gateway permissions.</strong> Push and the message cache are this
-    service’s own and are enforced completely. Read-only refuses every mutating HTTP request; it cannot police the
-    gateway WebSocket, which is a byte pipe by design — so it is a guard rail, not a boundary.</p>
+    <h2>${text.people.heading}</h2>
+    <p>${text.people.intro}</p>
     ${usersTable(input)}
     <form method="post" action="/admin/user">
       <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
-      <label for="add-user">Add somebody by gateway user id</label>
+      <label for="add-user">${text.people.addLabel}</label>
       <div class="row">
         <div><input id="add-user" name="userId" type="text" placeholder="someone@example.org"></div>
         <div>
-          <label><input type="checkbox" name="admin" value="1"> Administrator</label>
-          <label><input type="checkbox" name="pushAllowed" value="1" checked> Push allowed</label>
+          <label><input type="checkbox" name="admin" value="1"> ${text.people.administratorBox}</label>
+          <label><input type="checkbox" name="pushAllowed" value="1" checked> ${text.people.pushAllowed}</label>
         </div>
-        <div><button type="submit">Add</button></div>
+        <div><button type="submit">${text.people.addButton}</button></div>
       </div>
     </form>
     ${
       input.viewer
-        ? `<p class="note">You are signed in as <code>${escapeHtml(input.viewer)}</code>. The last administrator cannot be removed.</p>`
-        : '<p class="note">You are signed in with the local administrator secret.</p>'
+        ? `<p class="note">${text.people.signedInAs(escapeHtml(input.viewer))}</p>`
+        : `<p class="note">${text.people.signedInLocally}</p>`
     }
   </section>
 </main>

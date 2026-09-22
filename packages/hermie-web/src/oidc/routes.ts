@@ -32,6 +32,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
 import { CSRF_FIELD, cookieOf, newToken, setCookie, tokensMatch } from '../admin/session'
+import { webCopy, webStrings, type WebStrings } from '../i18n'
 import { isSecureRequest } from '../proxy'
 import { enrolPage, invitePage, oidcErrorPage, signInPage, signedOutPage } from './page'
 import {
@@ -243,7 +244,7 @@ export class OidcRouter {
     } catch (error) {
       const failure = error as AuthorizeError
 
-      this.html(response, 400, oidcErrorPage(failure.code, failure.message))
+      this.failure(request, response, 400, failure.code, failure.message)
 
       return
     }
@@ -298,7 +299,7 @@ export class OidcRouter {
     try {
       form = await this.checkedForm(request)
     } catch (error) {
-      this.html(response, 403, oidcErrorPage('invalid_request', (error as Error).message))
+      this.failure(request, response, 403, 'invalid_request', (error as Error).message)
 
       return
     }
@@ -310,7 +311,7 @@ export class OidcRouter {
       this.renderSignIn(request, response, url, {
         username,
         wantsSecondFactor: false,
-        notice: 'Too many attempts. Wait a few minutes and try again.'
+        notice: 'tooManyAttempts'
       })
 
       return
@@ -339,7 +340,7 @@ export class OidcRouter {
         this.renderSignIn(request, response, url, {
           username,
           wantsSecondFactor: false,
-          notice: 'That sign-in was not right.'
+          notice: 'notRight'
         })
 
         return
@@ -379,7 +380,7 @@ export class OidcRouter {
       this.renderSignIn(request, response, url, {
         username,
         wantsSecondFactor: true,
-        notice: 'That sign-in was not right.'
+        notice: 'notRight'
       })
 
       return
@@ -408,7 +409,7 @@ export class OidcRouter {
     this.renderSignIn(request, response, url, {
       username,
       wantsSecondFactor: true,
-      notice: 'That sign-in was not right.'
+      notice: 'notRight'
     })
   }
 
@@ -482,12 +483,26 @@ export class OidcRouter {
     response.end()
   }
 
+  /**
+   * The sign-in form.
+   *
+   * `notice` is named rather than written out, because every caller wants the
+   * same two sentences and both of them have to come from the language this
+   * request asked for — which is not known until this method has read the
+   * header.
+   */
   private renderSignIn(
     request: IncomingMessage,
     response: ServerResponse,
     url: URL,
-    input: { username: string; wantsSecondFactor: boolean; notice: string }
+    input: {
+      username: string
+      wantsSecondFactor: boolean
+      notice: '' | 'notRight' | 'tooManyAttempts'
+    }
   ): void {
+    const copy = webCopy(request)
+
     this.html(
       response,
       200,
@@ -495,7 +510,9 @@ export class OidcRouter {
         issuerName: this.options.issuerName(),
         csrf: this.mintCsrf(response, isSecureRequest(request)),
         query: url.searchParams.toString(),
-        ...input
+        ...input,
+        notice: input.notice ? copy.strings.oidc.signIn[input.notice] : '',
+        ...copy
       })
     )
   }
@@ -638,7 +655,7 @@ export class OidcRouter {
       'cache-control': 'no-store',
       'set-cookie': cleared
     })
-    response.end(signedOutPage(this.options.issuerName()))
+    response.end(signedOutPage({ issuerName: this.options.issuerName(), ...webCopy(request) }))
   }
 
   // ---- /invite ----
@@ -657,7 +674,7 @@ export class OidcRouter {
       const user = this.userForInvite(token)
 
       if (!user) {
-        this.html(response, 400, oidcErrorPage('invalid_token', 'That invitation has been used or has expired.'))
+        this.failure(request, response, 400, 'invalid_token', strings => strings.oidc.error.inviteSpent)
 
         return
       }
@@ -670,7 +687,8 @@ export class OidcRouter {
           csrf: this.mintCsrf(response, isSecureRequest(request)),
           token,
           username: user.username,
-          notice: ''
+          notice: '',
+          ...webCopy(request)
         })
       )
 
@@ -688,7 +706,7 @@ export class OidcRouter {
     try {
       form = await this.checkedForm(request)
     } catch (error) {
-      this.html(response, 403, oidcErrorPage('invalid_request', (error as Error).message))
+      this.failure(request, response, 403, 'invalid_request', (error as Error).message)
 
       return
     }
@@ -698,13 +716,15 @@ export class OidcRouter {
     const password = form.get('password') ?? ''
     const again = form.get('confirm') ?? ''
 
+    const copy = webCopy(request)
+
     if (!user) {
-      this.html(response, 400, oidcErrorPage('invalid_token', 'That invitation has been used or has expired.'))
+      this.failure(request, response, 400, 'invalid_token', strings => strings.oidc.error.inviteSpent)
 
       return
     }
 
-    const complaint = passwordComplaint(password, again)
+    const complaint = passwordComplaint(password, again, copy.strings)
 
     if (complaint) {
       this.html(
@@ -715,7 +735,8 @@ export class OidcRouter {
           csrf: this.mintCsrf(response, isSecureRequest(request)),
           token: offered,
           username: user.username,
-          notice: complaint
+          notice: complaint,
+          ...copy
         })
       )
 
@@ -728,11 +749,7 @@ export class OidcRouter {
       return { ...rest, password: hashPassword(password) }
     })
 
-    this.html(
-      response,
-      200,
-      oidcErrorPage('ok', 'Your password is set. Go back to the application and sign in with it.')
-    )
+    this.failure(request, response, 200, 'ok', strings => strings.oidc.error.passwordSet)
   }
 
   private userForInvite(token: string): OidcUser | null {
@@ -767,7 +784,8 @@ export class OidcRouter {
       secret,
       uri: otpauthUri({ issuerName: this.options.issuerName(), account: user.username, secret }),
       recoveryCodes: codes,
-      notice: ''
+      notice: '',
+      ...webCopy(request)
     })
 
     response.writeHead(200, {
@@ -800,7 +818,7 @@ export class OidcRouter {
     try {
       form = await this.checkedForm(request)
     } catch (error) {
-      this.html(response, 403, oidcErrorPage('invalid_request', (error as Error).message))
+      this.failure(request, response, 403, 'invalid_request', (error as Error).message)
 
       return
     }
@@ -809,17 +827,13 @@ export class OidcRouter {
     const pending = session ? this.enrolments.get(session) : undefined
 
     if (!pending || pending.expiresAt <= this.now) {
-      this.html(response, 400, oidcErrorPage('invalid_request', 'That enrolment is no longer in progress.'))
+      this.failure(request, response, 400, 'invalid_request', strings => strings.oidc.error.enrolmentGone)
 
       return
     }
 
     if (!totpMatches(pending.secret, form.get('totp') ?? '', { now: this.now })) {
-      this.html(
-        response,
-        400,
-        oidcErrorPage('invalid_request', 'That code was not right. Go back and try the next one the app shows.')
-      )
+      this.failure(request, response, 400, 'invalid_request', strings => strings.oidc.error.codeNotRight)
 
       return
     }
@@ -831,11 +845,7 @@ export class OidcRouter {
     }))
     this.enrolments.delete(session)
 
-    this.html(
-      response,
-      200,
-      oidcErrorPage('ok', 'Two-factor is on for this account. Go back to the application and sign in.')
-    )
+    this.failure(request, response, 200, 'ok', strings => strings.oidc.error.twoFactorOn)
   }
 
   // ---- shared ----
@@ -884,6 +894,35 @@ export class OidcRouter {
     response.end(body)
   }
 
+  /**
+   * The error page, in the language this request asked for.
+   *
+   * A method rather than ten call sites building the same object, because the
+   * one thing they must not disagree about is which request the language came
+   * from: an error page painted from somebody else's header would be a puzzle
+   * nobody could reproduce.
+   *
+   * `sentence` picks the copy out of the table it belongs to, so a call site
+   * names a key rather than a string; the failures that have no key — a
+   * provider's own complaint about a malformed request — pass the message
+   * through instead.
+   */
+  private failure(
+    request: IncomingMessage,
+    response: ServerResponse,
+    status: number,
+    code: string,
+    sentence: string | ((strings: WebStrings) => string)
+  ): void {
+    const copy = webCopy(request)
+
+    this.html(
+      response,
+      status,
+      oidcErrorPage({ ...copy, code, detail: typeof sentence === 'string' ? sentence : sentence(copy.strings) })
+    )
+  }
+
   private json(response: ServerResponse, status: number, body: unknown): void {
     const payload = JSON.stringify(body)
 
@@ -905,13 +944,13 @@ export class OidcRouter {
  * 800-63B's own finding, and this provider has no list of breached passwords to
  * check against without a dependency and a download.
  */
-export function passwordComplaint(password: string, again: string): string {
+export function passwordComplaint(password: string, again: string, strings: WebStrings = webStrings('en')): string {
   if (password.length < 12) {
-    return 'Use at least twelve characters. Length is what makes a password hard to guess.'
+    return strings.oidc.invite.tooShort
   }
 
   if (password !== again) {
-    return 'Those two did not match.'
+    return strings.oidc.invite.mismatch
   }
 
   return ''
