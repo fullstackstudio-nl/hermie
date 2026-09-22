@@ -278,7 +278,19 @@ export function KanbanScreen({ onClose, backLabel = kanbanStrings.back }: Kanban
         onRefused={column => setNotice(kanbanStrings.lockedTarget(columnLabel(column)))}
         onToggleArchived={() => setArchived(current => !current)}
         title={boards?.find(entry => entry.slug === slug)?.name ?? slug}
-        wide={width >= WIDE_BOARD_PX}
+        /*
+          The window's width is the FIRST guess, not the answer.
+
+          On a phone, and on a Mac window the board fills, the two are the same
+          number. Inside the iPad's Settings overlay they are not: the panel is
+          about half the window, and a board that asked the window laid eight
+          260pt columns out inside 516pt of panel — the second column was cut
+          off at the panel's edge and the reader could reach neither the cards
+          in it nor the New card under them. `BoardScreen` corrects this from
+          its own `onLayout`; the window is what it draws with until the first
+          layout lands, which is right wherever the board is the window.
+        */
+        windowWidth={width}
         {...(creating !== null && controller
           ? {
               creating,
@@ -402,7 +414,7 @@ function BoardScreen({
   onSubmitCreate,
   onToggleArchived,
   title,
-  wide
+  windowWidth
 }: {
   archived: boolean
   board: BoardView | null
@@ -419,10 +431,24 @@ function BoardScreen({
   onSubmitCreate?: (input: { title: string; body?: string | null }) => Promise<void>
   onToggleArchived: () => void
   title: string
-  wide: boolean
+  /** The first guess at the board's width; see `windowWidth` at the call site. */
+  windowWidth: number
 }) {
   const theme = useTheme()
   const [refreshing, setRefreshing] = useState(false)
+
+  /*
+    What the board is ACTUALLY drawn in, once it has been laid out.
+
+    The thing running out of room is this board, not the window it is in, and
+    the two are different numbers wherever the board is a panel: the iPad's
+    Settings overlay is about half the window, and a Mac window dragged narrow
+    is another. Null until the first layout, and the window stands in — which
+    is the right answer wherever the board IS the window, and one frame of the
+    wrong one where it is not.
+  */
+  const [measured, setMeasured] = useState<number | null>(null)
+  const wide = (measured ?? windowWidth) >= WIDE_BOARD_PX
 
   /*
     The horizontal scroller, and the row of columns inside it.
@@ -504,20 +530,20 @@ function BoardScreen({
 
   const targets = (board?.columns ?? []).filter(column => column.droppable).map(column => column.name)
 
-  const body = (
+  /*
+    The columns, and only the columns.
+
+    Everything else on this page is a SENTENCE, and a sentence inside the
+    sideways scroller is laid out against the columns' combined width — eight
+    of them, better than 2000pt — so it never wraps and simply runs off the
+    right edge of the viewport instead. The reader is left with "Running,
+    Review and Scheduled are the dispatcher's. A card can leave them but" and
+    no indication that the rest of it is two screens to the right.
+
+    So the board scrolls sideways and the prose does not.
+  */
+  const columns = (
     <>
-      {error ? (
-        <Text color="dangerText" testID="kanban-board-error">
-          {kanbanStrings.failed(error)}
-        </Text>
-      ) : null}
-
-      {notice ? (
-        <Text color="textMuted" testID="kanban-notice" variant="meta">
-          {notice}
-        </Text>
-      ) : null}
-
       {board === null ? (
         <Text color="textMuted">{kanbanStrings.board.loading}</Text>
       ) : (
@@ -577,6 +603,22 @@ function BoardScreen({
           })}
         </View>
       )}
+    </>
+  )
+
+  const notes = (
+    <>
+      {error ? (
+        <Text color="dangerText" testID="kanban-board-error">
+          {kanbanStrings.failed(error)}
+        </Text>
+      ) : null}
+
+      {notice ? (
+        <Text color="textMuted" testID="kanban-notice" variant="meta">
+          {notice}
+        </Text>
+      ) : null}
 
       {/* Said once, under the board, rather than as three dead drop targets. */}
       <Text color="textMuted" testID="kanban-locked-note" variant="meta">
@@ -616,13 +658,19 @@ function BoardScreen({
 
       <ScrollView
         contentContainerStyle={{
-          alignSelf: wide ? 'flex-start' : 'center',
+          alignSelf: 'center',
           gap: theme.space.lg,
           maxWidth: wide ? undefined : FORM_MAX_WIDTH,
           padding: theme.space.lg,
           width: '100%'
         }}
+        // The board's OWN width, which is what decides the layout. Reported
+        // from here rather than from the content container, because a content
+        // container laid out `flex-start` around a 2000pt row of columns
+        // reports the row's width and not the space it had.
+        onLayout={event => setMeasured(event.nativeEvent.layout.width)}
         ref={directTouchPanRef}
+        testID="kanban-board-scroll"
         refreshControl={
           <RefreshControl
             onRefresh={() => {
@@ -649,11 +697,13 @@ function BoardScreen({
             scrollEventThrottle={16}
             showsHorizontalScrollIndicator
           >
-            <View style={{ gap: theme.space.lg }}>{body}</View>
+            {columns}
           </ScrollView>
         ) : (
-          body
+          columns
         )}
+
+        {notes}
       </ScrollView>
     </Screen>
   )

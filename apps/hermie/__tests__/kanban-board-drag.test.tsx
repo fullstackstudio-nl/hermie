@@ -118,6 +118,35 @@ describe('the drag does not take the menu’s place', () => {
     expect(screen.queryByTestId('kanban-drag-hint')).toBeNull()
   })
 
+  it('believes its own layout over the window it is in', async () => {
+    // The iPad's Settings overlay: a 1032pt window with the board drawn in
+    // about half of it. Asking the window laid eight 260pt columns out inside
+    // 516pt of panel, and the second one was cut off at the panel's edge with
+    // its cards and its New card button out of reach.
+    await openBoard(1024)
+    expect(screen.getByTestId('kanban-drag-hint')).toBeTruthy()
+
+    fireEvent(screen.getByTestId('kanban-board-scroll'), 'layout', {
+      nativeEvent: { layout: { height: 900, width: 516, x: 0, y: 0 } }
+    })
+
+    await waitFor(() => expect(screen.queryByTestId('kanban-drag-hint')).toBeNull())
+  })
+
+  it('goes back to side by side when the panel is given the room', async () => {
+    await openBoard(1024)
+
+    fireEvent(screen.getByTestId('kanban-board-scroll'), 'layout', {
+      nativeEvent: { layout: { height: 900, width: 516, x: 0, y: 0 } }
+    })
+    await waitFor(() => expect(screen.queryByTestId('kanban-drag-hint')).toBeNull())
+
+    fireEvent(screen.getByTestId('kanban-board-scroll'), 'layout', {
+      nativeEvent: { layout: { height: 900, width: 980, x: 0, y: 0 } }
+    })
+    await waitFor(() => expect(screen.getByTestId('kanban-drag-hint')).toBeTruthy())
+  })
+
   it('still says why three columns refuse a card, on both widths', async () => {
     await openBoard(1024)
     expect(screen.getByTestId('kanban-locked-note')).toBeTruthy()

@@ -238,6 +238,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A board drawn in a panel now fits the panel.** On an iPad, opening **Boards** from Settings puts
+  the board in an overlay about half the window wide — and the board was choosing its layout from
+  the window, so it laid eight columns out side by side in half the room. The second column was cut
+  off at the panel's edge, with its cards and its **New card** button out of reach, and the three
+  lines under the board ran off the right-hand side mid-sentence. The board now measures itself
+  rather than the window, so in a narrow panel it stacks the way it does on a phone, and its
+  explanatory lines wrap instead of scrolling sideways with the columns.
+
 - **The bot's name in the chat header no longer has a message printed through it.** The transcript
   scrolls underneath the header, so whatever bubble happens to be passing behind the pill was its
   backdrop — and at the glass control's own transparency that bubble's words came through the name
