@@ -1398,13 +1398,22 @@ export class ChatController {
    * with nothing typed leaves the two sides with only the attachment in common,
    * so what is painted has to be the REFERENCE the row will carry rather than a
    * display name — see `attachmentReferences`.
+   *
+   * ## What it answers with
+   *
+   * The id of the item the prompt was PAINTED as, or `undefined` for a prompt
+   * that was parked behind a running turn and therefore has no item yet. Every
+   * caller on screen ignores it; the one that does not is the Shortcuts runner,
+   * which needs a fixed point in the transcript to tell the reply to its own
+   * prompt apart from the reply that was already there — see
+   * `features/intents/await-reply.ts`.
    */
   async send(
     botName: string,
     text: string,
     attachments: AttachmentInput[] = [],
     options: { display?: string } = {}
-  ): Promise<void> {
+  ): Promise<string | undefined> {
     const chat = this.chats.getState().chats[botName]
 
     if (!chat?.runtimeSessionId) {
@@ -1417,7 +1426,7 @@ export class ChatController {
     if (chat.turn.active) {
       this.queue(botName, text, attachments)
 
-      return
+      return undefined
     }
 
     const sessionId = chat.runtimeSessionId
@@ -1432,6 +1441,10 @@ export class ChatController {
     // is the expanded skill body the model is meant to read and NOT what the
     // reader typed. The bubble shows `/docx`; the gateway is sent the expansion.
     this.chats.getState().beginTurn(botName, options.display ?? body, attachmentReferences(attachments))
+
+    // Read back rather than recomputed: `beginLocalTurn` mints the id, and a
+    // second spelling of that rule here would be a second place for it to drift.
+    const painted = this.chats.getState().chats[botName]?.order.at(-1)
 
     try {
       for (const file of images) {
@@ -1451,6 +1464,8 @@ export class ChatController {
 
       this.chats.getState().settleTurn(botName, { status: result?.status ?? null })
       this.syncApprovalPoll()
+
+      return painted
     } catch (error) {
       // The optimistic bubble stays — the text is the user's, not ours to throw
       // away — but the turn is not running, so the composer comes back.

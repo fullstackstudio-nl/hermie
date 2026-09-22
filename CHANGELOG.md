@@ -139,6 +139,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and a device with nothing of its own to say carries your row through exactly as it
   carries a colleague's.
 
+- **“Ask <bot>” in Shortcuts and Siri waits for the new reply instead of returning the last
+  one.** A Shortcut cold-starts the app, and the watch that decides which message is the answer
+  was started before the chat had been opened — so it took its bearings on an empty transcript,
+  and the hydration that follows (the cache painting the thread, the resume binding it, the
+  history read filling it in) looked like the bot had just said something. It had: the time
+  before. The watch now starts once the chat is open, nothing counts as an answer until the
+  gateway has accepted the prompt, and a reply has to stand after that prompt in the transcript
+  rather than merely carry a different id — which is also what a reconnect breaks, because a
+  resume re-lays the tail under fresh ids without anything having been said. The forty-five
+  second cap and the “still working — use Send to” sentence are unchanged, except that the wait
+  now gets what is LEFT of those forty-five seconds, so the app stops a moment before Shortcuts
+  does rather than writing an answer nobody is still reading.
+
 - **The chat list no longer shows a raw `[IMPORTANT: …` or `[System: …` line.** The gateway's
   preview for a chat is its newest user or assistant row squashed onto one line and cut at eighty
   characters, so an injected wrapper reached the list without its newlines and, often, without its

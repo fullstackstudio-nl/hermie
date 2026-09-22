@@ -22,8 +22,25 @@
  * has to wait for a turn to finish inside a budget it did not choose. `send` is
  * fire-and-forget and is the honest answer for anything that takes real work:
  * it returns the moment the gateway has the prompt.
+ *
+ * ## Open, then watch, then send
+ *
+ * Three steps in one order, and the order is a bug fix rather than a style. A
+ * Shortcut used to answer with the reply to the question asked BEFORE it,
+ * because the watch was started first and opening the chat then hydrated the
+ * transcript underneath it — a store full of the last conversation, with the
+ * previous answer newest. `runOne` and `await-reply.ts` carry the detail.
  */
-import { intentFailure, intentReply, isExpired, parsePendingIntent, sortIntents, type PendingIntent } from './queue'
+import type { ReplyWatch } from './await-reply'
+import {
+  intentFailure,
+  intentReply,
+  isExpired,
+  parsePendingIntent,
+  sortIntents,
+  INTENT_BUDGET_MS,
+  type PendingIntent
+} from './queue'
 import type { IntentQueue } from '../../platform/intent-queue'
 
 export interface IntentRunnerPorts {
@@ -40,18 +57,31 @@ export interface IntentRunnerPorts {
    * profile into a sentence rather than a silence.
    */
   open: (bot: string) => Promise<void>
-  send: (bot: string, text: string) => Promise<void>
   /**
-   * Begin watching for the NEXT reply, and answer it within the budget.
+   * Submit the prompt, and say which transcript item it was painted as.
    *
-   * Called before `send`, never after: the watch takes a marker of what the bot
-   * last said, and a marker read after the prompt has gone is a marker that may
-   * already be the answer. `await-reply.ts` has the two races this avoids.
-   *
-   * Answers `null` when the turn is still running when time runs out, which is
-   * a real outcome rather than a failure and is reported as one.
+   * The id is what the watch measures a reply against, and it is `undefined`
+   * for the one case that has no item yet: a prompt the controller parked
+   * behind a turn that was already running. `await-reply.ts` has what stands in
+   * for it then.
    */
-  watchReply: (bot: string) => Promise<string | null>
+  send: (bot: string, text: string) => Promise<string | undefined>
+  /**
+   * Begin watching for the reply to the prompt that is about to be sent.
+   *
+   * Started between `open` and `send`, and neither side of that is arbitrary.
+   * After `open`, because opening a chat HYDRATES it — cache, resume, history —
+   * and a baseline taken before that is a baseline taken on an empty
+   * transcript, which is how a Shortcut came to answer with the previous reply.
+   * Before `send`, because a fast gateway can finish the whole turn before
+   * `send` returns.
+   *
+   * `budgetMs` is what is left of the request's own budget rather than the
+   * budget itself: the poll on the Swift side started when the request was
+   * written, so a watch that ran the full budget from here would answer a file
+   * nobody is reading any more.
+   */
+  startReplyWatch: (bot: string, budgetMs: number) => ReplyWatch
   now: () => number
 }
 
@@ -148,26 +178,37 @@ export class IntentRunner {
     }
 
     /**
-     * The watch is started BEFORE the prompt goes, and abandoned if it fails.
+     * Open, then watch, then send — and abandon the watch if the send fails.
      *
-     * It never rejects and it carries its own timeout, so a dropped one settles
-     * to `null` on its own. `void` rather than a cancel handle, because a
-     * cancellable watch would be a second thing to get wrong for a case whose
-     * whole cost is one timer.
+     * The order is the fix for a Shortcut that answered with the PREVIOUS reply:
+     * opening a chat paints the whole of the last conversation into the store,
+     * so a watch started before it took its baseline on an empty transcript and
+     * read the hydration as an answer. The port's own comment and
+     * `await-reply.ts` have the rest of it.
+     *
+     * A watch nobody waits on costs one timer and settles itself, so there is no
+     * cancel handle here — a cancellable watch would be a second thing to get
+     * wrong for a case whose whole cost is that timer.
      */
-    const waiting = intent.kind === 'ask' ? this.ports.watchReply(intent.bot) : null
+    let watch: ReplyWatch | null = null
 
     try {
       await this.ports.open(intent.bot)
-      await this.ports.send(intent.bot, intent.text)
+
+      if (intent.kind === 'ask') {
+        watch = this.ports.startReplyWatch(intent.bot, this.budgetLeft(intent))
+      }
+
+      const promptId = await this.ports.send(intent.bot, intent.text)
+
+      watch?.prompted({ itemId: promptId, text: intent.text })
     } catch (error) {
-      void waiting
       await this.ports.queue.complete(intent.id, intentFailure(intent.id, messageOf(error)))
 
       return
     }
 
-    if (!waiting) {
+    if (!watch) {
       // Fire and forget: the gateway has the prompt, which is the whole of what
       // "Send to" promised.
       await this.ports.queue.complete(intent.id, intentReply(intent.id, ''))
@@ -175,7 +216,7 @@ export class IntentRunner {
       return
     }
 
-    const reply = await waiting.catch(() => null)
+    const reply = await watch.reply.catch(() => null)
 
     await this.ports.queue.complete(
       intent.id,
@@ -186,6 +227,20 @@ export class IntentRunner {
           )
         : intentReply(intent.id, reply)
     )
+  }
+
+  /**
+   * What is left of this request's budget, in milliseconds.
+   *
+   * ONE number lives in `queue.ts` and both sides spend it, but they do not
+   * start spending it at the same moment: the Swift side starts polling when it
+   * writes the request, and this side only reaches the send after a launch, a
+   * dial and a hydration. Handing the watch the remainder keeps the two ends in
+   * step — the app gives up a moment before the Shortcut does, so the answer it
+   * writes is one somebody still reads.
+   */
+  private budgetLeft(intent: PendingIntent): number {
+    return Math.max(0, INTENT_BUDGET_MS - (this.ports.now() - intent.createdAt))
   }
 }
 

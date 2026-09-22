@@ -351,9 +351,19 @@ export function useChat(botName: string): UseChatResult {
     connectionError,
     clearError: useCallback(() => setError(null), []),
     setDraft: useCallback((draft: string) => useChatsStore.getState().setDraft(botName, draft), [botName]),
+    // The composer has no use for the id `send` answers with — that is the
+    // Shortcuts runner's, which needs a fixed point in the transcript — so it is
+    // dropped here rather than widening every caller of the hook.
     send: useCallback(
-      (text: string, attachments?: AttachmentInput[]) =>
-        controller ? controller.send(botName, text, attachments) : notReady(),
+      async (text: string, attachments?: AttachmentInput[]) => {
+        if (!controller) {
+          await notReady()
+
+          return
+        }
+
+        await controller.send(botName, text, attachments)
+      },
       [botName, controller, notReady]
     ),
     uploadFile: useCallback(

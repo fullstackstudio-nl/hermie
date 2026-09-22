@@ -58,11 +58,18 @@ function harness(entries: { id: string; payload: string }[], over: Partial<Inten
     },
     send: async bot => {
       calls.push(`send:${bot}`)
-    },
-    watchReply: async bot => {
-      calls.push(`watch:${bot}`)
 
-      return 'the status is fine'
+      return 'o:1'
+    },
+    startReplyWatch: (bot, budgetMs) => {
+      calls.push(`watch:${bot}:${budgetMs}`)
+
+      return {
+        prompted: mark => {
+          calls.push(`prompted:${mark.itemId ?? 'parked'}`)
+        },
+        reply: Promise.resolve('the status is fine')
+      }
     },
     now: () => NOW,
     ...over
@@ -77,9 +84,22 @@ describe('Ask a bot', () => {
 
     await runner.run()
 
-    // The watch is started BEFORE the send: see `await-reply.ts` for the two
-    // races that ordering avoids.
-    expect(calls).toEqual(['list', 'watch:researcher', 'open:researcher', 'send:researcher', 'complete:i1'])
+    /*
+      The order is the fix for a Shortcut that answered with the PREVIOUS reply:
+      the chat is OPENED first, because opening it hydrates the transcript and a
+      watch started before that takes its baseline on an empty one; the watch
+      goes second, because a fast gateway can finish the turn before `send`
+      returns; and the prompt is reported last, because nothing can be an answer
+      to a question that has not been asked. See `await-reply.ts`.
+    */
+    expect(calls).toEqual([
+      'list',
+      'open:researcher',
+      `watch:researcher:${INTENT_BUDGET_MS}`,
+      'send:researcher',
+      'prompted:o:1',
+      'complete:i1'
+    ])
     expect(answers.get('i1')).toEqual({ version: 1, id: 'i1', ok: true, reply: 'the status is fine' })
   })
 
@@ -89,12 +109,31 @@ describe('Ask a bot', () => {
    * action that does not wait.
    */
   it('says so, and names the way out, when the turn is still running', async () => {
-    const { answers, runner } = harness([requestFor()], { watchReply: async () => null })
+    const { answers, runner } = harness([requestFor()], {
+      startReplyWatch: () => ({ prompted: () => undefined, reply: Promise.resolve(null) })
+    })
 
     await runner.run()
 
     expect(answers.get('i1')?.ok).toBe(false)
     expect(answers.get('i1')?.error).toContain('Send to')
+  })
+
+  /**
+   * The watch gets what is LEFT of the budget, not the budget.
+   *
+   * Both sides spend one number, and they start spending it at different
+   * moments: the Swift side from the instant it writes the request, this side
+   * only after a launch, a dial and a hydration. A watch that ran the full
+   * budget from here would write its answer into a file nobody is reading any
+   * more.
+   */
+  it('hands the watch what is left of the budget after the launch', async () => {
+    const { calls, runner } = harness([requestFor({ createdAt: NOW - 12_000 })])
+
+    await runner.run()
+
+    expect(calls).toContain(`watch:researcher:${INTENT_BUDGET_MS - 12_000}`)
   })
 })
 
@@ -105,7 +144,7 @@ describe('Send to a bot', () => {
     await runner.run()
 
     expect(calls).toEqual(['list', 'open:researcher', 'send:researcher', 'complete:i1'])
-    expect(calls).not.toContain('watch:researcher')
+    expect(calls.some(call => call.startsWith('watch:'))).toBe(false)
     expect(answers.get('i1')).toEqual({ version: 1, id: 'i1', ok: true, reply: '' })
   })
 })

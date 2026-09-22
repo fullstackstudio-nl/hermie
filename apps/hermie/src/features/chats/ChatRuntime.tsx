@@ -35,7 +35,7 @@ import { BotsController } from '../bots/bots-controller'
 import { pushPlatform } from '../push/platform'
 import { PushSync } from '../push/push-sync'
 import { setPushRetire } from '../push/runtime'
-import { watchReply } from '../intents/await-reply'
+import { startReplyWatch } from '../intents/await-reply'
 import { onIntentRequest } from '../intents/intent-bus'
 import { IntentRunner } from '../intents/intent-runner'
 import { pushProjectId, pushVapidUrl } from '../push/where'
@@ -487,7 +487,11 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       // screenshot would otherwise go over the socket at full resolution, which
       // is the one thing `attachments.ts` exists to prevent.
       readImage: (uri, filename) => resizeToBase64(uri, filename),
-      send: (name, text, attachments) => controller.send(name, text, attachments),
+      // The painted id is the Shortcuts runner's business, not a share's: a share
+      // does not wait for the reply, so there is nothing to measure one against.
+      send: async (name, text, attachments) => {
+        await controller.send(name, text, attachments)
+      },
       onChange: waiting => useShareStore.getState().setWaiting(waiting)
     })
 
@@ -499,9 +503,10 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       launched the app has already taken over the phone and landing somewhere
       else while a message goes out is disorienting.
 
-      `watchReply` is handed the chat STORE rather than the controller, and
-      subscribes the moment it is called — which is before the prompt is sent.
-      See `intents/await-reply.ts` for the two races that ordering avoids.
+      `startReplyWatch` is handed the chat STORE rather than the controller, and
+      subscribes the moment it is called — which the runner does after the chat
+      is open and before the prompt is sent. See `intents/await-reply.ts` for why
+      both halves of that ordering are load bearing.
     */
     const intents = new IntentRunner({
       queue: intentQueue,
@@ -517,7 +522,8 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
         requestOpenChat(name)
       },
       send: (name, text) => controller.send(name, text),
-      watchReply: name => watchReply({ chats: useChatsStore, botName: name }),
+      startReplyWatch: (name, budgetMs) =>
+        startReplyWatch({ chats: useChatsStore, botName: name, timeoutMs: budgetMs }),
       now: () => Date.now()
     })
 

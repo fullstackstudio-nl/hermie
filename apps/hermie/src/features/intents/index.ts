@@ -1,4 +1,11 @@
-export { lastReplyOf, watchReply, type WatchReplyOptions } from './await-reply'
+export {
+  answersPrompt,
+  lastReplyOf,
+  startReplyWatch,
+  type PromptMark,
+  type ReplyWatch,
+  type StartReplyWatchOptions
+} from './await-reply'
 export { onIntentRequest, requestIntentRun } from './intent-bus'
 export { IntentRunner, type IntentRunnerPorts } from './intent-runner'
 export {
