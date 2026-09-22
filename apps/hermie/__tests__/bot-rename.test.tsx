@@ -28,15 +28,17 @@ import { createChatState } from '@hermie/transcript'
 import { act, fireEvent, screen, waitFor } from '@testing-library/react-native'
 
 import type { GatewayHttp } from '@hermie/gateway-client'
+import { PLUGIN_CAPABILITIES } from '@hermie/gateway-client/plugin'
 
 import { BotProfileSheet } from '../src/features/bot-profile'
-import { renameBot, renameProfile, ProfileRenameError } from '../src/features/bot-rename'
+import { DISPLAY_NAME_ROUTE, renameBot, renameProfile, ProfileRenameError } from '../src/features/bot-rename'
 import type { ChatGateway } from '../src/gateway/link'
 import { type ChatCache, chatCacheFor } from '../src/platform/chat-cache'
 import { useBotsStore, type Bot } from '../src/store/bots'
 import { useChatLayoutStore } from '../src/store/chat-layout'
 import { useChatsStore } from '../src/store/chats'
 import { useDeviceContextStore } from '../src/store/device-context'
+import { usePluginStore } from '../src/store/plugin'
 import { renderScreen } from './support/render'
 
 /*
@@ -131,7 +133,22 @@ beforeEach(() => {
   useChatsStore.getState().reset()
   useChatLayoutStore.getState().reset()
   useDeviceContextStore.getState().reset()
+  usePluginStore.getState().reset()
 })
+
+/**
+ * What this gateway's plugin says it can do.
+ *
+ * `null` leaves the store unread, which is the state before a roster has
+ * arrived: the sheet must say nothing about where a name goes until it knows.
+ */
+function pluginSays(capabilities: string[] | null): void {
+  if (capabilities === null) {
+    return
+  }
+
+  usePluginStore.getState().apply({ version: '0.3.0', capabilities, modules: {}, limits: {}, updatedAt: 1 })
+}
 
 // -- which name the field is editing -----------------------------------------
 
@@ -247,6 +264,76 @@ describe('the name field', () => {
     expect(screen.getByTestId('bot-profile-name-warning')).toHaveTextContent(
       'Renaming changes the profile name other tools use'
     )
+  })
+})
+
+// -- which gateway the name is saved on --------------------------------------
+
+describe('the display name and the plugin route', () => {
+  /** The route the plugin's `profiles.display_name` capability points at. */
+  it('sends the name to the plugin route and stores it locally too, with the capability', async () => {
+    const { http, calls } = fakeHttp({ name: 'researcher', display_name: 'De Onderzoeker' })
+
+    pluginSays([PLUGIN_CAPABILITIES.profilesDisplayName])
+    sheet(BOT, http)
+
+    fireEvent.changeText(screen.getByTestId('bot-profile-name'), 'De Onderzoeker')
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('bot-profile-save'))
+    })
+
+    expect(calls).toEqual([{ path: `${DISPLAY_NAME_ROUTE}/researcher`, body: { display_name: 'De Onderzoeker' } }])
+    // The next roster refresh reads the same value back, but the list redraws now.
+    expect(useChatLayoutStore.getState().labels.researcher).toBe('De Onderzoeker')
+  })
+
+  /** 403: the reason lands beside the field it is about, and nothing moves. */
+  it('shows a 403 beside the field and stores nothing', async () => {
+    const { GatewayError } = jest.requireActual('@hermie/gateway-client')
+    const { http } = fakeHttp(() => {
+      throw new GatewayError('protocol', 'PATCH failed with HTTP 403.', { status: 403 })
+    })
+
+    pluginSays([PLUGIN_CAPABILITIES.profilesDisplayName])
+    sheet(BOT, http)
+
+    fireEvent.changeText(screen.getByTestId('bot-profile-name'), 'De Onderzoeker')
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('bot-profile-save'))
+    })
+
+    expect(screen.getByText('This gateway account may not change profile names.')).toBeTruthy()
+    expect(useChatLayoutStore.getState().labels.researcher).toBeUndefined()
+  })
+
+  /** No capability: the app-only line shows up front, and the name stays local. */
+  it('shows the app-only line and keeps the name local, without the capability', async () => {
+    const { http, calls } = fakeHttp({ ok: true })
+
+    pluginSays([PLUGIN_CAPABILITIES.memoryBrowse])
+    sheet(BOT, http)
+
+    expect(screen.getByTestId('bot-profile-name-app-only')).toHaveTextContent(
+      'Stored in Hermie only; the gateway plugin is too old to save it on the gateway.'
+    )
+
+    fireEvent.changeText(screen.getByTestId('bot-profile-name'), 'De Onderzoeker')
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('bot-profile-save'))
+    })
+
+    expect(calls).toHaveLength(0)
+    expect(useChatLayoutStore.getState().labels.researcher).toBe('De Onderzoeker')
+  })
+
+  /** No roster read yet: neither line is drawn, because nothing is known. */
+  it('says nothing about where the name goes before a roster has been read', () => {
+    sheet(BOT, fakeHttp({ ok: true }).http)
+
+    expect(screen.queryByTestId('bot-profile-name-app-only')).toBeNull()
   })
 })
 

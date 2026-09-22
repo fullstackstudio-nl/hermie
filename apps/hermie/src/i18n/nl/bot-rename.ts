@@ -11,6 +11,8 @@ export const botRename: Translation<typeof renameStrings> = {
   displayLabel: 'Weergavenaam',
   displayHint: 'Hoe deze bot in jouw lijst heet. De gateway houdt de eigen naam van het profiel.',
   clearHint: 'Laat het leeg om terug te vallen op de naam die de gateway doorgeeft.',
+  displayAppOnly: 'Alleen in Hermie bewaard; de plug-in op de gateway is te oud om het daar op te slaan.',
+  displayForbidden: 'Dit gateway-account mag profielnamen niet wijzigen.',
 
   profileLabel: 'Profielnaam',
   profileHint: 'De naam waarmee de rest van de app deze bot aanspreekt.',

@@ -27,6 +27,18 @@ const renameStringsEn = {
   displayHint: 'What Hermie calls this bot in your list. The gateway keeps the profile’s own name.',
   /** Shown in the field while nobody has given the bot a name of their own. */
   clearHint: 'Leave it empty to fall back to the name the gateway reports.',
+  /**
+   * The gateway is not going to hear about this name.
+   *
+   * One quiet line, and only once the roster has actually been read — "we have
+   * not looked yet" must never be drawn as "your plugin is too old". It names
+   * the plugin rather than the gateway because that is the thing to update, and
+   * it does not offer a command: this is a field's footnote, not the install
+   * panel the memory page has room for.
+   */
+  displayAppOnly: 'Stored in Hermie only; the gateway plugin is too old to save it on the gateway.',
+  /** 403: the route is there, and this account may not write profiles. */
+  displayForbidden: 'This gateway account may not change profile names.',
 
   /** The other row, which is a fact and not a field. */
   profileLabel: 'Profile name',

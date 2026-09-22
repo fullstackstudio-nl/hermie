@@ -11,6 +11,8 @@ export const botRename: Translation<typeof renameStrings> = {
   displayLabel: 'Anzeigename',
   displayHint: 'Wie dieser Bot in deiner Liste heißt. Das Gateway behält den eigenen Namen des Profils.',
   clearHint: 'Leer lassen, um auf den Namen zurückzufallen, den das Gateway meldet.',
+  displayAppOnly: 'Nur in Hermie gespeichert; das Plug-in auf dem Gateway ist zu alt, um es dort zu speichern.',
+  displayForbidden: 'Dieses Gateway-Konto darf Profilnamen nicht ändern.',
 
   profileLabel: 'Profilname',
   profileHint: 'Der Name, unter dem der Rest der App diesen Bot anspricht.',

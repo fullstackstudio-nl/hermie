@@ -10,12 +10,19 @@
  * the profile's directory, its wrapper script, its service and the
  * active-profile pointer with it.
  *
- * So the field is the display name now, always, and it is Hermie's own: no call
- * a client has writes a profile's `display_name` (`profiles.configure` has no
- * such field, `profiles.create` has none, and the REST route above renames
- * instead), so the name is kept beside the reader's folders and colours in
- * `chat-layout`'s `labels` and read back by `botNames`. Clearing it falls back to
- * the name the gateway reports, and then to the handle.
+ * So the field is the display name now, always. Core still has no way to write
+ * one — `profiles.configure` has no such field, `profiles.create` has none, and
+ * the REST route above renames instead — so the name is kept beside the reader's
+ * folders and colours in `chat-layout`'s `labels` and read back by `botNames`.
+ * Clearing it falls back to the name the gateway reports, and then to the handle.
+ *
+ * Where the gateway-side plugin offers `profiles.display_name` the name goes to
+ * the gateway TOO, through the plugin's own route, and `home` is which of those
+ * two gateways this is. It changes two things and both are about not lying to
+ * the reader: the limit becomes the route's rather than the app's, so a name
+ * cannot be composed that the route will refuse, and a gateway that cannot take
+ * it says so under the field instead of leaving somebody to find the old name
+ * still in the profile list.
  *
  * ## Renaming the profile is still possible, and it is its own act
  *
@@ -31,6 +38,7 @@ import { View } from 'react-native'
 import { BOT_LABEL_MAX } from '../../store/chat-layout'
 import { Button, InsetRow, InsetValueRow, Text, TextField } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
+import { type DisplayNameHome, PROFILE_DISPLAY_NAME_MAX } from './display-name-controller'
 import { PROFILE_NAME_MAX } from './rename-controller'
 import { renameStrings } from './strings'
 
@@ -44,6 +52,16 @@ export interface BotNameFieldsProps {
   /** The reader's own name for this bot; empty while they have not given one. */
   value: string
   onChangeText: (next: string) => void
+  /**
+   * Where this name will be saved, or `null` while nobody has looked yet.
+   *
+   * `gateway` is a plugin advertising `profiles.display_name`; `app` is every
+   * other gateway, and is the one that gets a line saying so. `null` draws
+   * neither — see `useDisplayNameHome`.
+   */
+  home?: DisplayNameHome | null
+  /** A refusal from the display-name route, under the display-name field. */
+  nameError?: string | null
   /**
    * Rename the PROFILE itself.
    *
@@ -65,6 +83,8 @@ export function BotNameFields({
   isDefault,
   value,
   onChangeText,
+  home = null,
+  nameError,
   onRenameProfile,
   renaming = false,
   renameError,
@@ -84,8 +104,9 @@ export function BotNameFields({
         <TextField
           autoCapitalize="words"
           autoCorrect={false}
+          error={nameError ?? null}
           label={renameStrings.displayLabel}
-          maxLength={BOT_LABEL_MAX}
+          maxLength={home === 'gateway' ? PROFILE_DISPLAY_NAME_MAX : BOT_LABEL_MAX}
           onChangeText={onChangeText}
           placeholder={fallback}
           testID={testID}
@@ -97,6 +118,11 @@ export function BotNameFields({
         <Text color="textFaint" variant="micro">
           {renameStrings.clearHint}
         </Text>
+        {home === 'app' ? (
+          <Text color="textFaint" testID={`${testID}-app-only`} variant="micro">
+            {renameStrings.displayAppOnly}
+          </Text>
+        ) : null}
       </InsetRow>
 
       {/*

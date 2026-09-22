@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A bot's display name reaches the gateway, where the plugin offers a route for it.** Core's own
+  `PATCH /api/profiles/{name}` renames the profile instead of writing a display name, so the name
+  used to stay on this device alone and every other client on the gateway kept seeing the old one.
+  Where a newer plugin advertises a route for it, Save now writes the name there too, and the app's
+  own copy updates immediately so the list does not wait for the next roster read. An older plugin
+  gets a quiet line under the field saying the name is kept in the app only, and a refusal — the
+  account may not edit profiles, or the name itself is refused — shows its reason beside the field
+  and changes nothing on this device.
+
 ### Fixed
 
 - **A bot's display name can be saved.** Typing a new name on a bot's profile sheet left **Save**

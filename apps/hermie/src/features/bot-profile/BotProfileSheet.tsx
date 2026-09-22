@@ -33,10 +33,12 @@
  * how the sheet ended up with a dead button: a reader who came to rename a bot
  * changed the one thing they meant to change and watched Save stay greyed out,
  * with nothing on the screen saying the name had already been kept. So the
- * field holds a DRAFT now and Save commits it. It is still Hermie's own name —
- * no call a client has writes a profile's `display_name`, and the one REST
- * route that touches it RENAMES the profile instead — so it is stored beside
- * the colour in `chat-layout` and costs no round trip.
+ * field holds a DRAFT now and Save commits it — to the gateway's own profile
+ * where the plugin offers a route for that, and to `chat-layout`'s `labels`
+ * either way. `features/bot-rename/display-name-controller.ts` is the order of
+ * those two and the argument for it; this sheet only decides which gateway it
+ * is talking to, and says so under the field when the name is not going to
+ * travel.
  *
  * Renaming the profile itself is still a separate act behind its own
  * disclosure; that one needs `http`, needs the stores rekeyed, and lives in
@@ -71,7 +73,15 @@ import { BottomSheet } from '../../ui/BottomSheet'
 import { Button, InsetButtonRow, InsetGroup, InsetRow, InsetValueRow, Text, TextField } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { AVATAR_SIZE } from '../../ui/tokens'
-import { asRenameError, BotNameFields, saveBotName } from '../bot-rename'
+import {
+  asRenameError,
+  BotNameFields,
+  DisplayNameError,
+  renameStrings,
+  saveBotName,
+  saveDisplayName,
+  useDisplayNameHome
+} from '../bot-rename'
 import { memoryStrings } from '../memory/strings'
 import { CapabilitiesSheet } from '../profiles/CapabilitiesSheet'
 import { profileStrings } from '../profiles/strings'
@@ -166,7 +176,6 @@ export function BotProfileSheet({
     underneath the reader.
   */
   const label = useChatLayoutStore(state => state.labels[bot.name] ?? '')
-  const setLabel = useChatLayoutStore(state => state.setLabel)
   const [name, setName] = useState(label)
   /*
     The same two lines every other surface draws, in this reader's own order, and
@@ -190,7 +199,11 @@ export function BotProfileSheet({
       different button from Save and must not disable it. */
   const [renaming, setRenaming] = useState(false)
   const [renameError, setRenameError] = useState<string | null>(null)
+  /** A refusal from the display-name route, printed under that field alone. */
+  const [nameError, setNameError] = useState<string | null>(null)
   const [showCapabilities, setShowCapabilities] = useState(false)
+  /** `gateway`, `app`, or null while no roster has been read on this connection. */
+  const home = useDisplayNameHome()
 
   /*
     Reopening on a different bot — which the wide layout does without unmounting
@@ -211,6 +224,7 @@ export function BotProfileSheet({
     setAvatar(undefined)
     setError(null)
     setWarning(null)
+    setNameError(null)
     setRenameError(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- following `bot.description` or `bot.displayName` would let a roster poll overwrite what is being typed; see above.
   }, [bot.name])
@@ -267,6 +281,7 @@ export function BotProfileSheet({
 
     setBusy(true)
     setError(null)
+    setNameError(null)
     setWarning(null)
 
     try {
@@ -284,17 +299,46 @@ export function BotProfileSheet({
         }
       }
 
-      // Last, and after the two writes that can be refused: the name is the
-      // app's own and cannot fail, so committing it first would leave a bot
-      // renamed by a Save that then reported that it had not worked.
+      /*
+        The name last, and its refusal is its own.
+
+        Last because the two above it are writes to the profile on the gateway's
+        disk and this one is not: a 403 on the name must not stop a description
+        that the gateway had already accepted from being reported as saved. Its
+        own message because it belongs under the field it is about — `error` at
+        the foot of the sheet reads as the description having failed.
+      */
       if (changes.name !== null) {
-        setLabel(bot.name, changes.name)
+        const saved = await saveDisplayName({
+          http: http ?? null,
+          profile: bot.name,
+          draft: changes.name,
+          toGateway: home === 'gateway'
+        })
+
+        /*
+          The advert said the route was there and it answered 404 — a plugin
+          caught between two versions, or a profile the gateway has stopped
+          naming. The name IS saved, so this is a warning and not an error, and
+          the sheet stays open around it: closing would hide the one sentence
+          that says the gateway's own profile still has the old name.
+        */
+        if (home === 'gateway' && saved.home === 'app' && saved.displayName) {
+          setWarning(renameStrings.displayAppOnly)
+          onSaved?.()
+
+          return
+        }
       }
 
       onSaved?.()
       onClose()
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : text.saveFailed)
+      if (failure instanceof DisplayNameError) {
+        setNameError(failure.message)
+      } else {
+        setError(failure instanceof Error ? failure.message : text.saveFailed)
+      }
     } finally {
       setBusy(false)
     }
@@ -305,9 +349,10 @@ export function BotProfileSheet({
     changes.description,
     changes.name,
     gateway,
+    home,
+    http,
     onClose,
     onSaved,
-    setLabel,
     text.saveFailed
   ])
 
@@ -526,6 +571,8 @@ export function BotProfileSheet({
             botName={bot.name}
             displayName={bot.displayName}
             isDefault={bot.isDefault}
+            home={home}
+            nameError={nameError}
             onChangeText={setName}
             renameError={renameError}
             renaming={renaming}
