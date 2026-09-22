@@ -22,10 +22,11 @@
  * digest of the first and the operator's own copy of the second is the only one.
  */
 import { escapeHtml } from '../setup'
+import { htmlLang, type WebLocale, type WebStrings } from '../i18n'
 import { CSRF_FIELD } from './session'
 import type { SelfTestStep } from '../oidc/selftest'
 import type { OidcState } from '../oidc/state'
-import type { OidcUser } from '../oidc/users'
+import type { OidcRole, OidcUser } from '../oidc/users'
 
 export interface IdentityPageInput {
   state: OidcState
@@ -42,6 +43,10 @@ export interface IdentityPageInput {
   invite: { username: string; url: string } | null
   /** The last test sign-in's steps, held in memory so a reload is harmless. */
   selfTest: SelfTestStep[]
+  /** The language this request negotiated, for `<html lang>`. */
+  locale: WebLocale
+  /** Every sentence on the page, in that language. */
+  strings: WebStrings
   notice: string
 }
 
@@ -74,13 +79,23 @@ const STYLE = `
   a { color: var(--accent) }
 `
 
-const head = (title: string): string =>
-  `<!doctype html>\n<html lang="en">\n<meta charset="utf-8">\n` +
+const head = (locale: WebLocale, title: string): string =>
+  `<!doctype html>\n<html lang="${htmlLang(locale)}">\n<meta charset="utf-8">\n` +
   `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
   `<title>${escapeHtml(title)}</title>\n<style>${STYLE}</style>\n`
 
 const when = (seconds: number): string =>
   seconds ? new Date(seconds * 1000).toISOString().slice(0, 16).replace('T', ' ') : '—'
+
+/**
+ * The name of a role, as opposed to its value.
+ *
+ * The two are the same word in English and the `<option value>` keeps the
+ * value, because that is what the form posts and what the state file holds. A
+ * reader of a translated page gets the word for it in their own language.
+ */
+const roleName = (role: OidcRole, text: WebStrings['identity']['accounts']): string =>
+  role === 'admin' ? text.roleAdmin : text.roleUser
 
 /**
  * The gateway snippet, with this deployment's real values in it.
@@ -112,156 +127,158 @@ export function gatewayEnvSnippet(state: OidcState): string {
   ].join('\n')
 }
 
-function userRow(user: OidcUser, csrf: string): string {
-  const hidden = `<input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(csrf)}">
+function userRow(user: OidcUser, input: IdentityPageInput): string {
+  const text = input.strings.identity.accounts
+  const hidden = `<input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
         <input type="hidden" name="sub" value="${escapeHtml(user.sub)}">`
 
   return `<tr>
     <td>
-      <strong>${escapeHtml(user.username)}</strong>${user.disabled ? ' <span class="note bad">disabled</span>' : ''}
+      <strong>${escapeHtml(user.username)}</strong>${
+        user.disabled ? ` <span class="note bad">${text.disabled}</span>` : ''
+      }
       <br><span class="note">${escapeHtml(user.displayName || user.email || '—')}</span>
       <br><code class="note">${escapeHtml(user.sub)}</code>
     </td>
-    <td class="note">${escapeHtml(user.role)}</td>
-    <td class="note">${user.totpSecret ? 'on' : user.invite ? 'invited' : 'off'}</td>
+    <td class="note">${roleName(user.role, text)}</td>
+    <td class="note">${user.totpSecret ? text.totpOn : user.invite ? text.totpInvited : text.totpOff}</td>
     <td class="note">${when(user.lastSignInAt)}</td>
     <td>
       <form method="post" action="/admin/oidc/user">
         ${hidden}
         <div class="row">
           <div>
-            <label for="role-${escapeHtml(user.sub)}">Role</label>
+            <label for="role-${escapeHtml(user.sub)}">${text.role}</label>
             <select id="role-${escapeHtml(user.sub)}" name="role">
-              <option value="user"${user.role === 'user' ? ' selected' : ''}>user</option>
-              <option value="admin"${user.role === 'admin' ? ' selected' : ''}>admin</option>
+              <option value="user"${user.role === 'user' ? ' selected' : ''}>${text.roleUser}</option>
+              <option value="admin"${user.role === 'admin' ? ' selected' : ''}>${text.roleAdmin}</option>
             </select>
           </div>
-          <div><button type="submit" name="do" value="role">Save</button></div>
+          <div><button type="submit" name="do" value="role">${input.strings.common.save}</button></div>
         </div>
       </form>
       <form method="post" action="/admin/oidc/user">
         ${hidden}
-        <button class="quiet" type="submit" name="do" value="invite">Reset password</button>
+        <button class="quiet" type="submit" name="do" value="invite">${text.resetPassword}</button>
         <button class="quiet" type="submit" name="do" value="${user.disabled ? 'enable' : 'disable'}">${
-          user.disabled ? 'Re-enable' : 'Disable'
+          user.disabled ? text.reEnable : text.disable
         }</button>
-        ${user.totpSecret ? '<button class="quiet" type="submit" name="do" value="clear-totp">Clear two-factor</button>' : ''}
-        <button class="quiet" type="submit" name="do" value="remove">Remove</button>
+        ${
+          user.totpSecret
+            ? `<button class="quiet" type="submit" name="do" value="clear-totp">${text.clearTotp}</button>`
+            : ''
+        }
+        <button class="quiet" type="submit" name="do" value="remove">${text.remove}</button>
       </form>
     </td>
   </tr>`
 }
 
 function peopleSection(input: IdentityPageInput): string {
+  const text = input.strings.identity.accounts
   const rows = [...input.state.users].sort((left, right) => left.username.localeCompare(right.username))
 
   return `<section>
-    <h2>Accounts</h2>
-    <p><strong>These are this issuer’s own accounts</strong> — the people it will sign in. They are not the
-    same list as the one on <a href="/admin">the main page</a>, which is whoever the GATEWAY has seen; a
-    person appears there only once they have signed in through it.</p>
+    <h2>${text.heading}</h2>
+    <p>${text.intro}</p>
     ${
       rows.length
         ? `<table>
-      <tr><th>Who</th><th>Role</th><th>2FA</th><th>Last sign-in</th><th></th></tr>
-      ${rows.map(user => userRow(user, input.csrf)).join('\n      ')}
+      <tr><th>${text.who}</th><th>${text.role}</th><th>${text.twoFactor}</th><th>${text.lastSignIn}</th><th></th></tr>
+      ${rows.map(user => userRow(user, input)).join('\n      ')}
     </table>`
-        : '<p class="note">Nobody has an account on this issuer yet.</p>'
+        : `<p class="note">${text.empty}</p>`
     }
     ${
       input.invite
-        ? `<p class="note ok"><strong>Invitation for ${escapeHtml(input.invite.username)}</strong> — send them this link.
-      It works once, lapses in a day, and is <em>not shown again</em>:<br><code>${escapeHtml(input.invite.url)}</code></p>`
+        ? `<p class="note ok">${text.invitation(escapeHtml(input.invite.username))}<br><code>${escapeHtml(
+            input.invite.url
+          )}</code></p>`
         : ''
     }
     <form method="post" action="/admin/oidc/user">
       <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
       <div class="row">
         <div>
-          <label for="new-username">Username</label>
+          <label for="new-username">${text.username}</label>
           <input id="new-username" name="username" type="text" autocapitalize="off" spellcheck="false">
         </div>
         <div>
-          <label for="new-email">Email</label>
+          <label for="new-email">${text.email}</label>
           <input id="new-email" name="email" type="email" autocapitalize="off" spellcheck="false">
         </div>
         <div>
-          <label for="new-name">Display name</label>
+          <label for="new-name">${text.displayName}</label>
           <input id="new-name" name="displayName" type="text">
         </div>
         <div>
-          <label for="new-role">Role</label>
-          <select id="new-role" name="role"><option value="user">user</option><option value="admin">admin</option></select>
+          <label for="new-role">${text.role}</label>
+          <select id="new-role" name="role"><option value="user">${text.roleUser}</option><option value="admin">${
+            text.roleAdmin
+          }</option></select>
         </div>
-        <div><button type="submit" name="do" value="create">Invite</button></div>
+        <div><button type="submit" name="do" value="create">${text.invite}</button></div>
       </div>
-      <p class="note">Creating somebody mints a one-time link they use to choose their own password. Nobody
-      else, including you, ever sees it — which is the only way to add an account that does not end with a
-      password in a chat window.</p>
+      <p class="note">${text.inviteNote}</p>
     </form>
   </section>`
 }
 
 function guideSection(input: IdentityPageInput): string {
+  const text = input.strings.identity.guide
+
   return `<section>
-    <h2>What to put in the gateway’s configuration</h2>
-    <p>Enabling this here changes <strong>nothing</strong> on the gateway. Hermie Web does not write the
-    gateway’s configuration and would not know how; it tells you what to write. Put this in
-    <code>config.yaml</code> and restart the gateway.</p>
+    <h2>${text.heading}</h2>
+    <p>${text.intro}</p>
     <pre>${escapeHtml(gatewaySnippet(input.state, input.gatewayPublicUrl))}</pre>
-    <p>Or, for a container:</p>
+    <p>${text.orContainer}</p>
     <pre>${escapeHtml(gatewayEnvSnippet(input.state))}</pre>
     <dl>
-      <dt>Issuer</dt><dd><code>${escapeHtml(input.state.issuer)}</code></dd>
-      <dt>Client id</dt><dd><code>${escapeHtml(input.state.client.clientId)}</code> — fixed for this install</dd>
-      <dt>Redirect URI</dt><dd>${input.state.client.redirectUris
+      <dt>${text.issuer}</dt><dd><code>${escapeHtml(input.state.issuer)}</code></dd>
+      <dt>${text.clientId}</dt><dd>${text.clientIdValue(escapeHtml(input.state.client.clientId))}</dd>
+      <dt>${text.redirectUri}</dt><dd>${input.state.client.redirectUris
         .map(uri => `<code>${escapeHtml(uri)}</code>`)
         .join('<br>')}</dd>
-      <dt>Client secret</dt><dd>none — this is a public client, and PKCE is what authenticates the exchange</dd>
+      <dt>${text.clientSecret}</dt><dd>${text.clientSecretValue}</dd>
     </dl>
-    <p class="note"><strong><code>offline_access</code> is in that scope list on purpose.</strong> Without it
-    the gateway is issued no refresh token, and this service’s own push sign-in cannot be made at all — the
-    daemon would need somebody at a terminal every hour.</p>
-    <p class="note"><strong>The redirect URI is the gateway’s, not the app’s.</strong> A phone signing in
-    never talks to this issuer: the gateway brokers that flow and its loopback redirect is registered with
-    the gateway, not here.</p>
+    <p class="note">${text.offlineAccess}</p>
+    <p class="note">${text.redirectIsTheGateways}</p>
     <form method="post" action="/admin/oidc/redirects">
       <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
-      <label for="redirects">Redirect URIs, one per line</label>
+      <label for="redirects">${text.redirectsLabel}</label>
       <textarea id="redirects" name="redirectUris" rows="3" spellcheck="false">${escapeHtml(
         input.state.client.redirectUris.join('\n')
       )}</textarea>
-      <p class="note">Only change this if the gateway’s <code>public_url</code> is not what this page derived.</p>
-      <button type="submit">Save redirect URIs</button>
+      <p class="note">${text.redirectsNote}</p>
+      <button type="submit">${text.saveRedirects}</button>
     </form>
   </section>`
 }
 
 function testSection(input: IdentityPageInput): string {
+  const text = input.strings.identity.test
+
   return `<section>
-    <h2>Test sign-in</h2>
-    <p>Runs the whole round trip from this server against its own issuer — discovery, the JWKS, the sign-in
-    form, the code exchange, the ID token's signature and the refresh grant — and reports each step. It uses
-    a real account, because a test that skipped the sign-in form would be testing a path nobody takes. The
-    redirect is read and never followed, so nothing is sent to the gateway.</p>
+    <h2>${text.heading}</h2>
+    <p>${text.intro}</p>
     <form method="post" action="/admin/oidc/test">
       <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
       <div class="row">
         <div>
-          <label for="test-username">Username</label>
+          <label for="test-username">${text.username}</label>
           <input id="test-username" name="username" type="text" autocapitalize="off" spellcheck="false">
         </div>
         <div>
-          <label for="test-password">Password</label>
+          <label for="test-password">${text.password}</label>
           <input id="test-password" name="password" type="password" autocomplete="off">
         </div>
         <div>
-          <label for="test-totp">Code, if enrolled</label>
+          <label for="test-totp">${text.code}</label>
           <input id="test-totp" name="totp" type="text" inputmode="numeric" autocomplete="off">
         </div>
-        <div><button type="submit">Run it</button></div>
+        <div><button type="submit">${text.run}</button></div>
       </div>
-      <p class="note">Nothing typed here is stored or logged. The tokens it produces are discarded.</p>
+      <p class="note">${text.note}</p>
     </form>
     ${
       input.selfTest.length
@@ -271,7 +288,7 @@ function testSection(input: IdentityPageInput): string {
           step =>
             `<tr><td><strong>${escapeHtml(step.name)}</strong></td><td class="${
               step.ok ? 'ok' : 'bad'
-            }">${step.ok ? 'ok' : 'failed'}</td><td class="note">${escapeHtml(step.detail)}</td></tr>`
+            }">${step.ok ? text.stepOk : text.stepFailed}</td><td class="note">${escapeHtml(step.detail)}</td></tr>`
         )
         .join('\n      ')}
     </table>`
@@ -282,49 +299,37 @@ function testSection(input: IdentityPageInput): string {
 
 export function identityPage(input: IdentityPageInput): string {
   const { state } = input
+  const text = input.strings.identity
+  const provider = text.provider
   const blocked = !input.originAcceptable && !input.allowInsecure
 
-  return `${head('Identity — Hermie Web')}<main>
-  <h1>Identity</h1>
-  <p><a href="/admin">← Administration</a></p>
+  return `${head(input.locale, text.title)}<main>
+  <h1>${text.heading}</h1>
+  <p><a href="/admin">${text.backToAdmin}</a></p>
   ${input.notice ? `<p class="note ok">${escapeHtml(input.notice)}</p>` : ''}
 
   <section>
-    <h2>The built-in identity provider</h2>
-    <p>An OpenID Provider inside this service, for a deployment with no identity provider of its own.
-    It is <strong>off unless you turn it on</strong>, it federates with nothing, and turning it on makes
-    <strong>this service the identity root of your gateway</strong>: whoever holds this state directory can
-    mint any account on it.</p>
+    <h2>${provider.heading}</h2>
+    <p>${provider.intro}</p>
     <dl>
-      <dt>Status</dt><dd>${state.enabled ? '<span class="ok">on</span>' : 'off'}</dd>
+      <dt>${provider.status}</dt><dd>${state.enabled ? `<span class="ok">${provider.on}</span>` : provider.off}</dd>
       ${
         state.enabled
-          ? `<dt>Issuer</dt><dd><code>${escapeHtml(state.issuer)}</code></dd>
-      <dt>Signing keys</dt><dd>${state.keys.length} published${
-        state.keys.length > 1 ? ' (one current, the rest being retired)' : ''
-      }</dd>
-      <dt>Accounts</dt><dd>${state.users.length}</dd>`
+          ? `<dt>${provider.issuer}</dt><dd><code>${escapeHtml(state.issuer)}</code></dd>
+      <dt>${provider.signingKeys}</dt><dd>${provider.keysPublished(state.keys.length)}</dd>
+      <dt>${provider.accounts}</dt><dd>${state.users.length}</dd>`
           : ''
       }
     </dl>
-    ${
-      blocked
-        ? `<p class="note bad"><strong>This origin cannot be an issuer.</strong> You reached this page on
-      <code>${escapeHtml(input.origin)}</code>, and the gateway refuses an issuer that is not
-      <code>https</code> (or <code>http</code> on loopback) — so a provider enabled here would work in a
-      browser and be rejected by the gateway. Put TLS in front of this service, or restart it with
-      <code>--allow-insecure-oidc</code> if you are testing.</p>`
-        : ''
-    }
+    ${blocked ? `<p class="note bad">${provider.originBlocked(escapeHtml(input.origin))}</p>` : ''}
     <form method="post" action="/admin/oidc/enable">
       <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
       ${
         state.enabled
-          ? `<button type="submit" name="enabled" value="0">Turn it off</button>
-      <span class="note">Accounts and keys are kept; every refresh token is dropped.</span>`
-          : `<button type="submit" name="enabled" value="1"${blocked ? ' disabled' : ''}>Turn it on</button>
-      <span class="note">The issuer becomes <code>${escapeHtml(input.origin)}/oidc</code>, taken from the
-      address you reached this page on.</span>`
+          ? `<button type="submit" name="enabled" value="0">${provider.turnOff}</button>
+      <span class="note">${provider.turnOffNote}</span>`
+          : `<button type="submit" name="enabled" value="1"${blocked ? ' disabled' : ''}>${provider.turnOn}</button>
+      <span class="note">${provider.turnOnNote(escapeHtml(input.origin))}</span>`
       }
     </form>
   </section>
@@ -336,40 +341,37 @@ export function identityPage(input: IdentityPageInput): string {
   ${testSection(input)}
 
   <section>
-    <h2>Settings</h2>
+    <h2>${text.settings.heading}</h2>
     <form method="post" action="/admin/oidc/settings">
       <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
-      <label><input type="checkbox" name="requireTotp" value="1"${
-        state.settings.requireTotp ? ' checked' : ''
-      }> Require a second factor, enrolling anybody who has not got one</label>
+      <label><input type="checkbox" name="requireTotp" value="1"${state.settings.requireTotp ? ' checked' : ''}> ${
+        text.settings.requireTotp
+      }</label>
       <div class="row">
         <div>
-          <label for="id-ttl">ID token lifetime (seconds)</label>
+          <label for="id-ttl">${text.settings.idTokenTtl}</label>
           <input id="id-ttl" name="idTokenTtlSeconds" type="number" min="60" value="${
             state.settings.idTokenTtlSeconds
           }">
         </div>
         <div>
-          <label for="rt-ttl">Refresh token lifetime (seconds)</label>
+          <label for="rt-ttl">${text.settings.refreshTokenTtl}</label>
           <input id="rt-ttl" name="refreshTokenTtlSeconds" type="number" min="300" value="${
             state.settings.refreshTokenTtlSeconds
           }">
         </div>
-        <div><button type="submit">Save</button></div>
+        <div><button type="submit">${input.strings.common.save}</button></div>
       </div>
-      <p class="note">The ID token’s lifetime is the gateway’s session length: it holds the ID token and
-      re-verifies it on every request, refreshing only once it has expired.</p>
+      <p class="note">${text.settings.note}</p>
     </form>
   </section>
 
   <section>
-    <h2>Signing keys</h2>
-    <p>Rotating mints a new key and signs with it immediately. The old key stays in the published JWKS
-    until everything it signed has expired, plus the window a relying party caches the JWKS for — so a
-    rotation signs nobody out.</p>
+    <h2>${text.keys.heading}</h2>
+    <p>${text.keys.intro}</p>
     <form method="post" action="/admin/oidc/rotate">
       <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
-      <button type="submit">Rotate the signing key</button>
+      <button type="submit">${text.keys.rotate}</button>
     </form>
   </section>`
       : ''

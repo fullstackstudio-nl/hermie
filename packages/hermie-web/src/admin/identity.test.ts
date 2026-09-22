@@ -115,6 +115,36 @@ describe('the gate is the same gate', () => {
   })
 })
 
+describe('the language is negotiated here too', () => {
+  /*
+    This page was the last one still hard-coded to English, which is the one
+    place it actually mattered: an operator reading `/admin` in Dutch follows
+    the "Identiteitsinstellingen …" link and would have landed in English
+    halfway through the one flow on this service that has a middle.
+  */
+  it('answers /admin/oidc in the language the browser asked for, and English when it asked for nothing', async () => {
+    const cookie = await signInToGateway(ADA)
+    const asked = await fetch(`${web.url}/admin/oidc`, { headers: { cookie, 'accept-language': 'nl-NL,nl;q=0.9' } })
+    const dutch = await asked.text()
+
+    expect(asked.status).toBe(200)
+    expect(dutch).toContain('<html lang="nl">')
+    expect(dutch).toContain('<h1>Identiteit</h1>')
+    expect(dutch).toContain('De ingebouwde identity provider')
+    // The glossary holds: gateway stays gateway even in the middle of a Dutch
+    // sentence, and so does every path.
+    expect(dutch).toContain('identiteitswortel van je gateway')
+    expect(dutch).toContain('href="/admin"')
+
+    const silent = await fetch(`${web.url}/admin/oidc`, { headers: { cookie } })
+    const english = await silent.text()
+
+    expect(silent.status).toBe(200)
+    expect(english).toContain('<html lang="en">')
+    expect(english).toContain('The built-in identity provider')
+  })
+})
+
 describe('turning it on', () => {
   it('starts off, and says so on both pages', async () => {
     const cookie = await signInToGateway(ADA)

@@ -309,6 +309,110 @@ export interface WebStrings {
       signedInLocally: string
     }
   }
+  /**
+   * `/admin/oidc`, the built-in identity provider's own page.
+   *
+   * A branch of its own rather than a corner of `admin`, because it is its own
+   * page: `admin.identity` is the three-line summary and the link, and this is
+   * everything behind that link.
+   *
+   * What is NOT here is as deliberate as what is. The two configuration
+   * snippets are machine input — an operator pastes them into the gateway's
+   * `config.yaml` — so they are built in `admin/identity.ts` and never pass
+   * through a catalogue. The same goes for `dashboard.oauth.self_hosted.*`,
+   * `offline_access`, `--allow-insecure-oidc` and `public_url`: those are typed
+   * or pasted somewhere that does not speak Dutch.
+   */
+  identity: {
+    /** The `<title>`; the `<h1>` is `heading`, which has the tab strip's context already. */
+    title: string
+    heading: string
+    backToAdmin: string
+    provider: {
+      heading: string
+      intro: string
+      status: string
+      on: string
+      off: string
+      issuer: string
+      signingKeys: string
+      /** `2 published (one current, the rest being retired)` — the parenthesis only above one. */
+      keysPublished: (keys: number) => string
+      accounts: string
+      originBlocked: (origin: string) => string
+      turnOff: string
+      turnOffNote: string
+      turnOn: string
+      turnOnNote: (origin: string) => string
+    }
+    guide: {
+      heading: string
+      intro: string
+      orContainer: string
+      issuer: string
+      clientId: string
+      clientIdValue: (clientId: string) => string
+      redirectUri: string
+      clientSecret: string
+      clientSecretValue: string
+      offlineAccess: string
+      redirectIsTheGateways: string
+      redirectsLabel: string
+      redirectsNote: string
+      saveRedirects: string
+    }
+    accounts: {
+      heading: string
+      intro: string
+      who: string
+      role: string
+      twoFactor: string
+      lastSignIn: string
+      empty: string
+      disabled: string
+      totpOn: string
+      totpInvited: string
+      totpOff: string
+      /** The two role names, which are also the values the form posts. */
+      roleUser: string
+      roleAdmin: string
+      resetPassword: string
+      reEnable: string
+      disable: string
+      clearTotp: string
+      remove: string
+      /** Ends in the colon the link follows; the link itself is not copy. */
+      invitation: (username: string) => string
+      username: string
+      email: string
+      displayName: string
+      invite: string
+      inviteNote: string
+    }
+    test: {
+      heading: string
+      intro: string
+      username: string
+      password: string
+      code: string
+      run: string
+      note: string
+      stepOk: string
+      stepFailed: string
+    }
+    settings: {
+      heading: string
+      requireTotp: string
+      idTokenTtl: string
+      refreshTokenTtl: string
+      note: string
+    }
+    keys: {
+      heading: string
+      intro: string
+      rotate: string
+    }
+  }
   oidc: {
     signIn: {
       title: (issuerName: string) => string
@@ -518,6 +622,127 @@ const EN: WebStrings = {
       addButton: 'Add',
       signedInAs: viewer => `You are signed in as <code>${viewer}</code>. The last administrator cannot be removed.`,
       signedInLocally: 'You are signed in with the local administrator secret.'
+    }
+  },
+  identity: {
+    title: 'Identity — Hermie Web',
+    heading: 'Identity',
+    backToAdmin: '← Administration',
+    provider: {
+      heading: 'The built-in identity provider',
+      intro:
+        'An OpenID Provider inside this service, for a deployment with no identity provider of its own. It is ' +
+        '<strong>off unless you turn it on</strong>, it federates with nothing, and turning it on makes ' +
+        '<strong>this service the identity root of your gateway</strong>: whoever holds this state directory can ' +
+        'mint any account on it.',
+      status: 'Status',
+      on: 'on',
+      off: 'off',
+      issuer: 'Issuer',
+      signingKeys: 'Signing keys',
+      keysPublished: keys => `${keys} published${keys > 1 ? ' (one current, the rest being retired)' : ''}`,
+      accounts: 'Accounts',
+      originBlocked: origin =>
+        `<strong>This origin cannot be an issuer.</strong> You reached this page on <code>${origin}</code>, and ` +
+        'the gateway refuses an issuer that is not <code>https</code> (or <code>http</code> on loopback) — so a ' +
+        'provider enabled here would work in a browser and be rejected by the gateway. Put TLS in front of this ' +
+        'service, or restart it with <code>--allow-insecure-oidc</code> if you are testing.',
+      turnOff: 'Turn it off',
+      turnOffNote: 'Accounts and keys are kept; every refresh token is dropped.',
+      turnOn: 'Turn it on',
+      turnOnNote: origin =>
+        `The issuer becomes <code>${origin}/oidc</code>, taken from the address you reached this page on.`
+    },
+    guide: {
+      heading: 'What to put in the gateway’s configuration',
+      intro:
+        'Enabling this here changes <strong>nothing</strong> on the gateway. Hermie Web does not write the ' +
+        'gateway’s configuration and would not know how; it tells you what to write. Put this in ' +
+        '<code>config.yaml</code> and restart the gateway.',
+      orContainer: 'Or, for a container:',
+      issuer: 'Issuer',
+      clientId: 'Client id',
+      clientIdValue: clientId => `<code>${clientId}</code> — fixed for this install`,
+      redirectUri: 'Redirect URI',
+      clientSecret: 'Client secret',
+      clientSecretValue: 'none — this is a public client, and PKCE is what authenticates the exchange',
+      offlineAccess:
+        '<strong><code>offline_access</code> is in that scope list on purpose.</strong> Without it the gateway is ' +
+        'issued no refresh token, and this service’s own push sign-in cannot be made at all — the daemon would ' +
+        'need somebody at a terminal every hour.',
+      redirectIsTheGateways:
+        '<strong>The redirect URI is the gateway’s, not the app’s.</strong> A phone signing in never talks to ' +
+        'this issuer: the gateway brokers that flow and its loopback redirect is registered with the gateway, ' +
+        'not here.',
+      redirectsLabel: 'Redirect URIs, one per line',
+      redirectsNote: 'Only change this if the gateway’s <code>public_url</code> is not what this page derived.',
+      saveRedirects: 'Save redirect URIs'
+    },
+    accounts: {
+      heading: 'Accounts',
+      intro:
+        '<strong>These are this issuer’s own accounts</strong> — the people it will sign in. They are not the ' +
+        'same list as the one on <a href="/admin">the main page</a>, which is whoever the GATEWAY has seen; a ' +
+        'person appears there only once they have signed in through it.',
+      who: 'Who',
+      role: 'Role',
+      twoFactor: '2FA',
+      lastSignIn: 'Last sign-in',
+      empty: 'Nobody has an account on this issuer yet.',
+      disabled: 'disabled',
+      totpOn: 'on',
+      totpInvited: 'invited',
+      totpOff: 'off',
+      roleUser: 'user',
+      roleAdmin: 'admin',
+      resetPassword: 'Reset password',
+      reEnable: 'Re-enable',
+      disable: 'Disable',
+      clearTotp: 'Clear two-factor',
+      remove: 'Remove',
+      invitation: username =>
+        `<strong>Invitation for ${username}</strong> — send them this link. It works once, lapses in a day, and ` +
+        'is <em>not shown again</em>:',
+      username: 'Username',
+      email: 'Email',
+      displayName: 'Display name',
+      invite: 'Invite',
+      inviteNote:
+        'Creating somebody mints a one-time link they use to choose their own password. Nobody else, including ' +
+        'you, ever sees it — which is the only way to add an account that does not end with a password in a chat ' +
+        'window.'
+    },
+    test: {
+      heading: 'Test sign-in',
+      intro:
+        'Runs the whole round trip from this server against its own issuer — discovery, the JWKS, the sign-in ' +
+        "form, the code exchange, the ID token's signature and the refresh grant — and reports each step. It uses " +
+        'a real account, because a test that skipped the sign-in form would be testing a path nobody takes. The ' +
+        'redirect is read and never followed, so nothing is sent to the gateway.',
+      username: 'Username',
+      password: 'Password',
+      code: 'Code, if enrolled',
+      run: 'Run it',
+      note: 'Nothing typed here is stored or logged. The tokens it produces are discarded.',
+      stepOk: 'ok',
+      stepFailed: 'failed'
+    },
+    settings: {
+      heading: 'Settings',
+      requireTotp: 'Require a second factor, enrolling anybody who has not got one',
+      idTokenTtl: 'ID token lifetime (seconds)',
+      refreshTokenTtl: 'Refresh token lifetime (seconds)',
+      note:
+        'The ID token’s lifetime is the gateway’s session length: it holds the ID token and re-verifies it on ' +
+        'every request, refreshing only once it has expired.'
+    },
+    keys: {
+      heading: 'Signing keys',
+      intro:
+        'Rotating mints a new key and signs with it immediately. The old key stays in the published JWKS until ' +
+        'everything it signed has expired, plus the window a relying party caches the JWKS for — so a rotation ' +
+        'signs nobody out.',
+      rotate: 'Rotate the signing key'
     }
   },
   oidc: {
@@ -752,6 +977,119 @@ const NL: WebCatalogue<WebStrings> = {
       signedInLocally: 'Je bent ingelogd met het lokale beheerderswachtwoord.'
     }
   },
+  identity: {
+    title: 'Identiteit — Hermie Web',
+    heading: 'Identiteit',
+    backToAdmin: '← Beheer',
+    provider: {
+      heading: 'De ingebouwde identity provider',
+      intro:
+        'Een OpenID Provider binnen deze service, voor een deployment zonder eigen identity provider. Hij staat ' +
+        '<strong>uit tenzij je hem aanzet</strong>, hij federeert met niets, en aanzetten maakt <strong>deze ' +
+        'service de identiteitswortel van je gateway</strong>: wie deze state-map heeft, kan er elk account op ' +
+        'aanmaken.',
+      on: 'aan',
+      off: 'uit',
+      signingKeys: 'Ondertekeningssleutels',
+      keysPublished: keys => `${keys} gepubliceerd${keys > 1 ? ' (één actief, de rest wordt uitgefaseerd)' : ''}`,
+      originBlocked: origin =>
+        `<strong>Deze origin kan geen issuer zijn.</strong> Je hebt deze pagina bereikt op <code>${origin}</code>, ` +
+        'en de gateway weigert een issuer die geen <code>https</code> is (of <code>http</code> op loopback) — een ' +
+        'provider die je hier aanzet zou dus in een browser werken en door de gateway geweigerd worden. Zet TLS ' +
+        'voor deze service, of herstart hem met <code>--allow-insecure-oidc</code> als je aan het testen bent.',
+      turnOff: 'Zet hem uit',
+      turnOffNote: 'Accounts en sleutels blijven bewaard; elk refresh token vervalt.',
+      turnOn: 'Zet hem aan',
+      turnOnNote: origin =>
+        `De issuer wordt <code>${origin}/oidc</code>, genomen uit het adres waarop je deze pagina bereikt hebt.`
+    },
+    guide: {
+      heading: 'Wat je in de configuratie van de gateway zet',
+      intro:
+        'Dit hier aanzetten verandert <strong>niets</strong> aan de gateway. Hermie Web schrijft de configuratie ' +
+        'van de gateway niet en zou ook niet weten hoe; het vertelt je wat je moet schrijven. Zet dit in ' +
+        '<code>config.yaml</code> en herstart de gateway.',
+      orContainer: 'Of, voor een container:',
+      clientIdValue: clientId => `<code>${clientId}</code> — vast voor deze installatie`,
+      clientSecretValue: 'geen — dit is een public client, en PKCE is wat de uitwisseling authenticeert',
+      offlineAccess:
+        '<strong><code>offline_access</code> staat met opzet in die scope-lijst.</strong> Zonder dat krijgt de ' +
+        'gateway geen refresh token, en kan de eigen push-login van deze service helemaal niet gemaakt worden — ' +
+        'de daemon zou elk uur iemand achter een terminal nodig hebben.',
+      redirectIsTheGateways:
+        '<strong>De redirect URI is die van de gateway, niet die van de app.</strong> Een telefoon die inlogt ' +
+        'praat nooit met deze issuer: de gateway bemiddelt die flow, en zijn loopback-redirect staat bij de ' +
+        'gateway geregistreerd, niet hier.',
+      redirectsLabel: 'Redirect URI’s, één per regel',
+      redirectsNote:
+        'Verander dit alleen als de <code>public_url</code> van de gateway niet is wat deze pagina heeft afgeleid.',
+      saveRedirects: 'Redirect URI’s opslaan'
+    },
+    accounts: {
+      intro:
+        '<strong>Dit zijn de eigen accounts van deze issuer</strong> — de mensen die hij gaat inloggen. Het is ' +
+        'niet dezelfde lijst als die op <a href="/admin">de hoofdpagina</a>, want dat is iedereen die de GATEWAY ' +
+        'heeft gezien; iemand komt daar pas te staan zodra diegene via de gateway heeft ingelogd.',
+      who: 'Wie',
+      role: 'Rol',
+      lastSignIn: 'Laatst ingelogd',
+      empty: 'Niemand heeft nog een account op deze issuer.',
+      disabled: 'uitgeschakeld',
+      totpOn: 'aan',
+      totpInvited: 'uitgenodigd',
+      totpOff: 'uit',
+      roleUser: 'gebruiker',
+      roleAdmin: 'beheerder',
+      resetPassword: 'Wachtwoord opnieuw instellen',
+      reEnable: 'Weer inschakelen',
+      disable: 'Uitschakelen',
+      clearTotp: 'Tweefactor wissen',
+      remove: 'Verwijderen',
+      invitation: username =>
+        `<strong>Uitnodiging voor ${username}</strong> — stuur diegene deze link. Hij werkt één keer, vervalt ` +
+        'binnen een dag, en wordt <em>niet nog een keer getoond</em>:',
+      username: 'Gebruikersnaam',
+      email: 'E-mail',
+      displayName: 'Weergavenaam',
+      invite: 'Uitnodigen',
+      inviteNote:
+        'Iemand aanmaken maakt een eenmalige link waarmee diegene zelf een wachtwoord kiest. Niemand anders, jij ' +
+        'ook niet, ziet die ooit — en dat is de enige manier om een account toe te voegen die niet eindigt met ' +
+        'een wachtwoord in een chatvenster.'
+    },
+    test: {
+      heading: 'Test-login',
+      intro:
+        'Draait de hele rondgang vanaf deze server tegen zijn eigen issuer — discovery, de JWKS, het ' +
+        'inlogformulier, de code-uitwisseling, de handtekening van het ID token en de refresh grant — en ' +
+        'rapporteert elke stap. Hij gebruikt een echt account, want een test die het inlogformulier oversloeg zou ' +
+        'een pad testen dat niemand neemt. De redirect wordt gelezen en nooit gevolgd, dus er gaat niets naar de ' +
+        'gateway.',
+      username: 'Gebruikersnaam',
+      password: 'Wachtwoord',
+      code: 'Code, als er een is ingesteld',
+      run: 'Uitvoeren',
+      note: 'Wat je hier typt wordt niet opgeslagen en niet gelogd. De tokens die het oplevert worden weggegooid.',
+      stepFailed: 'mislukt'
+    },
+    settings: {
+      heading: 'Instellingen',
+      requireTotp: 'Een tweede factor verplichten, en iedereen die er geen heeft er een laten instellen',
+      idTokenTtl: 'Levensduur van het ID token (seconden)',
+      refreshTokenTtl: 'Levensduur van het refresh token (seconden)',
+      note:
+        'De levensduur van het ID token is de sessielengte van de gateway: die houdt het ID token vast en ' +
+        'controleert het bij elk verzoek opnieuw, en ververst pas als het verlopen is.'
+    },
+    keys: {
+      heading: 'Ondertekeningssleutels',
+      intro:
+        'Roteren maakt een nieuwe sleutel en ondertekent er meteen mee. De oude sleutel blijft in de ' +
+        'gepubliceerde JWKS staan tot alles wat ermee ondertekend is verlopen is, plus de tijd dat een relying ' +
+        'party de JWKS cachet — een rotatie logt dus niemand uit.',
+      rotate: 'Ondertekeningssleutel roteren'
+    }
+  },
   oidc: {
     signIn: {
       title: issuerName => `Inloggen bij ${issuerName}`,
@@ -970,6 +1308,125 @@ const DE: WebCatalogue<WebStrings> = {
       signedInAs: viewer =>
         `Du bist als <code>${viewer}</code> angemeldet. Der letzte Administrator kann nicht entfernt werden.`,
       signedInLocally: 'Du bist mit dem lokalen Administrator-Passwort angemeldet.'
+    }
+  },
+  identity: {
+    title: 'Identität — Hermie Web',
+    heading: 'Identität',
+    backToAdmin: '← Verwaltung',
+    provider: {
+      heading: 'Der eingebaute Identity Provider',
+      intro:
+        'Ein OpenID Provider in diesem Dienst, für eine Installation ohne eigenen Identity Provider. Er ist ' +
+        '<strong>aus, bis du ihn einschaltest</strong>, er föderiert mit nichts, und ihn einzuschalten macht ' +
+        '<strong>diesen Dienst zur Identitätswurzel deines gateway</strong>: wer dieses Statusverzeichnis hat, ' +
+        'kann darauf jedes Konto anlegen.',
+      on: 'an',
+      off: 'aus',
+      signingKeys: 'Signaturschlüssel',
+      keysPublished: keys =>
+        `${keys} veröffentlicht${keys > 1 ? ' (einer aktuell, die übrigen werden ausgemustert)' : ''}`,
+      accounts: 'Konten',
+      originBlocked: origin =>
+        `<strong>Dieser origin kann kein issuer sein.</strong> Du hast diese Seite auf <code>${origin}</code> ` +
+        'erreicht, und das gateway lehnt einen issuer ab, der nicht <code>https</code> ist (oder <code>http</code> ' +
+        'auf loopback) — ein hier eingeschalteter Provider würde also im Browser funktionieren und vom gateway ' +
+        'abgelehnt werden. Setz TLS vor diesen Dienst, oder starte ihn mit <code>--allow-insecure-oidc</code> ' +
+        'neu, wenn du testest.',
+      turnOff: 'Ausschalten',
+      turnOffNote: 'Konten und Schlüssel bleiben erhalten; jeder refresh token wird verworfen.',
+      turnOn: 'Einschalten',
+      turnOnNote: origin =>
+        `Der issuer wird <code>${origin}/oidc</code>, genommen aus der Adresse, über die du diese Seite erreicht ` +
+        'hast.'
+    },
+    guide: {
+      heading: 'Was in die Konfiguration des gateway gehört',
+      intro:
+        'Das hier einzuschalten ändert <strong>nichts</strong> am gateway. Hermie Web schreibt die Konfiguration ' +
+        'des gateway nicht und wüsste auch nicht wie; es sagt dir, was du schreiben musst. Trag das in ' +
+        '<code>config.yaml</code> ein und starte das gateway neu.',
+      orContainer: 'Oder, für einen Container:',
+      clientIdValue: clientId => `<code>${clientId}</code> — fest für diese Installation`,
+      clientSecretValue: 'keins — dies ist ein public client, und PKCE authentifiziert den Austausch',
+      offlineAccess:
+        '<strong><code>offline_access</code> steht mit Absicht in dieser scope-Liste.</strong> Ohne es bekommt ' +
+        'das gateway keinen refresh token, und die eigene push-Anmeldung dieses Dienstes lässt sich überhaupt ' +
+        'nicht herstellen — der Daemon bräuchte jede Stunde jemanden am Terminal.',
+      redirectIsTheGateways:
+        '<strong>Die Redirect URI gehört dem gateway, nicht der App.</strong> Ein Telefon, das sich anmeldet, ' +
+        'spricht nie mit diesem issuer: das gateway vermittelt diesen Ablauf, und sein loopback-Redirect ist beim ' +
+        'gateway registriert, nicht hier.',
+      redirectsLabel: 'Redirect URIs, eine pro Zeile',
+      redirectsNote:
+        'Ändere das nur, wenn die <code>public_url</code> des gateway nicht das ist, was diese Seite abgeleitet ' +
+        'hat.',
+      saveRedirects: 'Redirect URIs speichern'
+    },
+    accounts: {
+      heading: 'Konten',
+      intro:
+        '<strong>Das sind die eigenen Konten dieses issuer</strong> — die Menschen, die er anmelden wird. Es ist ' +
+        'nicht dieselbe Liste wie die auf <a href="/admin">der Hauptseite</a>, denn dort steht, wen das GATEWAY ' +
+        'gesehen hat; jemand taucht dort erst auf, sobald er sich darüber angemeldet hat.',
+      who: 'Wer',
+      role: 'Rolle',
+      lastSignIn: 'Letzte Anmeldung',
+      empty: 'Auf diesem issuer hat noch niemand ein Konto.',
+      disabled: 'deaktiviert',
+      totpOn: 'an',
+      totpInvited: 'eingeladen',
+      totpOff: 'aus',
+      roleUser: 'Benutzer',
+      roleAdmin: 'Administrator',
+      resetPassword: 'Passwort zurücksetzen',
+      reEnable: 'Wieder aktivieren',
+      disable: 'Deaktivieren',
+      clearTotp: 'Zwei-Faktor löschen',
+      remove: 'Entfernen',
+      invitation: username =>
+        `<strong>Einladung für ${username}</strong> — schick dieser Person den Link. Er funktioniert einmal, ` +
+        'verfällt binnen eines Tages und wird <em>nicht noch einmal gezeigt</em>:',
+      username: 'Benutzername',
+      email: 'E-Mail',
+      displayName: 'Anzeigename',
+      invite: 'Einladen',
+      inviteNote:
+        'Jemanden anzulegen erzeugt einen einmaligen Link, mit dem die Person ihr eigenes Passwort wählt. ' +
+        'Niemand sonst, auch du nicht, sieht ihn jemals — und das ist die einzige Art, ein Konto hinzuzufügen, ' +
+        'die nicht mit einem Passwort in einem Chatfenster endet.'
+    },
+    test: {
+      heading: 'Test-Anmeldung',
+      intro:
+        'Führt den ganzen Durchlauf von diesem Server gegen seinen eigenen issuer aus — Discovery, das JWKS, das ' +
+        'Anmeldeformular, den Code-Austausch, die Signatur des ID token und den refresh grant — und meldet jeden ' +
+        'Schritt. Er benutzt ein echtes Konto, denn ein Test, der das Anmeldeformular überspringt, würde einen ' +
+        'Weg testen, den niemand geht. Der Redirect wird gelesen und nie verfolgt, es geht also nichts an das ' +
+        'gateway.',
+      username: 'Benutzername',
+      password: 'Passwort',
+      code: 'Code, falls eingerichtet',
+      run: 'Ausführen',
+      note: 'Was du hier tippst, wird nicht gespeichert und nicht geloggt. Die Token daraus werden verworfen.',
+      stepFailed: 'fehlgeschlagen'
+    },
+    settings: {
+      heading: 'Einstellungen',
+      requireTotp: 'Einen zweiten Faktor verlangen und alle, die keinen haben, einen einrichten lassen',
+      idTokenTtl: 'Lebensdauer des ID token (Sekunden)',
+      refreshTokenTtl: 'Lebensdauer des refresh token (Sekunden)',
+      note:
+        'Die Lebensdauer des ID token ist die Sitzungslänge des gateway: es hält das ID token und prüft es bei ' +
+        'jeder Anfrage neu, und erneuert es erst, wenn es abgelaufen ist.'
+    },
+    keys: {
+      heading: 'Signaturschlüssel',
+      intro:
+        'Rotieren erzeugt einen neuen Schlüssel und signiert sofort damit. Der alte Schlüssel bleibt im ' +
+        'veröffentlichten JWKS, bis alles damit Signierte abgelaufen ist, plus die Zeit, die eine Relying Party ' +
+        'das JWKS cacht — eine Rotation meldet also niemanden ab.',
+      rotate: 'Signaturschlüssel rotieren'
     }
   },
   oidc: {

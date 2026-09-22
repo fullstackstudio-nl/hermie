@@ -524,7 +524,8 @@ export class AdminRouter {
         originAcceptable: issuerOriginAcceptable(origin),
         invite,
         selfTest,
-        notice
+        notice,
+        ...webCopy(request)
       })
     )
   }
