@@ -188,6 +188,52 @@ fn no_command_answers_a_frame_on_about_blank() {
 }
 
 #[test]
+fn no_command_answers_a_frame_local_to_the_shell() {
+    // `tauri://localhost` and `http://tauri.localhost` are the two shapes
+    // `is_local_url` calls local today (see `gateways::validate`'s
+    // `Invalid::Local`), the same way `about:blank` above is refused: parked as
+    // the TOP frame, with the call itself coming from somewhere unconfigured.
+    for local in ["tauri://localhost", "http://tauri.localhost"] {
+        let (_app, webview) = shell(vec![entry(ENTRY_ID, CONFIGURED)], local);
+
+        for (cmd, args) in commands() {
+            assert_eq!(
+                call(&webview, request(cmd, args, UNCONFIGURED)),
+                None,
+                "{cmd} answered a frame on {local}"
+            );
+        }
+    }
+}
+
+#[test]
+fn no_command_answers_a_calling_frame_parked_on_a_local_or_opaque_url() {
+    // The three cases above all park the TOP frame on a local or opaque URL.
+    // This is the other position one can appear in: the CALLING frame — the
+    // one `InvokeRequest::url` names and the ACL actually matches — while the
+    // window's top frame stays on the configured gateway. `about:blank` and
+    // `tauri://localhost` here stand for a same-window navigation caught
+    // mid-flight; `blob:` for the shape a page's own `URL.createObjectURL`
+    // produces, which carries the app's origin in its string but is not that
+    // origin as far as the ACL (or the same-origin policy) is concerned.
+    let (_app, webview) = configured_shell();
+
+    for calling_frame in [
+        "about:blank",
+        "tauri://localhost",
+        "blob:https://hermes.example.com:9443/1b0e6b6e-0000-4000-8000-000000000000",
+    ] {
+        for (cmd, args) in commands() {
+            assert_eq!(
+                call(&webview, request(cmd, args, calling_frame)),
+                None,
+                "{cmd} answered a calling frame on {calling_frame}"
+            );
+        }
+    }
+}
+
+#[test]
 fn a_shell_with_no_configured_gateway_grants_nothing_at_all() {
     // First run, before the connect page: there is no origin the bridge belongs
     // to, so there is no capability and every call is refused by the ACL.
@@ -612,4 +658,86 @@ fn an_ipv6_gateway_is_reachable_and_its_neighbours_are_not() {
         "http://[::1]:9120",
         "http://127.0.0.1:9120"
     ));
+}
+
+// ---------------------------------------------------------------------------
+// 8. The emit bypass cannot be written by accident
+// ---------------------------------------------------------------------------
+
+/// `tauri::Emitter` has to be in scope for `crate::emit_to_app`'s own
+/// `webview.emit_to(...)` call to compile — and that import is not scoped to
+/// this one call site. A later `webview.emit(...)` or a second `.emit_to(...)`
+/// added anywhere else in this crate would compile just as cleanly, and would
+/// run in whatever page happens to be loaded at that moment: Tauri never
+/// clears a page's JS listener records on navigation, so an emit while the
+/// window sits on, say, an identity provider's sign-in page evaluates the
+/// listener's callback there, with the payload, which is exactly the leak
+/// `crate::should_emit` exists to close.
+///
+/// Clippy's `disallowed-methods` lint (`Emitter::emit` and `Emitter::emit_to`,
+/// disallowed everywhere but this one call site) is the reviewer's suggested
+/// guard and is the one to switch to if this crate ever wires clippy into CI.
+/// It does not today — the CI job runs `cargo test`, `cargo check` and
+/// `cargo fmt`, nothing that lints — so this test greps the crate's own
+/// sources instead. It is not as strong a guard as a lint that runs on every
+/// `cargo check` before a binary is even produced, but it is the smallest
+/// thing that (a) runs on every `cargo test`, a gate this repo already has,
+/// and (b) fails loudly, with the offending line, the moment a second call
+/// site appears — which is what "impossible to write by accident" needs to
+/// mean here: caught at the next test run, not left for a reviewer to notice.
+#[test]
+fn only_emit_to_app_calls_emit() {
+    let src_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut calls: Vec<(String, usize, String)> = Vec::new();
+
+    for entry in std::fs::read_dir(&src_dir).expect("src dir readable") {
+        let path = entry.expect("dir entry readable").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
+            continue;
+        }
+
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_string();
+
+        // This file itself: it is `#[cfg(test)]`-only, never in a shipped
+        // binary, and it necessarily spells out `.emit(`/`.emit_to(` as string
+        // literals to look for them — which would otherwise flag itself.
+        if file_name == "acl.rs" {
+            continue;
+        }
+
+        let contents = std::fs::read_to_string(&path).expect("source file readable");
+
+        for (line_number, line) in contents.lines().enumerate() {
+            // A doc comment is where this very explanation says `.emit(...)`
+            // in prose; only an actual call, outside a comment, counts.
+            if line.trim_start().starts_with("//") {
+                continue;
+            }
+
+            if line.contains(".emit(") || line.contains(".emit_to(") {
+                calls.push((file_name.clone(), line_number + 1, line.trim().to_string()));
+            }
+        }
+    }
+
+    assert_eq!(
+        calls.len(),
+        1,
+        "expected exactly one Emitter::emit/emit_to call in the crate (crate::emit_to_app's \
+         own); a second call site bypasses `should_emit`. Found: {calls:#?}"
+    );
+
+    let (file, _line, code) = &calls[0];
+    assert_eq!(
+        file, "lib.rs",
+        "the one permitted emit call is expected in lib.rs (crate::emit_to_app), found in {file}: {code}"
+    );
+    assert!(
+        code.contains("webview.emit_to(EventTarget::labeled(webview.label())"),
+        "the one permitted emit call changed shape unexpectedly: {code}"
+    );
 }

@@ -71,6 +71,31 @@ jobs:
         if: github.event_name == 'pull_request'
         run: node scripts/check-no-trailers.mjs origin/${{ github.base_ref }}..HEAD
 
+  # `check` above runs the JavaScript/TypeScript suites; it has no `cargo test`
+  # anywhere, so the desktop bridge's ACL guarantees (`src/acl.rs`,
+  # `src/gateways.rs`) were until now proven only on a developer's own machine.
+  # A sibling job rather than a step of `check`: it needs no Node install, and
+  # running independently — nothing here `needs: check` and nothing needs it —
+  # keeps it off that job's critical path instead of adding its runtime on top.
+  # `macos-latest` needs no extra system packages for this: unlike Linux,
+  # Tauri's desktop crate links against the system WebKit that ships with the
+  # image, not webkit2gtk.
+  desktop-rust-tests:
+    name: Desktop bridge (cargo test)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: cargo test
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --locked
+
   # The native builds are the slow, expensive half: they run on demand and on
   # every release tag, not on every push. Nothing here signs anything. The Mac
   # is not a job of its own: it is the iOS build, run on a different destination

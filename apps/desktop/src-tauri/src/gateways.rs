@@ -21,12 +21,12 @@
 //!   relaunches; that is what keeps "the granted set equals the stored list at
 //!   every moment a page can run" exactly true rather than nearly true.
 
-use std::sync::RwLock;
+use std::sync::{OnceLock, RwLock};
 #[cfg(any(debug_assertions, test))]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use tauri::Url;
+use tauri::{Url, Wry};
 
 /// The environment variable the dev bed passes the Hermie Web address in.
 ///
@@ -47,12 +47,33 @@ pub const DEV_URL_VAR: &str = "HERMIE_WEB_URL";
 pub const DEV_ENTRY_ID: &str = "dev";
 
 /// The origin the Vite dev server serves the shell's own pages from
-/// (`build.devUrl` in `tauri.conf.json`).
+/// (`build.devUrl` in `tauri.conf.json`), read from the app's own compiled
+/// config rather than kept as a second literal here — a config edit and this
+/// check could otherwise drift apart silently.
 ///
 /// Refused by [`validate`] for the same reason `tauri.localhost` is: Tauri's
 /// `is_local_url` would call a page there local, which means `core:default` and
 /// the whole local API — the opposite of what a gateway entry is for.
-const DEV_SERVER_ORIGIN: &str = "http://localhost:1420";
+///
+/// `tauri::generate_context!()` embeds `tauri.conf.json` at compile time, so
+/// reading it back out is not an I/O cost — but it is a small parse, worth
+/// doing once. `Wry` (the runtime the shell actually runs) rather than a
+/// generic parameter: the config does not vary by runtime, and `validate` is a
+/// plain `&str -> Result` function nothing else here makes generic.
+fn dev_server_origin() -> &'static str {
+    static ORIGIN: OnceLock<Option<String>> = OnceLock::new();
+    ORIGIN
+        .get_or_init(|| {
+            crate::context::<Wry>()
+                .config()
+                .build
+                .dev_url
+                .as_ref()
+                .map(|url| url.origin().ascii_serialization())
+        })
+        .as_deref()
+        .unwrap_or_default()
+}
 
 /// Why a URL cannot be a gateway entry.
 ///
@@ -174,7 +195,7 @@ pub fn validate(raw: &str) -> Result<Url, Invalid> {
 
     let pattern = crate::bridge::origin_pattern(&url).ok_or(Invalid::NoHost)?;
 
-    if pattern == DEV_SERVER_ORIGIN {
+    if pattern == dev_server_origin() {
         return Err(Invalid::Local);
     }
 

@@ -18,8 +18,8 @@
 # There is deliberately NO `[default]` set here. A default permission would be
 # a set every capability could pull in by accident; the bridge is granted by
 # naming each command, and the six names below are the whole surface a remote
-# origin can reach. Adding a seventh is a plan change
-# a deliberate design change, not a routine edit.
+# origin can reach. Adding a seventh is a deliberate design change, not a
+# routine edit.
 #
 # Defining any app permission at all switches Tauri's ACL on for this app's own
 # commands (`RuntimeAuthority::has_app_manifest`), which means a LOCAL page —

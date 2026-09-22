@@ -363,7 +363,17 @@ fn escape_ipv6(host: &str) -> String {
 /// parses it internally and unwraps, so a pattern that does not parse would
 /// panic — at a reader's launch, with their address in the message. Refusing it
 /// as an error instead means the worst case is one gateway that does not work.
+///
+/// [`crate::gateways::validate`] runs again here too, even though every caller
+/// today (`setup()`, and Task 3's `gateways::add`) has already run it. This
+/// function is the one place a bad entry becomes a granted capability, so it is
+/// the one place the invariant has to hold on its own rather than be inherited
+/// from whoever calls it — a later caller that forgets to validate first must
+/// still fail closed, not grant.
 pub fn grant<R: Runtime>(app: &impl Manager<R>, entry: &GatewayEntry) -> tauri::Result<()> {
+    crate::gateways::validate(entry.url.as_str())
+        .map_err(|invalid| tauri::Error::InvalidWebviewUrl(invalid.message()))?;
+
     let Some(pattern) = origin_pattern(&entry.url) else {
         return Err(tauri::Error::InvalidWebviewUrl(
             "a gateway URL with no http(s) origin cannot be granted the bridge",
