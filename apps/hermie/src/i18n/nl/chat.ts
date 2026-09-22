@@ -53,7 +53,8 @@ export const chat: Translation<typeof chatStrings> = {
     collapse: 'Tool-aanroep inklappen'
   },
   botDm: {
-    lineTo: (handle: string) => `Bericht aan @${handle}`,
+    asideTo: (handle: string) => `Aan @${handle}`,
+    asideFrom: (handle: string) => `Van @${handle}`,
     replied: (name: string) => `${name} antwoordde`,
     sending: 'Versturen…',
     queued: 'In de wachtrij · wacht op de huidige taak',
@@ -75,7 +76,6 @@ export const chat: Translation<typeof chatStrings> = {
     rollupMixed: (count: number, replies: number) =>
       `${count} berichten · ${replies} ${replies === 1 ? 'antwoord' : 'antwoorden'}`,
     openChat: (handle: string) => `Open de chat van @${handle}`,
-    sent: 'Verzonden',
     reply: 'Antwoord',
     answered: '↩︎ beantwoord',
     chip: (target: string) => `Bericht aan ${target}`,

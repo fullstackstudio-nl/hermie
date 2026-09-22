@@ -90,7 +90,20 @@ export function visibleItems(state: ChatState, options: VisibilityOptions): Visi
         break
 
       case 'bot_dm_in':
-        out.push({ item, presentation: showBotToBot ? 'full' : 'chip' })
+        /*
+          `collapsed`, never `full`, at every level.
+
+          A bot-to-bot row is drawn as an ASIDE — the silhouette a reply's
+          thoughts have — and an aside starts closed whatever the verbosity. The
+          owner's rule: the reader opens one by tapping it, and the tap is
+          remembered per row. `verbose` used to open these, which put a
+          teammate's whole message on screen for a reader who had turned
+          verbosity up to see tool calls.
+
+          The toggle still demotes rather than hides (ADR-0009): a DM the reader
+          cannot see at all makes the bot's own reply unexplainable.
+        */
+        out.push({ item, presentation: showBotToBot ? 'collapsed' : 'chip' })
         break
 
       case 'cron_delivery':
@@ -111,10 +124,8 @@ export function visibleItems(state: ChatState, options: VisibilityOptions): Visi
         break
 
       case 'bot_dm_out':
-        out.push({
-          item,
-          presentation: !showBotToBot || level === 'quiet' ? 'chip' : level === 'verbose' ? 'full' : 'collapsed'
-        })
+        // `collapsed` at both levels that show it, for the reason above.
+        out.push({ item, presentation: !showBotToBot || level === 'quiet' ? 'chip' : 'collapsed' })
         break
 
       case 'subagent_group':
@@ -343,9 +354,9 @@ export const UNREAD_BADGE_CAP = 99
 /**
  * How many messages arrived in this chat since the user last looked at it.
  *
- * Only the two kinds a reader would call "a message" count: the bot's own
- * replies and inbound teammate DMs. Tool rows, notices and the user's own turns
- * are not unread mail, and counting them would make a badge that never settles.
+ * Only what a reader would call "a message" counts: the bot's own replies to
+ * them. Tool rows, notices, the user's own turns and bot-to-bot traffic are not
+ * unread mail, and counting them would make a badge that never settles.
  *
  * `since` is the watermark the roster keeps (unix seconds). A chat the app has
  * not loaded has nothing to count, which is why the list still falls back to a
@@ -374,12 +385,31 @@ export function unreadCountSince(state: ChatState, since: number): number {
  * message is, a chat the reader is looking at would count one for ever.
  */
 function countsAsMessage(item: TranscriptItem): boolean {
-  if (item.kind !== 'assistant' && item.kind !== 'bot_dm_in') {
+  /*
+    Bot-to-bot traffic is NOT mail, so it never moves a badge.
+
+    The owner's rule, in his words: *bot-to-bot must also not bump the
+    notification badge.* `bot_dm_in` used to count — it is a message, and it is
+    even addressed to this bot — but a badge answers one question, "is there
+    something here for ME", and two agents working out a delivery between
+    themselves is not. A bot that dispatches to a teammate every few seconds
+    produced a chat list that was permanently shouting about work nobody had to
+    look at, and a reader who opened it found nothing they had to do.
+
+    `bot_dm_out` and `subagent_group` never counted, and this is where that
+    stays written down: the three kinds are one rule, not one rule and two
+    accidents of an `if` that happened to exclude them.
+
+    It is only the COUNT. The rows are still in the transcript, still drawn, and
+    `hasOpenRequest` is untouched: a question a teammate's work raised still asks
+    for the reader, because somebody asked THEM.
+  */
+  if (item.kind !== 'assistant') {
     return false
   }
 
   // An empty or interim bubble is the turn in progress, not a message.
-  return item.kind !== 'assistant' || (!item.interim && item.text.trim() !== '')
+  return !item.interim && item.text.trim() !== ''
 }
 
 /**

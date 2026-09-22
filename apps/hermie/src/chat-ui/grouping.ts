@@ -22,11 +22,19 @@ export interface RowLayout {
   /** Last of its run, so it carries the tail. */
   tail: boolean
   /**
-   * Follows another outgoing bot-to-bot line.
+   * Follows another bot-to-bot aside BETWEEN THE SAME PAIR.
    *
-   * Not `grouped`: a dispatch is a ledger line, not speech (§6.4), so it has no
-   * tail and no corner to tuck. It does have a rhythm of its own — §6.6's nine
-   * points between consecutive lines — and that is the only thing this says.
+   * Not `grouped`: bot-to-bot traffic is not speech, so it has no tail and no
+   * corner to tuck. It does have a rhythm of its own — nine points between
+   * consecutive asides instead of a turn gap — and that is the only thing this
+   * says.
+   *
+   * "The same pair" is what makes it tight rather than merely consecutive. A
+   * dispatch to @writer followed by one to @builder is two separate errands, and
+   * running them together reads as one exchange that never happened. Both
+   * directions count: a message out and the answer coming back in are the two
+   * halves of one exchange, and the gap between them is the thing the owner
+   * asked to close.
    */
   ledgerRun: boolean
   /** A date stamp belongs directly ABOVE this row. */
@@ -60,9 +68,16 @@ export function speakerKey(item: TranscriptItem): string | null {
       // same teammate still group — and then only the first of that run carries
       // the eyebrow, which is the point of having one.
       return item.replyToBotHandle ? `bot-reply:${item.replyToBotHandle}` : 'bot'
-    case 'bot_dm_in':
-      return `dm:${item.senderHandle ?? item.senderName.toLowerCase()}`
     default:
+      /*
+        A bot-to-bot row is deliberately NOT a speaker.
+
+        It used to key on `dm:<handle>`, which grouped consecutive inbound DMs
+        into one run of bubbles — correct while an inbound DM WAS a bubble, and
+        a lie now that it is an aside. An aside has no tail to withhold and no
+        corner to tuck, so a speaker key would only make `layoutRows` promise a
+        silhouette nothing draws. Their spacing is `ledgerRun`'s answer instead.
+      */
       return null
   }
 }
@@ -123,7 +138,8 @@ export function layoutRows(entries: readonly VisibleItem[], now = Date.now() / 1
 
     const tail = key === null || next === undefined || speakerKey(next) !== key || !withinWindow(item.ts, next.ts)
 
-    const ledgerRun = item.kind === 'bot_dm_out' && previous?.kind === 'bot_dm_out'
+    const pair = dmPairKey(item)
+    const ledgerRun = pair !== null && previous !== undefined && dmPairKey(previous) === pair
 
     // A hidden row draws nothing, so it must not swallow the day's stamp either:
     // the stamp passes to the first row of that day the reader can actually see.
@@ -138,6 +154,24 @@ export function layoutRows(entries: readonly VisibleItem[], now = Date.now() / 1
   }
 
   return layout
+}
+
+/**
+ * The teammate a bot-to-bot row is about, or `null` for anything that is not one.
+ *
+ * One key for both directions, because a dispatch to @writer and @writer's
+ * answer are one exchange: keying them apart would put a turn gap in the middle
+ * of the pair the reader is trying to read as a pair.
+ */
+function dmPairKey(item: TranscriptItem): string | null {
+  switch (item.kind) {
+    case 'bot_dm_out':
+      return `dm:${item.targetHandle || item.target.toLowerCase()}`
+    case 'bot_dm_in':
+      return `dm:${item.senderHandle ?? item.senderName.toLowerCase()}`
+    default:
+      return null
+  }
 }
 
 function withinWindow(before: number | undefined, after: number | undefined): boolean {

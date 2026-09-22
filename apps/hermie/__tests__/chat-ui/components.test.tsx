@@ -10,8 +10,7 @@ import {
   AgentsSheet,
   AssistantBubble,
   attachmentName,
-  BotDmInBubble,
-  BotDmOutLine,
+  BotDmAside,
   ChatHeader,
   ExpandedProvider,
   UserBubble,
@@ -149,67 +148,113 @@ describe('bubbles', () => {
     expect(screen.getByText('REPLY TO @WRITER')).toBeTruthy()
   })
 
-  it('keeps the sender chip on an inbound DM, in the micro type', () => {
-    renderScreen(<BotDmInBubble item={botDmInItem} selfHandle="researcher" />)
-
-    expect(screen.getByText('WRITER · BOT')).toBeTruthy()
-    expect(screen.getByText('@writer → @researcher')).toBeTruthy()
-  })
-
   it('marks an inbound DM this bot has answered', () => {
-    renderScreen(<BotDmInBubble answered item={botDmInItem} selfHandle="researcher" />)
+    renderScreen(<BotDmAside answered item={botDmInItem} />)
 
     expect(screen.getByText(/answered$/)).toBeTruthy()
   })
 })
 
-describe('bot-to-bot lines', () => {
-  // §6.6: collapsed outgoing is a LINE, and tapping it expands the exchange in
-  // place. It used to be a card whose header navigated to the other bot's chat,
-  // which cost the reader the conversation they were reading.
-  it('draws a line with the reply marker and expands in place', () => {
-    renderScreen(
+describe('bot-to-bot asides', () => {
+  /*
+    The owner's rule: bot-to-bot messages are not chat bubbles. Both directions
+    are drawn as an aside — the silhouette a reply's thoughts have — which means
+    no `Bubble` anywhere near them. A bubble leaves a `-box` testID behind it, so
+    its absence is the assertion.
+  */
+  it('draws both directions as an aside and never as a bubble', () => {
+    const view = renderScreen(
       <ExpandedProvider>
-        <BotDmOutLine item={botDmOutItem} presentation="collapsed" />
+        <BotDmAside item={botDmOutItem} presentation="collapsed" />
+        <BotDmAside item={botDmInItem} presentation="collapsed" />
       </ExpandedProvider>
     )
 
-    expect(screen.getByText('Message to @writer')).toBeTruthy()
-    expect(screen.getByText(/replied/)).toBeTruthy()
-    expect(screen.queryByTestId(`bot-dm-out-expanded-${botDmOutItem.id}`)).toBeNull()
+    expect(view.getByTestId(`bot-dm-aside-${botDmOutItem.id}`)).toBeTruthy()
+    expect(view.getByTestId(`bot-dm-aside-${botDmInItem.id}`)).toBeTruthy()
 
-    fireEvent.press(screen.getByTestId(`bot-dm-out-line-${botDmOutItem.id}`))
-    expect(screen.getByTestId(`bot-dm-out-expanded-${botDmOutItem.id}`)).toBeTruthy()
+    for (const id of [botDmOutItem.id, botDmInItem.id]) {
+      expect(view.queryByTestId(`bot-dm-in-${id}`)).toBeNull()
+      expect(view.queryByTestId(`bot-dm-in-${id}-box`)).toBeNull()
+      expect(view.queryByTestId(`bot-dm-in-fold-${id}`)).toBeNull()
+      expect(view.queryByTestId(`bot-dm-out-expanded-${id}`)).toBeNull()
+    }
   })
 
-  it('never navigates from the line itself, only from the explicit link', () => {
+  it('heads each direction with the teammate, and keeps the reply marker', () => {
+    renderScreen(
+      <ExpandedProvider>
+        <BotDmAside item={botDmOutItem} presentation="collapsed" />
+        <BotDmAside item={botDmInItem} presentation="collapsed" />
+      </ExpandedProvider>
+    )
+
+    expect(screen.getByText('To @writer')).toBeTruthy()
+    expect(screen.getByText('From @writer')).toBeTruthy()
+    expect(screen.getByText(/replied/)).toBeTruthy()
+  })
+
+  it('starts collapsed and opens on a tap, both directions', () => {
+    for (const item of [botDmOutItem, botDmInItem]) {
+      const view = renderScreen(
+        <ExpandedProvider>
+          <BotDmAside item={item} presentation="collapsed" />
+        </ExpandedProvider>
+      )
+
+      expect(view.queryByTestId(`bot-dm-aside-${item.id}-body`)).toBeNull()
+
+      fireEvent.press(view.getByTestId(`bot-dm-aside-${item.id}-toggle`))
+      expect(view.getByTestId(`bot-dm-aside-${item.id}-body`)).toBeTruthy()
+
+      // And closes again: what is remembered is the reader's choice, not a
+      // one-way reveal.
+      fireEvent.press(view.getByTestId(`bot-dm-aside-${item.id}-toggle`))
+      expect(view.queryByTestId(`bot-dm-aside-${item.id}-body`)).toBeNull()
+
+      view.unmount()
+    }
+  })
+
+  it('shows the teammate’s reply inside the open outgoing aside', () => {
+    renderScreen(
+      <ExpandedProvider>
+        <BotDmAside item={botDmOutItem} presentation="collapsed" />
+      </ExpandedProvider>
+    )
+
+    fireEvent.press(screen.getByTestId(`bot-dm-aside-${botDmOutItem.id}-toggle`))
+    expect(screen.getByTestId(`bot-dm-aside-reply-${botDmOutItem.id}`)).toBeTruthy()
+  })
+
+  it('never navigates from the row itself, only from the explicit link', () => {
     const onOpenBot = jest.fn()
 
     renderScreen(
       <ExpandedProvider>
-        <BotDmOutLine item={botDmOutItem} onOpenBot={onOpenBot} presentation="collapsed" />
+        <BotDmAside item={botDmOutItem} onOpenBot={onOpenBot} presentation="collapsed" />
       </ExpandedProvider>
     )
 
-    fireEvent.press(screen.getByTestId(`bot-dm-out-line-${botDmOutItem.id}`))
+    fireEvent.press(screen.getByTestId(`bot-dm-aside-${botDmOutItem.id}-toggle`))
     expect(onOpenBot).not.toHaveBeenCalled()
 
     // The link carries the counterpart query, so the far chat lands on the
     // matching inbound row rather than at its bottom.
-    fireEvent.press(screen.getByTestId(`bot-dm-out-open-${botDmOutItem.id}`))
+    fireEvent.press(screen.getByTestId(`bot-dm-aside-open-${botDmOutItem.id}`))
     expect(onOpenBot).toHaveBeenCalledWith('writer', expect.objectContaining({ kind: 'bot_dm_in' }))
   })
 
   it('marks a failed delivery and says why', () => {
     renderScreen(
       <ExpandedProvider>
-        <BotDmOutLine item={failedDmOutItem} presentation="collapsed" />
+        <BotDmAside item={failedDmOutItem} presentation="collapsed" />
       </ExpandedProvider>
     )
 
     expect(screen.getByText('Failed')).toBeTruthy()
 
-    fireEvent.press(screen.getByTestId(`bot-dm-out-line-${failedDmOutItem.id}`))
+    fireEvent.press(screen.getByTestId(`bot-dm-aside-${failedDmOutItem.id}-toggle`))
     expect(screen.getByText('The gateway timed out.')).toBeTruthy()
   })
 

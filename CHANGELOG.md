@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Bot-to-bot messages are asides, not chat bubbles.** Both directions — the message this
+  bot sent a teammate and the teammate's answer — now read as a muted line on the left with
+  a chevron, the same shape a reply's thoughts have: no bubble, no tail, no card. An inbound
+  message used to arrive as a tinted bubble with a tail and an outgoing one opened onto a
+  glass panel the width of a bubble, and both said a conversation was happening in your chat
+  that was not yours. They stay closed at every verbosity level, including Verbose; tapping
+  one opens it, and it is still open when you scroll back to it. The roll-up is unchanged:
+  four or more dispatches in a row still collapse into one summary line that opens the
+  exchange. Consecutive messages between the same pair of bots now sit tight, and a message
+  to somebody else starts a new run.
+
+- **The muted marker is a bell you can read.** The crossed-out bell on a chat row was a small
+  box under a diagonal, in the faintest ink, tucked beside the time. It is now a drawn bell —
+  flared skirt, clapper — at the size the row's other marks use, and it sits directly after
+  the chat's name, because being muted is a state of the chat rather than something about the
+  timestamp.
+
+### Fixed
+
+- **Bot-to-bot traffic no longer bumps an unread count.** A message from another bot counted
+  as unread mail, so a bot that talks to its teammates produced a chat list, a folder total
+  and a home-screen widget permanently announcing work nobody had to look at — and opening
+  the chat showed nothing to do. The chat row's badge, the folder aggregate, the widget count
+  and the transcript's own "jump to latest" pill all skip bot-to-bot rows now. A question
+  waiting on **you** is untouched: somebody asked you, so the row still says so. Push needed
+  no change — the app has not registered for that notification type for some time — and there
+  is now a test that says so.
+
 - **The chat list's header has room to breathe.** It held four controls beside the title —
   Boards, New bot…, a `+` and Edit — pressed into one line above the search field, and in
   Dutch and German those words are longer still. It is now the title, one `…` holding

@@ -15,6 +15,7 @@ import {
   botDmInItem,
   botDmOutItem,
   clarifyItem,
+  dmRunItems,
   galleryTranscript,
   noticeItem,
   pendingDmOutItem,
@@ -49,8 +50,8 @@ function renderList(items: VisibleItem[], props: Record<string, unknown> = {}) {
 const FULL_TEST_IDS: Record<string, string | undefined> = {
   approval: `request-${approvalItem.id}`,
   assistant: `assistant-${assistantItem.id}`,
-  bot_dm_in: `bot-dm-in-header-${botDmInItem.id}`,
-  bot_dm_out: `bot-dm-out-${botDmOutItem.id}`,
+  bot_dm_in: `bot-dm-aside-${botDmInItem.id}`,
+  bot_dm_out: `bot-dm-aside-${botDmOutItem.id}`,
   clarify: `request-${clarifyItem.id}`,
   notice: `notice-${noticeItem.id}`,
   status: `status-${statusItem.id}`,
@@ -185,6 +186,78 @@ describe('answered questions', () => {
     renderList([{ item: { ...approvalItem, state: 'cancelled' }, presentation: 'full' }])
 
     expect(screen.getByText('Answered elsewhere')).toBeTruthy()
+  })
+})
+
+describe('bot-to-bot rows are asides, not bubbles', () => {
+  /*
+    The owner's rule, checked where the list actually assembles a row rather than
+    on a component in isolation: neither direction may reach a `Bubble`. A bubble
+    leaves `<testID>` and `<testID>-box` behind it, and the inbound row used to
+    carry both.
+  */
+  it('draws no bubble for either direction, at any presentation the selectors give', () => {
+    for (const presentation of ['full', 'collapsed'] as const) {
+      const view = renderList([
+        { item: botDmOutItem, presentation },
+        { item: botDmInItem, presentation }
+      ])
+
+      expect(view.getByTestId(`bot-dm-aside-${botDmOutItem.id}`)).toBeTruthy()
+      expect(view.getByTestId(`bot-dm-aside-${botDmInItem.id}`)).toBeTruthy()
+      expect(view.queryByTestId(`bot-dm-in-${botDmInItem.id}`)).toBeNull()
+      expect(view.queryByTestId(`bot-dm-in-${botDmInItem.id}-box`)).toBeNull()
+
+      view.unmount()
+    }
+  })
+
+  it('keeps both directions closed until the reader taps, and remembers the tap', () => {
+    const view = renderList([{ item: botDmInItem, presentation: 'full' }])
+
+    expect(view.queryByTestId(`bot-dm-aside-${botDmInItem.id}-body`)).toBeNull()
+
+    fireEvent.press(view.getByTestId(`bot-dm-aside-${botDmInItem.id}-toggle`))
+    expect(view.getByTestId(`bot-dm-aside-${botDmInItem.id}-body`)).toBeTruthy()
+  })
+})
+
+describe('the roll-up boundary', () => {
+  /*
+    Up to three consecutive dispatches are asides; the fourth turns the run into
+    the roll-up line, which the owner asked to keep exactly as it is. The pure
+    boundary is `dm-rollup.test.ts`'s; this is the rendered one, because the two
+    can disagree — `DmOutRow` decides separately whether a member draws itself.
+  */
+  const run = (count: number) => dmRunItems.slice(0, count).map(item => ({ item, presentation: 'collapsed' as const }))
+
+  it('draws three in a row as three asides and no roll-up', () => {
+    const view = renderList(run(3))
+
+    for (const item of dmRunItems.slice(0, 3)) {
+      expect(view.getByTestId(`bot-dm-aside-${item.id}`)).toBeTruthy()
+    }
+
+    expect(view.queryByTestId(`bot-dm-rollup-${dmRunItems[0]?.id}`)).toBeNull()
+  })
+
+  it('draws four in a row as the roll-up, and the asides only once it is opened', () => {
+    const view = renderList(run(4))
+    const head = dmRunItems[0]?.id ?? ''
+
+    expect(view.getByTestId(`bot-dm-rollup-${head}`)).toBeTruthy()
+
+    for (const item of dmRunItems.slice(1, 4)) {
+      expect(view.queryByTestId(`bot-dm-aside-${item.id}`)).toBeNull()
+    }
+
+    fireEvent.press(view.getByTestId(`bot-dm-rollup-${head}`))
+
+    for (const item of dmRunItems.slice(0, 4)) {
+      expect(view.getByTestId(`bot-dm-aside-${item.id}`)).toBeTruthy()
+      // Opening the run opens the run, not the messages in it.
+      expect(view.queryByTestId(`bot-dm-aside-${item.id}-body`)).toBeNull()
+    }
   })
 })
 

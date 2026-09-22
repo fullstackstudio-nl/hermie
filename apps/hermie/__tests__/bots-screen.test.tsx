@@ -5,10 +5,11 @@
  * stores on purpose (see `BotsScreen`), so the assertions here are mostly about
  * a row correctly reading all three at once.
  */
-import { fireEvent, screen } from '@testing-library/react-native'
+import { act, fireEvent, screen, within } from '@testing-library/react-native'
 
 import { BotsScreen } from '../src/features/bots'
 import { strings } from '../src/i18n/strings'
+import { ICON_SIZE } from '../src/ui/Icon'
 import { type Bot, useBotsStore } from '../src/store/bots'
 import { useChatLayoutStore } from '../src/store/chat-layout'
 import { useSettingsStore } from '../src/store/settings'
@@ -575,6 +576,65 @@ describe('the row context menu', () => {
   })
 })
 
+/**
+ * The mark that says a chat is quiet on purpose.
+ *
+ * Reported by the owner about the old one: "small and not clear". It was a
+ * 13pt rounded-top box in `textFaint`, tucked beside the stamp — the wrong
+ * size, the wrong ink and, mattering most, the wrong PLACE. Mute is a state of
+ * the row, so it belongs against the row's name rather than in the corner where
+ * a mark reads as something about the time.
+ */
+describe('the muted marker', () => {
+  beforeEach(seedRoster)
+
+  const renderRows = () => renderScreen(<BotsScreen />)
+
+  it('appears only while the chat is muted', () => {
+    renderRows()
+    expect(screen.queryByTestId('bot-muted-researcher', { includeHiddenElements: true })).toBeNull()
+
+    act(() => {
+      useChatLayoutStore.getState().setMute('researcher', Math.floor(Date.now() / 1000) + 3600)
+    })
+
+    expect(screen.getByTestId('bot-muted-researcher', { includeHiddenElements: true })).toBeTruthy()
+
+    act(() => {
+      useChatLayoutStore.getState().setMute('researcher', null)
+    })
+
+    expect(screen.queryByTestId('bot-muted-researcher', { includeHiddenElements: true })).toBeNull()
+  })
+
+  it('draws the bell glyph at the row-mark size, not the metadata marker size', () => {
+    act(() => {
+      useChatLayoutStore.getState().setMute('researcher', Math.floor(Date.now() / 1000) + 3600)
+    })
+
+    const view = renderRows()
+
+    // The NAME of the glyph, because the whole complaint was that the old one
+    // did not read as a bell: a size change alone would have left the box.
+    expect(view.UNSAFE_getByProps({ name: 'bellMuted' })).toBeTruthy()
+
+    const mark = screen.getByTestId('bot-muted-researcher', { includeHiddenElements: true })
+
+    expect(mark.props.height).toBe(ICON_SIZE.listMark)
+    expect(mark.props.width).toBe(ICON_SIZE.listMark)
+  })
+
+  it('still says it in words, for a reader who cannot see the glyph', () => {
+    act(() => {
+      useChatLayoutStore.getState().setMute('researcher', Math.floor(Date.now() / 1000) + 3600)
+    })
+
+    renderRows()
+
+    expect(screen.getByTestId('bot-row-researcher').props.accessibilityLabel).toContain(strings.layout.mutedRow)
+  })
+})
+
 describe('the unread badge', () => {
   beforeEach(() => {
     seedRoster()
@@ -582,7 +642,13 @@ describe('the unread badge', () => {
     useBotsStore.getState().markSeen('writer', NOW)
   })
 
-  /** Two replies and one inbound DM landing after the watermark. */
+  /**
+   * Two replies and one inbound DM landing after the watermark.
+   *
+   * The DM is in there so the badge has to say which of the three it counts: the
+   * owner's rule is that bot-to-bot traffic never bumps a count, so the answer
+   * is two.
+   */
   function seedUnread(sinceSeconds: number) {
     const chats = useChatsStore.getState()
 
@@ -645,10 +711,35 @@ describe('the unread badge', () => {
 
     renderScreen(<BotsScreen />)
 
-    // Hidden from the screen reader on purpose: the row's own label already
-    // says "3 unread messages", and a bare "3" after it would read twice.
-    expect(screen.getByTestId('bot-unread', { includeHiddenElements: true })).toHaveTextContent('3')
-    expect(screen.getByTestId('bot-row-researcher').props.accessibilityLabel).toContain('3 unread messages')
+    // Two, not three: `d1` is a teammate's DM, and bot-to-bot traffic is not
+    // this reader's mail. Hidden from the screen reader on purpose — the row's
+    // own label already says "2 unread messages", and a bare "2" after it would
+    // read twice.
+    expect(screen.getByTestId('bot-unread', { includeHiddenElements: true })).toHaveTextContent('2')
+    expect(screen.getByTestId('bot-row-researcher').props.accessibilityLabel).toContain('2 unread messages')
+  })
+
+  it('puts no number on the badge when the only new rows are bot-to-bot', () => {
+    useBotsStore.getState().markSeen('researcher', NOW - 60)
+    seedUnread(NOW - 60)
+
+    // Take the two replies away and leave the DM where it is: the row now has a
+    // new row on it by every measure except the one that decides a count.
+    useChatsStore.getState().update('researcher', state => ({ ...state, order: ['a0', 'd1'] }))
+
+    renderScreen(<BotsScreen />)
+
+    /*
+      The COUNT is what this rule owns. The plain dot beside it is the roster's
+      `last_active` — the gateway says a chat moved and says nothing about what
+      moved in it — so a client cannot attribute that to a DM and this test does
+      not pretend it can. What it pins is that no number is claimed, and that the
+      row does not tell a screen reader there are messages waiting.
+    */
+    const badge = screen.getByTestId('bot-unread', { includeHiddenElements: true })
+
+    expect(within(badge).queryByText(/\d/u)).toBeNull()
+    expect(screen.getByTestId('bot-row-researcher').props.accessibilityLabel).not.toMatch(/unread message/u)
   })
 
   it('caps the number rather than widening the badge', () => {

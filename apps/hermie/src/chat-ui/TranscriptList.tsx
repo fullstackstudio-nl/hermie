@@ -71,8 +71,7 @@ import { Button, Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
 import { BUBBLE_GAP, DM_LINE_GAP } from '../ui/tokens'
 import { AssistantBubble } from './AssistantBubble'
-import { BotDmInBubble } from './BotDmInBubble'
-import { BotDmOutLine } from './BotDmOutLine'
+import { BotDmAside } from './BotDmAside'
 import { BotDmRollup, useRollupExpanded } from './BotDmRollup'
 import { CronDeliveryCard } from './CronDeliveryCard'
 import { DateSeparator } from './DateSeparator'
@@ -116,7 +115,6 @@ export interface DmCounterpartQuery {
 }
 
 export interface TranscriptContext {
-  selfHandle?: string
   subagents?: Record<string, Subagent>
   /**
    * Handles whose chat is live and mid-turn right now, so a pending dispatch can
@@ -500,7 +498,7 @@ function DmOutRow({ entry, context, role }: { entry: VisibleItem; context: Trans
   }
 
   const line = (
-    <BotDmOutLine
+    <BotDmAside
       item={item}
       onLinkPress={context.onLinkPress}
       {...(context.onOpenBot ? { onOpenBot: context.onOpenBot } : {})}
@@ -548,18 +546,15 @@ function RowView({ entry, context, receipt, layout, dmRole }: RowProps) {
 
     case 'bot_dm_in':
       return (
-        <BotDmInBubble
-          // §6.6: an inbound bot message gains "↩ answered" once this bot has
-          // replied. `answersOurDispatch` is the engine's own attribution pass
+        <BotDmAside
+          // An inbound bot message gains "↩︎ answered" once this bot has replied.
+          // `answersOurDispatch` is the engine's own attribution pass
           // (`attributeBotReplies`), so the marker is not guessed at here.
           answered={item.answersOurDispatch ?? false}
-          grouped={layout.grouped}
           item={item}
           onLinkPress={context.onLinkPress}
           {...(context.onOpenBot ? { onOpenBot: context.onOpenBot } : {})}
           presentation={presentation}
-          selfHandle={context.selfHandle}
-          tail={layout.tail}
         />
       )
 
@@ -1325,7 +1320,6 @@ function TranscriptListBody({
       ...(handlers.lastAssistantId ? { lastAssistantId: handlers.lastAssistantId } : {}),
       onReadAloud: handlers.onReadAloud,
       readingItemIds: handlers.readingItemIds,
-      selfHandle: handlers.selfHandle,
       subagents: handlers.subagents ?? {},
       typingHandles: handlers.typingHandles ?? EMPTY_HANDLES
     }),
@@ -1350,7 +1344,6 @@ function TranscriptListBody({
       handlers.onReadAloud,
       handlers.readingItemIds,
       openAttachment,
-      handlers.selfHandle,
       openSelectText,
       handlers.subagents,
       handlers.typingHandles

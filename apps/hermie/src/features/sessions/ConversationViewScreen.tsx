@@ -129,7 +129,7 @@ export function ConversationViewScreen({ botName, onBack, onOpenChat, storedId }
         </Text>
       ) : null}
 
-      <TranscriptList items={items} selfHandle={botName} />
+      <TranscriptList items={items} />
     </Screen>
   )
 }

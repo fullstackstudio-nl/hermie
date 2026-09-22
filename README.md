@@ -68,9 +68,13 @@ no third-party network call. The only address Hermie knows is the one you typed.
   subset falls back to the source in a code block, which is still readable and
   still copyable. [ADR-0020](docs/adr/0020-diagrams-and-math-without-a-webview.md)
   says which subset, and why it is one.
-- **Bot-to-bot, visible.** A message one bot sends another shows up in both
-  conversations, the reply is folded into the message that caused it, and
-  **Activity** is one timeline of all of it across every bot.
+- **Bot-to-bot, visible and quiet.** A message one bot sends another shows up in
+  both conversations, the reply folded into the message that caused it, and
+  **Activity** is one timeline of all of it across every bot. It is drawn as an
+  aside rather than as speech — a muted line on the left, closed until you tap
+  it, the same shape a reply's thoughts have — because two agents working
+  something out between themselves is not a conversation you are in. For the
+  same reason it never moves an unread count and never raises a notification.
 - **Questions as sheets, answerable in place.** Approvals and clarifications
   come up as a bottom sheet, answered only by an explicit tap, and a question
   that was answered somewhere else says so instead of going stale. A permission

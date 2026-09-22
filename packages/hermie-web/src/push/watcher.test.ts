@@ -353,6 +353,46 @@ describe('a finished turn', () => {
     expect(f.sent[0]?.message.body).toBe('heard from Writer')
   })
 
+  /**
+   * And the app never asks to hear about one.
+   *
+   * The daemon still KNOWS the `dm` type — it reads its own list, and an
+   * operator running `hermie-web --push` for something else may want it — but a
+   * registration written by this app carries no `dm` key at all, and an absent
+   * type reads as off. The bag below is what `pushTypesOf` in `gateway-client`
+   * emits, written out rather than imported because this package deliberately
+   * does not depend on that one; `push.test.ts` there pins the other half, that
+   * the key really is dropped.
+   *
+   * So the owner's rule that bot-to-bot must not raise a notification is kept by
+   * the registration rather than by the daemon, and this is the test that says
+   * so: the same delivery, the same watcher, a real device's types, and nothing
+   * goes out.
+   *
+   * The device is not deaf — an ordinary reply on the same registration still
+   * buzzes — which is what separates this from a watcher that has stopped
+   * working.
+   */
+  it('sends nothing for a bot-to-bot delivery to a device this app registered', async () => {
+    f.setRegistrations({
+      'dev-1': registrationRow({
+        types: { message: true, request: true, cron: true, cron_done: true, cron_failed: true }
+      })
+    })
+    f.setHistory('Message from 🤖 Writer (@writer): can you check this')
+    f.watcher.onEvent(turn('live-r', 20))
+    await f.watcher.settle()
+
+    expect(f.sent).toHaveLength(0)
+
+    f.setHistory('What is the weather?')
+    f.watcher.onEvent(turn('live-r', 21))
+    await f.watcher.settle()
+
+    expect(f.sent).toHaveLength(1)
+    expect(f.sent[0]?.message.data.type).toBe('message')
+  })
+
   it('does not defer a DM to the heartbeat', async () => {
     // A question with a countdown on it is worth a buzz even if the chat is
     // open on a tablet in another room.
