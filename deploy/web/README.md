@@ -66,18 +66,19 @@ A mismatch shows up as HTTP 403 on `/api/status`, or a WebSocket that refuses th
 
 ## Flags and environment
 
-| Flag                 | Environment            | Default                  |                                                                  |
-| -------------------- | ---------------------- | ------------------------ | ---------------------------------------------------------------- |
-| `--gateway <url>`    | `HERMIE_GATEWAY_URL`   | `http://127.0.0.1:9119`  | The gateway. Fixed at start; nothing at runtime can change it.   |
-| `--port <n>`         | `HERMIE_PORT`          | `9120`                   |                                                                  |
-| `--host <addr>`      | `HERMIE_HOST`          | `127.0.0.1`              | Anything else puts an unauthenticated port on the network.       |
-| `--public-url <url>` | `HERMIE_PUBLIC_URL`    | derived from `--gateway` | Written into `Host` and `Origin` on proxied requests.            |
-| `--static <dir>`     | `HERMIE_STATIC_DIR`    | the bundled `dist/web`   |                                                                  |
-| `--login-return <p>` | `HERMIE_LOGIN_RETURN`  | `/`                      | Where a finished sign-in should land. See **OIDC** below.        |
-| `--install-root`     | `HERMIE_INSTALL_ROOT`  | the package's parent     | Where self-update unpacks releases and keeps the `current` link. |
-| `--no-self-update`   | `HERMIE_SELF_UPDATE=0` | on                       | Turns `/hermie/update` into a refusal.                           |
-| `--rollback`         |                        |                          | Point `current` at the previous release and exit.                |
-| `--cache-max-mb <n>` | `HERMIE_CACHE_MAX_MB`  | `64`                     | Disk the message cache may take. `0` turns it off.               |
+| Flag                    | Environment                    | Default                  |                                                                                                                             |
+| ----------------------- | ------------------------------ | ------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| `--gateway <url>`       | `HERMIE_GATEWAY_URL`           | `http://127.0.0.1:9119`  | The gateway. Fixed at start; nothing at runtime can change it.                                                              |
+| `--port <n>`            | `HERMIE_PORT`                  | `9120`                   |                                                                                                                             |
+| `--host <addr>`         | `HERMIE_HOST`                  | `127.0.0.1`              | Anything else puts an unauthenticated port on the network.                                                                  |
+| `--public-url <url>`    | `HERMIE_PUBLIC_URL`            | derived from `--gateway` | Written into `Host` and `Origin` on proxied requests.                                                                       |
+| `--static <dir>`        | `HERMIE_STATIC_DIR`            | the bundled `dist/web`   |                                                                                                                             |
+| `--login-return <p>`    | `HERMIE_LOGIN_RETURN`          | `/`                      | Where a finished sign-in should land. See **OIDC** below.                                                                   |
+| `--install-root`        | `HERMIE_INSTALL_ROOT`          | the package's parent     | Where self-update unpacks releases and keeps the `current` link.                                                            |
+| `--no-self-update`      | `HERMIE_SELF_UPDATE=0`         | on                       | Turns `/hermie/update` into a refusal.                                                                                      |
+| `--rollback`            |                                |                          | Point `current` at the previous release and exit.                                                                           |
+| `--cache-max-mb <n>`    | `HERMIE_CACHE_MAX_MB`          | `64`                     | Disk the message cache may take. `0` turns it off.                                                                          |
+| `--allow-insecure-oidc` | `HERMIE_ALLOW_INSECURE_OIDC=1` | off                      | Let the built-in identity provider be enabled on a non-https origin. The gateway refuses such an issuer anyway — see below. |
 
 And, for push (see below):
 
@@ -167,6 +168,112 @@ service can only decide what it does itself:
 It is **who has signed in through this service**, with when — not the gateway's account list.
 Upstream documents no route for listing accounts, and guessing at one would mean reading a 404 as
 "no users". The page labels which of the two it is showing.
+
+## Signing people in without a separate identity provider
+
+Hermie Web can be **its own OpenID Provider**, so a gateway can be gated without standing up
+Authentik or Keycloak beside it. It is **off**, and a deployment that already has an identity
+provider should leave it off and point `dashboard.oauth.self_hosted` at that one.
+
+> **Read this before you turn it on.** It makes this service the **identity root of your gateway**.
+> Whoever can read `--state-dir` can sign an ID token with any subject and be any account on that
+> gateway — not merely read what is stored. There is no setting that reduces this; it is what an
+> identity provider is. The full threat model is in
+> [ADR-0025](../../docs/adr/0025-hermie-web-is-a-service-layer.md).
+
+### Before you start
+
+- **TLS in front of this service is a precondition, not advice.** The gateway refuses an issuer that
+  is not `https`, allowing plain `http` only on `localhost`, `127.0.0.1` and `::1`. `/admin/oidc`
+  refuses to enable on any other plain-http origin for exactly that reason — otherwise you would get
+  a provider that works in a browser and is rejected by the gateway. See **Putting TLS in front**
+  below.
+- **You need `/admin`.** The provider is enabled from there, so a deployment nobody can administer
+  (see **Administration**) cannot enable it at all.
+- **Decide your issuer origin now.** The issuer is taken from the address you reach `/admin/oidc`
+  on, and every token ever issued carries it. Changing it later means re-registering with the
+  gateway and signing everybody out.
+- **Add `--state-dir` to your backups, and treat that backup as a credential.** It now holds the
+  signing key and every account.
+
+### The steps
+
+1. Open **`https://<this service>/admin/oidc`** on the address you want to be the issuer.
+2. Press **Turn it on**. The issuer becomes `<that origin>/oidc`; a signing key and a client id are
+   generated on the spot, and the client id is fixed for this install.
+3. Copy the snippet the page prints into the gateway's `config.yaml` and **restart the gateway**.
+   Enabling here writes nothing there — Hermie Web does not touch the gateway's configuration and
+   would not know how.
+
+   ```yaml
+   dashboard:
+     public_url: https://hermes.example.com
+     oauth:
+       self_hosted:
+         issuer: https://hermes.example.com:9443/oidc
+         client_id: hermie-web-0123456789abcdef
+         scopes: openid profile email offline_access
+   ```
+
+   or, for a container:
+
+   ```sh
+   HERMES_DASHBOARD_OIDC_ISSUER=https://hermes.example.com:9443/oidc
+   HERMES_DASHBOARD_OIDC_CLIENT_ID=hermie-web-0123456789abcdef
+   HERMES_DASHBOARD_OIDC_SCOPES="openid profile email offline_access"
+   ```
+
+   **Keep `offline_access`.** Without it the gateway is issued no refresh token, and `hermie-web
+login` — the service sign-in that `--push` and the message cache are spent on — cannot be made at
+   all. It fails with that exact complaint.
+
+4. Add people on the same page. Each one gets a **one-time invitation link** to choose their own
+   password with; you never see it. The link works once and lapses in a day.
+5. Press **Test sign-in** with one of those accounts. It runs discovery, the JWKS, the sign-in form,
+   the code exchange, the ID token's signature against the published key, userinfo and the refresh
+   grant, and tells you which step failed if one does. It reads the authorization redirect and never
+   follows it, so it cannot sign anybody in to the gateway as a side effect.
+6. Only then, sign in to the app normally. The **OIDC** section below still applies in full: the
+   gateway's callback is fixed to `public_url`, so Hermie Web has to answer on that same hostname on
+   another port, and `--login-return` has to point the landing back.
+
+### Day-to-day
+
+| You want to                          | Do this                                                                                                               |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| Add somebody                         | `/admin/oidc` → fill the row → **Invite**, then send them the link it shows once.                                     |
+| Reset a password                     | **Reset password** on their row. It mints a fresh link and ends their sessions.                                       |
+| Remove somebody's access now         | **Disable**. Their refresh tokens are dropped and their sign-in sessions end immediately.                             |
+| Help somebody who lost their phone   | **Clear two-factor**. They enrol a new authenticator at their next sign-in.                                           |
+| Require a second factor for everyone | **Settings** → _Require a second factor_. Anybody without one enrols at their next sign-in.                           |
+| Rotate the signing key               | **Rotate the signing key**. Nobody is signed out: the old key stays published until everything it signed has expired. |
+| Turn it off                          | **Turn it off**. Accounts and keys are kept, every refresh token is dropped, and `/oidc` answers 404 again.           |
+
+### What it deliberately is not
+
+Authorization code with PKCE (`S256` required) and nothing else — no implicit flow, no password
+grant, no dynamic client registration. **No federation and no SCIM**: if you have something to
+federate with, point the gateway at that instead. RS256, because that is what the gateway's
+validator accepts first. Passwords are `scrypt` (argon2id would be better and is a native dependency
+this package does not carry — ADR-0025 says so rather than hiding it). Optional TOTP with single-use
+recovery codes. `/oidc/logout` ends the sign-in here only; the gateway's own session lasts until its
+ID token expires.
+
+The one registered redirect URI is the **gateway's** `/auth/callback`. A phone never talks to this
+issuer — the gateway brokers the native flow and the app's loopback redirect is registered with the
+gateway, not here.
+
+### When it does not work
+
+| What you see                                                      | What it is                                                                                                                 |
+| ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| The **Turn it on** button is disabled                             | You reached the page on a plain-http origin that is not loopback. Put TLS in front; the gateway would refuse it too.       |
+| Gateway log: `OIDC issuer must be https://`                       | The same thing, from the other side.                                                                                       |
+| Gateway log: `OIDC discovery issuer mismatch`                     | The gateway's configured `issuer` is not the one on the page. Copy it again; a trailing slash is tolerated, a port is not. |
+| Gateway log: `OIDC discovery resolved to …, outside the … origin` | Something redirected the discovery fetch — usually a proxy upgrading `http` to `https` on a different host.                |
+| Gateway log: `OIDC discovery unreachable`                         | The gateway cannot reach this service's issuer URL. Press **Test sign-in**: its first step reads the same URL.             |
+| Sign-in works, then push cannot be set up                         | `offline_access` is missing from the gateway's `scopes`. The test sign-in's last step says so explicitly.                  |
+| `/oidc/...` answers 404                                           | The provider is off — or this is a different Hermie Web to the one you enabled it on.                                      |
 
 ## Push notifications
 

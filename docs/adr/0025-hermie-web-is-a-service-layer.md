@@ -238,3 +238,159 @@ override, and an absent flag reading as on.
 
 **Not verified:** anything against a real gateway, the push ceiling end to end through a real
 notifier, and the local-administrator sign-in in a browser.
+
+## Amendment (2026-09-22): part 3 — a built-in OIDC provider, off by default
+
+Part 1 listed "a built-in OIDC provider" among the later parts and promised it would be off by
+default. Here it is, and it is the only part of this record that changes what Hermie Web **is**
+rather than what it does.
+
+### Why it exists at all
+
+ADR-0015 says, and part 2 repeated, that **Hermie Web has no user database and is not going to grow
+one**. That sentence was load-bearing: the admin area is a list of ids the GATEWAY authenticates,
+the cache is keyed by a name the GATEWAY hands out, and `identity.ts` asks `/api/auth/me` and
+believes the answer. Nothing in this process has ever decided whether a person is who they say.
+
+The rule survives for the deployment it was written for. What it does not survive is the operator it
+never accounted for: somebody self-hosting one gateway for a handful of people, with **no identity
+provider at all**. Upstream's `dashboard.oauth.self_hosted` provider is a plain OIDC relying party —
+it expects Authentik, Keycloak, Zitadel, Authelia — and the honest options for that operator have
+been two:
+
+1. **Run the gateway ungated.** Then anyone who can reach the port is everyone, ADR-0007's shared
+   Bot Chat is the only conversation there can be, part 2's per-person options have nobody to be
+   about, and push has no account to be addressed to.
+2. **Stand up Keycloak.** A second service, a second database, a second thing to back up and patch,
+   in front of a gateway that is one Python process — for four people.
+
+Neither is a good answer and the second is the one people actually do not do. So there is a third:
+**this service can be the identity provider**, because it is already the thing in front of the
+gateway, it already holds a credential, and it already has a `0700` state directory and an operator
+page.
+
+### Why it is off by default, and stays off
+
+Because the sentence at the top of this section is still the right default. A deployment that has an
+identity provider should use it; this one is worse than Authentik at being Authentik and always will
+be. Enabling it is a decision with a consequence big enough that it gets its own section below, and
+a decision that big should never be something an operator discovers they have already made.
+
+Concretely: `oidc.json` does not exist until something creates it, `enabled` is false until an
+operator presses a button, and **every path under `/oidc` answers 404 while it is off** — not 503,
+not "not configured", 404, the same answer `/setup` gives once it is closed and for the same reason.
+
+### The threat model, stated plainly
+
+**Enabling this makes Hermie Web the identity root of the gateway.** That is not a side effect; it
+is what an identity provider is. The consequences, in the order they matter:
+
+- **The signing key in the state directory is the power to be anybody on that gateway.** Not to read
+  what is stored — to MINT an identity. Whoever can read `oidc.json` can sign an ID token with any
+  `sub`, hand it to the gateway, and be that person. The state directory was already documented as
+  "anyone who can read this has read access to every transcript on that gateway"; it is now also
+  write access to every account. There is no configuration that reduces this, because a provider
+  that could not sign would not be one.
+- **The blast radius is the gateway, not just this service.** Before this, compromising Hermie Web
+  got an attacker the service's own refresh token — one account's worth of access, revocable from
+  the gateway's side by signing that session out. Now it gets them every account, and revoking it
+  means changing the gateway's `issuer` to something else.
+- **TLS is not advice here, it is a precondition.** Authorization codes, ID tokens and refresh
+  tokens all cross the wire. Upstream refuses to accept a non-`https` issuer at all — it allows
+  `http` only on `localhost`, `127.0.0.1` and `::1`, by name — so this service refuses to be enabled
+  on one, with `--allow-insecure-oidc` existing to reproduce that refusal deliberately rather than
+  to work around it.
+- **Back up the state directory, and understand what you are backing up.** Losing it means every
+  account is gone and every session breaks. Copying it insecurely means handing over the gateway. It
+  is the same file that already held the push credential and the VAPID key; it is now the sharpest
+  object in the deployment.
+- **The gateway and this service share no secret.** The only thing that links them is the gateway's
+  configured `issuer`, and the trust flows one way: the gateway fetches a public document and a
+  public key. There is no client secret — this is a public client, authenticated by PKCE — so there
+  is nothing to rotate on both sides at once and nothing to leak from the gateway's configuration.
+  Registering it is three lines in `config.yaml`, and `/admin/oidc` prints exactly those three lines
+  with this deployment's own values already in them.
+- **The password hash is `scrypt`, and argon2id would be better.** ADR-0015 forbids a runtime
+  dependency in this package and argon2 is a native module, so the trade is stated rather than
+  hidden: N=2^14, r=8, p=1, a per-password salt, ~16 MB and tens of milliseconds per guess, with the
+  parameters stored beside each hash so the cost can be raised later without locking anybody out.
+  That is a real wall against an offline attack on a stolen file and it is weaker than argon2id at
+  the same latency. An operator for whom that difference matters has an identity provider already
+  and should use it.
+- **A TOTP secret is stored, and has to be.** Verifying a time-based code means recomputing it, so
+  the secret is recoverable from the state directory by anyone who can read it. It raises the cost
+  of a stolen password; it does not survive a stolen state directory, and nothing that verifies TOTP
+  locally could.
+
+### What it deliberately does not do
+
+- **No federation.** No upstream identity provider, no social login, no SAML, no LDAP. A deployment
+  that has something to federate WITH does not need this at all — it should point
+  `dashboard.oauth.self_hosted` at that thing directly and leave this off.
+- **No SCIM, and no directory of any kind.** Accounts are made on the page and that is the whole of
+  provisioning. A deployment that needs accounts to arrive from somewhere else needs a real identity
+  provider.
+- **No dynamic client registration.** There is exactly one client — the gateway — with an id fixed
+  per install. A registration endpoint would be a second identity surface to secure for nobody.
+- **No implicit flow, no password grant, no `plain` PKCE, no HS256.** Authorization code with S256
+  or nothing.
+- **No back-channel logout.** `/oidc/logout` ends the sign-in HERE; the gateway's own session lasts
+  until its ID token expires, and the page says so rather than implying otherwise.
+
+### Written against the relying party, not against the specification
+
+This is the part most likely to be undone by somebody tidying it later, so the reasoning is recorded
+rather than left only in the code. Every shape below is what
+`plugins/dashboard_auth/self_hosted/__init__.py` and `plugins/dashboard_auth/_shared.py` actually
+do, and where the specification allows something wider, the narrower thing is on purpose:
+
+- **RS256.** Upstream's allow-list is `("RS256", "ES256", "RS384", "RS512", "ES384", "ES512")` and
+  excludes HS256 by name. RS256 is first, is the OIDC default, and is what any other relying party
+  would accept without configuration.
+- **The ID token is the token that matters.** Upstream verifies it and treats the access token as
+  opaque — it even stores the ID token in `Session.access_token` and re-verifies it on every
+  request. So the ID token's lifetime IS the gateway's session length, and it carries exactly the
+  claims PyJWT is told to `require`: `exp`, `iat`, `aud`, `iss`, `sub`.
+- **`nonce` is echoed, never demanded.** `pkce_login_start` does not send one.
+- **Discovery is pinned twice.** The document's `issuer` must equal the configured one, and the URL
+  that served it must share that issuer's origin. That is why the issuer is STORED when the provider
+  is enabled rather than rebuilt from a `Host` header per request.
+- **The refresh grant must answer a fresh `id_token`**, which upstream errors on by name.
+- **The one registered redirect URI is the gateway's `/auth/callback`.** It is tempting to also
+  register the native app's loopback URI from [ADR-0004](0004-native-pkce-via-webview.md). That
+  would be wrong: `native_flow.py` says the gateway is "authorization server _to the desktop_, OAuth
+  client _to the Portal_", so the phone's loopback redirect is registered with the GATEWAY and this
+  issuer never sees it. `validate_redirect_uri` confirms it from the other side by refusing any
+  redirect URI whose path does not end `/auth/callback`. The list is editable on `/admin/oidc` for
+  the deployment that genuinely has a second client, and a loopback entry there is matched by RFC
+  8252's any-port rule.
+
+### What is verified
+
+`packages/hermie-web/src/oidc/oidc.test.ts`, end to end over real HTTP against the real server, with
+every ID token verified against the **published JWKS** using `node:crypto` directly rather than
+through this package's own verifier — a test that used our verifier would hide a bug in it, and the
+question is whether PyJWT would accept the token, not whether we like it. It pins the discovery
+shape, a full PKCE round trip, that a code is spent on its first exchange including a failing one,
+that an unknown client and an unregistered redirect URI are RENDERED rather than redirected, refresh
+rotation, that replaying a rotated token revokes the whole family, the TOTP and recovery-code paths,
+and that a key rotation leaves tokens signed by the old key verifying.
+`packages/hermie-web/src/oidc/crypto.test.ts` pins the primitives against their own specifications:
+RFC 6238's published test vectors, RFC 7638 thumbprints, and the two attacks a hand-written verifier
+gets wrong — `alg: none` and a token signed by a foreign key.
+`packages/hermie-web/src/admin/identity.test.ts` pins the operator's half against the real fake
+gateway with two accounts: the role gate, a POST with no CSRF token, that enabling mints an issuer
+from the origin the page was reached on, that the printed snippet carries this deployment's real
+values, the invitation round trip including that the link is shown once and works once, and the test
+sign-in in both its outcomes.
+
+**Not verified:** anything against a real Hermes gateway. Nothing in this round has been accepted by
+upstream's PyJWT, only by a test written from reading it. The discovery pin, the algorithm list and
+the required claims are all transcribed from that source and are the first things to check if a real
+gateway refuses a sign-in. Also unverified: any of these pages in a browser, and the provider behind
+a reverse proxy that terminates TLS — which is the configuration the threat model above assumes.
+
+**One gap in the gates themselves, found while writing this.**
+`packages/hermie-web/tsconfig.json` excludes `src/**/*.test.ts`, so `npm run typecheck` does not
+type-check this package's tests. A test in this round called a three-argument function with two and
+the gates stayed green; it was caught by the assertion failing, which is luck rather than a process.

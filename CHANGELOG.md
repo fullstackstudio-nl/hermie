@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Hermie Web can sign people in itself.** A gateway normally needs an identity provider — Authentik,
+  Keycloak, something of that shape — and for one gateway shared by a handful of people that is a
+  second service with its own database in front of a single process. So Hermie Web can now be that
+  provider. `/admin` → **Identity** turns it on, and the page then prints the exact three lines to
+  put in the gateway's configuration, with your own issuer and client id already filled in; turning
+  it on changes nothing on the gateway by itself. Accounts are added by sending somebody a one-time
+  link they choose their own password with, so nobody ever has to send a password to anybody. There
+  is optional two-factor with an authenticator app and recovery codes for the day a phone is lost,
+  and a **Test sign-in** button that runs the whole sign-in from the server and tells you which step
+  failed rather than leaving you to read a log.
+
+  It is **off unless you turn it on**, and a deployment that already has an identity provider should
+  leave it that way and keep using it. Turning it on is a real decision: it makes Hermie Web the
+  thing your gateway trusts to say who people are, so whoever can read its state directory can be
+  anybody on that gateway. The page says so, it refuses to switch on without TLS — because the
+  gateway would refuse it too — and the reasoning and the whole threat model are written down in
+  ADR-0025.
+
 - **Two more things to be told about: a scheduled run that finished, and one that failed.**
   Settings → Notifications now has a switch for each, on by default like the rest, and so does a
   chat's own notifications page — which is the point of splitting them out of **Routines**. A bot

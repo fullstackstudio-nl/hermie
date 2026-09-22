@@ -108,6 +108,19 @@ export interface HermieWebOptions {
    * app does too.
    */
   pushServerRequests: boolean
+  /**
+   * Let the built-in OIDC provider be enabled on an origin that is not https.
+   *
+   * It exists to be REFUSED by default rather than to be used. The gateway's
+   * own relying party rejects an issuer that is not `https` — or `http` on
+   * `localhost`, `127.0.0.1` or `::1`, which it allows by name and which
+   * therefore needs no flag at all. So this only unlocks the one case upstream
+   * will not accept: plain http on a real hostname. An operator who passes it
+   * gets a provider a browser can use and the gateway will not, which is why
+   * `/admin` says so beside the switch rather than letting it be discovered
+   * later ([ADR-0025](../../../docs/adr/0025-hermie-web-is-a-service-layer.md)).
+   */
+  allowInsecureOidc: boolean
 }
 
 export const DEFAULT_GATEWAY_URL = 'http://127.0.0.1:9119'
@@ -227,6 +240,7 @@ export interface ResolveOptionsInput {
   cacheMaxMb?: string | number | undefined
   vapidSubject?: string | undefined
   pushServerRequests?: boolean | undefined
+  allowInsecureOidc?: boolean | undefined
   env?: NodeJS.ProcessEnv
   /** Where `dist/web` sits when `--static` is not given. */
   packageRoot?: string
@@ -270,7 +284,9 @@ export function resolveOptions(input: ResolveOptionsInput = {}): HermieWebOption
     vapidSubject: input.vapidSubject ?? env.HERMIE_VAPID_SUBJECT ?? DEFAULT_VAPID_SUBJECT,
     pushServerRequests:
       input.pushServerRequests ??
-      (env.HERMIE_PUSH_SERVER_REQUESTS === '1' || env.HERMIE_PUSH_SERVER_REQUESTS === 'true')
+      (env.HERMIE_PUSH_SERVER_REQUESTS === '1' || env.HERMIE_PUSH_SERVER_REQUESTS === 'true'),
+    allowInsecureOidc:
+      input.allowInsecureOidc ?? (env.HERMIE_ALLOW_INSECURE_OIDC === '1' || env.HERMIE_ALLOW_INSECURE_OIDC === 'true')
   }
 }
 

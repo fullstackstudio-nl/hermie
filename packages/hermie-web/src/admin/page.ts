@@ -58,6 +58,8 @@ export interface AdminPageInput {
   bots: string[]
   /** Who is looking, for the "you cannot remove yourself last" hint. */
   viewer: string
+  /** A three-line summary of the built-in identity provider; the page for it is its own. */
+  identity: { enabled: boolean; issuer: string; accounts: number }
   notice: string
 }
 
@@ -257,6 +259,18 @@ export function adminPage(input: AdminPageInput): string {
       <button type="submit">Save</button>
       <button type="submit" name="clear" value="1">Clear the cache now</button>
     </form>
+  </section>
+
+  <section>
+    <h2>Identity</h2>
+    <p>${
+      input.identity.enabled
+        ? `This service is signing people in itself, as <code>${escapeHtml(input.identity.issuer)}</code>, for
+      ${input.identity.accounts} account${input.identity.accounts === 1 ? '' : 's'}. <strong>That makes it the
+      identity root of your gateway.</strong>`
+        : 'This service can sign people in itself, for a deployment with no identity provider of its own. It is <strong>off</strong>.'
+    }</p>
+    <p><a href="/admin/oidc">Identity settings, accounts and the gateway snippet →</a></p>
   </section>
 
   <section>
