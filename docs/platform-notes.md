@@ -89,7 +89,79 @@ which of the two it was.
 material actually reaches the transparency of the Messages search field on this
 Mac is a question for that Mac.
 
-## An inactive Mac window (2026-09-20) — read, not settled
+## An inactive Mac window (2026-09-22) — settled, half of it unwatched
+
+The 2026-09-20 note below left one thing open: whether UIKit dims a native
+material for a window that is not key in a "Designed for iPad" app. It is still
+not watched — there is no Mac window in this environment — but the question that
+mattered turned out to be answerable without one, because both branches lead to
+the same fix and only one of them had an alternative.
+
+**What was measured, in the iOS 27 SDK this app builds against.** The claim in
+the old note was that "UIKit exposes no inactive-appearance override". That was
+an assumption; it is now a reading of the headers:
+
+- `UIKit.framework/Headers/UIVisualEffectView.h` declares exactly three members:
+  `contentView`, `effect` and `initWithEffect:`. No state, no appearance mode,
+  nothing about window activation.
+- `UIGlassEffect.h` (iOS 26) declares `interactive`, `tintColor` and
+  `+effectWithStyle:`. `UIGlassContainerEffect` declares `spacing`.
+- `grep -rni inactiv` over the whole of `UIKit.framework/Headers` returns nothing
+  in `UIVisualEffect.h`, `UIBlurEffect.h`, `UIVibrancyEffect.h`, `UIWindow.h` or
+  `UIWindowScene.h`.
+
+AppKit's knob is `NSVisualEffectView.state = .active`, and a "Designed for iPad"
+app cannot reach it: it is an unmodified iOS binary, `TARGET_OS_MACCATALYST` is
+false and `NSApplication` is not linked. So a visual effect view **cannot** be
+told to ignore its window's key state from this app.
+
+**What was changed.** The only lever left is not to have a visual effect view on
+screen while the window is inactive, so:
+
+- `modules/hermie-mac/ios/HermieWindowActivity.swift` watches
+  `UIScene.activationState` through the four scene notifications
+  (`didActivate`, `willDeactivate`, `didEnterBackground`, `willEnterForeground`)
+  and reports whether ANY connected scene is `foregroundActive`. It installs no
+  observer at all unless `ProcessInfo.processInfo.isiOSAppOnMac`.
+- `HermieMacModule` exposes it as `isWindowActive()` plus an `onWindowActive`
+  event. `src/platform/window-activity.ts` is the seam; the browser half is a
+  constant.
+- `ThemeProvider` holds one subscription for the app and puts the answer on the
+  theme as `windowActive`, beside the two accessibility flags and for the same
+  reason — forty rows must not open forty native subscriptions.
+- `GlassSurface` treats it exactly like Reduce Transparency: while it is false
+  the surface draws **no** blur view and paints its own rung of the elevation
+  ladder instead. `GlassGroup` falls back to a plain row for the same reason —
+  `UIGlassContainerEffect` is a visual effect too.
+
+**Why the solid rung and not the `blur` fallback.** The old note floated
+"drop that surface to the `blur` material on a Mac". That would have fixed
+nothing: `expo-blur` is a `UIVisualEffectView` carrying a `UIBlurEffect`, so it
+follows window activation exactly as the glass does. The solid rung is the only
+recipe in the app with no visual effect view in it, which is what makes it the
+inactive-safe one.
+
+**Why a phone must not answer this honestly.** `foregroundInactive` is a state
+an iPhone enters several times a minute — Control Centre, the notification
+shade, a call banner, the app switcher. Honouring it there would make every
+glass surface blink to its solid rung whenever somebody pulled down the shade.
+The Mac check therefore lives in Swift, at the observer, so the seam cannot
+report `false` on a phone even by accident.
+
+**What needs a real Mac.** Three things, none of them reachable from here:
+
+- whether macOS dims the material at all, and by how much — the swap is built on
+  the premise that it does, and if it does not, the app is now swapping for
+  nothing;
+- whether the swap itself reads as a restyle. The rung is a flat fill where the
+  blur was, and the tokens are designed to make those interchangeable, but "the
+  same hierarchy" and "no visible change" are not the same claim;
+- the **title bar**, which stays the system's. It is drawn by the Mac's own
+  window chrome, outside the app's layer tree, and it dims when the window
+  resigns key like every other Mac title bar. Nothing here touches it and
+  nothing can.
+
+## An inactive Mac window (2026-09-20) — the earlier read
 
 The requirement is that the app does not change its look when its window is not
 key. What was checked, and what it leaves open:

@@ -50,6 +50,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Mac window no longer restyles itself when you click another app.** Every glass surface in
+  the app is a `UIVisualEffectView` underneath, and macOS draws those dimmed in a window that is not
+  the front one — so Hermie's chrome visibly changed the moment you went somewhere else. UIKit
+  offers no way to opt a visual effect view out of that, so the app stops having one on screen while
+  its window is behind another: each surface falls back to its own rung of the elevation ladder,
+  which is the same recipe Android and Reduce Transparency already get. Only on a Mac — the phones
+  and the iPad go `inactive` every time the notification shade comes down, and nothing there
+  changes. The window's title bar is still the system's and still dims with every other Mac title
+  bar.
+
 - **The header pill keeps its width while the bot thinks.** The owner reported it still changing
   size after the status line had already been taken out of the pill's intrinsic width — and
   "an absolutely positioned child cannot widen its parent" is an argument about one layout engine's

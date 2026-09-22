@@ -45,7 +45,15 @@ import UIKit
    `src/ui/useShortcut.ts` decides. The menu bar's own path reports `typing: false`, because a
    `UIKeyCommand` IS in the responder chain and the focused view has already declined it.
 
- **`devLaunchArguments`** is the fifth thing, and the only one that is not about keyboards. It is
+ **`isWindowActive`/`onWindowActive`** is not about keyboards either. It reports whether any of this
+ process's scenes is `foregroundActive`, and it exists because a Mac window that is not key draws
+ every `UIVisualEffectView` in it with the dimmed variant of its material — which is the app
+ restyling itself when the reader clicks another window. There is no API to turn that off (the
+ search is written out in `HermieWindowActivity`), so the fact is reported and `GlassSurface` stops
+ putting a visual effect view on screen while it is false. Mac only: `foregroundInactive` is a state
+ a phone enters every time the notification shade comes down.
+
+ **`devLaunchArguments`** is the last thing, and the only one that is not about keyboards. It is
  this process's own `ProcessInfo.processInfo.arguments`, which is how `xcrun simctl launch` can tell a
  running app to open on a particular screen — see `src/dev/launch-intent.ts` and the "Driving a
  simulator" section of docs/platform-notes.md. It is inside `#if DEBUG`, so a Release build has no
@@ -98,7 +106,7 @@ public class HermieMacModule: Module {
   public func definition() -> ModuleDefinition {
     Name("HermieMac")
 
-    Events("onEscape", "onShortcut")
+    Events("onEscape", "onShortcut", "onWindowActive")
 
     #if DEBUG
       Constants([
@@ -114,6 +122,14 @@ public class HermieMacModule: Module {
     OnCreate {
       self.watchForKeyboards()
       self.watchForActivation()
+
+      // A Mac window that is not key is drawn with the dimmed variant of every material in it, and
+      // no API turns that off — see `HermieWindowActivity`. The fact crosses into JavaScript and
+      // `GlassSurface` stops putting a visual effect view on screen while it is false.
+      HermieWindowActivity.shared.onChange = { [weak self] active in
+        self?.sendEvent("onWindowActive", ["active": active])
+      }
+      HermieWindowActivity.shared.start()
 
       // The menu bar's items and the keyboard's shortcuts are the same actions, so they land on the
       // same event. `install()` is a no-op anywhere but a Mac, where the menu bar exists.
@@ -138,6 +154,7 @@ public class HermieMacModule: Module {
       self.activationObservers = []
       GCKeyboard.coalesced?.keyboardInput?.keyChangedHandler = nil
       HermieMenuBar.onCommand = nil
+      HermieWindowActivity.shared.stop()
     }
 
     /**
@@ -254,6 +271,18 @@ public class HermieMacModule: Module {
     /** Whether the menu bar hook reached the app delegate's class. Reported on the developer screen. */
     Function("isMenuBarInstalled") { () -> Bool in
       HermieMenuBar.isInstalled
+    }
+
+    /**
+     Is this app's window the one the reader is working in?
+
+     Read once for the first render, because the event only fires on a CHANGE and a bundle that
+     reloaded while the window was behind another would otherwise start out believing it was in
+     front. `true` on everything that is not a Mac; see `HermieWindowActivity` for why a phone must
+     not answer this honestly.
+     */
+    Function("isWindowActive") { () -> Bool in
+      HermieWindowActivity.shared.isActive
     }
 
     /**
