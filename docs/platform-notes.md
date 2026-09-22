@@ -10398,13 +10398,34 @@ for `default` — whose home IS the installation root, so its id cannot move.
 client and bot-mode `@handle` resolution go on seeing the gateway's copy. The
 alternative was a field that saves and reverts on the next roster poll.
 
-**The one thing NOT done.** `labels` does not reach the gateway yet. The per-bot
-`hermie` `ui_meta` section is the right home and the bridge that projects it
-(`store/ui-meta-bridge.ts`) is owned by another round, so the store, the reader
-and `applyRemote`'s `labels` patch are all in place and the two lines that would
-close it are not written: `labels: layout.labels` in `snapshotFromStores`'s `app`
-object, and `...(app?.labels ? { labels: app.labels } : {})` in `applySnapshot`'s
-`applyRemote` call. Until then a name given on one device stays on it.
+**The one thing that was left over, done in R29.** `labels` reaches the gateway
+now, and it does so in the APP-WIDE key rather than on the bot's own `hermie`
+section — which is the opposite of what this paragraph used to say, and the two
+concrete lines it named were always the app-wide ones. The reason to prefer them
+is the one `PersistedLayout.labels` already gives in the store: the name is the
+READER's and not the profile's, so it belongs in the key that is per person
+(`hermie-app:<user_id>`), beside the mutes, the pins and the chats they have taken
+for themselves. The per-bot section is shared by everybody on the gateway and
+still carries `archived` and `colour` and nothing else. The two lines are
+`labels: layout.labels` in `snapshotFromStores`'s `app` object and
+`...(app?.labels ? { labels: app.labels } : {})` in `applySnapshot`'s
+`applyRemote` call, exactly as written above.
+
+Three things about it that are decisions rather than details, each pinned by
+`apps/hermie/__tests__/bot-name-sync.test.ts`:
+
+- **The key is always sent, empty included.** An absent key means "this build
+  knows nothing about names", and an emptied field has to be able to say the other
+  thing — otherwise a name taken back on one device would stand for ever on the
+  next. Reading an absent key as "nobody named anything" would un-name every bot
+  the first time an older build wrote the section.
+- **A name is a CHOICE, so it is dated** (R26's `updatedAt`) and is never counted
+  as one of the layout store's chores. A name given with no socket therefore wins
+  on the next connect against whatever the gateway was holding, which is the case
+  a dirty bit alone cannot answer after a relaunch.
+- **The roster's own `display_name` is untouched**, as it has to be: nothing a
+  client can call writes it. What syncs is Hermie's name for the bot, on this
+  person's devices.
 
 ### The current model read as a wire id (item B)
 

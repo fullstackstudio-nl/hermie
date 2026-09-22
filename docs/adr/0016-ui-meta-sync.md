@@ -409,3 +409,31 @@ drive the real stores against a gateway that remembers: the theme and the folder
 second device in both connect orders, neither device writing back over the other, the date adopted
 rather than re-taken, an offline change landing on the next connect, a relaunch reading the arriving
 copy rather than the replaced one, and the list's housekeeping being sent without being dated.
+
+## Amendment (2026-09-22): `labels`, the name the reader gave a bot
+
+Round R25a made the editable name on a bot's sheet the APP's own name for it, because no call a
+client has writes a profile's `display_name` — `profiles.configure` has no such field,
+`profiles.create` has none, and `PATCH /api/profiles/{name}` renames the profile instead. Round R29
+syncs it: `labels: Record<string, string>`, keyed by handle, in the **app-wide** section.
+
+The app-wide one and not the bot's own, although a bot's name looks like the most per-bot thing
+there could be. Two reasons, and the first is the decisive one:
+
+- **It is the READER's name, not the profile's.** The gateway's own display name is untouched and
+  unwritable; this is what one person calls a bot. `hermie-app:<user_id>` is per person by
+  construction, and the per-bot `hermie` key is shared by everybody on the gateway — two colleagues
+  do not have to agree on what a bot is called, for the same reason they do not share a bedtime.
+- **The date already lives there.** A name is a choice, so it has to be dated to win against an
+  older copy, and `updatedAt` dates the app-wide section. Putting a choice in a section with no date
+  would mean a rename made offline lost to whatever the gateway happened to be holding.
+
+Additive, and the section version stays at 1, by the rule this record states for `pinned`. The key
+is **always written, empty included**: absent means "this build knows nothing about names", and an
+emptied field has to be able to say the other thing, or a name taken back on one device stands for
+ever on the next. The per-bot section is unchanged and still carries `archived` and `colour` alone.
+
+`apps/hermie/__tests__/bot-name-sync.test.ts` drives it on two devices against the gateway that
+remembers: a rename arriving on the second device, one made with no socket landing on the next
+connect, an emptied field clearing the name on a device that still had it, and a rename being dated
+as a choice while the roster's fold beside it is not.

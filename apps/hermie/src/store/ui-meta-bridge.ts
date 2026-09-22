@@ -119,6 +119,24 @@ export interface HermieAppShape extends HermieAppSection {
    */
   myChats?: string[]
   /**
+   * What this reader calls each bot, by handle.
+   *
+   * Here rather than on the bot's own `hermie` section, and that is the whole
+   * reason the field exists at all: no call a client has writes a profile's
+   * `display_name` — the one route that touches it renames the profile — so this
+   * name is the READER's rather than the profile's, and two people sharing a
+   * gateway do not have to agree on what a bot is called. `store/chat-layout.ts`
+   * holds it and `store/bot-names.ts` prefers it over the roster's copy.
+   *
+   * Always sent, empty included, for the reason `pinned` gives above: a reader
+   * who clears the last name they gave has to be able to say so, and an omitted
+   * key reads as "this build knows nothing about names" rather than as "there
+   * are none".
+   *
+   * ADDITIVE, and the section version deliberately stays at 1 — see `pinned`.
+   */
+  labels?: Record<string, string>
+  /**
    * Which chats are silent, and until when.
    *
    * Here rather than on each bot's own profile because a mute is about the
@@ -260,6 +278,10 @@ export function snapshotFromStores(nowMs: number = Date.now()): UiMetaSnapshot {
     // Always sent, empty included, for the same reason: a reader who moves
     // their last chat back to the shared one has to be able to say so.
     myChats: Object.keys(layout.myChats),
+    // Always sent, empty included, for the same reason again: clearing the field
+    // on the bot's sheet is how a reader takes a name back, and an omitted key
+    // would leave the last name they gave on every other device for ever.
+    labels: layout.labels,
     // Always sent, empty included: a reader who unmutes their last chat has to
     // be able to say so, and an omitted key reads as "this device knows
     // nothing about mutes" rather than as "there are none".
@@ -356,6 +378,13 @@ export function applySnapshot(snapshot: UiMetaSnapshot): void {
     ...(Array.isArray(app?.myChats)
       ? { myChats: app.myChats.filter((name): name is string => typeof name === 'string' && name.length > 0) }
       : {}),
+    // And once more, which is what makes a name given on one device arrive on the
+    // next: absent is "this build says nothing about names", and reading that as
+    // "nobody named anything" would un-name every bot the moment an older device
+    // wrote the section. An empty object is the other answer and clears them,
+    // which is why the projection always sends the key. `applyRemote` sanitises
+    // each name — it came off a wire another build wrote.
+    ...(app?.labels ? { labels: app.labels } : {}),
     archived,
     accents
   })

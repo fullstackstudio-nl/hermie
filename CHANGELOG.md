@@ -45,6 +45,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for. **Appearance → Bot names** still swaps the two, and a reader who had already chosen the
   profile name keeps it: the setting is stored, so only somebody who never touched it moves.
 
+- **The name you give a bot follows you between devices.** That name is Hermie's own — no call a
+  gateway offers writes a profile's display name, and the one route that touches it renames the
+  profile instead — so a bot you had named stayed named only on the device you typed it on. It now
+  travels with your folders, pins and mutes: given on the desktop, it is on the phone; emptied
+  anywhere, it is emptied everywhere and the row falls back to the gateway's own display name and
+  then to the handle. A name given while there is no gateway to reach is kept and sent on the next
+  connection, and it counts as a choice you made, so the newest one wins wherever it was given. The
+  gateway's own copy of the name is untouched, as it has to be.
+
 - **Bot-to-bot messages are asides, not chat bubbles.** Both directions — the message this
   bot sent a teammate and the teammate's answer — now read as a muted line on the left with
   a chevron, the same shape a reply's thoughts have: no bubble, no tail, no card. An inbound

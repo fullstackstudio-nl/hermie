@@ -122,6 +122,57 @@ describe('the projection', () => {
     })
   })
 
+  /**
+   * The name the reader gave a bot, which is theirs and not the profile's.
+   *
+   * It rides in the app-wide section rather than on the bot's own for the reason
+   * it exists at all: no call a client has writes a profile's `display_name`, so
+   * the editable name is this reader's and two people on one gateway do not have
+   * to agree on it. Additive on an unbumped section version, like the fields
+   * around it.
+   */
+  describe('what this reader calls a bot', () => {
+    it('is projected into the app section', () => {
+      useChatLayoutStore.getState().setLabel('writer', 'De Schrijver')
+
+      expect((snapshotFromStores().app as HermieAppShape).labels).toEqual({ writer: 'De Schrijver' })
+    })
+
+    it('is not also written onto the bot’s own section', () => {
+      // A name in two places is two names to keep in step, and the bot's section
+      // is shared by everybody on the gateway.
+      useChatLayoutStore.getState().setAccent('writer', 'lime')
+      useChatLayoutStore.getState().setLabel('writer', 'De Schrijver')
+
+      expect(snapshotFromStores().bots).toEqual({ writer: { v: 1, colour: 'lime' } })
+    })
+
+    it('comes back out of a gateway’s copy', () => {
+      applySnapshot({ app: { v: 1, labels: { writer: 'De Schrijver' } } as HermieAppShape, bots: {} })
+
+      expect(useChatLayoutStore.getState().labels).toEqual({ writer: 'De Schrijver' })
+    })
+
+    it('leaves this reader’s own names alone when the section never mentions them', () => {
+      // A section written by a build that predates the field says nothing about
+      // names, and "absent" must not be read as "nobody named anything".
+      useChatLayoutStore.getState().setLabel('writer', 'De Schrijver')
+      applySnapshot({ app: { v: 1 } as HermieAppShape, bots: {} })
+
+      expect(useChatLayoutStore.getState().labels).toEqual({ writer: 'De Schrijver' })
+    })
+
+    it('is cleared by an empty map, which is the other answer', () => {
+      // Which is why the projection always sends the key: emptying the field on
+      // the sheet is how a reader takes a name back, and an omitted key would
+      // leave it standing on every other device for ever.
+      useChatLayoutStore.getState().setLabel('writer', 'De Schrijver')
+      applySnapshot({ app: { v: 1, labels: {} } as HermieAppShape, bots: {} })
+
+      expect(useChatLayoutStore.getState().labels).toEqual({})
+    })
+  })
+
   it('does not read an absent arrangement as an empty one', () => {
     // A gateway nobody has written to has no arrangement. Taking that as "no
     // rows anywhere" would empty a list somebody spent an afternoon on.
