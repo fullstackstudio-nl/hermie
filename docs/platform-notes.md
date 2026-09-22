@@ -8903,3 +8903,43 @@ Two smaller things the spy taught:
 Everything here is a measurement of what was started, and "no animation ran" is
 not the same claim as "the app is comfortable to use at Reduce Motion". Nobody
 has switched the setting on and used the app.
+
+### The App Group, checked rather than assumed
+
+Read end to end, and the answer is that **nothing was wrong**. All three
+entitlements name `group.dev.hermie.app`; the app's copy is written by the two
+config plugins rather than by hand; `ios.appleTeamId` does not exist anywhere,
+`DEVELOPMENT_TEAM` appears in no checked-in build setting, and the generated
+`project.pbxproj` contains it zero times after a prebuild. Verified against the
+real prebuild output rather than against the config, which is the only way to
+check a value three plugins cooperate to produce.
+
+What the audit did find is a **gap in the documentation, not in the build**:
+`docs/release.md` listed two App IDs where there are three. The share extension
+has been signed as `dev.hermie.app.share` since it was added, and needs the App
+Group as much as the widget does — it is a process that is killed the moment its
+sheet closes, so the container is the only place it can leave anything. Anybody
+following the release doc to set up a portal by hand would have provisioned two
+of the three and met the failure on the third.
+
+`docs/release.md` now carries the table, what `-allowProvisioningUpdates`
+creates by itself (all three App IDs, the group, the capabilities, the
+distribution certificate and the profiles) and the three things it does not —
+the App Store Connect record, anything at all on an Apple ID with only the
+Developer role, and a group on an App ID somebody created by hand before the
+extensions existed.
+
+**One test was added and it is not a duplicate of the two that already exist.**
+Each plugin's own suite holds its own plugin to the group. Neither can see the
+failure that actually threatens this: the two plugins write onto the SAME
+`ios.entitlements`, in an order nothing fixes, and the three sandboxes share a
+container only while all three name the same string. `app-group.test.ts`
+compares the three with each other, runs the two plugins in both orders, and
+asserts no team id has crept into `app.config.ts`, `eas.json` or either
+entitlements file.
+
+**What needs a device:** the portal itself. Everything above is a reading of
+what the repository produces; nobody has run `-allowProvisioningUpdates` against
+a portal that has never seen these App IDs, so the claim about what it creates
+by itself is Apple's documented behaviour plus this project's own archives, not
+a clean-room observation.

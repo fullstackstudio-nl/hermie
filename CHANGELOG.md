@@ -195,6 +195,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The release notes describe all three signed binaries, not two.** The iOS app ships as an app, a
+  widget extension and a share extension, and each needs the App Group to reach the others — a
+  widget cannot dial a gateway and a share extension is killed the moment its sheet closes, so the
+  shared container is the only way anything gets across. `docs/release.md` listed two App IDs where
+  there are three, so anybody setting up a developer portal by hand would have provisioned
+  `dev.hermie.app` and `dev.hermie.app.widgets` and met the failure on `dev.hermie.app.share`. It
+  now has the full table, what `-allowProvisioningUpdates` creates by itself, and the three things
+  it does not.
+
 - **A permission request can be answered from the transcript, without the sheet.** ADR-0010's sheet
   stays — a question that holds the agent's turn has to arrive in front of the reader rather than
   wait in a transcript they may have scrolled away from — but it is no longer the only way through.
