@@ -180,7 +180,11 @@ export function BotsScreen({
   const theme = useTheme()
   const insets = useSafeAreaInsets()
   const runtime = useChatRuntime()
-  const { config, connection, http, status } = useGateway()
+  // `signOut` is read with a guard rather than destructured plainly: the
+  // narrow shells that render this list stub the provider, and the footer's
+  // identity row is written to draw without a way out rather than to insist on
+  // one.
+  const { config, connection, http, status, signOut } = useGateway()
   const bots = useBotsStore(state => state.bots)
   const byName = useBotsStore(state => state.byName)
   const running = useBotsStore(state => state.running)
@@ -1193,7 +1197,13 @@ export function BotsScreen({
 
       {editing ? <EditBar onAddFolder={setAddedFolderId} /> : null}
 
-      {onOpenSection ? <SidebarFooter current={currentTab} onOpenSection={onOpenSection} /> : null}
+      {onOpenSection ? (
+        <SidebarFooter
+          current={currentTab}
+          onOpenSection={onOpenSection}
+          {...(signOut ? { onSignOut: () => void signOut() } : {})}
+        />
+      ) : null}
 
       {menuFor ? (
         /*

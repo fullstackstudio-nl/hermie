@@ -22,6 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nothing: the app probes for itself exactly as it did before. Everything this page can do, it can
   only do while no gateway is set; afterwards those addresses do not exist.
 
+- **The chat list says who you are signed in as.** At the bottom of the list, above the tabs: the
+  name the gateway has for you, with a **Sign out** beside it. Which name that is follows the same
+  ladder the rest of the app uses — the display name the gateway gives, else the first part of the
+  address you signed in with, else your account id with the provider's prefix taken off, never a
+  guess. There is no picture, because the gateway does not have one; the mark is the same
+  initial-drawn avatar a bot gets. On a gateway with no accounts there is nobody to name and the row
+  stays away. In a browser it is also where "Hermie Web 0.1.2 · your-gateway" lives, so what you are
+  connected to and who you are connected as are one block instead of two.
+
 - **In a browser, a chat opens with the conversation already in it.** Hermie Web now keeps a copy of
   each Bot Chat's tail, filled from the gateway connection it already holds for notifications and
   from the transcript reads it already passes along. The app asks for that copy before it dials, so

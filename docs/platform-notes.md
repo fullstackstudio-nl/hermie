@@ -79,6 +79,27 @@ cannot simply demand it: on an UNGATED gateway there is no cookie to have and
 bootstrap probe first and only requires a session when the gateway is gated, or when it could not be
 read at all.
 
+### The chat list's footer names a person, and `useGateway` throws
+
+`SidebarIdentity` reads `useDeviceContextStore`, which is a Zustand store and needs no provider —
+deliberately, because `useGateway()` **throws** outside a `<GatewayProvider>` and several narrow
+shells and tests render the chat list without one. The sign-out handler is therefore a prop that
+`BotsScreen` supplies when it has one, and the row draws the name with no button under it when it
+does not.
+
+Two details that are decisions rather than omissions:
+
+- **`/api/auth/me` has no avatar field** — `user_id`, `email`, `display_name`, `org_id`, `provider`,
+  `expires_at` and nothing else. The mark is the app's own initial-drawn `Avatar`; no picture is
+  fetched and none is invented.
+- **An ungated gateway names nobody.** `readIdentity` answers `owner` there, which is a placeholder,
+  so the row keys on `gated` and stays away rather than introducing the reader to themselves as
+  "owner".
+
+The "Hermie Web x.y.z · gateway" line is in this same block, not a second one: `loadHermieWebConfig`
+answers `null` off the web, so the line simply does not exist on a phone. Settings keeps the row
+that can UPDATE that version; this one only says which is running.
+
 ### The `/setup` window, and the loopback rule that constrains it
 
 `/setup` is served only while the gateway is unconfigured — no `--gateway`, no `HERMIE_GATEWAY_URL`,
