@@ -2541,8 +2541,17 @@ function Conversation({
   )
 }
 
-/** What the jump-to-latest pill counts: messages, not rows. */
-const MESSAGE_KINDS = new Set<string>(['assistant', 'bot_dm_in', 'bot_dm_out', 'user'])
+/**
+ * What the jump-to-latest pill counts: messages, not rows.
+ *
+ * The same rule as the chat list's badge, and deliberately the same list as
+ * `countsAsMessage` in the transcript selectors: bot-to-bot traffic does not
+ * count. A scrolled-up reader being told "3 new" and finding three asides
+ * between two agents is the pill making a promise the transcript does not keep —
+ * the owner's rule that bot-to-bot must not bump a count is about every count,
+ * not only the one on the chat list.
+ */
+const MESSAGE_KINDS = new Set<string>(['assistant', 'user'])
 
 /**
  * How many pages back a search will walk before it gives up.

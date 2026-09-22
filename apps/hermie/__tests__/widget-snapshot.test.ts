@@ -77,6 +77,28 @@ function chatWithReplies(name: string, count: number, at: number): ChatState {
   return state
 }
 
+/** The same chat, plus `dms` bot-to-bot rows stamped after the replies. */
+function chatWithDmTail(name: string, replies: number, dms: number, at: number): ChatState {
+  const state = chatWithReplies(name, replies, at)
+
+  for (let index = 0; index < dms; index += 1) {
+    const id = `d${index}`
+    const item = {
+      kind: 'bot_dm_in',
+      id,
+      senderName: 'Writer',
+      senderHandle: 'writer',
+      text: 'still working on it',
+      ts: at + replies + index
+    } as unknown as TranscriptItem
+
+    state.items[id] = item
+    state.order.push(id)
+  }
+
+  return state
+}
+
 /** A chat parked on an approval nobody has answered. */
 function chatAwaitingApproval(name: string): ChatState {
   const state = createChatState(name, 's', 's')
@@ -176,6 +198,28 @@ describe('projectWidgetSnapshot', () => {
 
   it('has nothing to count for a chat the app never opened', () => {
     expect(projectWidgetSnapshot(input()).bots[0]?.unread).toBe(0)
+  })
+
+  /**
+   * A widget is the loudest place a count appears, and bot-to-bot traffic is the
+   * cheapest thing to produce a lot of.
+   *
+   * Two teammate messages land after the two replies. The count stays at the two
+   * replies, and a chat whose WHOLE tail is teammate chatter counts nothing at
+   * all — there is no badge to be had from agents talking amongst themselves.
+   */
+  it('leaves bot-to-bot rows out of the count', () => {
+    const withTail = projectWidgetSnapshot(
+      input({ chats: { researcher: chatWithDmTail('researcher', 2, 2, 500) }, lastSeen: { researcher: 499 } })
+    )
+
+    expect(withTail.bots[0]?.unread).toBe(2)
+
+    const onlyDms = projectWidgetSnapshot(
+      input({ chats: { researcher: chatWithDmTail('researcher', 0, 3, 500) }, lastSeen: { researcher: 499 } })
+    )
+
+    expect(onlyDms.bots[0]?.unread).toBe(0)
   })
 
   it('strips the markdown off the last line the way the chat row does', () => {
@@ -328,6 +372,22 @@ describe('the folders a widget can be pinned to', () => {
     )
 
     expect(snapshot.folders[0]?.needsInput).toBe(1)
+  })
+
+  /** The aggregate reads the same predicate, so it had better agree. */
+  it('leaves bot-to-bot rows out of the folder aggregate too', () => {
+    const snapshot = projectWidgetSnapshot(
+      input({
+        bots: [bot('busy'), bot('chatty')],
+        chats: {
+          busy: chatWithDmTail('busy', 2, 5, 2_000),
+          chatty: chatWithDmTail('chatty', 0, 9, 2_000)
+        },
+        folders: [folder(['busy', 'chatty'])]
+      })
+    )
+
+    expect(snapshot.folders[0]?.unread).toBe(2)
   })
 
   it('counts every bot inside, not only the ones that fit', () => {

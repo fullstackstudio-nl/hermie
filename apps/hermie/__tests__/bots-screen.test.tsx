@@ -5,7 +5,7 @@
  * stores on purpose (see `BotsScreen`), so the assertions here are mostly about
  * a row correctly reading all three at once.
  */
-import { fireEvent, screen } from '@testing-library/react-native'
+import { fireEvent, screen, within } from '@testing-library/react-native'
 
 import { BotsScreen } from '../src/features/bots'
 import { strings } from '../src/i18n/strings'
@@ -582,7 +582,13 @@ describe('the unread badge', () => {
     useBotsStore.getState().markSeen('writer', NOW)
   })
 
-  /** Two replies and one inbound DM landing after the watermark. */
+  /**
+   * Two replies and one inbound DM landing after the watermark.
+   *
+   * The DM is in there so the badge has to say which of the three it counts: the
+   * owner's rule is that bot-to-bot traffic never bumps a count, so the answer
+   * is two.
+   */
   function seedUnread(sinceSeconds: number) {
     const chats = useChatsStore.getState()
 
@@ -645,10 +651,35 @@ describe('the unread badge', () => {
 
     renderScreen(<BotsScreen />)
 
-    // Hidden from the screen reader on purpose: the row's own label already
-    // says "3 unread messages", and a bare "3" after it would read twice.
-    expect(screen.getByTestId('bot-unread', { includeHiddenElements: true })).toHaveTextContent('3')
-    expect(screen.getByTestId('bot-row-researcher').props.accessibilityLabel).toContain('3 unread messages')
+    // Two, not three: `d1` is a teammate's DM, and bot-to-bot traffic is not
+    // this reader's mail. Hidden from the screen reader on purpose — the row's
+    // own label already says "2 unread messages", and a bare "2" after it would
+    // read twice.
+    expect(screen.getByTestId('bot-unread', { includeHiddenElements: true })).toHaveTextContent('2')
+    expect(screen.getByTestId('bot-row-researcher').props.accessibilityLabel).toContain('2 unread messages')
+  })
+
+  it('puts no number on the badge when the only new rows are bot-to-bot', () => {
+    useBotsStore.getState().markSeen('researcher', NOW - 60)
+    seedUnread(NOW - 60)
+
+    // Take the two replies away and leave the DM where it is: the row now has a
+    // new row on it by every measure except the one that decides a count.
+    useChatsStore.getState().update('researcher', state => ({ ...state, order: ['a0', 'd1'] }))
+
+    renderScreen(<BotsScreen />)
+
+    /*
+      The COUNT is what this rule owns. The plain dot beside it is the roster's
+      `last_active` — the gateway says a chat moved and says nothing about what
+      moved in it — so a client cannot attribute that to a DM and this test does
+      not pretend it can. What it pins is that no number is claimed, and that the
+      row does not tell a screen reader there are messages waiting.
+    */
+    const badge = screen.getByTestId('bot-unread', { includeHiddenElements: true })
+
+    expect(within(badge).queryByText(/\d/u)).toBeNull()
+    expect(screen.getByTestId('bot-row-researcher').props.accessibilityLabel).not.toMatch(/unread message/u)
   })
 
   it('caps the number rather than widening the badge', () => {

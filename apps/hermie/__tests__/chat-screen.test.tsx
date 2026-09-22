@@ -709,6 +709,52 @@ describe('ChatScreen', () => {
     expect(screen.queryByLabelText(/Jump to latest, \d+ new/u)).toBeNull()
 
     act(() => {
+      /*
+        And a teammate's message is not one either.
+
+        The owner's rule reaches this count as well as the chat list's: a
+        scrolled-up reader told "2 new" who scrolls down to two asides between
+        two agents has been sent for nothing. The dispatch and the inbound reply
+        are both here, because they are two different item kinds and an `if` that
+        caught only one of them would still announce the other.
+      */
+      useChatsStore.getState().dispatchEvent('researcher', {
+        type: 'tool.start',
+        session_id: 'runtime-1',
+        payload: { tool_id: 'call_dm_9', name: 'message_agent', args: { target: '@writer', message: 'ping' } }
+      })
+      useChatsStore.getState().dispatchEvent('researcher', {
+        type: 'tool.complete',
+        session_id: 'runtime-1',
+        payload: { tool_id: 'call_dm_9', name: 'message_agent', result: { status: 'queued', to: 'writer' } }
+      })
+      // The inbound half lands as its own item kind rather than through
+      // `message.start`: a foreign `message.start` carries no author, so the
+      // live path stands up a blank placeholder and only `session.resume` or a
+      // hydration tells it who spoke (ADR-0018).
+      useChatsStore.getState().update('researcher', state => ({
+        ...state,
+        items: {
+          ...state.items,
+          'dm-in-1': {
+            id: 'dm-in-1',
+            kind: 'bot_dm_in',
+            origin: 'live',
+            senderHandle: 'writer',
+            senderName: 'Writer',
+            seq: 9000,
+            text: 'on it',
+            ts: 1_700_000_100,
+            version: 0
+          } as never
+        },
+        order: [...state.order, 'dm-in-1']
+      }))
+    })
+
+    expect(screen.queryByLabelText(/Jump to latest, \d+ new/u)).toBeNull()
+
+    act(() => {
       useChatsStore.getState().dispatchEvent('researcher', {
         type: 'message.complete',
         session_id: 'runtime-1',

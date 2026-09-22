@@ -10,6 +10,7 @@ import {
   openRequests,
   runningSubagents,
   subagentTree,
+  lastMessageAt,
   unreadBadgeLabel,
   unreadCountSince,
   type VisibilityOptions,
@@ -34,6 +35,11 @@ const options = (over: Partial<VisibilityOptions> = {}): VisibilityOptions => ({
 
 const shown = (state: ChatState, over: Partial<VisibilityOptions> = {}) =>
   visibleItems(state, options(over)).map(entry => [entry.item.kind, entry.presentation])
+
+const kindsOf = (state: ChatState) => state.order.map(id => state.items[id]?.kind)
+
+/** The wire's own shape for an inbound teammate message — see ADR-0009. */
+const dmInbound = (text: string) => `Message from 🤖 Writer (@writer): ${text}`
 
 /** `[noticeKind, presentation]` for the notices a level lets through. */
 const notices = (state: ChatState, over: Partial<VisibilityOptions> = {}) =>
@@ -109,13 +115,38 @@ describe('visibleItems levels', () => {
     expect(shown(state)).toContainEqual(['notice', 'collapsed'])
   })
 
-  it('expands everything at verbose', () => {
+  it('expands everything at verbose, except the bot-to-bot asides', () => {
     const entries = shown(state, { level: 'verbose' })
 
     expect(entries).toContainEqual(['tool', 'full'])
     expect(entries).toContainEqual(['notice', 'full'])
-    expect(entries).toContainEqual(['bot_dm_out', 'full'])
     expect(entries).toContainEqual(['subagent_group', 'full'])
+  })
+
+  /**
+   * Bot-to-bot rows are asides, and an aside starts closed at EVERY level.
+   *
+   * The owner's rule: the reader opens one by tapping it. `verbose` used to hand
+   * `bot_dm_out` and `bot_dm_in` `full`, which opened a teammate's whole message
+   * for somebody who had turned verbosity up to watch tool calls — and `full` is
+   * the one presentation the renderer must never be given for these, because it
+   * is what the bubble and the glass card were drawn from.
+   */
+  it.each([['normal'], ['verbose']] as const)('keeps a bot-to-bot row collapsed at %s', level => {
+    const entries = shown(state, { level })
+
+    expect(entries).toContainEqual(['bot_dm_out', 'collapsed'])
+    expect(entries).toContainEqual(['bot_dm_in', 'collapsed'])
+    expect(entries).not.toContainEqual(['bot_dm_out', 'full'])
+    expect(entries).not.toContainEqual(['bot_dm_in', 'full'])
+  })
+
+  it('still demotes bot-to-bot to a chip rather than hiding it, with the toggle off', () => {
+    // ADR-0009: hiding a DM makes the bot's own reply unexplainable.
+    const entries = shown(state, { showBotToBot: false })
+
+    expect(entries).toContainEqual(['bot_dm_out', 'chip'])
+    expect(entries).toContainEqual(['bot_dm_in', 'chip'])
   })
 
   it('keeps a cron delivery at every level, folded at quiet', () => {
@@ -328,6 +359,63 @@ describe('unreadCountSince', () => {
     const state = run(streamedTurn)
 
     expect(unreadCountSince(state, 0)).toBe(1)
+  })
+
+  /**
+   * Bot-to-bot traffic does not move a badge.
+   *
+   * The owner's rule: *bot-to-bot must also not bump the notification badge.* A
+   * badge answers "is there something here for ME", and two agents working a
+   * delivery out between themselves is not. `bot_dm_in` used to count — it is a
+   * message, and it is addressed to this bot — so a chat whose whole tail is
+   * teammate chatter shouted for a reader who would find nothing to do in it.
+   */
+  it('counts nothing for a tail that is only bot-to-bot', () => {
+    const head = rowsToItems(rpcHistoryRows, 'rpc')
+    const history = reconcile(fresh(), head)
+    const watermark = lastMessageAt(history)
+
+    expect(unreadCountSince(history, watermark)).toBe(0)
+
+    // Three more teammate messages land, all of them AFTER the watermark.
+    const withDms = reconcile(
+      history,
+      rowsToItems(
+        [
+          ...rpcHistoryRows,
+          { role: 'user', text: dmInbound('Draft two is up.'), timestamp: watermark + 10, row_id: 90 },
+          { role: 'user', text: dmInbound('And a title for it.'), timestamp: watermark + 20, row_id: 91 },
+          { role: 'user', text: dmInbound('Ignore the last one.'), timestamp: watermark + 30, row_id: 92 }
+        ],
+        'rpc'
+      )
+    )
+
+    expect(kindsOf(withDms).filter(kind => kind === 'bot_dm_in')).toHaveLength(4)
+    expect(unreadCountSince(withDms, watermark)).toBe(0)
+
+    // And the reply the owner IS owed still counts, so the rule is about the
+    // kind rather than about a badge that stopped working at all.
+    const answered = run(
+      [
+        { type: 'message.start', seq: 900, payload: {} },
+        { type: 'message.complete', seq: 901, payload: { text: 'Done.', status: 'complete' } }
+      ],
+      withDms
+    )
+
+    // Counted from the beginning rather than from the watermark: the live
+    // bubble is stamped with the injected NOW, which is older than the history
+    // this fixture ends on.
+    expect(unreadCountSince(answered, 0)).toBe(unreadCountSince(withDms, 0) + 1)
+  })
+
+  it('leaves the watermark where a real message left it, not where a DM did', () => {
+    // `lastMessageAt` shares the predicate, which is what keeps "read" and
+    // "unread" from disagreeing about what a message is.
+    const state = reconcile(fresh(), rowsToItems(rpcHistoryRows, 'rpc'))
+
+    expect(unreadCountSince(state, lastMessageAt(state))).toBe(0)
   })
 
   it('caps the badge label rather than widening it', () => {
