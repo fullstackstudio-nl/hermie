@@ -75,6 +75,7 @@ function makeController(): Record<string, jest.Mock> {
   return {
     acknowledgeApproval: noop(),
     closeChat: noop(),
+    readKeyFor: (name: string) => name,
     deleteQueued: jest.fn(),
     editQueued: jest.fn(() => ''),
     interruptSubagent: jest.fn(async () => true),

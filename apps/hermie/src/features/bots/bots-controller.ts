@@ -66,7 +66,37 @@ export interface UserChatSource {
   cached(botName: string): BotCanonicalSession | null
   /** Resolve it, minting it if this reader has never had one. */
   resolve(bot: Bot): Promise<BotCanonicalSession>
+  /**
+   * Sub-chats: where the reader's memory puts this bot — a stored id, `null`
+   * for a legacy entry, `undefined` for the group chat. Optional: a source
+   * without it is the two-position switch and nothing else.
+   */
+  target?(botName: string): string | null | undefined
+  /** Find what `target` names, lookup-only. Throws when the listing failed. */
+  resolveTarget?(bot: Bot): Promise<CurrentResolution>
+  /**
+   * Change that memory. `{ chore: true }` for the app's own corrections — a
+   * stale id forgotten, a legacy entry resolved to its id — which are synced but
+   * never outrank a choice somebody made on another device.
+   */
+  rememberCurrent?(botName: string, storedId: string | null, options?: { chore?: boolean }): void
 }
+
+/**
+ * Where a bot's remembered conversation turned out to be, lookup-only.
+ *
+ *  - `group`: the reader's memory names no own chat for this bot;
+ *  - `own`: it does, and the listing still holds it. `legacy` says it was found
+ *    by the bare lead's title rather than by id, so the caller can remember the
+ *    id it now knows;
+ *  - `missing`: it does and the listing does not hold it. For an id that means
+ *    the chat is gone and the memory should go with it; for a legacy entry it
+ *    means the bare-lead chat was never persisted, and NOTHING is minted.
+ */
+export type CurrentResolution =
+  | { kind: 'group' }
+  | { kind: 'own'; session: BotCanonicalSession; legacy: boolean }
+  | { kind: 'missing'; legacy: boolean }
 
 export interface BotsControllerOptions {
   gateway: ChatGateway
@@ -391,6 +421,12 @@ export class BotsController {
    * both are in, rather than spending a second `profiles.list` to do it.
    */
   async placeUserChats(bots: readonly Bot[] = this.store.getState().bots): Promise<void> {
+    // With sub-chats this is `placeCurrentChats` under its old name (kept until
+    // the switch goes): the pin below is exactly what sub-chats replaced.
+    if (this.tracksCurrent) {
+      return this.placeCurrentChats(bots)
+    }
+
     const directory = this.userChats
 
     if (!directory) {
@@ -416,6 +452,117 @@ export class BotsController {
           }
         })
     )
+  }
+
+  /** Whether the reader's own chats are tracked per bot (sub-chats) rather than by the switch. */
+  get tracksCurrent(): boolean {
+    return Boolean(this.userChats?.target && this.userChats.resolveTarget)
+  }
+
+  /**
+   * Put each bot's remembered conversation on the roster (sub-chats).
+   *
+   * For every bot, what the reader's memory names is looked up — an id in the
+   * profile's listing, a legacy entry by the bare lead's title — and set as
+   * `Bot.current`, or cleared for the group chat. Lookup only: a remembered id
+   * the listing no longer holds is forgotten (the bot opens its group chat), a
+   * legacy entry that finds nothing leaves the bot on its group chat, and
+   * nothing is ever minted. Only "New chat" creates.
+   *
+   * A bot whose chat is bound on this device is skipped. Its key is on the
+   * conversation the reader has in front of them, and a choice made on another
+   * device must not pull that transcript out from under them (Owner Decision
+   * 4); `ChatController.openChat` applies the memory on the next open.
+   *
+   * Best effort per bot, and never awaited by a roster load, for the reason
+   * `placeUserChats` gives.
+   */
+  async placeCurrentChats(bots: readonly Bot[] = this.store.getState().bots): Promise<void> {
+    if (!this.tracksCurrent) {
+      return
+    }
+
+    await Promise.all(
+      bots
+        .filter(bot => !this.isBound(bot.name))
+        .map(async bot => {
+          try {
+            const session = await this.settleCurrent(bot)
+
+            // The roster may have been replaced, or the chat opened, while this
+            // was in the air.
+            if (this.store.getState().byName[bot.name] && !this.isBound(bot.name)) {
+              this.store.getState().setCurrent(bot.name, session)
+            }
+          } catch {
+            // The row keeps what it had until the next placement or open.
+          }
+        })
+    )
+  }
+
+  /**
+   * Which of the reader's own chats this bot's key belongs on, by the reader's
+   * memory — or `null` for the group chat. Lookup only; the store is NOT
+   * touched, because the caller decides whether a bound chat may move.
+   *
+   * The memory's own corrections happen here: a legacy entry that resolved is
+   * remembered by the id it now has, and an id the listing no longer holds is
+   * forgotten. Both as chores. A failed listing throws and forgets nothing.
+   */
+  async settleCurrent(bot: Bot): Promise<BotCanonicalSession | null> {
+    const source = this.userChats
+
+    if (!source?.target || !source.resolveTarget) {
+      return bot.current ?? null
+    }
+
+    const target = source.target(bot.name)
+
+    if (target === undefined) {
+      return null
+    }
+
+    const known = this.store.getState().byName[bot.name]?.current ?? bot.current
+
+    if (typeof target === 'string' && known?.id === target) {
+      return known
+    }
+
+    const outcome = await source.resolveTarget(bot)
+
+    if (source.target(bot.name) !== target) {
+      // The memory moved while the listing was in the air — a pick on this
+      // device, or another device's arriving. Answer for what it says now.
+      return this.settleCurrent(bot)
+    }
+
+    if (outcome.kind === 'own') {
+      if (outcome.legacy) {
+        source.rememberCurrent?.(bot.name, outcome.session.id, { chore: true })
+      }
+
+      return outcome.session
+    }
+
+    if (outcome.kind === 'missing' && !outcome.legacy) {
+      source.rememberCurrent?.(bot.name, null, { chore: true })
+    }
+
+    return null
+  }
+
+  /**
+   * The conversation this bot's key opens on: its current own chat, else the
+   * group chat, resolved as `resolveCanonical` resolves it.
+   */
+  resolveCurrent(bot: Bot): Promise<BotCanonicalSession> {
+    return bot.current ? Promise.resolve(bot.current) : this.resolveCanonical(bot)
+  }
+
+  /** Whether a chat is bound under this bot's key on this device right now. */
+  private isBound(botName: string): boolean {
+    return Boolean(this.chats?.getState().chats[botName])
   }
 
   /**
@@ -538,8 +685,12 @@ export class BotsController {
       shared transcript for a bot whose switch says otherwise — once, on the
       first tap after a cold launch, which is the hardest kind of wrong to
       notice. The directory memoises, so this costs nothing after the first.
+
+      With sub-chats this is skipped: the canonical always names the group
+      chat, and the reader's own chat is `Bot.current`, which `resolveCurrent`
+      reads. Resolution there never mints an own chat.
     */
-    if (this.userChats?.chose(bot.name)) {
+    if (!this.tracksCurrent && this.userChats?.chose(bot.name)) {
       return this.userChats.resolve(bot)
     }
 

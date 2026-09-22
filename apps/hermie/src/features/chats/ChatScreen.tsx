@@ -597,8 +597,15 @@ function Conversation({
       return
     }
 
-    useBotsStore.getState().markSeen(botName, readWatermark(Math.floor(Date.now() / 1000), newestMessageAt))
-  }, [away, botName, newestMessageAt])
+    // Under the key of the conversation the bot is ON: reading one of the
+    // reader's own chats must not mark the group chat read.
+    useBotsStore
+      .getState()
+      .markSeen(
+        runtime?.controller.readKeyFor(botName) ?? botName,
+        readWatermark(Math.floor(Date.now() / 1000), newestMessageAt)
+      )
+  }, [away, botName, newestMessageAt, runtime])
 
   // Messages that landed while the reader was further up: the pill's count.
   //

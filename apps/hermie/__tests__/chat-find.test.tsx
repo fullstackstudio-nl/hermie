@@ -73,6 +73,7 @@ beforeEach(() => {
   mockController = {
     openChat: jest.fn(async () => undefined),
     closeChat: jest.fn(async () => undefined),
+    readKeyFor: (name: string) => name,
     loadOlder: jest.fn(async () => 'start' as const),
     refreshOptions: jest.fn(async () => null),
     knowsSlashCommand: jest.fn(() => false),

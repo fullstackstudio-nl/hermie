@@ -62,13 +62,26 @@ import {
   type BotsController,
   CANONICAL_CHAT_TITLE,
   createCanonicalSession,
-  PROFILE_SESSION_LIST_LIMIT
+  PROFILE_SESSION_LIST_LIMIT,
+  SESSION_COLUMNS
 } from '../bots/bots-controller'
 import {
+  buildConversationList,
+  type ConversationList,
+  isStampLabel,
+  labelFromText,
+  newOwnChatTitle,
+  OWN_CHAT_LABEL_MAX
+} from '../sessions/conversation-list'
+import {
+  cacheKeyFor,
   classifyConversations,
   conversationKey,
   type Conversation,
-  type ConversationGroups
+  type ConversationGroups,
+  isOwnChatTitle,
+  ownChatLabel,
+  ownChatTitle
 } from '../sessions/session-model'
 import type { ChatChoice } from '../user-chats/user-chat'
 import type { UserChatSwitch } from '../user-chats/user-chat-switch'
@@ -355,6 +368,18 @@ export class ChatController {
    */
   private knownContract: number | null = null
   private readonly userChats: UserChatSwitch | null
+  /** Who wants to hear that a bot's conversation list may have changed, by bot. */
+  private readonly conversationListeners = new Map<string, Set<() => void>>()
+  /**
+   * The titles of the reader's own chats this controller has seen, by stored id:
+   * from a listing, a "New chat", a rename. The auto-relabel reads it, because a
+   * chat is only ever relabelled from the stamp it was born with.
+   */
+  private readonly ownTitles = new Map<string, string>()
+  /** Own chats the auto-relabel has already had its one try at. */
+  private readonly relabelTried = new Set<string>()
+  /** `message_count` of each own chat when it was opened, by conversation key. */
+  private readonly openedCounts = new Map<string, number>()
 
   constructor(options: ChatControllerOptions) {
     this.gateway = options.gateway
@@ -417,13 +442,94 @@ export class ChatController {
       return existing
     }
 
-    const run = this.hydrate(bot).finally(() => {
+    const run = this.openCurrent(bot).finally(() => {
       this.opening.delete(bot.name)
     })
 
     this.opening.set(bot.name, run)
 
     return run
+  }
+
+  /**
+   * Open the conversation this bot's key belongs on.
+   *
+   * With sub-chats the reader's memory decides first — lookup only, never a
+   * mint (`BotsController.settleCurrent`). This is also where a memory that
+   * moved while the chat stayed bound is finally applied: another device picked
+   * a different conversation, and a chat in front of the reader is never pulled
+   * away for that (Owner Decision 4), so it waits for the next open, which is
+   * this.
+   */
+  private async openCurrent(bot: Bot): Promise<void> {
+    if (!this.botsController.tracksCurrent) {
+      return this.hydrate(bot)
+    }
+
+    const own = await this.botsController.settleCurrent(bot)
+    const bound = this.boundOwnId(bot.name)
+
+    if (bound !== undefined && bound !== (own?.id ?? null)) {
+      await this.switchTo(bot, own)
+
+      return
+    }
+
+    this.bots.getState().setCurrent(bot.name, own)
+    await this.hydrate(botOn(bot, own))
+  }
+
+  /**
+   * Which conversation is bound under this bot's key right now: an own chat's
+   * stored id, `null` for the group chat, `undefined` when nothing is.
+   *
+   * Read off the two stores together — the chat under the key, and the roster's
+   * `current` — because `current` is moved only together with the chat
+   * (`switchTo`), or while nothing is bound (`placeCurrentChats`).
+   */
+  private boundOwnId(botName: string): string | null | undefined {
+    const chat = this.chats.getState().chats[botName]
+
+    if (!chat) {
+      return undefined
+    }
+
+    const bots = this.bots.getState()
+    const current = bots.byName[botName]?.current ?? bots.currentSessions[botName]
+
+    return current && chat.storedSessionId === current.id ? current.id : null
+  }
+
+  /**
+   * The key the read watermarks of this bot's current conversation live under:
+   * the bot's name for the group chat, `bot#<storedId>` for one of the reader's
+   * own. `ChatScreen`'s watermark and `closeChat` write through it, so reading
+   * a sub-chat never marks the group chat read. A viewer key answers itself.
+   */
+  readKeyFor(botName: string): string {
+    const bound = this.boundOwnId(botName)
+
+    if (bound) {
+      return conversationKey(botName, bound)
+    }
+
+    if (bound === null) {
+      return botName
+    }
+
+    const current = this.bots.getState().byName[botName]?.current
+
+    return current ? conversationKey(botName, current.id) : botName
+  }
+
+  /** The disk-cache key of whatever is held under a chat-store key. */
+  private cacheKeyOf(key: string): string {
+    return key.includes('#') ? key : this.readKeyFor(key)
+  }
+
+  /** The lead this reader's own chats carry, or '' on a gateway that named nobody. */
+  private get lead(): string {
+    return this.userChats?.available ? this.userChats.title : ''
   }
 
   private rememberContract(contract: number | null): void {
@@ -486,17 +592,22 @@ export class ChatController {
    */
   private async hydrate(bot: Bot, options?: { key: string; canonical: BotCanonicalSession }): Promise<void> {
     const chats = this.chats.getState()
-    const canonical = options?.canonical ?? (await this.botsController.resolveCanonical(bot))
+    // The bot's own key opens its CURRENT conversation: one of the reader's own
+    // chats when `bot.current` names one, the group chat otherwise.
+    const canonical = options?.canonical ?? (await this.botsController.resolveCurrent(bot))
     const key = options?.key ?? bot.name
     const isCanonical = key === bot.name
+    const isOwn = isCanonical && bot.current?.id === canonical.id
 
     chats.ensure(key, { storedSessionId: canonical.id, resolvedSessionId: canonical.resolvedId })
 
     // 1. The cache paints first, so the thread is on screen before the socket
     //    has answered. Reconciliation below keeps the item ids it painted. Only
-    //    for the canonical chat: the cache is keyed by bot and already holds it.
+    //    under the bot's own key, whose cache entry is per CONVERSATION — the
+    //    group chat under the bot's name, an own chat under `bot#<storedId>` —
+    //    so a switch between them paints from disk rather than cold.
     if (isCanonical) {
-      await this.paintFromCache(key, canonical.id, canonical.resolvedId)
+      await this.paintFromCache(key, cacheKeyFor(bot.name, canonical.id, !isOwn), canonical.id, canonical.resolvedId)
     }
 
     this.chats.getState().setHydration(key, 'hydrating')
@@ -586,7 +697,18 @@ export class ChatController {
 
     this.chats.getState().setHydration(key, 'live')
 
-    if (isCanonical) {
+    if (isOwn) {
+      // One of the reader's own chats: its watermarks live under its own key, so
+      // opening it clears nothing on the group chat. Opened now, on this device,
+      // which is what orders the list (Owner Decision 1).
+      const readKey = conversationKey(bot.name, canonical.id)
+      const nowSeconds = Math.floor(this.now() / 1000)
+
+      this.openedCounts.set(readKey, messageCount)
+      this.bots.getState().markSeen(readKey, nowSeconds)
+      this.bots.getState().markSeenCount(readKey, messageCount)
+      this.bots.getState().markOpened(canonical.id, nowSeconds)
+    } else if (isCanonical) {
       // Seen as of NOW, not as of the roster's `last_active`: the roster row can
       // be a minute old, and a chat the user is looking at is read. A branch is
       // not the Bot Chat, so reading one clears nothing.
@@ -600,7 +722,7 @@ export class ChatController {
     this.syncSubagentPoll()
   }
 
-  private async paintFromCache(botName: string, storedId: string, resolvedId: string): Promise<void> {
+  private async paintFromCache(botName: string, cacheKey: string, storedId: string, resolvedId: string): Promise<void> {
     if (!this.cache) {
       return
     }
@@ -612,7 +734,7 @@ export class ChatController {
     }
 
     try {
-      const row = await this.cache.read(botName)
+      const row = await this.cache.read(cacheKey)
 
       if (!row) {
         return
@@ -871,6 +993,12 @@ export class ChatController {
         return !chat.turn.active || chat.turn.foreignReconcilePending ? this.reconcileTailFor(name) : Promise.resolve()
       })
     ])
+
+    // Something about the profile's sessions changed — a chat created, renamed
+    // or deleted on another device among them — so every open list re-lists.
+    for (const botName of [...this.conversationListeners.keys()]) {
+      this.notifyConversations(botName)
+    }
   }
 
   /**
@@ -1067,7 +1195,12 @@ export class ChatController {
           this.registerOpenRequests(name, resume.open_requests ?? null)
           await this.replaySince(name, resume.session_id)
 
-          const expected = byName.get(name)?.canonical?.messageCount ?? 0
+          const bot = byName.get(name)
+          // The conversation the key is on: an own chat has its own count.
+          const expected =
+            (bot?.current && bot.current.id === chat.storedSessionId
+              ? bot.current.messageCount
+              : bot?.canonical?.messageCount) ?? 0
 
           if (expected > countPersistedRows(chat)) {
             await this.reconcileTailFor(name)
@@ -1481,6 +1614,19 @@ export class ChatController {
 
       this.chats.getState().settleTurn(botName, { status: result?.status ?? null })
       this.syncApprovalPoll()
+
+      const ownId = this.boundOwnId(botName)
+
+      if (ownId) {
+        // Sent to, on this device: the list is most recently used first.
+        this.bots.getState().markOpened(ownId, Math.floor(this.now() / 1000))
+
+        // A skill directive's `text` is the expansion, not what the reader
+        // typed, and is no name for a chat.
+        if (options.display === undefined) {
+          void this.relabelFromFirstMessage(botName, ownId, sessionId, text)
+        }
+      }
 
       return painted
     } catch (error) {
@@ -2264,6 +2410,12 @@ export class ChatController {
       return
     }
 
+    if (this.boundOwnId(botName)) {
+      await this.startAnotherOwnChat(bot, sessionId, storedId, arg, command)
+
+      return
+    }
+
     const stamped = `${CANONICAL_CHAT_TITLE} · ${localStamp(this.now())}`
     const asked = arg.trim()
     let retired = asked || stamped
@@ -2393,6 +2545,31 @@ export class ChatController {
       return
     }
 
+    if (this.botsController.tracksCurrent) {
+      // With sub-chats the switch is one more way to pick a row: the group chat,
+      // or the reader's first own chat (found, or minted as the switch always
+      // did). No pin: the canonical keeps naming the group chat.
+      if (choice === 'shared') {
+        await this.selectConversation(bot, null)
+
+        return
+      }
+
+      const mine = await directory.resolve(bot)
+
+      await this.selectConversation(bot, {
+        id: mine.id,
+        resolvedId: mine.resolvedId,
+        title: directory.title,
+        preview: mine.preview,
+        messageCount: mine.messageCount,
+        lastActive: mine.lastActive,
+        kind: 'mine'
+      })
+
+      return
+    }
+
     directory.remember(bot.name, choice)
 
     let target: BotCanonicalSession
@@ -2425,6 +2602,9 @@ export class ChatController {
     // and told in a way a poll already in the air cannot reverse. See
     // `canonicalPins` in the bots store.
     this.bots.getState().setCanonical(botName, canonical)
+    // And the key goes onto that canonical chat, not onto an own chat it may
+    // have been parked on.
+    this.bots.getState().setCurrent(botName, null)
 
     if (previous) {
       this.slashCatalogs.delete(previous)
@@ -2450,7 +2630,534 @@ export class ChatController {
 
     this.chats.getState().forget(botName)
 
-    await this.openChat({ ...bot, canonical })
+    await this.openChat(botOn({ ...bot, canonical }, null))
+  }
+
+  // ── sub-chats: the conversation each bot is on ─────────────────────────────
+
+  /**
+   * A bot's conversations as the list draws them: the group chat, then the
+   * reader's own chats, most recently used first (on this device), and whether
+   * this gateway can offer an own chat at all.
+   *
+   * One profile listing. The roster's `canonical` is handed in as the group
+   * chat's id — it always names the Bot Chat now, `Bot.current` being where the
+   * reader is — except where the old two-position switch still pinned it onto
+   * an own chat, which the title gives away; the list then finds the group chat
+   * by title rather than draw the reader's chat as everybody's.
+   */
+  async listBotConversations(bot: Bot | string): Promise<ConversationList> {
+    return (await this.listProfile(typeof bot === 'string' ? bot : bot.name)).list
+  }
+
+  /** One profile listing, and the list built from it. */
+  private async listProfile(botName: string): Promise<{ rows: SessionListRow[]; list: ConversationList }> {
+    const result = await this.gateway.request('session.list', {
+      profile: botName,
+      include_hidden: true,
+      limit: PROFILE_SESSION_LIST_LIMIT
+    })
+    const rows = (result?.sessions ?? []) as SessionListRow[]
+    const lead = this.lead
+    const canonical = this.bots.getState().byName[botName]?.canonical
+    const pinnedOnOwn =
+      Boolean(canonical?.id) &&
+      rows.some(
+        row => (row.id === canonical?.id || row.resolved_id === canonical?.id) && isOwnChatTitle(row.title, lead)
+      )
+    const list = buildConversationList({
+      rows,
+      lead,
+      ...(canonical?.id && !pinnedOnOwn ? { canonicalId: canonical.id } : {}),
+      ...(canonical?.resolvedId && !pinnedOnOwn ? { canonicalResolvedId: canonical.resolvedId } : {}),
+      lastOpenedAt: this.bots.getState().lastOpened
+    })
+
+    for (const conversation of list.own) {
+      this.ownTitles.set(conversation.id, conversation.title)
+    }
+
+    return { rows, list }
+  }
+
+  /**
+   * Hear that a bot's conversation list may have changed — after a
+   * `sessions.changed` sweep, and after every action this controller takes on
+   * that list. The listener re-lists; nothing here polls.
+   */
+  onConversationsChanged(botName: string, listener: () => void): () => void {
+    const listeners = this.conversationListeners.get(botName) ?? new Set<() => void>()
+
+    listeners.add(listener)
+    this.conversationListeners.set(botName, listeners)
+
+    return () => {
+      listeners.delete(listener)
+
+      if (!listeners.size && this.conversationListeners.get(botName) === listeners) {
+        this.conversationListeners.delete(botName)
+      }
+    }
+  }
+
+  private notifyConversations(botName: string): void {
+    for (const listener of [...(this.conversationListeners.get(botName) ?? [])]) {
+      try {
+        listener()
+      } catch {
+        // One broken surface does not stop the others hearing.
+      }
+    }
+  }
+
+  /**
+   * Put this bot's key on one of its conversations: an own chat, or the group
+   * chat with `null` (or its `canonical` row).
+   *
+   * The choice is remembered FIRST — it is what every device follows, and what
+   * the next open settles on — and put back if the switch fails. Picking the
+   * conversation the bot is already on is a no-op rather than a reload.
+   *
+   * Branches and past conversations are not for this: they open read-only in
+   * the viewer.
+   */
+  async selectConversation(bot: Bot, target: Conversation | null): Promise<void> {
+    if (target && target.kind !== 'mine' && target.kind !== 'canonical') {
+      throw new Error('Only the group chat or one of your own chats can be the conversation a bot is on.')
+    }
+
+    const botName = bot.name
+    const own = target?.kind === 'mine' ? target : null
+
+    if (own && !this.lead) {
+      throw new Error('This gateway has not said who you are, so there is only the group chat.')
+    }
+
+    // One open per key at a time: whatever is in the air lands first.
+    await this.opening.get(botName)?.catch(() => undefined)
+
+    const wanted = own?.id ?? null
+    const source = this.userChats
+    const memory = source?.target?.(botName)
+    const remembered = wanted === null ? memory === undefined : memory === wanted
+    const bound = this.boundOwnId(botName)
+
+    if (bound === wanted && remembered) {
+      return
+    }
+
+    if (!remembered) {
+      source?.rememberCurrent?.(botName, wanted)
+    }
+
+    if (bound === wanted) {
+      // Already on screen; only the memory had to catch up.
+      return
+    }
+
+    if (own) {
+      this.ownTitles.set(own.id, own.title)
+    }
+
+    const session: BotCanonicalSession | null = own
+      ? {
+          id: own.id,
+          resolvedId: own.resolvedId || own.id,
+          preview: own.preview,
+          lastActive: own.lastActive,
+          messageCount: own.messageCount
+        }
+      : null
+    const before = this.bots.getState().byName[botName]?.current ?? null
+    const run = this.switchTo(bot, session)
+
+    this.opening.set(botName, run)
+
+    try {
+      await run
+    } catch (error) {
+      this.opening.delete(botName)
+
+      // The switch did not happen, so neither did the choice.
+      if (!remembered) {
+        this.restoreMemory(botName, memory)
+      }
+
+      this.chats.getState().forget(botName)
+      this.bots.getState().setCurrent(botName, before)
+
+      // Best effort: put the conversation the reader was in back on screen.
+      const back = this.bots.getState().byName[botName]
+
+      if (back) {
+        void this.openChat(back).catch(() => undefined)
+      }
+
+      throw error
+    } finally {
+      if (this.opening.get(botName) === run) {
+        this.opening.delete(botName)
+      }
+    }
+
+    this.notifyConversations(botName)
+  }
+
+  /** Put the reader's memory back as it was, for a switch that did not happen. */
+  private restoreMemory(botName: string, memory: string | null | undefined): void {
+    const source = this.userChats
+
+    if (!source?.rememberCurrent) {
+      return
+    }
+
+    source.rememberCurrent(botName, memory ?? null, { chore: true })
+
+    if (memory === null) {
+      // A legacy entry: the bare-lead chat nobody resolved yet.
+      source.remember(botName, 'mine')
+    }
+  }
+
+  /**
+   * Repoint this bot's key at another conversation and open it.
+   *
+   * Everything keyed by the old session is dropped and the ordinary open path
+   * runs, as `switchCanonical` does — with two differences that are the point
+   * of sub-chats. The roster's `current` moves and its `canonical` does not, so
+   * the group chat keeps its unread badge while the reader is elsewhere. And
+   * nothing is forgotten on disk: the conversation being left is written to its
+   * OWN cache key first, so coming back to it paints at once.
+   */
+  private async switchTo(bot: Bot, own: BotCanonicalSession | null): Promise<void> {
+    const botName = bot.name
+    const chat = this.chats.getState().chats[botName]
+
+    if (chat) {
+      this.markLeft(botName)
+      await this.persist(botName)
+
+      if (chat.runtimeSessionId) {
+        this.slashCatalogs.delete(chat.runtimeSessionId)
+        this.slashCatalogLoads.delete(chat.runtimeSessionId)
+        this.parked.delete(chat.runtimeSessionId)
+      }
+
+      for (const entry of this.chats.getState().queues[botName] ?? []) {
+        this.queuedAttachments.delete(entry.id)
+      }
+
+      for (const [requestId, entry] of this.pending) {
+        if (entry.botName === botName) {
+          this.pending.delete(requestId)
+        }
+      }
+
+      this.windows.delete(botName)
+      this.loadingOlder.delete(botName)
+      this.chats.getState().forget(botName)
+    }
+
+    this.bots.getState().setCurrent(botName, own)
+
+    await this.hydrate(botOn(this.bots.getState().byName[botName] ?? bot, own))
+    this.syncApprovalPoll()
+  }
+
+  /**
+   * Start another of the reader's own chats on this bot and open it.
+   *
+   * Created visible, following the profile's configuration, under the group
+   * chat, and titled AT ONCE with `session.title` on the runtime id: upstream
+   * persists no row for an empty draft, and the title write is what makes the
+   * chat exist on every device before its first message — and what surfaces a
+   * clash. A clash is retried once with a seconds-precise stamp. Never through
+   * `resolveUserChat`'s lookup-then-create: this is the one place an own chat is
+   * minted.
+   *
+   * `label` names it at birth; without one it carries a local stamp until its
+   * first message relabels it.
+   */
+  async startOwnChat(bot: Bot, options: { label?: string } = {}): Promise<Conversation> {
+    const lead = this.lead
+
+    if (!lead) {
+      throw new Error('This gateway has not said who you are, so there is only the group chat.')
+    }
+
+    const botName = bot.name
+    const group = bot.canonical?.id ? bot.canonical : await this.botsController.resolveCanonical(bot)
+    const asked = cutLabel(options.label ?? '')
+    const first = newOwnChatTitle(lead, asked || localStamp(this.now()))
+    const created = await this.gateway.request('session.create', {
+      profile: botName,
+      title: first,
+      // NOT hidden: `hidden` marks the one canonical row, and an own chat is a
+      // listed conversation every device of this reader can find.
+      hidden: false,
+      source: 'hermie',
+      cols: SESSION_COLUMNS,
+      follow_profile_config: true,
+      parent_session_id: group.id
+    })
+    const storedId = created?.stored_session_id || created?.session_id || ''
+    const runtimeId = typeof created?.session_id === 'string' ? created.session_id : ''
+
+    if (!storedId || !runtimeId) {
+      throw new Error(`The gateway started a chat for ${botName} without returning its id.`)
+    }
+
+    let title: string
+
+    try {
+      title = await this.titleSession(botName, runtimeId, first)
+    } catch (error) {
+      if (!isTitleClash(error)) {
+        await this.closeQuietly(botName, runtimeId)
+
+        throw error
+      }
+
+      try {
+        title = await this.titleSession(botName, runtimeId, newOwnChatTitle(lead, localStamp(this.now(), true)))
+      } catch (second) {
+        await this.closeQuietly(botName, runtimeId)
+
+        throw second
+      }
+    }
+
+    const nowSeconds = Math.floor(this.now() / 1000)
+    const conversation: Conversation = {
+      id: storedId,
+      resolvedId: typeof created?.stored_session_id === 'string' ? created.stored_session_id : storedId,
+      title,
+      preview: '',
+      messageCount: 0,
+      lastActive: nowSeconds,
+      kind: 'mine'
+    }
+
+    this.ownTitles.set(storedId, title)
+    this.bots.getState().markOpened(storedId, nowSeconds)
+    await this.selectConversation(bot, conversation)
+    this.notifyConversations(botName)
+
+    return conversation
+  }
+
+  /**
+   * `/new` inside one of the reader's own chats: another own chat beside it.
+   *
+   * The one being left is kept exactly as it is — it is still in the reader's
+   * list — and the group chat is never touched: retiring and re-minting the
+   * `Bot Chat` is a shared action, and it stays `/new`'s meaning in the group
+   * chat only. A name given to the command names the NEW chat.
+   */
+  private async startAnotherOwnChat(
+    bot: Bot,
+    sessionId: string,
+    storedId: string,
+    arg: string,
+    command: string
+  ): Promise<void> {
+    const botName = bot.name
+    const lead = this.lead
+    const leaving = this.ownTitles.get(storedId)
+    let created: Conversation
+
+    try {
+      created = await this.startOwnChat(bot, { label: arg })
+    } catch (error) {
+      this.commandRow(
+        botName,
+        sessionId,
+        command,
+        `The gateway would not start a new chat (${messageOf(error)}). You are still in the one you were in.`
+      )
+
+      return
+    }
+
+    const kept = leaving ? ownChatLabel(leaving, lead) || 'My chat' : ''
+
+    this.commandRow(
+      botName,
+      this.chats.getState().chats[botName]?.runtimeSessionId ?? '',
+      command,
+      kept
+        ? `New chat started: “${ownChatLabel(created.title, lead)}”. The one you were in is still in your chats as “${kept}”.`
+        : `New chat started: “${ownChatLabel(created.title, lead)}”. The one you were in is still in your chats.`
+    )
+  }
+
+  /**
+   * Rename one of the reader's own chats. The LABEL only: the lead is what
+   * finds the chat on every device and is not the reader's to change here.
+   * Refusals — an empty name, one that is too long, one another chat already
+   * wears — are thrown for the surface to show beside the field.
+   */
+  async renameOwnChat(bot: Bot, storedId: string, label: string): Promise<string> {
+    const lead = this.lead
+    const name = collapse(label)
+
+    if (!lead) {
+      throw new Error('This gateway has not said who you are, so there is only the group chat.')
+    }
+
+    if (this.isGroupId(bot, storedId)) {
+      throw new Error('The group chat cannot be renamed.')
+    }
+
+    if (!name) {
+      throw new Error('A chat needs a name.')
+    }
+
+    if (name.length > OWN_CHAT_LABEL_MAX) {
+      throw new Error(`A chat name can be at most ${OWN_CHAT_LABEL_MAX} characters.`)
+    }
+
+    const settled = await this.renameConversation(bot.name, storedId, ownChatTitle(lead, name))
+
+    this.ownTitles.set(storedId, settled)
+    this.notifyConversations(bot.name)
+
+    return settled
+  }
+
+  /**
+   * Delete one of the reader's own chats.
+   *
+   * The bot leaves it FIRST when it is the conversation the key is on, so the
+   * gateway is never asked to delete a session this device is holding live; it
+   * lands on the group chat. Then the stored id goes, and with it the chat's
+   * disk cache and every watermark it left behind.
+   */
+  async deleteOwnChat(bot: Bot, storedId: string): Promise<void> {
+    const botName = bot.name
+
+    if (this.isGroupId(bot, storedId)) {
+      throw new Error('The group chat cannot be deleted.')
+    }
+
+    if (this.boundOwnId(botName) === storedId) {
+      await this.selectConversation(bot, null)
+    } else {
+      if (this.userChats?.target?.(botName) === storedId) {
+        this.userChats.rememberCurrent?.(botName, null)
+      }
+
+      if (this.bots.getState().byName[botName]?.current?.id === storedId && !this.chats.getState().chats[botName]) {
+        this.bots.getState().setCurrent(botName, null)
+      }
+    }
+
+    await this.deleteConversation(botName, storedId)
+
+    const key = conversationKey(botName, storedId)
+
+    if (this.cache) {
+      try {
+        await this.cache.forget(key)
+      } catch {
+        // An orphaned cache entry is never read again: nothing points at it.
+      }
+    }
+
+    this.bots.getState().forgetConversation(key, storedId)
+    this.ownTitles.delete(storedId)
+    this.relabelTried.delete(storedId)
+    this.openedCounts.delete(key)
+    this.notifyConversations(botName)
+  }
+
+  /**
+   * Where a push tap or a link naming one session of this bot should land.
+   *
+   * Resolved against the gateway, never taken from the payload: one of the
+   * reader's own chats becomes the conversation the bot is on (`current`), the
+   * group chat likewise, a branch or a past conversation opens in the read-only
+   * viewer, and an id the listing does not hold lands on whatever the bot is on.
+   */
+  async openSession(bot: Bot, storedId: string): Promise<{ kind: 'current' } | { kind: 'viewer' }> {
+    const { rows, list } = await this.listProfile(bot.name)
+    const matches = (conversation: { id: string; resolvedId: string }): boolean =>
+      conversation.id === storedId || conversation.resolvedId === storedId
+
+    if (list.group && matches(list.group)) {
+      await this.selectConversation(bot, null)
+
+      return { kind: 'current' }
+    }
+
+    const own = list.own.find(matches)
+
+    if (own) {
+      await this.selectConversation(bot, own)
+
+      return { kind: 'current' }
+    }
+
+    return rows.some(row => row.id === storedId || row.resolved_id === storedId)
+      ? { kind: 'viewer' }
+      : { kind: 'current' }
+  }
+
+  /** Is this stored id the bot's group chat, as far as the roster knows? */
+  private isGroupId(bot: Bot, storedId: string): boolean {
+    const canonical = this.bots.getState().byName[bot.name]?.canonical ?? bot.canonical
+
+    return Boolean(canonical && (canonical.id === storedId || canonical.resolvedId === storedId))
+  }
+
+  /**
+   * An own chat's first message names it, while it still wears the stamp it was
+   * born with. Best effort, once per chat: a refusal is recorded and the stamp
+   * stays, which is a name, only a dull one.
+   */
+  private async relabelFromFirstMessage(
+    botName: string,
+    storedId: string,
+    runtimeId: string,
+    text: string
+  ): Promise<void> {
+    const lead = this.lead
+    const title = this.ownTitles.get(storedId)
+
+    if (!lead || !title || this.relabelTried.has(storedId) || !isStampLabel(ownChatLabel(title, lead))) {
+      return
+    }
+
+    const label = labelFromText(text)
+
+    if (!label) {
+      return
+    }
+
+    this.relabelTried.add(storedId)
+
+    try {
+      this.ownTitles.set(storedId, await this.titleSession(botName, runtimeId, ownChatTitle(lead, label)))
+      this.notifyConversations(botName)
+    } catch (error) {
+      this.noteRpcFailure('session.title', error)
+    }
+  }
+
+  /** `session.title` on a RUNTIME id, answering the title the gateway settled on. */
+  private async titleSession(botName: string, runtimeId: string, title: string): Promise<string> {
+    const result = await this.gateway.request('session.title', { session_id: runtimeId, profile: botName, title })
+
+    return typeof result?.title === 'string' && result.title ? result.title : title
+  }
+
+  /** Close a session this controller started and could not finish setting up. */
+  private async closeQuietly(botName: string, runtimeId: string): Promise<void> {
+    try {
+      await this.gateway.request('session.close', { session_id: runtimeId, profile: botName })
+    } catch (error) {
+      this.noteRpcFailure('session.close', error)
+    }
   }
 
   /**
@@ -2675,7 +3382,18 @@ export class ChatController {
       throw new Error(`${botName} is not on the roster.`)
     }
 
-    const current = this.chats.getState().chats[botName]?.runtimeSessionId
+    /*
+      The conversation being put away is the GROUP chat. Under the bot's key
+      that is the chat on screen — unless the key is parked in one of the
+      reader's own chats, which must never be retired as though it were the
+      Bot Chat. Then the group chat is resumed by its own id.
+    */
+    const parked = this.boundOwnId(botName)
+    const current = parked
+      ? bot.canonical?.id
+        ? await this.runtimeIdFor(botName, bot.canonical.id)
+        : undefined
+      : this.chats.getState().chats[botName]?.runtimeSessionId
     const incoming = await this.runtimeIdFor(botName, storedId)
     const retired = `${CANONICAL_CHAT_TITLE} · ${localStamp(this.now())}`
 
@@ -2722,6 +3440,12 @@ export class ChatController {
       })
     } catch (error) {
       this.noteRpcFailure('session.set_hidden', error)
+    }
+
+    if (parked) {
+      // The reader asked for this conversation to be the group chat, so the
+      // group chat is where they are now.
+      this.userChats?.rememberCurrent?.(botName, null)
     }
 
     await this.switchCanonical(bot, {
@@ -3157,7 +3881,9 @@ export class ChatController {
 
     try {
       await this.cache.write({
-        bot: botName,
+        // Per conversation: an own chat under the bot's key is written under
+        // `bot#<storedId>`, never over the group chat's entry.
+        bot: this.cacheKeyOf(botName),
         itemsJson: JSON.stringify(snapshot),
         lastRowId: snapshot.lastRowId ?? null,
         lastSeq: snapshot.lastSeq,
@@ -3179,8 +3905,29 @@ export class ChatController {
    * read; it deliberately does NOT detach, so bot-to-bot traffic keeps arriving.
    */
   async closeChat(botName: string): Promise<void> {
-    this.bots.getState().markSeen(botName, Math.floor(this.now() / 1000))
+    this.markLeft(botName)
     await this.persist(botName)
+  }
+
+  /**
+   * The reader is leaving whatever is under this key: its watermark moves, under
+   * the key of the conversation it IS — `bot#<storedId>` while parked in one of
+   * their own chats, so the group chat's badge is left alone.
+   */
+  private markLeft(botName: string): void {
+    const key = this.readKeyFor(botName)
+    const bots = this.bots.getState()
+
+    bots.markSeen(key, Math.floor(this.now() / 1000))
+
+    const chat = this.chats.getState().chats[botName]
+
+    if (key !== botName && !botName.includes('#') && chat) {
+      // A listing row carries a count and no activity time, so an own chat that
+      // is not open is called unread by counting (`isOwnUnread`). The larger of
+      // what the gateway reported on open and what this transcript now holds.
+      bots.markSeenCount(key, Math.max(this.openedCounts.get(key) ?? 0, countPersistedRows(chat)))
+    }
   }
 
   private requireRuntime(botName: string): string {
@@ -3196,12 +3943,60 @@ export class ChatController {
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
-/** `2026-09-21 23:16`, in the reader's own zone — a retired chat is filed by when they left it. */
-function localStamp(now: number): string {
+const collapse = (value: unknown): string => (typeof value === 'string' ? value : '').replace(/\s+/gu, ' ').trim()
+
+/**
+ * `2026-09-21 23:16`, in the reader's own zone — a retired chat is filed by when
+ * they left it, a new own chat by when it was started. `seconds` adds `:ss`, for
+ * the one retry after a title clash within the same minute.
+ */
+function localStamp(now: number, seconds = false): string {
   const at = new Date(now)
   const pad = (value: number): string => String(value).padStart(2, '0')
+  const minute = `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`
 
-  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`
+  return seconds ? `${minute}:${pad(at.getSeconds())}` : minute
+}
+
+/** A label the reader gave, cut to what an own chat's name may carry. */
+function cutLabel(label: string): string {
+  const clean = collapse(label)
+
+  return clean.length > OWN_CHAT_LABEL_MAX ? clean.slice(0, OWN_CHAT_LABEL_MAX).trim() : clean
+}
+
+/**
+ * The gateway's "that title is taken" (`hermes_state_titles.py`, 4022).
+ *
+ * Read off the error's own code where the channel kept it, and off the
+ * serialized JSON-RPC error otherwise — the same two shapes
+ * `describeRpcFailure` reads.
+ */
+const TITLE_CLASH_CODE = 4022
+
+function isTitleClash(error: unknown): boolean {
+  if (error && typeof error === 'object' && (error as { code?: unknown }).code === TITLE_CLASH_CODE) {
+    return true
+  }
+
+  return describeRpcFailure('session.title', error, 0).code === TITLE_CLASH_CODE
+}
+
+/** `bot` bound to one of the reader's own chats, or to its group chat with `null`. */
+function botOn(bot: Bot, own: BotCanonicalSession | null): Bot {
+  if (own) {
+    return { ...bot, current: own }
+  }
+
+  if (!bot.current) {
+    return bot
+  }
+
+  const rest = { ...bot }
+
+  delete rest.current
+
+  return rest
 }
 
 const retireFailed = (reason: string): string =>

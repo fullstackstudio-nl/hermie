@@ -74,6 +74,7 @@ function makeController() {
   return {
     openChat: jest.fn(async () => undefined),
     closeChat: jest.fn(async () => undefined),
+    readKeyFor: (name: string) => name,
     send: jest.fn(async () => undefined),
     stopTurn: jest.fn(async () => undefined),
     acknowledgeApproval: jest.fn(async () => undefined),

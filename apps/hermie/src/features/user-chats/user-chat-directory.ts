@@ -20,7 +20,15 @@
  */
 import type { ChatGateway } from '../../gateway/link'
 import type { Bot, BotCanonicalSession } from '../../store/bots'
-import { type ChatChoice, type ChatIdentity, resolveUserChat, userChatTitle } from './user-chat'
+import type { CurrentResolution } from '../bots/bots-controller'
+import {
+  type ChatChoice,
+  type ChatIdentity,
+  lookupOwnChatById,
+  lookupOwnChatByTitle,
+  resolveUserChat,
+  userChatTitle
+} from './user-chat'
 
 export interface UserChatDirectoryOptions {
   gateway: ChatGateway
@@ -28,12 +36,23 @@ export interface UserChatDirectoryOptions {
   identity: () => ChatIdentity | null
   /** Which chat the reader asked for on this bot. */
   choice: (botName: string) => ChatChoice
+  /**
+   * Which conversation the reader's memory puts this bot on (sub-chats): a
+   * stored id, `null` for a legacy entry (the bare-lead chat, by title), or
+   * `undefined` for the group chat. See `currentTargetOf` in the layout store.
+   *
+   * Optional so the two-position switch can still be built without it; a
+   * directory without it answers `undefined` everywhere, which is "the group
+   * chat" and the old behaviour.
+   */
+  target?: (botName: string) => string | null | undefined
 }
 
 export class UserChatDirectory {
   private readonly gateway: ChatGateway
   private readonly identity: () => ChatIdentity | null
   private readonly choice: (botName: string) => ChatChoice
+  private readonly targetOf: ((botName: string) => string | null | undefined) | null
   private readonly known = new Map<string, BotCanonicalSession>()
   private readonly running = new Map<string, Promise<BotCanonicalSession>>()
   /** The title the memo above belongs to, so a new person starts empty. */
@@ -43,6 +62,45 @@ export class UserChatDirectory {
     this.gateway = options.gateway
     this.identity = options.identity
     this.choice = options.choice
+    this.targetOf = options.target ?? null
+  }
+
+  /** Whether this directory knows about sub-chats at all (see `target`). */
+  get tracksCurrent(): boolean {
+    return this.targetOf !== null
+  }
+
+  /**
+   * Where the reader's memory puts this bot: a stored id, `null` for a legacy
+   * entry, `undefined` for the group chat — and `undefined` on a gateway that
+   * named nobody, which has no own chats to be on.
+   */
+  target(botName: string): string | null | undefined {
+    return this.available && this.targetOf ? this.targetOf(botName) : undefined
+  }
+
+  /**
+   * Find the conversation `target` names, WITHOUT minting anything.
+   *
+   * An id is looked up in the profile's listing; a legacy entry by the bare
+   * lead's title. A failed listing throws rather than answering `missing`,
+   * because the caller forgets the memory on `missing` and a gateway that is
+   * restarting has not deleted anybody's chat.
+   */
+  async resolveTarget(bot: Bot): Promise<CurrentResolution> {
+    const target = this.target(bot.name)
+    const lead = this.title
+
+    if (target === undefined || !lead) {
+      return { kind: 'group' }
+    }
+
+    const session =
+      target === null
+        ? await lookupOwnChatByTitle({ gateway: this.gateway, profile: bot.name, title: lead })
+        : await lookupOwnChatById({ gateway: this.gateway, profile: bot.name, lead, storedId: target })
+
+    return session ? { kind: 'own', session, legacy: target === null } : { kind: 'missing', legacy: target === null }
   }
 
   /** The title this reader's chats carry, or '' when nobody has been named. */

@@ -13,7 +13,7 @@ import { AppState, type AppStateStatus, Text } from 'react-native'
 import { ChatRuntimeProvider } from '../src/features/chats/ChatRuntime'
 
 const mockRefresh = jest.fn(async () => [])
-const mockPlaceUserChats = jest.fn(async () => undefined)
+const mockPlaceCurrentChats = jest.fn(async () => undefined)
 const mockPaintFromCache = jest.fn(async () => undefined)
 const mockOnForeground = jest.fn(async () => undefined)
 const mockOnBackground = jest.fn()
@@ -47,9 +47,9 @@ jest.mock('../src/features/bots/bots-controller', () => ({
   BotsController: class {
     paintFromCache = mockPaintFromCache
     refresh = mockRefresh
-    // ADR-0007, amended: the runtime re-points the roster at the reader's own
-    // chats once the identity and the arrangement are both in.
-    placeUserChats = mockPlaceUserChats
+    // Sub-chats: the runtime places each bot's remembered conversation on the
+    // roster once the identity and the arrangement are both in.
+    placeCurrentChats = mockPlaceCurrentChats
     dispose = jest.fn()
   }
 }))

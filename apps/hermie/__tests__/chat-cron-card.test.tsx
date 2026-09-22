@@ -148,6 +148,7 @@ function makeController() {
   return {
     acknowledgeApproval: jest.fn(async () => undefined),
     closeChat: jest.fn(async () => undefined),
+    readKeyFor: (name: string) => name,
     interruptSubagent: jest.fn(async () => true),
     lockClarify: jest.fn(async () => undefined),
     modelOptions: jest.fn(async () => []),

@@ -147,6 +147,7 @@ jest.mock('../src/gateway', () => ({
 const mockController = {
   openChat: jest.fn(async () => undefined),
   closeChat: jest.fn(async () => undefined),
+  readKeyFor: (name: string) => name,
   refreshOptions: jest.fn(async () => undefined),
   modelOptions: jest.fn(async () => [])
 }

@@ -8,7 +8,7 @@
  * the controller a literal instead of either.
  */
 import type { Bot, BotCanonicalSession } from '../../store/bots'
-import type { UserChatSource } from '../bots/bots-controller'
+import type { CurrentResolution, UserChatSource } from '../bots/bots-controller'
 import type { ChatChoice } from './user-chat'
 
 export interface UserChatSwitch extends UserChatSource {
@@ -27,6 +27,14 @@ export interface UserChatSwitchParts {
   cached: (botName: string) => BotCanonicalSession | null
   resolve: (bot: Bot) => Promise<BotCanonicalSession>
   remember: (botName: string, choice: ChatChoice) => void
+  /**
+   * Sub-chats. All three optional, so the switch keeps building without them;
+   * a switch without `target` is one where every bot is on its group chat
+   * unless the old two-position switch moved it.
+   */
+  target?: (botName: string) => string | null | undefined
+  resolveTarget?: (bot: Bot) => Promise<CurrentResolution>
+  rememberCurrent?: (botName: string, storedId: string | null, options?: { chore?: boolean }) => void
 }
 
 export function userChatSwitch(parts: UserChatSwitchParts): UserChatSwitch {
@@ -40,6 +48,9 @@ export function userChatSwitch(parts: UserChatSwitchParts): UserChatSwitch {
     chose: parts.chose,
     cached: parts.cached,
     resolve: parts.resolve,
-    remember: parts.remember
+    remember: parts.remember,
+    ...(parts.target ? { target: parts.target } : {}),
+    ...(parts.resolveTarget ? { resolveTarget: parts.resolveTarget } : {}),
+    ...(parts.rememberCurrent ? { rememberCurrent: parts.rememberCurrent } : {})
   }
 }

@@ -47,6 +47,7 @@ import type { SessionListRow } from '@hermes/shared/gateway-contract'
 import type { ChatGateway } from '../../gateway/link'
 import type { BotCanonicalSession } from '../../store/bots'
 import { PROFILE_SESSION_LIST_LIMIT, SESSION_COLUMNS } from '../bots/bots-controller'
+import { isOwnChatTitle } from '../sessions/session-model'
 
 /**
  * What a private chat's title starts with.
@@ -224,8 +225,10 @@ export async function lookupUserChat(input: ResolveUserChatInput): Promise<BotCa
     )
   }
 
-  const match = rows.find(row => collapse(row.title) === input.title)
+  return sessionOfRow(rows.find(row => collapse(row.title) === input.title))
+}
 
+function sessionOfRow(match: SessionListRow | undefined): BotCanonicalSession | null {
   if (!match?.id) {
     return null
   }
@@ -237,4 +240,64 @@ export async function lookupUserChat(input: ResolveUserChatInput): Promise<BotCa
     lastActive: typeof match.started_at === 'number' ? match.started_at : 0,
     messageCount: typeof match.message_count === 'number' ? match.message_count : 0
   }
+}
+
+/**
+ * One of the reader's own chats on this bot, by the title it carries — the
+ * lookup a legacy `myChats` entry resolves through (sub-chats).
+ *
+ * The same exact-title lookup `lookupUserChat` runs, under the name the
+ * sub-chats code reads it by: a legacy entry means "the bare-lead chat", and
+ * the bare lead is a title. Lookup only. Nothing on the sub-chats side mints on
+ * a miss; only "New chat" creates.
+ */
+export function lookupOwnChatByTitle(input: ResolveUserChatInput): Promise<BotCanonicalSession | null> {
+  return lookupUserChat(input)
+}
+
+export interface LookupOwnChatByIdInput {
+  gateway: ChatGateway
+  profile: string
+  /** The lead this reader's chats carry, `Chat · <their name>`. */
+  lead: string
+  /** The STORED id the reader's memory names. */
+  storedId: string
+}
+
+/**
+ * One of the reader's own chats on this bot, by the stored id a device
+ * remembered for it (`chat-layout.current`).
+ *
+ * `session.list` has no id filter, so this is one profile listing and a scan.
+ * A row only counts while it still wears this reader's title family: an id is
+ * an address, and an address that now names somebody else's chat — or the
+ * group chat, after an adopt — is not the reader's chat any more.
+ *
+ * Answers `null` when the listing does not hold it (deleted, or renamed out of
+ * the family) and THROWS when the listing failed. The two are kept apart
+ * because the caller forgets a remembered id on the first and must not on the
+ * second: a gateway that is restarting has not deleted anybody's chat.
+ */
+export async function lookupOwnChatById(input: LookupOwnChatByIdInput): Promise<BotCanonicalSession | null> {
+  let rows: SessionListRow[]
+
+  try {
+    const result = await input.gateway.request('session.list', {
+      profile: input.profile,
+      limit: PROFILE_SESSION_LIST_LIMIT,
+      include_hidden: true
+    })
+
+    rows = result?.sessions ?? []
+  } catch (error) {
+    throw new Error(
+      `Could not list ${input.profile}'s conversations (${error instanceof Error ? error.message : String(error)}).`
+    )
+  }
+
+  return sessionOfRow(
+    rows.find(
+      row => (row.id === input.storedId || row.resolved_id === input.storedId) && isOwnChatTitle(row.title, input.lead)
+    )
+  )
 }

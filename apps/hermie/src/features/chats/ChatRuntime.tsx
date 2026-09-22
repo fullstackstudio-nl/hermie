@@ -21,7 +21,7 @@ import { RUNS_ON_MAC } from '../../platform/runs-on-mac'
 import { shareInbox } from '../../platform/share-inbox'
 import { useAppStampStore } from '../../store/app-stamp'
 import { useBotsStore } from '../../store/bots'
-import { useChatLayoutStore } from '../../store/chat-layout'
+import { currentTargetOf, useChatLayoutStore } from '../../store/chat-layout'
 import { useChatsStore } from '../../store/chats'
 import { OWNER_USER_ID, useDeviceContextStore } from '../../store/device-context'
 import { useVoiceSettingsStore } from '../voice/voice-settings'
@@ -316,7 +316,10 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
 
         return context.userId ? { userId: context.userId, displayName: context.displayName } : null
       },
-      choice: name => (useChatLayoutStore.getState().myChats[name] ? 'mine' : 'shared')
+      choice: name => (useChatLayoutStore.getState().myChats[name] ? 'mine' : 'shared'),
+      // Sub-chats: which conversation the reader's memory puts each bot on — a
+      // stored id, a legacy entry (`null`), or the group chat (`undefined`).
+      target: name => currentTargetOf(useChatLayoutStore.getState(), name)
     })
     const userChatsSwitch = userChatSwitch({
       available: () => userChats.available,
@@ -324,7 +327,10 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       chose: name => userChats.chose(name),
       cached: name => userChats.cached(name),
       resolve: bot => userChats.resolve(bot),
-      remember: (name, choice) => useChatLayoutStore.getState().setMyChat(name, choice === 'mine')
+      remember: (name, choice) => useChatLayoutStore.getState().setMyChat(name, choice === 'mine'),
+      target: name => userChats.target(name),
+      resolveTarget: bot => userChats.resolveTarget(bot),
+      rememberCurrent: (name, storedId, options) => useChatLayoutStore.getState().setCurrent(name, storedId, options)
     })
     const bots = new BotsController({
       gateway,
@@ -347,6 +353,17 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       ready: () => hydrated.current
     })
     const stopWatching = uiMeta.start()
+    /*
+      Another device picked a conversation (or this one did, or a legacy entry
+      resolved): place it on the roster for every bot whose chat is NOT bound
+      here. A bound one is left where it is and follows on its next open
+      (Owner Decision 4) — `placeCurrentChats` skips it.
+    */
+    const stopFollowingCurrent = useChatLayoutStore.subscribe((state, previous) => {
+      if (state.current !== previous.current || state.myChats !== previous.myChats) {
+        void bots.placeCurrentChats().catch(() => undefined)
+      }
+    })
     // Built with the connection for the same reason the bridge above is: the
     // roster and the open chats are emptied when a connection goes, and a sync
     // that outlived one would keep writing the previous gateway's bots onto the
@@ -560,6 +577,7 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       controller.stop()
       bots.dispose()
       stopWatching()
+      stopFollowingCurrent()
       stopWidgets()
       stopPush()
       stopShareBus()
@@ -648,7 +666,7 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
         re-read a roster that has not changed to learn something that is not on
         it (ADR-0007, amended).
       */
-      await value.bots.placeUserChats().catch(() => undefined)
+      await value.bots.placeCurrentChats().catch(() => undefined)
     })()
   }, [config, http, status, value])
 
