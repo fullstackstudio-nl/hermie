@@ -32,7 +32,7 @@
  */
 import { escapeHtml } from '../setup'
 import type { WebLocale, WebStrings } from '../i18n'
-import { adminBarePage, adminShell, card, csrfField, type AdminChrome } from './layout'
+import { barePage, adminShell, card, csrfField, type AdminChrome } from './layout'
 import { PUSH_TYPES } from '../push/registrations'
 import type { AdminState, AdminUserRow } from './state'
 
@@ -141,7 +141,7 @@ export function adminSignInPage(input: {
 }): string {
   const { common, admin } = input.strings
 
-  return adminBarePage({
+  return barePage({
     brand: input.brand,
     title: common.administration,
     locale: input.locale,
@@ -169,7 +169,7 @@ export function adminForbiddenPage(input: {
 }): string {
   const text = input.strings.admin.forbidden
 
-  return adminBarePage({
+  return barePage({
     brand: input.brand,
     title: text.title,
     locale: input.locale,

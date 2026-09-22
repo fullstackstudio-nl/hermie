@@ -283,7 +283,7 @@ describe('accounts', () => {
     expect(confirmation).toContain('<h1>Your password is set</h1>')
     expect(confirmation).not.toContain('Sign-in failed')
     // And a way onward, on this origin, named after the deployment.
-    expect(confirmation).toContain('<a href="/">Back to Hermie Web</a>')
+    expect(confirmation).toContain('<a href="/">Back to Hermie</a>')
 
     // The link is spent: it cannot set a second password.
     expect(await (await submit('somebody else’s password')).text()).toContain('has been used or has expired')
@@ -324,7 +324,7 @@ describe('accounts', () => {
 
     expect(confirmation).toContain('<html lang="nl">')
     expect(confirmation).toContain('Je wachtwoord staat ingesteld')
-    expect(confirmation).toContain('Terug naar Hermie Web')
+    expect(confirmation).toContain('Terug naar Hermie')
     expect(confirmation).not.toContain('Inloggen mislukt')
   })
 

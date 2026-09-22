@@ -312,8 +312,10 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
     read: () => oidc,
     write: writeOidc,
     // The team's own name where one is set, so the sign-in page a reader lands
-    // on says what they think they are signing in to rather than what we call it.
-    issuerName: () => admin.branding.name || 'Hermie Web',
+    // on says what they think they are signing in to rather than what we call
+    // it. The same fallback `brandOf` uses, so the provider's pages and the
+    // administration's call one deployment one thing.
+    issuerName: () => admin.branding.name || 'Hermie',
     /*
       Where the provider's own pages send somebody onward.
 

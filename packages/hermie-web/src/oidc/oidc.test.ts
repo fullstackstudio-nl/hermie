@@ -809,3 +809,46 @@ describe('off by default', () => {
     expect(body).not.toContain('RECOVERYCODE0001')
   })
 })
+
+/**
+ * What the provider's own pages look like, which is the deployment they belong
+ * to.
+ *
+ * Somebody following an invitation link has never seen this service before and
+ * has no way to tell a real one from a page that fetched them. Unstyled HTML
+ * reads like a broken page and teaches people to ignore how a sign-in looks, so
+ * the mark and the operator's own name are on every page here — and they are
+ * asserted, because a style sheet that quietly stops being included is invisible
+ * to every other test in this file.
+ */
+describe('the provider’s pages wear the deployment’s chrome', () => {
+  it('puts the mark and the branding name on the sign-in page, with no script', async () => {
+    const page = await fetch(authorizeUrl(pkce()))
+    const body = await page.text()
+
+    expect(page.status).toBe(200)
+    expect(body).toContain('<svg class="mark"')
+    expect(body).toContain('<span class="brand-name">Hermie</span>')
+    expect(body).toContain('<title>Sign in to Hermie</title>')
+    // Light and dark, from the reader's own setting; there is nothing to click.
+    expect(body).toContain('prefers-color-scheme: dark')
+    expect(body).not.toContain('<script')
+    // And no search engine has any business here.
+    expect(body).toContain('name="robots"')
+  })
+
+  it('puts it on the refusals too, which is where a reader is most at sea', async () => {
+    const page = await fetch(authorizeUrl({ ...pkce(), clientId: 'somebody-else' }))
+    const body = await page.text()
+
+    expect(page.status).toBe(400)
+    expect(body).toContain('<svg class="mark"')
+    expect(body).toContain('<h1>Sign-in failed</h1>')
+  })
+
+  it('names the deployment once in the tab, not twice', async () => {
+    const page = await fetch(authorizeUrl(pkce()))
+
+    expect(await page.text()).not.toContain('Sign in to Hermie — Hermie')
+  })
+})

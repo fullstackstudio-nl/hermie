@@ -959,7 +959,12 @@ export class OidcRouter {
     this.html(
       response,
       status,
-      oidcErrorPage({ ...copy, code, detail: typeof sentence === 'string' ? sentence : sentence(copy.strings) })
+      oidcErrorPage({
+        ...copy,
+        code,
+        detail: typeof sentence === 'string' ? sentence : sentence(copy.strings),
+        issuerName: this.options.issuerName()
+      })
     )
   }
 

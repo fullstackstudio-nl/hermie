@@ -239,7 +239,14 @@ export interface WebStrings {
       danger: string
     }
     footer: {
-      version: (brand: string, version: string) => string
+      /**
+       * The software and its version.
+       *
+       * Deliberately not the deployment's name: the header already carries
+       * that, and a footer that repeated it would say "Acme Chat — Acme Chat".
+       * What an operator needs down here is what this IS and which build.
+       */
+      version: (version: string) => string
     }
     overview: {
       title: string
@@ -632,7 +639,7 @@ const EN: WebStrings = {
       danger: 'Danger zone'
     },
     footer: {
-      version: (brand, version) => `${brand} — Hermie Web ${version}`
+      version: version => `Hermie Web ${version}`
     },
     overview: {
       title: 'Overview',
@@ -1062,7 +1069,7 @@ const NL: WebCatalogue<WebStrings> = {
       danger: 'Gevarenzone'
     },
     footer: {
-      version: (brand, version) => `${brand} — Hermie Web ${version}`
+      version: version => `Hermie Web ${version}`
     },
     overview: {
       title: 'Overzicht',
@@ -1477,7 +1484,7 @@ const DE: WebCatalogue<WebStrings> = {
       danger: 'Gefahrenzone'
     },
     footer: {
-      version: (brand, version) => `${brand} — Hermie Web ${version}`
+      version: version => `Hermie Web ${version}`
     },
     overview: {
       title: 'Übersicht',

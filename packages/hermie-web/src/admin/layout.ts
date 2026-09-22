@@ -306,6 +306,9 @@ const STYLE = `
   /* The enrolment page's numbered steps and its one-time recovery codes. */
   ol, ul { color: var(--muted); padding-left: 1.2rem; font-size: 0.9rem; margin: 0 0 var(--s4) }
   li { margin-bottom: var(--s1) }
+
+  /* The enrolment page's numbered steps and its one-time recovery codes. */
+  ol { color: var(--muted); padding-left: 1.2rem; font-size: 0.9rem; margin: 0 0 var(--s4) }
   .codes {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -414,7 +417,7 @@ export function adminShell(chrome: AdminChrome, page: { title: string; intro?: s
 </div>
 <footer>
   <div class="footer-inner">
-    <span class="note">${strings.admin.footer.version(escapeHtml(chrome.brand), escapeHtml(chrome.version))}</span>
+    <span class="note">${strings.admin.footer.version(escapeHtml(chrome.version))}</span>
     <form method="post" action="/admin/update">
       <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(chrome.csrf)}">
       ${
@@ -439,18 +442,30 @@ export function adminShell(chrome: AdminChrome, page: { title: string; intro?: s
  * pages they cannot open is both useless to them and an inventory for anybody
  * else.
  */
-export function adminBarePage(input: {
+export function barePage(input: {
   brand: string
+  /** The `<h1>`. */
   title: string
+  /**
+   * The whole `<title>`, where the heading plus the brand will not do.
+   *
+   * Taken verbatim: "Sign in to Acme Chat" already names the deployment, and
+   * appending it again gives a tab reading "Sign in to Acme Chat — Acme Chat".
+   */
+  documentTitle?: string
+  /** `narrow` for a page that is one form: a sign-in has no use for 34rem. */
+  width?: 'narrow' | 'wide'
   locale: WebLocale
   strings: WebStrings
   body: string
 }): string {
-  return `${head(input.locale, `${input.title} — ${input.brand}`)}<body>
+  const column = input.width === 'narrow' ? '26rem' : '34rem'
+
+  return `${head(input.locale, input.documentTitle ?? `${input.title} — ${input.brand}`)}<body>
 <header class="top">
   <span class="brand">${MARK}<span class="brand-name">${escapeHtml(input.brand)}</span></span>
 </header>
-<div class="shell" style="grid-template-columns: minmax(0, 34rem)">
+<div class="shell" style="grid-template-columns: minmax(0, ${column})">
   <main>
     <h1>${escapeHtml(input.title)}</h1>
     ${input.body}

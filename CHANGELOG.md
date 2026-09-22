@@ -90,6 +90,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nothing at all — so turning it off to test something cannot cost you your own way into
   `/admin`. A state directory written before this reconciles once, on its next start.
 
+
 - **The built-in provider's own pages look like the deployment they belong to.** The sign-in,
   the invitation, the two-factor enrolment, the signed-out page and every refusal were bare
   HTML — which is what a page looks like when its style sheet has failed to load, and these
