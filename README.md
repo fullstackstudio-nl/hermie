@@ -40,13 +40,13 @@ no third-party network call. The only address Hermie knows is the one you typed.
 
 <table>
   <tr>
-    <td width="33%"><img src="docs/screenshots/chats.png" alt="The chat list on an iPhone: a search field above two rows — Researcher with a photo avatar and Writer with a generated W on a tinted disc, each carrying a green online bead, and a blue unread dot beside Writer"></td>
-    <td width="33%"><img src="docs/screenshots/conversation.png" alt="A conversation with the Researcher bot: a card for the cron job Source scan that was delivered to this chat, an outgoing bot-to-bot line reading Message to @writer, and a long report folded after a few lines behind a Show more link"></td>
-    <td width="33%"><img src="docs/screenshots/approval.png" alt="The approval sheet over a dimmed conversation, headed Permission request for @researcher and asking whether to allow the command rm -rf ./build, with the choices Allow once, Allow for this session, Always allow and Deny"></td>
+    <td width="33%"><img src="docs/screenshots/chats.png" alt="The chat list on an iPhone: Boards, New bot and Edit across the header, a search field, and two rows — researcher with a photo avatar and writer with a generated W on a tinted disc, each carrying a green online bead and a blue unread dot"></td>
+    <td width="33%"><img src="docs/screenshots/conversation.png" alt="A conversation with the researcher bot: a Mermaid flowchart of a token-refresh path folded behind a Show more link, then a question about the backoff answered with a typeset geometric series and the figures that follow from it"></td>
+    <td width="33%"><img src="docs/screenshots/approval.png" alt="The approval sheet over a dimmed conversation, headed Permission request for @researcher and asking Allow this command? over the quoted command rm -rf ./build, its summary and the tool that wants to run it, with the choices Allow once, Allow for this session, Always allow and Deny"></td>
   </tr>
   <tr>
     <td>The chat list</td>
-    <td>A conversation, with bot-to-bot traffic in it</td>
+    <td>A conversation, with a diagram and a formula in it</td>
     <td>An approval, asked and answered</td>
   </tr>
 </table>
@@ -461,7 +461,7 @@ conversation instead of squeezing it again, and it closes as soon as you pick a
 chat. Whether it starts open follows the window's width until you say otherwise;
 after that it is remembered, per gateway, like the rest of your arrangement.
 
-<img src="docs/screenshots/wide.png" alt="Hermie on an iPad: the chat list as a sidebar on the left with Researcher selected, and the conversation filling the panel beside it — incoming replies against the left edge of that panel, the owner's own messages against its right edge, and a tool card and a cron result between them" width="760">
+<img src="docs/screenshots/wide.png" alt="Hermie on an iPad: the chat list as a sidebar on the left with researcher pinned above a Writing folder and selected, and the conversation filling the column beside it — incoming replies against the left edge of that column, the owner's own messages against its right edge, and an outgoing bot-to-bot line, a cron result and a folded report between them" width="760">
 
 The Mac is not a separate port. It is the iOS app, which Apple runs on Apple
 Silicon Macs unmodified, so it has the same keychain, the same modules and the
