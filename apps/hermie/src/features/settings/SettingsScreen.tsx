@@ -25,6 +25,7 @@ import { useEscapeKey } from '../../ui/useEscapeKey'
 import { useHardwareBack } from '../../ui/useHardwareBack'
 import { FORM_MAX_WIDTH } from '../../ui/tokens'
 import { ConnectorsScreen, connectorStrings } from '../connectors'
+import { LogsScreen, logStrings } from '../logs'
 import { McpScreen, mcpStrings } from '../mcp'
 import { NewBotFlow, profileStrings } from '../profiles'
 import { SkillsScreen, skillStrings } from '../skills'
@@ -77,6 +78,7 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
   const [showSkills, setShowSkills] = useState(false)
   const [showMcp, setShowMcp] = useState(false)
   const [showConnectors, setShowConnectors] = useState(false)
+  const [showLogs, setShowLogs] = useState(false)
   const [showNewBot, setShowNewBot] = useState(false)
 
   // Escape goes back ONE level: out of a screen Settings opened and into
@@ -91,6 +93,7 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
       setShowSkills(false)
       setShowMcp(false)
       setShowConnectors(false)
+      setShowLogs(false)
     },
     showConnectionTest ||
       showGallery ||
@@ -99,7 +102,8 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
       showMemory ||
       showSkills ||
       showMcp ||
-      showConnectors
+      showConnectors ||
+      showLogs
   )
 
   // The same one level for Android's back button, which is not Escape and has
@@ -117,6 +121,7 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
       setShowSkills(false)
       setShowMcp(false)
       setShowConnectors(false)
+      setShowLogs(false)
     },
     showConnectionTest ||
       showGallery ||
@@ -125,7 +130,8 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
       showMemory ||
       showSkills ||
       showMcp ||
-      showConnectors
+      showConnectors ||
+      showLogs
   )
 
   // A screen opened from here REPLACES Settings rather than pushing onto a
@@ -162,6 +168,10 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
 
   if (showConnectors) {
     return <ConnectorsScreen onClose={() => setShowConnectors(false)} />
+  }
+
+  if (showLogs) {
+    return <LogsScreen onClose={() => setShowLogs(false)} />
   }
 
   const token = config?.authMode === 'session_token'
@@ -249,6 +259,17 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
                   ? strings.settings.pluginInstalled(advert?.version ?? '')
                   : strings.settings.pluginAbsent
             }
+          />
+          {/*
+            The gateway's own log files, over `GET /api/logs`. It is the only
+            surface a client has for them — there is no socket method — and a
+            gateway that does not serve the route gets the command instead of
+            an empty page.
+          */}
+          <InsetButtonRow
+            detail={logStrings.settings.hint}
+            onPress={() => setShowLogs(true)}
+            title={logStrings.settings.row}
           />
         </InsetGroup>
 

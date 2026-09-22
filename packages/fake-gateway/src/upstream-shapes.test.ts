@@ -2447,6 +2447,114 @@ describe('skills.manage over the socket — methods_tools.py::_SKILLS_ACTIONS', 
  * such method: upstream registers it and generates it, this repo's copy of the
  * contract predates that, and without a fixture nothing here would notice.
  */
+/**
+ * `GET /api/logs` — `hermes_cli/web_routers/status.py::get_logs`.
+ *
+ * This is the WHOLE of the gateway's log surface for a client. Upstream
+ * registers no socket method for logs at all (`groups.log` is a hosted room's
+ * event log and `subagent.tail` is a child's transcript), and this route
+ * answers a tail and hangs up — no follow, no stream, no websocket.
+ *
+ * Pinned because every one of its edges is a place a client reads the wrong
+ * thing: an absent file is a 200 rather than a 404, `level` is a MINIMUM rather
+ * than an equality, an unknown component is a refusal, and the 500-line ceiling
+ * is applied in silence.
+ */
+describe('GET /api/logs — status.py::get_logs', () => {
+  const read = async (query: string): Promise<{ status: number; body: Record<string, unknown> }> => {
+    const response = await fetch(`${gateway.url}/api/logs${query}`)
+
+    return { status: response.status, body: (await response.json()) as Record<string, unknown> }
+  }
+
+  it('answers {file, lines} and nothing else', async () => {
+    const { status, body } = await read('?file=gateway')
+
+    expect(status).toBe(200)
+    expect(keysOf(body)).toEqual(['file', 'lines'])
+    expect(body.file).toBe('gateway')
+    expect(Array.isArray(body.lines)).toBe(true)
+  })
+
+  it('refuses a file name that is not in LOG_FILES', async () => {
+    const { status, body } = await read('?file=secrets')
+
+    expect(status).toBe(400)
+    expect(String(body.detail)).toMatch(/Unknown log file/u)
+  })
+
+  /**
+   * The answer a client most easily reads as a failure. `get_logs` checks
+   * `log_path.exists()` first, so a log the gateway has never written is a
+   * successful empty answer — not a 404, and not a reason to tell somebody
+   * their gateway cannot serve logs.
+   */
+  it('answers 200 with no lines for a file that is not on disk', async () => {
+    const { status, body } = await read('?file=desktop')
+
+    expect(status).toBe(200)
+    expect(body.lines).toEqual([])
+  })
+
+  /** `level` is a FLOOR. Asking for WARNING must not hide the ERROR above it. */
+  it('filters by a MINIMUM level rather than an exact one', async () => {
+    const { body } = await read('?file=gateway&level=WARNING')
+    const lines = body.lines as string[]
+
+    expect(lines.some(line => line.includes('WARNING'))).toBe(true)
+    expect(lines.some(line => line.includes('ERROR'))).toBe(true)
+    expect(lines.some(line => line.includes(' INFO '))).toBe(false)
+    expect(lines.some(line => line.includes('DEBUG'))).toBe(false)
+  })
+
+  /**
+   * `ALL` and an absent level mean the same thing, and both have to mean "no
+   * filter". Upstream comments on this exact trap: an empty tuple reads as
+   * "must match a prefix" and silently drops every line.
+   */
+  it('treats ALL and an absent level alike, as no filter at all', async () => {
+    const all = (await read('?file=gateway&level=ALL')).body.lines as string[]
+    const none = (await read('?file=gateway')).body.lines as string[]
+
+    expect(all).toEqual(none)
+    expect(all.length).toBeGreaterThan(0)
+  })
+
+  it('refuses a component COMPONENT_PREFIXES does not know', async () => {
+    const { status, body } = await read('?file=gateway&component=nope')
+
+    expect(status).toBe(400)
+    expect(String(body.detail)).toMatch(/Unknown component/u)
+  })
+
+  it('searches case-insensitively, as a substring and never as a pattern', async () => {
+    const hit = (await read('?file=gateway&search=LISTENING')).body.lines as string[]
+    const miss = (await read('?file=gateway&search=.*')).body.lines as string[]
+
+    expect(hit).toHaveLength(1)
+    expect(hit[0]).toContain('listening')
+    expect(miss).toEqual([])
+  })
+
+  /**
+   * A traceback's body has no level of its own. It comes back as part of the
+   * tail, which is why the app parses a level per line and leaves a
+   * continuation line unclassified instead of inheriting the line above.
+   */
+  it('returns continuation lines with no level in them', async () => {
+    const lines = (await read('?file=gateway')).body.lines as string[]
+
+    expect(lines.some(line => line.startsWith('Traceback'))).toBe(true)
+  })
+
+  it('clamps the line count in silence', async () => {
+    const { body } = await read('?file=gateway&lines=99999')
+
+    expect((body.lines as string[]).length).toBeLessThanOrEqual(500)
+    expect(body.truncated).toBeUndefined()
+  })
+})
+
 describe('connectors.* over the socket — methods_connectors.py', () => {
   const harness = socketHarness()
 

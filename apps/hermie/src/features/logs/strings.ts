@@ -1,0 +1,78 @@
+/**
+ * Every literal the gateway-logs page paints.
+ *
+ * The two that carry an argument are `tailHint` and `absent`. The first says
+ * the page POLLS, because `/api/logs` has no follow and calling a one-second
+ * refetch a "live tail" would be a claim about the gateway that is not true.
+ * The second is what a gateway without the route gets: the real command, not
+ * an empty page and not a scrape.
+ */
+export const logStrings = {
+  settings: {
+    row: 'Logs',
+    hint: 'What the gateway has been writing down'
+  },
+
+  title: 'Gateway logs',
+  back: 'Settings',
+
+  loading: 'Reading the log…',
+  failed: (reason: string) => `Could not read the log: ${reason}`,
+
+  /** A file that exists as a name but has nothing in it yet. */
+  empty: 'This log is empty.',
+  /** A filter that matched nothing, which is not the same as an empty file. */
+  noMatches: 'No lines match those filters.',
+
+  /**
+   * The gateway has no `/api/logs`.
+   *
+   * Every route on this page is one call, so a 404 is the whole answer: the
+   * gateway is older than the route, or its dashboard is not mounted. The page
+   * says so and names the command, because the alternative — reading the files
+   * off the host some other way — is a scrape, and a scrape of somebody else's
+   * machine is not something this app should invent.
+   */
+  absent: 'This gateway does not serve its logs over the API.',
+  absentHint: 'Read them on the machine that runs it:',
+  command: 'hermes logs gateway -f',
+
+  file: 'FILE',
+  /** The six names `hermes_cli/logs.py::LOG_FILES` maps, in its own order. */
+  files: {
+    agent: 'Agent',
+    errors: 'Errors',
+    gateway: 'Gateway',
+    gui: 'Dashboard',
+    desktop: 'Desktop',
+    mcp: 'MCP output'
+  },
+
+  level: 'LEVEL',
+  levelAll: 'All',
+
+  component: 'COMPONENT',
+  componentAll: 'All',
+
+  search: 'Search',
+  searchPlaceholder: 'Find in these lines',
+
+  /**
+   * Polling, said as polling.
+   *
+   * `/api/logs` answers a tail and hangs up — there is no follow, no stream and
+   * no socket behind it, so this page asks again every few seconds. Pausing
+   * stops asking; it does not stop the gateway writing.
+   */
+  tail: 'Follow',
+  tailOn: 'Following',
+  tailOff: 'Paused',
+  tailHint: 'Follow re-reads the file every few seconds. The gateway offers no live stream, so this is a poll.',
+
+  copy: 'Copy',
+  copied: 'Copied.',
+
+  /** `min(lines, 500)` is the route's own ceiling, so the page says when it hit it. */
+  truncated: (count: number) => `Showing the last ${count} lines — the API will not serve more.`,
+  lineCount: (count: number) => `${count} ${count === 1 ? 'line' : 'lines'}`
+}

@@ -639,6 +639,15 @@ export interface FakeGatewayState {
   /** Skill names installed from the hub over the socket, newest last. */
   skillsInstalled: string[]
   /**
+   * The gateway's log files, by the name `GET /api/logs?file=` looks up.
+   *
+   * Keyed by `hermes_cli/logs.py::LOG_FILES`' KEYS rather than the filenames
+   * they map to, because that is the vocabulary a client sends. A key that is
+   * absent here is a file that does not exist on disk, which the route answers
+   * with an empty list and a 200 — not a 404.
+   */
+  logs: Map<string, string[]>
+  /**
    * The connector catalogue one session can see.
    *
    * Upstream reaches this through `manage_connections`, so the rows are the
@@ -1222,6 +1231,22 @@ function nowSeconds(): number {
 function s256(verifier: string): string {
   return createHash('sha256').update(verifier, 'ascii').digest('base64url')
 }
+
+/** `hermes_cli/logs.py::LOG_FILES`' keys — the vocabulary `?file=` is looked up in. */
+const LOG_FILE_NAMES = new Set(['agent', 'errors', 'gateway', 'gui', 'desktop', 'mcp'])
+
+/** `hermes_logging._LEVEL_ORDER`. The `level` filter is a MINIMUM, not an equality. */
+const LOG_LEVEL_ORDER = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+
+/** `hermes_logging.COMPONENT_PREFIXES`, which is what makes an unknown component a 400. */
+const LOG_COMPONENT_PREFIXES = new Map<string, string[]>([
+  ['gateway', ['gateway', 'hermes_plugins', 'plugins.platforms']],
+  ['agent', ['agent', 'run_agent', 'model_tools', 'batch_runner']],
+  ['tools', ['tools']],
+  ['cli', ['hermes_cli', 'cli']],
+  ['cron', ['cron']],
+  ['gui', ['hermes_cli.web_server', 'hermes_cli.pty_bridge', 'hermes_cli.desktop', 'tui_gateway', 'uvicorn']]
+])
 
 function json(res: ServerResponse, status: number, body: unknown): void {
   const text = JSON.stringify(body)
@@ -2201,6 +2226,22 @@ function initialState(options: FakeGatewayOptions): FakeGatewayState {
         statusReason: 'the workspace revoked the token'
       }
     ],
+    logs: new Map<string, string[]>([
+      [
+        'gateway',
+        [
+          '2026-09-22 09:00:00,001 INFO gateway.run: listening on 127.0.0.1:8760',
+          '2026-09-22 09:00:01,114 DEBUG tui_gateway.ws: client attached sess-1',
+          '2026-09-22 09:00:02,900 WARNING gateway.auth: ticket reused within 2s',
+          '2026-09-22 09:00:03,210 ERROR gateway.run: handler raised',
+          'Traceback (most recent call last):',
+          '  File "server.py", line 12, in _dispatch'
+        ]
+      ],
+      ['agent', ['2026-09-22 09:00:00,000 INFO agent.loop: turn started']],
+      // Present as a NAME with nothing in it, which is the 200-with-no-lines case.
+      ['errors', []]
+    ]),
     connectorsUnavailable: false,
     connectorOps: new Map<string, FakeConnectorOp>(),
     connectorSeq: 0,
@@ -2870,6 +2911,82 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
         })),
         overall: 'ok'
       })
+
+      return
+    }
+
+    /**
+     * `GET /api/logs` — `hermes_cli/web_routers/status.py::get_logs`.
+     *
+     * The ONLY way a client reads the gateway's logs. There is no socket
+     * method and nothing here streams, which is why the app's page calls its
+     * refresh a poll rather than a tail.
+     *
+     * Three refusals and one non-refusal are worth having: an unknown `file`
+     * is a 400, an unknown `component` is a 400, a file that is not on disk is
+     * a 200 with no lines, and `lines` is clamped to 500 in SILENCE — a client
+     * asking for more is not told it did not get it.
+     */
+    if (path === '/api/logs') {
+      const file = url.searchParams.get('file') ?? 'agent'
+
+      if (!LOG_FILE_NAMES.has(file)) {
+        json(res, 400, { detail: `Unknown log file: ${file}` })
+
+        return
+      }
+
+      const component = url.searchParams.get('component')
+
+      if (component && component.toLowerCase() !== 'all' && !LOG_COMPONENT_PREFIXES.has(component)) {
+        json(res, 400, {
+          detail: `Unknown component: ${component}. Available: ${[...LOG_COMPONENT_PREFIXES.keys()].sort().join(', ')}`
+        })
+
+        return
+      }
+
+      // A file the gateway has never written. `get_logs` checks `exists()`
+      // before it reads, so this is a 200 and not a 404.
+      const stored = state.logs.get(file)
+
+      if (!stored) {
+        json(res, 200, { file, lines: [] })
+
+        return
+      }
+
+      const level = url.searchParams.get('level')
+      const minLevel = level && level.toUpperCase() !== 'ALL' ? level.toUpperCase() : null
+      const search = url.searchParams.get('search')
+      const wanted = Number.parseInt(url.searchParams.get('lines') ?? '100', 10) || 100
+
+      let lines = stored
+
+      if (minLevel) {
+        const floor = LOG_LEVEL_ORDER.indexOf(minLevel)
+
+        lines = lines.filter(line => {
+          const found = /\s(DEBUG|INFO|WARNING|ERROR|CRITICAL)\s/u.exec(line)
+
+          return found ? LOG_LEVEL_ORDER.indexOf(found[1] as string) >= floor : false
+        })
+      }
+
+      if (component && component.toLowerCase() !== 'all') {
+        const prefixes = LOG_COMPONENT_PREFIXES.get(component) ?? []
+
+        lines = lines.filter(line => prefixes.some(prefix => line.includes(` ${prefix}`)))
+      }
+
+      if (search) {
+        const needle = search.toLowerCase()
+
+        lines = lines.filter(line => line.toLowerCase().includes(needle))
+      }
+
+      // The clamp upstream applies twice, and never mentions.
+      json(res, 200, { file, lines: lines.slice(-Math.min(wanted, 500)) })
 
       return
     }
