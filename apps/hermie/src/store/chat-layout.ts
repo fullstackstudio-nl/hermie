@@ -86,6 +86,17 @@ export interface PersistedLayout {
    */
   myChats?: string[]
   accents: Record<string, AccentName>
+  /**
+   * The name THIS READER gave a bot, by handle. Absent for a bot they have not
+   * named, which is most of them.
+   *
+   * It lives with the arrangement rather than on the bot's own `ui_meta` section
+   * for the reason `mutes` and `myChats` give beside it: a gateway offers a
+   * client no way to write a profile's `display_name` — the only route that
+   * touches it renames the profile instead — so this name is the reader's, not
+   * the profile's, and two people sharing a gateway do not have to agree on it.
+   */
+  labels?: Record<string, string>
   /** Bot name -> the second its silence lapses, or 0 for forever. */
   mutes?: Mutes
   /**
@@ -138,6 +149,14 @@ export interface ChatLayoutState {
    */
   myChats: Record<string, true>
   accents: Record<string, AccentName>
+  /**
+   * What this reader calls each bot, by handle. Absent where they have not said.
+   *
+   * The editable name on the bot's own sheet. It wins over the roster's
+   * `display_name`, which is read-only over every call a client has — see
+   * `PersistedLayout.labels` and `features/bot-rename`.
+   */
+  labels: Record<string, string>
   /**
    * Which chats are silent, and until when.
    *
@@ -212,6 +231,8 @@ export interface ChatLayoutState {
   /** Open this bot as the reader's own chat, or back to the shared one. */
   setMyChat: (botName: string, mine: boolean) => void
   setAccent: (botName: string, accent: AccentName) => void
+  /** Name this bot in this reader's own list; an empty string clears it. */
+  setLabel: (botName: string, label: string) => void
   /** Silence one chat until `until` seconds, `0` for forever, `null` to stop. */
   setMute: (botName: string, until: number | null) => void
   /**
@@ -244,6 +265,7 @@ export interface ChatLayoutState {
     pinned?: string[]
     myChats?: string[]
     accents?: Record<string, AccentName>
+    labels?: Record<string, string>
     mutes?: Mutes
   }) => void
   reset: () => void
@@ -258,6 +280,7 @@ const INITIAL = {
   pinned: {} as Record<string, true>,
   myChats: {} as Record<string, true>,
   accents: {} as Record<string, AccentName>,
+  labels: {} as Record<string, string>,
   mutes: {} as Mutes,
   sidebarCollapsed: undefined as boolean | undefined,
   loaded: false,
@@ -286,6 +309,44 @@ function persist(gatewayKey: string, layout: PersistedLayout): void {
     })
 }
 
+/**
+ * The longest name a reader may give a bot.
+ *
+ * The same 64 the gateway's own display-name setter applies
+ * (`hermes_cli/profiles.py::set_profile_display_name`). Matching it is not
+ * imitation for its own sake: the two names sit in the same place on every row,
+ * so a limit that let one of them be twice as long would let a list drawn from
+ * this store lay out differently from a list drawn from the roster.
+ */
+export const BOT_LABEL_MAX = 64
+
+/**
+ * Read a map of reader-given names defensively.
+ *
+ * It arrives from disk AND from a gateway, so every value is checked: a name is
+ * a non-empty trimmed string within the limit, and anything else is dropped
+ * rather than repaired. An over-long one is CUT rather than discarded — somebody
+ * typed it, and the first sixty-four characters are much closer to what they
+ * meant than nothing at all.
+ */
+function labelsOf(value: unknown): Record<string, string> {
+  const out: Record<string, string> = {}
+
+  for (const [bot, label] of Object.entries((value ?? {}) as Record<string, unknown>)) {
+    if (!bot || typeof label !== 'string') {
+      continue
+    }
+
+    const trimmed = label.trim().slice(0, BOT_LABEL_MAX)
+
+    if (trimmed) {
+      out[bot] = trimmed
+    }
+  }
+
+  return out
+}
+
 /** Read a stored blob defensively: an older build may have written anything. */
 function asLayout(value: unknown): PersistedLayout {
   const raw = (value ?? {}) as Partial<PersistedLayout>
@@ -304,6 +365,7 @@ function asLayout(value: unknown): PersistedLayout {
   return {
     entries: arrangement.entries,
     folders: arrangement.folders,
+    labels: labelsOf(raw.labels),
     collapsed: (Array.isArray(raw.collapsed) ? raw.collapsed : []).filter(
       (id): id is string => typeof id === 'string' && id.length > 0
     ),
@@ -360,8 +422,19 @@ function looseToEntryIndex(arrangement: Arrangement, loose: number, from: number
 
 export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
   const save = (): void => {
-    const { gatewayKey, entries, folders, collapsed, archived, pinned, myChats, accents, mutes, sidebarCollapsed } =
-      get()
+    const {
+      gatewayKey,
+      entries,
+      folders,
+      collapsed,
+      archived,
+      pinned,
+      myChats,
+      accents,
+      labels,
+      mutes,
+      sidebarCollapsed
+    } = get()
 
     if (gatewayKey) {
       persist(gatewayKey, {
@@ -372,6 +445,7 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
         pinned: Object.keys(pinned),
         myChats: Object.keys(myChats),
         accents,
+        labels,
         mutes,
         // Omitted while nobody has chosen, so that "never chosen" survives a
         // round trip as the absence it is rather than as a `false` the width
@@ -428,6 +502,7 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
         pinned,
         myChats,
         accents: stored.accents,
+        labels: stored.labels ?? {},
         mutes: stored.mutes ?? {},
         sidebarCollapsed: stored.sidebarCollapsed,
         loaded: true
@@ -675,6 +750,24 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
       save()
     },
 
+    setLabel(botName, label) {
+      const labels = { ...get().labels }
+      const trimmed = label.trim().slice(0, BOT_LABEL_MAX)
+
+      // An empty name is the absence of one rather than a name of its own, so it
+      // is stored as nothing and the row falls back to the roster's own label
+      // and then to the handle. That is also what makes "clear it" a thing a
+      // reader can do by emptying the field.
+      if (trimmed) {
+        labels[botName] = trimmed
+      } else {
+        delete labels[botName]
+      }
+
+      set({ labels })
+      save()
+    },
+
     setMute(botName, until) {
       const mutes = { ...get().mutes }
 
@@ -743,6 +836,10 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
         // "none" would put them back in the shared transcript without asking.
         ...(patch.myChats ? { myChats } : {}),
         ...(patch.accents ? { accents: patch.accents } : {}),
+        // Absent is not empty once more: a build that predates the field says
+        // nothing about what this reader calls their bots, and reading that as
+        // "nothing" would un-name every one of them.
+        ...(patch.labels ? { labels: labelsOf(patch.labels) } : {}),
         ...(patch.mutes ? { mutes: patch.mutes } : {})
       })
       save()
@@ -798,6 +895,16 @@ export function useMyChat(botName: string): boolean {
  */
 export function useChatAccent(botName: string): AccentName {
   return accentOrBrand(useChatLayoutStore(state => state.accents[botName] ?? 'default'))
+}
+
+/**
+ * What this reader calls one bot, or `''`.
+ *
+ * A string rather than the map, for the reason `useBotDisplayName` selects one:
+ * a row must not re-render because somebody renamed a different bot.
+ */
+export function useBotLabel(botName: string | undefined): string {
+  return useChatLayoutStore(state => (botName === undefined ? '' : (state.labels[botName] ?? '')))
 }
 
 /**

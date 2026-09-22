@@ -1387,21 +1387,6 @@ const stringsEn = {
 
     description: 'DESCRIPTION',
     descriptionPlaceholder: 'What this bot is for',
-    /**
-     * The one field on this sheet that the gateway does NOT let a client write.
-     *
-     * `profiles.configure` carries `description` and no display name, so the name
-     * is shown next to the profile it belongs to rather than as a field that
-     * would silently fail to save. Said out loud, because a greyed-out box with
-     * no reason next to it reads as a bug.
-     */
-    displayNameReadOnly: 'Set on the gateway, in this profile.',
-    /** The handle row's own caption: what this name is FOR, not where it came from. */
-    profileNameHint: 'The name the rest of the app addresses this bot by.',
-    displayName: 'Display name',
-    /** Shown in place of a display name that was never set. */
-    displayNameUnset: 'Not set',
-
     colour: 'COLOUR',
     colourHint: 'This chat only. It tints the bubbles, the avatar ring and the row in the list.',
 
@@ -1418,7 +1403,6 @@ const stringsEn = {
     about: 'ABOUT THIS BOT',
     model: 'Model',
     provider: 'Provider',
-    profileName: 'Profile name',
     session: 'Session',
     gatewayVersion: 'Gateway',
     unknown: '—',

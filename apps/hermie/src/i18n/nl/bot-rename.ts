@@ -9,14 +9,22 @@ import type { Translation } from '../catalogue'
 
 export const botRename: Translation<typeof renameStrings> = {
   displayLabel: 'Weergavenaam',
-  displayHint: 'Hoe deze bot op elke client heet. Het profiel houdt zijn eigen naam.',
+  displayHint: 'Hoe deze bot in jouw lijst heet. De gateway houdt de eigen naam van het profiel.',
+  clearHint: 'Laat het leeg om terug te vallen op de naam die de gateway doorgeeft.',
 
   profileLabel: 'Profielnaam',
   profileHint: 'De naam waarmee de rest van de app deze bot aanspreekt.',
+
+  renameRow: 'Profiel hernoemen…',
+  renameHint: 'Verandert het profiel op de gateway zelf, niet wat Hermie laat zien.',
+  renameField: 'Nieuwe profielnaam',
+  renameAction: 'Profiel hernoemen',
+  renameBusy: 'Hernoemen…',
+  renameCancel: 'Laat het zoals het is',
   profileWarning: 'Hernoemen verandert de profielnaam die andere tools gebruiken',
+  renameDefault: 'Het standaardprofiel houdt zijn naam. Zijn thuis is de eigen map van de gateway.',
 
   placeholder: 'Niet ingesteld',
-  clearHint: 'Laat het leeg om terug te vallen op de profielnaam.',
 
   refused: 'De gateway accepteerde die naam niet.',
   missing: (name: string) => `De gateway heeft geen profiel dat ${name} heet.`,

@@ -203,6 +203,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now gets what is LEFT of those forty-five seconds, so the app stops a moment before Shortcuts
   does rather than writing an answer nobody is still reading.
 
+- **Renaming a bot renames the bot, not the profile.** The name field on a bot's sheet used to
+  send `PATCH /api/profiles/{name}`, which on every profile but the default one renames the
+  profile itself — its directory, its wrapper script, its service and the active-profile
+  pointer — so somebody changing what they took for a label moved the handle that their crons,
+  their `@`-mentions and the gateway's own logs address. The field is the **display name** now,
+  on every profile, and it is Hermie's own: no call a client has writes a profile's
+  `display_name`, so the name is kept beside your folders and your colours and read by every
+  surface that draws a bot — the chat list, the chat header, the sheet itself, the memory list
+  and the home-screen widget. Emptying it falls back to the name the gateway reports, and then
+  to the handle. Renaming the **profile** is still there, as its own clearly-labelled action
+  further down the same group, with its own field and the warning out loud; it is not offered
+  for the default profile, whose name cannot move at all.
+
 - **The line that says which model a chat is on prints the model's name.** The picker under
   it listed **Claude Opus 4.1** and **GPT-5**, and the row above said
   `anthropic/claude-opus-4-1-20250805`. The reason was one option: a chat's own model is

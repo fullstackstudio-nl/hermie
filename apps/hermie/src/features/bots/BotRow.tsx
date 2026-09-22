@@ -20,6 +20,7 @@ import { ContextMenuHost, HAS_NATIVE_CONTEXT_MENU } from '../../platform/context
 import { secondaryClick } from '../../platform/secondary-click'
 import { botNames, useNameOrder } from '../../store/bot-names'
 import type { Bot } from '../../store/bots'
+import { useBotLabel } from '../../store/chat-layout'
 import { usePendingShareCount } from '../../store/share'
 import { DragGrip } from '../../ui/DragGrip'
 import { GlassSurface } from '../../ui/glass'
@@ -134,7 +135,7 @@ export const BotRow = memo(function BotRow({
     where nobody has set a display name — so the third line is conditional and
     the row keeps the height it had.
   */
-  const names = botNames(bot, useNameOrder())
+  const names = botNames({ ...bot, label: useBotLabel(bot.name) }, useNameOrder())
 
   /**
    * Shares this chat has been given that have not gone out yet.

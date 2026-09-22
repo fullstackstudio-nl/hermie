@@ -1,5 +1,6 @@
-// Naming a bot: core's PATCH route, and the local rekeying a real rename needs.
-export { BotNameFields, type BotNameFieldsProps, initialBotName } from './BotNameFields'
+// Naming a bot: the app's own display name, and core's PATCH route behind the
+// separate act of renaming the profile itself.
+export { BotNameFields, type BotNameFieldsProps } from './BotNameFields'
 export { renameBot, type RenameBotResult } from './rename-bot'
 export {
   asRenameError,

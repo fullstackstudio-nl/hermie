@@ -175,6 +175,15 @@ export interface WidgetSnapshotInput {
    * only place it is made.
    */
   nameOrder: NameOrder
+  /**
+   * The name THIS READER gave each bot, by handle, where they gave one.
+   *
+   * It wins over the roster's `display_name` here for the same reason it wins in
+   * the app: it is the only one of the two a client can write. A home screen that
+   * went on showing the gateway's copy would be the one surface that did not
+   * answer to the field on the bot's own sheet.
+   */
+  labels: Record<string, string>
   chats: Record<string, ChatState>
   /** Bots the last `session.active_list` poll could place a busy session on. */
   running: Record<string, true>
@@ -385,7 +394,7 @@ function projectBot(bot: Bot, input: WidgetSnapshotInput): WidgetBot {
   // The line the widget draws, which is the app's primary name for this bot.
   // `name` beside it stays the HANDLE whatever the order says: it is the deep
   // link's key (`hermie://chat/<bot>`) and the avatar file's key, not a label.
-  const label = botLabel(bot, input.nameOrder)
+  const label = botLabel({ ...bot, label: input.labels[bot.name] ?? '' }, input.nameOrder)
 
   return {
     name: bot.name,

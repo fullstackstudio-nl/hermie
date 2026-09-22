@@ -52,6 +52,7 @@ function input(overrides: Partial<WidgetSnapshotInput> = {}): WidgetSnapshotInpu
     running: {},
     lastSeen: {},
     accents: {},
+    labels: {},
     archived: {},
     folders: [],
     mutes: {},

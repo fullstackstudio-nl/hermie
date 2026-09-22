@@ -1,27 +1,35 @@
 /**
  * The two name rows on the bot profile sheet: one editable, one a fact.
  *
- * ## Which one is editable depends on the profile, and that is the feature
+ * ## The editable one is the DISPLAY name, on every profile
  *
- * `PATCH /api/profiles/{name}` is one route with two behaviours. On `default`
- * it sets a presentation-only display name and the profile keeps its id; on any
- * other profile it RENAMES the profile — directory, wrapper script, service and
- * active-profile pointer — and there is no display name involved at all.
+ * It used to be whichever name that profile's `PATCH /api/profiles/{name}` would
+ * move, which meant the field was a display name on `default` and a RENAME
+ * everywhere else. The owner renamed a bot, expecting its label to change, and
+ * watched its handle move instead — which is what that route does, and it takes
+ * the profile's directory, its wrapper script, its service and the
+ * active-profile pointer with it.
  *
- * So there is no single honest label for one field. On `default` the editable
- * row is **Display name** and the profile name below it is untouchable. On
- * every other bot the editable row is **Profile name**, because that is
- * literally what changes, and it carries the warning out loud: the handle is
- * what `@`-mentions, crons, DM lines and the gateway's own logs use, and
- * somebody renaming what they think is a label is about to break all four.
+ * So the field is the display name now, always, and it is Hermie's own: no call
+ * a client has writes a profile's `display_name` (`profiles.configure` has no
+ * such field, `profiles.create` has none, and the REST route above renames
+ * instead), so the name is kept beside the reader's folders and colours in
+ * `chat-layout`'s `labels` and read back by `botNames`. Clearing it falls back to
+ * the name the gateway reports, and then to the handle.
  *
- * The sheet used to show both rows read-only with the sentence "Set on the
- * gateway, in this profile." That was true of `profiles.configure`, which is
- * the only thing the app had; it was never true of the REST route beside it.
+ * ## Renaming the profile is still possible, and it is its own act
+ *
+ * Behind a disclosure of its own, with its own field, its own button and the
+ * warning out loud: the handle is what `@`-mentions, crons, DM lines and the
+ * gateway's own logs use. Not offered for `default`, which cannot be renamed at
+ * all — its home is the installation root — so that row says so instead of
+ * opening onto a field whose only answer is a 400.
  */
+import { useState } from 'react'
 import { View } from 'react-native'
 
-import { InsetRow, InsetValueRow, Text, TextField } from '../../ui/primitives'
+import { BOT_LABEL_MAX } from '../../store/chat-layout'
+import { Button, InsetRow, InsetValueRow, Text, TextField } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { PROFILE_NAME_MAX } from './rename-controller'
 import { renameStrings } from './strings'
@@ -31,32 +39,24 @@ export interface BotNameFieldsProps {
   botName: string
   /** The label the roster reported, which may equal the identifier. */
   displayName: string
-  /** `default` keeps its id and takes a label; everything else is renamed. */
+  /** `default` keeps its id, so there is no profile rename to offer. */
   isDefault: boolean
-  /** The draft, held by the sheet so Save can send it. */
+  /** The reader's own name for this bot; empty while they have not given one. */
   value: string
   onChangeText: (next: string) => void
-  /** Shown under the input, in the danger colour. */
-  error?: string | null
+  /**
+   * Rename the PROFILE itself.
+   *
+   * Absent means the disclosure is not drawn: renaming is
+   * `PATCH /api/profiles/{name}` and nothing else on this connection can do it,
+   * so a button over a gateway with no REST surface would have nowhere to go.
+   */
+  onRenameProfile?: (next: string) => void
+  /** A rename is in flight. */
+  renaming?: boolean
+  /** Shown under the rename field, in the danger colour. */
+  renameError?: string | null
   testID?: string
-}
-
-/**
- * What the field starts on for a given bot.
- *
- * Exported because "what has changed" has to be computed against the same
- * value the field was seeded with, and a second opinion about that is how a
- * sheet sends a rename nobody asked for.
- */
-export function initialBotName(bot: { name: string; displayName: string; isDefault: boolean }): string {
-  if (!bot.isDefault) {
-    return bot.name
-  }
-
-  // A roster row whose `display_name` is absent is projected as the name
-  // itself (`botFromProfileRow`), and a field pre-filled with the id would
-  // make "never set" look like a label somebody chose.
-  return bot.displayName && bot.displayName !== bot.name ? bot.displayName : ''
 }
 
 export function BotNameFields({
@@ -65,55 +65,114 @@ export function BotNameFields({
   isDefault,
   value,
   onChangeText,
-  error,
+  onRenameProfile,
+  renaming = false,
+  renameError,
   testID = 'bot-profile-name'
 }: BotNameFieldsProps) {
   const theme = useTheme()
+  /* The disclosure, and the draft inside it. Local: it is a form, not a setting. */
+  const [renameOpen, setRenameOpen] = useState(false)
+  const [draft, setDraft] = useState(botName)
+  const canRename = Boolean(onRenameProfile) && !isDefault
+  /* What the row shows when the field is empty — the gateway's name, or the handle. */
+  const fallback = displayName && displayName !== botName ? displayName : botName
 
   return (
     <View>
       <InsetRow>
         <TextField
-          autoCapitalize={isDefault ? 'words' : 'none'}
+          autoCapitalize="words"
           autoCorrect={false}
-          error={error ?? null}
-          label={isDefault ? renameStrings.displayLabel : renameStrings.profileLabel}
-          maxLength={PROFILE_NAME_MAX}
+          label={renameStrings.displayLabel}
+          maxLength={BOT_LABEL_MAX}
           onChangeText={onChangeText}
-          placeholder={renameStrings.placeholder}
+          placeholder={fallback}
           testID={testID}
           value={value}
         />
         <Text color="textMuted" variant="meta">
-          {isDefault ? renameStrings.displayHint : renameStrings.profileHint}
+          {renameStrings.displayHint}
         </Text>
-        {isDefault ? null : (
-          <Text color="dangerText" style={{ marginTop: theme.space.xxs }} testID={`${testID}-warning`} variant="meta">
-            {renameStrings.profileWarning}
-          </Text>
-        )}
+        <Text color="textFaint" variant="micro">
+          {renameStrings.clearHint}
+        </Text>
       </InsetRow>
 
       {/*
-        The group draws its own hairlines between CHILDREN, and these two rows
-        arrive as one child, so the separator between them is drawn here — same
-        inset, same colour — rather than the pair reading as one tall row.
+        The group draws its own hairlines between CHILDREN, and these rows arrive
+        as one child, so the separator between them is drawn here — same inset,
+        same colour — rather than the pair reading as one tall row.
       */}
       <View style={{ height: 1, marginLeft: theme.space.lg, backgroundColor: theme.hairline }} />
 
-      {/*
-        The other half of the pair, always read-only, because on either kind of
-        profile exactly one of the two names is settable over this route.
-      */}
+      {/* The other name, always a fact. `mono` because it is an identifier. */}
+      <InsetValueRow detail={renameStrings.profileHint} label={renameStrings.profileLabel} mono value={botName} />
+
       {isDefault ? (
-        <InsetValueRow detail={renameStrings.profileHint} label={renameStrings.profileLabel} mono value={botName} />
-      ) : (
-        <InsetValueRow
-          label={renameStrings.displayLabel}
-          mono={false}
-          value={displayName && displayName !== botName ? displayName : renameStrings.placeholder}
-        />
-      )}
+        <InsetRow>
+          <Text color="textMuted" testID={`${testID}-default`} variant="meta">
+            {renameStrings.renameDefault}
+          </Text>
+        </InsetRow>
+      ) : null}
+
+      {canRename ? (
+        <View>
+          <View style={{ height: 1, marginLeft: theme.space.lg, backgroundColor: theme.hairline }} />
+
+          {renameOpen ? (
+            <InsetRow>
+              <TextField
+                autoCapitalize="none"
+                autoCorrect={false}
+                error={renameError ?? null}
+                label={renameStrings.renameField}
+                maxLength={PROFILE_NAME_MAX}
+                onChangeText={setDraft}
+                placeholder={botName}
+                testID={`${testID}-rename-field`}
+                value={draft}
+              />
+              <Text color="dangerText" testID={`${testID}-warning`} variant="meta">
+                {renameStrings.profileWarning}
+              </Text>
+              <Button
+                busy={renaming}
+                disabled={renaming || draft.trim() === '' || draft.trim() === botName}
+                onPress={() => onRenameProfile?.(draft)}
+                testID={`${testID}-rename-save`}
+                title={renaming ? renameStrings.renameBusy : renameStrings.renameAction}
+                variant="danger"
+              />
+              <Button
+                onPress={() => {
+                  setRenameOpen(false)
+                  setDraft(botName)
+                }}
+                testID={`${testID}-rename-cancel`}
+                title={renameStrings.renameCancel}
+                variant="secondary"
+              />
+            </InsetRow>
+          ) : (
+            <InsetRow>
+              <Button
+                onPress={() => {
+                  setDraft(botName)
+                  setRenameOpen(true)
+                }}
+                testID={`${testID}-rename`}
+                title={renameStrings.renameRow}
+                variant="secondary"
+              />
+              <Text color="textMuted" variant="meta">
+                {renameStrings.renameHint}
+              </Text>
+            </InsetRow>
+          )}
+        </View>
+      ) : null}
     </View>
   )
 }

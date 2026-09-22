@@ -28,14 +28,13 @@
  * this sheet is not the model picker, which is the chat options sheet's job and
  * is a guarded call with a confirmation of its own.
  *
- * The NAME used to be a fact too, with the sentence "Set on the gateway, in
- * this profile." beside it. That was true of `profiles.configure`, which
- * carries a description and no display name — and it was never true of the
- * REST route beside it. Core serves `PATCH /api/profiles/{name}`, so the name
- * is a field now, and `features/bot-rename` owns it because which name it edits
- * depends on the profile: `default` takes a display name and keeps its id,
- * every other profile is really RENAMED. The second case needs `http` and it
- * needs the stores rekeyed, both of which live there.
+ * The display NAME is the exception, and it is a fourth thing that writes as it
+ * is typed. It is Hermie's own — no call a client has writes a profile's
+ * `display_name`, and the one REST route that touches it RENAMES the profile
+ * instead — so it is stored beside the colour in `chat-layout` and needs no
+ * round trip and no Save. Renaming the profile itself is a separate act behind
+ * its own disclosure; that one needs `http`, needs the stores rekeyed, and lives
+ * in `features/bot-rename`.
  *
  * ## The sharing notice is not asked twice
  *
@@ -66,7 +65,7 @@ import { BottomSheet } from '../../ui/BottomSheet'
 import { Button, InsetButtonRow, InsetGroup, InsetRow, InsetValueRow, Text, TextField } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { AVATAR_SIZE } from '../../ui/tokens'
-import { asRenameError, BotNameFields, botNameChanged, initialBotName, saveBotName } from '../bot-rename'
+import { asRenameError, BotNameFields, saveBotName } from '../bot-rename'
 import { memoryStrings } from '../memory/strings'
 import { CapabilitiesSheet } from '../profiles/CapabilitiesSheet'
 import { profileStrings } from '../profiles/strings'
@@ -152,11 +151,9 @@ export function BotProfileSheet({
   const theme = useTheme()
   const text = strings.botProfile
   /* The same two lines every other surface draws, in this reader's own order. */
-  const names = botNames(bot, useNameOrder())
+  const names = botNames({ ...bot, label: useChatLayoutStore(state => state.labels[bot.name] ?? '') }, useNameOrder())
 
   const [description, setDescription] = useState(bot.description)
-  /* The name field's draft. Which NAME it holds is `initialBotName`'s decision. */
-  const [name, setName] = useState(() => initialBotName(bot))
   /**
    * The gateway took the name and part of the local move did not land.
    *
@@ -168,6 +165,10 @@ export function BotProfileSheet({
   const [avatar, setAvatar] = useState<{ base64: string; uri: string } | null | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** A profile rename is in flight, and what it answered. Its own pair: it is a
+      different button from Save and must not disable it. */
+  const [renaming, setRenaming] = useState(false)
+  const [renameError, setRenameError] = useState<string | null>(null)
   const [showCapabilities, setShowCapabilities] = useState(false)
 
   /*
@@ -183,15 +184,22 @@ export function BotProfileSheet({
   */
   useEffect(() => {
     setDescription(bot.description)
-    setName(initialBotName(bot))
     setAvatar(undefined)
     setError(null)
     setWarning(null)
+    setRenameError(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- following `bot.description` or `bot.displayName` would let a roster poll overwrite what is being typed; see above.
   }, [bot.name])
 
   const accent = useChatLayoutStore(state => state.accents[bot.name] ?? 'default')
   const setAccent = useChatLayoutStore(state => state.setAccent)
+  /*
+    The reader's own name for this bot, read from the store rather than held as a
+    draft. It writes as it is typed, like the note below it, so there is nothing
+    to seed and nothing a roster poll can overwrite mid-sentence.
+  */
+  const label = useChatLayoutStore(state => state.labels[bot.name] ?? '')
+  const setLabel = useChatLayoutStore(state => state.setLabel)
 
   const note = useDeviceContextStore(state => state.perBot[bot.name] ?? '')
   const setBotNote = useDeviceContextStore(state => state.setBotNote)
@@ -223,8 +231,6 @@ export function BotProfileSheet({
   // states the draft distinguishes, flattened out of the picked object.
   const pickedBytes: string | null | undefined = avatar === undefined ? undefined : (avatar?.base64 ?? null)
   const changes = changesFor({ description: bot.description }, { description, avatar: pickedBytes })
-  /* The name travels on the REST half, so it is its own question from `changes`. */
-  const nameChanged = Boolean(http) && botNameChanged(initialBotName(bot), name)
 
   const onSave = useCallback(async () => {
     if (!gateway) {
@@ -248,40 +254,54 @@ export function BotProfileSheet({
         await uploadAvatar({ gateway, botName: bot.name }, avatar.base64)
       }
 
-      /*
-        The name LAST, and not because it is least important. On every profile
-        but `default` it really renames the profile, so the two calls above —
-        both of which address the profile by its current name — would be aimed
-        at a name that no longer exists if the order were the other way round.
-      */
-      if (nameChanged && http) {
-        const saved = await saveBotName({ http, bot, draft: name, gatewayId: gatewayId ?? null })
+      onSaved?.()
+      onClose()
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : text.saveFailed)
+    } finally {
+      setBusy(false)
+    }
+  }, [avatar, bot.name, changes.description, gateway, onClose, onSaved, text.saveFailed])
+
+  /**
+   * Rename the profile itself — the separate, destructive act.
+   *
+   * Its own handler rather than a branch of Save, because it is a different
+   * button with a different failure: a refusal belongs beside the rename field
+   * and must not look like the description having failed to save. Nothing else
+   * on this sheet is sent with it, and it is deliberately the ONLY thing sent —
+   * the description and the photo address the profile by its current name, and
+   * mixing the two would aim one of them at a name that no longer exists.
+   */
+  const onRenameProfile = useCallback(
+    async (draft: string) => {
+      if (!http) {
+        return
+      }
+
+      setRenaming(true)
+      setRenameError(null)
+      setWarning(null)
+
+      try {
+        const saved = await saveBotName({ http, bot, draft, gatewayId: gatewayId ?? null })
 
         if (saved.warning) {
           // The rename landed; the local half did not, all of it. Reported and
           // the sheet stays open, because closing on it would hide the only
           // sentence that says which part to expect back after a reconnect.
           setWarning(saved.warning)
-          onSaved?.()
-
-          return
         }
-      }
 
-      onSaved?.()
-      onClose()
-    } catch (failure) {
-      setError(
-        nameChanged
-          ? asRenameError(failure, bot.name).message
-          : failure instanceof Error
-            ? failure.message
-            : text.saveFailed
-      )
-    } finally {
-      setBusy(false)
-    }
-  }, [avatar, bot, changes.description, gateway, gatewayId, http, name, nameChanged, onClose, onSaved, text.saveFailed])
+        onSaved?.()
+      } catch (failure) {
+        setRenameError(asRenameError(failure, bot.name).message)
+      } finally {
+        setRenaming(false)
+      }
+    },
+    [bot, gatewayId, http, onSaved]
+  )
 
   /*
     What this bot gets BESIDES the note, said in the same breath as the note
@@ -454,26 +474,17 @@ export function BotProfileSheet({
             all, and the label promised the other one. The handle is `mono`
             because it is an identifier and reads as one.
           */}
-          {http ? (
-            <BotNameFields
-              botName={bot.name}
-              displayName={bot.displayName}
-              isDefault={bot.isDefault}
-              onChangeText={setName}
-              testID={`${testID}-name`}
-              value={name}
-            />
-          ) : (
-            <>
-              <InsetValueRow detail={text.profileNameHint} label={text.profileName} mono value={bot.name} />
-              <InsetValueRow
-                detail={text.displayNameReadOnly}
-                label={text.displayName}
-                mono={false}
-                value={bot.displayName && bot.displayName !== bot.name ? bot.displayName : text.displayNameUnset}
-              />
-            </>
-          )}
+          <BotNameFields
+            botName={bot.name}
+            displayName={bot.displayName}
+            isDefault={bot.isDefault}
+            onChangeText={next => setLabel(bot.name, next)}
+            renameError={renameError}
+            renaming={renaming}
+            testID={`${testID}-name`}
+            value={label}
+            {...(http ? { onRenameProfile: (next: string) => void onRenameProfile(next) } : {})}
+          />
           <InsetValueRow
             label={text.model}
             mono={false}
@@ -506,7 +517,7 @@ export function BotProfileSheet({
 
         <Button
           busy={busy}
-          disabled={!gateway || (!changes.any && !nameChanged)}
+          disabled={!gateway || !changes.any}
           onPress={() => void onSave()}
           testID={`${testID}-save`}
           title={busy ? text.saving : text.save}

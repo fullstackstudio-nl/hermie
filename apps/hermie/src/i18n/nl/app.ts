@@ -809,11 +809,6 @@ export const app: Translation<typeof strings> = {
 
     description: 'BESCHRIJVING',
     descriptionPlaceholder: 'Waar deze bot voor is',
-    displayNameReadOnly: 'Ingesteld op de gateway, in dit profiel.',
-    profileNameHint: 'De naam waarmee de rest van de app deze bot aanspreekt.',
-    displayName: 'Weergavenaam',
-    displayNameUnset: 'Niet ingesteld',
-
     colour: 'KLEUR',
     colourHint: 'Alleen deze chat. Het kleurt de bubbels, de ring om de avatar en de rij in de lijst.',
 
@@ -827,7 +822,6 @@ export const app: Translation<typeof strings> = {
     contextSettingsLink: 'Wijzigen bij Instellingen → Context',
 
     about: 'OVER DEZE BOT',
-    profileName: 'Profielnaam',
     session: 'Sessie',
 
     save: 'Opslaan',

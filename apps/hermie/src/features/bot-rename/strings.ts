@@ -1,40 +1,61 @@
 /**
- * Every literal the rename field paints.
+ * Every literal the name rows paint.
  *
  * Its own file rather than `src/i18n/strings.ts`, for the reason
  * `features/cron/strings.ts` gives: copy that lives next to the thing it
  * describes moves with it.
  *
- * The wording splits on ONE fact and everything else follows from it. Core's
- * `PATCH /api/profiles/{name}` does two different things depending on which
- * profile it is aimed at — it gives the `default` profile a presentation-only
- * label and keeps its id, and it genuinely RENAMES any other profile, its
- * directory, its wrapper script, its service and the active-profile pointer
- * with it (`docs/DESIGN.md` §8 in the plugin repository, read out of Hermes
- * 0.21.3). A field labelled "Display name" over both would be telling half the
- * readers that a handle their crons and their `@`-mentions use is a label.
+ * The wording splits on ONE fact, and the fact has not changed — only what the
+ * app does about it has. A gateway offers a client no way to write a profile's
+ * `display_name`: `profiles.configure` has no such field, `profiles.create` has
+ * none, and `PATCH /api/profiles/{name}` RENAMES the profile — its directory, its
+ * wrapper script, its service and the active-profile pointer — on every profile
+ * but `default`.
+ *
+ * So there are two rows and they are two different things, said out loud rather
+ * than folded into one field whose meaning depends on which bot you opened. The
+ * **display name** is Hermie's, it is what the list and the header draw, and it
+ * cannot break anything. The **profile name** is the gateway's, it is what
+ * `@`-mentions, crons, DM lines and the gateway's own logs use, and changing it
+ * is an act of its own behind a button that says so.
  */
 import { localised } from '../../i18n/catalogue'
 
 const renameStringsEn = {
-  /** The `default` profile: a label, and the id underneath is untouched. */
+  /** The editable row, on every profile. Hermie's own name for the bot. */
   displayLabel: 'Display name',
-  displayHint: 'What this bot is called on every client. The profile keeps its own name.',
+  displayHint: 'What Hermie calls this bot in your list. The gateway keeps the profile’s own name.',
+  /** Shown in the field while nobody has given the bot a name of their own. */
+  clearHint: 'Leave it empty to fall back to the name the gateway reports.',
 
-  /** Any other profile: this IS the handle. */
+  /** The other row, which is a fact and not a field. */
   profileLabel: 'Profile name',
   profileHint: 'The name the rest of the app addresses this bot by.',
+
+  /**
+   * The separate act, behind its own disclosure.
+   *
+   * A row rather than a second field always on screen: renaming a profile is
+   * rare, it is not undoable from here, and a form that offers it beside a label
+   * somebody edits weekly is a form that will have it pressed by accident.
+   */
+  renameRow: 'Rename profile…',
+  renameHint: 'Changes the profile on the gateway itself, not what Hermie shows.',
+  renameField: 'New profile name',
+  renameAction: 'Rename profile',
+  renameBusy: 'Renaming…',
+  renameCancel: 'Keep it as it is',
   /**
    * The warning, in the present tense and without a hedge.
    *
    * A separate line rather than part of the hint, because it does not describe
-   * the field — it says what pressing Save will do.
+   * the field — it says what pressing the button will do.
    */
   profileWarning: 'Renaming changes the profile name other tools use',
+  /** `default` cannot move: its home IS the gateway's installation root. */
+  renameDefault: 'The default profile keeps its name. Its home is the gateway’s own directory.',
 
   placeholder: 'Not set',
-  /** Only `default` can be cleared, and only back to its own id. */
-  clearHint: 'Leave it empty to fall back to the profile name.',
 
   /** Refusals, named by what the gateway answered rather than by a guess at why. */
   refused: 'The gateway would not take that name.',

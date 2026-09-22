@@ -9,14 +9,22 @@ import type { Translation } from '../catalogue'
 
 export const botRename: Translation<typeof renameStrings> = {
   displayLabel: 'Anzeigename',
-  displayHint: 'Wie dieser Bot auf jedem Client heißt. Das Profil behält seinen eigenen Namen.',
+  displayHint: 'Wie dieser Bot in deiner Liste heißt. Das Gateway behält den eigenen Namen des Profils.',
+  clearHint: 'Leer lassen, um auf den Namen zurückzufallen, den das Gateway meldet.',
 
   profileLabel: 'Profilname',
   profileHint: 'Der Name, unter dem der Rest der App diesen Bot anspricht.',
+
+  renameRow: 'Profil umbenennen…',
+  renameHint: 'Ändert das Profil auf dem Gateway selbst, nicht das, was Hermie anzeigt.',
+  renameField: 'Neuer Profilname',
+  renameAction: 'Profil umbenennen',
+  renameBusy: 'Wird umbenannt…',
+  renameCancel: 'So lassen',
   profileWarning: 'Umbenennen ändert den Profilnamen, den andere Tools verwenden',
+  renameDefault: 'Das Standardprofil behält seinen Namen. Sein Zuhause ist das eigene Verzeichnis des Gateways.',
 
   placeholder: 'Nicht gesetzt',
-  clearHint: 'Leer lassen, um auf den Profilnamen zurückzufallen.',
 
   refused: 'Das Gateway hat diesen Namen nicht angenommen.',
   missing: (name: string) => `Das Gateway kennt kein Profil namens ${name}.`,

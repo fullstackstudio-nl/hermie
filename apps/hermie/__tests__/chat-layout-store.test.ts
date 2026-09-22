@@ -340,6 +340,54 @@ describe('per-chat colour', () => {
   })
 })
 
+/**
+ * The name a reader gives a bot.
+ *
+ * It lives here rather than on the bot's `ui_meta` section because no call a
+ * client has writes a profile's `display_name` — see `features/bot-rename`. So it
+ * is this reader's name, beside their colours and their folders, and the rules
+ * are the colour's rules: an empty one is the absence of a name, and it is read
+ * back defensively because it arrives from disk and from a gateway.
+ */
+describe('the name this reader gave a bot', () => {
+  it('stores a name and treats an empty one as the absence of one', () => {
+    store().setLabel('writer', 'De Schrijver')
+    expect(store().labels).toEqual({ writer: 'De Schrijver' })
+
+    store().setLabel('writer', '  ')
+    expect(store().labels).toEqual({})
+  })
+
+  it('trims what it stores, so two names that look the same are the same', () => {
+    store().setLabel('writer', '  De Schrijver  ')
+
+    expect(store().labels.writer).toBe('De Schrijver')
+  })
+
+  it('reads a gateway’s copy defensively, and absent is not empty', () => {
+    store().setLabel('writer', 'De Schrijver')
+
+    // A build that predates the field says nothing about names; taking that as
+    // "nobody has named anything" would un-name every bot on the gateway.
+    store().applyRemote({})
+    expect(store().labels).toEqual({ writer: 'De Schrijver' })
+
+    store().applyRemote({ labels: { writer: 'Writer', researcher: 42 as unknown as string, '': 'x' } })
+    expect(store().labels).toEqual({ writer: 'Writer' })
+  })
+
+  it('reads it back off the disk it was written to', async () => {
+    await store().load('https://gateway.example.com')
+    store().setLabel('writer', 'De Schrijver')
+    await settle()
+
+    store().reset()
+    await store().load('https://gateway.example.com')
+
+    expect(store().labels.writer).toBe('De Schrijver')
+  })
+})
+
 describe('persistence, keyed by gateway', () => {
   it('starts empty for a gateway it has never seen', async () => {
     await store().load('https://gateway.example.com')

@@ -120,19 +120,29 @@ describe('the read-only block', () => {
   })
 
   /**
-   * The display name is READ-ONLY and this is the test that says why.
+   * The display name IS a field, and the name the gateway reports is what the
+   * empty field falls back to.
    *
-   * `ProfilesConfigureParams` has a `description` and no display name — `name`
-   * there identifies the profile rather than renaming it — so there is no call
-   * a client could make. A field would take an edit and lose it, which is worse
-   * than no field, and the sentence under the value is what keeps a reader from
-   * hunting for the one that is missing.
+   * No call a client has writes a profile's `display_name`, so the field is
+   * Hermie's own name for the bot — see `features/bot-rename`. The roster's copy
+   * is the placeholder, which is what says "this is what you will get if you
+   * leave it alone" without pretending to be a value somebody typed.
    */
-  it('offers no field for the display name, and says where it is set instead', () => {
+  it('offers a display-name field seeded by nothing and falling back to the roster', () => {
+    const tree = sheet(fakeGateway().gateway)
+    const field = tree.getByTestId('bot-profile-name')
+
+    expect(field.props.value).toBe('')
+    expect(field.props.placeholder).toBe('Researcher')
+  })
+
+  /** The handle is a fact on this sheet; moving it is its own button. */
+  it('shows the profile name as a fact, with the rename behind its own action', () => {
     const tree = sheet(fakeGateway().gateway)
 
-    expect(tree.getByText('Researcher')).toBeTruthy()
-    expect(tree.getByText('Set on the gateway, in this profile.')).toBeTruthy()
+    expect(tree.getByText('researcher')).toBeTruthy()
+    // No REST half was handed in, so there is nothing that could rename it.
+    expect(tree.queryByTestId('bot-profile-name-rename')).toBeNull()
   })
 })
 

@@ -18,6 +18,7 @@ import { ScrollView } from 'react-native'
 import { strings } from '../../i18n/strings'
 import { botNames, useNameOrder } from '../../store/bot-names'
 import { useBotsStore } from '../../store/bots'
+import { useChatLayoutStore } from '../../store/chat-layout'
 import { InsetButtonRow, InsetGroup, Screen, Text } from '../../ui/primitives'
 import { useEscapeKey } from '../../ui/useEscapeKey'
 import { useHardwareBack } from '../../ui/useHardwareBack'
@@ -37,6 +38,8 @@ export function MemoryBotsScreen({ onClose, initialProfile, testID = 'memory-bot
   const theme = useTheme()
   const bots = useBotsStore(state => state.bots)
   const order = useNameOrder()
+  /* The names this reader gave their bots, which win over the roster's. */
+  const labels = useChatLayoutStore(state => state.labels)
   const [open, setOpen] = useState<string | null>(initialProfile ?? null)
 
   /*
@@ -54,7 +57,7 @@ export function MemoryBotsScreen({ onClose, initialProfile, testID = 'memory-bot
       <MemoryScreen
         onClose={() => (initialProfile ? onClose() : setOpen(null))}
         profile={open}
-        {...(bot ? { title: botNames(bot, order).primary } : {})}
+        {...(bot ? { title: botNames({ ...bot, label: labels[bot.name] ?? '' }, order).primary } : {})}
       />
     )
   }
@@ -77,7 +80,7 @@ export function MemoryBotsScreen({ onClose, initialProfile, testID = 'memory-bot
         ) : (
           <InsetGroup>
             {bots.map(bot => {
-              const names = botNames(bot, order)
+              const names = botNames({ ...bot, label: labels[bot.name] ?? '' }, order)
 
               return (
                 <InsetButtonRow

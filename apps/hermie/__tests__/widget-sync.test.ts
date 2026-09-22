@@ -90,7 +90,7 @@ function harness(bridgeOverrides: Partial<WidgetBridge> = {}) {
   const indexed: { name: string; label: string; subtitle: string }[][] = []
   const bots = fakeStore({ bots: [bot('researcher')], running: {}, lastSeen: {}, avatars: {} })
   const chats = fakeStore({ chats: {} })
-  const layout = fakeStore({ accents: {}, archived: {}, folders: [], mutes: {} })
+  const layout = fakeStore({ accents: {}, archived: {}, folders: [], labels: {}, mutes: {} })
   // The widget's one name line follows the app's own order, so the sync reads
   // it and re-writes when it changes. `profile` is the shipping default.
   const settings = fakeStore({ botNameOrder: 'profile' })
@@ -154,7 +154,7 @@ describe('WidgetSync', () => {
     snapshots.length = 0
 
     // A notification with no change behind it — which is most of them.
-    layout.set({ accents: {}, archived: {}, mutes: {} })
+    layout.set({ accents: {}, archived: {}, labels: {}, mutes: {} })
     await settle()
     stop()
 

@@ -22,6 +22,30 @@ describe('the two names a bot has', () => {
     })
   })
 
+  /**
+   * The third name, and the only one a reader can change.
+   *
+   * No call a client has writes a profile's `display_name`, so the editable name
+   * is the app's own (`chat-layout`'s `labels`) and it wins here. Clearing it
+   * falls back to the roster's copy, and then to the handle.
+   */
+  it('prefers the name this reader gave the bot', () => {
+    expect(botNames({ ...LANCE, label: 'Beheer' }, 'display')).toEqual({ primary: 'Beheer', secondary: 'lance-vance' })
+    expect(botNames({ ...LANCE, label: 'Beheer' }, 'profile')).toEqual({ primary: 'lance-vance', secondary: 'Beheer' })
+  })
+
+  it('falls back to the roster’s name when the reader cleared theirs', () => {
+    expect(botNames({ ...LANCE, label: '   ' }, 'display').primary).toBe('Netwerkbeheerder')
+  })
+
+  /** A reader-given name that IS the handle is still one name, not two lines. */
+  it('draws one line when the name the reader chose is the handle', () => {
+    expect(botNames({ name: 'postman', displayName: 'De Postbode', label: 'Postman' }, 'display')).toEqual({
+      primary: 'postman',
+      secondary: ''
+    })
+  })
+
   it('swaps the two on request, and swaps nothing else', () => {
     expect(botNames(LANCE, 'profile')).toEqual({ primary: 'lance-vance', secondary: 'Netwerkbeheerder' })
   })

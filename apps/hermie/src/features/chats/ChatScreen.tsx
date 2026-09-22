@@ -64,7 +64,7 @@ import { presenceOf } from '../bots/presence'
 import { MemoryBotsScreen } from '../memory'
 import { botNames } from '../../store/bot-names'
 import { useBotsStore } from '../../store/bots'
-import { useChatAccent, useChatLayoutStore, useChatMuted } from '../../store/chat-layout'
+import { useBotLabel, useChatAccent, useChatLayoutStore, useChatMuted } from '../../store/chat-layout'
 import { ChatChoiceRow } from '../user-chats'
 import { mutedUntil as mutedUntilOf } from '../../store/mute'
 import { useChatsStore } from '../../store/chats'
@@ -1537,7 +1537,11 @@ function Conversation({
     sheet's subtitle — and is the primary line so those agree with the header.
   */
   const names = botNames(
-    { name: botName, displayName: byName[botName]?.displayName ?? botName },
+    {
+      name: botName,
+      displayName: byName[botName]?.displayName ?? botName,
+      label: useBotLabel(botName)
+    },
     useSettingsStore(state => state.botNameOrder)
   )
   const display = names.primary

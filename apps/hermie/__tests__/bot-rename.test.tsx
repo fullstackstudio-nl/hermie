@@ -1,16 +1,20 @@
 /**
- * Renaming a bot: the call, the field that makes it, and the keys it moves.
+ * Naming a bot: the field, the separate rename, and the keys a rename moves.
  *
- * Three things are worth asserting and they are three different failures:
+ * Four things are worth asserting and they are four different failures:
  *
- *  - **The field says which name it is editing.** `PATCH /api/profiles/{name}`
- *    sets a display name on `default` and genuinely RENAMES every other
- *    profile, so a sheet that labelled both "Display name" would have somebody
- *    change a handle their crons address and never be told.
+ *  - **The field is the DISPLAY name.** The owner renamed a bot expecting its
+ *    label to change and watched its handle move instead, because that is what
+ *    `PATCH /api/profiles/{name}` does to every profile but `default`. The field
+ *    writes Hermie's own name for the bot now, and sends nothing.
+ *  - **Renaming the profile is still reachable, and it is its own act.** Behind
+ *    its own disclosure, with its own button, and not offered at all for a
+ *    profile that cannot be renamed or a connection that cannot do it.
  *  - **The stores are rekeyed.** A bot's name is this app's primary key. If the
  *    gateway renames a profile and nothing local moves, the next roster read
- *    drops the colour, the folder, the note, the watermark and the cached
- *    transcript — silently, because a missing key reads as a new bot.
+ *    drops the colour, the folder, the note, the name the reader gave it, the
+ *    watermark and the cached transcript — silently, because a missing key reads
+ *    as a new bot.
  *  - **A refusal stays a refusal.** 400 and 404 are the two the route answers,
  *    and neither may be reported as a success or leave the stores half moved.
  */
@@ -20,7 +24,7 @@ import { act, fireEvent, screen, waitFor } from '@testing-library/react-native'
 import type { GatewayHttp } from '@hermie/gateway-client'
 
 import { BotProfileSheet } from '../src/features/bot-profile'
-import { initialBotName, renameBot, renameProfile, ProfileRenameError } from '../src/features/bot-rename'
+import { renameBot, renameProfile, ProfileRenameError } from '../src/features/bot-rename'
 import type { ChatGateway } from '../src/gateway/link'
 import { type ChatCache, chatCacheFor } from '../src/platform/chat-cache'
 import { useBotsStore, type Bot } from '../src/store/bots'
@@ -125,64 +129,97 @@ beforeEach(() => {
 
 // -- which name the field is editing -----------------------------------------
 
-describe('the name field', () => {
-  it('edits the DISPLAY name on the default profile, and warns about nothing', () => {
-    sheet(DEFAULT_BOT, fakeHttp({ ok: true, name: 'default', display_name: 'X', path: '/p' }).http)
+/** Open the profile-rename disclosure and type a new handle into it. */
+function typeNewProfileName(next: string): void {
+  fireEvent.press(screen.getByTestId('bot-profile-name-rename'))
+  fireEvent.changeText(screen.getByTestId('bot-profile-name-rename-field'), next)
+}
 
-    expect(screen.getByTestId('bot-profile-name')).toBeTruthy()
-    expect(screen.queryByTestId('bot-profile-name-warning')).toBeNull()
+describe('the name field', () => {
+  it('writes the display name into the app and sends nothing', () => {
+    const { http, calls } = fakeHttp({ ok: true })
+
+    sheet(BOT, http)
+    fireEvent.changeText(screen.getByTestId('bot-profile-name'), 'De Onderzoeker')
+
+    expect(useChatLayoutStore.getState().labels.researcher).toBe('De Onderzoeker')
+    expect(calls).toHaveLength(0)
   })
 
-  it('edits the PROFILE name on any other profile, and says what that costs', () => {
-    sheet(BOT, fakeHttp({ ok: true, name: 'analyst', path: '/p' }).http)
+  /** Emptying it is how a reader goes back to the name the gateway reports. */
+  it('clears the name rather than storing an empty one', () => {
+    sheet(BOT, fakeHttp({ ok: true }).http)
+
+    fireEvent.changeText(screen.getByTestId('bot-profile-name'), 'De Onderzoeker')
+    fireEvent.changeText(screen.getByTestId('bot-profile-name'), '   ')
+
+    expect(useChatLayoutStore.getState().labels.researcher).toBeUndefined()
+  })
+
+  it('is a field on the default profile too, and offers no rename there', () => {
+    sheet(DEFAULT_BOT, fakeHttp({ ok: true }).http)
+
+    expect(screen.getByTestId('bot-profile-name')).toBeTruthy()
+    expect(screen.queryByTestId('bot-profile-name-rename')).toBeNull()
+    expect(screen.getByTestId('bot-profile-name-default')).toBeTruthy()
+  })
+
+  /** Without a REST half nothing can rename, so the act is simply not offered. */
+  it('still takes a display name when the connection has no REST surface', () => {
+    sheet(BOT, null)
+
+    expect(screen.getByTestId('bot-profile-name')).toBeTruthy()
+    expect(screen.queryByTestId('bot-profile-name-rename')).toBeNull()
+  })
+
+  it('says what renaming the profile costs, once the disclosure is open', () => {
+    sheet(BOT, fakeHttp({ ok: true }).http)
+
+    expect(screen.queryByTestId('bot-profile-name-warning')).toBeNull()
+
+    fireEvent.press(screen.getByTestId('bot-profile-name-rename'))
 
     expect(screen.getByTestId('bot-profile-name-warning')).toHaveTextContent(
       'Renaming changes the profile name other tools use'
     )
   })
-
-  /** A roster row with no display name is projected as the id; that is not a label. */
-  it('starts empty on a default profile that has never been given a label', () => {
-    expect(initialBotName({ name: 'default', displayName: 'default', isDefault: true })).toBe('')
-    expect(initialBotName({ name: 'default', displayName: 'Jurist', isDefault: true })).toBe('Jurist')
-    expect(initialBotName({ name: 'researcher', displayName: 'Researcher', isDefault: false })).toBe('researcher')
-  })
-
-  /** Without a REST half there is nothing that can rename, so the rows go back to facts. */
-  it('is read-only when the connection has no REST surface', () => {
-    sheet(BOT, null)
-
-    expect(screen.queryByTestId('bot-profile-name')).toBeNull()
-  })
 })
 
 // -- the call ----------------------------------------------------------------
 
-describe('saving the name', () => {
+describe('renaming the profile', () => {
   it('sends new_name to PATCH /api/profiles/{name} and nothing else', async () => {
     const { http, calls } = fakeHttp({ ok: true, name: 'analyst', path: '/root/.hermes/profiles/analyst' })
     const onSaved = jest.fn()
 
     sheet(BOT, http, onSaved)
-    fireEvent.changeText(screen.getByTestId('bot-profile-name'), 'analyst')
-    fireEvent.press(screen.getByTestId('bot-profile-save'))
+    typeNewProfileName('analyst')
+    fireEvent.press(screen.getByTestId('bot-profile-name-rename-save'))
 
     await waitFor(() => expect(calls).toHaveLength(1))
     expect(calls[0]).toEqual({ path: '/api/profiles/researcher', body: { new_name: 'analyst' } })
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
   })
 
-  it('shows a 400 beside the field instead of closing', async () => {
+  /** Save is for the description and the photo, and a rename is neither. */
+  it('leaves Save disabled, because nothing it sends has changed', () => {
+    sheet(BOT, fakeHttp({ ok: true }).http)
+    typeNewProfileName('analyst')
+
+    expect(screen.getByTestId('bot-profile-save').props.accessibilityState.disabled).toBe(true)
+  })
+
+  it('shows a 400 beside the rename field instead of closing', async () => {
     const { GatewayError } = jest.requireActual('@hermie/gateway-client')
     const { http } = fakeHttp(() => {
       throw new GatewayError('protocol', 'PATCH failed with HTTP 400.', { status: 400 })
     })
 
     sheet(BOT, http)
-    fireEvent.changeText(screen.getByTestId('bot-profile-name'), 'analyst')
-    fireEvent.press(screen.getByTestId('bot-profile-save'))
+    typeNewProfileName('analyst')
+    fireEvent.press(screen.getByTestId('bot-profile-name-rename-save'))
 
-    await waitFor(() => expect(screen.getByTestId('bot-profile-error')).toHaveTextContent(/would not take that name/))
+    await waitFor(() => expect(screen.getByText('The gateway would not take that name.')).toBeTruthy())
   })
 
   it('shows a 404 as a missing profile rather than as a missing endpoint', async () => {
@@ -194,12 +231,10 @@ describe('saving the name', () => {
     })
 
     sheet(BOT, http)
-    fireEvent.changeText(screen.getByTestId('bot-profile-name'), 'analyst')
-    fireEvent.press(screen.getByTestId('bot-profile-save'))
+    typeNewProfileName('analyst')
+    fireEvent.press(screen.getByTestId('bot-profile-name-rename-save'))
 
-    await waitFor(() =>
-      expect(screen.getByTestId('bot-profile-error')).toHaveTextContent('The gateway has no profile called researcher.')
-    )
+    await waitFor(() => expect(screen.getByText('The gateway has no profile called researcher.')).toBeTruthy())
   })
 
   /** `rename_profile` refuses it before the setter sees it, so the app does too. */
@@ -237,6 +272,7 @@ describe('renameBot', () => {
     useChatsStore.getState().markLive('researcher')
     useChatLayoutStore.getState().reconcile(['researcher'])
     useChatLayoutStore.getState().setAccent('researcher', 'lime')
+    useChatLayoutStore.getState().setLabel('researcher', 'De Onderzoeker')
     useChatLayoutStore.getState().setArchived('researcher', true)
     useChatLayoutStore.getState().setMute('researcher', 0)
     useDeviceContextStore.getState().setBotNote('researcher', 'Prefers footnotes.', 10)
@@ -273,6 +309,8 @@ describe('renameBot', () => {
     expect(layout.entries).toContainEqual({ kind: 'chat', name: 'analyst' })
     expect(layout.entries).not.toContainEqual({ kind: 'chat', name: 'researcher' })
     expect(layout.accents.analyst).toBe('lime')
+    expect(layout.labels.analyst).toBe('De Onderzoeker')
+    expect(layout.labels.researcher).toBeUndefined()
     expect(layout.accents.researcher).toBeUndefined()
     expect(layout.archived.analyst).toBe(true)
     expect(layout.mutes.analyst).toBe(0)

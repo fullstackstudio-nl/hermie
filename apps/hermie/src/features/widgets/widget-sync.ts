@@ -294,6 +294,7 @@ export class WidgetSync {
     const snapshot = projectWidgetSnapshot({
       bots: bots.bots,
       nameOrder: this.stores.settings.getState().botNameOrder,
+      labels: layout.labels,
       chats: this.stores.chats.getState().chats,
       running: bots.running,
       lastSeen: bots.lastSeen,

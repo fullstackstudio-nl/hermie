@@ -829,11 +829,6 @@ export const app: Translation<typeof strings> = {
 
     description: 'BESCHREIBUNG',
     descriptionPlaceholder: 'Wofür dieser Bot da ist',
-    displayNameReadOnly: 'Auf dem Gateway gesetzt, in diesem Profil.',
-    profileNameHint: 'Der Name, mit dem der Rest der App diesen Bot anspricht.',
-    displayName: 'Anzeigename',
-    displayNameUnset: 'Nicht gesetzt',
-
     colour: 'FARBE',
     colourHint: 'Nur dieser Chat. Sie tönt die Sprechblasen, den Ring um den Avatar und die Zeile in der Liste.',
 
@@ -848,7 +843,6 @@ export const app: Translation<typeof strings> = {
 
     about: 'ÜBER DIESEN BOT',
     model: 'Modell',
-    profileName: 'Profilname',
 
     save: 'Speichern',
     saving: 'Speichere…',

@@ -183,6 +183,7 @@ describe('what the widgets count', () => {
     running: {},
     lastSeen: {},
     accents: {},
+    labels: {},
     archived: {},
     folders: [],
     mutes,

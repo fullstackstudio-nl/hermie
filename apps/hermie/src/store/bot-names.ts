@@ -14,6 +14,16 @@
  * and a secondary one under it, and **which of them is primary is one global
  * setting** rather than a decision each surface makes for itself.
  *
+ * ## Whose display name it is
+ *
+ * There is a third name and it is the one a reader can actually change. No call
+ * a client has writes a profile's `display_name`: `profiles.configure` has no
+ * such field, `profiles.create` has none, and `PATCH /api/profiles/{name}`
+ * RENAMES the profile on everything but `default`. So the app keeps the reader's
+ * own name for a bot beside their folders and colours (`chat-layout`'s `labels`)
+ * and prefers it here. The roster's `display_name` is the fallback under it, and
+ * the handle is the fallback under that.
+ *
  * ## Why a module and not a hook
  *
  * `botNames` is pure, which is what lets the same rule answer for a React row,
@@ -31,6 +41,7 @@
  * name is the common case on a fresh gateway.
  */
 import { useBotsStore } from './bots'
+import { useBotLabel } from './chat-layout'
 import { useSettingsStore } from './settings'
 
 /**
@@ -73,6 +84,19 @@ export interface BotNames {
 export interface NameableBot {
   name: string
   displayName: string
+  /**
+   * The name THIS READER gave the bot, when they have given it one.
+   *
+   * It wins over `displayName`, and that is the whole of the rule. A gateway
+   * offers a client no way to write a profile's `display_name` — the one route
+   * that touches it renames the profile instead, which is what made renaming a
+   * bot in this app move its handle — so the editable name is the app's own and
+   * the roster's is the fallback under it. See `chat-layout`'s `labels`.
+   *
+   * Optional because most callers have no opinion: a fixture, a widget
+   * projection and a test all pass two names and mean the roster's.
+   */
+  label?: string
 }
 
 /**
@@ -90,7 +114,10 @@ export interface NameableBot {
  */
 export function botNames(bot: NameableBot, order: NameOrder): BotNames {
   const handle = bot.name
-  const display = bot.displayName.trim()
+  // The reader's own name first, the roster's second. An empty one is not a
+  // name, which is what makes clearing the field fall back rather than blank the
+  // row.
+  const display = (bot.label ?? '').trim() || bot.displayName.trim()
   const same = display === '' || display.toLowerCase() === handle.trim().toLowerCase()
 
   if (same) {
@@ -115,8 +142,9 @@ export function useNameOrder(): NameOrder {
 export function useBotNames(name: string | undefined): BotNames {
   const order = useNameOrder()
   const displayName = useBotsStore(state => (name === undefined ? '' : (state.byName[name]?.displayName ?? name)))
+  const label = useBotLabel(name)
 
-  return botNames({ name: name ?? '', displayName }, order)
+  return botNames({ name: name ?? '', displayName, label }, order)
 }
 
 /**

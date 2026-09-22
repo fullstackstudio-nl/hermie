@@ -5,8 +5,9 @@
  *
  * A bot's name is not a label in this app, it is the PRIMARY KEY. The chat
  * store holds transcripts under it, the roster holds bots and watermarks under
- * it, the arrangement holds entries, folders, archive flags, colours and mutes
- * under it, the device-context store holds the per-bot note under it, and the
+ * it, the arrangement holds entries, folders, archive flags, colours, the name
+ * the reader gave the bot and mutes under it, the device-context store holds the
+ * per-bot note under it, and the
  * on-disk transcript cache has a column of it. So the moment core's
  * `PATCH /api/profiles/{name}` really renames a profile — which it does for
  * every profile except `default` — every one of those keys is pointing at a bot
@@ -109,7 +110,13 @@ export async function renameBot(from: string, to: string, gatewayId: string | nu
   const before = {
     bots: { bots: bots.bots, byName: bots.byName, avatars: bots.avatars, running: bots.running },
     chats: { chats: chats.chats, queues: chats.queues, runtimeToBot: chats.runtimeToBot, live: chats.live },
-    layout: { entries: layout.entries, folders: layout.folders, archived: layout.archived, mutes: layout.mutes }
+    layout: {
+      entries: layout.entries,
+      folders: layout.folders,
+      archived: layout.archived,
+      labels: layout.labels,
+      mutes: layout.mutes
+    }
   }
 
   try {
@@ -163,6 +170,10 @@ export async function renameBot(from: string, to: string, gatewayId: string | nu
         folder.bots.includes(from) ? { ...folder, bots: folder.bots.map(name => (name === from ? to : name)) } : folder
       ),
       archived: rekey(layout.archived, from, to) as Record<string, true>,
+      // The reader's own name for the bot, which is keyed on the handle like
+      // everything else here — and is the one key whose loss would look like the
+      // rename having undone the rename.
+      labels: rekey(layout.labels, from, to) as Record<string, string>,
       mutes: rekey(layout.mutes, from, to)
     })
   } catch {
