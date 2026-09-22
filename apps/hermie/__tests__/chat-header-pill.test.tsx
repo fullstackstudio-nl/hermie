@@ -19,11 +19,24 @@ import { act, render } from '@testing-library/react-native'
 import { ChatHeader, PILL_MIN_TEXT_WIDTH, pillTextWidth } from '../src/chat-ui/ChatHeader'
 import type { PresenceState } from '../src/ui/tokens'
 import { shortToolName, TOOL_NAME_MAX } from '../src/chat-ui/tool-label'
-import { ThemeProvider } from '../src/ui/theme'
+import { ThemeProvider, useTheme, type Theme } from '../src/ui/theme'
+
+/**
+ * The theme the provider actually resolved, so an assertion can name a token
+ * rather than a hex string that moves the next time the ladder is retuned.
+ */
+let seen: Theme | undefined
+
+function ThemeProbe() {
+  seen = useTheme()
+
+  return null
+}
 
 function header(subtitle: string, presence: PresenceState = 'working', name = 'Researcher') {
   return render(
     <ThemeProvider>
+      <ThemeProbe />
       <ChatHeader name={name} onOpenOptions={() => undefined} presence={presence} subtitle={subtitle} />
     </ThemeProvider>
   )
@@ -84,6 +97,36 @@ describe('the status line cannot widen the pill', () => {
     const tree = header('Running an extremely long tool name that could never fit…')
 
     expect(tree.getByText('Running an extremely long tool name that could never fit…').props.numberOfLines).toBe(1)
+  })
+})
+
+/**
+ * The transcript scrolls UNDER the header, so the pill's backdrop is whatever
+ * bubble is passing behind it. A control wash alone lets that bubble's text
+ * through the bot's name; the solid rung is what makes the pill's contrast a
+ * number instead of a coincidence. Same rule, same reason, as `AttachMenu`.
+ */
+describe('the pill does not let the transcript read through it', () => {
+  it('lays the control rung under the wash rather than staying transparent', () => {
+    const tree = header('Online', 'online')
+    const surface = tree.getByTestId('chat-header-pill-surface', { includeHiddenElements: true })
+    const style = surface.props.style as Record<string, unknown>[]
+    const flattened = Object.assign({}, ...style.filter(Boolean)) as Record<string, unknown>
+
+    expect(seen).toBeDefined()
+    expect(flattened.backgroundColor).toBe(seen?.glass.control.solid)
+    expect(flattened.backgroundColor).not.toBe('transparent')
+  })
+
+  it('gives the presence bead the same colour its ring already assumed', () => {
+    const tree = header('Online', 'online')
+    const surface = tree.getByTestId('chat-header-pill-surface', { includeHiddenElements: true })
+    const style = surface.props.style as Record<string, unknown>[]
+    const flattened = Object.assign({}, ...style.filter(Boolean)) as Record<string, unknown>
+
+    // The bead draws a ring in `glass.control.solid` so that it reads as a hole
+    // punched in the pill. That is only true once the pill IS that colour.
+    expect(flattened.backgroundColor).toBe(seen?.glass.control.solid)
   })
 })
 

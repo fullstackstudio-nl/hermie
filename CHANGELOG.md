@@ -227,6 +227,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The bot's name in the chat header no longer has a message printed through it.** The transcript
+  scrolls underneath the header, so whatever bubble happens to be passing behind the pill was its
+  backdrop — and at the glass control's own transparency that bubble's words came through the name
+  and the status under it, two strings of text at the same weight in the same place. The pill now
+  takes the solid layer under its glass, the way the attach menu and every other floating menu in
+  the app already do, so what it says is legible over any transcript.
+
 - **Signing in works again.** Since gateways got ids, every credential the app tried to store was
   rejected before it reached the device's secret store at all: the id is appended with an `@`, and
   `expo-secure-store` accepts only letters, digits, `.`, `-` and `_` in a key. It was not a
