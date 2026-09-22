@@ -1,5 +1,5 @@
 export { McpScreen, type McpScreenProps, McpServerScreen, type McpServerScreenProps } from './McpScreen'
-export { useMcpProbeStore } from './probe-store'
+export { mcpProbeKey, useMcpProbeStore, type McpProbeScope } from './probe-store'
 export {
   McpController,
   mergeServers,

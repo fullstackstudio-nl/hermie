@@ -22,7 +22,7 @@ import { Button, InsetGroup, InsetRow, InsetValueRow, Text } from '../../ui/prim
 import { FORM_MAX_WIDTH } from '../../ui/tokens'
 import { useTheme } from '../../ui/theme'
 import { McpController, type McpProbe, type McpServerView } from './mcp-controller'
-import { useMcpProbeStore } from './probe-store'
+import { mcpProbeKey, useMcpProbeStore, type McpProbeScope } from './probe-store'
 import { mcpStrings } from './strings'
 
 export interface McpScreenProps {
@@ -32,6 +32,19 @@ export interface McpScreenProps {
   onOpenServer: (name: string) => void
   /** Scope every call to one bot. Omitted means the gateway's own profile. */
   profile?: string | null
+}
+
+/**
+ * Which gateway and which bot these probes belong to.
+ *
+ * Read from the provider rather than passed in, because both pages already take
+ * the profile as a prop and neither has any business also being told which
+ * gateway it is looking at — there is one, and `useGateway` knows it.
+ */
+function useProbeScope(profile: string | null): McpProbeScope {
+  const { gatewayId } = useGateway()
+
+  return useMemo(() => ({ gateway: gatewayId ?? null, profile }), [gatewayId, profile])
 }
 
 /** The controller both pages talk through, one per connection. */
@@ -80,6 +93,7 @@ export function McpScreen({ back, onOpenServer, profile = null }: McpScreenProps
   const theme = useTheme()
   const controller = useMcpController()
   const { servers, error, load } = useMcpServers(controller, profile)
+  const scope = useProbeScope(profile)
   const probes = useMcpProbeStore(state => state.probes)
   const [refreshing, setRefreshing] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
@@ -128,7 +142,7 @@ export function McpScreen({ back, onOpenServer, profile = null }: McpScreenProps
             {servers.map(entry => (
               <ServerRow
                 key={entry.name}
-                needsAuth={probes[entry.name]?.needsAuth === true}
+                needsAuth={probes[mcpProbeKey(scope, entry.name)]?.needsAuth === true}
                 onPress={() => {
                   setNotice(null)
                   onOpenServer(entry.name)
@@ -185,7 +199,8 @@ export interface McpServerScreenProps {
 export function McpServerScreen({ name, back, profile = null }: McpServerScreenProps) {
   const controller = useMcpController()
   const { servers } = useMcpServers(controller, profile)
-  const probe = useMcpProbeStore(state => state.probes[name] ?? null)
+  const scope = useProbeScope(profile)
+  const probe = useMcpProbeStore(state => state.probes[mcpProbeKey(scope, name)] ?? null)
   const setProbe = useMcpProbeStore(state => state.setProbe)
   const changed = useMcpProbeStore(state => state.changed)
   const [busy, setBusy] = useState(false)
@@ -202,7 +217,7 @@ export function McpServerScreen({ name, back, profile = null }: McpServerScreenP
     void controller
       .test(name, profile)
       .then(result => {
-        setProbe(name, result)
+        setProbe(scope, name, result)
         setNotice(result.ok ? mcpStrings.testOk(result.tools.length) : mcpStrings.testFailed(result.error ?? ''))
       })
       .catch((cause: unknown) =>
@@ -221,7 +236,7 @@ export function McpServerScreen({ name, back, profile = null }: McpServerScreenP
     void controller
       .authorise(name, profile)
       .then(result => {
-        setProbe(name, result)
+        setProbe(scope, name, result)
         setNotice(mcpStrings.authoriseOk)
         changed()
       })

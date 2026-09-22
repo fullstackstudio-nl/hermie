@@ -26,6 +26,7 @@ import { currentTargetOf, useChatLayoutStore } from '../../store/chat-layout'
 import { useChatsStore } from '../../store/chats'
 import { OWNER_USER_ID, useDeviceContextStore } from '../../store/device-context'
 import { useVoiceSettingsStore } from '../voice/voice-settings'
+import { useMcpProbeStore } from '../mcp'
 import { usePluginStore } from '../../store/plugin'
 import { usePushStore } from '../../store/push'
 import { useSettingsStore } from '../../store/settings'
@@ -191,6 +192,10 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     useChatsStore.getState().reset()
     useBotsStore.getState().reset()
     usePluginStore.getState().reset()
+    // And what the MCP pages learned by testing. Those results are keyed by
+    // gateway, so the next one cannot READ them; this is about not keeping the
+    // previous account's server names in this process.
+    useMcpProbeStore.getState().reset()
 
     hydrated.current = Promise.all([
       useSettingsStore.getState().hydrate(ns),
@@ -265,6 +270,7 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       useBotsStore.getState().reset()
       // The advert belongs to a gateway; the next one is not this one.
       usePluginStore.getState().reset()
+      useMcpProbeStore.getState().reset()
       /*
         And neither are the neighbours.
 
