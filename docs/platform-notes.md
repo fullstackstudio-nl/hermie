@@ -9945,3 +9945,72 @@ a listing, and the memory graph is the screen that puts them all on one page.
 navigator`. A real launch always has the list underneath; this is an artefact
   of the screenshot door, not a defect in the app.
 - **Nothing was verified on Android, on the Mac or in a browser this round.**
+
+## Round R22: a teammate's message is an aside, and it counts for nothing (2026-09-22)
+
+Three things the owner reported in one sitting, and the first two are the same
+sentence read twice. _Bot-to-bot messages must not be seen as chat bubbles. The
+message to another bot must simply sit on the left and be expandable — same
+design as thoughts. The replies too. Bot-to-bot must also not bump the
+notification badge._
+
+### What changed
+
+- **One component for both directions.** `chat-ui/BotDmAside.tsx` replaces
+  `BotDmInBubble` (a tinted bubble with a tail) and `BotDmOutLine` (a line whose
+  open body sat on a `GlassSurface`). No bubble, no tail, no card: the
+  `ReasoningDisclosure` silhouette, a `To @handle` / `From @handle` header, the
+  time, the reply marker, a chevron, and a Markdown body that opens on a tap.
+- **Closed at every verbosity.** `selectors.ts` hands these rows `collapsed` and
+  never `full`, which is what stops a renderer re-deriving the bubble from the
+  presentation. `showBotToBot: false` still demotes to a chip.
+- **The roll-up is untouched**, deliberately — the owner said it is good as it
+  is. Runs are now keyed on the PAIR, so a dispatch and its answer sit tight and
+  an errand to somebody else starts a new run.
+- **`countsAsMessage` drops `bot_dm_in`**, which is the chat row's pill, the
+  folder aggregate and the widget count in one edit; `ChatScreen`'s
+  `MESSAGE_KINDS` kept a second copy of the list and follows it.
+- **The muted bell** is redrawn with a flared skirt and a clapper, at a new
+  `ICON_SIZE.listMark` (17), in `textMuted`, and moved from the stamp corner to
+  the name line.
+
+### Verified
+
+- **Full suites, on this machine:** `npm run typecheck`, `npx eslint .`,
+  `npx prettier --check .`, `npx vitest run` (83 files, 1620 tests) and
+  `cd apps/hermie && npx jest` (231 suites, 2978 tests). Green.
+- **Each rule fails without its change**, checked by reverting it: putting
+  `bot_dm_in` back into `countsAsMessage` and `full` back into the `bot_dm_out`
+  presentation fails two tests in `packages/transcript/src/selectors.test.ts`.
+- **The "no bubble" assertion is a real one**, not a text match: `Bubble` emits
+  `<testID>` and `<testID>-box`, and both are asserted absent for DM rows — in
+  isolation in `chat-ui/components.test.tsx` and through the list in
+  `chat-ui/transcript-list.test.tsx`.
+- **The roll-up boundary is pinned twice**: as a pure function in
+  `dm-rollup.test.ts` and as rendered rows in `transcript-list.test.tsx` — three
+  in a row draw three asides and no roll-up, four draw the roll-up and the asides
+  only once it is opened, each still closed.
+
+### Not verified
+
+- **Nothing was seen on a device or a simulator this round.** Every claim above
+  is a test result. The aside's look — the ink, the 22pt row, how the header,
+  preview, clock and marker share a phone's width when a handle is long — has
+  not been looked at by anybody. The same goes for the new bell: its path was
+  reasoned about against the 24×24 grid the other icons use and never rendered
+  to a screen, and a bell is exactly the kind of small mark that can be correct
+  in coordinates and wrong to the eye.
+- **Nothing was verified on Android, on the Mac or in a browser.**
+- **The chat row's plain dot is out of scope and still lit.** It comes from the
+  roster's `last_active`, which says a chat moved and not what moved in it, so a
+  chat whose only new rows are bot-to-bot can still carry a dot beside a count of
+  nothing. The test says so rather than pretending otherwise.
+- **Push was pinned, not exercised.** `watcher.test.ts` now proves the daemon
+  sends nothing for a bot-to-bot delivery to a registration shaped the way this
+  app writes one. No notification was sent to a real phone this round.
+- **The live path still cannot attribute an inbound DM on its own.** A foreign
+  `message.start` carries no author (ADR-0018), so it stands up a blank `user`
+  placeholder until a resume or a hydration says who spoke — which means a chat
+  open at the moment a teammate writes can, for that window, count the row. The
+  jump-pill test seeds the classified item rather than papering over this; the
+  fix belongs in the reducer, which another round owns.
