@@ -35,7 +35,15 @@ import { type Bot, useBotsStore } from '../src/store/bots'
 import { useChatLayoutStore } from '../src/store/chat-layout'
 import { useChatsStore } from '../src/store/chats'
 import { readArrangement, type Arrangement } from '../src/store/folders'
+import { FolderGroup } from '../src/features/bots/FolderGroup'
 import { renderScreen } from './support/render'
+
+/** A plate is a drawing, so it is hidden from accessibility and asked for as one. */
+const HIDDEN = { includeHiddenElements: true } as const
+
+/** The one style object a `FolderGroup` is given, for reading a corner off. */
+const style = (node: { props: { style?: unknown } }): Record<string, number> =>
+  (node.props.style ?? {}) as Record<string, number>
 
 // Two modules, because the gateway card reaches for the provider directly
 // rather than through the barrel.
@@ -213,6 +221,90 @@ describe('the folder row on screen', () => {
     // The grip is where the responder lives; a folder without one is a folder
     // that can be looked at in edit mode and not moved.
     expect(typeof grip.props.onStartShouldSetResponder).toBe('function')
+  })
+})
+
+/**
+ * A folder has to LOOK like a folder, which was the owner's whole report on R24:
+ * the behaviour arrived and the drawing stayed a divider with a name on it.
+ *
+ * Three things carry that and each fails differently. The MARK says what kind of
+ * thing this is. The PLATE says what is inside it — a closed folder is the whole
+ * group and rounds all four corners, an open one is the top of something its
+ * chats continue. And the STEP says those chats are in it rather than under it.
+ */
+describe('a folder is drawn as a container', () => {
+  it('wears a folder mark and a chevron of its own', async () => {
+    const id = await renderList()
+
+    expect(screen.getByTestId(`folder-mark-${id}`, HIDDEN)).toBeTruthy()
+    // One chevron that turns, rather than two glyphs swapped at the cut.
+    expect(screen.getByTestId(`folder-chevron-${id}`, HIDDEN)).toBeTruthy()
+  })
+
+  it('is one plate the header opens and the last chat closes', async () => {
+    const id = await renderList()
+
+    const plate = style(screen.getByTestId(`folder-group-${id}`, HIDDEN))
+
+    // Open: the top of something.
+    expect(plate.borderTopLeftRadius).toBeGreaterThan(0)
+    expect(plate.borderBottomLeftRadius).toBe(0)
+    expect(plate.borderBottomWidth).toBe(0)
+
+    // `beta` then `gamma` are inside; only the last one closes the plate.
+    expect(style(screen.getByTestId('folder-member-beta', HIDDEN)).borderBottomLeftRadius).toBe(0)
+    expect(style(screen.getByTestId('folder-member-gamma', HIDDEN)).borderBottomLeftRadius).toBeGreaterThan(0)
+
+    // And a chat that is in no folder sits on no plate at all.
+    expect(screen.queryByTestId('folder-member-alpha', HIDDEN)).toBeNull()
+  })
+
+  it('rounds all four corners once it is closed, because then it is the whole group', async () => {
+    const id = await renderList()
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId(`folder-${id}`))
+    })
+
+    const plate = style(screen.getByTestId(`folder-group-${id}`, HIDDEN))
+
+    expect(plate.borderBottomLeftRadius).toBeGreaterThan(0)
+    expect(plate.borderBottomWidth).toBe(1)
+    // The rows it was holding are gone with it.
+    expect(screen.queryByTestId('folder-member-beta', HIDDEN)).toBeNull()
+  })
+
+  it('steps its chats in, so they read as being inside it', async () => {
+    await renderList()
+
+    expect(style(screen.getByTestId('folder-member-beta', HIDDEN)).paddingLeft).toBeGreaterThan(0)
+  })
+})
+
+/**
+ * Dropping INTO a folder has to look like dropping into a container.
+ *
+ * The plate takes the folder's own colour while a chat is over it. Asserted on
+ * the plate rather than through a simulated drag, because what the drag decides —
+ * which folder is being aimed at — is one lookup against the anchor's TARGET, and
+ * that already has the anchors' own tests above it. What had no test at all was
+ * whether being aimed at changes anything a reader can see.
+ */
+describe('the plate while a chat is over it', () => {
+  it('takes the folder’s colour, and its resting state does not', () => {
+    renderScreen(
+      <>
+        <FolderGroup colour="lime" edge="only" testID="resting" />
+        <FolderGroup colour="lime" edge="only" targeted testID="targeted" />
+      </>
+    )
+
+    const resting = style(screen.getByTestId('resting', HIDDEN))
+    const targeted = style(screen.getByTestId('targeted', HIDDEN))
+
+    expect(targeted.backgroundColor).not.toBe(resting.backgroundColor)
+    expect(targeted.borderColor).not.toBe(resting.borderColor)
   })
 })
 

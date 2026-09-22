@@ -29,6 +29,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Animated,
   FlatList,
+  LayoutAnimation,
   Pressable,
   RefreshControl,
   TextInput,
@@ -61,13 +62,14 @@ import { Appear } from '../../ui/Appear'
 import { DragGrip } from '../../ui/DragGrip'
 import { GlassSurface } from '../../ui/glass'
 import { Icon, ICON_SIZE } from '../../ui/Icon'
+import { durationFor, easing, NATIVE_DRIVER } from '../../ui/motion'
 import { Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { useFocusRing } from '../../ui/useFocusRing'
 import { useEscapeKey } from '../../ui/useEscapeKey'
 import { useHover } from '../../ui/useHover'
 import { useNumberedShortcuts, useShortcut } from '../../ui/useShortcut'
-import { CONTROL_MIN_HEIGHT, TAP_SLOP } from '../../ui/tokens'
+import { CONTROL_MIN_HEIGHT, TAP_SLOP, type AccentName } from '../../ui/tokens'
 import { formatListTime } from '../../chat-ui'
 import { useChatRuntime } from '../chats/ChatRuntime'
 import { type MessageMatch, useMessageSearch } from '../search'
@@ -76,6 +78,7 @@ import { NewBotFlow } from '../profiles/NewBotFlow'
 import { KanbanScreen, kanbanStrings, useBoardsOpener } from '../kanban'
 import { profileStrings } from '../profiles/strings'
 import { ConnectionLine } from './ConnectionLine'
+import { FolderGroup, type FolderGroupEdge } from './FolderGroup'
 import { GatewayTitle } from './GatewayTitle'
 import {
   clampToPinnedBand,
@@ -158,8 +161,19 @@ const ARCHIVED_PRESENCE: Presence = { state: 'offline' }
 
 type ListItem =
   | { key: string; kind: 'folder'; folder: Folder; open: boolean; counts: FolderCounts }
-  | { key: string; kind: 'folderEmpty'; id: string }
-  | { key: string; kind: 'bot'; bot: Bot; archived: boolean }
+  | { key: string; kind: 'folderEmpty'; id: string; colour: AccentName }
+  | {
+      key: string
+      kind: 'bot'
+      bot: Bot
+      archived: boolean
+      /** Which folder draws this row, and therefore which plate it sits on. */
+      folderId: string | null
+      /** The colour of that plate; ignored for a loose row. */
+      folderColour: AccentName
+      /** The bottom slice of the plate: the last chat shown inside its folder. */
+      lastInFolder: boolean
+    }
   | { key: string; kind: 'archiveHeader'; count: number }
   | { key: string; kind: 'noNameMatch'; query: string }
   | { key: string; kind: 'messagesHeader'; searching: boolean; count: number }
@@ -381,6 +395,24 @@ export function BotsScreen({
   const rows = useMemo(() => folderRows(rowsInput), [rowsInput])
 
   /**
+   * Each folder's colour, by id.
+   *
+   * The rows INSIDE a folder are drawn on that folder's plate, so they have to
+   * know its colour — and a row cannot look it up, because a row is handed a bot
+   * and not a container. One map, built with the folders, rather than a `find`
+   * per row per render.
+   */
+  const folderColours = useMemo(() => {
+    const out: Record<string, AccentName> = {}
+
+    for (const folder of folders) {
+      out[folder.id] = folder.colour ?? 'default'
+    }
+
+    return out
+  }, [folders])
+
+  /**
    * The list, flattened.
    *
    * Archived bots are excluded from the filters and from the unread totals —
@@ -401,6 +433,7 @@ export function BotsScreen({
   const items = useMemo<ListItem[]>(() => {
     const out: ListItem[] = []
     const narrowed = Boolean(query.trim())
+    const colourOfFolder = (id: string | null): AccentName => (id ? (folderColours[id] ?? 'default') : 'default')
     const shown = (name: string): Bot | null => {
       const bot = byName[name]
 
@@ -418,14 +451,24 @@ export function BotsScreen({
         const bot = shown(row.name)
 
         if (bot) {
-          out.push({ archived: false, bot, key: row.key, kind: 'bot' })
+          out.push({
+            archived: false,
+            bot,
+            folderColour: colourOfFolder(row.folderId),
+            folderId: row.folderId,
+            key: row.key,
+            kind: 'bot',
+            // Filled in below: which row is last inside a folder depends on
+            // which rows the search dropped, and that is not known yet.
+            lastInFolder: false
+          })
         }
 
         continue
       }
 
       if (row.kind === 'folderEmpty') {
-        out.push({ id: row.folderId, key: row.key, kind: 'folderEmpty' })
+        out.push({ colour: colourOfFolder(row.folderId), id: row.folderId, key: row.key, kind: 'folderEmpty' })
         continue
       }
 
@@ -456,6 +499,21 @@ export function BotsScreen({
       out.push({ counts: row.counts, folder: row.folder, key: row.key, kind: 'folder', open: row.open })
     }
 
+    /*
+      Which member is the LAST one drawn inside its folder, which is the cell that
+      rounds the bottom of the plate. Computed here, over the rows that survived
+      the search, rather than from the arrangement: a folder whose final chat was
+      filtered out still has to close its plate under the chat above it.
+    */
+    for (let index = 0; index < out.length; index += 1) {
+      const item = out[index]
+      const next = out[index + 1]
+
+      if (item?.kind === 'bot' && item.folderId) {
+        item.lastInFolder = !(next?.kind === 'bot' && next.folderId === item.folderId)
+      }
+    }
+
     if (archivedNames.length) {
       out.push({ count: archivedNames.length, key: 'archive', kind: 'archiveHeader' })
 
@@ -464,7 +522,16 @@ export function BotsScreen({
           const bot = byName[name]
 
           if (bot) {
-            out.push({ archived: true, bot, key: `archived:${name}`, kind: 'bot' })
+            // The drawer is its own group and has no folder plate under it.
+            out.push({
+              archived: true,
+              bot,
+              folderColour: 'default',
+              folderId: null,
+              key: `archived:${name}`,
+              kind: 'bot',
+              lastInFolder: false
+            })
           }
         }
       }
@@ -512,7 +579,7 @@ export function BotsScreen({
     }
 
     return out
-  }, [archiveOpen, archivedNames, archivedSet, byName, editing, messageSearch, query, rows])
+  }, [archiveOpen, archivedNames, archivedSet, byName, editing, folderColours, messageSearch, query, rows])
 
   const hasRows = items.some(item => item.kind === 'bot')
 
@@ -931,10 +998,56 @@ export function BotsScreen({
     [byName, openBot]
   )
 
-  /** Open or close a folder. Local to this device; see `PersistedLayout`. */
-  const toggleFolder = useCallback((id: string, open: boolean) => {
-    useChatLayoutStore.getState().setFolderOpen(id, open)
-  }, [])
+  /**
+   * The folder a drop would land in, or `null`.
+   *
+   * Read off the anchor's TARGET rather than off its key, which is what makes
+   * one answer cover three gestures: onto the folder's own header
+   * (`folderIn:<id>`), into an empty one (`folderEmpty:<id>`), and between two
+   * chats already inside it (a `bot:` anchor whose target names the folder).
+   * All three mean "in here", and the plate has to say so for all three.
+   *
+   * A FOLDER being dragged is excluded. Folders do not nest — `topLevelIndexOf`
+   * maps any target inside a folder back to that folder's own position — so
+   * lighting the plate would promise a containment the arrangement cannot hold.
+   */
+  const dropFolderId = useMemo(() => {
+    const dragged = drag.draggingKey ? parseRowKey(drag.draggingKey) : null
+
+    if (!drag.dropKey || dragged?.kind !== 'bot') {
+      return null
+    }
+
+    return anchors.find(anchor => anchor.key === drag.dropKey)?.target.folderId ?? null
+  }, [anchors, drag.draggingKey, drag.dropKey])
+
+  /**
+   * Open or close a folder. Local to this device; see `PersistedLayout`.
+   *
+   * The rows arrive and leave with a layout animation, which is the difference
+   * between a folder opening and a list suddenly being longer. One frame of
+   * configuration for the next commit, and `durationFor` collapses it to zero
+   * under Reduce Motion — the same rule every other motion in the app follows.
+   * `create`/`delete` fade rather than scale: the rows are full-width and a scale
+   * on one reads as the list breathing.
+   */
+  const toggleFolder = useCallback(
+    (id: string, open: boolean) => {
+      const duration = durationFor('row', theme.reduceMotion)
+
+      if (duration > 0) {
+        LayoutAnimation.configureNext({
+          duration,
+          create: { type: 'easeInEaseOut', property: 'opacity' },
+          delete: { type: 'easeInEaseOut', property: 'opacity' },
+          update: { type: 'easeInEaseOut' }
+        })
+      }
+
+      useChatLayoutStore.getState().setFolderOpen(id, open)
+    },
+    [theme.reduceMotion]
+  )
 
   /**
    * A folder's own menu, which is the row menu's alphabet one level up.
@@ -1132,6 +1245,13 @@ export function BotsScreen({
 
             if (item.kind === 'folder') {
               const liftedFolder = drag.draggingKey === item.key
+              /*
+                A closed folder IS the whole group, so it rounds all four
+                corners. An open one is the top of a plate the rows below it
+                continue — including the placeholder row an empty open folder
+                draws, which is why `size` is not the test.
+              */
+              const edge: FolderGroupEdge = item.open ? 'top' : 'only'
 
               return (
                 /*
@@ -1160,20 +1280,27 @@ export function BotsScreen({
                   }
                   testID={liftedFolder ? `folder-row-lifted-${item.folder.id}` : undefined}
                 >
-                  <FolderHeader
-                    autoFocus={item.folder.id === addedFolderId}
-                    counts={item.counts}
-                    editing={editing}
-                    folder={item.folder}
-                    {...(editing ? { handleHandlers: drag.handleHandlers(item.key) } : {})}
-                    onArm={drag.arm}
-                    onDisarm={drag.disarm}
-                    onMenuSelect={onFolderMenuSelect}
-                    onMove={moveFolder}
-                    onRename={renameFolder}
-                    onToggle={toggleFolder}
-                    open={item.open}
-                  />
+                  <FolderGroup
+                    colour={item.folder.colour ?? 'default'}
+                    edge={edge}
+                    targeted={dropFolderId === item.folder.id}
+                    testID={`folder-group-${item.folder.id}`}
+                  >
+                    <FolderHeader
+                      autoFocus={item.folder.id === addedFolderId}
+                      counts={item.counts}
+                      editing={editing}
+                      folder={item.folder}
+                      {...(editing ? { handleHandlers: drag.handleHandlers(item.key) } : {})}
+                      onArm={drag.arm}
+                      onDisarm={drag.disarm}
+                      onMenuSelect={onFolderMenuSelect}
+                      onMove={moveFolder}
+                      onRename={renameFolder}
+                      onToggle={toggleFolder}
+                      open={item.open}
+                    />
+                  </FolderGroup>
                 </Animated.View>
               )
             }
@@ -1181,7 +1308,9 @@ export function BotsScreen({
             if (item.kind === 'folderEmpty') {
               return (
                 <Animated.View style={{ transform: [{ translateY: drag.offsetFor(item.key) }] }}>
-                  <FolderEmpty id={item.id} />
+                  <FolderGroup colour={item.colour} edge="bottom" indent targeted={dropFolderId === item.id}>
+                    <FolderEmpty id={item.id} />
+                  </FolderGroup>
                 </Animated.View>
               )
             }
@@ -1189,72 +1318,99 @@ export function BotsScreen({
             const state = presence.get(item.bot.name) ?? ARCHIVED_PRESENCE
             const { count, unread } = unreadFor(item.bot.name)
             const lifted = drag.draggingKey === item.key
+            const inFolder = item.folderId
+
+            const row =
+              (
+                /*
+                 * The wrapper carries three things a row cannot carry itself: the
+                 * measurement the drop arithmetic needs, the pan responder that claims
+                 * the gesture once a long press has armed it, and the lift.
+                 *
+                 * The lift is a TRANSFORM on the row in place rather than a separate drag
+                 * layer. A portal would let the row leave the list, which nothing here
+                 * needs — the drop targets are all inside it — and it would cost a second
+                 * copy of the row to keep in sync with the first.
+                 *
+                 * What it cannot carry is the z-order or the measurement: both belong to
+                 * the cell this wrapper sits inside, which is `DragCell`.
+                 */
+                <Animated.View
+                  {...(item.archived ? {} : drag.rowHandlers(item.key))}
+                  /*
+                   * Two states, one style: LIFTED reads off the drag's own `lift`
+                   * value, everything else off its row offset. Neither is a boolean
+                   * in a style object any more — a row that changed size in one frame
+                   * was the tell that this was a transform applied rather than a row
+                   * picked up.
+                   */
+                  style={
+                    lifted
+                      ? {
+                          elevation: 8,
+                          shadowColor: '#000',
+                          shadowOffset: { height: 6, width: 0 },
+                          // Interpolated off the lift so the shadow arrives with the
+                          // scale and leaves with it, rather than blinking on.
+                          shadowOpacity: drag.lift.interpolate({ inputRange: [0, 1], outputRange: [0, 0.28] }),
+                          shadowRadius: 12,
+                          transform: [
+                            { translateY: drag.translateY },
+                            { scale: drag.lift.interpolate({ inputRange: [0, 1], outputRange: [1, LIFT_SCALE] }) }
+                          ]
+                        }
+                      : { transform: [{ translateY: drag.offsetFor(item.key) }] }
+                  }
+                  testID={lifted ? `bot-row-lifted-${item.bot.name}` : undefined}
+                >
+                  <BotRow
+                    accent={accents[item.bot.name] ?? 'default'}
+                    archived={item.archived}
+                    bot={item.bot}
+                    compact={!sidebar}
+                    editing={editing && !item.archived}
+                    {...(editing && !item.archived ? { handleHandlers: drag.handleHandlers(item.key) } : {})}
+                    menuFolders={menuFolders}
+                    mutedUntil={mutedUntilOf(mutes, item.bot.name, Math.floor(Date.now() / 1000))}
+                    pinned={Boolean(pinned[item.bot.name])}
+                    onArm={drag.arm}
+                    onDisarm={drag.disarm}
+                    onMenuSelect={onMenuSelect}
+                    onMove={moveBot}
+                    onOpenMenu={setMenuFor}
+                    onPress={openBot}
+                    presence={item.archived ? ARCHIVED_PRESENCE : state}
+                    selected={item.bot.name === selectedBot}
+                    unread={item.archived ? false : unread}
+                    unreadCount={item.archived ? 0 : count}
+                    {...(avatars[item.bot.name] ? { avatarUri: avatars[item.bot.name] } : {})}
+                  />
+                </Animated.View>
+              )
+
+            /*
+              A chat inside a folder is drawn ON the folder's plate and stepped in
+              from it, which is the other half of what makes a folder read as a
+              container rather than as a heading. A loose chat is the row on its
+              own, exactly as it was.
+
+              The plate is OUTSIDE the drag wrapper, so a lifted row rises out of
+              its folder rather than carrying a slice of the plate with it.
+            */
+            if (!inFolder) {
+              return row
+            }
 
             return (
-              /*
-               * The wrapper carries three things a row cannot carry itself: the
-               * measurement the drop arithmetic needs, the pan responder that claims
-               * the gesture once a long press has armed it, and the lift.
-               *
-               * The lift is a TRANSFORM on the row in place rather than a separate drag
-               * layer. A portal would let the row leave the list, which nothing here
-               * needs — the drop targets are all inside it — and it would cost a second
-               * copy of the row to keep in sync with the first.
-               *
-               * What it cannot carry is the z-order or the measurement: both belong to
-               * the cell this wrapper sits inside, which is `DragCell`.
-               */
-              <Animated.View
-                {...(item.archived ? {} : drag.rowHandlers(item.key))}
-                /*
-                 * Two states, one style: LIFTED reads off the drag's own `lift`
-                 * value, everything else off its row offset. Neither is a boolean
-                 * in a style object any more — a row that changed size in one frame
-                 * was the tell that this was a transform applied rather than a row
-                 * picked up.
-                 */
-                style={
-                  lifted
-                    ? {
-                        elevation: 8,
-                        shadowColor: '#000',
-                        shadowOffset: { height: 6, width: 0 },
-                        // Interpolated off the lift so the shadow arrives with the
-                        // scale and leaves with it, rather than blinking on.
-                        shadowOpacity: drag.lift.interpolate({ inputRange: [0, 1], outputRange: [0, 0.28] }),
-                        shadowRadius: 12,
-                        transform: [
-                          { translateY: drag.translateY },
-                          { scale: drag.lift.interpolate({ inputRange: [0, 1], outputRange: [1, LIFT_SCALE] }) }
-                        ]
-                      }
-                    : { transform: [{ translateY: drag.offsetFor(item.key) }] }
-                }
-                testID={lifted ? `bot-row-lifted-${item.bot.name}` : undefined}
+              <FolderGroup
+                colour={item.folderColour}
+                edge={item.lastInFolder ? 'bottom' : 'middle'}
+                indent
+                targeted={dropFolderId === inFolder}
+                testID={`folder-member-${item.bot.name}`}
               >
-                <BotRow
-                  accent={accents[item.bot.name] ?? 'default'}
-                  archived={item.archived}
-                  bot={item.bot}
-                  compact={!sidebar}
-                  editing={editing && !item.archived}
-                  {...(editing && !item.archived ? { handleHandlers: drag.handleHandlers(item.key) } : {})}
-                  menuFolders={menuFolders}
-                  mutedUntil={mutedUntilOf(mutes, item.bot.name, Math.floor(Date.now() / 1000))}
-                  pinned={Boolean(pinned[item.bot.name])}
-                  onArm={drag.arm}
-                  onDisarm={drag.disarm}
-                  onMenuSelect={onMenuSelect}
-                  onMove={moveBot}
-                  onOpenMenu={setMenuFor}
-                  onPress={openBot}
-                  presence={item.archived ? ARCHIVED_PRESENCE : state}
-                  selected={item.bot.name === selectedBot}
-                  unread={item.archived ? false : unread}
-                  unreadCount={item.archived ? 0 : count}
-                  {...(avatars[item.bot.name] ? { avatarUri: avatars[item.bot.name] } : {})}
-                />
-              </Animated.View>
+                {row}
+              </FolderGroup>
             )
           }}
           // While a row is lifted the list must not also pan: the auto-scroll at the
@@ -1721,14 +1877,15 @@ function SearchField({
  * second modal on a screen that already has one for the row menu.
  */
 /**
- * A folder's own row: a disclosure control, a name, and what is inside it.
+ * A folder's own row: the top of the plate, with the disclosure on it.
  *
- * It replaces the named divider ADR-0012 drew, and it is a different KIND of
- * thing rather than the same thing restyled. A divider was a heading — it stood
- * above its rows and had no inside, so there was nothing to close, nothing to
- * count while it was closed and nowhere to drop a row onto. This row owns what
- * follows it: tapping it folds those rows away, and folded away they still have
- * to be accounted for, which is what the badge is.
+ * It replaced the named divider ADR-0012 drew, and the first attempt replaced
+ * only the BEHAVIOUR — it collapsed, it counted, a drop could land in it — while
+ * still drawing a line with a word on it. The owner's verdict was exactly that:
+ * _"only the name has gone from divider to folder"_. So the drawing says it now:
+ * a folder mark in the folder's own colour, a chevron that turns rather than
+ * being swapped for a different glyph, and a plate (`FolderGroup`) that this row
+ * is the top of and its chats continue.
  *
  * The badge appears ONLY while the folder is closed. Open, every row inside is
  * on screen carrying its own count, and a total above them would be the same
@@ -1775,6 +1932,27 @@ function FolderHeader({
   const hover = useHover()
   const mutes = useChatLayoutStore(state => state.mutes)
   const swatch = theme.accent(folder.colour ?? 'default')
+
+  /*
+    The chevron TURNS. It used to be two glyphs — `chevronRight` closed,
+    `chevronDown` open — which is a cut between two drawings, and a cut is what a
+    web page does. One mark rotating a quarter turn is what every native
+    disclosure does, and it is the cheapest possible animation: one transform on
+    the native driver, no layout, no re-render.
+
+    `press` rather than `row`: the mark is small and travels nothing, so the
+    duration a whole row gets would read as the chevron lagging the rows.
+  */
+  const spin = useRef(new Animated.Value(open ? 1 : 0)).current
+
+  useEffect(() => {
+    Animated.timing(spin, {
+      toValue: open ? 1 : 0,
+      duration: durationFor('press', theme.reduceMotion),
+      easing: easing.standard,
+      useNativeDriver: NATIVE_DRIVER
+    }).start()
+  }, [open, spin, theme.reduceMotion])
 
   const menu = useMemo(
     () =>
@@ -1829,6 +2007,11 @@ function FolderHeader({
       onLongPress={() => (HAS_NATIVE_CONTEXT_MENU ? onArm?.(folderRowKey(folder.id)) : undefined)}
       onPress={() => onToggle(folder.id, !open)}
       onPressOut={onDisarm}
+      /*
+        No margins of its own any more: the plate around it owns the inset, and a
+        row that also inset itself would sit in from its own container by twice
+        the amount and stop reading as the top of it.
+      */
       style={{
         alignItems: 'center',
         backgroundColor: hover.hovered ? theme.glass.row.solid : 'transparent',
@@ -1836,8 +2019,6 @@ function FolderHeader({
         cursor: 'pointer',
         flexDirection: 'row',
         gap: theme.space.sm,
-        marginHorizontal: theme.space.sm,
-        marginTop: theme.space.sm,
         paddingHorizontal: theme.space.md,
         paddingVertical: theme.space.md
       }}
@@ -1861,9 +2042,26 @@ function FolderHeader({
         />
       ) : null}
 
-      {/* Decorative: the row's own expanded state is what a screen reader reads,
-          and `Icon` keeps itself out of the tree so it cannot say it twice. */}
-      <Icon color={swatch.fill} name={open ? 'chevronDown' : 'chevronRight'} size={ICON_SIZE.marker} />
+      {/* Decorative, both of them: the row's own expanded state is what a screen
+          reader reads, and `Icon` keeps itself out of the tree so it cannot say
+          it twice. */}
+      <Animated.View
+        style={{
+          transform: [{ rotate: spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '90deg'] }) }]
+        }}
+        testID={`folder-chevron-${folder.id}`}
+      >
+        <Icon color={theme.colors.textMuted} name="chevronRight" size={ICON_SIZE.marker} />
+      </Animated.View>
+
+      {/*
+        The folder itself, in the folder's own colour.
+
+        This is the mark that was missing. A name beside a chevron is a
+        disclosure — a section that folds — and the thing the owner asked for is a
+        CONTAINER, which every interface they use draws as a folder.
+      */}
+      <Icon color={swatch.fill} name="folder" size={ICON_SIZE.listMark} testID={`folder-mark-${folder.id}`} />
 
       {editing ? (
         <TextInput

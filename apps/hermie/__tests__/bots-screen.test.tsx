@@ -451,7 +451,18 @@ describe('a folder with nothing in it', () => {
 
     renderScreen(<BotsScreen />)
 
-    const ids = screen.getAllByTestId(/^(folder|folder-empty)-/).map(node => node.props.testID as string)
+    /*
+      The three rows this is about, named exactly.
+      
+      A prefix match would also pick up what a folder is DRAWN with — its plate,
+      its mark, its chevron, the plate under each of its chats — none of which is
+      a row, and one of which wraps the header rather than following it, so a
+      prefix would report a header twice and fail for a reason that is not this
+      test's.
+    */
+    const ids = screen
+      .getAllByTestId(new RegExp(`^(folder-${empty}|folder-empty-${empty}|folder-${full})$`))
+      .map(node => node.props.testID as string)
 
     // The empty folder, its own row, then the next folder. Never two headers
     // adjacent.

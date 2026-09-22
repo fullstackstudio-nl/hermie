@@ -203,6 +203,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now gets what is LEFT of those forty-five seconds, so the app stops a moment before Shortcuts
   does rather than writing an answer nobody is still reading.
 
+- **A folder is drawn as a folder.** It gained an inside in the last round — it collapses, it
+  counts what it is hiding, a drop can land in it — and went on being drawn as a line with a
+  word on it, so only the name had changed. It is one sunk plate now: a header with a folder
+  mark in the folder's own colour and a chevron that turns a quarter of a circle rather than
+  being swapped for a different glyph, and the chats inside stepped in and drawn on the same
+  plate, which closes under the last of them. Opening and closing moves the rows rather than
+  cutting to the new list, and dragging a chat over a folder tints the whole plate in that
+  folder's colour — onto its header, into an empty one, or between two chats already inside,
+  because all three mean the same thing. Everything it already did is untouched: the order,
+  the drag, the menus, the mute and unread rules, the widget's folder pin and the scroll a
+  widget tap asks for.
+
 - **A second gateway is now reachable from the chat list.** Adding one worked and getting to
   it did not: the only way across was Settings → Gateways, and the chat header that might have
   carried the switch already holds a name, a subtitle, a presence bead, a context ring and an
