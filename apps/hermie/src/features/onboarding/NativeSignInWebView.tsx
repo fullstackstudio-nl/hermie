@@ -103,6 +103,12 @@ export function NativeSignInWebView({
 }: NativeSignInWebViewProps) {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
+  // The header below is memoised, so its two sentences are read here and
+  // depended on by name: neither `insets` nor `theme` moves when the reader
+  // picks another language, and a header stuck in the old one is the first
+  // thing they would see.
+  const headerTitle = strings.onboarding.signIn.webview.title
+  const cancelLabel = strings.common.cancel
   const [attempt, setAttempt] = useState<{ pkce: Pkce; url: string } | null>(null)
   const [phase, setPhase] = useState<Phase>('signing-in')
   const [error, setError] = useState<string | null>(null)
@@ -255,15 +261,18 @@ export function NativeSignInWebView({
         shadow="float"
         variant="float"
       >
-        <Text variant="chatName">{strings.onboarding.signIn.webview.title}</Text>
+        <Text variant="chatName">{headerTitle}</Text>
         <Pressable accessibilityRole="button" hitSlop={12} onPress={onCancel}>
           <Text color="accentText" variant="body">
-            {strings.common.cancel}
+            {cancelLabel}
           </Text>
         </Pressable>
       </GlassSurface>
     ),
-    [insets.top, onCancel, theme]
+    // The two sentences are dependencies rather than the locale, because they
+    // are what the memo actually reads — and what changes when the reader picks
+    // another language while this sheet is open.
+    [cancelLabel, headerTitle, insets.top, onCancel, theme]
   )
 
   const body = () => {

@@ -177,15 +177,21 @@ export function CronScreen({ initialCreate, initialJobId }: CronScreenProps = {}
     [controller]
   )
 
+  // The two headers, read here and depended on by name: `jobs` does not move on
+  // a settled gateway, so a memo that only watched it would keep ACTIVE and
+  // PAUSED in whatever language they were first built in.
+  const activeTitle = cronStrings.sections.active
+  const pausedTitle = cronStrings.sections.paused
+
   const sections = useMemo(() => {
     const active = jobs.filter(job => cronStatusOf(job) !== 'paused')
     const paused = jobs.filter(job => cronStatusOf(job) === 'paused')
 
     return [
-      ...(active.length ? [{ title: cronStrings.sections.active, data: active }] : []),
-      ...(paused.length ? [{ title: cronStrings.sections.paused, data: paused }] : [])
+      ...(active.length ? [{ title: activeTitle, data: active }] : []),
+      ...(paused.length ? [{ title: pausedTitle, data: paused }] : [])
     ]
-  }, [jobs])
+  }, [activeTitle, jobs, pausedTitle])
 
   // The REST list tags EVERY row with its store, so on a single-profile gateway
   // each one would read "Profile: default" — a column of the same word. It is
