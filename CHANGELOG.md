@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Drag a card across a board, where the columns are side by side.** On an iPad, a Mac window or a
+  wide browser, hold a card until it lifts and drop it on another column. The board scrolls sideways
+  under the card when you carry it to an edge, and the column you are over lights up — while the
+  three columns the dispatcher owns, **Running**, **Review** and **Scheduled**, dim the moment a card
+  leaves the ground, so you are told they will not take it before you aim rather than after. Let go
+  on one anyway and the board says why and sends nothing. Dropping a card back where it came from,
+  or anywhere off the columns, does nothing and says nothing. **Move to…** has not gone anywhere: it
+  is still on every card, it is still the only way on a phone, and it is still what VoiceOver and a
+  keyboard use. There is deliberately no dragging a card up or down within a column — a board has no
+  order to save, only a priority.
+
 - **Two more things to be told about: a scheduled run that finished, and one that failed.**
   Settings → Notifications now has a switch for each, on by default like the rest, and so does a
   chat's own notifications page — which is the point of splitting them out of **Routines**. A bot
