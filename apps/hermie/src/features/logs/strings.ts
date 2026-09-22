@@ -21,6 +21,19 @@ const logStringsEn = {
   loading: 'Reading the log…',
   failed: (reason: string) => `Could not read the log: ${reason}`,
 
+  /**
+   * The route answered something this app does not recognise.
+   *
+   * Said out loud, with what came back in it, because the alternative is what
+   * this page used to do: draw "This log is empty" over a gateway that had in
+   * fact replied. A reader can read this sentence down a phone to whoever runs
+   * the gateway, which is the only way the shape gets fixed.
+   */
+  unexpected: (saw: string) => `The gateway answered ${saw} rather than a log page.`,
+  unexpectedHint:
+    'The page can read a list of lines, an object carrying one, or one block of text. Check what the gateway serves:',
+  unexpectedCommand: 'curl -sS "$GATEWAY/api/logs?file=gateway&lines=5"',
+
   /** A file that exists as a name but has nothing in it yet. */
   empty: 'This log is empty.',
   /** A filter that matched nothing, which is not the same as an empty file. */

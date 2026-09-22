@@ -62,7 +62,7 @@ export interface SettingsScreenProps {
    * Development only (`--hermieOpen overlay:settings/licences`). Each of these
    * is behind a tap, and a simulator this machine can only launch cannot tap.
    */
-  initialPage?: 'connection' | 'gallery' | 'gateways' | 'licences' | 'themes'
+  initialPage?: 'connection' | 'gallery' | 'gateways' | 'licences' | 'logs' | 'memory' | 'themes'
 }
 
 export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
@@ -77,7 +77,7 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
   const [showGallery, setShowGallery] = useState(initialPage === 'gallery')
   const [showLicences, setShowLicences] = useState(initialPage === 'licences')
   const [showThemes, setShowThemes] = useState(initialPage === 'themes')
-  const [showMemory, setShowMemory] = useState(false)
+  const [showMemory, setShowMemory] = useState(initialPage === 'memory')
   const [showGateways, setShowGateways] = useState(initialPage === 'gateways')
   const [confirmingChange, setConfirmingChange] = useState(false)
   /*
@@ -89,7 +89,7 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
   const [showSkills, setShowSkills] = useState(false)
   const [showMcp, setShowMcp] = useState(false)
   const [showConnectors, setShowConnectors] = useState(false)
-  const [showLogs, setShowLogs] = useState(false)
+  const [showLogs, setShowLogs] = useState(initialPage === 'logs')
   const [showBoards, setShowBoards] = useState(false)
   const [showNewBot, setShowNewBot] = useState(false)
   /*

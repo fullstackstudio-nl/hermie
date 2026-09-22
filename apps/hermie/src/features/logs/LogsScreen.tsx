@@ -26,6 +26,7 @@ import {
   LOG_LEVELS,
   LOG_POLL_INTERVAL_MS,
   LogsController,
+  LogsShapeError,
   LogsUnavailable,
   type LogComponent,
   type LogFile,
@@ -50,6 +51,8 @@ export function LogsScreen({ onClose }: LogsScreenProps) {
   const [page, setPage] = useState<LogPage | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [absent, setAbsent] = useState(false)
+  /** What the route answered, when it answered something that is not a log page. */
+  const [unreadable, setUnreadable] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
   const controller = useMemo(() => (http ? new LogsController(http) : null), [http])
@@ -69,12 +72,36 @@ export function LogsScreen({ onClose }: LogsScreenProps) {
       setPage(await controller.read({ file, level, component, search }))
       setError(null)
       setAbsent(false)
+      setUnreadable(null)
     } catch (cause) {
       if (cause instanceof LogsUnavailable) {
         setAbsent(true)
         setPage(null)
+        setUnreadable(null)
+      } else if (cause instanceof LogsShapeError) {
+        /*
+          The route answered and this app did not understand it. That is not an
+          empty file and it is not a dead route, so it gets a state of its own
+          — the one the owner's gateway needed, where the page said "This log is
+          empty" about a reply it had thrown away.
+        */
+        setUnreadable(cause.saw)
+        setPage(null)
+        setError(null)
       } else {
-        setError(cause instanceof Error ? cause.message : String(cause))
+        /*
+          `hint` is FastAPI's own `detail`, which `GatewayHttp` parks on the
+          error and this page used to drop: a 400 reading "Unknown log file:
+          desktop" arrived as "failed with HTTP 400" and the actionable half was
+          thrown away between the two.
+        */
+        const hint = (cause as { hint?: unknown } | null)?.hint
+
+        setError(
+          [cause instanceof Error ? cause.message : String(cause), typeof hint === 'string' ? hint : null]
+            .filter(part => part !== null)
+            .join(' ')
+        )
       }
     }
   }, [controller, file, level, component, search])
@@ -92,14 +119,14 @@ export function LogsScreen({ onClose }: LogsScreenProps) {
   readRef.current = read
 
   useEffect(() => {
-    if (!following || absent) {
+    if (!following || absent || unreadable !== null) {
       return
     }
 
     const timer = setInterval(() => void readRef.current(), LOG_POLL_INTERVAL_MS)
 
     return () => clearInterval(timer)
-  }, [following, absent])
+  }, [following, absent, unreadable])
 
   const body = page?.lines ?? []
 
@@ -224,7 +251,32 @@ export function LogsScreen({ onClose }: LogsScreenProps) {
               </Text>
             ) : null}
 
-            {page === null ? (
+            {unreadable !== null ? (
+              /*
+                The route answered and this app could not read it. Named, with
+                what came back and the one command that settles it — because the
+                alternative is the bug this replaced, where a reply the client
+                had discarded was reported as an empty file.
+              */
+              <InsetGroup
+                footer={
+                  <Text color="textMuted" variant="meta">
+                    {logStrings.unexpectedHint}
+                  </Text>
+                }
+              >
+                <InsetRow>
+                  <Text color="dangerText" testID="logs-unexpected">
+                    {logStrings.unexpected(unreadable)}
+                  </Text>
+                </InsetRow>
+                <InsetRow>
+                  <Text testID="logs-unexpected-command" variant="code">
+                    {logStrings.unexpectedCommand}
+                  </Text>
+                </InsetRow>
+              </InsetGroup>
+            ) : page === null ? (
               <Text color="textMuted">{logStrings.loading}</Text>
             ) : body.length === 0 ? (
               <Text color="textMuted" testID="logs-empty">
@@ -245,8 +297,21 @@ export function LogsScreen({ onClose }: LogsScreenProps) {
                   A horizontal scroller around the lines, because a log line is
                   as long as it is and wrapping one destroys the column
                   alignment that makes a tail readable.
+
+                  `flexGrow: 0` is not decoration. A horizontal `ScrollView`
+                  defaults to `flexGrow: 1`, so inside a scrollable column it
+                  balloons to the viewport height instead of hugging its
+                  content — the same guard `DiffView` and `OverflowScroll`
+                  carry, and this was the one horizontal scroller in the app
+                  without it.
                 */}
-                <ScrollView horizontal showsHorizontalScrollIndicator>
+                <ScrollView
+                  directionalLockEnabled
+                  horizontal
+                  nestedScrollEnabled
+                  showsHorizontalScrollIndicator
+                  style={{ flexGrow: 0 }}
+                >
                   <View style={{ gap: 2 }}>
                     {body.map(line => (
                       <Text

@@ -18,6 +18,10 @@ export const logs: Translation<typeof logStrings> = {
   loading: 'Het logbestand lezen…',
   failed: (reason: string) => `Kon het logbestand niet lezen: ${reason}`,
 
+  unexpected: (saw: string) => `De gateway antwoordde ${saw} in plaats van een logpagina.`,
+  unexpectedHint:
+    'Deze pagina kan een lijst met regels lezen, een object dat er een bevat, of één blok tekst. Kijk na wat de gateway serveert:',
+
   empty: 'Dit logbestand is leeg.',
   noMatches: 'Geen enkele regel past bij deze filters.',
 

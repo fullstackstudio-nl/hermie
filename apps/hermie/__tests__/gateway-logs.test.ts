@@ -9,8 +9,10 @@
 import {
   LOG_LINE_CAP,
   LogsController,
+  LogsShapeError,
   LogsUnavailable,
   levelOf,
+  linesOf,
   logsPath,
   type LogsHttp
 } from '../src/features/logs/logs-controller'
@@ -158,9 +160,23 @@ describe('LogsController.read', () => {
     await expect(new LogsController(offline).read({ file: 'gateway' })).rejects.toThrow('Network request failed')
   })
 
-  it('survives a body whose lines are missing or not a list', async () => {
-    expect((await new LogsController(http({ file: 'agent' })).read({ file: 'agent' })).lines).toEqual([])
-    expect((await new LogsController(http({ lines: 'nope' })).read({ file: 'agent' })).lines).toEqual([])
+  /**
+   * The bug the Logs page shipped with, inverted.
+   *
+   * The reader used to answer `[]` to every shape it did not recognise, so a
+   * gateway that replied with something else was reported as an empty file and
+   * Follow went on polling it. An unrecognised body is now LOUD, and it says
+   * what came back so the reader can pass it on.
+   */
+  it('refuses a body that is not a log page rather than calling the file empty', async () => {
+    await expect(new LogsController(http({ file: 'agent' })).read({ file: 'agent' })).rejects.toBeInstanceOf(
+      LogsShapeError
+    )
+    // The message names what came back, which is the only part of this a reader
+    // can pass on to whoever runs the gateway.
+    await expect(new LogsController(http({ ok: true })).read({ file: 'agent' })).rejects.toThrow(/ok/u)
+    await expect(new LogsController(http(42)).read({ file: 'agent' })).rejects.toBeInstanceOf(LogsShapeError)
+    await expect(new LogsController(http(undefined)).read({ file: 'agent' })).rejects.toBeInstanceOf(LogsShapeError)
   })
 
   it('asks the route for the filters it was given', async () => {
@@ -179,5 +195,74 @@ describe('LogsController.read', () => {
     const page = await new LogsController(http({ file: 'agent', lines: ['same', 'same'] })).read({ file: 'agent' })
 
     expect(page.lines[0]?.key).not.toBe(page.lines[1]?.key)
+  })
+})
+
+/**
+ * Which bodies count as a log page.
+ *
+ * This block exists because of a failure one route over. `GET /api/cron/jobs`
+ * answers a BARE ARRAY on a real gateway while the fake answered
+ * `{jobs: [...]}`, and the crons list was empty for two releases — every test
+ * drove the fake, the fake agreed with the app, and neither had been compared
+ * with a real `hermes serve`. `/api/logs` is in the same upstream package, is
+ * written down in this repo only as prose, and had exactly the same
+ * single-spelling reader. So the shapes are pinned here rather than assumed.
+ *
+ * The case that matters is the last one: `null` and `[]` are different answers.
+ * `[]` is a gateway saying the file is empty; `null` is this client saying it
+ * did not understand, and only one of those may reach a reader as "This log is
+ * empty".
+ */
+describe('linesOf takes every shape a tail can arrive in', () => {
+  it('takes the documented envelope', () => {
+    expect(linesOf({ file: 'gateway', lines: ['one', 'two'] })).toEqual(['one', 'two'])
+  })
+
+  it('takes a bare array, which is how the neighbouring route actually answers', () => {
+    expect(linesOf(['one', 'two'])).toEqual(['one', 'two'])
+  })
+
+  it('takes the other two spellings of the same envelope', () => {
+    expect(linesOf({ logs: ['one'] })).toEqual(['one'])
+    expect(linesOf({ entries: ['one'] })).toEqual(['one'])
+  })
+
+  it('takes one block of text, because a log file is one string with newlines', () => {
+    expect(linesOf({ lines: 'one\ntwo' })).toEqual(['one', 'two'])
+    expect(linesOf({ lines: '' })).toEqual([])
+  })
+
+  it('takes structured lines and rebuilds the text the level reader wants', () => {
+    expect(linesOf({ lines: [{ time: '2026-09-22 09:00:00', level: 'error', message: 'boom' }] })).toEqual([
+      '2026-09-22 09:00:00 ERROR boom'
+    ])
+    expect(linesOf({ lines: [{ text: 'plain' }] })).toEqual(['plain'])
+  })
+
+  it('keeps an empty list as an empty file rather than as a failure', () => {
+    expect(linesOf({ file: 'errors', lines: [] })).toEqual([])
+    expect(linesOf([])).toEqual([])
+  })
+
+  it('answers null — not an empty page — for anything else', () => {
+    expect(linesOf({ ok: true })).toBeNull()
+    expect(linesOf({ lines: 42 })).toBeNull()
+    expect(linesOf({ lines: [{ id: 1 }, { id: 2 }] })).toBeNull()
+    expect(linesOf(undefined)).toBeNull()
+    expect(linesOf(null)).toBeNull()
+    expect(linesOf('a plain string')).toBeNull()
+  })
+})
+
+describe('a page built from a shape other than the documented one', () => {
+  it('reads the levels off a bare array exactly as off the envelope', async () => {
+    const page = await new LogsController(
+      http(['2026-09-22 09:00:00 ERROR gateway.run: boom', 'Traceback (most recent call last):'])
+    ).read({ file: 'gateway' })
+
+    expect(page.lines.map(line => line.level)).toEqual(['ERROR', null])
+    // No `file` field in a bare array, so the page keeps the one it asked about.
+    expect(page.file).toBe('gateway')
   })
 })

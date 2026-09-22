@@ -174,11 +174,15 @@ xcrun simctl launch <udid> dev.hermie.app \
 | `--hermieOpen gallery:chat`    | the gallery's whole chat screen                              |
 | `--hermieOpen sheet:<name>`    | shorthand for that sheet's section                           |
 | `--hermieOpen chat:<handle>`   | the real chat screen for that bot                            |
-| `--hermieOpen overlay:<s>[/p]` | `activity`, `crons`, `settings`, and `settings/licences`     |
+| `--hermieOpen overlay:<s>[/p]` | `activity`, `crons`, `settings`, and a settings page¹        |
 | `--hermieTheme light\|dark`    | pin the scheme (a simulator's appearance cannot be set here) |
 | `--hermiePreset <name>`        | pin the theme: `blue`, `graphite` or `lime`                  |
 | `--hermieGateway <url>`        | seed that gateway's configuration and skip onboarding        |
 | `--hermieToken <token>`        | the session token to seed beside it                          |
+
+¹ The settings pages are `connection`, `gallery`, `licences`, `logs`, `memory` and `themes` —
+`--hermieOpen overlay:settings/logs`. Every one of them is behind a tap, and a simulator this
+machine can only launch cannot tap; a page nobody can open is a page nobody photographs.
 
 **`--hermieGateway` is how you reach a connected app without typing.** `chat:`
 and `overlay:` need a configured gateway, and configuring one meant completing

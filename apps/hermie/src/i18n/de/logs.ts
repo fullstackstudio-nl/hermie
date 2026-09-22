@@ -18,6 +18,10 @@ export const logs: Translation<typeof logStrings> = {
   loading: 'Log wird gelesen…',
   failed: (reason: string) => `Das Log konnte nicht gelesen werden: ${reason}`,
 
+  unexpected: (saw: string) => `Das Gateway antwortete ${saw} statt mit einer Logseite.`,
+  unexpectedHint:
+    'Diese Seite kann eine Liste von Zeilen lesen, ein Objekt, das eine enthält, oder einen Block Text. Prüfe, was das Gateway ausliefert:',
+
   empty: 'Dieses Log ist leer.',
   noMatches: 'Keine Zeile passt zu diesen Filtern.',
 

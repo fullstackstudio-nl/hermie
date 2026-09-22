@@ -36,6 +36,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gateway is kept and `/setup` stays closed — and the confirmation page says so before the
   button rather than afterwards.
 
+### Fixed
+
+- **The gateway logs page no longer reports a reply it threw away as an empty file.** It could read
+  one spelling of the answer — an object carrying a list of lines — and quietly turned everything
+  else into zero lines, drawn as **This log is empty** with Follow still polling. That is a claim
+  about the gateway's disk, made by a client that had simply failed to understand what came back.
+  The page now also reads a bare list of lines (which is how the neighbouring routine route really
+  answers), the two other spellings of the same envelope, one block of text, and lines that arrive
+  as objects; and an answer it still cannot read is said out loud, with what came back in it and
+  the one command that settles the question, instead of being dressed up as an empty file. A
+  refusal now keeps the gateway's own sentence too — "Unknown log file: desktop" used to arrive as
+  "failed with HTTP 400" with the useful half dropped in between. The lines themselves sit in a
+  horizontal scroller that was missing the guard the app's other two carry, so it could take the
+  whole height and leave nothing to see.
+
 ### Changed
 
 - **Choosing a model for a new bot is a list, not a strip of slivers.** The New-bot sheet put the

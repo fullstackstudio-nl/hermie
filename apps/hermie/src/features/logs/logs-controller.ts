@@ -17,6 +17,16 @@
  * `output_tail` is one background process's stdout, scoped to the session that
  * spawned it, and calling that "the gateway's logs" would put a chat's shell
  * command under a heading about the server.
+ *
+ * **What `{file, lines}` is, and is not.** That shape is written down in this
+ * repo as prose citing upstream; nothing here has ever been compared with a
+ * real `hermes serve`, and the owner's gateway shows an empty page. The
+ * neighbouring route is the precedent: `GET /api/cron/jobs` answers a BARE
+ * ARRAY on a real gateway while the fake answered `{jobs: [...]}`, and the
+ * crons list was empty for two releases because the app and the fake agreed
+ * with each other and neither had been asked. So `linesOf` takes the envelope,
+ * the bare array, and a blob of text, and anything it does not recognise is a
+ * LOUD failure (`LogsShapeError`) rather than a quiet empty page.
  */
 
 /** The slice of the gateway's HTTP half this page needs. Injected so a test can watch it. */
@@ -97,6 +107,27 @@ export class LogsUnavailable extends Error {
 }
 
 /**
+ * The route answered, and the answer was not a log page.
+ *
+ * This exists because its absence is what made the page look empty on a real
+ * gateway. The reader used to be one line — `Array.isArray(body?.lines) ?
+ * body.lines : []` — so EVERY shape it did not recognise became a page of zero
+ * lines with no error, no notice, and a Follow that went on polling. "This log
+ * is empty" is a claim about the gateway's disk; it must not be what a client
+ * says when it failed to understand the reply.
+ *
+ * It carries what actually came back, because that sentence is the only thing
+ * that makes the failure reportable from a phone: a reader can read it out, and
+ * `linesOf` below can then be taught the shape.
+ */
+export class LogsShapeError extends Error {
+  constructor(readonly saw: string) {
+    super(`The gateway answered ${saw}, which is not a log page.`)
+    this.name = 'LogsShapeError'
+  }
+}
+
+/**
  * `LEVEL` as the formatter writes it: after the timestamp, before the logger.
  *
  * Deliberately the same shape as `hermes_cli/logs.py::_LEVEL_RE` — surrounded
@@ -147,6 +178,112 @@ export const logsPath = (query: LogQuery): string => {
   return `/api/logs?${params.toString()}`
 }
 
+/**
+ * The keys an envelope may carry its lines under.
+ *
+ * `lines` is what `get_logs` is documented to answer. The others are here
+ * because the route next door in the same upstream package taught this repo the
+ * lesson the hard way: `GET /api/cron/jobs` answers a BARE ARRAY on a real
+ * gateway while the fake answered `{jobs: [...]}`, and the crons list was empty
+ * for two releases because every test drove the fake and the fake agreed with
+ * the app. A reader that accepts one spelling is a reader that reports a
+ * disagreement as an empty file.
+ */
+const LINE_KEYS = ['lines', 'logs', 'entries'] as const
+
+/** The fields a line carries its text in, when a line is an object rather than a string. */
+const TEXT_KEYS = ['text', 'line', 'message', 'msg'] as const
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+/** What came back, in few enough words to put on a phone screen. */
+const describe = (body: unknown): string => {
+  if (body === undefined || body === null) {
+    return 'nothing'
+  }
+
+  if (Array.isArray(body)) {
+    return 'a list of something other than log lines'
+  }
+
+  if (isRecord(body)) {
+    const keys = Object.keys(body)
+
+    return keys.length ? `an object with ${keys.slice(0, 6).join(', ')}` : 'an empty object'
+  }
+
+  return `a ${typeof body}`
+}
+
+/** One line's text, whether the gateway wrote a string or an object. */
+const textOf = (line: unknown): string | null => {
+  if (typeof line === 'string') {
+    return line
+  }
+
+  if (typeof line === 'number' || typeof line === 'boolean') {
+    return String(line)
+  }
+
+  if (isRecord(line)) {
+    for (const key of TEXT_KEYS) {
+      const value = line[key]
+
+      if (typeof value === 'string') {
+        // A structured line puts the level in a field of its own, so rebuild the
+        // shape `levelOf` reads rather than losing the colour.
+        const level = typeof line.level === 'string' ? line.level.toUpperCase() : null
+        const stamp =
+          typeof line.time === 'string' ? line.time : typeof line.timestamp === 'string' ? line.timestamp : null
+
+        return [stamp, level, value].filter(part => part !== null && part !== '').join(' ')
+      }
+    }
+  }
+
+  return null
+}
+
+/**
+ * The lines out of whatever the route answered, or `null` for "not a log page".
+ *
+ * `null` and `[]` are deliberately different answers. `[]` is a gateway saying
+ * the file is empty, which `get_logs` does with a 200 when `log_path.exists()`
+ * is false; `null` is this client saying it did not understand, which is a bug
+ * report and not a fact about a file.
+ *
+ * Exported so the shapes it tolerates are pinned by a test rather than by this
+ * comment.
+ */
+export function linesOf(body: unknown): string[] | null {
+  const raw = Array.isArray(body) ? body : isRecord(body) ? LINE_KEYS.map(key => body[key]).find(Array.isArray) : null
+
+  if (Array.isArray(raw)) {
+    const texts = raw.map(textOf)
+
+    // One unreadable element among readable ones is dropped; a list where NONE
+    // of them is readable is a different shape wearing a familiar key.
+    return texts.some(text => text !== null) || texts.length === 0
+      ? texts.filter((text): text is string => text !== null)
+      : null
+  }
+
+  // A single blob of text under a familiar key: one log file is, after all, one
+  // string with newlines in it.
+  if (isRecord(body)) {
+    for (const key of LINE_KEYS) {
+      const value = body[key]
+
+      if (typeof value === 'string') {
+        return value.length ? value.split('\n') : []
+      }
+    }
+  }
+
+  return null
+}
+
 export class LogsController {
   constructor(private readonly http: LogsHttp) {}
 
@@ -162,10 +299,10 @@ export class LogsController {
   async read(query: LogQuery): Promise<LogPage> {
     const wanted = query.lines ?? LOG_LINE_CAP
 
-    let body: { file?: string; lines?: unknown }
+    let body: unknown
 
     try {
-      body = await this.http.get<{ file?: string; lines?: unknown }>(logsPath(query))
+      body = await this.http.get<unknown>(logsPath(query))
     } catch (cause) {
       if (isMissingRoute(cause)) {
         throw new LogsUnavailable()
@@ -174,16 +311,22 @@ export class LogsController {
       throw cause
     }
 
-    const lines = Array.isArray(body?.lines) ? body.lines : []
+    const lines = linesOf(body)
+
+    if (lines === null) {
+      throw new LogsShapeError(describe(body))
+    }
+
+    const file = isRecord(body) && typeof body.file === 'string' ? (body.file as LogFile) : query.file
 
     return {
-      file: (body?.file as LogFile) ?? query.file,
+      file,
       capped: lines.length >= Math.min(wanted, LOG_LINE_CAP),
-      lines: lines.map((line, index) => {
-        const text = typeof line === 'string' ? line : String(line)
-
-        return { key: `${index}:${text.slice(0, 64)}`, text, level: levelOf(text) }
-      })
+      lines: lines.map((text, index) => ({
+        key: `${index}:${text.slice(0, 64)}`,
+        text,
+        level: levelOf(text)
+      }))
     }
   }
 }
