@@ -392,6 +392,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Hermie Web's tests are type-checked.** That package is the one workspace that emits JavaScript
+  rather than only declarations — the release zip and the Docker image both run `dist/server` — so
+  its `tsconfig.json` excludes `*.test.ts`, or the tests would be published with it. The side effect
+  was that nothing type-checked the tests at all: a suite could build a push registration without
+  its owner, or read an argument a mock never declared, and only a runtime failure on that exact
+  line would ever have said so. A second project (`tsconfig.test.json`, emitting nothing) now covers
+  them and runs as part of `npm run typecheck`. Switching it on found eleven errors, all in tests,
+  all now fixed.
+
 - **The release notes describe all three signed binaries, not two.** The iOS app ships as an app, a
   widget extension and a share extension, and each needs the App Group to reach the others — a
   widget cannot dial a gateway and a share extension is killed the moment its sheet closes, so the

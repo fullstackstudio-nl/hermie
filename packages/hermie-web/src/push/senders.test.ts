@@ -30,21 +30,23 @@ const state = (over: Partial<PushState> = {}): PushState => ({
 
 const expo = (installationId: string): PushRegistration => ({
   installationId,
+  owner: '',
   transport: 'expo',
   token: `ExponentPushToken[${installationId}]`,
   platform: 'ios',
-  types: { message: true, request: true, dm: true, cron: true },
+  types: { message: true, request: true, dm: true, cron: true, cron_done: true, cron_failed: true },
   preview: false,
   updatedAt: 0
 })
 
 const web = (installationId: string): PushRegistration => ({
   installationId,
+  owner: '',
   transport: 'webpush',
   endpoint: 'https://push.test/ep',
   keys: generateSubscriptionKeys(),
   platform: 'web',
-  types: { message: true, request: true, dm: true, cron: true },
+  types: { message: true, request: true, dm: true, cron: true, cron_done: true, cron_failed: true },
   preview: false,
   updatedAt: 0
 })

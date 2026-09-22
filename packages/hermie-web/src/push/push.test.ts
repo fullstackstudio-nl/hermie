@@ -36,10 +36,12 @@ const MESSAGE: PushMessage = { body: 'sent you a message', data: { bot: 'researc
 
 const registration = (installationId: string, token: string): PushRegistration => ({
   installationId,
+  // The legacy anonymous key: these rows predate per-user sections.
+  owner: '',
   transport: 'expo',
   token,
   platform: 'ios',
-  types: { cron: true, dm: true, message: true, request: true },
+  types: { cron: true, cron_done: true, cron_failed: true, dm: true, message: true, request: true },
   preview: false,
   updatedAt: 0
 })

@@ -295,7 +295,7 @@ describe('Web Push', () => {
     const headers = call.init.headers as Record<string, string>
 
     expect(headers['content-encoding']).toBe('aes128gcm')
-    expect(headers.authorization.startsWith('vapid t=')).toBe(true)
+    expect(headers.authorization?.startsWith('vapid t=')).toBe(true)
 
     const payload = JSON.parse(decrypt(Buffer.from(call.init.body as Uint8Array))) as Record<string, unknown>
 
