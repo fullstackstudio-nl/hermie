@@ -38,6 +38,8 @@ import {
   type PushSectionShape
 } from '@hermie/gateway-client/push'
 import {
+  APP_UPDATED_AT,
+  appStampOf,
   HERMIE_APP_SECTION_VERSION,
   HERMIE_SECTION_VERSION,
   UiMetaSync,
@@ -49,6 +51,7 @@ import {
 import { Platform } from 'react-native'
 
 import { ACCENTS, type AccentName } from '../ui/tokens'
+import { useAppStampStore } from './app-stamp'
 import { asNameOrder, type NameOrder } from './bot-names'
 import { useChatLayoutStore } from './chat-layout'
 import { readArrangement, type Folder, type LayoutEntry } from './folders'
@@ -150,6 +153,21 @@ export interface HermieAppShape extends HermieAppSection {
   textSize?: TextSize
   themeChoice?: unknown
   themes?: unknown
+  /**
+   * When the person last CHOSE any of the above, in seconds.
+   *
+   * The section travels whole and last writer wins, and until this field existed
+   * "last" meant whichever device flushed last. A device flushes for reasons that
+   * are not a choice — its own push row moved, a disk read landed late — so a
+   * second device being opened could undo a theme chosen on the first, for every
+   * device at once. `store/app-stamp.ts` holds the date; `appLocalWins` in the
+   * sync compares it.
+   *
+   * ADDITIVE, and the section version deliberately stays at 1 — see `pinned`.
+   * A section with no date is UNDATED rather than ancient; `appStampOf` says what
+   * that means at the two ends of the comparison.
+   */
+  updatedAt?: number
   /** ADR-0017: every device that asked to be told, and who was last looking. */
   push?: PushSectionShape
   /** What the gateway plugin renders into a bot's system prompt, per person. */
@@ -229,6 +247,7 @@ export function snapshotFromStores(nowMs: number = Date.now()): UiMetaSnapshot {
     fallbackDefault: context.remoteDefault
   })
 
+  const chosenAt = useAppStampStore.getState().updatedAt
   const app: HermieAppShape = {
     v: HERMIE_APP_SECTION_VERSION,
     entries: layout.entries,
@@ -250,6 +269,9 @@ export function snapshotFromStores(nowMs: number = Date.now()): UiMetaSnapshot {
     textSize: settings.textSize,
     themeChoice: settings.themeChoice,
     themes: settings.userThemes,
+    // Omitted while this device has never seen a choice, because an absent date
+    // is honest about that and a zero would read as a date at the epoch.
+    ...(chosenAt ? { [APP_UPDATED_AT]: chosenAt } : {}),
     // Omitted rather than empty while nobody has ever registered; see
     // `pushSectionFor`.
     ...(pushSection ? { push: pushSection } : {}),
@@ -396,15 +418,79 @@ export function applySnapshot(snapshot: UiMetaSnapshot): void {
     ...(asThemeChoice(app?.themeChoice) ? { themeChoice: asThemeChoice(app?.themeChoice)! } : {}),
     ...(Array.isArray(app?.themes) ? { userThemes: asUserThemes(app?.themes) } : {})
   })
+
+  /*
+    And the section's own date, adopted with the section.
+
+    It is what makes the comparison in `appLocalWins` transitive: a device that
+    took the gateway's copy is now holding a copy dated when that copy was
+    chosen, so it neither re-claims it as its own newer change nor argues about
+    it again on the next connect. `app` here is whichever side won, so on the
+    device that wrote it this is a no-op.
+
+    Skipped when there is no section at all: a gateway nobody has written to says
+    nothing about when anything was chosen, and reading that as "the epoch" would
+    throw away the date of a change this device is holding — which is exactly the
+    change `seedWhatTheGatewayLacks` is about to send.
+  */
+  if (app) {
+    useAppStampStore.getState().applyRemote(appStampOf(app))
+  }
 }
 
 /** A section's projection, as one string, so a diff is one comparison. */
 const fingerprint = (value: unknown): string => JSON.stringify(value ?? null)
 
+/**
+ * The same, over the app section's CHOICES alone.
+ *
+ * Three of its fields are not choices anybody made. `push` and `context` are maps
+ * keyed by device and by person, written by heartbeats and by device facts, and
+ * `updatedAt` is the date those choices are stamped with — dating a change of
+ * date would be a loop. Everything else in the section is somebody's decision,
+ * and a change to one of those is what moves the date.
+ *
+ * Which means a push registration going out no longer claims this device chose
+ * anything, and that matters: it is a write on every connect, and a section that
+ * claimed to be newly chosen on every connect would win every argument it had no
+ * business being in.
+ */
+const CHOICES = 'app:choices'
+
+const choiceFingerprint = (app: HermieAppSection | null): string => {
+  if (!app) {
+    return 'null'
+  }
+
+  const choices: Record<string, unknown> = { ...app }
+
+  delete choices.push
+  delete choices.context
+  delete choices[APP_UPDATED_AT]
+
+  return JSON.stringify(choices)
+}
+
 export interface UiMetaBridgeOptions {
   gateway: UiMetaGateway
   /** Overridable so a test does not have to wait two thirds of a second. */
   debounceMs?: number
+  /**
+   * This gateway's disk reads, awaited before anything is watched or compared.
+   *
+   * The app-wide section holds ONE PERSON's settings and a reconcile decides
+   * whose copy is newer, so it has to be asked of a device that actually holds
+   * its own copy. Before this, a disk read still in flight made the answer a
+   * matter of timing twice over: the arriving value went into the stores and the
+   * disk's landed on top of it, and the baseline this class diffs against was the
+   * app's DEFAULTS, so the disk read itself was read as somebody choosing
+   * something. Opening a second device therefore replaced the theme that had been
+   * chosen, on every device, which is the report this exists for.
+   *
+   * Optional, and absent means "already in": every case that hands over two
+   * functions rather than a running app watches synchronously, as it did before.
+   */
+  ready?: () => Promise<unknown>
 }
 
 export class UiMetaBridge {
@@ -414,9 +500,12 @@ export class UiMetaBridge {
   private timer: ReturnType<typeof setTimeout> | undefined
   private applying = false
   private unsubscribe: (() => void)[] = []
+  private readonly ready: (() => Promise<unknown>) | undefined
+  private stopped = false
 
   constructor(options: UiMetaBridgeOptions) {
     this.debounceMs = options.debounceMs ?? UI_META_DEBOUNCE_MS
+    this.ready = options.ready
     this.sync = new UiMetaSync({
       gateway: options.gateway,
       read: snapshotFromStores,
@@ -437,8 +526,49 @@ export class UiMetaBridge {
     })
   }
 
-  /** Start watching both stores. The returned function stops and cancels. */
+  /**
+   * Start watching both stores. The returned function stops and cancels.
+   *
+   * With a `ready` promise the watch begins once the disk has answered, so the
+   * baseline it diffs against is what this device HOLDS rather than the app's
+   * defaults. Without one it begins at once, which is what every caller that
+   * hands over two functions wants.
+   */
   start(): () => void {
+    this.stopped = false
+
+    if (!this.ready) {
+      this.watch()
+
+      return () => this.stop()
+    }
+
+    void this.ready()
+      .catch(() => undefined)
+      .then(() => {
+        // Torn down while the disk was answering: a connection that came and
+        // went faster than a file system must not leave a live subscription.
+        if (!this.stopped) {
+          this.watch()
+        }
+      })
+
+    return () => this.stop()
+  }
+
+  stop(): void {
+    this.stopped = true
+
+    for (const off of this.unsubscribe) {
+      off()
+    }
+
+    this.unsubscribe = []
+    clearTimeout(this.timer)
+    this.timer = undefined
+  }
+
+  private watch(): void {
     this.remember(snapshotFromStores())
 
     const watch = (): void => this.onStoreChanged()
@@ -449,18 +579,6 @@ export class UiMetaBridge {
       usePushStore.subscribe(watch),
       useDeviceContextStore.subscribe(watch)
     ]
-
-    return () => this.stop()
-  }
-
-  stop(): void {
-    for (const off of this.unsubscribe) {
-      off()
-    }
-
-    this.unsubscribe = []
-    clearTimeout(this.timer)
-    this.timer = undefined
   }
 
   /**
@@ -476,7 +594,13 @@ export class UiMetaBridge {
   }
 
   /** Read the gateway's copy and send whatever this device is still holding. */
-  reconcile(): Promise<unknown> {
+  async reconcile(): Promise<unknown> {
+    // The disk first. Whose copy is newer is a question about what this device
+    // holds, and a device whose own read has not landed does not hold it yet.
+    if (this.ready) {
+      await this.ready().catch(() => undefined)
+    }
+
     return this.sync.reconcile()
   }
 
@@ -527,7 +651,7 @@ export class UiMetaBridge {
       return
     }
 
-    const snapshot = snapshotFromStores()
+    let snapshot = snapshotFromStores()
     let dirty = false
 
     for (const [name, section] of Object.entries(snapshot.bots)) {
@@ -553,6 +677,26 @@ export class UiMetaBridge {
       dirty = true
     }
 
+    /*
+      A CHOICE, dated, so that the newest one wins wherever it was made.
+
+      The section travels whole and last writer wins, and a device writes it for
+      reasons that are nobody's decision — its own push row, its context facts, a
+      disk read that landed late. So the date moves only for the part of the
+      section that is somebody's decision, and it is taken here rather than in two
+      dozen setters for the reason this whole class exists: one diff, every field,
+      nothing to forget when the next field is added.
+
+      The snapshot is re-read afterwards because the date is IN it: remembering
+      the one taken before the touch would leave this device one notification
+      behind for ever.
+    */
+    if (this.seen.get(CHOICES) !== choiceFingerprint(snapshot.app)) {
+      useAppStampStore.getState().touch()
+      snapshot = snapshotFromStores()
+      dirty = true
+    }
+
     if (!dirty) {
       return
     }
@@ -565,6 +709,7 @@ export class UiMetaBridge {
   private remember(snapshot: UiMetaSnapshot): void {
     this.seen.clear()
     this.seen.set('app', fingerprint(snapshot.app))
+    this.seen.set(CHOICES, choiceFingerprint(snapshot.app))
 
     for (const [name, section] of Object.entries(snapshot.bots)) {
       this.seen.set(`bot:${name}`, fingerprint(section))

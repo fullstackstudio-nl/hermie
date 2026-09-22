@@ -23,6 +23,7 @@ import { WebSocket } from 'ws'
 
 import { HERMIE_PLUGIN_KEY } from './plugin'
 import {
+  APP_UPDATED_AT,
   appKeyFor,
   BOT_MARKER_KEY,
   HERMIE_APP_KEY,
@@ -448,6 +449,145 @@ describe('one key per person', () => {
 
       expect(Object.keys(meta).filter(key => key.startsWith(HERMIE_APP_KEY))).toEqual([])
       expect(await metaOf(request, 'writer')).toMatchObject({ [HERMIE_KEY]: { archived: true } })
+    })
+  })
+})
+
+/**
+ * Whose copy is the newer one.
+ *
+ * ADR-0016 said "last writer wins, per section", and "last" meant whichever
+ * device flushed last. On one device that is the same sentence; on two it is not,
+ * and the difference was reported twice in one day: a theme picked on a desktop
+ * went back to the phone's the moment the phone was opened, and the folders with
+ * it. The losing device then wrote its own copy home, so the choice was gone for
+ * every device rather than merely wrong on one.
+ *
+ * A device holds this section for reasons that are nobody's decision — its own
+ * push row, its context facts, a disk read that landed late, the live roster
+ * folded into the list — so the dirty bit cannot answer the question. The section
+ * therefore says WHEN it was chosen, and these cases are the comparison.
+ */
+describe('the newest choice, wherever it was made', () => {
+  const HOUR = 3600
+  const noon = 1_789_950_000
+
+  /** One person's two devices, and the app-wide key they share. */
+  const appOf = async (request: UiMetaGateway['request']): Promise<Record<string, unknown>> =>
+    (await metaOf(request, 'researcher'))[APP_KEY] as Record<string, unknown>
+
+  it('takes the desktop’s later choice onto the phone, and leaves it there', async () => {
+    await withGateway(async ({ request, device }) => {
+      const desktop = device()
+
+      await desktop.sync.reconcile()
+      desktop.local.app = { v: 1, themeChoice: 'graphite', [APP_UPDATED_AT]: noon }
+      desktop.sync.markApp()
+      await desktop.sync.flush()
+
+      // The phone chose Lime an hour EARLIER and never sent it.
+      const phone = device({ app: { v: 1, themeChoice: 'lime', [APP_UPDATED_AT]: noon - HOUR }, bots: {} })
+
+      phone.sync.markApp()
+      await phone.sync.reconcile()
+
+      expect(phone.local.app).toMatchObject({ themeChoice: 'graphite' })
+      expect(await appOf(request)).toMatchObject({ themeChoice: 'graphite' })
+    })
+  })
+
+  it('does the same in the other connect order', async () => {
+    await withGateway(async ({ request, device }) => {
+      // This time the OLDER choice is the one already on the gateway.
+      const phone = device()
+
+      await phone.sync.reconcile()
+      phone.local.app = { v: 1, themeChoice: 'lime', [APP_UPDATED_AT]: noon - HOUR }
+      phone.sync.markApp()
+      await phone.sync.flush()
+
+      const desktop = device({ app: { v: 1, themeChoice: 'graphite', [APP_UPDATED_AT]: noon }, bots: {} })
+
+      await desktop.sync.reconcile()
+
+      // Not marked dirty by the caller: the date is what says this device is
+      // holding something the gateway has not got, which is the only thing left
+      // to go on after the app was relaunched and the dirty bit went with it.
+      expect(desktop.local.app).toMatchObject({ themeChoice: 'graphite' })
+      expect(await appOf(request)).toMatchObject({ themeChoice: 'graphite' })
+    })
+  })
+
+  it('gives a tie to the gateway, so that one of the two stops', async () => {
+    await withGateway(async ({ request, device }) => {
+      const desktop = device()
+
+      await desktop.sync.reconcile()
+      desktop.local.app = { v: 1, themeChoice: 'graphite', [APP_UPDATED_AT]: noon }
+      desktop.sync.markApp()
+      await desktop.sync.flush()
+
+      const phone = device({ app: { v: 1, themeChoice: 'lime', [APP_UPDATED_AT]: noon }, bots: {} })
+
+      phone.sync.markApp()
+      await phone.sync.reconcile()
+
+      expect(phone.local.app).toMatchObject({ themeChoice: 'graphite' })
+      expect(await appOf(request)).toMatchObject({ themeChoice: 'graphite' })
+    })
+  })
+
+  it('keeps an undated local change, which is where this started', async () => {
+    // Neither side has a date: a build that predates the field, or a device that
+    // has never had a choice made on it. The rule is then the one that was there
+    // before — a dirty section is the newer one — because that is what makes a
+    // change made on a plane survive the landing.
+    await withGateway(async ({ request, device }) => {
+      const desktop = device()
+
+      await desktop.sync.reconcile()
+      desktop.local.app = { v: 1, themeChoice: 'graphite' }
+      desktop.sync.markApp()
+      await desktop.sync.flush()
+
+      const phone = device({ app: { v: 1, themeChoice: 'lime' }, bots: {} })
+
+      phone.sync.markApp()
+      await phone.sync.reconcile()
+
+      expect(phone.local.app).toMatchObject({ themeChoice: 'lime' })
+      expect(await appOf(request)).toMatchObject({ themeChoice: 'lime' })
+    })
+  })
+
+  it('prefers a dated choice to an undated one', async () => {
+    await withGateway(async ({ request, device }) => {
+      const older = device()
+
+      await older.sync.reconcile()
+      older.local.app = { v: 1, themeChoice: 'lime' }
+      older.sync.markApp()
+      await older.sync.flush()
+
+      const newer = device({ app: { v: 1, themeChoice: 'graphite', [APP_UPDATED_AT]: noon }, bots: {} })
+
+      newer.sync.markApp()
+      await newer.sync.reconcile()
+
+      expect(newer.local.app).toMatchObject({ themeChoice: 'graphite' })
+      expect(await appOf(request)).toMatchObject({ themeChoice: 'graphite' })
+    })
+  })
+
+  it('still sends a section to a gateway that has none, whatever the dates say', async () => {
+    // An absent key is not a decision anybody made; a present one is. That
+    // asymmetry is older than the dates and the dates must not undo it.
+    await withGateway(async ({ request, device }) => {
+      const phone = device({ app: { v: 1, themeChoice: 'lime', [APP_UPDATED_AT]: noon - HOUR }, bots: {} })
+
+      await phone.sync.reconcile()
+
+      expect(await appOf(request)).toMatchObject({ themeChoice: 'lime' })
     })
   })
 })

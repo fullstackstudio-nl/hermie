@@ -1,6 +1,6 @@
 # 0016. Per-client settings live in `ui_meta`, one section per concern, last writer wins
 
-- Status: Accepted, amended 2026-09-21 (the app-wide key carries a person's name)
+- Status: Accepted, amended 2026-09-22 (the app-wide section says when it was chosen)
 - Date: 2026-09-21
 - Amends: [0012](0012-local-chat-list-layout.md)
 
@@ -318,3 +318,79 @@ canonical chat stays shared however many people read it and that an owner surviv
 
 The fake gateway's `/api/auth/me` answered a fixed tester until this round; it now answers the
 caller, which is what upstream does and what makes any of the above mean anything.
+
+## Amendment (2026-09-22): "last writer wins" needs a definition of last
+
+### What was reported
+
+"I set my theme to Graphite on macOS. The moment I open another device, it resets the theme to
+whatever was active on that device."
+
+It was not a second device merely showing the wrong colour. The second device then wrote its own
+copy home, so the choice was gone from the gateway as well and the device it had been made on lost
+it on its next reconnect. A theme, deleted by opening a phone.
+
+### What was actually wrong
+
+This record decided **last writer wins, per section, guarded by the revision**, and that is still
+the right rule. What was missing is that "last" was being read as _whichever device flushed last_,
+and a device flushes the app-wide section for several reasons that are nobody choosing anything:
+
+1. **Its own rows in the section moved.** `push` and `context` are maps keyed by installation and
+   by person and they are written on every connect. The section they live in is the same one that
+   holds the theme and the folders.
+2. **A disk read landed late.** The stores are read from disk in one effect and the socket comes up
+   in another. The gateway's copy went into the stores and the device's own landed on top of it a
+   moment later — and `store/ui-meta-bridge.ts` is a DIFF over the local stores, so it read that as
+   a change somebody had just made.
+
+In both cases `withPendingKept` took the local section as "the newest by definition", handed it to
+the stores over the top of the gateway's, and then flushed it.
+
+### What is decided
+
+**The app-wide section carries `updatedAt`: when the person last CHOSE any of it, in seconds.** It is
+additive and the section version stays at 1, by the rule this record already states for `pinned`.
+
+- **Newer wins. A tie goes to the gateway**, so that one of two devices stops.
+- **Undated on both sides keeps the local copy**, which is the behaviour before the field existed
+  and the one a change made on a plane needs.
+- **A dated section beats an undated one.** Only the dated one can say when anybody chose it.
+- **A gateway with no section at all still takes this device's**, which is `seedWhatTheGatewayLacks`
+  and is older than the dates.
+- **A local section dated later than the gateway's IS an unsent change**, whatever the process
+  remembers. The dirty bit lives with a socket; a change made offline and then followed by a
+  relaunch used to arrive with nothing marked and was quietly replaced.
+
+**The date moves for choices only.** It is taken in the bridge's own diff — one place, every field,
+nothing to forget when the next field is added — over the section MINUS `push`, `context` and the
+date itself.
+
+**Nothing is watched or compared until the disk has answered.** `UiMetaBridgeOptions.ready` holds
+both the subscription and the reconcile behind this gateway's reads, so the baseline the diff works
+from is what the device HOLDS rather than the app's defaults.
+
+**A section that arrives is now written to disk.** `applyAppSettings` used to be deliberately silent,
+on the grounds that persisting would write the arriving value back where it came from. It would not:
+that is the local store, and the bridge is deaf while a copy goes in. What the silence actually cost
+was the next launch, which read the theme the person had replaced.
+
+### What this costs
+
+- **Two devices whose clocks disagree resolve by the clock, not by the truth.** The guard is that a
+  date is never allowed to be older than the one the device already holds, so a choice made here is
+  always newer than the copy it replaces — but a phone an hour ahead does win an argument it might
+  not deserve. A tie going to the gateway keeps that from becoming a loop.
+- **One more field in a section every build reads.** A build that predates it writes the section
+  undated, and then loses to any dated one. That is the intended direction: the build that can say
+  when something was chosen is the one to believe.
+
+### What is verified
+
+`packages/gateway-client/src/ui-meta.test.ts`, over a real socket against the fake gateway: the later
+choice winning in both connect orders, a tie going to the gateway, an undated local change still
+kept, a dated section beating an undated one, and a gateway with no section still being seeded.
+`apps/hermie/__tests__/app-settings-sync.test.ts` drives the real stores against a gateway that
+remembers: the theme arriving on a second device in both connect orders, neither device writing back
+over the other, the date adopted rather than re-taken, an offline change landing on the next connect,
+and a relaunch reading the arriving copy rather than the replaced one.

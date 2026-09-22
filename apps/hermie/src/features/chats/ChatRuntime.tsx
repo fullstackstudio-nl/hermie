@@ -19,6 +19,7 @@ import { chatCacheFor } from '../../platform/chat-cache'
 import { intentQueue } from '../../platform/intent-queue'
 import { RUNS_ON_MAC } from '../../platform/runs-on-mac'
 import { shareInbox } from '../../platform/share-inbox'
+import { useAppStampStore } from '../../store/app-stamp'
 import { useBotsStore } from '../../store/bots'
 import { useChatLayoutStore } from '../../store/chat-layout'
 import { useChatsStore } from '../../store/chats'
@@ -140,6 +141,22 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
   */
   const registryRef = useRef(registry)
   registryRef.current = registry
+  /*
+    Every per-gateway disk read, as one promise the reconcile waits on.
+
+    ADR-0016's app-wide section holds ONE PERSON's settings, shared by all their
+    devices, and reconciling it means deciding whose copy is newer. A disk read
+    still in flight while that decision is taken makes this device's answer a
+    matter of timing: the gateway's theme went into the stores, the disk's landed
+    on top of it a moment later, the bridge read that as a local change and sent
+    it — so opening a second device did not merely show the wrong theme, it
+    replaced the chosen one for every device. That is the report this ref is for.
+
+    It is a ref rather than state because nothing renders on it, and it is
+    resolved for good after the first read: a reconnect to the same gateway finds
+    a promise that has already settled and waits for nothing.
+  */
+  const hydrated = useRef<Promise<unknown>>(Promise.resolve())
 
   /*
     Everything that is stored PER GATEWAY is read here, keyed by the active
@@ -174,13 +191,19 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     useBotsStore.getState().reset()
     usePluginStore.getState().reset()
 
-    void useSettingsStore.getState().hydrate(ns)
-    void useBotsStore.getState().hydrateLastSeen(ns)
-    void usePushStore.getState().hydrate(ns)
-    // The list's arrangement, on the same key. "Change gateway" now edits an
-    // entry rather than replacing the one gateway, so an arrangement follows
-    // an address correction instead of being dropped by it (ADR-0012, amended).
-    void useChatLayoutStore.getState().load(gatewayId)
+    hydrated.current = Promise.all([
+      useSettingsStore.getState().hydrate(ns),
+      // The date on the app-wide section, beside the settings it dates. It has
+      // to be in memory before the first projection or an offline change would
+      // travel undated and lose to the copy it was meant to replace.
+      useAppStampStore.getState().hydrate(ns),
+      useBotsStore.getState().hydrateLastSeen(ns),
+      usePushStore.getState().hydrate(ns),
+      // The list's arrangement, on the same key. "Change gateway" now edits an
+      // entry rather than replacing the one gateway, so an arrangement follows
+      // an address correction instead of being dropped by it (ADR-0012, amended).
+      useChatLayoutStore.getState().load(gatewayId)
+    ]).catch(() => undefined)
   }, [gatewayId])
 
   /**
@@ -318,7 +341,10 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       // stricter than the two methods `UiMetaSync` names by string. The cast is
       // at the seam rather than inside the sync, so the sync stays testable with
       // two hand-written functions.
-      gateway: { request: (method, params) => gateway.request(method as 'profiles.list', params) }
+      gateway: { request: (method, params) => gateway.request(method as 'profiles.list', params) },
+      // Nothing is watched or compared until this gateway's own disk reads have
+      // landed; see `hydrated` above and `UiMetaBridgeOptions.ready`.
+      ready: () => hydrated.current
     })
     const stopWatching = uiMeta.start()
     // Built with the connection for the same reason the bridge above is: the

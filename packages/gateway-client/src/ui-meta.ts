@@ -112,6 +112,45 @@ export interface HermieAppSection {
 }
 
 /**
+ * The field the app-wide section dates itself with, in SECONDS.
+ *
+ * ADR-0016 decided "last writer wins, per section", and for a long time "last"
+ * meant whichever device flushed last. That is the right answer for two devices
+ * racing in the same second and the wrong one for everything else: a second
+ * device that has changed nothing of its own can be holding the section for
+ * reasons that have nothing to do with a person choosing anything — its own push
+ * row, a disk read that landed late — and then "last" is the device that
+ * reconnected last rather than the choice that was made last. The report this
+ * field was added for was that: a theme picked on one machine was undone by
+ * opening another.
+ *
+ * So the section says when it was last CHOSEN, and a reconcile compares the two
+ * dates rather than trusting whoever arrives second. Seconds rather than
+ * milliseconds because it travels beside `context`'s `updatedAt`, which is
+ * already in seconds, and because nothing here needs to tell two choices a
+ * hundred milliseconds apart from each other.
+ *
+ * ADDITIVE, and `HERMIE_APP_SECTION_VERSION` deliberately stays at 1 — see the
+ * rule on the version constants above. A section written by a build that
+ * predates the field is UNDATED, which is not the same as "dated zero": see
+ * `appStampOf`.
+ */
+export const APP_UPDATED_AT = 'updatedAt'
+
+/**
+ * When this section was last chosen, or `0` when it does not say.
+ *
+ * Zero is "undated" and is deliberately the lowest possible answer: a section
+ * written by a build that predates the field loses to one that carries a date,
+ * because the dated one is the only one that can prove when anybody chose it.
+ */
+export function appStampOf(section: HermieAppSection | null | undefined): number {
+  const raw = section?.[APP_UPDATED_AT]
+
+  return typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0
+}
+
+/**
  * What a person's brand-new key inherits from the anonymous one, and what it
  * pointedly does not.
  *
@@ -415,6 +454,8 @@ export class UiMetaSync {
       return null
     }
 
+    this.noteNewerLocalApp(remote)
+
     const snapshot = this.withPendingKept(remote)
 
     this.apply(snapshot)
@@ -435,6 +476,35 @@ export class UiMetaSync {
     await this.flush()
 
     return snapshot
+  }
+
+  /**
+   * A local app section dated later than the gateway's is an UNSENT CHANGE.
+   *
+   * The dirty bit lives in this object and this object lives with a socket, so a
+   * change made with no gateway and then followed by a relaunch arrives at the
+   * next reconcile with nothing marked. Before the section carried a date there
+   * was no way to know: the local copy and the gateway's were two values with no
+   * order between them. There is one now, so the question can be asked of the
+   * data rather than of what this process happens to remember — which is the same
+   * move `seedWhatTheGatewayLacks` makes for a key that is not there at all.
+   *
+   * Not on the inheritance pull. There `app` is the ANONYMOUS section, read to be
+   * copied into this person's brand-new key, and `migrated` is what puts it there
+   * a few lines further down. A device with a dated local copy would otherwise
+   * discard an arrangement made on a build that had no dates to offer, which is
+   * the one comparison this field cannot settle.
+   */
+  private noteNewerLocalApp(remote: UiMetaSnapshot): void {
+    if (remote.migrated) {
+      return
+    }
+
+    const local = this.read()
+
+    if (local.app && appStampOf(local.app) > appStampOf(remote.app)) {
+      this.dirtyApp = true
+    }
   }
 
   /**
@@ -470,9 +540,11 @@ export class UiMetaSync {
    * Without this, a reconcile after a spell with no socket would hand the app the
    * remote value, overwrite the change that was made offline, and then flush THAT
    * back — so a change made on a plane would not merely fail to arrive, it would
-   * be erased on landing by the device that made it. A dirty section is a section
-   * whose newest value is the local one by definition; every other section is the
-   * gateway's.
+   * be erased on landing by the device that made it.
+   *
+   * For a BOT section a dirty section is a section whose newest value is the
+   * local one by definition. For the app-wide section it is not — see
+   * `appLocalWins`, which is what the dates are for.
    */
   private withPendingKept(remote: UiMetaSnapshot): UiMetaSnapshot {
     if (!this.pending) {
@@ -495,12 +567,66 @@ export class UiMetaSync {
     }
 
     return {
-      app: this.dirtyApp ? local.app : remote.app,
+      app: this.appLocalWins(local.app, remote.app) ? local.app : remote.app,
       bots,
       plugin,
       remote: remote.app,
       pushHome: remote.pushHome ?? null
     }
+  }
+
+  /**
+   * Whose app-wide section is the newer one: this device's, or the gateway's.
+   *
+   * The dirty bit alone cannot answer it. It says "this device is holding a
+   * section the gateway has not taken", and a device holds one for reasons that
+   * are not a person choosing anything: the section also carries the push
+   * registrations and the context row, and a disk read can land after the
+   * reconcile. Treating that as "mine is newer" is how a theme chosen on one
+   * machine was undone by
+   * opening another — and not merely undone locally: the losing device then
+   * flushed its own copy, so the choice was gone for every device.
+   *
+   * So the dates decide, and the rules are the ones ADR-0016 already implies:
+   *
+   *  - **Newer wins.** Whoever chose last is who the person is.
+   *  - **Equal goes to the gateway.** Two devices that agree to the second have
+   *    nothing to argue about, and one of them has to stop.
+   *  - **Undated on both sides keeps the local copy**, which is the behaviour
+   *    before this field existed and the one the offline case needs: a change
+   *    made with no socket, by a build or a device that has no date to offer, is
+   *    still a change and must not be erased on landing.
+   *  - **A gateway with no section at all takes ours.** There is nothing up there
+   *    to lose, and `seedWhatTheGatewayLacks` says why an absent key is not a
+   *    decision anybody made.
+   *
+   * Note what stays true when the gateway wins: the section is still DIRTY, so
+   * it is still flushed — and `sectionsFor` re-reads the app afterwards, by which
+   * time `apply` has put the gateway's values into the stores. What goes out is
+   * therefore the gateway's arrangement with this device's own push row folded
+   * into it, rather than either half on its own.
+   */
+  private appLocalWins(local: HermieAppSection | null, remote: HermieAppSection | null): boolean {
+    if (!this.dirtyApp) {
+      return false
+    }
+
+    if (!remote) {
+      return true
+    }
+
+    if (!local) {
+      return false
+    }
+
+    const localAt = appStampOf(local)
+    const remoteAt = appStampOf(remote)
+
+    if (localAt === 0 && remoteAt === 0) {
+      return true
+    }
+
+    return localAt > remoteAt
   }
 
   /** Read `profiles.list` and project the two keys out of it. */

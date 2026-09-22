@@ -70,6 +70,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   report it is, not as speech. Every entry path is now held to one rule by a test that walks
   all of them: no row of traffic between two bots is ever drawn as a message.
 
+- **Your theme, your text size and your chat defaults follow you between devices again.** Pick
+  Graphite on the Mac, open the phone, and the phone went back to whatever colour it had been
+  on — and then wrote that back, so the Mac lost the choice too the next time it connected. The
+  same went for the text size, the name order, the verbosity defaults and the themes you have
+  made yourself: everything that is yours rather than a particular machine's.
+
+  These settings live in one block on the gateway that all your devices share, and the rule for
+  two devices disagreeing was "the last one to write wins". That is not the same as "the last
+  choice you made wins", because a device writes that block for reasons that are nothing to do
+  with choosing anything — it registers itself for notifications on every connect, and it reads
+  its own copy off the disk a moment after the gateway's has arrived. The block now records
+  **when you last chose** something in it, and the newest choice wins wherever it was made, with
+  a tie going to the gateway so that two devices cannot argue forever. A change made with no
+  connection keeps its date and still lands when there is one, even if the app was closed and
+  reopened in between. And the copy that arrives is written to the device, so the next launch
+  opens on the theme you chose rather than on the one you replaced.
+
 - **Signing in from a browser no longer ends on "Maximum call stack size exceeded".** The
   browser build's sign-in step failed on every visit — the first one, and the one straight
   after **Forget gateway**, which is where it was reported from. The step could not read

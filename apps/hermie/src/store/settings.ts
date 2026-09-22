@@ -263,11 +263,15 @@ export interface SettingsState {
   editUserTheme: (id: string, scheme: 'light' | 'dark', patch: Record<string, string | null>) => void
   deleteUserTheme: (id: string) => void
   /**
-   * Replace the app-wide half wholesale, without writing it back out.
+   * Replace the app-wide half wholesale, with the gateway's copy.
    *
-   * ADR-0016's reconcile hands the gateway's copy of this section straight in, so
-   * the setter is deliberately silent: persisting here would write the value that
-   * just arrived back to the place it came from, on every reconnect.
+   * ADR-0016's reconcile hands that copy straight in. It is written to DISK like
+   * any other change — the device's own store is what the UI paints from, and a
+   * theme that only ever lived in memory was a theme the next launch showed the
+   * old one of, offline for as long as the socket stayed down. What it is
+   * deliberately not is a write back to the GATEWAY: the bridge is deaf while
+   * this runs, so the arriving value is not read back as a local change and sent
+   * home again.
    */
   applyAppSettings: (patch: {
     defaults?: ChatViewSettings
@@ -492,6 +496,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
         // Default".
         ...(patch.textSize ? { textSize: patch.textSize } : {})
       })
+      save()
     },
 
     reset() {
