@@ -43,6 +43,9 @@ export const app: Translation<typeof strings> = {
     add: 'Hinzufügen',
     remove: 'Entfernen',
     openInBrowser: 'Stattdessen im Browser öffnen',
+    search: 'Suchen',
+    noMatches: 'Dazu passt nichts.',
+    nothingToPick: 'Es gibt nichts zur Auswahl.',
     dismiss: 'Schließen'
   },
 

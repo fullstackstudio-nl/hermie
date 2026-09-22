@@ -85,9 +85,16 @@ export function NewBotFlow({ visible, onClose, onOpened }: NewBotFlowProps) {
               // inventory writes wire ids, and a reader choosing a model for a
               // brand-new bot should be reading the same words here as in the
               // chat they will open next.
-              label: `${provider.name} · ${prettyModelName(model)}`,
+              //
+              // The provider is a SECTION now rather than a prefix on every
+              // label. Repeating it on each row was the only way a horizontal
+              // strip could say it, and it is what made the labels too long to
+              // survive being squeezed into one segment each.
+              label: prettyModelName(model),
+              detail: `${provider.slug}/${model}`,
               model: `${provider.slug}/${model}`,
-              provider: provider.slug
+              provider: provider.slug,
+              providerName: provider.name || provider.slug
             }))
           )
         )

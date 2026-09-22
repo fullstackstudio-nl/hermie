@@ -112,6 +112,15 @@ export interface PickerOption {
   detail?: string
   /** Asks the caller to confirm before switching, per `confirm_expensive_model`. */
   expensive?: boolean
+  /**
+   * The headed section this option belongs under — a provider, for a model.
+   *
+   * Consecutive options sharing one `group` become one section, so the ORDER of
+   * the options decides the order of the sections. Options with no group at all
+   * stay one unheaded list, which is what every picker was before models grew
+   * providers.
+   */
+  group?: string
 }
 
 /**

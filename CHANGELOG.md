@@ -38,6 +38,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Choosing a model for a new bot is a list, not a strip of slivers.** The New-bot sheet put the
+  gateway's whole model inventory into one horizontal segmented bar, and a bar divides a single
+  width between its options — so a gateway offering a dozen models gave each label a twelfth of the
+  sheet and every one of them was cut to two or three characters. Both choices in that sheet, the
+  model and **Clone settings from**, are now a row saying what is picked, opening the same full
+  page the chat's own model picker uses: one option per row with its pretty name, the wire id
+  underneath, a tick on the current one, a section per provider, and a search field once the list
+  is long enough to need one. Picking now stores the `provider/model` pair rather than the label,
+  so two providers offering a model of the same name are two different rows instead of one
+  ambiguous segment. The chat's own picker gained the provider sections too.
+
 - **A share now reaches the bot without opening Hermie.** Sharing a link or a document into
   Hermie from another app wrote the share down and waited for the next launch to send it — so
   nothing happened until you opened the app, which is not what tapping Send in a share sheet

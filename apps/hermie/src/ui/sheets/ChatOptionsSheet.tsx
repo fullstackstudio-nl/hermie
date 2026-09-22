@@ -10,7 +10,7 @@
  * (ADR-0008); the gateway's own `display.tool_progress` is deliberately not
  * here, because changing it writes global config shared with other surfaces.
  */
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useState } from 'react'
 import { Pressable, View } from 'react-native'
 
 import { prettyModelName, type ContextUsage } from '@hermie/transcript'
@@ -23,13 +23,14 @@ import { formatMuteUntil, MUTE_DURATIONS, MUTE_FOREVER, muteUntil, type MuteDura
 import { DICTATION_AUTO, RATE_STEPS } from '../../features/voice/voice-settings'
 import { strings } from '../../i18n/strings'
 import { AccentSwatches } from '../AccentSwatches'
-import { BottomSheet, SheetEyebrow, SheetPage } from '../BottomSheet'
+import { BottomSheet, SheetEyebrow } from '../BottomSheet'
 import { SHARE_FILE_VERB } from '../../platform/share-text'
-import { Button, InsetButtonRow, InsetGroup, Text, TextField } from '../primitives'
+import { Button, InsetButtonRow, InsetGroup, Text } from '../primitives'
 import { useTheme } from '../theme'
 import { TAP_SLOP, type AccentName } from '../tokens'
 import { useEscapeKey } from '../useEscapeKey'
 import { DisclosureRow, SegmentedRow, SwitchRow } from './controls'
+import { PickerPage as Page, PickerPane } from './PickerPane'
 
 export interface ChatOptionsSheetProps {
   visible: boolean
@@ -344,12 +345,23 @@ export function modelRowLabel(options: readonly PickerOption[], value: string): 
  *    matches on it, because `value` is one of the three fields it looks in.
  *  - **The chat's own model always appears**, even when the inventory is empty or
  *    no longer lists it. A picker that cannot show what you are on is a lie.
+ *
+ * The provider becomes the option's `group`, so the pane cuts the list into
+ * headed sections. A model whose provider the inventory did not name keeps no
+ * group, and the chat's own model — which is synthesised from an id and nothing
+ * else — never has one: it belongs above the sections, not inside whichever one
+ * happens to be first.
  */
 export function modelPickerOptions(
-  models: readonly { id: string }[],
+  models: readonly { id: string; provider?: string }[],
   current: string | undefined | null
 ): PickerOption[] {
-  const options = models.map(model => ({ value: model.id, label: prettyModelName(model.id), detail: model.id }))
+  const options = models.map(model => ({
+    value: model.id,
+    label: prettyModelName(model.id),
+    detail: model.id,
+    ...(model.provider ? { group: model.provider } : {})
+  }))
 
   if (current && !options.some(option => option.value === current)) {
     return [{ value: current, label: prettyModelName(current), detail: current }, ...options]
@@ -367,108 +379,6 @@ export function muteRowLabel(mutedUntil: number | null, now: number): string {
   return mutedUntil === MUTE_FOREVER
     ? strings.layout.muted
     : strings.layout.mutedUntil(formatMuteUntil(mutedUntil, now, strings.layout.muteWeekdays))
-}
-
-/**
- * A page inside the sheet.
- *
- * `SheetPage` rather than a local copy: the back affordance has to be in the
- * same place with the same glyph in every sheet that goes a level deeper, which
- * is the visible half of "Escape goes back one level".
- */
-function Page({ children, onBack, title }: { children: ReactNode; onBack: () => void; title: string }) {
-  return (
-    <SheetPage backLabel={strings.common.back} onBack={onBack} testID="picker-back" title={title}>
-      {children}
-    </SheetPage>
-  )
-}
-
-function PickerPane({
-  title,
-  options,
-  value,
-  searchable,
-  onPick,
-  onBack
-}: {
-  title: string
-  options: PickerOption[]
-  value: string
-  searchable?: boolean
-  onPick: (option: PickerOption) => void
-  onBack: () => void
-}) {
-  const theme = useTheme()
-  const [query, setQuery] = useState('')
-
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase()
-
-    if (!needle) {
-      return options
-    }
-
-    return options.filter(
-      option =>
-        option.label.toLowerCase().includes(needle) ||
-        option.value.toLowerCase().includes(needle) ||
-        (option.detail ?? '').toLowerCase().includes(needle)
-    )
-  }, [options, query])
-
-  return (
-    <Page onBack={onBack} title={title}>
-      {searchable ? (
-        <TextField
-          autoCapitalize="none"
-          autoCorrect={false}
-          label={chatStrings.options.modelSearch}
-          onChangeText={setQuery}
-          testID="picker-search"
-          value={query}
-        />
-      ) : null}
-
-      <InsetGroup>
-        {filtered.map(option => (
-          <Pressable
-            accessibilityRole="button"
-            aria-selected={option.value === value}
-            key={option.value}
-            onPress={() => onPick(option)}
-            testID={`picker-option-${option.value}`}
-          >
-            <View
-              style={{
-                alignItems: 'center',
-                flexDirection: 'row',
-                gap: theme.space.sm,
-                minHeight: 44,
-                paddingHorizontal: theme.space.lg,
-                paddingVertical: theme.space.sm
-              }}
-            >
-              <View style={{ flex: 1 }}>
-                <Text>{option.label}</Text>
-                {option.detail ? (
-                  <Text color="textMuted" variant="meta">
-                    {option.detail}
-                  </Text>
-                ) : null}
-              </View>
-              {option.expensive ? (
-                <Text color="dangerText" variant="meta">
-                  {'$$'}
-                </Text>
-              ) : null}
-              {option.value === value ? <Text color="accentText">{'✓'}</Text> : null}
-            </View>
-          </Pressable>
-        ))}
-      </InsetGroup>
-    </Page>
-  )
 }
 
 /**
@@ -759,6 +669,7 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
           }}
           options={props.modelOptions}
           searchable
+          searchLabel={chatStrings.options.modelSearch}
           title={chatStrings.options.model}
           value={props.model}
         />

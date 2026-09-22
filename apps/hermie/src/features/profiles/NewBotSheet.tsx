@@ -16,13 +16,26 @@
  * `profiles.create` has no such parameter and neither does `profiles.configure`
  * — so a field here could only ever have been a lie. The handle is what the
  * roster shows until the gateway grows a way to set the other.
+ *
+ * **Model and Clone-from are disclosure rows onto a page, not segmented
+ * strips.** They were strips, and a strip divides one fixed width between its
+ * options: a gateway offering twenty models gave each label a twentieth of the
+ * sheet, so every one of them was cut to two or three characters and the control
+ * said nothing at all. The length of both lists is a property of somebody else's
+ * machine, which is exactly the case a segmented control cannot serve. A page —
+ * the same `PickerPane` the chat's options sheet opens — has one row per option,
+ * a tick on the current one, sections per provider and a search field once the
+ * list is long. A page rather than a second sheet on top of this one, because two
+ * modals deep is where `Modal` stops behaving the same on all four targets.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { View } from 'react-native'
 
+import type { PickerOption } from '../../chat-ui/types'
 import { BottomSheet, SheetEyebrow } from '../../ui/BottomSheet'
 import { Button, InsetGroup, InsetRow, Text, TextField } from '../../ui/primitives'
-import { SegmentedRow } from '../../ui/sheets'
+import { DisclosureRow, PickerPane } from '../../ui/sheets'
+import { useEscapeKey } from '../../ui/useEscapeKey'
 import { useTheme } from '../../ui/theme'
 import { checkProfileName } from './profile-name'
 import { EMPTY_NEW_BOT_DRAFT, type NewBotDraft } from './profiles-controller'
@@ -33,7 +46,20 @@ export interface ModelChoice {
   label: string
   model: string
   provider: string
+  /**
+   * The provider under its own name, which is the picker's section header.
+   *
+   * Optional because it is the only field the segmented strip this replaced did
+   * not need: an inventory that arrives without it falls back to the slug, and a
+   * caller that supplies neither gets one ungrouped list.
+   */
+  providerName?: string
+  /** The wire id, under the pretty name. It is what goes in a config file. */
+  detail?: string
 }
+
+/** Which level of the sheet is showing. A page, not a second modal. */
+type Pane = 'root' | 'model' | 'clone'
 
 export interface NewBotSheetProps {
   visible: boolean
@@ -63,6 +89,7 @@ export function NewBotSheet({
   const [raw, setRaw] = useState('')
   const [draft, setDraft] = useState<NewBotDraft>({ ...EMPTY_NEW_BOT_DRAFT })
   const [touched, setTouched] = useState(false)
+  const [pane, setPane] = useState<Pane>('root')
 
   useEffect(() => {
     // Re-seed on every open: a sheet that reopened holding the last attempt's
@@ -71,10 +98,52 @@ export function NewBotSheet({
       setRaw('')
       setDraft({ ...EMPTY_NEW_BOT_DRAFT })
       setTouched(false)
+      setPane('root')
     }
   }, [visible])
 
+  /**
+   * Escape goes back exactly ONE level, as it does in the chat's options sheet.
+   *
+   * The `BottomSheet` below registers its own "close the sheet" handler first,
+   * because effects flush child-first and `useEscapeKey` delivers to whoever
+   * registered last. A page therefore wins the key while it is open, pops
+   * itself, and hands the key back to the sheet.
+   */
+  useEscapeKey(() => setPane('root'), visible && pane !== 'root')
+
   const verdict = useMemo(() => checkProfileName(raw, taken), [raw, taken])
+
+  /**
+   * The model rows: "Inherit" first and headless, then one section per provider.
+   *
+   * `value` is the `provider/model` pair the draft actually stores, so the tick
+   * needs no lookup table — which is what the strip needed, because a segment's
+   * identity there was its LABEL and two providers offering the same model would
+   * have collided on it.
+   */
+  const modelOptions = useMemo<PickerOption[]>(
+    () => [
+      { value: '', label: profileStrings.new.modelInherit },
+      ...models.map(choice => ({
+        value: choice.model,
+        label: choice.label,
+        detail: choice.detail,
+        group: choice.providerName ?? choice.provider
+      }))
+    ],
+    [models]
+  )
+
+  const cloneOptions = useMemo<PickerOption[]>(
+    () => [
+      { value: '', label: profileStrings.new.cloneNone },
+      ...cloneable.map(name => ({ value: name, label: name }))
+    ],
+    [cloneable]
+  )
+
+  const modelLabel = modelOptions.find(option => option.value === draft.model)?.label ?? profileStrings.new.modelInherit
 
   const submit = () => {
     setTouched(true)
@@ -93,119 +162,122 @@ export function NewBotSheet({
       testID="new-bot"
       visible={visible}
     >
-      <View style={{ gap: theme.space.xl }}>
-        <View style={{ gap: theme.space.xs }}>
-          <SheetEyebrow>{profileStrings.new.eyebrow}</SheetEyebrow>
-          <Text variant="sheetTitle">{profileStrings.new.title}</Text>
-        </View>
+      {pane === 'model' ? (
+        <PickerPane
+          onBack={() => setPane('root')}
+          onPick={option => {
+            const picked = models.find(choice => choice.model === option.value)
 
-        <InsetGroup
-          footer={
-            <Text color="textMuted" variant="meta">
-              {verdict.warning ?? profileStrings.new.handleHint}
-            </Text>
-          }
-        >
-          <InsetRow>
-            <TextField
-              autoCapitalize="none"
-              autoCorrect={false}
-              error={touched || raw ? verdict.error : null}
-              label={profileStrings.new.handle}
-              onChangeText={setRaw}
-              onSubmitEditing={submit}
-              placeholder={profileStrings.new.handlePlaceholder}
-              testID="new-bot-handle"
-              value={raw}
-            />
-          </InsetRow>
+            setDraft(current => ({ ...current, model: picked?.model ?? '', provider: picked?.provider ?? '' }))
+            setPane('root')
+          }}
+          options={modelOptions}
+          title={profileStrings.new.model}
+          value={draft.model}
+        />
+      ) : pane === 'clone' ? (
+        <PickerPane
+          onBack={() => setPane('root')}
+          onPick={option => {
+            setDraft(current => ({ ...current, cloneFrom: option.value === '' ? null : option.value }))
+            setPane('root')
+          }}
+          options={cloneOptions}
+          title={profileStrings.new.cloneFrom}
+          value={draft.cloneFrom ?? ''}
+        />
+      ) : (
+        <View style={{ gap: theme.space.xl }}>
+          <View style={{ gap: theme.space.xs }}>
+            <SheetEyebrow>{profileStrings.new.eyebrow}</SheetEyebrow>
+            <Text variant="sheetTitle">{profileStrings.new.title}</Text>
+          </View>
 
-          <InsetRow>
-            <TextField
-              label={profileStrings.new.description}
-              multiline
-              numberOfLines={2}
-              onChangeText={description => setDraft(current => ({ ...current, description }))}
-              placeholder={profileStrings.new.descriptionPlaceholder}
-              style={{ minHeight: 56, textAlignVertical: 'top' }}
-              testID="new-bot-description"
-              value={draft.description}
-            />
-          </InsetRow>
-        </InsetGroup>
-
-        {models.length ? (
           <InsetGroup
             footer={
               <Text color="textMuted" variant="meta">
-                {profileStrings.new.modelHint}
+                {verdict.warning ?? profileStrings.new.handleHint}
               </Text>
             }
           >
             <InsetRow>
-              <SegmentedRow
-                label={profileStrings.new.model}
-                onChange={value =>
-                  setDraft(current => {
-                    const picked = models.find(choice => choice.label === value)
+              <TextField
+                autoCapitalize="none"
+                autoCorrect={false}
+                error={touched || raw ? verdict.error : null}
+                label={profileStrings.new.handle}
+                onChangeText={setRaw}
+                onSubmitEditing={submit}
+                placeholder={profileStrings.new.handlePlaceholder}
+                testID="new-bot-handle"
+                value={raw}
+              />
+            </InsetRow>
 
-                    return { ...current, model: picked?.model ?? '', provider: picked?.provider ?? '' }
-                  })
-                }
-                options={[
-                  { value: profileStrings.new.modelInherit, label: profileStrings.new.modelInherit },
-                  ...models.map(choice => ({ value: choice.label, label: choice.label }))
-                ]}
-                testID="new-bot-model"
-                value={models.find(choice => choice.model === draft.model)?.label ?? profileStrings.new.modelInherit}
+            <InsetRow>
+              <TextField
+                label={profileStrings.new.description}
+                multiline
+                numberOfLines={2}
+                onChangeText={description => setDraft(current => ({ ...current, description }))}
+                placeholder={profileStrings.new.descriptionPlaceholder}
+                style={{ minHeight: 56, textAlignVertical: 'top' }}
+                testID="new-bot-description"
+                value={draft.description}
               />
             </InsetRow>
           </InsetGroup>
-        ) : null}
 
-        {cloneable.length ? (
-          <InsetGroup
-            footer={
-              <Text color="textMuted" variant="meta">
-                {profileStrings.new.cloneHint}
-              </Text>
-            }
-          >
-            <InsetRow>
-              <SegmentedRow
+          {models.length ? (
+            <InsetGroup
+              footer={
+                <Text color="textMuted" variant="meta">
+                  {profileStrings.new.modelHint}
+                </Text>
+              }
+            >
+              <DisclosureRow
+                label={profileStrings.new.model}
+                onPress={() => setPane('model')}
+                testID="new-bot-model"
+                value={modelLabel}
+              />
+            </InsetGroup>
+          ) : null}
+
+          {cloneable.length ? (
+            <InsetGroup
+              footer={
+                <Text color="textMuted" variant="meta">
+                  {profileStrings.new.cloneHint}
+                </Text>
+              }
+            >
+              <DisclosureRow
                 label={profileStrings.new.cloneFrom}
-                onChange={value =>
-                  setDraft(current => ({
-                    ...current,
-                    cloneFrom: value === profileStrings.new.cloneNone ? null : value
-                  }))
-                }
-                options={[
-                  { value: profileStrings.new.cloneNone, label: profileStrings.new.cloneNone },
-                  ...cloneable.map(name => ({ value: name, label: name }))
-                ]}
+                onPress={() => setPane('clone')}
                 testID="new-bot-clone"
                 value={draft.cloneFrom ?? profileStrings.new.cloneNone}
               />
-            </InsetRow>
-          </InsetGroup>
-        ) : null}
+            </InsetGroup>
+          ) : null}
 
-        {error ? (
-          <Text color="dangerText" testID="new-bot-error" variant="meta">
-            {profileStrings.new.failed(error)}
-          </Text>
-        ) : null}
+          {error ? (
+            <Text color="dangerText" testID="new-bot-error" variant="meta">
+              {profileStrings.new.failed(error)}
+            </Text>
+          ) : null}
 
-        <Button
-          busy={busy}
-          disabled={!verdict.ok}
-          onPress={submit}
-          testID="new-bot-create"
-          title={profileStrings.new.create}
-        />
-        <Button onPress={onCancel} title={profileStrings.new.cancel} variant="secondary" />
-      </View>
+          <Button
+            busy={busy}
+            disabled={!verdict.ok}
+            onPress={submit}
+            testID="new-bot-create"
+            title={profileStrings.new.create}
+          />
+          <Button onPress={onCancel} title={profileStrings.new.cancel} variant="secondary" />
+        </View>
+      )}
     </BottomSheet>
   )
 }

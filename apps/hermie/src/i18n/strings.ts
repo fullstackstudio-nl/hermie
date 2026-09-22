@@ -41,6 +41,12 @@ const stringsEn = {
     add: 'Add',
     remove: 'Remove',
     openInBrowser: 'Open in browser instead',
+    /** The generic label on a picker's own search field. */
+    search: 'Search',
+    /** A search that matched none of the options. */
+    noMatches: 'Nothing matches that.',
+    /** A picker whose list is empty before anybody typed anything. */
+    nothingToPick: 'Nothing to choose from.',
     /**
      * The accessible name of a sheet's backdrop — the layer a tap anywhere
      * outside the panel lands on.
