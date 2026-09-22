@@ -246,6 +246,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rather than the window, so in a narrow panel it stacks the way it does on a phone, and its
   explanatory lines wrap instead of scrolling sideways with the columns.
 
+- **Opening a chat's (…) menu puts the keyboard away.** With a half-typed message the menu opened
+  behind the composer and the keyboard, and its lower rows — Model, Colour — were on screen and
+  impossible to reach or scroll to. Your draft is kept.
+
 - **The chat header's Back and (…) buttons no longer have a message printed through them.** The
   same thing the pill did, on the two circles beside it: a reply scrolling under the chrome came
   through the glass with the chevron drawn on top of it. All three now hide what passes behind

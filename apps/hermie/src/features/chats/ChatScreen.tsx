@@ -29,7 +29,7 @@ import {
   type Verbosity
 } from '@hermie/transcript'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ActivityIndicator, Pressable, View } from 'react-native'
+import { ActivityIndicator, Keyboard, Pressable, View } from 'react-native'
 
 import {
   AgentsBar,
@@ -1758,6 +1758,24 @@ function Conversation({
   */
   const openOptions = useCallback(() => {
     void refreshUsage()
+
+    /*
+      Put the keyboard away first.
+
+      The popover is laid out absolutely from the top of the chrome downwards,
+      and it is a SIBLING of the composer rather than above it — so with the
+      keyboard up on a phone, opening the menu while the draft had focus drew
+      the composer and its send button straight over the menu's lower half,
+      with the rest of it behind the keyboard and no way to scroll to it.
+      Measured on the iPhone 17 Pro: Model and Colour were both unreachable.
+
+      Raising the popover's z-order would only move the collision — the rows
+      would then cover the composer, and the keyboard would still be sitting on
+      the bottom third of a menu. A menu over the transcript and a keyboard for
+      the draft are two different intentions, and the tap on (…) is the moment
+      the reader states which one they are in.
+    */
+    Keyboard.dismiss()
 
     if (chromeWidth >= CHAT_POPOVER_MIN_WIDTH) {
       setOptionsPopover(true)
