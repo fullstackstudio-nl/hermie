@@ -457,25 +457,41 @@ next run, and a status bead, with paused crons under their own divider.
 
 ### 6.6 Bot to bot
 
-**Collapsed outgoing is a line, not a bubble and not a pill.** Small arrow glyph +
-`Message to @writer` + a one-line truncated preview + time, and at the right a reply
-indicator that is always present:
+**Neither direction is a bubble, a pill or a card.** Both are the ASIDE — the
+silhouette §6.4's thoughts have: left-aligned, muted ink at the smaller size, no
+background, a one-line header with the time and a chevron, and a body that opens
+in place. The header is the direction and the counterpart, and nothing else:
+`To @writer` on a message this bot sent, `From @writer` on one it received. One
+component draws both, and the presentation is the same at every verbosity —
+including Quiet, which is where the sending side used to be a centred
+`Message to Writer` chip while the answer beside it was already an aside.
 
-| Situation         | Indicator                                             |
-| ----------------- | ----------------------------------------------------- |
-| A reply came back | `↩ replied` + the first words of the reply, quoted    |
-| Still pending     | hollow dot + `Delivered · waiting for reply` (static) |
-| It did not go     | `Failed` in `dangerText` + the reason                 |
+On an outgoing row a reply indicator is **always present**, because a row with
+nothing on its right would read as delivered and answered:
 
-Consecutive lines sit 9 px apart. More than three in a row roll up into
-`5 messages to @writer · 4 replies`, which expands in place.
+| Situation              | Indicator                                             |
+| ---------------------- | ----------------------------------------------------- |
+| A reply came back      | `↩︎ replied`                                           |
+| Still pending          | hollow dot + `Delivered · waiting for reply` (static) |
+| The recipient is on it | hollow dot + `@writer is writing…`                    |
+| It did not go          | `Failed` in `dangerText`                              |
 
-Tapping a line **expands the exchange inline**: the message sent, the delivery
-status, the reply rendered as markdown, and a secondary `Open @writer's chat` link.
-It never navigates away and never scrolls the transcript somewhere else.
+An inbound row gains `↩︎ answered` once this bot has replied to it.
 
-**Incoming** bot messages keep a tinted bubble — they start a turn in this chat —
-with a `Writer · bot` chip, and gain an `↩ answered` marker once this bot has replied.
+Consecutive rows sit 9 px apart, keyed on the PAIR: an errand and the answer to it
+sit tight, and a message to somebody else starts a new run. More than three in a
+row — **in either direction, in one run** — roll up into
+`6 messages with @writer · 4 replies`, which expands in place; `replies` counts the
+errands that were answered.
+
+Tapping a row **opens it inline**: the body rendered as Markdown, selectable, and a
+secondary `Open @writer's chat` link. The row itself never navigates away and never
+scrolls the transcript somewhere else, and the open state survives being scrolled
+out of the list and back.
+
+The bot-to-bot switch in the chat's options folds both directions to a one-line
+chip. It never hides them: a message the reader cannot see makes the bot's own
+reply unexplainable.
 
 ### 6.7 Files and images
 

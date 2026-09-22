@@ -923,8 +923,12 @@ describe('following a DM across chats', () => {
   }
 
   /**
-   * The line these tests press is the expanded one, which Quiet (the default)
-   * folds to a chip.
+   * Verbosity `normal`.
+   *
+   * It is no longer what makes a dispatch an aside — Quiet, the default, draws
+   * the same row, which is what the test below pins. It is kept because these two
+   * tests press the open LINK inside an opened aside, and a reader who has turned
+   * verbosity up is the case they were written for.
    *
    * It used to have to wait for a hydrate first: the screen read the settings
    * store on mount and that read replaced `perChat`. The per-account settings
@@ -937,6 +941,22 @@ describe('following a DM across chats', () => {
       useSettingsStore.getState().setChatView('researcher', { level: 'normal' })
     })
   }
+
+  it('draws a dispatch as an aside at the default verbosity, never as a chip', async () => {
+    // The owner's report, exactly: Quiet is the default, and Quiet used to demote
+    // a dispatch to a centred chip reading `Message to Writer` while the answer
+    // beside it stayed an aside. A direction is not a verbosity.
+    act(() => {
+      useBotsStore.getState().setBots([BOT, { ...BOT, name: 'writer', displayName: 'Writer' }])
+      dispatchDm('Can you draft the announcement?', 1_700_000_000)
+    })
+
+    renderScreen(<ChatScreen bot="researcher" />)
+
+    await waitFor(() => expect(screen.getByTestId('bot-dm-aside-t:call_dm_1')).toBeTruthy())
+    expect(screen.queryByTestId('bot-dm-out-chip-t:call_dm_1')).toBeNull()
+    expect(screen.queryByText('Message to Writer')).toBeNull()
+  })
 
   it('opens the recipient on the matching inbound message', async () => {
     const onOpenBot = jest.fn()

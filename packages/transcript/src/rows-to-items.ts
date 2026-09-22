@@ -12,12 +12,14 @@ import {
   deliveryTargetFromCommand,
   dispatchedTo,
   isBotDmDeliveryCommand,
+  isBotDmDeliveryReport,
+  type IncomingBotMessage,
   normalizeAgentTarget,
   parseIncomingBotMessage,
   parseProcessCompleteText,
   replyFromDeliveryOutput
 } from './bot-dm'
-import { parseCronDelivery } from './cron-delivery'
+import { type ParsedCronDelivery, parseCronDelivery } from './cron-delivery'
 import { type InjectedRow, parseInjectedRow, stripSteerWrapper, unwrapSystemNote } from './injected'
 import {
   type AssistantItem,
@@ -207,6 +209,96 @@ export function stripUserText(raw: string): StrippedUserText {
     .trim()
 
   return { text: cleaned, attachments }
+}
+
+/**
+ * What a `role: "user"` row turns out to be.
+ *
+ * `bot_dm_reply` is the delivery runner handing a teammate's answer back. It is
+ * bot-to-bot traffic, so it never becomes speech; what it becomes is decided by
+ * the caller, because the answer belongs on the dispatch that asked for it and
+ * only a caller holding the transcript can find that dispatch.
+ */
+export type UserRowClass =
+  | { kind: 'cron_delivery'; cron: ParsedCronDelivery }
+  | { kind: 'bot_dm_in'; incoming: IncomingBotMessage }
+  | { kind: 'bot_dm_reply' }
+  | { kind: 'notice'; injected: InjectedRow }
+  | { kind: 'user'; text: string; attachments?: string[]; steered: boolean }
+
+export interface ClassifyUserRowOptions {
+  /**
+   * The gateway labelled this row with a `display_kind` this projection
+   * recognised, and the label is a stronger signal than any header heuristic. A
+   * labelled row is only ever read for the one convention a label cannot carry:
+   * the delivery signature, which rides inside the text of a `steer` or a
+   * `skill_invocation` as much as anywhere else.
+   */
+  labelled?: boolean
+}
+
+/**
+ * The ONE place a `role: "user"` row is classified.
+ *
+ * Hermes starts a turn by writing a `user` row and running the agent on it, and
+ * only some of those rows are the owner typing. Which one this is, is a question
+ * about the text — so it has exactly one answer, and this is where it is given.
+ *
+ * It exists because there used to be two answers. This module read a persisted
+ * row and `readInflightPrompt` read a resume's `inflight.user`, each with its own
+ * copy of the same chain, and the copies drifted: a teammate's answer, which
+ * arrives as a background-process report, was recognised by neither and painted
+ * as the owner's own bubble on both. A single chain is what makes the invariant
+ * testable — no bot-to-bot row is ever speech — rather than a promise every new
+ * caller has to remember.
+ *
+ * The order is the order of certainty, narrowest convention first. Nothing here
+ * touches the wire: every branch is a parser named after the upstream file that
+ * writes the string it reads.
+ */
+export function classifyUserRow(text: string, options: ClassifyUserRowOptions = {}): UserRowClass {
+  const labelled = options.labelled === true
+
+  if (!labelled) {
+    const cron = parseCronDelivery(text)
+
+    if (cron) {
+      return { kind: 'cron_delivery', cron }
+    }
+  }
+
+  const incoming = parseIncomingBotMessage(text)
+
+  if (incoming) {
+    return { kind: 'bot_dm_in', incoming }
+  }
+
+  // Before the injected-notice parser, which refuses a text carrying a delivery
+  // block rather than guessing at its body — and, refusing, used to hand the row
+  // on to the speech branch below.
+  if (!labelled && isBotDmDeliveryReport(text)) {
+    return { kind: 'bot_dm_reply' }
+  }
+
+  if (!labelled) {
+    const injected = parseInjectedRow(text)
+
+    if (injected) {
+      return { kind: 'notice', injected }
+    }
+  }
+
+  // A steer IS the user speaking, so it keeps its bubble — but the wrapper the
+  // gateway delivers it in is addressed to the model, not to the reader.
+  const unwrapped = stripSteerWrapper(text)
+  const stripped = stripUserText(unwrapped ?? text)
+
+  return {
+    kind: 'user',
+    text: stripped.text,
+    ...(stripped.attachments ? { attachments: stripped.attachments } : {}),
+    steered: unwrapped !== null
+  }
 }
 
 const NOTICE_TITLES: Record<string, string> = {
@@ -420,7 +512,17 @@ export function rowsToItems(rows: readonly TranscriptRow[], shape: RowShape, opt
       return
     }
 
-    if (displayKind === 'process_complete') {
+    /**
+     * A background process reporting back: the deliveries it carries go onto the
+     * dispatches that spawned them, and whatever is left over becomes a notice.
+     *
+     * One function for two entry points. The gateway labels this row
+     * `process_complete` where it can; where it cannot, the text is all there is
+     * and `classifyUserRow` recognises the delivery signature in it. Both have to
+     * project the SAME items or reconciliation pairs nothing and the reader gets
+     * the row twice — once as a card, once as whatever the other path made of it.
+     */
+    const processComplete = (title: string) => {
       const blocks = parseProcessCompleteText(content)
       const leftovers: string[] = []
       const unattributed: ProcessCompletionBlock[] = []
@@ -462,16 +564,18 @@ export function rowsToItems(rows: readonly TranscriptRow[], shape: RowShape, opt
       const body = leftovers.filter(Boolean).join('\n\n')
 
       if (body || !blocks.length) {
-        const emitted = notice(
-          'process_complete',
-          displayText(row.display_metadata) ?? NOTICE_TITLES.process_complete ?? 'Background process finished',
-          body || content
-        )
+        const emitted = notice('process_complete', title, body || content)
 
         if (unattributed.length) {
           emitted.completions = unattributed
         }
       }
+    }
+
+    if (displayKind === 'process_complete') {
+      processComplete(
+        displayText(row.display_metadata) ?? NOTICE_TITLES.process_complete ?? 'Background process finished'
+      )
 
       return
     }
@@ -510,13 +614,22 @@ export function rowsToItems(rows: readonly TranscriptRow[], shape: RowShape, opt
       return
     }
 
-    // Before the speech paths, and only on a row this file has NOT already
-    // recognised by `display_kind`: a cron delivery is an ordinary `role: user`
-    // row with no marker on it, so anything the gateway did label is a stronger
-    // signal than our header heuristic and has already returned above.
-    const cron = role === 'user' && !displayKind ? parseCronDelivery(content) : null
+    /*
+      Everything from here is the one classifier, and the last thing standing
+      between a machine's report and the owner's own bubble.
 
-    if (cron) {
+      A row the gateway labelled has already returned above except for
+      `skill_invocation` and `steer`, so `labelled` only spares those two the
+      header heuristics — the label is a stronger signal than any of them. What
+      reaches here unlabelled is an older gateway, a transport that drops
+      `display_kind`, or a shape upstream added since. Anything that is not a real
+      message must not be drawn as one.
+    */
+    const classified = role === 'user' ? classifyUserRow(content, { labelled: Boolean(displayKind) }) : undefined
+
+    if (classified?.kind === 'cron_delivery') {
+      const cron = classified.cron
+
       push<CronDeliveryItem>({
         id: fallbackId,
         kind: 'cron_delivery',
@@ -530,9 +643,9 @@ export function rowsToItems(rows: readonly TranscriptRow[], shape: RowShape, opt
       return
     }
 
-    const incoming = role === 'user' ? parseIncomingBotMessage(content) : null
+    if (classified?.kind === 'bot_dm_in') {
+      const incoming = classified.incoming
 
-    if (incoming) {
       push<BotDmInItem>({
         id: fallbackId,
         kind: 'bot_dm_in',
@@ -545,14 +658,18 @@ export function rowsToItems(rows: readonly TranscriptRow[], shape: RowShape, opt
       return
     }
 
-    // The last thing standing between a machine's report and the owner's own
-    // bubble. A row the gateway labelled has already returned above, so this only
-    // sees the ones it left unmarked — an older gateway, a transport that drops
-    // `display_kind`, or a shape upstream added since. Anything that is not a
-    // real message must not be drawn as one.
-    const injected: InjectedRow | null = role === 'user' && !displayKind ? parseInjectedRow(content) : null
+    // The reply the gateway did not label. It takes the labelled row's branch, so
+    // an unlabelled report joins its reply onto the dispatch exactly as a
+    // labelled one does instead of falling through to a bubble.
+    if (classified?.kind === 'bot_dm_reply') {
+      processComplete(NOTICE_TITLES.process_complete ?? 'Background process finished')
 
-    if (injected) {
+      return
+    }
+
+    if (classified?.kind === 'notice') {
+      const injected = classified.injected
+
       if (injected.noticeKind === 'async_delegation_complete') {
         closeOpenGroup()
       }
@@ -562,17 +679,15 @@ export function rowsToItems(rows: readonly TranscriptRow[], shape: RowShape, opt
       return
     }
 
-    // A steer IS the user speaking, so it keeps its bubble — but the wrapper the
-    // gateway delivers it in is addressed to the model, not to the reader.
-    const unwrapped = role === 'user' ? stripSteerWrapper(content) : null
-    const stripped = stripUserText(unwrapped ?? content)
+    const stripped = classified ?? stripUserText(content)
 
     if (!stripped.text && !stripped.attachments?.length) {
       return
     }
 
+    const steered = classified?.kind === 'user' && classified.steered
     const speechKind =
-      displayKind === 'skill_invocation' || displayKind === 'steer' ? displayKind : unwrapped !== null ? 'steer' : ''
+      displayKind === 'skill_invocation' || displayKind === 'steer' ? displayKind : steered ? 'steer' : ''
 
     push<UserItem>({
       id: fallbackId,

@@ -306,6 +306,21 @@ export const botDmInItem: BotDmInItem = {
   text: 'Intro is ready. Can you verify the recovery claim?'
 }
 
+/**
+ * The answer that lands in the middle of a run of errands.
+ *
+ * It is in the gallery's transcript so the roll-up there is a MIXED run: the rule
+ * is that consecutive asides are one group whichever way each of them went, and a
+ * fixture of five dispatches could never show it.
+ */
+export const dmRunAnswerItem: BotDmInItem = {
+  ...base('dm-run-answer', 44),
+  kind: 'bot_dm_in',
+  senderHandle: 'writer',
+  senderName: 'Writer',
+  text: 'Second paragraph is down to four lines. Want me to cut the registrar names too?'
+}
+
 export const subagents: Subagent[] = [
   {
     currentTool: 'web_search',
@@ -679,10 +694,13 @@ export const galleryTranscript: VisibleItem[] = [
   { item: riskyToolItem, presentation: 'collapsed' },
   { item: runningToolItem, presentation: 'collapsed' },
   { item: silentToolItem, presentation: 'collapsed' },
+  // Both directions are `collapsed` and neither is ever `chip` here: that is what
+  // the selectors now hand the list at every verbosity, and a gallery photographed
+  // from a different pair of presentations is a screenshot of nothing.
   { item: botDmOutItem, presentation: 'collapsed' },
-  { item: botDmInItem, presentation: 'full' },
+  { item: botDmInItem, presentation: 'collapsed' },
   { item: replyToBotItem, presentation: 'full' },
-  { item: pendingDmOutItem, presentation: 'chip' },
+  { item: pendingDmOutItem, presentation: 'collapsed' },
   { item: failedDmOutItem, presentation: 'collapsed' },
   { item: subagentGroupItem, presentation: 'full' },
   { item: statusItem, presentation: 'chip' },
@@ -695,7 +713,11 @@ export const galleryTranscript: VisibleItem[] = [
   { item: approvalItem, presentation: 'full' },
   { item: clarifyItem, presentation: 'full' },
   { item: cronDeliveryItem, presentation: 'collapsed' },
-  ...dmRunItems.map(item => ({ item, presentation: 'collapsed' as const })),
+  // An answer in the middle of the run: six consecutive asides, one roll-up.
+  ...[...dmRunItems.slice(0, 2), dmRunAnswerItem, ...dmRunItems.slice(2)].map(item => ({
+    item,
+    presentation: 'collapsed' as const
+  })),
   { item: inlineCodeRegressionItem, presentation: 'full' },
   { item: longReportItem, presentation: 'full' }
 ]

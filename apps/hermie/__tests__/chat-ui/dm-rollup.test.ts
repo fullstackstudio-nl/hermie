@@ -1,14 +1,19 @@
 /**
- * The bot-to-bot roll-up: more than three consecutive outgoing DMs collapse into
- * one summary (§6.6).
+ * The bot-to-bot roll-up: more than three consecutive asides collapse into one
+ * summary (§6.6).
  *
  * "Consecutive" is a question about what is VISIBLE, which is the part worth
- * pinning: a hidden placeholder between two dispatches does not break the run, but
- * a tool row does — the reader can see the tool row, so the dispatches are not
- * adjacent on screen.
+ * pinning: a hidden placeholder between two rows does not break the run, but a
+ * tool row does — the reader can see the tool row, so the asides are not adjacent
+ * on screen.
+ *
+ * And a run holds BOTH DIRECTIONS. An answer standing between two dispatches is
+ * the same silhouette as the rows around it, so it belongs to the same group;
+ * gathering only dispatches split one exchange into two runs with a row between
+ * them that belonged to neither.
  */
 import { hasReply, ROLLUP_THRESHOLD, rollupDmRuns } from '../../src/chat-ui'
-import type { BotDmOutItem, TranscriptItem, VisibleItem } from '../../src/chat-ui/types'
+import type { BotDmInItem, BotDmOutItem, TranscriptItem, VisibleItem } from '../../src/chat-ui/types'
 
 const AT = 1_767_000_000
 
@@ -26,6 +31,22 @@ function dm(id: string, options: { handle?: string; reply?: string; error?: stri
     ts: AT,
     version: 0,
     ...(options.reply ? { reply: { text: options.reply, ts: AT + 1 } } : {})
+  }
+
+  return { item, presentation: 'collapsed' }
+}
+
+function dmIn(id: string, options: { handle?: string } = {}): VisibleItem {
+  const item: BotDmInItem = {
+    id,
+    kind: 'bot_dm_in',
+    origin: 'history',
+    senderHandle: options.handle ?? 'writer',
+    senderName: options.handle ?? 'Writer',
+    seq: 0,
+    text: `answer ${id}`,
+    ts: AT,
+    version: 0
   }
 
   return { item, presentation: 'collapsed' }
@@ -119,7 +140,47 @@ describe('rollupDmRuns', () => {
     expect(roles.d3).toEqual({ role: 'rollupMember', runId: 'd0' })
   })
 
-  it('has nothing to say about a list with no dispatches in it', () => {
+  it('has nothing to say about a list with no asides in it', () => {
     expect(rollupDmRuns([other('a'), other('b')])).toEqual({})
+  })
+
+  it('folds both directions into one run', () => {
+    // Two errands, an answer, two more: five rows the reader sees as one
+    // exchange, so one roll-up rather than two runs of two with a row loose
+    // between them.
+    const entries = [dm('d0', { reply: 'ok' }), dm('d1'), dmIn('i0'), dm('d2'), dm('d3')]
+    const roles = rollupDmRuns(entries)
+    const head = roles.d0
+
+    expect(head?.role).toBe('rollupHead')
+    expect(head?.role === 'rollupHead' && head.run.items.map(item => item.kind)).toEqual([
+      'bot_dm_out',
+      'bot_dm_out',
+      'bot_dm_in',
+      'bot_dm_out',
+      'bot_dm_out'
+    ])
+    // The counterpart is the same teammate in both directions, so the run can
+    // still name them.
+    expect(head?.role === 'rollupHead' && head.run.handle).toBe('writer')
+    // Only the dispatch that was answered counts. An inbound row is somebody
+    // else's message, not an answer to one of ours.
+    expect(head?.role === 'rollupHead' && head.run.replies).toBe(1)
+    expect(roles.i0).toEqual({ role: 'rollupMember', runId: 'd0' })
+  })
+
+  it('rolls up a run of inbound rows on its own', () => {
+    const entries = Array.from({ length: ROLLUP_THRESHOLD + 1 }, (_, index) => dmIn(`i${index}`))
+    const roles = rollupDmRuns(entries)
+
+    expect(roles.i0?.role).toBe('rollupHead')
+    expect(roles.i3).toEqual({ role: 'rollupMember', runId: 'i0' })
+  })
+
+  it('reports no single handle when the two directions name different teammates', () => {
+    const entries = [dm('d0'), dm('d1'), dmIn('i0', { handle: 'builder' }), dm('d2')]
+    const head = rollupDmRuns(entries).d0
+
+    expect(head?.role === 'rollupHead' && head.run.handle).toBeUndefined()
   })
 })

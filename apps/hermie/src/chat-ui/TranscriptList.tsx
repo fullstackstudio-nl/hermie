@@ -90,7 +90,7 @@ import { useLedgerWidth } from './primitives/Bubble'
 import { BubbleColumn } from './primitives/BubbleColumn'
 import { Chip } from './primitives/Chip'
 import { ExpandedProvider, useExpanded } from './expanded'
-import { rollupDmRuns, type DmRowRole } from './dm-rollup'
+import { isDmRow, rollupDmRuns, type DmRowRole } from './dm-rollup'
 import { clipInline } from './format'
 import { messageMenuItems, parseMessageMenuAction } from './message-menu'
 import { layoutRows, type RowLayout } from './grouping'
@@ -481,29 +481,38 @@ function rowDraws(entry: VisibleItem, dmRole: DmRowRole | undefined, runExpanded
 }
 
 /**
- * One outgoing DM row, which may be swallowed by a roll-up.
+ * One bot-to-bot aside, either direction, which may be swallowed by a roll-up.
+ *
+ * One component for both, because the reader sees one row: a dispatch and the
+ * answer to it are the same silhouette, they roll up into the same run, and the
+ * only difference between them is the header and whether there is a delivery
+ * marker to show.
  *
  * A member of a collapsed run renders NOTHING — not a hidden view, nothing at all
  * — so the run really is one line tall until it is opened. `TranscriptRowFrame`
  * asks the same question a second time, because the gap around a row that draws
  * nothing must go with it.
  */
-function DmOutRow({ entry, context, role }: { entry: VisibleItem; context: TranscriptContext; role?: DmRowRole }) {
+function DmAsideRow({ entry, context, role }: { entry: VisibleItem; context: TranscriptContext; role?: DmRowRole }) {
   const runId = role?.role === 'rollupMember' ? role.runId : role?.role === 'rollupHead' ? role.run.id : ''
   const runExpanded = useRollupExpanded(runId)
   const item = entry.item
 
-  if (item.kind !== 'bot_dm_out') {
+  if (!isDmRow(item)) {
     return null
   }
 
   const line = (
     <BotDmAside
+      // An inbound message gains "↩︎ answered" once this bot has replied.
+      // `answersOurDispatch` is the engine's own attribution pass
+      // (`attributeBotReplies`), so the marker is not guessed at here.
+      answered={item.kind === 'bot_dm_in' && (item.answersOurDispatch ?? false)}
       item={item}
       onLinkPress={context.onLinkPress}
       {...(context.onOpenBot ? { onOpenBot: context.onOpenBot } : {})}
       presentation={entry.presentation}
-      targetTyping={context.typingHandles?.includes(item.targetHandle) ?? false}
+      targetTyping={item.kind === 'bot_dm_out' && (context.typingHandles?.includes(item.targetHandle) ?? false)}
     />
   )
 
@@ -544,20 +553,6 @@ function RowView({ entry, context, receipt, layout, dmRole }: RowProps) {
         />
       )
 
-    case 'bot_dm_in':
-      return (
-        <BotDmAside
-          // An inbound bot message gains "↩︎ answered" once this bot has replied.
-          // `answersOurDispatch` is the engine's own attribution pass
-          // (`attributeBotReplies`), so the marker is not guessed at here.
-          answered={item.answersOurDispatch ?? false}
-          item={item}
-          onLinkPress={context.onLinkPress}
-          {...(context.onOpenBot ? { onOpenBot: context.onOpenBot } : {})}
-          presentation={presentation}
-        />
-      )
-
     case 'assistant':
       return (
         <AssistantBubble
@@ -595,8 +590,9 @@ function RowView({ entry, context, receipt, layout, dmRole }: RowProps) {
       )
     }
 
+    case 'bot_dm_in':
     case 'bot_dm_out':
-      return <DmOutRow context={context} entry={entry} role={dmRole} />
+      return <DmAsideRow context={context} entry={entry} role={dmRole} />
 
     case 'subagent_group':
       return (

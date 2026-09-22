@@ -90,15 +90,24 @@ export function visibleItems(state: ChatState, options: VisibilityOptions): Visi
         break
 
       case 'bot_dm_in':
+      case 'bot_dm_out':
         /*
-          `collapsed`, never `full`, at every level.
+          ONE rule for both directions, `collapsed` and never `full`, at every
+          level.
 
           A bot-to-bot row is drawn as an ASIDE — the silhouette a reply's
           thoughts have — and an aside starts closed whatever the verbosity. The
-          owner's rule: the reader opens one by tapping it, and the tap is
-          remembered per row. `verbose` used to open these, which put a
-          teammate's whole message on screen for a reader who had turned
-          verbosity up to see tool calls.
+          reader opens one by tapping it, and the tap is remembered per row.
+          `verbose` used to open the inbound ones, which put a teammate's whole
+          message on screen for a reader who had turned verbosity up to see tool
+          calls.
+
+          The two used to have a case each, and they disagreed. `quiet` — the
+          DEFAULT level — demoted a dispatch to a chip reading `Message to
+          @writer` while the answer to it stayed an aside beside it, so the
+          owner's report was about the one shape the shared design had not
+          reached. A direction is not a verbosity: the same traffic gets the same
+          row whichever way it went.
 
           The toggle still demotes rather than hides (ADR-0009): a DM the reader
           cannot see at all makes the bot's own reply unexplainable.
@@ -121,11 +130,6 @@ export function visibleItems(state: ChatState, options: VisibilityOptions): Visi
          * themselves — has no business demoting it to a chip.
          */
         out.push({ item, presentation: level === 'quiet' ? 'collapsed' : 'full' })
-        break
-
-      case 'bot_dm_out':
-        // `collapsed` at both levels that show it, for the reason above.
-        out.push({ item, presentation: !showBotToBot || level === 'quiet' ? 'chip' : 'collapsed' })
         break
 
       case 'subagent_group':

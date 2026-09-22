@@ -224,10 +224,10 @@ describe('bot-to-bot rows are asides, not bubbles', () => {
 
 describe('the roll-up boundary', () => {
   /*
-    Up to three consecutive dispatches are asides; the fourth turns the run into
-    the roll-up line, which the owner asked to keep exactly as it is. The pure
-    boundary is `dm-rollup.test.ts`'s; this is the rendered one, because the two
-    can disagree — `DmOutRow` decides separately whether a member draws itself.
+    Up to three consecutive asides stay asides; the fourth turns the run into the
+    roll-up line, which the owner asked to keep exactly as it is. The pure boundary
+    is `dm-rollup.test.ts`'s; this is the rendered one, because the two can
+    disagree — `DmAsideRow` decides separately whether a member draws itself.
   */
   const run = (count: number) => dmRunItems.slice(0, count).map(item => ({ item, presentation: 'collapsed' as const }))
 
@@ -239,6 +239,25 @@ describe('the roll-up boundary', () => {
     }
 
     expect(view.queryByTestId(`bot-dm-rollup-${dmRunItems[0]?.id}`)).toBeNull()
+  })
+
+  it('folds an answer standing between dispatches into the same run', () => {
+    // Two errands, the answer to one of them, one more errand: four consecutive
+    // asides, so one roll-up. Gathering only dispatches left the inbound row
+    // drawn on its own between two short runs.
+    const entries = [dmRunItems[0]!, dmRunItems[1]!, botDmInItem, dmRunItems[2]!].map(item => ({
+      item,
+      presentation: 'collapsed' as const
+    }))
+    const view = renderList(entries)
+    const head = dmRunItems[0]?.id ?? ''
+
+    expect(view.getByTestId(`bot-dm-rollup-${head}`)).toBeTruthy()
+    expect(view.queryByTestId(`bot-dm-aside-${botDmInItem.id}`)).toBeNull()
+
+    fireEvent.press(view.getByTestId(`bot-dm-rollup-${head}`))
+
+    expect(view.getByTestId(`bot-dm-aside-${botDmInItem.id}`)).toBeTruthy()
   })
 
   it('draws four in a row as the roll-up, and the asides only once it is opened', () => {

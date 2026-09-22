@@ -84,10 +84,15 @@ const chatStringsEn = {
       waiting: 'Delivered · waiting for reply',
       failed: 'Failed'
     },
-    /** The roll-up more than three consecutive lines collapse into. */
+    /**
+     * The roll-up more than three consecutive asides collapse into.
+     *
+     * `with`, not `to`: a run holds both directions, so some of those messages
+     * came the other way. The reply count is the dispatches that were answered.
+     */
     rollup: (count: number, handle: string, replies: number) =>
-      `${count} messages to @${handle} · ${replies} ${replies === 1 ? 'reply' : 'replies'}`,
-    /** The same roll-up where the run went to more than one teammate. */
+      `${count} messages with @${handle} · ${replies} ${replies === 1 ? 'reply' : 'replies'}`,
+    /** The same roll-up where the run involved more than one teammate. */
     rollupMixed: (count: number, replies: number) =>
       `${count} messages · ${replies} ${replies === 1 ? 'reply' : 'replies'}`,
     /** The one place a DM line is allowed to navigate away from this chat. */

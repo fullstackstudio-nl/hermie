@@ -1,26 +1,36 @@
 /**
- * Consecutive outgoing bot-to-bot lines, rolled up.
+ * Consecutive bot-to-bot asides, rolled up.
  *
- * §6.6: a collapsed outgoing DM is a LINE, not a bubble and not a pill, and more
- * than three in a row roll up into `5 messages to @writer · 4 replies`, which
- * expands in place.
+ * §6.6: a collapsed bot-to-bot row is a LINE, not a bubble and not a pill, and
+ * more than three in a row roll up into `5 messages with @writer · 4 replies`,
+ * which expands in place.
+ *
+ * The run spans BOTH DIRECTIONS. It used to gather only dispatches, which was
+ * true while an inbound message was a bubble — a bubble is not part of a run of
+ * lines — and became wrong the moment both directions turned into the same aside.
+ * An exchange of eight rows then rolled up as two runs of four with an answer
+ * standing between them, and a single answer in the middle of a long errand broke
+ * the run in half. Consecutive asides are one group, whichever way each of them
+ * went.
  *
  * This is the whole rule as one pure function over the visible list, for two
  * reasons. A row cannot see its neighbours, so it cannot know it is the fourth of
  * a run. And "consecutive" is a question about what is VISIBLE: a hidden
- * placeholder between two dispatches does not break the run, but a tool row does
- * — the reader can see the tool row, so the dispatches are not adjacent on screen.
+ * placeholder between two rows does not break the run, but a tool row does — the
+ * reader can see the tool row, so the asides are not adjacent on screen.
  */
-import type { BotDmOutItem, TranscriptItem, VisibleItem } from './types'
+import type { BotDmInItem, BotDmOutItem, TranscriptItem, VisibleItem } from './types'
 
 /** More than this many in a row roll up. Three is the mockup's number. */
 export const ROLLUP_THRESHOLD = 3
 
+export type BotDmRowItem = BotDmInItem | BotDmOutItem
+
 export interface DmRun {
   /** The id the roll-up's own disclosure state is keyed on: the first line's. */
   id: string
-  items: BotDmOutItem[]
-  /** The single target, or undefined when the run went to more than one. */
+  items: BotDmRowItem[]
+  /** The single counterpart, or undefined when the run involved more than one. */
   handle?: string
   replies: number
 }
@@ -38,6 +48,21 @@ export function isDmOut(item: TranscriptItem): item is BotDmOutItem {
   return item.kind === 'bot_dm_out'
 }
 
+/** A bot-to-bot aside, either direction: the rows a run is made of. */
+export function isDmRow(item: TranscriptItem): item is BotDmRowItem {
+  return item.kind === 'bot_dm_out' || item.kind === 'bot_dm_in'
+}
+
+/**
+ * The teammate a row is about: the target of a dispatch, the sender of an inbound
+ * message. A run naming one of them can say so; a run that touched two cannot.
+ */
+export function dmRunHandle(item: BotDmRowItem): string {
+  return item.kind === 'bot_dm_out'
+    ? item.targetHandle || item.target.toLowerCase()
+    : (item.senderHandle ?? item.senderName.toLowerCase())
+}
+
 /**
  * A reply that actually came back.
  *
@@ -48,10 +73,10 @@ export function hasReply(item: BotDmOutItem): boolean {
   return Boolean(item.reply && !item.reply.error)
 }
 
-/** Index every outgoing DM row in the visible list by how it should be drawn. */
+/** Index every bot-to-bot row in the visible list by how it should be drawn. */
 export function rollupDmRuns(entries: readonly VisibleItem[]): Record<string, DmRowRole> {
   const roles: Record<string, DmRowRole> = {}
-  let run: BotDmOutItem[] = []
+  let run: BotDmRowItem[] = []
 
   const flush = () => {
     if (run.length === 0) {
@@ -76,15 +101,18 @@ export function rollupDmRuns(entries: readonly VisibleItem[]): Record<string, Dm
       return
     }
 
-    const handles = new Set(run.map(item => item.targetHandle))
+    const handles = new Set(run.map(dmRunHandle))
 
     roles[head.id] = {
       role: 'rollupHead',
       run: {
         id: head.id,
         items: [...run],
-        ...(handles.size === 1 ? { handle: head.targetHandle } : {}),
-        replies: run.filter(hasReply).length
+        ...(handles.size === 1 ? { handle: dmRunHandle(head) } : {}),
+        // Answered dispatches only. An inbound row is somebody else's message,
+        // not an answer to one of ours, and counting it would make `6 messages ·
+        // 6 replies` out of three errands nobody has come back on.
+        replies: run.filter(item => isDmOut(item) && hasReply(item)).length
       }
     }
 
@@ -100,7 +128,7 @@ export function rollupDmRuns(entries: readonly VisibleItem[]): Record<string, Dm
       continue
     }
 
-    if (isDmOut(entry.item)) {
+    if (isDmRow(entry.item)) {
       run.push(entry.item)
 
       continue

@@ -74,8 +74,9 @@ export const chat: Translation<typeof chatStrings> = {
       waiting: 'Zugestellt · wartet auf Antwort',
       failed: 'Fehlgeschlagen'
     },
+    // `mit`, nicht `an`: eine Folge enthält beide Richtungen.
     rollup: (count: number, handle: string, replies: number) =>
-      `${count} Nachrichten an @${handle} · ${replies} ${replies === 1 ? 'Antwort' : 'Antworten'}`,
+      `${count} Nachrichten mit @${handle} · ${replies} ${replies === 1 ? 'Antwort' : 'Antworten'}`,
     rollupMixed: (count: number, replies: number) =>
       `${count} Nachrichten · ${replies} ${replies === 1 ? 'Antwort' : 'Antworten'}`,
     openChat: (handle: string) => `Chat von @${handle} öffnen`,

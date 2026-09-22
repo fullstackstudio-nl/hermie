@@ -5,15 +5,22 @@
  * can compare by reference. Nothing here filters — see `selectors.ts`.
  */
 import {
+  type IncomingBotMessage,
   normalizeAgentTarget,
-  parseIncomingBotMessage,
   parseMessageAgentResult,
   parseProcessCompleteText,
   replyFromDeliveryOutput
 } from './bot-dm'
-import { parseCronDelivery } from './cron-delivery'
-import { type InjectedRow, isInjectedNotice, parseInjectedRow, stripSteerWrapper } from './injected'
-import { attachmentsMatchKey, normalizedItemText, normalizeMatchText, stripUserText } from './rows-to-items'
+import type { ParsedCronDelivery } from './cron-delivery'
+import { type InjectedRow, isInjectedNotice } from './injected'
+import {
+  attachmentsMatchKey,
+  classifyUserRow,
+  normalizedItemText,
+  normalizeMatchText,
+  stripUserText,
+  type UserRowClass
+} from './rows-to-items'
 import { subagentIdOf, TERMINAL_SUBAGENT_STATUS, toSubagent } from './subagent-progress'
 import type { ErrorSurface, SessionLiveInfo, Usage } from '@hermes/shared/gateway-events'
 import {
@@ -1460,54 +1467,76 @@ type InflightPrompt = {
   carried: string
   /** Those references themselves, for the item this prompt projects to. */
   refs?: string[]
-  kind: 'user' | 'cron_delivery' | 'bot_dm_in' | 'notice'
-  cron?: ReturnType<typeof parseCronDelivery>
-  incoming?: ReturnType<typeof parseIncomingBotMessage>
+  /** The words a bubble would show: the prompt with every wrapper taken off. */
+  speech?: string
+  kind: UserRowClass['kind']
+  cron?: ParsedCronDelivery
+  incoming?: IncomingBotMessage
   injected?: InjectedRow
 }
 
+/**
+ * Read `inflight.user` through the SAME classifier the persisted row goes
+ * through.
+ *
+ * Anything that is not a real message must not be drawn as one, and LIVE is where
+ * that used to fail. The persisted row carries a `display_kind` and
+ * `rows-to-items` has always read it; `inflight.user` carries the text and
+ * nothing else, so this side had a second copy of the chain — and the copies
+ * disagreed. A fan-out's report reached the screen as a blue bubble opening
+ * `[ASYNC DELEGATION BATCH COMPLETE — …]`, signed by the owner; a teammate's
+ * answer, which arrives as a background-process report, did the same for longer.
+ * `classifyUserRow` is now the only chain, so a shape recognised on one path
+ * cannot be missed on the other.
+ *
+ * What is left here is what only this side knows: the comparison key, which is
+ * `normalizedItemText` of the item the prompt would become.
+ */
 function readInflightPrompt(userText: string): InflightPrompt {
-  const cron = parseCronDelivery(userText)
+  const classified = classifyUserRow(userText)
 
-  if (cron) {
-    return {
-      raw: userText,
-      key: normalizeMatchText(`${cron.jobName}\n${cron.body}`),
-      carried: '',
-      kind: 'cron_delivery',
-      cron
-    }
-  }
+  switch (classified.kind) {
+    case 'cron_delivery':
+      return {
+        raw: userText,
+        key: normalizeMatchText(`${classified.cron.jobName}\n${classified.cron.body}`),
+        carried: '',
+        kind: 'cron_delivery',
+        cron: classified.cron
+      }
 
-  const incoming = parseIncomingBotMessage(userText)
+    case 'bot_dm_in':
+      return {
+        raw: userText,
+        key: normalizeMatchText(classified.incoming.body),
+        carried: '',
+        kind: 'bot_dm_in',
+        incoming: classified.incoming
+      }
 
-  if (incoming) {
-    return { raw: userText, key: normalizeMatchText(incoming.body), carried: '', kind: 'bot_dm_in', incoming }
-  }
+    case 'bot_dm_reply':
+      // The key is the raw report, which nothing on screen can match: a delivery
+      // report projects no item at all, so there is nothing for it to pair with.
+      return { raw: userText, key: normalizeMatchText(userText), carried: '', kind: 'bot_dm_reply' }
 
-  // Anything that is not a real message must not be drawn as one, and LIVE is
-  // where that used to fail. The persisted row carries a `display_kind` and
-  // `rows-to-items` has always read it; `inflight.user` carries the text and
-  // nothing else, so a fan-out's report reached the screen as a blue bubble
-  // opening `[ASYNC DELEGATION BATCH COMPLETE — …]`, signed by the owner.
-  const injected = parseInjectedRow(userText)
+    case 'notice':
+      return {
+        raw: userText,
+        key: normalizeMatchText(classified.injected.body),
+        carried: '',
+        kind: 'notice',
+        injected: classified.injected
+      }
 
-  if (injected) {
-    return { raw: userText, key: normalizeMatchText(injected.body), carried: '', kind: 'notice', injected }
-  }
-
-  // `stripUserText` is what the persisted row goes through, directives and
-  // attached-context block included, so the optimistic and inflight projections
-  // of one prompt agree — and the steer wrapper comes off here for that same
-  // reason.
-  const stripped = stripUserText(stripSteerWrapper(userText) ?? userText)
-
-  return {
-    raw: userText,
-    key: normalizeMatchText(stripped.text),
-    carried: attachmentsMatchKey(stripped.attachments),
-    ...(stripped.attachments ? { refs: stripped.attachments } : {}),
-    kind: 'user'
+    default:
+      return {
+        raw: userText,
+        key: normalizeMatchText(classified.text),
+        carried: attachmentsMatchKey(classified.attachments),
+        ...(classified.attachments ? { refs: classified.attachments } : {}),
+        speech: classified.text,
+        kind: 'user'
+      }
   }
 }
 
@@ -1646,8 +1675,20 @@ export function applyResumeSnapshot(state: ChatState, snapshot: ResumeSnapshot, 
   // there is nothing left for it to become, and a blank bubble between a cron
   // card and its reply is a row the reader has to explain to themselves.
   const placeholder = userText ? foreignPlaceholderId(next) : undefined
+  /*
+    A delivery report opens a turn, and projects nothing.
 
-  if (userText && !overlap.promptShown) {
+    The teammate's answer inside it belongs on the dispatch that asked for it, and
+    a resume cannot make that join: the dispatch is a tool row this snapshot says
+    nothing about, and it may not even be on screen. So this side stays quiet and
+    leaves the row to the tail fetch, which has the whole transcript to join
+    against. What must NOT happen is the fall-through that used to: the report
+    painted as the owner's own bubble, headers, command line, teammate's reply and
+    all.
+  */
+  const projectable = prompt.kind !== 'bot_dm_reply'
+
+  if (userText && projectable && !overlap.promptShown) {
     // The turn a resume finds running may be a scheduled job's or a teammate's,
     // not the owner's. Projecting all three here rather than only in
     // `rows-to-items` is what keeps the invariant: a delivery renders as the
@@ -1685,7 +1726,7 @@ export function applyResumeSnapshot(state: ChatState, snapshot: ResumeSnapshot, 
             : {
                 id: `i:${next.turn.nextSeq}`,
                 kind: 'user',
-                text: stripUserText(stripSteerWrapper(userText) ?? userText).text,
+                text: prompt.speech ?? '',
                 // The references too, for the same reason the projection lifts them
                 // out of the text: without them a prompt that was nothing but a
                 // file resumes as an empty bubble, and the row that lands for it has

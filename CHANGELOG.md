@@ -15,10 +15,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   message used to arrive as a tinted bubble with a tail and an outgoing one opened onto a
   glass panel the width of a bubble, and both said a conversation was happening in your chat
   that was not yours. They stay closed at every verbosity level, including Verbose; tapping
-  one opens it, and it is still open when you scroll back to it. The roll-up is unchanged:
-  four or more dispatches in a row still collapse into one summary line that opens the
-  exchange. Consecutive messages between the same pair of bots now sit tight, and a message
-  to somebody else starts a new run.
+  one opens it, and it is still open when you scroll back to it. Consecutive messages between
+  the same pair of bots sit tight, and a message to somebody else starts a new run.
+
+  **The sending side is the same row as the receiving side.** On Quiet — the level the app
+  starts on — a message to a teammate was not an aside at all: it was a centred chip reading
+  `Message to Writer`, with the answer to it drawn as an aside directly underneath. One
+  direction was a verbosity setting and the other was not, so the shape you saw depended on
+  which way the message had gone. Both are now the same line at every level, and the
+  bot-to-bot switch in the chat's options is the only thing that folds either of them to a
+  chip.
+
+  **A run of them is one run, whichever way each message went.** Four or more consecutive
+  bot-to-bot lines still collapse into one summary that opens the exchange — but an answer
+  standing in the middle of a stretch of errands no longer breaks it in two, and an exchange
+  of eight rows is one summary rather than two with a loose line between them. The summary
+  reads `6 messages with @writer · 4 replies`; it used to say `to`, which was only ever true
+  of half the run.
 
 - **The muted marker is a bell you can read.** The crossed-out bell on a chat row was a small
   box under a diagonal, in the faintest ink, tucked beside the time. It is now a drawn bell —
@@ -27,6 +40,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   timestamp.
 
 ### Fixed
+
+- **A teammate's answer no longer arrives as a message you appear to have typed.** The reply
+  to a message one bot sends another does not come back as a message; it comes back as a
+  report from the background job that delivered it, on the same channel your own messages
+  use. When the gateway labelled that report, the reply was folded onto the line that asked
+  for it, which is where it belongs. When it did not — an older gateway, or a reconnection
+  that describes the running turn as plain text — the whole report was drawn as a blue bubble
+  signed by you: the delivery command, the process id and the teammate's words, in your
+  colour, in the middle of your conversation. That was the "sometimes the reply bubbles come
+  up" in the report, and "sometimes" was exactly it: it needed the label to be missing, or
+  the app to reconnect while that turn was still running.
+
+  Both halves are fixed in the one place a row is classified, rather than in the two that had
+  drifted apart: the reply now lands on the line it answers whether the gateway labelled the
+  report or not, and a reconnection during that turn adds nothing rather than adding a bubble.
+  A reply with no dispatch left on screen to attach to is still shown — as the background
+  report it is, not as speech. Every entry path is now held to one rule by a test that walks
+  all of them: no row of traffic between two bots is ever drawn as a message.
 
 - **Signing in from a browser no longer ends on "Maximum call stack size exceeded".** The
   browser build's sign-in step failed on every visit — the first one, and the one straight
