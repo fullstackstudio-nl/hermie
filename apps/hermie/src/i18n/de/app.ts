@@ -524,6 +524,36 @@ export const app: Translation<typeof strings> = {
 
   settings: {
     title: 'Einstellungen',
+
+    categories: {
+      account: 'Konto',
+      gateways: 'Gateways',
+      chats: 'Chats und Nachrichten',
+      notifications: 'Mitteilungen',
+      context: 'Kontext über dich',
+      memory: 'Gedächtnis',
+      appearance: 'Darstellung',
+      privacy: 'Datenschutz und Sicherheit',
+      voice: 'Sprache und Stimme',
+      capabilities: 'Bots und Fähigkeiten',
+      advanced: 'Erweitert',
+      about: 'Über',
+      summary: {
+        signedOut: 'Nicht angemeldet',
+        gateways: (host: string, count: number) =>
+          count === 1 ? `${host} · 1 Gateway` : `${host} · ${count} Gateways`,
+        on: 'An',
+        off: 'Aus',
+        notificationKinds: (count: number) => (count === 1 ? 'An · 1 Art' : `An · ${count} Arten`),
+        shared: 'Geteilt',
+        notShared: 'Nicht geteilt',
+        bots: (count: number) => (count === 1 ? '1 Bot' : `${count} Bots`),
+        capabilities: 'Skills · MCP · Connectors',
+        lockBrowser: 'Nicht im Browser',
+        developer: 'Entwickler',
+        version: (version: string) => `Version ${version}`
+      }
+    },
     address: 'Adresse',
     viaHermieWeb: 'über Hermie Web',
     user: 'Angemeldet als',
@@ -686,6 +716,7 @@ export const app: Translation<typeof strings> = {
     presetHint: 'Jedes Thema hat eine helle und eine dunkle Seite; die Einstellung oben wählt, welche zu sehen ist.',
 
     themes: {
+      title: 'Themen',
       header: 'DEINE THEMEN',
       advanced: 'Erweitert',
       advancedHint: 'Geh von einem Thema oben aus und ändere seine Farben.',

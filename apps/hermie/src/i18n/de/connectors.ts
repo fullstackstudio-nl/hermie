@@ -52,6 +52,7 @@ export const connectors: Translation<typeof connectorStrings> = {
   disconnect: 'Einen Connector meldest du dort ab, wo du das Konto verwaltest, nicht in Hermes.',
 
   detail: {
+    title: 'Connector',
     slug: 'Kennung',
     enabled: 'Aktiviert',
     yes: 'Ja',

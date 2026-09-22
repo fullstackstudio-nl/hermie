@@ -54,6 +54,7 @@ export const connectors: Translation<typeof connectorStrings> = {
   disconnect: 'Uitloggen bij een connector doe je waar je het account beheert, niet vanuit Hermes.',
 
   detail: {
+    title: 'Connector',
     enabled: 'Ingeschakeld',
     yes: 'Ja',
     no: 'Nee'

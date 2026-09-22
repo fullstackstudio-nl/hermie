@@ -512,6 +512,36 @@ export const app: Translation<typeof strings> = {
 
   settings: {
     title: 'Instellingen',
+
+    categories: {
+      account: 'Account',
+      gateways: 'Gateways',
+      chats: 'Chats en berichten',
+      notifications: 'Meldingen',
+      context: 'Context over jou',
+      memory: 'Geheugen',
+      appearance: 'Weergave',
+      privacy: 'Privacy en beveiliging',
+      voice: 'Spraak',
+      capabilities: 'Bots en mogelijkheden',
+      advanced: 'Geavanceerd',
+      about: 'Over',
+      summary: {
+        signedOut: 'Niet ingelogd',
+        gateways: (host: string, count: number) =>
+          count === 1 ? `${host} · 1 gateway` : `${host} · ${count} gateways`,
+        on: 'Aan',
+        off: 'Uit',
+        notificationKinds: (count: number) => (count === 1 ? 'Aan · 1 soort' : `Aan · ${count} soorten`),
+        shared: 'Gedeeld',
+        notShared: 'Niet gedeeld',
+        bots: (count: number) => (count === 1 ? '1 bot' : `${count} bots`),
+        capabilities: 'Skills · MCP · Connectors',
+        lockBrowser: 'Niet in een browser',
+        developer: 'Ontwikkelaar',
+        version: (version: string) => `Versie ${version}`
+      }
+    },
     address: 'Adres',
     version: 'Versie',
     user: 'Ingelogd als',
@@ -671,6 +701,7 @@ export const app: Translation<typeof strings> = {
     presetHint: 'Elk thema heeft een licht en een donker gezicht; de instelling hierboven kiest welke te zien is.',
 
     themes: {
+      title: 'Thema’s',
       header: 'JOUW THEMA’S',
       advanced: 'Geavanceerd',
       advancedHint: 'Begin met een thema hierboven en verander de kleuren.',

@@ -31,6 +31,7 @@ export const mcp: Translation<typeof mcpStrings> = {
   },
 
   detail: {
+    title: 'MCP-server',
     address: 'Adres',
     auth: 'Authenticatie',
     authNone: 'Geen',

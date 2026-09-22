@@ -33,6 +33,7 @@ export const mcp: Translation<typeof mcpStrings> = {
   toolCount: (count: number) => `${count} ${count === 1 ? 'Tool' : 'Tools'}`,
 
   detail: {
+    title: 'MCP-Server',
     address: 'Adresse',
     auth: 'Authentifizierung',
     authNone: 'Keine',

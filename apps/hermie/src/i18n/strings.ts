@@ -920,6 +920,45 @@ const stringsEn = {
 
   settings: {
     title: 'Settings',
+
+    /**
+     * The category list Settings opens on (HERM-108), and the one line of
+     * state under each category's name.
+     *
+     * A summary says where a setting STANDS, not what the page is for: the
+     * reader scanning the list is looking for the thing that is wrong, and
+     * "Dark · English" finds it faster than "Colours and language".
+     */
+    categories: {
+      account: 'Account',
+      gateways: 'Gateways',
+      chats: 'Chats & messages',
+      notifications: 'Notifications',
+      context: 'Context about you',
+      memory: 'Memory',
+      appearance: 'Appearance',
+      privacy: 'Privacy & security',
+      voice: 'Voice',
+      capabilities: 'Bots & capabilities',
+      advanced: 'Advanced',
+      about: 'About',
+      summary: {
+        signedOut: 'Not signed in',
+        gateways: (host: string, count: number) =>
+          count === 1 ? `${host} · 1 gateway` : `${host} · ${count} gateways`,
+        on: 'On',
+        off: 'Off',
+        notificationKinds: (count: number) => (count === 1 ? 'On · 1 kind' : `On · ${count} kinds`),
+        shared: 'Shared',
+        notShared: 'Not shared',
+        bots: (count: number) => (count === 1 ? '1 bot' : `${count} bots`),
+        capabilities: 'Skills · MCP · Connectors',
+        lockBrowser: 'Not in a browser',
+        developer: 'Developer',
+        version: (version: string) => `Version ${version}`
+      }
+    },
+
     gateway: 'Gateway',
     address: 'Address',
     /**
@@ -1198,6 +1237,8 @@ const stringsEn = {
      * the answer for everybody who does not want it.
      */
     themes: {
+      /** The page the Advanced row opens, named for what it holds. */
+      title: 'Themes',
       header: 'YOUR THEMES',
       advanced: 'Advanced',
       advancedHint: 'Start from a theme above and change its colours.',
