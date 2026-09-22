@@ -27,6 +27,7 @@ import * as Theme from '../categories/Theme'
 import * as Voice from '../categories/Voice'
 import { GatewayAddPage, GatewayDetailPage } from '../GatewaysScreen'
 import { LicencesPage } from './LicencesPage'
+import { LockThresholdPage } from './LockThresholdPage'
 import { SETTINGS_ROUTE_META, type SettingsRouteMeta } from './route-meta'
 import { SETTINGS_CATEGORIES, type SettingsCategoryName, type SettingsRouteName } from './route-names'
 import { SettingsRoot } from './SettingsRoot'
@@ -55,6 +56,7 @@ const COMPONENTS: Record<SettingsRouteName, ComponentType<Record<string, never>>
   Theme: Theme.Page,
 
   Privacy: Privacy.Page,
+  LockThreshold: LockThresholdPage,
   Voice: Voice.Page,
 
   Capabilities: Capabilities.Page,

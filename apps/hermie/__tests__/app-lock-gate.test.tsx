@@ -159,25 +159,49 @@ describe('the store, driven directly', () => {
   it('refuses to switch the lock on when nothing is enrolled to open it', async () => {
     mockBiometrics.enrolment.mockResolvedValue('none')
 
-    const accepted = await useLockStore.getState().setThreshold('immediately')
+    const accepted = await useLockStore.getState().changeThreshold('immediately')
 
     expect(accepted).toBe(false)
     expect(useLockStore.getState().machine.threshold).toBe('off')
     expect(await keyValueStore.getJson('hermie.lock')).toBeNull()
+    // Refused on enrolment, so the prompt itself was never reached.
+    expect(mockBiometrics.authenticate).not.toHaveBeenCalled()
   })
 
   it('accepts a passcode-only device, because a passcode is an unlock', async () => {
     mockBiometrics.enrolment.mockResolvedValue('passcode')
 
-    expect(await useLockStore.getState().setThreshold('1m')).toBe(true)
+    expect(await useLockStore.getState().changeThreshold('1m')).toBe(true)
     expect(await keyValueStore.getJson('hermie.lock')).toEqual({ threshold: '1m' })
+    expect(mockBiometrics.authenticate).toHaveBeenCalledTimes(1)
   })
 
-  it('switches off without asking the hardware anything', async () => {
-    mockBiometrics.enrolment.mockResolvedValue('none')
+  it('leaves the stored value and the machine untouched when the prompt is refused', async () => {
+    mockBiometrics.enrolment.mockResolvedValue('biometric')
+    mockBiometrics.authenticate.mockResolvedValue('failed')
 
-    expect(await useLockStore.getState().setThreshold('off')).toBe(true)
+    expect(await useLockStore.getState().changeThreshold('immediately')).toBe(false)
+    expect(useLockStore.getState().machine.threshold).toBe('off')
+    expect(await keyValueStore.getJson('hermie.lock')).toBeNull()
+  })
+
+  it('asks the hardware even to switch off, but never checks enrolment for it', async () => {
+    mockBiometrics.enrolment.mockResolvedValue('none')
+    useLockStore.setState({ machine: start('immediately') })
+
+    expect(await useLockStore.getState().changeThreshold('off')).toBe(true)
     expect(mockBiometrics.enrolment).not.toHaveBeenCalled()
+    expect(mockBiometrics.authenticate).toHaveBeenCalledTimes(1)
+    expect(await keyValueStore.getJson('hermie.lock')).toEqual({ threshold: 'off' })
+  })
+
+  it('leaves an on lock on when the prompt to turn it off is refused', async () => {
+    mockBiometrics.authenticate.mockResolvedValue('failed')
+    useLockStore.setState({ machine: start('immediately') })
+
+    expect(await useLockStore.getState().changeThreshold('off')).toBe(false)
+    expect(useLockStore.getState().machine.threshold).toBe('immediately')
+    expect(await keyValueStore.getJson('hermie.lock')).toBeNull()
   })
 
   it('does not stack a second prompt on top of the one already up', async () => {
@@ -191,6 +215,24 @@ describe('the store, driven directly', () => {
     await act(async () => {
       gate.resolve('ok')
       await Promise.all([first, second])
+    })
+
+    expect(mockBiometrics.authenticate).toHaveBeenCalledTimes(1)
+  })
+
+  it('refuses a threshold change while the lifecycle watcher already has a prompt up', async () => {
+    const gate = deferred<'ok'>()
+    mockBiometrics.authenticate.mockReturnValue(gate.promise)
+    useLockStore.setState({ machine: start('immediately'), ready: true })
+
+    const unlocking = useLockStore.getState().unlock()
+    const changed = useLockStore.getState().changeThreshold('5m')
+
+    expect(await changed).toBe(false)
+
+    await act(async () => {
+      gate.resolve('ok')
+      await unlocking
     })
 
     expect(mockBiometrics.authenticate).toHaveBeenCalledTimes(1)

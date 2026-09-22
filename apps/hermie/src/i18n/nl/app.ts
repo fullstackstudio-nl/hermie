@@ -769,7 +769,9 @@ export const app: Translation<typeof strings> = {
         'Stel eerst een toegangscode, Face ID of een vingerafdruk in bij je apparaatinstellingen — anders vergrendelt Hermie zonder dat er een manier is om hem te openen.',
       unavailable: 'Dit apparaat heeft geen ontgrendelmethode die Hermie kan vragen.',
       passcodeOnly: 'Er is geen biometrie ingesteld, dus Hermie vraagt om de toegangscode van dit apparaat.',
-      web: 'Hermie kan zichzelf niet vergrendelen in een browser: de pagina en alles wat een vergrendeling afdwingt zijn dezelfde code. Vergrendel het scherm of sluit de tab.'
+      web: 'Hermie kan zichzelf niet vergrendelen in een browser: de pagina en alles wat een vergrendeling afdwingt zijn dezelfde code. Vergrendel het scherm of sluit de tab.',
+      refused:
+        'Hermie kon niet bevestigen dat jij het was, dus is er niets gewijzigd. Kies de optie opnieuw om het nog eens te proberen.'
     }
   },
 

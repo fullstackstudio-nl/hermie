@@ -21,7 +21,14 @@ export {
   type PopoverRowId
 } from './ChatOptionsPopover'
 export { ClarifySheet, type ClarifySheetProps } from './ClarifySheet'
-export { PICKER_SEARCH_FROM, PickerPage, PickerPane, type PickerPaneProps } from './PickerPane'
+export {
+  PICKER_SEARCH_FROM,
+  PickerList,
+  PickerPage,
+  PickerPane,
+  type PickerListProps,
+  type PickerPaneProps
+} from './PickerPane'
 export {
   DisclosureRow,
   type DisclosureRowProps,

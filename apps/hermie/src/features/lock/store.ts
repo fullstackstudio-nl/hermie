@@ -72,13 +72,17 @@ export interface LockState {
   /** Re-read what the hardware offers; also the settings screen's check. */
   checkEnrolment: () => Promise<BiometricEnrolment>
   /**
-   * Change the preference.
+   * Change the preference. HERM-106: authenticates FIRST, in both directions
+   * and with `off` included, so the picker itself is the proof rather than a
+   * segmented control anyone could tap past.
    *
-   * Answers false when the device has nothing to unlock with, having changed
-   * nothing: switching a lock on with no face, no finger and no passcode
-   * enrolled would close the app behind a plate the device cannot open.
+   * Answers false — having changed nothing, in the stored preference or in
+   * `machine` — when the device has nothing to unlock with (switching a lock
+   * on with no face, no finger and no passcode enrolled would close the app
+   * behind a plate the device cannot open) or when the prompt was refused,
+   * cancelled, or could not run.
    */
-  setThreshold: (threshold: LockThreshold) => Promise<boolean>
+  changeThreshold: (threshold: LockThreshold) => Promise<boolean>
 }
 
 export const useLockStore = create<LockState>((set, get) => ({
@@ -191,13 +195,42 @@ export const useLockStore = create<LockState>((set, get) => ({
     }
   },
 
-  async setThreshold(threshold) {
+  async changeThreshold(threshold) {
+    // Not reachable from the picker page, which never calls this for the
+    // value already in force — but a store method has to hold on its own,
+    // and stacking this prompt on top of the lifecycle watcher's would be
+    // exactly the bug the `prompting` guard exists to prevent.
+    if (get().prompting) {
+      return false
+    }
+
     if (threshold !== 'off') {
       const enrolment = await get().checkEnrolment()
 
       if (enrolment === 'unavailable' || enrolment === 'none') {
         return false
       }
+    }
+
+    /*
+      `off` prompts too. A lock is a promise to whoever is in the room that
+      the transcript needs a face to open, and switching it off is the one
+      change that promise cannot survive unauthenticated: anyone holding an
+      unlocked phone could reach this row and turn the lock off on someone
+      else's behalf. Nothing is skipped for `off` except the enrolment gate
+      above, which exists to keep the lock from being switched ON behind a
+      plate the device cannot open — a question `off` does not ask.
+    */
+    set({ prompting: true })
+
+    try {
+      const verdict = await biometrics.authenticate(strings.lock.prompt)
+
+      if (verdict !== 'ok') {
+        return false
+      }
+    } finally {
+      set({ prompting: false })
     }
 
     set({ machine: thresholdChanged(get().machine, threshold) })

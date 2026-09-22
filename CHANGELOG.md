@@ -90,6 +90,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the next press. Activity and Crons keep their panel, and it no longer draws its own title row —
   the title and the close both come from the page's own chrome now, the same as everywhere else.
 
+- **Require unlock is a picker, not a row of five segments (HERM-106).** Privacy & security shows a
+  single disclosure row naming the current option; opening it pushes a page listing Off, Now, 1 min,
+  5 min and 15 min with a tick on the one in force, the same list style the model picker uses.
+  Choosing a value — Off included — asks Face ID, Touch ID or the device passcode first: the pick
+  only takes once that succeeds, and a refused, failed or cancelled prompt leaves the stored value,
+  the lock itself and the row exactly as they were, with the reason underneath the list. Choosing the
+  value already in force costs no prompt at all. Web keeps its own notice, since there is nothing
+  there to ask.
+
 ### Removed
 
 - **The gateway's logs page (HERM-103).** Settings no longer has a "gateway's logs" row, and the

@@ -58,8 +58,7 @@ export function PickerPage({ children, onBack, title }: { children: ReactNode; o
   )
 }
 
-export interface PickerPaneProps {
-  title: string
+export interface PickerListProps {
   options: readonly PickerOption[]
   /** The option that carries the tick. `''` ticks nothing, which a span picker wants. */
   value: string
@@ -69,7 +68,16 @@ export interface PickerPaneProps {
   searchLabel?: string
   /** What an empty list says. Defaults to the generic sentence. */
   emptyLabel?: string
+  /**
+   * The explanatory line under the list — `InsetGroup`'s own `footer`, carried
+   * on the last section so a caller with no groups at all still gets one.
+   */
+  footer?: ReactNode
   onPick: (option: PickerOption) => void
+}
+
+export interface PickerPaneProps extends PickerListProps {
+  title: string
   onBack: () => void
 }
 
@@ -98,16 +106,17 @@ function sectionsFor(options: readonly PickerOption[]): { group: string | null; 
   return sections
 }
 
-export function PickerPane({
-  title,
-  options,
-  value,
-  searchable,
-  searchLabel,
-  emptyLabel,
-  onPick,
-  onBack
-}: PickerPaneProps) {
+/**
+ * The list itself: the search field a long list grows and the sectioned rows,
+ * with no page frame around them.
+ *
+ * Split out of `PickerPane` for HERM-106's `LockThreshold` route, which is a
+ * pushed Settings page rather than a sheet — it already has the one back
+ * control `PageChrome` gives every route, and wrapping this in `PickerPage`
+ * there would draw a second one. `PickerPane` below is unchanged for every
+ * caller that still wants the sheet page around it.
+ */
+export function PickerList({ options, value, searchable, searchLabel, emptyLabel, footer, onPick }: PickerListProps) {
   const theme = useTheme()
   const [query, setQuery] = useState('')
 
@@ -131,7 +140,7 @@ export function PickerPane({
   const showSearch = searchable ?? options.length >= PICKER_SEARCH_FROM
 
   return (
-    <PickerPage onBack={onBack} title={title}>
+    <>
       {showSearch ? (
         <TextField
           autoCapitalize="none"
@@ -145,7 +154,11 @@ export function PickerPane({
 
       {filtered.length ? (
         sections.map((section, index) => (
-          <InsetGroup header={section.group ?? undefined} key={section.group ?? `section-${index}`}>
+          <InsetGroup
+            footer={index === sections.length - 1 ? footer : undefined}
+            header={section.group ?? undefined}
+            key={section.group ?? `section-${index}`}
+          >
             {section.options.map(option => (
               <Pressable
                 accessibilityRole="button"
@@ -188,6 +201,14 @@ export function PickerPane({
           {emptyLabel ?? (query.trim() ? strings.common.noMatches : strings.common.nothingToPick)}
         </Text>
       )}
+    </>
+  )
+}
+
+export function PickerPane({ title, onBack, ...list }: PickerPaneProps) {
+  return (
+    <PickerPage onBack={onBack} title={title}>
+      <PickerList {...list} />
     </PickerPage>
   )
 }

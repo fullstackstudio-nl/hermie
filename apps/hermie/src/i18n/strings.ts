@@ -1330,7 +1330,13 @@ const stringsEn = {
         'Set up a passcode, Face ID or a fingerprint in your device settings first — otherwise Hermie would lock with no way to open it.',
       unavailable: 'This device has no unlock method Hermie can ask for.',
       passcodeOnly: 'No biometrics are enrolled, so Hermie will ask for this device’s passcode.',
-      web: 'Hermie cannot lock itself in a browser: the page and anything enforcing a lock are the same code. Lock the screen or close the tab.'
+      web: 'Hermie cannot lock itself in a browser: the page and anything enforcing a lock are the same code. Lock the screen or close the tab.',
+      /**
+       * Every value on this page — Off included — has to be proven with a face,
+       * a finger or a passcode before it takes; this is what a refused, failed
+       * or cancelled prompt says underneath the still-unchanged row.
+       */
+      refused: 'Hermie could not confirm it was you, so nothing changed. Choose the option again to try once more.'
     }
   },
 

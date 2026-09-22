@@ -2,13 +2,16 @@
  * Settings → Privacy & security: the app lock. Per device, and never carried to
  * another one by ADR-0016's sync.
  *
- * The control is still the segmented row `PrivacySection` draws; HERM-106 turns
- * it into a pushed `LockThreshold` picker, which is why this is a page of its
- * own already.
+ * HERM-106 turns the row `PrivacySection` draws into a `DisclosureRow` that
+ * pushes the `LockThreshold` picker, which is why this is a page of its own
+ * already.
  */
+import { useNavigation, type NavigationProp } from '@react-navigation/native'
+
 import { strings } from '../../../i18n/strings'
 import { biometrics } from '../../../platform/biometrics'
 import { useLockStore } from '../../lock'
+import type { SettingsParamList } from '../navigation/route-names'
 import { SettingsPage } from '../navigation/SettingsPage'
 import { PrivacySection } from '../PrivacySection'
 
@@ -21,9 +24,11 @@ export function useSummary(): string {
 }
 
 export function Page() {
+  const navigation = useNavigation<NavigationProp<SettingsParamList>>()
+
   return (
     <SettingsPage route="Privacy">
-      <PrivacySection />
+      <PrivacySection onOpenLockThreshold={() => navigation.navigate('LockThreshold')} />
     </SettingsPage>
   )
 }

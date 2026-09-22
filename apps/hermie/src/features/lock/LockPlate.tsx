@@ -29,8 +29,8 @@ export interface LockPlateProps {
    * Said under the button when the device has nothing left to unlock with.
    *
    * The only way into that state is a passcode removed after the lock was
-   * switched on — `setThreshold` refuses to switch it on otherwise — and it is
-   * the one case where the plate has to explain itself rather than just ask.
+   * switched on — `changeThreshold` refuses to switch it on otherwise — and it
+   * is the one case where the plate has to explain itself rather than just ask.
    */
   stranded?: boolean
 }

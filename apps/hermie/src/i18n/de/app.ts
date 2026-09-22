@@ -789,7 +789,9 @@ export const app: Translation<typeof strings> = {
         'Richte zuerst einen Code, Face ID oder einen Fingerabdruck in deinen Geräteeinstellungen ein — sonst würde Hermie sich sperren, ohne dass es noch zu öffnen wäre.',
       unavailable: 'Dieses Gerät hat keine Entsperrmethode, nach der Hermie fragen könnte.',
       passcodeOnly: 'Es ist keine Biometrie eingerichtet, deshalb fragt Hermie nach dem Code dieses Geräts.',
-      web: 'Hermie kann sich in einem Browser nicht selbst sperren: die Seite und alles, was eine Sperre durchsetzt, sind derselbe Code. Sperre den Bildschirm oder schließe den Tab.'
+      web: 'Hermie kann sich in einem Browser nicht selbst sperren: die Seite und alles, was eine Sperre durchsetzt, sind derselbe Code. Sperre den Bildschirm oder schließe den Tab.',
+      refused:
+        'Hermie konnte nicht bestätigen, dass du es warst, also wurde nichts geändert. Wähle die Option erneut, um es noch einmal zu versuchen.'
     }
   },
 

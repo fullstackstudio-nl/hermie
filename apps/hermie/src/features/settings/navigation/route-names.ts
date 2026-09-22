@@ -22,6 +22,7 @@ export type SettingsParamList = {
   Appearance: undefined
   Theme: undefined
   Privacy: undefined
+  LockThreshold: undefined
   Voice: undefined
   Capabilities: undefined
   Skills: undefined
@@ -57,6 +58,7 @@ const ROUTE_SET: Record<SettingsRouteName, true> = {
   Appearance: true,
   Theme: true,
   Privacy: true,
+  LockThreshold: true,
   Voice: true,
   Capabilities: true,
   Skills: true,
@@ -108,7 +110,9 @@ const ALIASES: Record<string, SettingsRouteName> = {
   'chats-messages': 'ChatsMessages',
   mcp: 'Mcp',
   boards: 'Boards',
-  kanban: 'Boards'
+  kanban: 'Boards',
+  lock: 'LockThreshold',
+  'require-unlock': 'LockThreshold'
 }
 
 export function settingsRouteFrom(value: string): SettingsRouteName | undefined {

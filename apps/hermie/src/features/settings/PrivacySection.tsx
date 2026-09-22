@@ -6,61 +6,34 @@
  * says on a locked screen, what a bot is told about the device — these are the
  * questions a reader comes to a settings screen looking for a single place to
  * answer, and a lock filed under "Chat" is a lock nobody finds.
+ *
+ * The control is a `DisclosureRow` to the `LockThreshold` picker (HERM-106,
+ * owner: "Face id/touch id moet een select worden") rather than the five-
+ * segment control it used to be — a segmented track has no room for five
+ * readable labels on a phone, and picking a value there asked for nothing at
+ * all. Authentication and the reasons a pick did not take now live on that
+ * page, next to the list it is actually choosing from.
  */
-import { useEffect, useState } from 'react'
-
 import { strings } from '../../i18n/strings'
 import { biometrics } from '../../platform/biometrics'
-import type { BiometricEnrolment } from '../../platform/platform-contracts'
 import { InsetGroup, InsetRow, Text } from '../../ui/primitives'
-import { SegmentedRow } from '../../ui/sheets'
-import { LOCK_THRESHOLDS, type LockThreshold, useLockStore } from '../lock'
+import { DisclosureRow } from '../../ui/sheets'
+import { useLockStore } from '../lock'
 
-const OPTIONS: { value: LockThreshold; label: string }[] = LOCK_THRESHOLDS.map(value => ({
-  value,
-  label: strings.settings.lock.options[value]
-}))
-
-/**
- * The sentence under the picker, which is doing more work than a hint usually
- * does: three of its four cases are the reasons the picker will not take.
- */
-function footerFor(enrolment: BiometricEnrolment | null, threshold: LockThreshold): string {
-  switch (enrolment) {
-    case 'none':
-      return strings.settings.lock.noEnrolment
-    case 'unavailable':
-      return strings.settings.lock.unavailable
-    case 'passcode':
-      return strings.settings.lock.passcodeOnly
-    default:
-      return threshold === 'off' ? strings.settings.lock.hint : strings.settings.lock.hintOn
-  }
+export interface PrivacySectionProps {
+  onOpenLockThreshold: () => void
 }
 
-export function PrivacySection() {
+export function PrivacySection({ onOpenLockThreshold }: PrivacySectionProps) {
   const threshold = useLockStore(state => state.machine.threshold)
-  const enrolment = useLockStore(state => state.enrolment)
-  const checkEnrolment = useLockStore(state => state.checkEnrolment)
-  const setThreshold = useLockStore(state => state.setThreshold)
-  const [refused, setRefused] = useState(false)
-
-  // Asked here rather than at launch: it is a native round trip nobody needs
-  // until they are looking at this row, and what it answers can change between
-  // launches — a passcode is a thing people add and remove.
-  useEffect(() => {
-    if (biometrics.available) {
-      void checkEnrolment()
-    }
-  }, [checkEnrolment])
 
   /*
     The browser says so and offers nothing.
 
     A plate drawn over this app's own DOM is not a lock: the page and the thing
     that would enforce it are the same JavaScript, and a tab is closed by the
-    operating system rather than by us. Offering a switch that cannot do what
-    its name says is worse than the note. See `platform/biometrics.web.ts`.
+    operating system rather than by us. Offering a row that cannot do what its
+    name says is worse than the note. See `platform/biometrics.web.ts`.
   */
   if (!biometrics.available) {
     return (
@@ -75,18 +48,12 @@ export function PrivacySection() {
   }
 
   return (
-    <InsetGroup
-      footer={refused ? strings.settings.lock.noEnrolment : footerFor(enrolment, threshold)}
-      header={strings.settings.privacy}
-    >
-      <SegmentedRow
+    <InsetGroup header={strings.settings.privacy}>
+      <DisclosureRow
         label={strings.settings.lock.label}
-        onChange={(next: LockThreshold) => {
-          void setThreshold(next).then(accepted => setRefused(!accepted))
-        }}
-        options={OPTIONS}
+        onPress={onOpenLockThreshold}
         testID="settings-app-lock"
-        value={threshold}
+        value={strings.settings.lock.options[threshold]}
       />
     </InsetGroup>
   )
