@@ -80,7 +80,21 @@ export const PLUGIN_CAPABILITIES = {
    * and `memoryEdit` to decide whether to be writable.
    */
   memoryBrowse: 'memory.browse',
-  memoryEdit: 'memory.edit'
+  memoryEdit: 'memory.edit',
+  /**
+   * The plugin will write a profile's `display_name` for us.
+   *
+   * The one capability on this list that exists because CORE's answer was the
+   * wrong one. `PATCH /api/profiles/{name}` is the only route that touches a
+   * display name and it RENAMES the profile on every profile but `default` —
+   * its directory, its wrapper script, its service and the active-profile
+   * pointer — so a client that wanted to change what a bot is CALLED had
+   * nowhere to send it and kept the name to itself. With this, the plugin's
+   * `PATCH /api/plugins/hermie/profiles/{name}` takes `{"display_name": …}`,
+   * writes it where `profiles.list` reads it, and every other client on that
+   * gateway sees the name too.
+   */
+  profilesDisplayName: 'profiles.display_name'
 } as const
 
 export type PluginCapability = (typeof PLUGIN_CAPABILITIES)[keyof typeof PLUGIN_CAPABILITIES]
