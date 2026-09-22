@@ -24,7 +24,9 @@ import {
   CONTEXT_LIMITS,
   CONTEXT_SECTION_VERSION,
   contextDefaultOf,
+  contextDeviceFactsDiffer,
   contextRowFor,
+  contextRowOf,
   contextSectionFor,
   contextTextOf,
   foreignContextUsers,
@@ -145,5 +147,71 @@ describe('reading a section back', () => {
 
   it('reads the default back, for a write that has nobody of its own', () => {
     expect(contextDefaultOf(bag)).toBe('tester@example.invalid')
+  })
+
+  it('hands our own row back too, unread', () => {
+    expect(contextRowOf(bag, 'tester@example.invalid')).toEqual({ displayName: 'Sebas' })
+    expect(contextRowOf(bag, 'nobody@example.invalid')).toBeNull()
+    expect(contextRowOf({ push: {} }, 'tester@example.invalid')).toBeNull()
+    expect(contextRowOf(bag, '')).toBeNull()
+  })
+})
+
+/**
+ * Whether the row up there is this machine's.
+ *
+ * One row serves every device one person uses, so the only way a device can
+ * tell that it is not the one being described is to compare. Five fields, and
+ * only five: their name and what they wrote about themselves are the same
+ * wherever they are sitting, and a device that re-sent the row because of those
+ * would be two apps writing at each other.
+ */
+describe('comparing a stored row against this device', () => {
+  const here: ContextUserInput = {
+    userId: 'tester@example.invalid',
+    displayName: 'Sebas',
+    device: { model: 'iPad Pro', os: 'iOS 27.0', appVersion: '0.1.0 (1284) · 7c838c4' },
+    timezone: 'Europe/Amsterdam',
+    locale: 'nl-NL',
+    updatedAt: 1_789_957_143
+  }
+
+  it('is quiet about the row this device wrote itself', () => {
+    // Same facts, later clock, and a different `about` — none of which says
+    // anything about which machine this is.
+    const mine = contextRowFor({ ...here, updatedAt: here.updatedAt + 900, about: 'Writes documentation.' })
+
+    expect(contextDeviceFactsDiffer(mine, here)).toBe(false)
+  })
+
+  it('notices every one of the five fields', () => {
+    const mine = contextRowFor(here)
+
+    expect(contextDeviceFactsDiffer({ ...mine, device: { ...(mine.device as object), model: 'Mac' } }, here)).toBe(true)
+    expect(
+      contextDeviceFactsDiffer({ ...mine, device: { ...(mine.device as object), os: 'macOS · iOS 27.0' } }, here)
+    ).toBe(true)
+    expect(
+      contextDeviceFactsDiffer({ ...mine, device: { ...(mine.device as object), appVersion: '0.2.0' } }, here)
+    ).toBe(true)
+    expect(contextDeviceFactsDiffer({ ...mine, timezone: 'America/New_York' }, here)).toBe(true)
+    expect(contextDeviceFactsDiffer({ ...mine, locale: 'de-DE' }, here)).toBe(true)
+  })
+
+  it('reads a row it cannot parse as somebody else’s machine', () => {
+    // A row written by a build this one does not know says nothing about this
+    // device, and the recoverable direction is to write ours over it.
+    expect(contextDeviceFactsDiffer({ v: 9 }, here)).toBe(true)
+    expect(contextDeviceFactsDiffer(null, here)).toBe(true)
+  })
+
+  it('does not mistake the caps or a collapsed space for a change', () => {
+    const roomy: ContextUserInput = {
+      ...here,
+      device: { ...here.device, model: `  ${here.device.model}  ` },
+      timezone: `${here.timezone}\n`
+    }
+
+    expect(contextDeviceFactsDiffer(contextRowFor(here), roomy)).toBe(false)
   })
 })

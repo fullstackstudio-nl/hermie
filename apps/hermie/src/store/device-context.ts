@@ -97,6 +97,15 @@ export interface DeviceContextState {
   updatedAt: number
   /** Rows belonging to other people, carried through a write untouched. */
   others: Record<string, unknown>
+  /**
+   * The gateway's own copy of THIS person's row, or `null` when it holds none.
+   *
+   * Two things hang off it, and both are about the second device somebody signs
+   * in on. See `needsSharingNotice` for why its presence answers the sharing
+   * question, and `carriedContextUsers` for why a device that cannot write a row
+   * of its own has to carry this one instead of dropping it.
+   */
+  remoteOwnRow: unknown
   /** The `default` the section already carried, kept when this device has none. */
   remoteDefault: string
   acknowledgedFor: string
@@ -119,7 +128,16 @@ export interface DeviceContextState {
   refreshFacts: (stamp: number, facts?: DeviceFacts) => void
   /** Remember that the sharing notice was accepted for this gateway. */
   acknowledge: (baseUrl: string) => void
-  applyRemote: (patch: { others: Record<string, unknown>; remoteDefault: string }) => void
+  applyRemote: (patch: { others: Record<string, unknown>; remoteDefault: string; own?: unknown }) => void
+  /**
+   * Re-date this device's row so the next write replaces the gateway's copy.
+   *
+   * The section is keyed by PERSON and one row serves every device they use, so
+   * the last writer owns it. A device that has changed nothing of its own has
+   * nothing for the bridge to notice — and the bridge is a diff over this
+   * store — so claiming the row is a state change or it is nothing at all.
+   */
+  claimRow: (stamp: number) => void
   /** Forget the identity and the neighbours: a sign-out, or another gateway. */
   retire: () => void
   reset: () => void
@@ -178,6 +196,7 @@ export const useDeviceContextStore = create<DeviceContextState>((set, get) => {
     facts: EMPTY_FACTS,
     updatedAt: 0,
     others: {},
+    remoteOwnRow: null,
     remoteDefault: '',
     acknowledgedFor: '',
     loaded: false,
@@ -280,7 +299,18 @@ export const useDeviceContextStore = create<DeviceContextState>((set, get) => {
     },
 
     applyRemote(patch) {
-      set({ others: patch.others, remoteDefault: patch.remoteDefault })
+      set({
+        others: patch.others,
+        remoteDefault: patch.remoteDefault,
+        // `undefined` is a caller that did not look, which is not the same
+        // answer as "the gateway holds no row for this person" and must not be
+        // read as one — the sharing notice turns on the difference.
+        ...(patch.own === undefined ? {} : { remoteOwnRow: patch.own })
+      })
+    },
+
+    claimRow(stamp) {
+      set({ updatedAt: stamp })
     },
 
     retire() {
@@ -294,7 +324,7 @@ export const useDeviceContextStore = create<DeviceContextState>((set, get) => {
         wholesale by the next gateway's reconcile, which runs before its first
         flush.
       */
-      set({ baseUrl: '', gated: false, userId: '', displayName: '', email: '' })
+      set({ baseUrl: '', gated: false, userId: '', displayName: '', email: '', remoteOwnRow: null })
     },
 
     reset() {
@@ -311,6 +341,7 @@ export const useDeviceContextStore = create<DeviceContextState>((set, get) => {
         facts: EMPTY_FACTS,
         updatedAt: 0,
         others: {},
+        remoteOwnRow: null,
         remoteDefault: '',
         acknowledgedFor: '',
         loaded: false
@@ -326,9 +357,23 @@ export const useDeviceContextStore = create<DeviceContextState>((set, get) => {
  * gateway has no accounts, so "everyone with access to this gateway" is the
  * person holding the phone, and telling them that their own gateway can read
  * their own context is noise.
+ *
+ * **A row already on the gateway is an answer.** The acknowledgement is stored
+ * on the device that gave it, and the question is not the device's: the notice
+ * says "everyone with access to THIS gateway can read it", so it is answered
+ * per gateway — which is why what is remembered is an address and not a
+ * boolean. A second device therefore asked a question the person had already
+ * answered, and until they answered it again on that device too, `ownContextRow`
+ * stayed `null` there: the phone beside the desktop never said which machine it
+ * was, and — worse — wrote a section with the person missing from it. Their own
+ * row, found on the gateway under their own id, is that answer.
  */
 export function needsSharingNotice(state: DeviceContextState): boolean {
-  return state.gated && Boolean(state.baseUrl) && state.acknowledgedFor !== state.baseUrl
+  if (!state.gated || !state.baseUrl || state.acknowledgedFor === state.baseUrl) {
+    return false
+  }
+
+  return state.remoteOwnRow === null || state.remoteOwnRow === undefined
 }
 
 /** `sebas@example.invalid` → `sebas`. Nothing at all for something that is not one. */
@@ -412,4 +457,28 @@ export function ownContextRow(state: DeviceContextState): ContextUserInput | nul
     perBot: state.perBot,
     updatedAt: state.updatedAt
   }
+}
+
+/**
+ * The rows a write from this device has to carry, `ownContextRow` aside.
+ *
+ * `others` is what `foreignContextUsers` found, and it drops this person's own
+ * row on purpose: the whole point is that this device replaces it. When this
+ * device has no row to replace it WITH, that drop is a deletion — the section
+ * is written whole, so a person whose row is in neither half simply stops
+ * being in it, and the gateway plugin then renders an empty section into the
+ * next chat's system prompt. Measured on a gateway with one person and two
+ * devices: the desktop's row vanished the first time the phone wrote anything
+ * at all, and came back, unchanged and still dated that morning, the next time
+ * the desktop wrote.
+ *
+ * So a device with nothing of its own to say carries the person's row exactly
+ * as it carries a colleague's — unread, and put back the way it was found.
+ */
+export function carriedContextUsers(state: DeviceContextState): Record<string, unknown> {
+  if (!state.userId || state.remoteOwnRow === null || state.remoteOwnRow === undefined || ownContextRow(state)) {
+    return state.others
+  }
+
+  return { ...state.others, [state.userId]: state.remoteOwnRow }
 }

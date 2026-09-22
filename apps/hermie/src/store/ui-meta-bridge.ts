@@ -22,6 +22,8 @@
  */
 import {
   contextDefaultOf,
+  contextDeviceFactsDiffer,
+  contextRowOf,
   contextSectionFor,
   foreignContextUsers,
   type ContextSectionShape
@@ -50,7 +52,7 @@ import { ACCENTS, type AccentName } from '../ui/tokens'
 import { asNameOrder, type NameOrder } from './bot-names'
 import { useChatLayoutStore } from './chat-layout'
 import { readArrangement, type Folder, type LayoutEntry } from './folders'
-import { ownContextRow, useDeviceContextStore } from './device-context'
+import { carriedContextUsers, ownContextRow, useDeviceContextStore } from './device-context'
 import { mutesOf, type Mutes } from './mute'
 import { usePluginStore } from './plugin'
 import { ownRegistration, usePushStore } from './push'
@@ -219,7 +221,10 @@ export function snapshotFromStores(nowMs: number = Date.now()): UiMetaSnapshot {
   */
   const context = useDeviceContextStore.getState()
   const contextSection = contextSectionFor({
-    others: context.others,
+    // `carriedContextUsers` rather than `context.others`: a device that cannot
+    // write a row of its own must put this person's back rather than leave a
+    // hole where they were.
+    others: carriedContextUsers(context),
     own: ownContextRow(context),
     fallbackDefault: context.remoteDefault
   })
@@ -363,9 +368,22 @@ export function applySnapshot(snapshot: UiMetaSnapshot): void {
   }
 
   /* Ours is replaced, theirs is taken — see the push section above. */
+  const contextUserId = useDeviceContextStore.getState().userId
+
   useDeviceContextStore.getState().applyRemote({
-    others: foreignContextUsers(neighbours, useDeviceContextStore.getState().userId),
-    remoteDefault: contextDefaultOf(neighbours)
+    others: foreignContextUsers(neighbours, contextUserId),
+    remoteDefault: contextDefaultOf(neighbours),
+    /*
+      And OURS, kept beside them rather than thrown away.
+
+      It is not read into the local switches — the person's decisions are this
+      device's and the device facts are this device's — but the gateway's copy
+      of their row is the only thing that can say whether they have already
+      agreed to share on this gateway, and whether the row up there describes
+      this machine or the last one they used. `store/device-context.ts` says
+      what each of those answers is for.
+    */
+    own: contextRowOf(neighbours, contextUserId)
   })
 
   useSettingsStore.getState().applyAppSettings({
@@ -460,6 +478,48 @@ export class UiMetaBridge {
   /** Read the gateway's copy and send whatever this device is still holding. */
   reconcile(): Promise<unknown> {
     return this.sync.reconcile()
+  }
+
+  /**
+   * Say which machine the person is on, when the gateway still names another.
+   *
+   * The context section is keyed by PERSON, so their two devices share one row
+   * and the last writer owns it. Everything else in this file is a DIFF over the
+   * local stores, which is exactly the right question for an arrangement the
+   * reader drags about and exactly the wrong one here: a phone opened an hour
+   * after the desktop wrote has changed nothing of its own, so there is nothing
+   * to notice, and the bot goes on being told about the desktop. It was: the
+   * report this was found from is a bot that kept answering as though the person
+   * were still at their Mac.
+   *
+   * So the question asked here is the other one — does the row up there describe
+   * THIS machine? — and it is asked on the two events where the answer can have
+   * changed: the connection coming up, and the app coming back to the front. The
+   * five device fields are all that is compared, so a person's name and what
+   * they wrote about themselves never make this fire, and a device that is
+   * already the one named sends nothing at all. When it does fire, re-dating the
+   * row is the whole of it: the diff above sees the change like any other and
+   * the usual debounce carries it out with whatever else is pending.
+   *
+   * Two devices both opened at once each claim the row once, on their own edge,
+   * and then stop — the loser's next claim needs another connect or another
+   * foreground, so this cannot become a pair of apps writing at each other.
+   */
+  claimDeviceContext(stamp: number = Math.floor(Date.now() / 1000)): boolean {
+    const state = useDeviceContextStore.getState()
+    const own = ownContextRow(state)
+
+    if (!own || state.remoteOwnRow === null || state.remoteOwnRow === undefined) {
+      return false
+    }
+
+    if (!contextDeviceFactsDiffer(state.remoteOwnRow, own)) {
+      return false
+    }
+
+    useDeviceContextStore.getState().claimRow(stamp)
+
+    return true
   }
 
   private onStoreChanged(): void {

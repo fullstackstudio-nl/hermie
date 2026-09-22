@@ -46,6 +46,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   app rather than in the two places it had reached — the second being the file-drop seam,
   where the first file dropped on a browser window would have gone the same way.
 
+- **A bot is told which device you are actually on.** Answer on your laptop in the morning
+  and pick the same chat up on a tablet, and the bot went on reasoning about the laptop —
+  its make, its clock, its language — for as long as you kept typing. What the bot is told
+  is one row per PERSON, shared by every device you use, and the app decides what to send
+  by watching for changes on the device it is running on. The tablet had changed nothing,
+  so it had nothing to say, and the row stayed the laptop's. On connecting and on coming
+  back to the front, the app now compares the five device facts in that row against its
+  own and re-sends only when they differ — so the device you are holding is the one in the
+  next message's context, and the one that wrote the row says nothing at all.
+
+  **And the second device no longer deletes what the first one shared.** The notice that
+  explains who on a gateway can read your context was answered per device rather than per
+  gateway, so a second device never had an answer and had no row of its own to write —
+  while the write replaces the whole section. Your row went out of it entirely, and a chat
+  started in that window got a system prompt with nothing about you in it at all; the
+  laptop put the row back, unchanged and still dated that morning, the next time it wrote
+  anything. Your own row already sitting on the gateway now counts as the answer it is,
+  and a device with nothing of its own to say carries your row through exactly as it
+  carries a colleague's.
+
 - **The chat list no longer shows a raw `[IMPORTANT: …` or `[System: …` line.** The gateway's
   preview for a chat is its newest user or assistant row squashed onto one line and cut at eighty
   characters, so an injected wrapper reached the list without its newlines and, often, without its

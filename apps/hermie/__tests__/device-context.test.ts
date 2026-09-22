@@ -315,3 +315,104 @@ describe('signing out', () => {
     expect(store().others).toEqual({ 'colleague@example.invalid': { displayName: 'Robin' } })
   })
 })
+
+/**
+ * One person, two devices, one row.
+ *
+ * The section is keyed by PERSON, so a desktop and a phone share a row rather
+ * than getting one each — which is right, because there is one person, and
+ * which is where both halves of the reported fault came from: a bot that went
+ * on saying the owner was at their Mac while they typed on an iPad, and a new
+ * chat whose frozen system-prompt section came out EMPTY although the block was
+ * sitting in `profile.yaml` the whole time.
+ */
+describe('a second device', () => {
+  /** The desktop's row, as the gateway holds it. */
+  const REMOTE_ROW = {
+    displayName: 'Sebas',
+    device: { model: 'Mac', os: 'macOS · iOS 27.0', appVersion: '0.1.0 (1284) · 7c838c4' },
+    timezone: 'Europe/Amsterdam',
+    locale: 'nl-NL',
+    updatedAt: NOW - 3600
+  }
+
+  /** What `applySnapshot` hands the store once it has read that gateway. */
+  const fromGateway = (own: unknown = REMOTE_ROW): void =>
+    store().applyRemote({ others: {}, remoteDefault: 'tester@example.invalid', own })
+
+  /** Signed in, never asked the sharing question HERE, and still loading. */
+  function arriving(): void {
+    store().setIdentity({
+      baseUrl: GATEWAY,
+      gated: true,
+      userId: 'tester@example.invalid',
+      displayName: 'Sebas',
+      email: ''
+    })
+  }
+
+  it('says which machine it is, without asking a question already answered', async () => {
+    /*
+      The acknowledgement is kept on the device that gave it, so the phone had
+      none — and until it had one `ownContextRow` answered `null` there, which
+      is why an hour of typing on an iPad never moved a row that said Mac. The
+      notice is about the GATEWAY, and the person's own row sitting on that
+      gateway is them having answered it.
+    */
+    await signedIn()
+
+    expect(store().acknowledgedFor).not.toBe(GATEWAY)
+
+    fromGateway()
+
+    expect(needsSharingNotice(store())).toBe(false)
+
+    const row = (snapshotFromStores().app as HermieAppShape).context?.users['tester@example.invalid'] as {
+      device?: { model?: string }
+    }
+
+    // This device's facts, not the ones that were up there a moment ago.
+    expect(row.device?.model).toBe(FACTS.model)
+  })
+
+  it('does not take the person out of the section while it is still loading', () => {
+    /*
+      The other half of the same report: a new chat froze an EMPTY section into
+      its system prompt although the block was in `profile.yaml` the whole time.
+      A reconcile can land before the disk read does, and a store that is not
+      loaded has no row to write — while `foreignContextUsers` has already
+      dropped this person's, on purpose, because the device is supposed to be
+      replacing it. Between the two the section went out with the person
+      missing from it, which is a deletion, because ADR-0016 writes it whole.
+    */
+    arriving()
+    fromGateway()
+
+    expect(ownContextRow(store())).toBeNull()
+    expect((snapshotFromStores().app as HermieAppShape).context?.users['tester@example.invalid']).toEqual(REMOTE_ROW)
+  })
+
+  it('carries a row it cannot read the same way', () => {
+    // Written by a build this one has never heard of. Same rule as a
+    // colleague's row: carried because of whose it is, not because it parses.
+    arriving()
+    fromGateway({ v: 9, somethingElse: true })
+
+    expect((snapshotFromStores().app as HermieAppShape).context?.users['tester@example.invalid']).toEqual({
+      v: 9,
+      somethingElse: true
+    })
+  })
+
+  it('writes no section at all when there is neither a row here nor one there', async () => {
+    // The first device on a gateway with accounts, before the notice is
+    // answered: absent, not empty, not partial. Unchanged by any of this.
+    await store().hydrate()
+    arriving()
+    store().refreshFacts(NOW, FACTS)
+    fromGateway(null)
+
+    expect(needsSharingNotice(store())).toBe(true)
+    expect((snapshotFromStores().app as HermieAppShape).context).toBeUndefined()
+  })
+})

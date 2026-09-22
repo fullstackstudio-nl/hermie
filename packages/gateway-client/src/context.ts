@@ -189,6 +189,57 @@ export function foreignContextUsers(section: unknown, userId: string): Record<st
   return out
 }
 
+/**
+ * The row a section holds for one person, or `null` when it holds none.
+ *
+ * Returned unread, like `foreignContextUsers` returns its rows and for the same
+ * reason: a row written by a newer app is still that person's row, and a reader
+ * that dropped what it could not parse would drop it from the next write too.
+ */
+export function contextRowOf(section: unknown, userId: string): unknown {
+  const context = isObject(section) ? section[CONTEXT_SECTION_KEY] : null
+  const users = isObject(context) && isObject(context.users) ? context.users : {}
+  const row = userId ? users[userId] : undefined
+
+  return row === undefined ? null : row
+}
+
+/**
+ * The device half of a row, flattened, so two copies can be compared.
+ *
+ * The person half — their name, what they wrote about themselves, a note for
+ * one chat — is deliberately not in here. That half is the same wherever they
+ * are sitting; only these five fields say which machine the row was written
+ * from, and they are the only reason a row has to be written again by a device
+ * that changed nothing.
+ */
+function deviceFactsOf(row: unknown): string {
+  const source = isObject(row) ? row : {}
+  const device = isObject(source.device) ? source.device : {}
+
+  return [
+    contextTextOf(device.model, CONTEXT_LIMITS.model),
+    contextTextOf(device.os, CONTEXT_LIMITS.os),
+    contextTextOf(device.appVersion, CONTEXT_LIMITS.appVersion),
+    contextTextOf(source.timezone, CONTEXT_LIMITS.timezone),
+    contextTextOf(source.locale, CONTEXT_LIMITS.locale)
+  ].join(' ')
+}
+
+/**
+ * Whether a stored row was written from somewhere other than here.
+ *
+ * The section is keyed by PERSON, so one row serves every device they use and
+ * the last writer owns it. A phone that opens the same gateway an hour after a
+ * desktop wrote it has changed nothing of its own and would never send — while
+ * the bot goes on being told about the desktop. This is the question that says
+ * the row is somebody else's machine, asked against the same normalisation the
+ * write uses so that a cap or a collapsed space is never mistaken for a change.
+ */
+export function contextDeviceFactsDiffer(row: unknown, own: ContextUserInput): boolean {
+  return deviceFactsOf(row) !== deviceFactsOf(contextRowFor(own))
+}
+
 export interface ContextSectionInput {
   /** Rows belonging to other people, from `foreignContextUsers`. */
   others: Record<string, unknown>

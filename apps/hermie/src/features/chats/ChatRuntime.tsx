@@ -254,7 +254,7 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
         one gateway's rows from being offered to the next.
       */
       usePushStore.getState().applyRemote({ others: {}, seen: {} })
-      useDeviceContextStore.getState().applyRemote({ others: {}, remoteDefault: '' })
+      useDeviceContextStore.getState().applyRemote({ others: {}, remoteDefault: '', own: null })
       setValue(null)
       valueRef.current = null
 
@@ -602,6 +602,12 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       // and which profile that is comes out of `profiles.list`.
       await value.uiMeta.reconcile().catch(() => undefined)
       /*
+        And, with the gateway's copy now in hand, whether the row it holds for
+        this person describes the machine they are actually sitting at. A no-op
+        on the device that wrote it — see `UiMetaBridge.claimDeviceContext`.
+      */
+      value.uiMeta.claimDeviceContext()
+      /*
         Only NOW can the roster know which chats are this reader's own.
 
         The refresh above ran before either half was in: the identity is read a
@@ -725,6 +731,13 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
         // A new build, a flight across a timezone, a phone that was renamed
         // while the app was away. A no-op when nothing actually moved.
         useDeviceContextStore.getState().refreshFacts(Math.floor(Date.now() / 1000))
+        /*
+          And the other half of the same question, which no amount of reading
+          this device can answer: the person may have been talking to the same
+          bot from another one while this app was away, in which case the row
+          on the gateway is that machine's. A no-op when it is still this one.
+        */
+        runtime.uiMeta.claimDeviceContext()
         /*
           And the mutes that lapsed while the phone was in a drawer.
 
