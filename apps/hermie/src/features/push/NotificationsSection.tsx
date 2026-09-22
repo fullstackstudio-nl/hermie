@@ -29,7 +29,15 @@ import { PluginInstall } from './PluginInstall'
 import type { PushSync } from './push-sync'
 import { pushRegistrationState, pushRetryable, pushStatusText } from './status'
 
-const TYPE_LABELS: Record<PushType, string> = {
+/*
+ * Built on CALL rather than at import.
+ *
+ * A module-level literal would freeze whatever language was active when the
+ * bundle loaded, which on a cold start is always English — see
+ * `i18n/catalogue.ts`. The list is three entries and it is rebuilt per render;
+ * the alternative is a screen that keeps its old language until it is remounted.
+ */
+const typeLabels = (): Record<PushType, string> => ({
   message: strings.settings.notifications.typeMessage,
   request: strings.settings.notifications.typeRequest,
   cron: strings.settings.notifications.typeCron,
@@ -37,7 +45,7 @@ const TYPE_LABELS: Record<PushType, string> = {
   cron_failed: strings.settings.notifications.typeCronFailed,
   turn_done: strings.settings.notifications.typeTurnDone,
   turn_failed: strings.settings.notifications.typeTurnFailed
-}
+})
 
 export interface NotificationsSectionProps {
   /** `null` before the gateway connection exists, which is when this renders nothing. */
@@ -210,7 +218,7 @@ export function NotificationsSection({ push, available = true, testID = 'setting
           {PUSH_TYPES.map(type => (
             <SwitchRow
               key={type}
-              label={TYPE_LABELS[type]}
+              label={typeLabels()[type]}
               onChange={on => setType(type, on)}
               testID={`${testID}-type-${type}`}
               value={types[type] === true}

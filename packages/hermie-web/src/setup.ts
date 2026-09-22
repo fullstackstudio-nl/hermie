@@ -35,6 +35,8 @@ import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import type { IncomingMessage } from 'node:http'
 import path from 'node:path'
 
+import { htmlLang, type WebLocale, type WebStrings } from './i18n'
+
 /** The file inside the state directory that makes the next start a configured one. */
 export const SETUP_FILE = 'setup.json'
 
@@ -298,6 +300,31 @@ export const escapeHtml = (value: string): string =>
   )
 
 /**
+ * A value a `<script>` element can carry, as a JavaScript literal.
+ *
+ * `JSON.stringify` on its own is not enough inside an HTML document: the parser
+ * ends a script element at the first `</script`, wherever in the text it falls,
+ * so a sentence containing that sequence would close the element early and
+ * spill the rest of the table into the page as markup. Escaping every `<` to
+ * its `\\uXXXX` form closes that off without changing a single character of the
+ * string the script reads back out.
+ *
+ * U+2028 and U+2029 go the same way: JSON allows them raw and older JavaScript
+ * parsers read them as line terminators, which would end the statement.
+ *
+ * The two separators are named by code point rather than written out, because a
+ * source file that contains them is a source file some editor will silently
+ * repair.
+ */
+const UNSAFE_IN_SCRIPT = new RegExp(`[<${String.fromCharCode(0x2028, 0x2029)}]`, 'g')
+
+const scriptLiteral = (value: unknown): string =>
+  JSON.stringify(value).replace(
+    UNSAFE_IN_SCRIPT,
+    character => `\\u${character.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}`
+  )
+
+/**
  * A small standalone page, with its script inline.
  *
  * Inline because this page is served BEFORE anything is configured, which is
@@ -306,12 +333,39 @@ export const escapeHtml = (value: string): string =>
  * operator is in when they most need this page to work. It carries no external
  * request of any kind.
  */
-export function setupPage(options: { version: string; defaultGateway: string }): string {
+export function setupPage(options: {
+  version: string
+  defaultGateway: string
+  locale: WebLocale
+  strings: WebStrings
+}): string {
+  const text = options.strings.setup
+
+  /*
+    What the inline script says, as one object.
+
+    The two sentences that interpolate are rendered here with `{name}` markers
+    and filled in below, because a translation has to be free to put the value
+    somewhere other than where English put it, and a function cannot cross into
+    a script element.
+  */
+  const script = {
+    probing: text.script.probing('{address}'),
+    probed: text.script.probed('{version}', '{flows}'),
+    noSignIn: text.script.noSignIn,
+    didNotWork: text.script.didNotWork,
+    asking: text.script.asking,
+    saving: text.script.saving,
+    savedNothingCanAdmin: text.script.savedNothingCanAdmin,
+    savedOpening: text.script.savedOpening,
+    loginStored: text.script.loginStored
+  }
+
   return `<!doctype html>
-<html lang="en">
+<html lang="${htmlLang(options.locale)}">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Set up Hermie Web</title>
+<title>${escapeHtml(text.title)}</title>
 <style>
   :root { color-scheme: light dark; --ink: #16181d; --muted: #5d636e; --line: #d9dce2; --bg: #f6f7f9; --card: #fff; --accent: #2f6df6; --bad: #b3261e; }
   @media (prefers-color-scheme: dark) { :root { --ink: #eceef2; --muted: #9aa1ad; --line: #2c3038; --bg: #101216; --card: #181b21; } }
@@ -334,63 +388,62 @@ export function setupPage(options: { version: string; defaultGateway: string }):
   ol { color: var(--muted); padding-left: 1.2rem }
 </style>
 <main>
-  <h1>Set up Hermie Web</h1>
-  <p>This page exists once. When the gateway is saved it answers 404, and everybody else only ever sees a sign-in.</p>
+  <h1>${escapeHtml(text.title)}</h1>
+  <p>${text.intro}</p>
 
   <section>
-    <h2>1. The gateway</h2>
-    <p>The Hermes gateway this server proxies. It is fixed once it is saved.</p>
+    <h2>${text.gatewayHeading}</h2>
+    <p>${text.gatewayIntro}</p>
     <div class="row">
       <div>
-        <label for="gateway">Address</label>
+        <label for="gateway">${text.addressLabel}</label>
         <input id="gateway" value="${escapeHtml(options.defaultGateway)}" spellcheck="false" autocapitalize="off">
       </div>
-      <button id="probe" type="button">Probe</button>
+      <button id="probe" type="button">${text.probeButton}</button>
     </div>
     <p class="note" id="probe-result"></p>
   </section>
 
   <section id="login-card" hidden>
-    <h2>2. The service login</h2>
-    <p>
-      One sign-in that belongs to this <em>server</em>, not to you. Hermie Web spends it on a gateway
-      connection of its own, and uses that connection for two things: push notifications, and the message
-      cache that makes a chat paint the moment it opens. It is not the sign-in the app will ask you for.
-    </p>
-    <p class="note">
-      Optional here. Without it the app still works; push and the cache do not. You can also do it from a
-      terminal with <code>hermie-web login</code>, which is the route to take if your provider will not
-      accept this server's own address as a redirect.
-    </p>
+    <h2>${text.loginHeading}</h2>
+    <p>${text.loginIntro}</p>
+    <p class="note">${text.loginNote}</p>
     <div class="row">
       <div>
-        <label for="provider">Provider</label>
-        <input id="provider" placeholder="leave empty for the gateway's default" spellcheck="false">
+        <label for="provider">${text.providerLabel}</label>
+        <input id="provider" placeholder="${escapeHtml(text.providerPlaceholder)}" spellcheck="false">
       </div>
-      <button id="login" type="button">Sign in</button>
+      <button id="login" type="button">${options.strings.common.signIn}</button>
     </div>
     <p class="note" id="login-result"></p>
   </section>
 
   <section id="save-card" hidden>
-    <h2>3. Save</h2>
-    <p>Saving writes the gateway to this server's state directory and closes this page for good.</p>
-    <label for="admin-secret">Administrator secret (optional)</label>
+    <h2>${text.saveHeading}</h2>
+    <p>${text.saveIntro}</p>
+    <label for="admin-secret">${text.adminSecretLabel}</label>
     <input id="admin-secret" type="password" autocomplete="new-password">
-    <p class="note">Only needed on a gateway with no accounts. With accounts, whoever is signed in
-    right now becomes this service's first administrator and this can stay empty. Stored as a scrypt
-    hash; <code>/admin</code> never shows it back.</p>
-    <button id="save" type="button">Save and finish</button>
+    <p class="note">${text.adminSecretNote}</p>
+    <button id="save" type="button">${text.saveButton}</button>
     <p class="note" id="save-result"></p>
   </section>
 
-  <p class="note">Hermie Web ${escapeHtml(options.version)}</p>
+  <p class="note">${text.footer(escapeHtml(options.version))}</p>
 </main>
 <script>
 (function () {
+  var T = ${scriptLiteral(script)};
   var probed = null;
   var $ = function (id) { return document.getElementById(id) };
   var say = function (id, text, bad) { var el = $(id); el.textContent = text; el.className = bad ? 'note bad' : 'note' };
+  // A sentence from the table, with its {markers} filled in. A marker the
+  // caller does not name is left alone rather than blanked, so a translation
+  // that happens to contain braces is printed rather than eaten.
+  var fill = function (template, values) {
+    return template.replace(/\\{(\\w+)\\}/g, function (whole, name) {
+      return Object.prototype.hasOwnProperty.call(values, name) ? values[name] : whole;
+    });
+  };
 
   var post = function (path, body) {
     return fetch(path, {
@@ -402,16 +455,16 @@ export function setupPage(options: { version: string; defaultGateway: string }):
 
   $('probe').addEventListener('click', function () {
     var address = $('gateway').value;
-    say('probe-result', 'Probing ' + address + ' …');
+    say('probe-result', fill(T.probing, { address: address }));
     $('probe').disabled = true;
     post('/hermie/setup/probe', { gateway: address }).then(function (answer) {
       $('probe').disabled = false;
-      if (!answer.ok) { probed = null; say('probe-result', answer.body.detail || 'That did not work.', true); return }
+      if (!answer.ok) { probed = null; say('probe-result', answer.body.detail || T.didNotWork, true); return }
       probed = answer.body.gateway;
       $('gateway').value = probed;
       var p = answer.body.probe;
-      var flows = p.authRequired ? p.authFlows.join(', ') : 'no sign-in required';
-      say('probe-result', 'Hermes ' + (p.version || '?') + ' — ' + flows + '.');
+      var flows = p.authRequired ? p.authFlows.join(', ') : T.noSignIn;
+      say('probe-result', fill(T.probed, { version: p.version || '?', flows: flows }));
       $('login-card').hidden = !p.authRequired;
       $('save-card').hidden = false;
     }, function (error) {
@@ -422,9 +475,9 @@ export function setupPage(options: { version: string; defaultGateway: string }):
 
   $('login').addEventListener('click', function () {
     if (!probed) { return }
-    say('login-result', 'Asking the gateway for a sign-in address …');
+    say('login-result', T.asking);
     post('/hermie/setup/login', { gateway: probed, provider: $('provider').value }).then(function (answer) {
-      if (!answer.ok) { say('login-result', answer.body.detail || 'That did not work.', true); return }
+      if (!answer.ok) { say('login-result', answer.body.detail || T.didNotWork, true); return }
       window.location.assign(answer.body.authorizeUrl);
     }, function (error) { say('login-result', String(error), true) });
   });
@@ -432,24 +485,24 @@ export function setupPage(options: { version: string; defaultGateway: string }):
   $('save').addEventListener('click', function () {
     if (!probed) { return }
     $('save').disabled = true;
-    say('save-result', 'Saving …');
+    say('save-result', T.saving);
     post('/hermie/setup/save', { gateway: probed, adminSecret: $('admin-secret').value }).then(function (answer) {
-      if (!answer.ok) { $('save').disabled = false; say('save-result', answer.body.detail || 'That did not work.', true); return }
+      if (!answer.ok) { $('save').disabled = false; say('save-result', answer.body.detail || T.didNotWork, true); return }
       if (answer.body.admin === 'none') {
         // Said here rather than discovered later: a service nobody can
         // administer needs a file edited on the host to get one.
         $('save').disabled = false;
-        say('save-result', 'Saved, but nothing can open /admin: this gateway named nobody and no secret was set.', true);
+        say('save-result', T.savedNothingCanAdmin, true);
         return
       }
-      say('save-result', 'Saved. Opening Hermie …');
+      say('save-result', T.savedOpening);
       window.location.assign('/');
     }, function (error) { $('save').disabled = false; say('save-result', String(error), true) });
   });
 
   if (new URLSearchParams(window.location.search).get('signedin') === '1') {
     $('probe').click();
-    say('login-result', 'The service login was stored.');
+    say('login-result', T.loginStored);
   }
 })();
 </script>
@@ -457,12 +510,25 @@ export function setupPage(options: { version: string; defaultGateway: string }):
 `
 }
 
-/** The small page the gateway's redirect lands on at the end of the service login. */
-export function setupCallbackPage(title: string, detail: string): string {
+/**
+ * The small page the gateway's redirect lands on at the end of the service
+ * login.
+ *
+ * `title` and `detail` are sentences the caller has already chosen — usually
+ * out of `strings.setup.callback`, but a failure from the provider arrives as
+ * its own message and is passed through — so both are escaped here.
+ */
+export function setupCallbackPage(page: {
+  locale: WebLocale
+  strings: WebStrings
+  title: string
+  detail: string
+}): string {
   return (
-    `<!doctype html><html lang="en"><meta charset="utf-8"><title>${escapeHtml(title)}</title>` +
+    `<!doctype html><html lang="${htmlLang(page.locale)}"><meta charset="utf-8">` +
+    `<title>${escapeHtml(page.title)}</title>` +
     `<body style="font:16px/1.55 system-ui,sans-serif;margin:4rem auto;max-width:34rem;padding:0 1rem">` +
-    `<h1 style="font-size:1.25rem">${escapeHtml(title)}</h1><p>${escapeHtml(detail)}</p>` +
-    `<p><a href="/setup?signedin=1">Back to setup</a></p></body></html>`
+    `<h1 style="font-size:1.25rem">${escapeHtml(page.title)}</h1><p>${escapeHtml(page.detail)}</p>` +
+    `<p><a href="/setup?signedin=1">${escapeHtml(page.strings.setup.callback.back)}</a></p></body></html>`
   )
 }

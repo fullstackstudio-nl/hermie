@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Hermie can speak Dutch and German.** Settings → Appearance → **Language** offers *Follow device*,
+  English, Nederlands and Deutsch, and switching repaints the app where you stand — no restart, no
+  losing the sheet you had open. A device set to Dutch or German gets that language on first launch;
+  anything else gets English.
+
+  English is not one of three options, it is the language Hermie is **written** in, and the other two
+  are translations of it. That is a deliberate design and it is visible: a sentence nobody has
+  translated yet appears in English rather than as a blank row or a key. Numbers, dates, relative
+  times and plurals follow the chosen language too, through the platform's own `Intl` — so a Dutch
+  reader gets `1.234` and `22-09-2026` rather than the American forms. The choice belongs to the
+  device, like light-and-dark: switching to your work gateway does not switch your language.
+
+  The pages Hermie Web serves itself — `/setup`, `/admin` and the sign-in — speak the same three
+  languages, negotiated from your browser's `Accept-Language` rather than from a setting, because
+  the first of them is reached before there is anywhere to keep one. English is the default there
+  too, and the same sentence in the same glossary: a gateway is a gateway in all three.
+
 - **Drag a card across a board, where the columns are side by side.** On an iPad, a Mac window or a
   wide browser, hold a card until it lifts and drop it on another column. The board scrolls sideways
   under the card when you carry it to an edge, and the column you are over lights up — while the
@@ -414,6 +431,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only thing in the world that can move the pill is the bot being renamed.
 
 ### Changed
+
+- **Hermie Web's tests are type-checked.** That package is the one workspace that emits JavaScript
+  rather than only declarations — the release zip and the Docker image both run `dist/server` — so
+  its `tsconfig.json` excludes `*.test.ts`, or the tests would be published with it. The side effect
+  was that nothing type-checked the tests at all: a suite could build a push registration without
+  its owner, or read an argument a mock never declared, and only a runtime failure on that exact
+  line would ever have said so. A second project (`tsconfig.test.json`, emitting nothing) now covers
+  them and runs as part of `npm run typecheck`. Switching it on found eleven errors, all in tests,
+  all now fixed.
 
 - **The release notes describe all three signed binaries, not two.** The iOS app ships as an app, a
   widget extension and a share extension, and each needs the App Group to reach the others — a

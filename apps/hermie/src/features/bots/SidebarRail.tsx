@@ -40,7 +40,7 @@ import { Icon, ICON_SIZE } from '../../ui/Icon'
 import { Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { CONTROL_SIZE, TAP_SLOP } from '../../ui/tokens'
-import { TABS, type BotsSection, type TabKey } from './SidebarFooter'
+import { tabs, type BotsSection, type TabKey } from './SidebarFooter'
 
 export interface SidebarRailProps {
   /** Which destination reads as current, so the rail marks the same one the strip would. */
@@ -80,16 +80,18 @@ export function SidebarRail({ current = 'chats', onOpenSection, onShowList, unre
           strip they replace sits, so the reader's hand goes to the same corner. */}
       <View style={{ flex: 1 }} />
 
-      {TABS.filter(tab => tab.key !== 'chats').map(tab => (
-        <RailButton
-          icon={tab.icon}
-          key={tab.key}
-          label={tab.label}
-          onPress={onOpenSection ? () => onOpenSection(tab.key as BotsSection) : undefined}
-          selected={tab.key === current}
-          testID={`sidebar-rail-${tab.key}`}
-        />
-      ))}
+      {tabs()
+        .filter(tab => tab.key !== 'chats')
+        .map(tab => (
+          <RailButton
+            icon={tab.icon}
+            key={tab.key}
+            label={tab.label}
+            onPress={onOpenSection ? () => onOpenSection(tab.key as BotsSection) : undefined}
+            selected={tab.key === current}
+            testID={`sidebar-rail-${tab.key}`}
+          />
+        ))}
     </View>
   )
 }
@@ -110,7 +112,7 @@ function RailButton({
   testID
 }: {
   badge?: number
-  icon: (typeof TABS)[number]['icon'] | 'sidebar'
+  icon: ReturnType<typeof tabs>[number]['icon'] | 'sidebar'
   label: string
   onPress?: (() => void) | undefined
   selected: boolean

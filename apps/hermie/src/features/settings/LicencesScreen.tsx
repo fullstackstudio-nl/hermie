@@ -14,7 +14,7 @@
  *     once would be most of a megabyte of glyphs; a row expands on demand and
  *     collapses again.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ActivityIndicator, FlatList, Pressable, View } from 'react-native'
 
 import { strings } from '../../i18n/strings'
@@ -145,11 +145,10 @@ function PackageRow({
 }) {
   const theme = useTheme()
   const key = keyOf(entry)
-  const detail = useMemo(() => {
-    const licence = entry.licence || strings.settings.licencesUndeclared
-
-    return `${entry.version} · ${licence}`
-  }, [entry.licence, entry.version])
+  // Not memoised: it is a template literal over two fields, and a memo would
+  // have had to be told about the language as well — for a saving of one string
+  // concatenation per render.
+  const detail = `${entry.version} · ${entry.licence || strings.settings.licencesUndeclared}`
 
   return (
     <View

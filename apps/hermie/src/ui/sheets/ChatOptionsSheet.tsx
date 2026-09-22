@@ -246,7 +246,15 @@ export interface ChatNotificationSettings {
  * bot whose routine FAILING is worth a buzz, and the only way to say that is to
  * have the delivery and the two outcomes as separate switches.
  */
-const CHAT_NOTIFICATION_TYPES: { type: PushType; label: string }[] = [
+/*
+ * Built on CALL rather than at import.
+ *
+ * A module-level literal would freeze whatever language was active when the
+ * bundle loaded, which on a cold start is always English — see
+ * `i18n/catalogue.ts`. The list is three entries and it is rebuilt per render;
+ * the alternative is a screen that keeps its old language until it is remounted.
+ */
+const chatNotificationTypes = (): { type: PushType; label: string }[] => [
   { type: 'turn_done', label: chatStrings.notifications.types.turnDone as string },
   { type: 'turn_failed', label: chatStrings.notifications.types.turnFailed as string },
   { type: 'request', label: chatStrings.notifications.types.needsInput as string },
@@ -575,7 +583,7 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
                 : chatStrings.notifications.following
             }
           >
-            {CHAT_NOTIFICATION_TYPES.map(entry => (
+            {chatNotificationTypes().map(entry => (
               <SwitchRow
                 key={entry.type}
                 label={entry.label}

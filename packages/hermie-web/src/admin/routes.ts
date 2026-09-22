@@ -19,6 +19,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
 import type { GatewayIdentity, IdentityReader } from '../identity'
+import { webCopy } from '../i18n'
 import { isSecureRequest } from '../proxy'
 import { PUSH_TYPES, type PushType } from '../push/registrations'
 import {
@@ -157,7 +158,7 @@ export class AdminRouter {
     }
 
     if (!this.allowed(request, state, identity)) {
-      await this.refuse(response, state, identity)
+      await this.refuse(request, response, state, identity)
 
       return
     }
@@ -202,16 +203,23 @@ export class AdminRouter {
     return Boolean(state.localAdmin) && this.sessions.has(cookieOf(request.headers.cookie, ADMIN_SESSION_COOKIE))
   }
 
-  private async refuse(response: ServerResponse, state: AdminState, identity: GatewayIdentity | null): Promise<void> {
+  private async refuse(
+    request: IncomingMessage,
+    response: ServerResponse,
+    state: AdminState,
+    identity: GatewayIdentity | null
+  ): Promise<void> {
+    const copy = webCopy(request)
+
     if (state.localAdmin) {
       // A deployment with a local secret offers the way in rather than a wall:
       // its whole point is that there is no gateway account to recognise.
-      this.html(response, 401, adminSignInPage({ csrf: this.mintCsrf(response, false), notice: '' }))
+      this.html(response, 401, adminSignInPage({ csrf: this.mintCsrf(response, false), notice: '', ...copy }))
 
       return
     }
 
-    this.html(response, 403, adminForbiddenPage(identity?.userId ?? ''))
+    this.html(response, 403, adminForbiddenPage({ viewer: identity?.userId ?? '', ...copy }))
   }
 
   private async signIn(
@@ -237,6 +245,8 @@ export class AdminRouter {
     }
 
     if (!localSecretMatches(state, form.get('secret') ?? '')) {
+      const copy = webCopy(request)
+
       // The same page again, with the same generic line. Nothing here says
       // whether a secret exists, how long it is, or how close this one was.
       this.html(
@@ -244,7 +254,8 @@ export class AdminRouter {
         401,
         adminSignInPage({
           csrf: this.mintCsrf(response, isSecureRequest(request)),
-          notice: 'That secret was not right.'
+          notice: copy.strings.admin.signIn.wrongSecret,
+          ...copy
         })
       )
 
@@ -295,7 +306,8 @@ export class AdminRouter {
         identity: (({ enabled, issuer, users }) => ({ enabled, issuer, accounts: users.length }))(
           this.options.oidc.read()
         ),
-        notice
+        notice,
+        ...webCopy(request)
       })
     )
   }
@@ -512,7 +524,8 @@ export class AdminRouter {
         originAcceptable: issuerOriginAcceptable(origin),
         invite,
         selfTest,
-        notice
+        notice,
+        ...webCopy(request)
       })
     )
   }

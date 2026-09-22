@@ -11,7 +11,7 @@
  * happily with the old glyphs in it, and a visual check is what missed this for
  * several rounds.
  *
- * The four entries come from the strip's own `TABS` rather than from a list
+ * The four entries come from the strip's own `tabs()` rather than from a list
  * repeated here, so a fifth destination cannot be added without this noticing.
  *
  * **`includeHiddenElements` is load-bearing in this file.** An icon hides itself
@@ -22,7 +22,7 @@
 import { render, screen } from '@testing-library/react-native'
 import { StyleSheet } from 'react-native'
 
-import { SidebarFooter, TABS } from '../src/features/bots'
+import { SidebarFooter, tabs } from '../src/features/bots'
 import { Icon, ICON_SIZE } from '../src/ui/Icon'
 import { ThemeProvider } from '../src/ui/theme'
 
@@ -50,7 +50,7 @@ describe('the tab strip', () => {
   it('draws all four marks at the same size', () => {
     renderStrip()
 
-    const marks = TABS.map(tab => iconBoxes(`tab-icon-${tab.key}`).mark)
+    const marks = tabs().map(tab => iconBoxes(`tab-icon-${tab.key}`).mark)
 
     expect(marks).toHaveLength(4)
     expect(marks).toEqual(marks.map(() => ({ height: ICON_SIZE.tab, width: ICON_SIZE.tab })))
@@ -64,7 +64,7 @@ describe('the tab strip', () => {
   it('centres every mark in the same slot, which is what aligns the labels', () => {
     renderStrip()
 
-    for (const tab of TABS) {
+    for (const tab of tabs()) {
       expect(iconBoxes(`tab-icon-${tab.key}`).slot).toMatchObject({
         height: ICON_SIZE.tabSlot,
         width: ICON_SIZE.tabSlot
@@ -73,7 +73,7 @@ describe('the tab strip', () => {
   })
 
   it('gives each tab its own mark rather than one glyph four times', () => {
-    expect(new Set(TABS.map(tab => tab.icon)).size).toBe(TABS.length)
+    expect(new Set(tabs().map(tab => tab.icon)).size).toBe(tabs().length)
   })
 })
 

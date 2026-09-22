@@ -92,7 +92,7 @@ describe('writing it', () => {
 
   it('re-reads on a conflict, so it does not write over the value that won', async () => {
     const link = {
-      request: vi.fn(async (method: string) => {
+      request: vi.fn(async (method: string, _params?: Record<string, unknown>) => {
         if (method === 'profiles.list') {
           return {
             profiles: [

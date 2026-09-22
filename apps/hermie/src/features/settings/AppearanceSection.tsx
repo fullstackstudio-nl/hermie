@@ -21,9 +21,19 @@ import type { NameOrder } from '../../store/bot-names'
 import { TEXT_SIZE_ORDER, type TextSize } from '../../store/text-size'
 import { chatStrings } from '../../chat-ui/strings'
 import { THEME_PRESET_ORDER } from '../../ui/themes'
+import { LanguageGroup } from './LanguageGroup'
 import { ThemeCard } from './ThemeCard'
 
-const APPEARANCE_OPTIONS: { value: Appearance; label: string }[] = [
+/*
+ * Built on CALL rather than at import.
+ *
+ * These two lists were the clearest example of the thing the i18n layer had to
+ * work around: a module-level literal reads `strings.*` once, when the bundle
+ * loads, and a bundle loads before the stored language has come off disk. The
+ * segments would have stayed English for the life of the process no matter what
+ * the picker under them said.
+ */
+const appearanceOptions = (): { value: Appearance; label: string }[] => [
   { value: 'system', label: strings.settings.themeOptions.system },
   { value: 'light', label: strings.settings.themeOptions.light },
   { value: 'dark', label: strings.settings.themeOptions.dark }
@@ -37,7 +47,7 @@ const APPEARANCE_OPTIONS: { value: Appearance; label: string }[] = [
  * keep: a gateway where nobody has set a display name shows the same thing
  * either way, and a segment reading "lance-vance" would be a lie on it.
  */
-const NAME_ORDER_OPTIONS: { value: NameOrder; label: string }[] = [
+const nameOrderOptions = (): { value: NameOrder; label: string }[] => [
   { value: 'profile', label: strings.settings.botNameOptions.profile },
   { value: 'display', label: strings.settings.botNameOptions.display }
 ]
@@ -65,11 +75,18 @@ export function AppearanceSection({ onOpenAdvanced }: AppearanceSectionProps) {
         <SegmentedRow
           label={strings.settings.theme}
           onChange={(value: Appearance) => setAppearance(value)}
-          options={APPEARANCE_OPTIONS}
+          options={appearanceOptions()}
           testID="settings-appearance"
           value={appearance}
         />
       </InsetGroup>
+
+      {/*
+        Language sits directly under light-or-dark because the two are the same
+        kind of decision: both belong to the device rather than to a gateway
+        account, and both are read before there is an account to read them for.
+      */}
+      <LanguageGroup />
 
       {/*
         Its own group, for its own footer.
@@ -82,7 +99,7 @@ export function AppearanceSection({ onOpenAdvanced }: AppearanceSectionProps) {
         <SegmentedRow
           label={strings.settings.botNames}
           onChange={(value: NameOrder) => setBotNameOrder(value)}
-          options={NAME_ORDER_OPTIONS}
+          options={nameOrderOptions()}
           testID="settings-bot-names"
           value={botNameOrder}
         />

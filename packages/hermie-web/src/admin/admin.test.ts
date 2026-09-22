@@ -124,6 +124,36 @@ describe('the gate', () => {
     expect(page.csrf.length).toBeGreaterThan(10)
   })
 
+  it('answers in the language the browser asked for, whether it lets you in or turns you away', async () => {
+    const turnedAway = await fetch(`${web.url}/admin`, { headers: { 'accept-language': 'nl' } })
+    const refusal = await turnedAway.text()
+
+    expect(turnedAway.status).toBe(403)
+    expect(refusal).toContain('<html lang="nl">')
+    expect(refusal).toContain('Geen beheerder')
+
+    const letIn = await fetch(`${web.url}/admin`, {
+      headers: { cookie: await signIn(ADA), 'accept-language': 'de-DE,de;q=0.9' } as Record<string, string>
+    })
+    const page = await letIn.text()
+
+    expect(letIn.status).toBe(200)
+    expect(page).toContain('<html lang="de">')
+    expect(page).toContain('Verwaltung')
+    // The glossary holds: push stays push, VAPID stays VAPID.
+    expect(page).toContain('VAPID-Schlüssel')
+  })
+
+  it('answers English when the browser asked for nothing', async () => {
+    const response = await fetch(`${web.url}/admin`, {
+      headers: { cookie: await signIn(ADA) } as Record<string, string>
+    })
+    const page = await response.text()
+
+    expect(page).toContain('<html lang="en">')
+    expect(page).toContain('Administration')
+  })
+
   it('echoes no secret of any kind', async () => {
     const page = await openAdmin(await signIn(ADA))
 

@@ -6,7 +6,9 @@
  * gateway's and the CLI's, so renaming it here would only cost the reader a
  * translation step when they go looking for `hermes skills list`.
  */
-export const skillStrings = {
+import { localised } from '../../i18n/catalogue'
+
+const skillStringsEn = {
   settings: {
     row: 'Skills',
     hint: 'What your bots know how to do'
@@ -48,3 +50,13 @@ export const skillStrings = {
 
   toggleFailed: (reason: string) => `Could not change that: ${reason}`
 }
+
+/*
+ * The English table above is the SOURCE, and `localised` is what makes it one
+ * language among three: a read resolves against the active locale's catalogue
+ * first and falls back to the sentence written here. See `i18n/catalogue.ts`.
+ *
+ * `skillStringsEn` stays un-exported so there is exactly one way into these strings, and
+ * so nothing can read past the layer by accident.
+ */
+export const skillStrings = localised('skills', skillStringsEn)

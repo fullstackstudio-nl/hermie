@@ -17,11 +17,19 @@ export interface TestConnectionStepProps {
 /** The checklist, in the order `runConnectionTest` actually works through it. */
 const STAGES: ConnectionTestStage[] = ['rest', 'socket', 'profiles']
 
-const STAGE_LABEL: Record<ConnectionTestStage, string> = {
+/*
+ * Built on CALL rather than at import.
+ *
+ * A module-level literal would freeze whatever language was active when the
+ * bundle loaded, which on a cold start is always English — see
+ * `i18n/catalogue.ts`. The list is three entries and it is rebuilt per render;
+ * the alternative is a screen that keeps its old language until it is remounted.
+ */
+const stageLabel = (): Record<ConnectionTestStage, string> => ({
   rest: strings.onboarding.test.checklist.rest,
   socket: strings.onboarding.test.checklist.socket,
   profiles: strings.onboarding.test.checklist.profiles
-}
+})
 
 /**
  * The test runs ITSELF the moment the step appears.
@@ -95,7 +103,7 @@ export function TestConnectionStep({ draft, update }: TestConnectionStepProps) {
             testID={`test-stage-${stage}`}
             tone={toneFor(stage, { busy, error, passed, reached })}
           >
-            {STAGE_LABEL[stage]}
+            {stageLabel()[stage]}
           </StatusLine>
         ))}
       </View>

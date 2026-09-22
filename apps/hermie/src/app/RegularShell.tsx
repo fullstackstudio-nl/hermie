@@ -89,12 +89,20 @@ import { useSidebarState, useSidebarWidth } from './useLayoutMode'
  * menu bar's Hide/Show Sidebar — the last two arrive as the same `toggleSidebar`
  * action (`platform/desktop-shortcuts`), so there is nothing to keep in step.
  */
-/** What each panel is called, for the browser tab. */
-const SECTION_TITLES: Record<BotsSection, string> = {
+/** What each panel is called, for the browser tab. Read per render: see below. */
+/*
+ * Built on CALL rather than at import.
+ *
+ * A module-level literal would freeze whatever language was active when the
+ * bundle loaded, which on a cold start is always English — see
+ * `i18n/catalogue.ts`. The list is three entries and it is rebuilt per render;
+ * the alternative is a screen that keeps its old language until it is remounted.
+ */
+const sectionTitles = (): Record<BotsSection, string> => ({
   activity: strings.tabs.activity,
   cron: strings.tabs.routines,
   settings: strings.tabs.settings
-}
+})
 
 export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
   const theme = useTheme()
@@ -138,7 +146,7 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
    */
   const selectedBotLabel = useBotDisplayName(selectedBot)
 
-  usePageTitle(section ? SECTION_TITLES[section] : (selectedBotLabel ?? strings.tabs.chats))
+  usePageTitle(section ? sectionTitles()[section] : (selectedBotLabel ?? strings.tabs.chats))
 
   const openBot = useCallback((name: string, options?: OpenChatOptions) => {
     setSelectedBot(name)

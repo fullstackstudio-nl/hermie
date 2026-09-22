@@ -33,7 +33,15 @@ import { resolveThemeFace, THEME_PRESET_ORDER, type ThemePresetName } from '../.
 import { FORM_MAX_WIDTH } from '../../ui/tokens'
 import { ThemeCard } from './ThemeCard'
 
-const FIELDS: { field: ThemeColourField; label: string }[] = [
+/*
+ * Built on CALL rather than at import.
+ *
+ * A module-level literal would freeze whatever language was active when the
+ * bundle loaded, which on a cold start is always English — see
+ * `i18n/catalogue.ts`. The list is three entries and it is rebuilt per render;
+ * the alternative is a screen that keeps its old language until it is remounted.
+ */
+const fields = (): { field: ThemeColourField; label: string }[] => [
   { field: 'background', label: strings.settings.themes.background },
   { field: 'accentFill', label: strings.settings.themes.accentFill },
   { field: 'accentBubble', label: strings.settings.themes.accentBubble }
@@ -249,7 +257,7 @@ function ThemeEditor({
           />
         </InsetRow>
 
-        {FIELDS.map(({ field, label }) => (
+        {fields().map(({ field, label }) => (
           <InsetRow key={field}>
             <TextField
               autoCapitalize="characters"

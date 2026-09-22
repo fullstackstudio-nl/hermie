@@ -27,14 +27,22 @@ export interface ScheduleBuilderProps {
   showErrors?: boolean
 }
 
-const MODES: { value: ScheduleMode; label: string }[] = [
+/*
+ * Built on CALL rather than at import.
+ *
+ * A module-level literal would freeze whatever language was active when the
+ * bundle loaded, which on a cold start is always English — see
+ * `i18n/catalogue.ts`. The list is three entries and it is rebuilt per render;
+ * the alternative is a screen that keeps its old language until it is remounted.
+ */
+const modes = (): { value: ScheduleMode; label: string }[] => [
   { value: 'interval', label: cronStrings.schedule.modes.interval },
   { value: 'daily', label: cronStrings.schedule.modes.daily },
   { value: 'cron', label: cronStrings.schedule.modes.cron },
   { value: 'once', label: cronStrings.schedule.modes.once }
 ]
 
-const UNITS: { value: IntervalUnit; label: string }[] = [
+const units = (): { value: IntervalUnit; label: string }[] => [
   { value: 'minutes', label: cronStrings.schedule.units.minutes },
   { value: 'hours', label: cronStrings.schedule.units.hours },
   { value: 'days', label: cronStrings.schedule.units.days }
@@ -49,7 +57,7 @@ export function ScheduleBuilder({ draft, onChange, showErrors = false }: Schedul
     <View style={{ gap: theme.space.md }} testID="schedule-builder">
       <SegmentedRow
         label={cronStrings.schedule.mode}
-        options={MODES}
+        options={modes()}
         value={draft.mode}
         onChange={mode => patch({ mode })}
         testID="schedule-mode"
@@ -65,7 +73,7 @@ export function ScheduleBuilder({ draft, onChange, showErrors = false }: Schedul
             testID="schedule-interval-value"
           />
           <SegmentedRow
-            options={UNITS}
+            options={units()}
             value={draft.intervalUnit}
             onChange={intervalUnit => patch({ intervalUnit })}
             testID="schedule-interval-unit"

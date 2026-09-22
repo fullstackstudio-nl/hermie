@@ -14,7 +14,9 @@
  * 0.21.3). A field labelled "Display name" over both would be telling half the
  * readers that a handle their crons and their `@`-mentions use is a label.
  */
-export const renameStrings = {
+import { localised } from '../../i18n/catalogue'
+
+const renameStringsEn = {
   /** The `default` profile: a label, and the id underneath is untouched. */
   displayLabel: 'Display name',
   displayHint: 'What this bot is called on every client. The profile keeps its own name.',
@@ -46,3 +48,13 @@ export const renameStrings = {
   partialStores: 'the open chats',
   partialCache: 'the cached transcript'
 } as const
+
+/*
+ * The English table above is the SOURCE, and `localised` is what makes it one
+ * language among three: a read resolves against the active locale's catalogue
+ * first and falls back to the sentence written here. See `i18n/catalogue.ts`.
+ *
+ * `renameStringsEn` stays un-exported so there is exactly one way into these strings, and
+ * so nothing can read past the layer by accident.
+ */
+export const renameStrings = localised('botRename', renameStringsEn)

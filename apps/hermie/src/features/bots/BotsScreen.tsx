@@ -544,12 +544,25 @@ export function BotsScreen({
   )
 
   /** One stable array for every row's menu; see `BotRow.menuFolders`. */
+  /*
+    Read out of the table HERE rather than inside the memos below, and then
+    depended on by name.
+
+    A memo that produces TEXT has to recompute when the language changes, and
+    `folderList` can sit still for hours. Depending on the SENTENCE rather than
+    on the locale says why in the dependency array itself, and it is the thing
+    that actually changed — `useLocale()` in the deps would be a value the
+    callback never reads, which is both a lint warning and a worse explanation.
+  */
+  const topGroupName = strings.layout.topGroup
+  const unnamedFolderName = strings.layout.unnamedFolder
+
   const menuFolders = useMemo(
     () => [
-      { id: null, name: strings.layout.topGroup },
-      ...folderList.map(folder => ({ id: folder.id, name: folder.name || strings.layout.unnamedFolder }))
+      { id: null, name: topGroupName },
+      ...folderList.map(folder => ({ id: folder.id, name: folder.name || unnamedFolderName }))
     ],
-    [folderList]
+    [folderList, topGroupName, unnamedFolderName]
   )
 
   const listRef = useRef<FlatList<ListItem>>(null)
@@ -673,11 +686,11 @@ export function BotsScreen({
     }
 
     if (row.kind === 'folder') {
-      return folders.find(folder => folder.id === row.id)?.name || strings.layout.unnamedFolder
+      return folders.find(folder => folder.id === row.id)?.name || unnamedFolderName
     }
 
     return byName[row.name]?.displayName ?? row.name
-  }, [byName, drag.draggingKey, folders])
+  }, [byName, drag.draggingKey, folders, unnamedFolderName])
 
   /**
    * What every cell has to know, and nothing more.
@@ -808,12 +821,18 @@ export function BotsScreen({
    * Chats screen the item is still sent and still does nothing — the same as ⌘W on
    * a bare list, and a phone has no menu bar to read it in.
    */
+  const toggleSidebarItem = rail ? strings.menuBar.showSidebar : strings.menuBar.hideSidebar
+
   useEffect(() => {
     setMenuBar(
-      { ...strings.menuBar, toggleSidebar: rail ? strings.menuBar.showSidebar : strings.menuBar.hideSidebar },
+      { ...strings.menuBar, toggleSidebar: toggleSidebarItem },
       visibleBots.slice(0, 9).map(bot => bot.displayName)
     )
-  }, [rail, visibleBots])
+    // `toggleSidebarItem` stands in for `rail` as well as for the language: it
+    // is the one value here that moves when either of them does, so a menu bar
+    // built in English is replaced the moment the reader picks another
+    // language rather than waiting for the roster to change.
+  }, [toggleSidebarItem, visibleBots])
 
   /**
    * One selection from either menu.

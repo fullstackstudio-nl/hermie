@@ -12,5 +12,5 @@ export { consumeRevealFolder, onRevealFolder, requestRevealFolder } from './fold
 export { presenceOf, type Presence, type PresenceInput, type PresenceState } from './presence'
 export { ConnectionLine } from './ConnectionLine'
 export { GatewayNameLine } from './GatewayNameLine'
-export { SidebarFooter, TABS, type BotsSection, type TabKey } from './SidebarFooter'
+export { SidebarFooter, tabs, type BotsSection, type TabKey } from './SidebarFooter'
 export { SidebarRail, type SidebarRailProps } from './SidebarRail'

@@ -140,6 +140,9 @@ describe('the cache route, on a gated gateway', () => {
     await web.cache.put({
       sessionId: 'tip-1',
       bot: 'researcher',
+      // Shared among everybody signed in to the gateway, which is the case
+      // this test is about: shared is still not world-readable.
+      owner: '',
       storedId: '',
       shape: 'rest',
       rows: [{ role: 'assistant', row_id: 1, text: 'secret' }],
@@ -242,6 +245,9 @@ describe('a cache whose directory is a wreck', () => {
     await cache.put({
       sessionId: 'tip-1',
       bot: 'researcher',
+      // Shared among everybody signed in to the gateway, which is the case
+      // this test is about: shared is still not world-readable.
+      owner: '',
       storedId: '',
       shape: 'rest',
       rows: [{ role: 'assistant', row_id: 1 }],

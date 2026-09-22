@@ -21,6 +21,7 @@
  * a form that answers "does this person have an account here".
  */
 import { escapeHtml } from '../setup'
+import { htmlLang, type WebLocale, type WebStrings } from '../i18n'
 import { CSRF_FIELD } from '../admin/session'
 
 const STYLE = `
@@ -42,8 +43,8 @@ const STYLE = `
   .codes { display: grid; grid-template-columns: 1fr 1fr; gap: .35rem; font-family: ui-monospace, monospace; font-size: .9rem; margin: .75rem 0 }
 `
 
-const head = (title: string): string =>
-  `<!doctype html>\n<html lang="en">\n<meta charset="utf-8">\n` +
+const head = (locale: WebLocale, title: string): string =>
+  `<!doctype html>\n<html lang="${htmlLang(locale)}">\n<meta charset="utf-8">\n` +
   `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
   `<meta name="robots" content="noindex">\n` +
   `<title>${escapeHtml(title)}</title>\n<style>${STYLE}</style>\n`
@@ -57,6 +58,10 @@ export interface SignInPageInput {
   /** Ask for the second factor as well; set once a password has been accepted. */
   wantsSecondFactor: boolean
   notice: string
+  /** The language this request negotiated, for `<html lang>`. */
+  locale: WebLocale
+  /** Every sentence on the page, in that language. */
+  strings: WebStrings
 }
 
 /**
@@ -67,8 +72,10 @@ export interface SignInPageInput {
  * unauthenticated visitor which accounts have one enrolled.
  */
 export function signInPage(input: SignInPageInput): string {
-  return `${head(`Sign in to ${input.issuerName}`)}<main>
-  <h1>Sign in</h1>
+  const text = input.strings.oidc.signIn
+
+  return `${head(input.locale, text.title(input.issuerName))}<main>
+  <h1>${text.heading}</h1>
   <p>${escapeHtml(input.issuerName)}</p>
   ${input.notice ? `<p class="note bad">${escapeHtml(input.notice)}</p>` : ''}
   <section>
@@ -77,16 +84,16 @@ export function signInPage(input: SignInPageInput): string {
       ${
         input.wantsSecondFactor
           ? `<input type="hidden" name="username" value="${escapeHtml(input.username)}">
-      <label for="totp">Six-digit code</label>
+      <label for="totp">${text.totp}</label>
       <input id="totp" name="totp" inputmode="numeric" autocomplete="one-time-code" autofocus>
-      <label for="recovery">…or one recovery code</label>
+      <label for="recovery">${text.recovery}</label>
       <input id="recovery" name="recovery" autocomplete="off">`
-          : `<label for="username">Username</label>
+          : `<label for="username">${text.username}</label>
       <input id="username" name="username" value="${escapeHtml(input.username)}" autocomplete="username" autocapitalize="off" spellcheck="false" autofocus>
-      <label for="password">Password</label>
+      <label for="password">${text.password}</label>
       <input id="password" name="password" type="password" autocomplete="current-password">`
       }
-      <button type="submit">${input.wantsSecondFactor ? 'Verify' : 'Sign in'}</button>
+      <button type="submit">${input.wantsSecondFactor ? text.verify : input.strings.common.signIn}</button>
     </form>
   </section>
 </main>
@@ -94,23 +101,34 @@ export function signInPage(input: SignInPageInput): string {
 `
 }
 
-/** A refusal a browser sees, for the errors that must not be redirected. */
-export function oidcErrorPage(code: string, detail: string): string {
-  return `${head('Sign-in failed')}<main>
-  <h1>Sign-in failed</h1>
-  <p>${escapeHtml(detail)}</p>
-  <p class="note"><code>${escapeHtml(code)}</code></p>
+/**
+ * A refusal a browser sees, for the errors that must not be redirected.
+ *
+ * `detail` is a sentence the caller chose. Most come out of
+ * `strings.oidc.error`; the ones that do not are a provider's own message about
+ * a malformed request, which has no translation and is escaped like any other
+ * value.
+ */
+export function oidcErrorPage(input: { code: string; detail: string; locale: WebLocale; strings: WebStrings }): string {
+  const text = input.strings.oidc.error
+
+  return `${head(input.locale, text.title)}<main>
+  <h1>${text.title}</h1>
+  <p>${escapeHtml(input.detail)}</p>
+  <p class="note"><code>${escapeHtml(input.code)}</code></p>
 </main>
 </html>
 `
 }
 
 /** The page at the end of `/oidc/logout` when no redirect was asked for. */
-export function signedOutPage(issuerName: string): string {
-  return `${head('Signed out')}<main>
-  <h1>Signed out</h1>
-  <p>Your sign-in to ${escapeHtml(issuerName)} has been forgotten on this server.</p>
-  <p class="note">The application you came from may keep its own session until it expires.</p>
+export function signedOutPage(input: { issuerName: string; locale: WebLocale; strings: WebStrings }): string {
+  const text = input.strings.oidc.signedOut
+
+  return `${head(input.locale, text.title)}<main>
+  <h1>${text.title}</h1>
+  <p>${text.detail(escapeHtml(input.issuerName))}</p>
+  <p class="note">${text.note}</p>
 </main>
 </html>
 `
@@ -122,6 +140,10 @@ export interface InvitePageInput {
   token: string
   username: string
   notice: string
+  /** The language this request negotiated, for `<html lang>`. */
+  locale: WebLocale
+  /** Every sentence on the page, in that language. */
+  strings: WebStrings
 }
 
 /**
@@ -132,22 +154,24 @@ export interface InvitePageInput {
  * chose. The link is single-use and lapses.
  */
 export function invitePage(input: InvitePageInput): string {
-  return `${head('Choose a password')}<main>
-  <h1>Choose a password</h1>
+  const text = input.strings.oidc.invite
+
+  return `${head(input.locale, text.title)}<main>
+  <h1>${text.title}</h1>
   <p>${escapeHtml(input.issuerName)} — <code>${escapeHtml(input.username)}</code></p>
   ${input.notice ? `<p class="note bad">${escapeHtml(input.notice)}</p>` : ''}
   <section>
     <form method="post" action="/oidc/invite">
       <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
       <input type="hidden" name="token" value="${escapeHtml(input.token)}">
-      <label for="password">Password</label>
+      <label for="password">${text.password}</label>
       <input id="password" name="password" type="password" autocomplete="new-password" autofocus>
-      <label for="confirm">Again</label>
+      <label for="confirm">${text.again}</label>
       <input id="confirm" name="confirm" type="password" autocomplete="new-password">
-      <button type="submit">Set the password</button>
+      <button type="submit">${text.submit}</button>
     </form>
   </section>
-  <p class="note">This link works once and then stops. Nobody else, including whoever invited you, ever sees what you type here.</p>
+  <p class="note">${text.note}</p>
 </main>
 </html>
 `
@@ -170,29 +194,35 @@ export function enrolPage(input: {
   uri: string
   recoveryCodes: string[]
   notice: string
+  /** The language this request negotiated, for `<html lang>`. */
+  locale: WebLocale
+  /** Every sentence on the page, in that language. */
+  strings: WebStrings
 }): string {
-  return `${head('Set up two-factor')}<main>
-  <h1>Two-factor</h1>
+  const text = input.strings.oidc.enrol
+
+  return `${head(input.locale, text.title)}<main>
+  <h1>${text.heading}</h1>
   <p>${escapeHtml(input.issuerName)} — <code>${escapeHtml(input.username)}</code></p>
   ${input.notice ? `<p class="note bad">${escapeHtml(input.notice)}</p>` : ''}
   <section>
     <ol>
-      <li>Add this to your authenticator:<br><code>${escapeHtml(input.secret)}</code></li>
-      <li>Or open <code>${escapeHtml(input.uri)}</code></li>
-      <li>Type the code it shows, to prove it works.</li>
+      <li>${text.addToAuthenticator}<br><code>${escapeHtml(input.secret)}</code></li>
+      <li>${text.orOpen} <code>${escapeHtml(input.uri)}</code></li>
+      <li>${text.typeTheCode}</li>
     </ol>
     <form method="post" action="/oidc/enrol">
       <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(input.csrf)}">
-      <label for="totp">Six-digit code</label>
+      <label for="totp">${text.totp}</label>
       <input id="totp" name="totp" inputmode="numeric" autocomplete="one-time-code">
-      <button type="submit">Confirm</button>
+      <button type="submit">${text.confirm}</button>
     </form>
   </section>
   ${
     input.recoveryCodes.length
       ? `<section>
-    <h1 style="font-size:1rem">Recovery codes</h1>
-    <p>Each works once, in place of a code from the app. This is the only time they are shown.</p>
+    <h1 style="font-size:1rem">${text.recoveryHeading}</h1>
+    <p>${text.recoveryNote}</p>
     <div class="codes">${input.recoveryCodes.map(code => `<span>${escapeHtml(code)}</span>`).join('')}</div>
   </section>`
       : ''

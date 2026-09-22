@@ -48,7 +48,15 @@ export type TabKey = 'chats' | BotsSection
  * Exported so a test can walk the same four entries the strip renders, rather
  * than repeating the list and then agreeing with itself.
  */
-export const TABS: { key: TabKey; label: string; icon: IconName }[] = [
+/*
+ * Built on CALL rather than at import.
+ *
+ * A module-level literal would freeze whatever language was active when the
+ * bundle loaded, which on a cold start is always English — see
+ * `i18n/catalogue.ts`. The list is three entries and it is rebuilt per render;
+ * the alternative is a screen that keeps its old language until it is remounted.
+ */
+export const tabs = (): { key: TabKey; label: string; icon: IconName }[] => [
   { key: 'chats', label: strings.tabs.chats, icon: 'chats' },
   { key: 'activity', label: strings.tabs.activity, icon: 'activity' },
   { key: 'cron', label: strings.tabs.routines, icon: 'crons' },
@@ -91,7 +99,7 @@ function TabStrip({ current, onOpenSection }: { current: TabKey; onOpenSection: 
         padding: 3
       }}
     >
-      {TABS.map(tab => {
+      {tabs().map(tab => {
         const selected = tab.key === current
 
         return (

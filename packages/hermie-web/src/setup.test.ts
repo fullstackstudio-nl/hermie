@@ -142,6 +142,34 @@ describe('a Hermie Web with no gateway', () => {
     expect(root.headers.get('location')).toBe('/setup')
   })
 
+  it('serves it in the language the browser asked for, and English when it asked for nothing', async () => {
+    const dutch = await fetch(`${web.url}/setup`, { headers: { 'accept-language': 'nl-BE,nl;q=0.9,en;q=0.5' } })
+    const page = await dutch.text()
+
+    expect(page).toContain('<html lang="nl">')
+    expect(page).toContain('Hermie Web instellen')
+    // The script's own sentences travel with the page, not with a second fetch.
+    expect(page).toContain('Dat werkte niet.')
+    // The glossary holds: the gateway is a gateway in every language.
+    expect(page).toContain('De Hermes gateway')
+
+    const plain = await (await fetch(`${web.url}/setup`)).text()
+
+    expect(plain).toContain('<html lang="en">')
+    expect(plain).toContain('Set up Hermie Web')
+  })
+
+  it('injects the script’s sentences as one literal that cannot close the element', async () => {
+    const page = await (await fetch(`${web.url}/setup`, { headers: { 'accept-language': 'nl' } })).text()
+    const literal = /var T = (\{.*?\});/.exec(page)?.[1] ?? ''
+
+    // It parses as JSON, which is what a table spliced in string by string
+    // would stop doing the first time somebody added an apostrophe.
+    expect((JSON.parse(literal) as Record<string, string>).didNotWork).toBe('Dat werkte niet.')
+    // And no raw `<` survives into it, so no sentence can end the <script>.
+    expect(literal).not.toContain('<')
+  })
+
   it('refuses to proxy rather than dialling an address nobody chose', async () => {
     const response = await fetch(`${web.url}/api/status`)
 

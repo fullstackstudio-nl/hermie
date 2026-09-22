@@ -7,7 +7,9 @@
  * The second is what a gateway without the route gets: the real command, not
  * an empty page and not a scrape.
  */
-export const logStrings = {
+import { localised } from '../../i18n/catalogue'
+
+const logStringsEn = {
   settings: {
     row: 'Logs',
     hint: 'What the gateway has been writing down'
@@ -76,3 +78,13 @@ export const logStrings = {
   truncated: (count: number) => `Showing the last ${count} lines — the API will not serve more.`,
   lineCount: (count: number) => `${count} ${count === 1 ? 'line' : 'lines'}`
 }
+
+/*
+ * The English table above is the SOURCE, and `localised` is what makes it one
+ * language among three: a read resolves against the active locale's catalogue
+ * first and falls back to the sentence written here. See `i18n/catalogue.ts`.
+ *
+ * `logStringsEn` stays un-exported so there is exactly one way into these strings, and
+ * so nothing can read past the layer by accident.
+ */
+export const logStrings = localised('logs', logStringsEn)

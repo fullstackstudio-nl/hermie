@@ -11,7 +11,9 @@
  *  - `disconnect` explains why there is no button. Upstream refuses to expose
  *    one on purpose; it is not a gap this app can paper over.
  */
-export const connectorStrings = {
+import { localised } from '../../i18n/catalogue'
+
+const connectorStringsEn = {
   settings: {
     row: 'Connectors',
     hint: 'Apps a bot can reach on your behalf'
@@ -90,3 +92,13 @@ export const connectorStrings = {
     no: 'No'
   }
 }
+
+/*
+ * The English table above is the SOURCE, and `localised` is what makes it one
+ * language among three: a read resolves against the active locale's catalogue
+ * first and falls back to the sentence written here. See `i18n/catalogue.ts`.
+ *
+ * `connectorStringsEn` stays un-exported so there is exactly one way into these strings, and
+ * so nothing can read past the layer by accident.
+ */
+export const connectorStrings = localised('connectors', connectorStringsEn)

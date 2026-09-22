@@ -42,6 +42,7 @@ import {
   type AdminState
 } from './admin/state'
 import { IdentityReader, type GatewayIdentity } from './identity'
+import { webCopy } from './i18n'
 import { OidcProvider } from './oidc/provider'
 import { OidcRouter } from './oidc/routes'
 import { loadOidcState, saveOidcState, type OidcState } from './oidc/state'
@@ -841,13 +842,17 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
         return
       }
 
-      html(response, 200, setupPage({ version: options.version, defaultGateway: options.gatewayUrl }))
+      html(
+        response,
+        200,
+        setupPage({ version: options.version, defaultGateway: options.gatewayUrl, ...webCopy(request) })
+      )
 
       return
     }
 
     if (url.pathname === SETUP_CALLBACK_PATH) {
-      await handleSetupCallback(response, url)
+      await handleSetupCallback(request, response, url)
 
       return
     }
@@ -979,12 +984,18 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
    * hour-long credential is not a credential a daemon can hold, and storing one
    * would mean push stopping in the night with nothing to say why.
    */
-  async function handleSetupCallback(response: ServerResponse, url: URL): Promise<void> {
+  async function handleSetupCallback(request: IncomingMessage, response: ServerResponse, url: URL): Promise<void> {
+    const copy = webCopy(request)
+    const text = copy.strings.setup.callback
     const pending = pendingLogin
     pendingLogin = null
 
     if (!pending) {
-      html(response, 400, setupCallbackPage('Nothing was waiting', 'Start the service sign-in from the setup page.'))
+      html(
+        response,
+        400,
+        setupCallbackPage({ ...copy, title: text.nothingWaitingTitle, detail: text.nothingWaitingDetail })
+      )
 
       return
     }
@@ -995,7 +1006,11 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
       html(
         response,
         400,
-        setupCallbackPage('Sign-in failed', `${failure}: ${url.searchParams.get('error_description') ?? ''}`)
+        setupCallbackPage({
+          ...copy,
+          title: text.failedTitle,
+          detail: `${failure}: ${url.searchParams.get('error_description') ?? ''}`
+        })
       )
 
       return
@@ -1006,11 +1021,7 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
     if (!code || url.searchParams.get('state') !== pending.state) {
       // Either the redirect carried no code, or somebody else's redirect landed
       // here. Neither is a sign-in, and nothing is stored for either.
-      html(
-        response,
-        400,
-        setupCallbackPage('Sign-in failed', 'That redirect did not carry the code this server was waiting for.')
-      )
+      html(response, 400, setupCallbackPage({ ...copy, title: text.failedTitle, detail: text.noCode }))
 
       return
     }
@@ -1031,16 +1042,9 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
       state.oidc = { refreshToken: tokens.refreshToken, provider: tokens.provider, gateway: pending.gatewayUrl }
       await savePushState(options.stateDir, state)
 
-      html(
-        response,
-        200,
-        setupCallbackPage(
-          'The service is signed in',
-          'Hermie Web stored the sign-in it uses for push and for the message cache.'
-        )
-      )
+      html(response, 200, setupCallbackPage({ ...copy, title: text.signedInTitle, detail: text.signedInDetail }))
     } catch (error) {
-      html(response, 400, setupCallbackPage('Sign-in failed', (error as Error).message))
+      html(response, 400, setupCallbackPage({ ...copy, title: text.failedTitle, detail: (error as Error).message }))
     }
   }
 

@@ -13,7 +13,9 @@
  * plugin: a gateway can have an older Hermie plugin installed and enabled and
  * still have no memory routes at all.
  */
-export const memoryStrings = {
+import { localised } from '../../i18n/catalogue'
+
+const memoryStringsEn = {
   title: 'Memory',
   /** The row on the bot profile sheet, and the entry in Settings. */
   rowTitle: 'Memory',
@@ -135,3 +137,13 @@ export const memoryStrings = {
     unknown: 'Waiting for the gateway to say what is installed…'
   }
 } as const
+
+/*
+ * The English table above is the SOURCE, and `localised` is what makes it one
+ * language among three: a read resolves against the active locale's catalogue
+ * first and falls back to the sentence written here. See `i18n/catalogue.ts`.
+ *
+ * `memoryStringsEn` stays un-exported so there is exactly one way into these strings, and
+ * so nothing can read past the layer by accident.
+ */
+export const memoryStrings = localised('memory', memoryStringsEn)

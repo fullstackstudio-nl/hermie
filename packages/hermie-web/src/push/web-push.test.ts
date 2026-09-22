@@ -30,11 +30,12 @@ const MESSAGE: PushMessage = { title: 'Researcher', body: 'sent you a message', 
 
 const webpush = (endpoint: string, keys: { p256dh: string; auth: string }): PushRegistration => ({
   installationId: 'dev-1',
+  owner: '',
   transport: 'webpush',
   endpoint,
   keys,
   platform: 'web',
-  types: { message: true, request: true, dm: true, cron: true },
+  types: { message: true, request: true, dm: true, cron: true, cron_done: true, cron_failed: true },
   preview: false,
   updatedAt: 0
 })
@@ -180,7 +181,7 @@ describe('sending', () => {
     const headers = calls[0]?.init.headers as Record<string, string>
 
     expect(headers['content-encoding']).toBe('aes128gcm')
-    expect(headers.authorization.startsWith('vapid t=')).toBe(true)
+    expect(headers.authorization?.startsWith('vapid t=')).toBe(true)
     expect(decrypt(Buffer.from(calls[0]?.init.body as Uint8Array), subscription)).toContain('sent you a message')
   })
 
@@ -221,10 +222,11 @@ describe('sending', () => {
     const fetchImpl = vi.fn() as unknown as typeof fetch
     const expo: PushRegistration = {
       installationId: 'dev-2',
+      owner: '',
       transport: 'expo',
       token: 'ExponentPushToken[x]',
       platform: 'ios',
-      types: { message: true, request: true, dm: true, cron: true },
+      types: { message: true, request: true, dm: true, cron: true, cron_done: true, cron_failed: true },
       preview: false,
       updatedAt: 0
     }

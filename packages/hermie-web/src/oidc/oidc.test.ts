@@ -409,6 +409,49 @@ describe('the PKCE round trip', () => {
   })
 })
 
+describe('the language the sign-in is painted in', () => {
+  it('follows Accept-Language, and is English where there is none', async () => {
+    const { challenge, state } = pkce()
+    const url = authorizeUrl({ challenge, state })
+
+    const dutch = await fetch(url, { headers: { 'accept-language': 'nl-BE,nl;q=0.9,en;q=0.4' } })
+    const page = await dutch.text()
+
+    expect(dutch.status).toBe(200)
+    expect(page).toContain('<html lang="nl">')
+    expect(page).toContain('<h1>Inloggen</h1>')
+    expect(page).toContain('Gebruikersnaam')
+
+    const plain = await (await fetch(url)).text()
+
+    expect(plain).toContain('<html lang="en">')
+    expect(plain).toContain('<h1>Sign in</h1>')
+  })
+
+  it('says the same nothing about the account in German as it does in English', async () => {
+    const { challenge, state } = pkce()
+    const url = authorizeUrl({ challenge, state })
+    const page = await fetch(url, { headers: { 'accept-language': 'de' } })
+    const { token, cookie } = csrfOf(page)
+
+    await page.text()
+
+    const refusal = await fetch(url, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { cookie, 'content-type': 'application/x-www-form-urlencoded', 'accept-language': 'de' },
+      body: new URLSearchParams({ csrf: token, username: 'ada', password: 'not the password' }).toString()
+    })
+    const body = await refusal.text()
+
+    expect(body).toContain('<html lang="de">')
+    // The one generic sentence, translated. Nothing here says which half was
+    // wrong, in this language any more than in English.
+    expect(body).toContain('Diese Anmeldung war nicht richtig.')
+    expect(body).not.toContain('Passwort war')
+  })
+})
+
 describe('what must not be redirected', () => {
   it('renders an unknown client rather than bouncing the error anywhere', async () => {
     const { challenge, state } = pkce()

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { ActivityIndicator, View } from 'react-native'
 
 import { DEV_LAUNCH_INTENT, DevGallery } from '../dev'
@@ -8,12 +8,36 @@ import { AppLock } from '../features/lock'
 import { OnboardingNavigator } from '../features/onboarding'
 import { GatewayProvider, useGateway } from '../gateway'
 import { strings } from '../i18n/strings'
+import { useFollowsLocale } from '../i18n/use-locale'
+import { useLanguageStore } from '../store/language'
 import { SafeArea } from '../platform/safe-area'
 import { Screen, Text } from '../ui/primitives'
 import { ThemeProvider, useTheme } from '../ui/theme'
 import { Shell } from './Shell'
 
 export default function App() {
+  /*
+    The whole tree follows the language from here.
+
+    Not a context, and not a `key` that remounts: `strings.x.y` resolves on
+    access (`i18n/catalogue.ts`), so the only thing a switch needs is a render.
+    Subscribing at the root gives every screen under it one — a provider would
+    only wake its own consumers, and a remount would throw away the scroll
+    position and the open sheet of whoever just used the picker.
+  */
+  useFollowsLocale()
+
+  const languageLoaded = useLanguageStore(state => state.loaded)
+
+  useEffect(() => {
+    // Behind the splash, like the appearance read in `ThemeProvider`: the
+    // stored choice is on disk and the first frame cannot wait for it. Until it
+    // lands the app is in English, which is the language it is written in.
+    if (!languageLoaded) {
+      void useLanguageStore.getState().hydrate()
+    }
+  }, [languageLoaded])
+
   // One client for the app's lifetime; refetching is driven by gateway events
   // rather than by focus or intervals.
   const queryClient = useMemo(

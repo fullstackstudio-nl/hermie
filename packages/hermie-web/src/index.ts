@@ -58,6 +58,17 @@ export {
 } from './update'
 export { extractZip, readZip, safeEntryPath, type ZipEntry } from './zip'
 export {
+  htmlLang,
+  localeOf,
+  negotiateLocale,
+  type WebCatalogue,
+  type WebLocale,
+  WEB_LOCALES,
+  webCopy,
+  webStrings,
+  type WebStrings
+} from './i18n'
+export {
   clearSecondFactor,
   createAccount,
   disableProvider,
