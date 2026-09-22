@@ -128,7 +128,9 @@ export function previewFromGatewayText(raw: unknown): ChatPreview | null {
   const injected = parseInjectedRow(raw)
 
   if (!injected) {
-    return { text: raw.trim(), system: false }
+    const opener = truncatedInjectedOpener(raw)
+
+    return opener ? { text: opener, system: true } : { text: raw.trim(), system: false }
   }
 
   /*
@@ -154,4 +156,33 @@ export function previewFromGatewayText(raw: unknown): ChatPreview | null {
  */
 export function chatRowPreview(state: ChatState | undefined, gatewayPreview: unknown): ChatPreview | null {
   return previewFromChat(state) ?? previewFromGatewayText(gatewayPreview)
+}
+
+/**
+ * A `[System: …]` or `[IMPORTANT: …]` row the gateway has already cut down for
+ * a list.
+ *
+ * The roster's preview is the newest user or assistant row squashed onto one
+ * line and cut at eighty characters, so an injected wrapper arrives with its
+ * newlines gone and, past eighty characters, its closing bracket gone too —
+ * which is exactly what `parseInjectedRow` reads for: a header line, a body
+ * under it, a bracket at the end. None of that survives the cut, and the raw
+ * text with its opening bracket was what reached the chat list. So a preview
+ * that OPENS like scaffolding is read as scaffolding: the first sentence after
+ * the marker, with the ellipsis the gateway appended and any bracket it left
+ * taken off. It is a lookup on the opener only; a message that merely starts
+ * with a bracket (`[link](…)`) does not match.
+ */
+function truncatedInjectedOpener(raw: string): string | null {
+  const match = /^\s*\[(?:System|IMPORTANT):\s*([^\r\n]+)/u.exec(raw)
+
+  if (!match) {
+    return null
+  }
+
+  const rest = match[1]!.replace(/(?:\.\.\.|…)\s*$/u, '').replace(/\]\s*$/u, '')
+  const stop = rest.search(/[.;](?=\s|$)/u)
+  const sentence = (stop === -1 ? rest : rest.slice(0, stop)).trim()
+
+  return sentence || null
 }

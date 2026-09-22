@@ -28,6 +28,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The chat list no longer shows a raw `[IMPORTANT: …` or `[System: …` line.** The gateway's
+  preview for a chat is its newest user or assistant row squashed onto one line and cut at eighty
+  characters, so an injected wrapper reached the list without its newlines and, often, without its
+  closing bracket — a shape the scaffolding parser could not read, so the row was drawn as somebody's
+  words. A preview that opens like scaffolding is now read as scaffolding: the list shows its first
+  sentence as a system line ("Background process … completed normally (exit code 0)", "The active
+  model for this chat has changed to …").
+
 - **Bot-to-bot traffic no longer bumps an unread count.** A message from another bot counted
   as unread mail, so a bot that talks to its teammates produced a chat list, a folder total
   and a home-screen widget permanently announcing work nobody had to look at — and opening

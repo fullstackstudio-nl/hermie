@@ -123,3 +123,40 @@ describe('choosing between the two', () => {
     expect(chatRowPreview(undefined, modelSwitchMarkerText)).toMatchObject({ system: true })
   })
 })
+
+describe('previewFromGatewayText on a row the gateway cut for the list', () => {
+  const processFull =
+    '[IMPORTANT: Background process proc_38ad4d983751 completed normally (exit code 0). Command: /usr/local/lib/tool --flag]'
+  const processCut =
+    '[IMPORTANT: Background process proc_38ad4d983751 completed normally (exit code 0). Command: /usr/local/lib/too...'
+  const systemCut =
+    '[System: The active model for this chat has changed to gpt-6-astra via /model. Sessions that were open keep t...'
+
+  it('reads a single-line background-process wrapper as a system line', () => {
+    expect(previewFromGatewayText(processFull)).toEqual({
+      text: 'Background process proc_38ad4d983751 completed normally (exit code 0)',
+      system: true
+    })
+  })
+
+  it('reads the same wrapper after the gateway cut its bracket off', () => {
+    expect(previewFromGatewayText(processCut)).toEqual({
+      text: 'Background process proc_38ad4d983751 completed normally (exit code 0)',
+      system: true
+    })
+  })
+
+  it('reads a cut model-switch note down to its first sentence', () => {
+    expect(previewFromGatewayText(systemCut)).toEqual({
+      text: 'The active model for this chat has changed to gpt-6-astra via /model',
+      system: true
+    })
+  })
+
+  it('leaves a message that merely starts with a bracket alone', () => {
+    expect(previewFromGatewayText('[the plan](https://example.test) is ready')).toEqual({
+      text: '[the plan](https://example.test) is ready',
+      system: false
+    })
+  })
+})
