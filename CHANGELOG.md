@@ -88,6 +88,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Setting a password from an invitation no longer reports "Sign-in failed".** The two things
+  that can succeed on the built-in provider's own pages — choosing a first password from an
+  invitation link, and enrolling an authenticator — both ended on the error page. The sentence
+  under the heading said the password was set; the heading over it said the sign-in had failed.
+  Somebody who had just done exactly what they were asked read the heading, believed it, and had
+  no reason to try the password. Both now have a page of their own, headed with what happened,
+  and a link back to the application on this origin.
+
 - **Hermie Web behind a reverse proxy keeps its port.** nginx's `$host` is the name with the
   port stripped off it, so the block every deployment guide prints told the service it was on
   `example.com` while the browser was on `example.com:9443`. Hermie Web builds three addresses

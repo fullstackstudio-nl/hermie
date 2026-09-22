@@ -282,7 +282,16 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
     },
     // The team's own name where one is set, so the sign-in page a reader lands
     // on says what they think they are signing in to rather than what we call it.
-    issuerName: () => admin.branding.name || 'Hermie Web'
+    issuerName: () => admin.branding.name || 'Hermie Web',
+    /*
+      Where the provider's own pages send somebody onward.
+
+      The root of this origin, which is where the app is served from — NOT
+      `--login-return`. That one is a path on the gateway's vhost which the
+      gateway redirects back here, so resolving it against this origin would be
+      a link to something this service does not answer for.
+    */
+    appPath: '/'
   })
 
   const adminRouter = new AdminRouter({

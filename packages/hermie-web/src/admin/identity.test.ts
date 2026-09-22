@@ -267,9 +267,65 @@ describe('accounts', () => {
     expect(await (await submit('short')).text()).toContain('at least twelve characters')
     expect(await (await submit('a long enough password', 'a different one')).text()).toContain('did not match')
 
-    expect((await submit('katherine’s own password')).status).toBe(200)
+    const done = await submit('katherine’s own password')
+    const confirmation = await done.text()
+
+    expect(done.status).toBe(200)
+    /*
+      The page that reports it says so.
+
+      This used to be the ERROR page: the sentence under the heading said the
+      password was set and the heading above it read "Sign-in failed", so
+      somebody who had just done exactly what they were asked was told they had
+      failed. The heading is the assertion, and the absence of the other one is
+      the regression guard.
+    */
+    expect(confirmation).toContain('<h1>Your password is set</h1>')
+    expect(confirmation).not.toContain('Sign-in failed')
+    // And a way onward, on this origin, named after the deployment.
+    expect(confirmation).toContain('<a href="/">Back to Hermie Web</a>')
+
     // The link is spent: it cannot set a second password.
     expect(await (await submit('somebody else’s password')).text()).toContain('has been used or has expired')
+  })
+
+  it('says the password is set in the language the reader’s browser asked for', async () => {
+    const created = await post(await signInToGateway(ADA), '/admin/oidc/user', {
+      do: 'create',
+      username: 'mary',
+      role: 'user'
+    })
+    const link = (/<code>([^<]*\/oidc\/invite\?token=[^<]*)<\/code>/.exec(created.page)?.[1] ?? '').replace(
+      /&amp;/g,
+      '&'
+    )
+    const page = await fetch(link, { headers: { 'accept-language': 'nl' } })
+    const body = await page.text()
+    const csrf = decodeURIComponent(/hermie_oidc_csrf=([^;,]*)/.exec(page.headers.get('set-cookie') ?? '')?.[1] ?? '')
+    const token = /name="token" value="([^"]*)"/.exec(body)?.[1] ?? ''
+
+    expect(body).toContain('<html lang="nl">')
+
+    const done = await fetch(`${web.url}/oidc/invite`, {
+      method: 'POST',
+      headers: {
+        cookie: `hermie_oidc_csrf=${encodeURIComponent(csrf)}`,
+        'content-type': 'application/x-www-form-urlencoded',
+        'accept-language': 'nl'
+      },
+      body: new URLSearchParams({
+        csrf,
+        token,
+        password: 'mary’s own long password',
+        confirm: 'mary’s own long password'
+      }).toString()
+    })
+    const confirmation = await done.text()
+
+    expect(confirmation).toContain('<html lang="nl">')
+    expect(confirmation).toContain('Je wachtwoord staat ingesteld')
+    expect(confirmation).toContain('Terug naar Hermie Web')
+    expect(confirmation).not.toContain('Inloggen mislukt')
   })
 
   it('refuses a duplicate username and a malformed one', async () => {

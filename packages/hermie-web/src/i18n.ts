@@ -440,10 +440,27 @@ export interface WebStrings {
     error: {
       title: string
       inviteSpent: string
-      passwordSet: string
       enrolmentGone: string
       codeNotRight: string
-      twoFactorOn: string
+    }
+    /**
+     * The two pages that are a SUCCESS, and used not to look like one.
+     *
+     * Setting a password and enrolling an authenticator both ended on the error
+     * page: the sentence underneath said the password was set, and the heading
+     * above it said "Sign-in failed". Somebody who had just done exactly what
+     * they were asked read the heading, believed it, and went looking for what
+     * they had got wrong. A page that reports a success needs its own heading,
+     * and a way onward — which is the link back to the application, because the
+     * provider has nowhere of its own to send anybody.
+     */
+    done: {
+      passwordSetTitle: string
+      passwordSetDetail: string
+      twoFactorTitle: string
+      twoFactorDetail: string
+      /** The link onward: the application this issuer signs people in to. */
+      back: (issuerName: string) => string
     }
     signedOut: {
       title: string
@@ -782,10 +799,15 @@ const EN: WebStrings = {
     error: {
       title: 'Sign-in failed',
       inviteSpent: 'That invitation has been used or has expired.',
-      passwordSet: 'Your password is set. Go back to the application and sign in with it.',
       enrolmentGone: 'That enrolment is no longer in progress.',
-      codeNotRight: 'That code was not right. Go back and try the next one the app shows.',
-      twoFactorOn: 'Two-factor is on for this account. Go back to the application and sign in.'
+      codeNotRight: 'That code was not right. Go back and try the next one the app shows.'
+    },
+    done: {
+      passwordSetTitle: 'Your password is set',
+      passwordSetDetail: 'That invitation has been used up. Sign in with the password you just chose.',
+      twoFactorTitle: 'Two-factor is on',
+      twoFactorDetail: 'This account will ask for a code from your authenticator at every sign-in.',
+      back: issuerName => `Back to ${issuerName}`
     },
     signedOut: {
       title: 'Signed out',
@@ -1138,10 +1160,15 @@ const NL: WebCatalogue<WebStrings> = {
     error: {
       title: 'Inloggen mislukt',
       inviteSpent: 'Die uitnodiging is al gebruikt of verlopen.',
-      passwordSet: 'Je wachtwoord staat ingesteld. Ga terug naar de applicatie en log ermee in.',
       enrolmentGone: 'Die aanmelding loopt niet meer.',
-      codeNotRight: 'Die code klopte niet. Ga terug en probeer de volgende die de app laat zien.',
-      twoFactorOn: 'Tweefactor staat aan voor dit account. Ga terug naar de applicatie en log in.'
+      codeNotRight: 'Die code klopte niet. Ga terug en probeer de volgende die de app laat zien.'
+    },
+    done: {
+      passwordSetTitle: 'Je wachtwoord staat ingesteld',
+      passwordSetDetail: 'Die uitnodiging is nu opgebruikt. Log in met het wachtwoord dat je net gekozen hebt.',
+      twoFactorTitle: 'Tweefactor staat aan',
+      twoFactorDetail: 'Dit account vraagt bij elke login om een code uit je authenticator.',
+      back: issuerName => `Terug naar ${issuerName}`
     },
     signedOut: {
       title: 'Uitgelogd',
@@ -1488,10 +1515,16 @@ const DE: WebCatalogue<WebStrings> = {
     error: {
       title: 'Anmeldung fehlgeschlagen',
       inviteSpent: 'Diese Einladung wurde bereits benutzt oder ist abgelaufen.',
-      passwordSet: 'Dein Passwort ist gesetzt. Geh zurück zur Anwendung und melde dich damit an.',
       enrolmentGone: 'Diese Einrichtung läuft nicht mehr.',
-      codeNotRight: 'Dieser Code war nicht richtig. Geh zurück und probier den nächsten, den die App zeigt.',
-      twoFactorOn: 'Zwei-Faktor ist für dieses Konto an. Geh zurück zur Anwendung und melde dich an.'
+      codeNotRight: 'Dieser Code war nicht richtig. Geh zurück und probier den nächsten, den die App zeigt.'
+    },
+    done: {
+      passwordSetTitle: 'Dein Passwort ist gesetzt',
+      passwordSetDetail:
+        'Diese Einladung ist damit verbraucht. Melde dich mit dem Passwort an, das du gerade gewählt hast.',
+      twoFactorTitle: 'Zwei-Faktor ist an',
+      twoFactorDetail: 'Dieses Konto fragt bei jeder Anmeldung nach einem Code aus deiner Authenticator-App.',
+      back: issuerName => `Zurück zu ${issuerName}`
     },
     signedOut: {
       title: 'Abgemeldet',

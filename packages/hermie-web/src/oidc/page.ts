@@ -121,6 +121,39 @@ export function oidcErrorPage(input: { code: string; detail: string; locale: Web
 `
 }
 
+/**
+ * The page at the end of something that WORKED.
+ *
+ * It exists because the two successes this provider has — a password chosen from
+ * an invitation, an authenticator enrolled — were both drawn by
+ * `oidcErrorPage`. The sentence under the heading said the password was set and
+ * the heading over it said "Sign-in failed", so the reader who had just done
+ * exactly what they were asked was told they had failed.
+ *
+ * `back` is a path on THIS origin rather than an absolute address, and
+ * deliberately: the reader is already here, so a relative link cannot be pointed
+ * at the wrong port by a proxy header. It is not `--login-return` either —
+ * that one is a path on the GATEWAY's vhost, which the gateway redirects back
+ * here, and resolving it against this origin would link to something this
+ * service does not serve.
+ */
+export function oidcDonePage(input: {
+  title: string
+  detail: string
+  issuerName: string
+  back: string
+  locale: WebLocale
+  strings: WebStrings
+}): string {
+  return `${head(input.locale, input.title)}<main>
+  <h1>${escapeHtml(input.title)}</h1>
+  <p>${escapeHtml(input.detail)}</p>
+  <p><a href="${escapeHtml(input.back)}">${input.strings.oidc.done.back(escapeHtml(input.issuerName))}</a></p>
+</main>
+</html>
+`
+}
+
 /** The page at the end of `/oidc/logout` when no redirect was asked for. */
 export function signedOutPage(input: { issuerName: string; locale: WebLocale; strings: WebStrings }): string {
   const text = input.strings.oidc.signedOut

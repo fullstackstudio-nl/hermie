@@ -34,7 +34,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { CSRF_FIELD, cookieOf, newToken, setCookie, tokensMatch } from '../admin/session'
 import { webCopy, webStrings, type WebStrings } from '../i18n'
 import { isSecureRequest } from '../proxy'
-import { enrolPage, invitePage, oidcErrorPage, signInPage, signedOutPage } from './page'
+import { enrolPage, invitePage, oidcDonePage, oidcErrorPage, signInPage, signedOutPage } from './page'
 import {
   LOGIN_SESSION_TTL_SECONDS,
   type AuthorizeError,
@@ -73,6 +73,14 @@ export interface OidcRouterOptions {
   write: (state: OidcState) => Promise<void>
   /** What the sign-in page calls this deployment. The branding name, else "Hermie Web". */
   issuerName: () => string
+  /**
+   * Where "back to the application" goes: a path on this origin.
+   *
+   * The root, because that is where this service serves the app. Named rather
+   * than written into the page so the one place that knows the answer is the
+   * server that does the serving.
+   */
+  appPath: string
   now?: () => number
 }
 
@@ -749,7 +757,10 @@ export class OidcRouter {
       return { ...rest, password: hashPassword(password) }
     })
 
-    this.failure(request, response, 200, 'ok', strings => strings.oidc.error.passwordSet)
+    this.done(request, response, strings => ({
+      title: strings.oidc.done.passwordSetTitle,
+      detail: strings.oidc.done.passwordSetDetail
+    }))
   }
 
   private userForInvite(token: string): OidcUser | null {
@@ -845,7 +856,10 @@ export class OidcRouter {
     }))
     this.enrolments.delete(session)
 
-    this.failure(request, response, 200, 'ok', strings => strings.oidc.error.twoFactorOn)
+    this.done(request, response, strings => ({
+      title: strings.oidc.done.twoFactorTitle,
+      detail: strings.oidc.done.twoFactorDetail
+    }))
   }
 
   // ---- shared ----
@@ -892,6 +906,32 @@ export class OidcRouter {
       ...(existing ? { 'set-cookie': existing as string | string[] } : {})
     })
     response.end(body)
+  }
+
+  /**
+   * The page at the end of something that worked, in this request's language.
+   *
+   * A 200 and a heading of its own, where both of these used to be a 200 on the
+   * page headed "Sign-in failed". The status was never the problem — a browser
+   * does not draw it — the heading was.
+   */
+  private done(
+    request: IncomingMessage,
+    response: ServerResponse,
+    copyFor: (strings: WebStrings) => { title: string; detail: string }
+  ): void {
+    const copy = webCopy(request)
+
+    this.html(
+      response,
+      200,
+      oidcDonePage({
+        ...copy,
+        ...copyFor(copy.strings),
+        issuerName: this.options.issuerName(),
+        back: this.options.appPath
+      })
+    )
   }
 
   /**
