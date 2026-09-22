@@ -51,17 +51,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (the gateway you are on and how many you have, the default verbosity, Dark · English), and each
   opening a page of its own. Every page is a ROUTE in one stack now, so every one of them has
   exactly one back button, labelled with the page it returns to, and Escape and Android's back
-  both walk one level per press. A wide window shows the list and the open page side by side. The
-  bot-name order moved from Appearance to Chats & messages, the theme editor is a page under
-  Appearance, and the global voice settings — speaking rate, dictation language, confirm before
-  sending, stop when the app closes — are reachable outside a chat's options sheet for the first
-  time. Development builds keep the connection test and the component gallery, under Advanced.
+  both walk one level per press. The bot-name order moved from Appearance to Chats & messages, the
+  theme editor is a page under Appearance, and the global voice settings — speaking rate, dictation
+  language, confirm before sending, stop when the app closes — are reachable outside a chat's
+  options sheet for the first time. Development builds keep the connection test and the component
+  gallery, under Advanced.
 
-### Removed
-
-- **The gateway's logs page (HERM-103).** Settings no longer has a "gateway's logs" row, and the
-  client no longer calls `GET /api/logs`. See `docs/platform-notes.md` for the surface it used to read.
-### Changed
+- **The phone has a tab bar (HERM-75, HERM-101, HERM-102, HERM-105).** Chats, Activity, Crons and
+  Settings are four tabs along the bottom of the window rather than three pages pushed over the
+  chat list, so each of them is a root you can reach from anywhere and none of them carries a back
+  button any more — the stray "‹ Bots" is gone, and so is the tab strip that used to sit inside the
+  chat list. The platform's own title bar is switched off everywhere: every page draws the app's
+  glass header, which means one title and one back control per page instead of two, and that back
+  now names the page it actually returns to. A chat takes the whole window, without the bar. A cron
+  card in a transcript opens that cron over the chat it was in, and Back returns to the chat.
 
 - **Activity, Crons and a bot's conversations now share the app's one page chrome.** Each of these
   pages draws the same translucent glass header `PageChrome` introduced for Settings, with a single
@@ -70,7 +73,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bespoke back buttons for it. Activity's sticky "Today" divider is drawn in the page's own glass
   material instead of a flat fill, so it no longer reads as an opaque band across the screen.
 
+### Removed
+
+- **The gateway's logs page (HERM-103).** Settings no longer has a "gateway's logs" row, and the
+  client no longer calls `GET /api/logs`. See `docs/platform-notes.md` for the surface it used to read.
+
 ### Fixed
+
+- **The Add gateway wizard is no longer drawn under the glass header.** Its first step sat behind
+  the header, which took the taps meant for the address field.
+
+- **An MCP server's test result no longer follows you to another gateway or another bot.** Results
+  were remembered by the server's name alone, so a `files` or a `github` configured on two gateways
+  shared one answer and a row could show the other machine's "needs authorisation" mark. They are
+  now remembered per gateway and per bot, and forgotten when you switch or sign out.
 
 - **A paused cron no longer reads "NEXT 14h ago".** The list row's NEXT/LAST label is now a single
   helper: a paused cron always shows when it last ran (or nothing at all if it never has), and an
