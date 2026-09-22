@@ -25,6 +25,7 @@ import { useEscapeKey } from '../../ui/useEscapeKey'
 import { useHardwareBack } from '../../ui/useHardwareBack'
 import { FORM_MAX_WIDTH } from '../../ui/tokens'
 import { ConnectorsScreen, connectorStrings } from '../connectors'
+import { KanbanScreen, kanbanStrings } from '../kanban'
 import { LogsScreen, logStrings } from '../logs'
 import { McpScreen, mcpStrings } from '../mcp'
 import { NewBotFlow, profileStrings } from '../profiles'
@@ -79,6 +80,7 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
   const [showMcp, setShowMcp] = useState(false)
   const [showConnectors, setShowConnectors] = useState(false)
   const [showLogs, setShowLogs] = useState(false)
+  const [showBoards, setShowBoards] = useState(false)
   const [showNewBot, setShowNewBot] = useState(false)
 
   // Escape goes back ONE level: out of a screen Settings opened and into
@@ -94,6 +96,7 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
       setShowMcp(false)
       setShowConnectors(false)
       setShowLogs(false)
+      setShowBoards(false)
     },
     showConnectionTest ||
       showGallery ||
@@ -103,7 +106,8 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
       showSkills ||
       showMcp ||
       showConnectors ||
-      showLogs
+      showLogs ||
+      showBoards
   )
 
   // The same one level for Android's back button, which is not Escape and has
@@ -122,6 +126,7 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
       setShowMcp(false)
       setShowConnectors(false)
       setShowLogs(false)
+      setShowBoards(false)
     },
     showConnectionTest ||
       showGallery ||
@@ -131,7 +136,8 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
       showSkills ||
       showMcp ||
       showConnectors ||
-      showLogs
+      showLogs ||
+      showBoards
   )
 
   // A screen opened from here REPLACES Settings rather than pushing onto a
@@ -172,6 +178,10 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
 
   if (showLogs) {
     return <LogsScreen onClose={() => setShowLogs(false)} />
+  }
+
+  if (showBoards) {
+    return <KanbanScreen onClose={() => setShowBoards(false)} />
   }
 
   const token = config?.authMode === 'session_token'
@@ -397,6 +407,11 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
             detail={connectorStrings.settings.hint}
             onPress={() => setShowConnectors(true)}
             title={connectorStrings.settings.row}
+          />
+          <InsetButtonRow
+            detail={kanbanStrings.settings.hint}
+            onPress={() => setShowBoards(true)}
+            title={kanbanStrings.settings.row}
           />
         </InsetGroup>
 

@@ -664,6 +664,16 @@ export interface FakeGatewayState {
    * with 4031.
    */
   connectorsUnavailable: boolean
+  /**
+   * The Kanban plugin's boards, or `null` when the plugin is not mounted.
+   *
+   * `null` is the state worth having: `web_server_dashboard.py` only mounts the
+   * router for a plugin that is bundled or enabled, so a gateway without it
+   * 404s the PREFIX and every route with it.
+   */
+  kanbanBoards: FakeKanbanBoard[] | null
+  /** Completed `POST /dispatch` nudges, so a test can prove a write kicked one. */
+  kanbanDispatches: number
   /** Live connection operations by `op_id`. */
   connectorOps: Map<string, FakeConnectorOp>
   /**
@@ -1231,6 +1241,41 @@ function nowSeconds(): number {
 function s256(verifier: string): string {
   return createHash('sha256').update(verifier, 'ascii').digest('base64url')
 }
+
+/**
+ * One Kanban card, as `hermes_cli/kanban_db.py::Task` shapes it.
+ *
+ * Only the columns a client reads are modelled; upstream's dataclass carries
+ * about forty. `parents` is here because it is what makes a `ready` move
+ * REFUSABLE, which is the behaviour worth pinning.
+ */
+export interface FakeKanbanTask {
+  id: string
+  title: string
+  body: string | null
+  status: string
+  assignee: string | null
+  priority: number
+  /** Epoch SECONDS, as every timestamp on this router is. */
+  created_at: number
+  /** Cards that must be done or archived before this one may become ready. */
+  parents: string[]
+  comments: { id: number; author: string; body: string; created_at: number }[]
+}
+
+/** One board on disk: a slug, a display name and its own pile of cards. */
+export interface FakeKanbanBoard {
+  slug: string
+  name: string
+  description: string
+  tasks: FakeKanbanTask[]
+}
+
+/** `plugin_api.BOARD_COLUMNS` — fixed, server-owned, left to right. */
+const KANBAN_COLUMNS = ['triage', 'todo', 'scheduled', 'ready', 'running', 'blocked', 'review', 'done']
+
+/** `_apply_status` raises before anything else for this one. */
+const KANBAN_RUNNING_REFUSAL = "Cannot set status to 'running' directly; use the dispatcher/claim path"
 
 /** `hermes_cli/logs.py::LOG_FILES`' keys — the vocabulary `?file=` is looked up in. */
 const LOG_FILE_NAMES = new Set(['agent', 'errors', 'gateway', 'gui', 'desktop', 'mcp'])
@@ -2242,6 +2287,51 @@ function initialState(options: FakeGatewayOptions): FakeGatewayState {
       // Present as a NAME with nothing in it, which is the 200-with-no-lines case.
       ['errors', []]
     ]),
+    kanbanBoards: [
+      {
+        slug: 'default',
+        name: 'Default',
+        description: '',
+        tasks: [
+          {
+            id: 't_aa11bb22',
+            title: 'Write the release notes',
+            body: 'Pull them from the changelog.',
+            status: 'todo',
+            assignee: null,
+            priority: 0,
+            created_at: 1_760_000_000,
+            parents: [],
+            comments: [{ id: 1, author: 'writer', body: 'Started on this.', created_at: 1_760_000_100 }]
+          },
+          {
+            id: 't_cc33dd44',
+            title: 'Ship the build',
+            body: null,
+            status: 'todo',
+            assignee: 'writer',
+            priority: 2,
+            // Gated on the notes above, which is what makes a `ready` move refusable.
+            created_at: 1_760_000_050,
+            parents: ['t_aa11bb22'],
+            comments: []
+          },
+          {
+            id: 't_ee55ff66',
+            title: 'Tidy the worktrees',
+            body: null,
+            status: 'running',
+            assignee: 'writer',
+            priority: 0,
+            created_at: 1_760_000_075,
+            parents: [],
+            comments: []
+          }
+        ]
+      },
+      { slug: 'sprint', name: 'Sprint', description: 'This fortnight', tasks: [] }
+    ],
+    kanbanDispatches: 0,
     connectorsUnavailable: false,
     connectorOps: new Map<string, FakeConnectorOp>(),
     connectorSeq: 0,
@@ -2916,6 +3006,26 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     }
 
     /**
+     * The Kanban plugin's own router — `plugins/kanban/dashboard/plugin_api.py`,
+     * mounted at `/api/plugins/kanban` by `web_server_dashboard.py`.
+     *
+     * Mounted ONLY when the plugin is bundled or enabled, which is why a null
+     * board list 404s the whole prefix rather than answering an empty board:
+     * there is no router to answer with.
+     */
+    if (path.startsWith('/api/plugins/kanban')) {
+      if (state.kanbanBoards === null) {
+        json(res, 404, { detail: 'Not Found' })
+
+        return
+      }
+
+      await handleKanban(req, res, path.slice('/api/plugins/kanban'.length), method, url.searchParams)
+
+      return
+    }
+
+    /**
      * `GET /api/logs` — `hermes_cli/web_routers/status.py::get_logs`.
      *
      * The ONLY way a client reads the gateway's logs. There is no socket
@@ -3472,6 +3582,245 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
    * (no `{job: …}` wrapper), `/runs` answers `{runs, limit}` of session rows,
    * and `DELETE` answers `{ok: true}`.
    */
+  /**
+   * The Kanban plugin's routes, as `plugins/kanban/dashboard/plugin_api.py`
+   * answers them.
+   *
+   * Four behaviours here are the ones a client gets wrong, and each exists so a
+   * test can hold the app to them:
+   *
+   *  - a card's column IS its `status`, and the columns are a fixed list;
+   *  - `POST /tasks` has NO `status` field — the server derives `triage` or
+   *    `ready` — so landing anywhere else takes a second call;
+   *  - `running` is refused outright with a 400, and a `ready` whose parents
+   *    are not done is a 409 whose `detail` NAMES them;
+   *  - archiving is `status: 'archived'`, which is recoverable, while
+   *    `DELETE /tasks/{id}` is not.
+   */
+  async function handleKanban(
+    req: IncomingMessage,
+    res: ServerResponse,
+    path: string,
+    method: string,
+    query: URLSearchParams
+  ): Promise<void> {
+    const boards = state.kanbanBoards ?? []
+    const slug = (query.get('board') ?? '').trim() || boards[0]?.slug || 'default'
+    const board = boards.find(entry => entry.slug === slug)
+
+    if (path === '/boards' && method === 'GET') {
+      json(res, 200, {
+        boards: boards.map(entry => ({
+          slug: entry.slug,
+          name: entry.name,
+          description: entry.description,
+          is_current: entry.slug === boards[0]?.slug,
+          // `list_boards` counts everything that is not archived.
+          total: entry.tasks.filter(task => task.status !== 'archived').length
+        })),
+        current: boards[0]?.slug ?? ''
+      })
+
+      return
+    }
+
+    if (!board) {
+      json(res, 404, { detail: `Unknown board: ${slug}` })
+
+      return
+    }
+
+    if (path === '/board' && method === 'GET') {
+      const withArchived = query.get('include_archived') === 'true'
+      const columns = withArchived ? [...KANBAN_COLUMNS, 'archived'] : KANBAN_COLUMNS
+
+      json(res, 200, {
+        columns: columns.map(name => ({
+          name,
+          // `ORDER BY priority DESC, created_at ASC` — the only order there is.
+          tasks: board.tasks
+            .filter(task => task.status === name)
+            .sort((a, b) => b.priority - a.priority || a.created_at - b.created_at)
+            .map(kanbanTaskView)
+        })),
+        tenants: [],
+        assignees: [...new Set(board.tasks.map(task => task.assignee).filter(Boolean))],
+        latest_event_id: 0,
+        now: Math.floor(Date.now() / 1000)
+      })
+
+      return
+    }
+
+    if (path === '/dispatch' && method === 'POST') {
+      state.kanbanDispatches += 1
+      json(res, 200, { spawned: [] })
+
+      return
+    }
+
+    if (path === '/tasks' && method === 'POST') {
+      const body = await readBody(req)
+      const title = typeof body.title === 'string' ? body.title.trim() : ''
+
+      if (!title) {
+        json(res, 422, { detail: 'title is required' })
+
+        return
+      }
+
+      const made: FakeKanbanTask = {
+        id: `t_${(board.tasks.length + 1).toString(16).padStart(8, '0')}`,
+        title,
+        body: typeof body.body === 'string' ? body.body : null,
+        // The whole of create's say over the landing column. There is no
+        // `status` on `CreateTaskBody`, so anything else is a second call.
+        status: body.triage === true ? 'triage' : 'ready',
+        assignee: typeof body.assignee === 'string' ? body.assignee : null,
+        priority: typeof body.priority === 'number' ? body.priority : 0,
+        created_at: Math.floor(Date.now() / 1000),
+        parents: [],
+        comments: []
+      }
+
+      board.tasks.push(made)
+      json(res, 200, { task: kanbanTaskView(made) })
+
+      return
+    }
+
+    const taskMatch = /^\/tasks\/([^/]+)(\/[a-z]+)?$/u.exec(path)
+
+    if (!taskMatch) {
+      json(res, 404, { detail: 'Not Found' })
+
+      return
+    }
+
+    const task = board.tasks.find(entry => entry.id === decodeURIComponent(taskMatch[1] as string))
+
+    if (!task) {
+      // A 404 WITH a detail: the router answering about one card, which is not
+      // the same as the plugin being absent.
+      json(res, 404, { detail: 'task not found' })
+
+      return
+    }
+
+    if (taskMatch[2] === '/comments' && method === 'POST') {
+      const body = await readBody(req)
+      const text = typeof body.body === 'string' ? body.body.trim() : ''
+
+      if (!text) {
+        json(res, 400, { detail: 'comment body is required' })
+
+        return
+      }
+
+      task.comments.push({
+        id: task.comments.length + 1,
+        // Defaulted server-side, which is why a client that cares sends its own.
+        author: typeof body.author === 'string' && body.author ? body.author : 'dashboard',
+        body: text,
+        created_at: Math.floor(Date.now() / 1000)
+      })
+
+      // The comment it made is NOT returned; a caller has to re-read the task.
+      json(res, 200, { ok: true })
+
+      return
+    }
+
+    if (taskMatch[2] === undefined && method === 'GET') {
+      json(res, 200, {
+        task: kanbanTaskView(task),
+        comments: task.comments,
+        events: [],
+        links: { parents: task.parents, children: [] },
+        runs: []
+      })
+
+      return
+    }
+
+    if (taskMatch[2] === undefined && method === 'PATCH') {
+      const body = await readBody(req)
+      const status = typeof body.status === 'string' ? body.status : null
+
+      if (status === 'running') {
+        json(res, 400, { detail: KANBAN_RUNNING_REFUSAL })
+
+        return
+      }
+
+      if (status && status !== 'archived' && !KANBAN_COLUMNS.includes(status)) {
+        json(res, 400, { detail: `unknown status: ${status}` })
+
+        return
+      }
+
+      if (status === 'ready') {
+        const blocking = task.parents
+          .map(id => board.tasks.find(entry => entry.id === id))
+          .filter(parent => parent && parent.status !== 'done' && parent.status !== 'archived')
+
+        if (blocking.length) {
+          const named = blocking
+            .map(parent => `'${parent?.title}' (${parent?.id}, status=${parent?.status})`)
+            .join(', ')
+
+          // The sentence the app shows verbatim: nothing on the client side can
+          // work out which parent is in the way.
+          json(res, 409, { detail: `Cannot move to 'ready': blocked by parent(s) not done — ${named}` })
+
+          return
+        }
+      }
+
+      if (status) {
+        task.status = status
+      }
+
+      if (typeof body.title === 'string') {
+        task.title = body.title
+      }
+
+      if (body.body === null || typeof body.body === 'string') {
+        task.body = body.body as string | null
+      }
+
+      if (typeof body.assignee === 'string') {
+        task.assignee = body.assignee
+      }
+
+      if (typeof body.priority === 'number') {
+        task.priority = body.priority
+      }
+
+      json(res, 200, { task: kanbanTaskView(task) })
+
+      return
+    }
+
+    json(res, 404, { detail: 'Not Found' })
+  }
+
+  /** One card on the wire, with the three keys the board route derives. */
+  function kanbanTaskView(task: FakeKanbanTask): Record<string, unknown> {
+    return {
+      id: task.id,
+      title: task.title,
+      body: task.body,
+      status: task.status,
+      assignee: task.assignee,
+      priority: task.priority,
+      created_at: task.created_at,
+      latest_summary: null,
+      comment_count: task.comments.length,
+      link_counts: { parents: task.parents.length, children: 0 }
+    }
+  }
+
   async function handleCron(
     req: IncomingMessage,
     res: ServerResponse,

@@ -2460,6 +2460,192 @@ describe('skills.manage over the socket — methods_tools.py::_SKILLS_ACTIONS', 
  * than an equality, an unknown component is a refusal, and the 500-line ceiling
  * is applied in silence.
  */
+/**
+ * The Kanban plugin's router — `plugins/kanban/dashboard/plugin_api.py`.
+ *
+ * Kanban is a PLUGIN and all of it is REST: there is no socket method for any
+ * of it, the gateway's `/kanban` slash command answers prose, and `ui_meta` is
+ * a per-profile blob with no list semantics. So a client speaks the same
+ * `/api/plugins/kanban/*` the desktop plugin does, and these cases pin the
+ * parts of it that do not behave like a board app.
+ */
+describe('/api/plugins/kanban — plugin_api.py', () => {
+  const call = async (
+    path: string,
+    init?: { method?: string; body?: unknown }
+  ): Promise<{ status: number; body: Record<string, unknown> }> => {
+    const response = await fetch(`${gateway.url}/api/plugins/kanban${path}`, {
+      method: init?.method ?? 'GET',
+      ...(init?.body === undefined
+        ? {}
+        : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(init.body) })
+    })
+
+    return { status: response.status, body: (await response.json()) as Record<string, unknown> }
+  }
+
+  it('lists the boards on disk with their card counts', async () => {
+    const { body } = await call('/boards')
+    const boards = body.boards as Record<string, unknown>[]
+
+    expect(boards.length).toBeGreaterThan(0)
+    expect(keysOf(boards[0])).toEqual(['description', 'is_current', 'name', 'slug', 'total'])
+  })
+
+  /**
+   * Columns are a server-owned CONSTANT and a card's column is its `status`.
+   * There is no column id, no create-column and no reorder-column anywhere in
+   * the router.
+   */
+  it('answers the fixed column list, in plugin_api’s own order', async () => {
+    const { body } = await call('/board?board=default')
+    const names = (body.columns as Record<string, unknown>[]).map(column => column.name)
+
+    expect(names).toEqual(['triage', 'todo', 'scheduled', 'ready', 'running', 'blocked', 'review', 'done'])
+  })
+
+  /** `archived` is a filter toggle rather than a column, and only on request. */
+  it('appends archived only when it was asked for', async () => {
+    const { body } = await call('/board?board=default&include_archived=true')
+    const names = (body.columns as Record<string, unknown>[]).map(column => column.name)
+
+    expect(names[names.length - 1]).toBe('archived')
+  })
+
+  /**
+   * There is no `position`, `index` or rank on a card — the server sorts by
+   * `priority DESC, created_at ASC`, which is why the app says there is no
+   * order to drag within a column.
+   */
+  it('sorts a column by priority and then age, and carries no position at all', async () => {
+    const { body } = await call('/board?board=default')
+    const todo = (body.columns as Record<string, unknown>[]).find(column => column.name === 'todo')
+    const cards = todo?.tasks as Record<string, unknown>[]
+
+    expect(cards.map(card => card.title)).toEqual(['Ship the build', 'Write the release notes'])
+    expect(cards[0]).not.toHaveProperty('position')
+    expect(cards[0]).not.toHaveProperty('index')
+  })
+
+  /**
+   * `POST /tasks` has no `status` field at all. The server derives `triage` or
+   * `ready`, so a client that sent a status would have it ignored and the card
+   * would land in `ready`.
+   */
+  it('derives a new card’s column rather than taking one', async () => {
+    const ready = await call('/tasks?board=sprint', { method: 'POST', body: { title: 'a', status: 'done' } })
+    const triaged = await call('/tasks?board=sprint', { method: 'POST', body: { title: 'b', triage: true } })
+
+    expect((ready.body.task as Record<string, unknown>).status).toBe('ready')
+    expect((triaged.body.task as Record<string, unknown>).status).toBe('triage')
+  })
+
+  it('moves a card with a status and nothing else', async () => {
+    const { body } = await call('/tasks/t_aa11bb22?board=default', { method: 'PATCH', body: { status: 'done' } })
+
+    expect((body.task as Record<string, unknown>).status).toBe('done')
+  })
+
+  /** `_apply_status` raises for this one before it looks at anything else. */
+  it('refuses running outright, with the message upstream wrote', async () => {
+    const { status, body } = await call('/tasks/t_ee55ff66?board=default', {
+      method: 'PATCH',
+      body: { status: 'running' }
+    })
+
+    expect(status).toBe(400)
+    expect(String(body.detail)).toMatch(/Cannot set status to 'running' directly/u)
+  })
+
+  /**
+   * The refusal whose sentence a client cannot reconstruct: it NAMES the
+   * parent cards that are blocking, which is why the app shows `detail`
+   * verbatim rather than writing its own "could not move the card".
+   */
+  it('refuses a ready whose parents are not done, and names them', async () => {
+    // Its own gateway: the parent this case needs still open is a card another
+    // case in this file moves to `done`, and a suite whose outcome depends on
+    // which order it ran in is not pinning anything.
+    const live = await startFakeGateway({ port: 0 })
+
+    try {
+      const response = await fetch(`${live.url}/api/plugins/kanban/tasks/t_cc33dd44?board=default`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status: 'ready' })
+      })
+      const body = (await response.json()) as Record<string, unknown>
+
+      expect(response.status).toBe(409)
+      expect(String(body.detail)).toContain('blocked by parent(s) not done')
+      expect(String(body.detail)).toContain('t_aa11bb22')
+    } finally {
+      await live.close()
+    }
+  })
+
+  it('takes an archive as a status, which is recoverable', async () => {
+    const { body } = await call('/tasks/t_ee55ff66?board=default', { method: 'PATCH', body: { status: 'archived' } })
+
+    expect((body.task as Record<string, unknown>).status).toBe('archived')
+  })
+
+  /**
+   * The comment route answers `{ok: true}` and NOT the comment it made, so a
+   * client has to re-read the task to see it. `author` defaults to
+   * `"dashboard"`, which is why a client that is not the dashboard sends one.
+   */
+  it('takes a comment, answers ok, and hands it back only on the task', async () => {
+    const posted = await call('/tasks/t_aa11bb22/comments?board=default', {
+      method: 'POST',
+      body: { author: 'hermie', body: 'on it' }
+    })
+
+    expect(posted.body).toEqual({ ok: true })
+
+    const { body } = await call('/tasks/t_aa11bb22?board=default')
+    const comments = body.comments as Record<string, unknown>[]
+
+    expect(comments[comments.length - 1]).toMatchObject({ author: 'hermie', body: 'on it' })
+    expect(keysOf(comments[0])).toEqual(['author', 'body', 'created_at', 'id'])
+  })
+
+  it('answers a 404 WITH a detail for one card it does not have', async () => {
+    const { status, body } = await call('/tasks/t_nope?board=default')
+
+    expect(status).toBe(404)
+    expect(body.detail).toBe('task not found')
+  })
+
+  /**
+   * And the other 404: the PREFIX. `web_server_dashboard.py` mounts the router
+   * only for a plugin that is bundled or enabled, so a gateway without it has
+   * nothing to answer with — which is why the app offers an install command
+   * rather than an empty board.
+   */
+  it('404s the whole prefix, with no detail, when the plugin is not mounted', async () => {
+    const live = await startFakeGateway({ port: 0 })
+
+    try {
+      live.state.kanbanBoards = null
+
+      const response = await fetch(`${live.url}/api/plugins/kanban/boards`)
+
+      expect(response.status).toBe(404)
+    } finally {
+      await live.close()
+    }
+  })
+
+  it('counts a dispatch nudge, which is what keeps a new card off the 60s tick', async () => {
+    const before = gateway.state.kanbanDispatches
+
+    await call('/dispatch?board=default', { method: 'POST', body: {} })
+
+    expect(gateway.state.kanbanDispatches).toBe(before + 1)
+  })
+})
+
 describe('GET /api/logs — status.py::get_logs', () => {
   const read = async (query: string): Promise<{ status: number; body: Record<string, unknown> }> => {
     const response = await fetch(`${gateway.url}/api/logs${query}`)
