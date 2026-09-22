@@ -12,6 +12,89 @@ by Hermie Web (ADR-0015), and it is the only one nobody installs. Sections dated
 that talk about a native macOS target described a platform that no longer exists — they were removed
 rather than rewritten, and git history has them.
 
+## Three languages over one English source (2026-09-22)
+
+[docs/i18n.md](i18n.md) is how the layer works and how to add a language. This is what the platforms
+had to say about it.
+
+### A string read at import time is frozen in English for the life of the process
+
+`strings.x.y` resolves against the active locale on ACCESS, through a proxy. That makes the whole
+thing invisible to callers — right up until a caller is not a call:
+
+```ts
+// Read once, when the bundle loaded. Always English on a cold start.
+const APPEARANCE_OPTIONS = [{ value: 'system', label: strings.settings.themeOptions.system }]
+```
+
+The app had fourteen of these — segmented-control options, tab labels, `Record<PushType, string>`
+label maps, the browser tab titles in `RegularShell`. Every one of them looked correct in every test,
+because the tests ran in English. They are functions now, rebuilt per render.
+
+This is the failure mode to look for first when a screen keeps its old language after a switch, and
+it has no runtime symptom on a build that never switches.
+
+### `Object.keys` on a `Proxy` answers with the TARGET's keys
+
+The catalogue proxy only traps `get`. `ownKeys` and `getOwnPropertyDescriptor` fall through to the
+English table it wraps, which is what makes `Object.keys(strings.settings.themeOptions)` return the
+full English key set even while the values are coming back in Dutch. The completeness walkers depend
+on that: a proxy that also trapped `ownKeys` would only ever report the keys somebody had already
+translated, and the test would pass on an empty catalogue.
+
+### A language switch needs a re-render, and the cheap ways of getting one are both wrong
+
+Two obvious approaches, both rejected:
+
+- **`key={locale}` on the tree.** It repaints, and it remounts — so the reader who just used the
+  picker loses their scroll position and whatever sheet was open. The switch is in Settings, so that
+  is guaranteed to be visible.
+- **A context provider.** It only wakes the components that consume it. Every screen would have to
+  opt in, and the one that forgot would sit there in the old language.
+
+What works is `useSyncExternalStore` at the ROOT (`useFollowsLocale` in `App`): the root re-renders
+and React walks the tree under it in one pass.
+
+**With one exception, and it is the one that matters.** A `React.memo` whose props did not change is
+not walked, and a language switch changes nobody's props. The two boundaries that paint words —
+`TranscriptRowFrame` in `chat-ui/TranscriptList.tsx` and `BotRow` — would have gone on saying
+"Delivered", "Show more" and the row menu in the old language until something else moved them, which
+in an open conversation could be a long time. Both call `useFollowsLocale()` themselves. The cost is
+one listener per mounted row, on a virtualised list of a few dozen.
+
+The rule for anything added later: **a memoised component that reads `strings` subscribes itself.**
+Nothing enforces it, and the symptom is invisible until somebody switches language with that
+component on screen.
+
+### `Intl` is present on every engine this app runs on, and is still wrapped
+
+Hermes ships a full ICU on iOS and Android, and `Intl.PluralRules`, `Intl.NumberFormat`,
+`Intl.DateTimeFormat`, `Intl.RelativeTimeFormat` and `Intl.ListFormat` all answer. The browser build
+has them by definition. `i18n/format.ts` still wraps every call in a `try`, on the same argument
+`languageLabel` in `ChatOptionsSheet` already made: an old Android build without ICU should lose a
+thousands separator, not the screen.
+
+The device's own language comes from `Intl.DateTimeFormat().resolvedOptions().locale` on native and
+`navigator.language` in the browser — both already in `platform/device-facts`, so there is no new
+seam.
+
+### `@hermie/web` compiles to CommonJS, so `import.meta` is a compile error there
+
+`packages/hermie-web/tsconfig.json` sets `"module": "CommonJS"` because the emitted relative imports
+are extensionless and Node's ESM loader refuses those. A test in that package that reaches for
+`import.meta.url` to find its own directory gets TS1343; `__dirname` is the answer, and it works under
+vitest as well because Vite's SSR transform provides it.
+
+Worth writing down because it is now catchable: until this round nothing type-checked that package's
+tests at all, so the same mistake would have run fine under vitest and shipped.
+
+### `noUncheckedIndexedAccess` makes every `Record` read optional
+
+Turning the test typecheck on in `@hermie/web` surfaced two assertions of the shape
+`headers.authorization.startsWith(…)`. With `noUncheckedIndexedAccess` — which this repo has on —
+that property is `string | undefined`. `headers.authorization?.startsWith(…)` keeps the assertion
+honest: `undefined` is not `true`, so the test still fails when the header is missing.
+
 ## Hermie Web as a service layer, part 1 (2026-09-22)
 
 [ADR-0025](adr/0025-hermie-web-is-a-service-layer.md) is the decision; this is what a reader of the

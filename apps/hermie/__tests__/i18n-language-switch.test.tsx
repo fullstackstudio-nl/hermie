@@ -127,8 +127,10 @@ describe('a switch at the root', () => {
     })
 
     // Not a gap in the screen, and not a key: the sentence the app is written
-    // in. See `i18n/coverage.ts` for how one of these becomes a to-do.
-    expect(strings.settings.theme).toBe('Theme')
+    // in. `tabs.chats` is one the Dutch catalogue deliberately does not answer.
+    // See `i18n/coverage.ts` for how a key that SHOULD be translated and is not
+    // becomes a to-do instead.
+    expect(strings.tabs.chats).toBe('Chats')
   })
 })
 

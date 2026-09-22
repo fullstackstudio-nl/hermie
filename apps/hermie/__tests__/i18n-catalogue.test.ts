@@ -17,7 +17,7 @@
  *     was renamed in English.
  */
 import { resetActiveLocale, setActiveLocale } from '../src/i18n/active-locale'
-import { missingKeys, strayKeys, type Translation } from '../src/i18n/catalogue'
+import { catalogueFor, missingKeys, strayKeys, type Translation } from '../src/i18n/catalogue'
 import { strings } from '../src/i18n/strings'
 
 afterEach(() => {
@@ -28,9 +28,15 @@ describe('the localised proxy', () => {
   it('hands back the English sentence when the catalogue has no answer', () => {
     setActiveLocale('nl')
 
-    // `settings.theme` is deliberately not in the Dutch catalogue yet. A reader
-    // in Dutch sees the English word rather than a key or an empty row.
-    expect(strings.settings.theme).toBe('Theme')
+    // `tabs.chats` is one of the keys the Dutch catalogue deliberately does not
+    // answer — the word is the same in Dutch, and copying it would be a line
+    // somebody has to keep in step for nothing. Both halves are asserted, so
+    // this cannot start passing because somebody translated it after all: the
+    // catalogue really has no entry, AND the read really comes back English.
+    const dutchApp = catalogueFor('nl', 'app') as { tabs?: Record<string, unknown> }
+
+    expect(dutchApp.tabs?.chats).toBeUndefined()
+    expect(strings.tabs.chats).toBe('Chats')
   })
 
   it('hands back the catalogue value when it has one', () => {
@@ -54,11 +60,15 @@ describe('the localised proxy', () => {
   })
 
   it('keeps functions callable, and keeps their arguments', () => {
+    expect(strings.onboarding.stepCounter(2, 4)).toBe('Step 2 of 4')
+
     setActiveLocale('nl')
 
-    // Untranslated, so English — but still a function with its argument intact,
-    // which is the thing a naive string-only catalogue breaks.
-    expect(strings.onboarding.stepCounter(2, 4)).toBe('Step 2 of 4')
+    // The catalogue answered with a FUNCTION, and both arguments survived the
+    // swap. A catalogue that answered with a bare string would have type-erred;
+    // one that answered with a string through a cast would print a sentence
+    // with the numbers missing, which is what `usable` refuses.
+    expect(strings.onboarding.stepCounter(2, 4)).toBe('Stap 2 van 4')
   })
 
   it('walks nested branches without losing the path', () => {

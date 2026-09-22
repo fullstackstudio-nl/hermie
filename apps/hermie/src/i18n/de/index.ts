@@ -7,6 +7,28 @@
  * — Hermie is somebody's own bots on somebody's own machine.
  */
 import { app } from './app'
+import { botRename } from './bot-rename'
+import { chat } from './chat'
+import { connectors } from './connectors'
+import { cron } from './cron'
+import { kanban } from './kanban'
+import { logs } from './logs'
+import { mcp } from './mcp'
+import { memory } from './memory'
+import { profiles } from './profiles'
+import { skills } from './skills'
 
 /** Every tree, by the name `catalogue.ts` knows it as. */
-export const de = { app }
+export const de = {
+  app,
+  botRename,
+  chat,
+  connectors,
+  cron,
+  kanban,
+  logs,
+  mcp,
+  memory,
+  profiles,
+  skills
+}

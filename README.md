@@ -234,6 +234,18 @@ no third-party network call. The only address Hermie knows is the one you typed.
   is a Home Screen button, and _Bots needing input_ answers without opening
   Hermie at all — so it works from an automation while the phone is locked. Your
   bots are in Spotlight too: type a name, open the chat.
+- **Dutch and German, if you want them.** Hermie's interface is written in
+  English and stays that way by default. Settings → Appearance → **Language**
+  offers _Follow device_, English, Nederlands and Deutsch, and switching
+  repaints the app where you stand rather than restarting it. A device set to
+  Dutch or German gets that language on first launch; anything else gets
+  English. Numbers, dates, relative times and plurals follow the language you
+  picked. A sentence nobody has translated yet appears in English rather than as
+  a blank row — English is the source, not a fallback of last resort. The setup,
+  admin and sign-in pages Hermie Web serves negotiate the same three languages
+  from your browser's `Accept-Language`. Adding a fourth is
+  [documented](docs/i18n.md), and the glossary that keeps `gateway`, `Crons`,
+  `Boards`, `Skills` and `MCP` untranslated is there too.
 
 ## What you need
 
