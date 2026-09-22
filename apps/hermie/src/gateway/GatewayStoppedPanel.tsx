@@ -48,7 +48,7 @@ export function useGatewayStop(): GatewayStop | null {
     error: lastError,
     config,
     gateway,
-    // `?.` for the reason `GatewayNameLine` gives: several suites stand in for
+    // `?.` for the reason `GatewayTitle` gives: several suites stand in for
     // this context with the fields they care about, and a card that explains a
     // dead connection must not be the thing that crashes.
     gatewayCount: registry?.gateways.length ?? 1

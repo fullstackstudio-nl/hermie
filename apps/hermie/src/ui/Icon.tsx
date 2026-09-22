@@ -62,6 +62,8 @@ export type IconName =
   | 'pin'
   | 'grip'
   | 'mic'
+  | 'check'
+  | 'folder'
 
 export interface IconProps {
   name: IconName
@@ -241,6 +243,26 @@ function Glyph({ color, name, stroke }: { color: string; name: IconName; stroke:
      * budget at the 13pt marker size, which is a tighter one than the muted
      * bell next to it works to.
      */
+    /** The tick beside the row a list has already chosen. */
+    case 'check':
+      return <Line color={color} d="M5 12.8L9.6 17.2L19 7.2" stroke={stroke * 1.15} />
+
+    /**
+     * A folder, drawn as a tab and a body rather than as one outline.
+     *
+     * Two paths because a single rounded rectangle with a bump reads as a card
+     * with a defect at this size. The tab is a short lid over the left third,
+     * which is the shape every file manager has agreed on, and it is what keeps
+     * this mark from being confused with the `sidebar` rectangle next to it.
+     */
+    case 'folder':
+      return (
+        <>
+          <Line color={color} d="M3.5 7.5A1.6 1.6 0 015.1 5.9h3.6l1.9 2.2" stroke={stroke} />
+          <Rect fill="none" height={10.6} rx={2} stroke={color} strokeWidth={stroke} width={17} x={3.5} y={7.5} />
+        </>
+      )
+
     case 'pin':
       return (
         <>

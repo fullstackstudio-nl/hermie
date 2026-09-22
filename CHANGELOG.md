@@ -203,6 +203,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now gets what is LEFT of those forty-five seconds, so the app stops a moment before Shortcuts
   does rather than writing an answer nobody is still reading.
 
+- **A second gateway is now reachable from the chat list.** Adding one worked and getting to
+  it did not: the only way across was Settings → Gateways, and the chat header that might have
+  carried the switch already holds a name, a subtitle, a presence bead, a context ring and an
+  options button. Once there is more than one gateway the list's title becomes that gateway's
+  name with a chevron — the screen's own name moves to the small line under it — and pressing
+  it opens the list of gateways with the live one ticked. With one gateway nothing changes.
+  Settings → Gateways stays the place to add, rename, sign out of and remove one, and every
+  row that is not the live one now carries **Use this gateway** in words rather than relying
+  on a reader guessing that the row is a button.
+
 - **Renaming a bot renames the bot, not the profile.** The name field on a bot's sheet used to
   send `PATCH /api/profiles/{name}`, which on every profile but the default one renames the
   profile itself — its directory, its wrapper script, its service and the active-profile

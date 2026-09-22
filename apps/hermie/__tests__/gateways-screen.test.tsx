@@ -10,10 +10,13 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native'
 import type { ConnectionStatus, GatewayError } from '@hermie/gateway-client'
 
-import { GatewayNameLine } from '../src/features/bots/GatewayNameLine'
+import { GatewayTitle } from '../src/features/bots/GatewayTitle'
 import { GatewaysScreen } from '../src/features/settings/GatewaysScreen'
 import { GatewayProvider, useGateway } from '../src/gateway'
 import { withProviders } from './support/render'
+
+/** A decorative mark is hidden from accessibility, so a query has to say so. */
+const HIDDEN = { includeHiddenElements: true } as const
 
 const mockDisk = new Map<string, string>()
 const mockKeychain = new Map<string, string>()
@@ -175,6 +178,29 @@ describe('switching', () => {
     await waitFor(() => expect(read()?.gatewayId).toBe(mockGatewayB))
   })
 
+  /**
+   * The act is on the row, in words.
+   *
+   * The footer under the list has always said that a tap connects, and the owner
+   * still read the list as a list of things to look at. A word on the row is a
+   * control; a sentence under the list is a caption.
+   */
+  it('offers the switch as a labelled action on every row that is not live', async () => {
+    const read = await openList()
+
+    expect(screen.getByTestId(`gateway-use-${mockGatewayB}`)).toHaveTextContent('Use this gateway')
+    // Not on the live row: there the tick says the act has already happened.
+    expect(screen.queryByTestId(`gateway-use-${mockGatewayA}`)).toBeNull()
+    expect(screen.getByTestId(`gateway-tick-${mockGatewayA}`, HIDDEN)).toBeTruthy()
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId(`gateway-use-${mockGatewayB}`))
+    })
+
+    await waitFor(() => expect(registry().activeGatewayId).toBe(mockGatewayB))
+    await waitFor(() => expect(read()?.gatewayId).toBe(mockGatewayB))
+  })
+
   it('does nothing when the gateway is already the live one', async () => {
     await openList()
 
@@ -265,23 +291,48 @@ describe('one gateway’s own page', () => {
   })
 })
 
-describe('the name on the chat list', () => {
-  const renderLine = () =>
+describe('the chat list’s title, and the switch behind it', () => {
+  const renderTitle = () =>
     render(
       withProviders(
         <GatewayProvider>
-          <GatewayNameLine />
+          <GatewayTitle />
         </GatewayProvider>
       )
     )
 
-  it('names the gateway once there is more than one to tell apart', async () => {
-    renderLine()
+  it('becomes the gateway’s name once there is more than one to tell apart', async () => {
+    renderTitle()
 
-    await waitFor(() => expect(screen.getByTestId('bots-gateway-name')).toHaveTextContent('Home'))
+    await waitFor(() => expect(screen.getByTestId('bots-gateway-switch')).toHaveTextContent('Home'))
   })
 
-  it('says nothing when there is only one', async () => {
+  it('lists every gateway with the live one ticked, and switches on a tap', async () => {
+    renderTitle()
+
+    await waitFor(() => expect(screen.getByTestId('bots-gateway-switch')).toBeTruthy())
+    fireEvent.press(screen.getByTestId('bots-gateway-switch'))
+
+    await waitFor(() => expect(screen.getByTestId(`bots-gateway-choice-${mockGatewayA}`)).toBeTruthy())
+    expect(screen.getByTestId(`bots-gateway-choice-${mockGatewayB}`)).toBeTruthy()
+    /*
+      The tick is on the live one and on nothing else. Asked for with hidden
+      elements included, because a mark beside a label it repeats is hidden FROM
+      ACCESSIBILITY on purpose — the row says which one it is through
+      `aria-selected`, and `Icon` keeps itself out of the tree so it cannot say
+      it twice.
+    */
+    expect(screen.getByTestId(`bots-gateway-active-${mockGatewayA}`, HIDDEN)).toBeTruthy()
+    expect(screen.queryByTestId(`bots-gateway-active-${mockGatewayB}`, HIDDEN)).toBeNull()
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId(`bots-gateway-choice-${mockGatewayB}`))
+    })
+
+    await waitFor(() => expect(registry().activeGatewayId).toBe(mockGatewayB))
+  })
+
+  it('is the screen’s own name, with nothing to press, when there is one gateway', async () => {
     mockDisk.set(
       'hermie.gateways',
       JSON.stringify({
@@ -291,10 +342,11 @@ describe('the name on the chat list', () => {
       })
     )
 
-    renderLine()
+    renderTitle()
 
-    // A permanent label under the title, answering a question nobody has, is
-    // a row of the sidebar spent on nothing.
-    await waitFor(() => expect(screen.queryByTestId('bots-gateway-name')).toBeNull())
+    // A control whose menu has one row in it teaches the reader to stop pressing
+    // things.
+    await waitFor(() => expect(screen.getByText('Chats')).toBeTruthy())
+    expect(screen.queryByTestId('bots-gateway-switch')).toBeNull()
   })
 })

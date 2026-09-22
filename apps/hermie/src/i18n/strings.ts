@@ -370,6 +370,17 @@ const stringsEn = {
     moreActions: 'More',
 
     /**
+     * The chat list's title, once it is the gateway's name and a chevron.
+     *
+     * The label carries the current gateway rather than being a bare "Switch
+     * gateway", because a screen reader reaching this control has not been told
+     * which gateway the list below it belongs to — and that IS the question the
+     * control answers.
+     */
+    switchGateway: (name: string) => `Gateway: ${name}`,
+    switchGatewayHint: 'Choose which gateway this list belongs to',
+
+    /**
      * A share that has arrived and cannot go yet.
      *
      * Said as "waiting to send" rather than "failed", because it is: the entry
@@ -1071,6 +1082,14 @@ const stringsEn = {
       signedInAs: (user: string) => `Signed in as ${user}`,
       signedOut: 'Signed out',
       authModeToken: 'Session token',
+      /**
+       * The word on the row, said as the act rather than as the state.
+       *
+       * The footer under the list already said a tap connects, and the owner
+       * still read the list as a list. A sentence under a list is a caption; a
+       * word on the row is a control.
+       */
+      use: 'Use this gateway',
       manage: 'Manage',
       add: 'Add gateway',
       addHint: 'Runs setup for another machine. The gateway you are on now stays connected until you switch.',

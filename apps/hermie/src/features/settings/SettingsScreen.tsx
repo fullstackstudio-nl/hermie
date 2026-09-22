@@ -214,7 +214,7 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
   /*
     How many gateways this device knows about, for the row's subtitle.
 
-    Read through `?.` for the reason `GatewayNameLine` gives: Settings is
+    Read through `?.` for the reason `GatewayTitle` gives: Settings is
     rendered by suites that stand in for the gateway context with the two or
     three fields they care about, and a subtitle is not worth a crash in any of
     them. One is the right answer when nothing is known, because one is what

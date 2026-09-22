@@ -28,6 +28,7 @@ export {
   GATEWAY_REGISTRY_VERSION,
   gatewayById,
   gatewayForKey,
+  gatewayLabel,
   type GatewayRecord,
   type GatewayRegistry,
   gatewaysInOrder,

@@ -76,7 +76,7 @@ import { NewBotFlow } from '../profiles/NewBotFlow'
 import { KanbanScreen, kanbanStrings, useBoardsOpener } from '../kanban'
 import { profileStrings } from '../profiles/strings'
 import { ConnectionLine } from './ConnectionLine'
-import { GatewayNameLine } from './GatewayNameLine'
+import { GatewayTitle } from './GatewayTitle'
 import {
   clampToPinnedBand,
   committedRowIndex,
@@ -1553,20 +1553,14 @@ function Head({
       }}
       testID="bots-head"
     >
+      {/*
+        The screen's name — or, once there is a second gateway, that gateway's
+        name with the screen's underneath it and a menu behind it. See
+        `GatewayTitle`: the switch is the LIST's, because every row in the list
+        belongs to one gateway and a chat header had no room for it.
+      */}
       <View style={{ flex: 1 }}>
-        {/*
-          One line, always. Without it the title is a `flex: 1` column next to
-          controls that do not compress, and at the narrow sidebar's width
-          "Chats" wrapped to one character per line — six rows of one letter.
-          Eliding is the honest failure here: the word is the screen's name and
-          a reader who sees "Cha…" has still been told which screen this is.
-        */}
-        <Text accessibilityRole="header" aria-level={1} numberOfLines={1} variant={sidebar ? 'titleWide' : 'title'}>
-          {strings.bots.title}
-        </Text>
-        {/* Which gateway this list belongs to, and only once there is more
-            than one of them to tell apart. */}
-        <GatewayNameLine />
+        <GatewayTitle sidebar={sidebar} />
       </View>
 
       <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.md }}>

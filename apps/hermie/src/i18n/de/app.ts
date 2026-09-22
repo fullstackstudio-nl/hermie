@@ -246,6 +246,7 @@ export const app: Translation<typeof strings> = {
     offline: 'Offline — zeigt die zuletzt gespeicherte Liste.',
     footnote: 'Deine Unterhaltungen bleiben bei deinem Gateway.',
     moreActions: 'Mehr',
+    switchGatewayHint: 'Wähle, zu welchem Gateway diese Liste gehört',
 
     sharePending: (count: number) =>
       count === 1 ? '1 geteilter Inhalt wartet auf den Versand' : `${count} geteilte Inhalte warten auf den Versand`
@@ -625,6 +626,7 @@ export const app: Translation<typeof strings> = {
       signedInAs: (user: string) => `Angemeldet als ${user}`,
       signedOut: 'Abgemeldet',
       authModeToken: 'Session-Token',
+      use: 'Dieses Gateway verwenden',
       manage: 'Verwalten',
       add: 'Gateway hinzufügen',
       addHint:

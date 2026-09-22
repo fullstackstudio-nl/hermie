@@ -110,6 +110,18 @@ export function defaultGatewayName(address: string): string {
   }
 }
 
+/**
+ * What to CALL one gateway on screen.
+ *
+ * Its stored name, and its host when that name is empty. Every entry is minted
+ * with `defaultGatewayName` so the second half is rarely reached — but a rename
+ * field can be emptied, and a switcher whose rows are blank names one gateway as
+ * well as the next.
+ */
+export function gatewayLabel(gateway: GatewayRecord): string {
+  return gateway.name.trim() || defaultGatewayName(gateway.address)
+}
+
 /** The active entry, or `null` when the list is empty or the pointer is stale. */
 export function activeGatewayOf(registry: GatewayRegistry): GatewayRecord | null {
   return registry.gateways.find(gateway => gateway.id === registry.activeGatewayId) ?? null

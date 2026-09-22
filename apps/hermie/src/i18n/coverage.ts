@@ -68,6 +68,8 @@ export const UNTRANSLATED_KEYS: Record<TranslatedLocale, readonly string[]> = {
     'app.onboarding.test.checklist.socket',
     'app.onboarding.done.gateway',
     'app.bots.title',
+    // `Gateway: <name>` — the word is the same in this language.
+    'app.bots.switchGateway',
     'app.bots.sidebarHeader',
     'app.presence.online',
     'app.presence.offline',
@@ -212,6 +214,8 @@ export const UNTRANSLATED_KEYS: Record<TranslatedLocale, readonly string[]> = {
     'app.onboarding.test.checklist.socket',
     'app.onboarding.done.gateway',
     'app.bots.title',
+    // `Gateway: <name>` — the word is the same in this language.
+    'app.bots.switchGateway',
     'app.bots.sidebarHeader',
     'app.presence.online',
     'app.presence.offline',

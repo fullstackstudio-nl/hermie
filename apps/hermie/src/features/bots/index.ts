@@ -11,6 +11,6 @@ export { BotsScreen, BotsScreenOrSignedOut, type BotsScreenProps, type OpenBotOp
 export { consumeRevealFolder, onRevealFolder, requestRevealFolder } from './folder-reveal'
 export { presenceOf, type Presence, type PresenceInput, type PresenceState } from './presence'
 export { ConnectionLine } from './ConnectionLine'
-export { GatewayNameLine } from './GatewayNameLine'
+export { GatewayTitle, type GatewayTitleProps } from './GatewayTitle'
 export { SidebarFooter, tabs, type BotsSection, type TabKey } from './SidebarFooter'
 export { SidebarRail, type SidebarRailProps } from './SidebarRail'

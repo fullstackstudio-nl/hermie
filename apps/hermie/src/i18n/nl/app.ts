@@ -242,6 +242,7 @@ export const app: Translation<typeof strings> = {
     offline: 'Offline — de laatst bewaarde lijst wordt getoond.',
     footnote: 'Je gesprekken blijven bij je gateway.',
     moreActions: 'Meer',
+    switchGatewayHint: 'Kies bij welke gateway deze lijst hoort',
 
     sharePending: (count: number) =>
       count === 1 ? '1 gedeeld item wacht op verzending' : `${count} gedeelde items wachten op verzending`
@@ -611,6 +612,7 @@ export const app: Translation<typeof strings> = {
       active: 'Verbonden',
       signedInAs: (user: string) => `Ingelogd als ${user}`,
       signedOut: 'Uitgelogd',
+      use: 'Gebruik deze gateway',
       manage: 'Beheren',
       add: 'Gateway toevoegen',
       addHint:

@@ -23,9 +23,10 @@ import { useCallback, useState } from 'react'
 import { Pressable, ScrollView, View } from 'react-native'
 
 import { useGateway } from '../../gateway'
-import { gatewaysInOrder, type GatewayRecord } from '../../gateway/registry'
+import { gatewayLabel, gatewaysInOrder, type GatewayRecord } from '../../gateway/registry'
 import { strings } from '../../i18n/strings'
 import { directTouchPanRef } from '../../platform/pointer-drag'
+import { Icon, ICON_SIZE } from '../../ui/Icon'
 import { InsetButtonRow, InsetGroup, InsetValueRow, Screen, Text, TextField } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { FORM_MAX_WIDTH } from '../../ui/tokens'
@@ -144,10 +145,16 @@ interface GatewayRowProps {
 /**
  * One gateway.
  *
- * Two targets rather than one, and they are deliberately far apart: the body
- * connects and the trailing word opens the page that can delete. A single row
- * carrying both would make "remove everything on this device" a mis-tap away
- * from "read my messages".
+ * Three targets, and they are deliberately far apart: the body connects, the
+ * word beside it SAYS that it connects, and the trailing word opens the page
+ * that can delete. A single row carrying all of it would make "remove everything
+ * on this device" a mis-tap away from "read my messages".
+ *
+ * The middle one is new and it is the whole point of the row. Tapping the body
+ * has always switched, and the footer under the list has always said so — but a
+ * sentence under a list is not a label on a control, and the owner read the list
+ * as a list of things to look at. The word is only on the rows it would do
+ * something to; the live one wears the tick instead.
  */
 function GatewayRow({ gateway, active, onSwitch, onManage }: GatewayRowProps) {
   const theme = useTheme()
@@ -176,7 +183,7 @@ function GatewayRow({ gateway, active, onSwitch, onManage }: GatewayRowProps) {
         })}
         testID={`gateway-switch-${gateway.id}`}
       >
-        <Text variant="preview">{gateway.name}</Text>
+        <Text variant="preview">{gatewayLabel(gateway)}</Text>
         <Text color="textMuted" variant="meta">
           {describeGateway(gateway)}
         </Text>
@@ -187,13 +194,34 @@ function GatewayRow({ gateway, active, onSwitch, onManage }: GatewayRowProps) {
         ) : null}
       </Pressable>
 
+      {active ? (
+        <Icon
+          color={theme.colors.accentText}
+          name="check"
+          size={ICON_SIZE.inline}
+          style={{ marginRight: theme.space.sm }}
+          testID={`gateway-tick-${gateway.id}`}
+        />
+      ) : (
+        <Pressable
+          accessibilityRole="button"
+          onPress={onSwitch}
+          style={{ cursor: 'pointer', padding: theme.space.sm }}
+          testID={`gateway-use-${gateway.id}`}
+        >
+          <Text color="accentText" variant="meta">
+            {text.use}
+          </Text>
+        </Pressable>
+      )}
+
       <Pressable
         accessibilityRole="button"
         onPress={onManage}
         style={{ cursor: 'pointer', padding: theme.space.sm }}
         testID={`gateway-manage-${gateway.id}`}
       >
-        <Text color="accentText" variant="meta">
+        <Text color="textMuted" variant="meta">
           {text.manage}
         </Text>
       </Pressable>
