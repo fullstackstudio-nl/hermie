@@ -107,7 +107,11 @@ const PARAMS: Partial<Record<SettingsRouteName, object>> = {
   Connector: { sessionId: 'session-1', slug: 'gmail' },
   GatewayDetail: { id: 'g1' },
   McpServer: { name: 'files' },
-  MemoryBot: { profile: 'researcher' }
+  MemoryBot: { profile: 'researcher' },
+  // No user theme has to exist for this: `ThemeEditScreen` falls back to a
+  // preset the same way `resolveThemeFace` does, which is what makes the walk
+  // reach it without first creating one through `Theme`.
+  ThemeEdit: { id: 'walk-theme' }
 }
 
 const page = (name: SettingsRouteName) => screen.getByTestId(`settings-page-${name}`)
@@ -316,7 +320,7 @@ describe('every setting still has a home', () => {
     ['Appearance', 'settings-appearance'],
     ['Appearance', 'settings-language'],
     ['Appearance', 'settings-text-size'],
-    ['Appearance', 'settings-themes-advanced'],
+    ['Appearance', 'settings-theme'],
     ['Advanced', 'settings-connection-test'],
     ['Advanced', 'settings-gallery'],
     ['About', 'settings-licences']

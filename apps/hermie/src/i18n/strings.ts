@@ -1237,11 +1237,11 @@ const stringsEn = {
      * the answer for everybody who does not want it.
      */
     themes: {
-      /** The page the Advanced row opens, named for what it holds. */
+      /** The page the Theme row opens, named for what it holds. */
       title: 'Themes',
+      /** The registry title for a pushed theme editor; overridden on the page itself by the theme's own name. */
+      editPageTitle: 'Edit theme',
       header: 'YOUR THEMES',
-      advanced: 'Advanced',
-      advancedHint: 'Start from a theme above and change its colours.',
       back: 'Back to settings',
       create: 'New theme',
       createFrom: (preset: string) => `From ${preset}`,

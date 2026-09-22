@@ -1,80 +1,40 @@
 /**
- * Settings → Appearance → Advanced: themes the reader makes themselves.
+ * Settings → Appearance → Theme: the preset cards, then the reader's own
+ * themes, then the rows that start a new one.
  *
- * Three things shape this screen.
- *
- *  1. **A theme is a preset plus a few colours.** Not a palette editor. Eight
- *     elevation rungs, four bubble washes, two hairlines and a dozen inks are a
- *     system that has to stay in proportion, and handing them over one at a time
- *     is how a reader ends up with a window they cannot read. What IS handed over
- *     is the three colours that carry the composition: the floor, the accent's
- *     ring and the outgoing bubble.
- *  2. **The guard is the build's guard.** `judgeThemeColour` is the function
- *     `npm run contrast:check` measures with, so a colour this screen accepts is a
- *     colour the check accepts, and the refusal says the ratio it measured rather
- *     than "invalid".
- *  3. **One face at a time.** A theme has a light and a dark face; the face being
- *     edited is the one that is ON, and the screen says so out loud. Editing both
- *     at once would mean two of every field and a reader guessing which half of
- *     the screen they are looking at.
+ * HERM-107 moved this content off the Appearance page — a picker with six-plus
+ * cards on it is a long look for a screen that also holds light/dark, language
+ * and text size — and moved the EDITOR off this one in turn: editing a theme's
+ * colours is a `ThemeEdit` page of its own now (`ThemeEditScreen`), reached by
+ * tapping a card here or starting one from a preset. Tapping a card, preset or
+ * user, still applies it straight away: the only question in front of a theme
+ * picker is what the window will look like, and a reader should not have to
+ * open the editor just to try one on.
  */
-import { useState } from 'react'
 import { View } from 'react-native'
 
 import { strings } from '../../i18n/strings'
 import { directTouchPanRef } from '../../platform/pointer-drag'
 import { useSettingsStore } from '../../store/settings'
-import { judgeThemeColour, type ThemeColourField } from '../../ui/contrast'
 import { PageFrame, PageScrollView, type PageChromeBack } from '../../ui/chrome'
-import { InsetButtonRow, InsetGroup, InsetRow, Text, TextField } from '../../ui/primitives'
-import { useEscapeKey } from '../../ui/useEscapeKey'
-import { useHardwareBack } from '../../ui/useHardwareBack'
+import { InsetButtonRow, InsetGroup, Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
-import { resolveThemeFace, THEME_PRESET_ORDER, type ThemePresetName } from '../../ui/themes'
+import { THEME_PRESET_ORDER } from '../../ui/themes'
 import { FORM_MAX_WIDTH } from '../../ui/tokens'
 import { ThemeCard } from './ThemeCard'
-
-/*
- * Built on CALL rather than at import.
- *
- * A module-level literal would freeze whatever language was active when the
- * bundle loaded, which on a cold start is always English — see
- * `i18n/catalogue.ts`. The list is three entries and it is rebuilt per render;
- * the alternative is a screen that keeps its old language until it is remounted.
- */
-const fields = (): { field: ThemeColourField; label: string }[] => [
-  { field: 'background', label: strings.settings.themes.background },
-  { field: 'accentFill', label: strings.settings.themes.accentFill },
-  { field: 'accentBubble', label: strings.settings.themes.accentBubble }
-]
 
 export interface ThemesScreenProps {
   /** The page's one back control, labelled with the page it returns to. */
   back?: PageChromeBack
+  /** Open the editor for one of the reader's own themes — created or existing. */
+  onEditTheme: (id: string) => void
 }
 
-export function ThemesScreen({ back }: ThemesScreenProps) {
+export function ThemesScreen({ back, onEditTheme }: ThemesScreenProps) {
   const theme = useTheme()
   const userThemes = useSettingsStore(state => state.userThemes)
-  const choice = useSettingsStore(state => state.themeChoice)
-  const [editing, setEditing] = useState<string | null>(choice.kind === 'user' ? choice.id : null)
-  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null)
-
-  /*
-    The delete confirmation is a LEVEL, so Escape cancels it before it leaves the
-    screen.
-
-    It is two rows drawn in place rather than a sheet, which is exactly why it
-    was missed: nothing mounts, so there was no new registration and the first
-    Escape closed the whole of Appearance → Advanced with a destructive question
-    still on screen. Registered after the pair above, so it sits on top of them
-    while the question is up — hook order is effect order, and flipping `enabled`
-    is what pushes and pops.
-  */
-  useEscapeKey(() => setConfirmingDelete(null), confirmingDelete !== null)
-  useHardwareBack(() => setConfirmingDelete(null), confirmingDelete !== null)
-
-  const target = userThemes.find(entry => entry.id === editing) ?? null
+  const themeChoice = useSettingsStore(state => state.themeChoice)
+  const setThemeChoice = useSettingsStore(state => state.setThemeChoice)
 
   return (
     <PageFrame {...(back ? { back } : {})} title={strings.settings.themes.title}>
@@ -88,30 +48,35 @@ export function ThemesScreen({ back }: ThemesScreenProps) {
           width: '100%'
         }}
       >
-        <View style={{ gap: theme.space.sm }}>
-          <Text accessibilityRole="header" aria-level={1} variant="title">
-            {strings.settings.themes.header}
+        {/*
+          The presets, as cards rather than as a segmented control of names. A
+          segment reading "Graphite" is a promise a reader cannot check; each
+          card paints its own floor, its own panel and a bubble pair in its own
+          accent, resolved through the same function the app resolves the live
+          theme with — see `ThemeCard`.
+        */}
+        <View style={{ gap: theme.space.md }}>
+          <Text color="textMuted" style={{ letterSpacing: 0.6, marginLeft: theme.space.lg }} variant="meta">
+            {strings.settings.preset}
           </Text>
-          <Text color="textMuted" variant="preview">
-            {strings.settings.themes.advancedHint}
+          <View accessibilityRole="radiogroup" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.space.md }}>
+            {THEME_PRESET_ORDER.map(name => (
+              <ThemeCard
+                choice={{ kind: 'preset', name }}
+                key={name}
+                label={strings.settings.presetOptions[name]}
+                onPress={() => setThemeChoice({ kind: 'preset', name })}
+                scheme={theme.scheme}
+                selected={themeChoice.kind === 'preset' && themeChoice.name === name}
+                testID={`theme-card-${name}`}
+                userThemes={userThemes}
+              />
+            ))}
+          </View>
+          <Text color="textMuted" style={{ marginHorizontal: theme.space.lg }} variant="meta">
+            {strings.settings.presetHint}
           </Text>
         </View>
-
-        <InsetGroup header={strings.settings.themes.create}>
-          {THEME_PRESET_ORDER.map(preset => (
-            <InsetButtonRow
-              key={preset}
-              onPress={() => {
-                const id = useSettingsStore.getState().createUserTheme(preset, strings.settings.presetOptions[preset])
-
-                useSettingsStore.getState().setThemeChoice({ kind: 'user', id })
-                setEditing(id)
-              }}
-              testID={`theme-new-${preset}`}
-              title={strings.settings.themes.createFrom(strings.settings.presetOptions[preset])}
-            />
-          ))}
-        </InsetGroup>
 
         {userThemes.length ? (
           <View style={{ gap: theme.space.md }}>
@@ -128,11 +93,11 @@ export function ThemesScreen({ back }: ThemesScreenProps) {
                   key={entry.id}
                   label={entry.name || strings.settings.themes.untitled}
                   onPress={() => {
-                    useSettingsStore.getState().setThemeChoice({ kind: 'user', id: entry.id })
-                    setEditing(entry.id)
+                    setThemeChoice({ kind: 'user', id: entry.id })
+                    onEditTheme(entry.id)
                   }}
                   scheme={theme.scheme}
-                  selected={editing === entry.id}
+                  selected={themeChoice.kind === 'user' && themeChoice.id === entry.id}
                   testID={`theme-card-user-${entry.id}`}
                   userThemes={userThemes}
                 />
@@ -145,163 +110,24 @@ export function ThemesScreen({ back }: ThemesScreenProps) {
           </Text>
         )}
 
-        {target ? (
-          <ThemeEditor
-            key={target.id}
-            base={target.base}
-            id={target.id}
-            name={target.name}
-            onDelete={() => setConfirmingDelete(target.id)}
-          />
-        ) : null}
-
-        {confirmingDelete ? (
-          <InsetGroup footer={strings.settings.themes.deleteHint}>
+        <InsetGroup header={strings.settings.themes.create}>
+          {THEME_PRESET_ORDER.map(preset => (
             <InsetButtonRow
+              key={preset}
               onPress={() => {
-                useSettingsStore.getState().deleteUserTheme(confirmingDelete)
-                setConfirmingDelete(null)
-                setEditing(null)
+                const id = useSettingsStore.getState().createUserTheme(preset, strings.settings.presetOptions[preset])
+
+                useSettingsStore.getState().setThemeChoice({ kind: 'user', id })
+                onEditTheme(id)
               }}
-              testID="theme-delete-confirm"
-              title={strings.settings.themes.deleteConfirm(
-                userThemes.find(entry => entry.id === confirmingDelete)?.name ?? ''
-              )}
-              tone="danger"
+              testID={`theme-new-${preset}`}
+              title={strings.settings.themes.createFrom(strings.settings.presetOptions[preset])}
             />
-            <InsetButtonRow
-              onPress={() => setConfirmingDelete(null)}
-              title={strings.settings.themes.keepIt}
-              tone="text"
-            />
-          </InsetGroup>
-        ) : null}
+          ))}
+        </InsetGroup>
 
         <View style={{ height: theme.space.xxl }} />
       </PageScrollView>
     </PageFrame>
-  )
-}
-
-/**
- * The editor for one theme's current face.
- *
- * Every field keeps its own draft text, because a colour is only a colour once
- * six digits have been typed and rejecting the four in between would make the
- * field impossible to use. The store is written on the first draft that PASSES,
- * so the window follows the typing, and a draft that fails leaves the last good
- * value on screen with the reason under the field.
- */
-function ThemeEditor({
-  id,
-  name,
-  base,
-  onDelete
-}: {
-  id: string
-  name: string
-  base: ThemePresetName
-  onDelete: () => void
-}) {
-  const theme = useTheme()
-  const userThemes = useSettingsStore(state => state.userThemes)
-  const entry = userThemes.find(item => item.id === id)
-  const face = resolveThemeFace({ kind: 'user', id }, theme.scheme, userThemes)
-  const stored = entry?.[theme.scheme] ?? {}
-
-  const current: Record<ThemeColourField, string> = {
-    background: face.background,
-    accentFill: face.accentSwatch.fill,
-    accentBubble: face.accentSwatch.bubble
-  }
-
-  const [drafts, setDrafts] = useState<Partial<Record<ThemeColourField, string>>>({})
-  const [errors, setErrors] = useState<Partial<Record<ThemeColourField, string>>>({})
-
-  const describe = (field: ThemeColourField, verdict: ReturnType<typeof judgeThemeColour>): string => {
-    if (verdict.ok) {
-      return ''
-    }
-
-    if (verdict.reason === 'malformed') {
-      return strings.settings.themes.rejected(strings.settings.themes.reasonMalformed)
-    }
-
-    const ratio = verdict.ratio.toFixed(2)
-
-    if (field === 'accentBubble') {
-      return strings.settings.themes.rejected(strings.settings.themes.reasonBubble(ratio))
-    }
-
-    if (field === 'background') {
-      return strings.settings.themes.rejected(strings.settings.themes.reasonBackground(ratio))
-    }
-
-    return strings.settings.themes.rejected(strings.settings.themes.reasonAccentFill(ratio))
-  }
-
-  return (
-    <View style={{ gap: theme.space.lg }}>
-      <InsetGroup footer={strings.settings.themes.editingHint} header={strings.settings.themes.editing(theme.scheme)}>
-        <InsetRow>
-          <TextField
-            autoCapitalize="words"
-            label={strings.settings.themes.name}
-            onChangeText={next => useSettingsStore.getState().renameUserTheme(id, next)}
-            placeholder={strings.settings.themes.namePlaceholder}
-            testID="theme-name"
-            value={name}
-          />
-        </InsetRow>
-
-        {fields().map(({ field, label }) => (
-          <InsetRow key={field}>
-            <TextField
-              autoCapitalize="characters"
-              autoCorrect={false}
-              error={errors[field] ?? null}
-              label={label}
-              onChangeText={next => {
-                setDrafts(previous => ({ ...previous, [field]: next }))
-
-                const verdict = judgeThemeColour(field, next, theme.scheme, face)
-
-                setErrors(previous => ({ ...previous, [field]: describe(field, verdict) }))
-
-                if (verdict.ok) {
-                  useSettingsStore.getState().editUserTheme(id, theme.scheme, { [field]: next.trim() })
-                }
-              }}
-              placeholder={strings.settings.themes.colourPlaceholder}
-              testID={`theme-colour-${field}`}
-              value={drafts[field] ?? current[field]}
-            />
-            {/* A field that is following the preset can say so and be let go of again. */}
-            {stored[field] ? (
-              <Text
-                color="accentText"
-                onPress={() => {
-                  setDrafts(previous => ({ ...previous, [field]: undefined }))
-                  setErrors(previous => ({ ...previous, [field]: '' }))
-                  useSettingsStore.getState().editUserTheme(id, theme.scheme, { [field]: null })
-                }}
-                testID={`theme-follow-${field}`}
-                variant="meta"
-              >
-                {strings.settings.themes.followPreset}
-              </Text>
-            ) : (
-              <Text color="textFaint" variant="meta">
-                {strings.settings.themes.createFrom(strings.settings.presetOptions[base])}
-              </Text>
-            )}
-          </InsetRow>
-        ))}
-      </InsetGroup>
-
-      <InsetGroup>
-        <InsetButtonRow onPress={onDelete} testID="theme-delete" title={strings.settings.themes.delete} tone="danger" />
-      </InsetGroup>
-    </View>
   )
 }

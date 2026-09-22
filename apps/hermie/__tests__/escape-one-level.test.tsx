@@ -7,11 +7,11 @@
  * two places the audit found. Both are the same mistake, which is the one worth
  * naming: **a level that does not MOUNT is a level nobody notices.**
  *
- *  - **Settings → Appearance → Advanced.** Deleting a theme asks first, and the
- *    question is two rows drawn in place rather than a sheet. Nothing mounted,
- *    so nothing registered, so the first Escape closed the whole screen with a
- *    destructive question still on it — and the reader's next Escape-reflex
- *    would have been aimed at the question.
+ *  - **Settings → Appearance → Theme → edit.** Deleting a theme asks first, and
+ *    the question is two rows drawn in place rather than a sheet. Nothing
+ *    mounted, so nothing registered, so the first Escape closed the whole
+ *    screen with a destructive question still on it — and the reader's next
+ *    Escape-reflex would have been aimed at the question.
  *  - **The memory map.** A tapped node opens a detail card with a close control
  *    of its own, which is what makes it a level; it too is drawn in place. The
  *    first Escape left the memory screen entirely and took the card with it.
@@ -24,7 +24,7 @@ import { PLUGIN_CAPABILITIES } from '@hermie/gateway-client/plugin'
 import { act, fireEvent, screen, waitFor } from '@testing-library/react-native'
 
 import { MemoryScreen } from '../src/features/memory'
-import { ThemesScreen } from '../src/features/settings/ThemesScreen'
+import { ThemeEditScreen } from '../src/features/settings/ThemeEditScreen'
 import { useMemoryStore } from '../src/store/memory'
 import { usePluginStore } from '../src/store/plugin'
 import { useSettingsStore } from '../src/store/settings'
@@ -58,19 +58,20 @@ describe('Escape in the theme editor', () => {
     useSettingsStore.getState().reset()
   })
 
-  /** A user theme, and the screen showing it, which is what makes Delete reachable. */
+  /** A user theme, and the screen editing it, which is what makes Delete reachable. */
   function openWithATheme(onPress: () => void) {
-    renderScreen(<ThemesScreen back={{ label: 'Appearance', onPress }} />)
+    const id = useSettingsStore.getState().createUserTheme('blue', 'Blue')
 
-    fireEvent.press(screen.getByTestId('theme-new-blue'))
+    renderScreen(<ThemeEditScreen back={{ label: 'Theme', onPress }} id={id} />)
 
     return screen.getByTestId('theme-delete')
   }
 
   it('closes the screen when nothing is open inside it', () => {
     const onClose = jest.fn()
+    const id = useSettingsStore.getState().createUserTheme('blue', 'Blue')
 
-    renderScreen(<ThemesScreen back={{ label: 'Appearance', onPress: onClose }} />)
+    renderScreen(<ThemeEditScreen back={{ label: 'Theme', onPress: onClose }} id={id} />)
 
     pressEscape()
 

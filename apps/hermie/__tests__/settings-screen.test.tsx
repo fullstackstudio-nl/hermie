@@ -168,15 +168,17 @@ describe('Gateways and a cleartext gateway', () => {
 /**
  * The theme picker.
  *
- * The cards are the part worth a test, because they are the part that can
- * silently stop being true: each one paints the theme it names, through the same
- * `resolveThemeFace` the live window is built with. If a card ever stopped
- * following the theme it points at, a reader would pick a window they were never
- * shown.
+ * HERM-107 moved it off Appearance itself and onto the `Theme` page that
+ * row opens — `theme-page.test.tsx` pins that navigation and the row's own
+ * value. The cards are the part worth a test here regardless of which page
+ * holds them, because they are the part that can silently stop being true:
+ * each one paints the theme it names, through the same `resolveThemeFace` the
+ * live window is built with. If a card ever stopped following the theme it
+ * points at, a reader would pick a window they were never shown.
  */
-describe('Appearance', () => {
+describe('Theme', () => {
   it('offers a card per preset, and marks the one that is on', async () => {
-    await open('Appearance')
+    await open('Theme')
 
     for (const name of ['blue', 'graphite', 'lime']) {
       expect(screen.getByTestId(`theme-card-${name}`)).toBeTruthy()
@@ -192,7 +194,7 @@ describe('Appearance', () => {
   })
 
   it('switches the theme, and the preview follows', async () => {
-    await open('Appearance')
+    await open('Theme')
 
     fireEvent.press(screen.getByTestId('theme-card-lime'))
 
@@ -200,7 +202,7 @@ describe('Appearance', () => {
   })
 
   it('paints each card in its own theme rather than in the app’s', async () => {
-    await open('Appearance')
+    await open('Theme')
 
     const backgroundOf = (name: string): unknown =>
       // `style` is an array on a `View` with two style objects; the flat form is
@@ -216,23 +218,11 @@ describe('Appearance', () => {
       useSettingsStore.getState().createUserTheme('lime', 'Studio')
     })
 
-    await open('Appearance')
+    await open('Theme')
 
     const id = useSettingsStore.getState().userThemes[0]?.id ?? ''
 
     expect(screen.getByTestId(`theme-card-user-${id}`)).toBeTruthy()
-  })
-
-  it('opens the themes page and comes back with Escape', async () => {
-    const view = await open('Appearance')
-
-    fireEvent.press(screen.getByTestId('settings-themes-advanced'))
-    await waitFor(() => expect(screen.getByTestId('theme-new-lime')).toBeTruthy())
-
-    pressEscape()
-
-    await waitFor(() => expect(view.queryByTestId('theme-new-lime')).toBeNull())
-    expect(screen.getByTestId('theme-card-blue')).toBeTruthy()
   })
 })
 

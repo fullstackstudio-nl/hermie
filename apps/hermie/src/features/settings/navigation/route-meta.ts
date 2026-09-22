@@ -45,6 +45,7 @@ export const SETTINGS_ROUTE_META: Record<SettingsRouteName, SettingsRouteMeta> =
 
   Appearance: { title: () => category.appearance, parent: 'Root' },
   Theme: { title: () => strings.settings.themes.title, parent: 'Appearance' },
+  ThemeEdit: { title: () => strings.settings.themes.editPageTitle, parent: 'Theme' },
 
   Privacy: { title: () => category.privacy, parent: 'Root' },
   LockThreshold: { title: () => strings.settings.lock.label, parent: 'Privacy' },

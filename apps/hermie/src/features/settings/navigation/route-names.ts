@@ -21,6 +21,7 @@ export type SettingsParamList = {
   MemoryBot: { profile: string }
   Appearance: undefined
   Theme: undefined
+  ThemeEdit: { id: string }
   Privacy: undefined
   LockThreshold: undefined
   Voice: undefined
@@ -57,6 +58,7 @@ const ROUTE_SET: Record<SettingsRouteName, true> = {
   MemoryBot: true,
   Appearance: true,
   Theme: true,
+  ThemeEdit: true,
   Privacy: true,
   LockThreshold: true,
   Voice: true,

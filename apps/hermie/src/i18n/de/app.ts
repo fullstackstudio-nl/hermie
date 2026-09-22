@@ -717,9 +717,8 @@ export const app: Translation<typeof strings> = {
 
     themes: {
       title: 'Themen',
+      editPageTitle: 'Thema bearbeiten',
       header: 'DEINE THEMEN',
-      advanced: 'Erweitert',
-      advancedHint: 'Geh von einem Thema oben aus und ändere seine Farben.',
       back: 'Zurück zu den Einstellungen',
       create: 'Neues Thema',
       createFrom: (preset: string) => `Aus ${preset}`,

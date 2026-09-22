@@ -65,6 +65,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   options sheet for the first time. Development builds keep the connection test and the component
   gallery, under Advanced.
 
+- **The theme picker moved under Appearance → Theme (HERM-107).** Appearance itself now shows one
+  row — "Theme", naming whichever preset or theme of your own is on — instead of the row of preset
+  cards. Opening it lands on the preset cards, your own themes below them, and the rows that start
+  a new one from a preset; picking a card there applies it immediately, the same as before. Editing
+  a theme's colours is a page of its own again, `ThemeEdit`, reached from a card or a "from a
+  preset" row, so it has its own one back control rather than swapping in beside the cards it was
+  reached from.
+
 - **The phone has a tab bar (HERM-75, HERM-101, HERM-102, HERM-105).** Chats, Activity, Crons and
   Settings are four tabs along the bottom of the window rather than three pages pushed over the
   chat list, so each of them is a root you can reach from anywhere and none of them carries a back

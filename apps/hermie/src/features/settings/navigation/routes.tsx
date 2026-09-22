@@ -54,6 +54,7 @@ const COMPONENTS: Record<SettingsRouteName, ComponentType<Record<string, never>>
 
   Appearance: Appearance.Page,
   Theme: Theme.Page,
+  ThemeEdit: Theme.EditPage,
 
   Privacy: Privacy.Page,
   LockThreshold: LockThresholdPage,

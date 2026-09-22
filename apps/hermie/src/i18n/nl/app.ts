@@ -702,9 +702,8 @@ export const app: Translation<typeof strings> = {
 
     themes: {
       title: 'Thema’s',
+      editPageTitle: 'Thema bewerken',
       header: 'JOUW THEMA’S',
-      advanced: 'Geavanceerd',
-      advancedHint: 'Begin met een thema hierboven en verander de kleuren.',
       back: 'Terug naar instellingen',
       create: 'Nieuw thema',
       createFrom: (preset: string) => `Vanaf ${preset}`,

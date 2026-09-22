@@ -9,19 +9,32 @@
  * and a gallery section that re-implemented the picker would be a second picker
  * to keep in step with the first. So the section is the thing itself, mounted
  * twice.
+ *
+ * HERM-107: the preset cards and the reader's own themes used to live here,
+ * inline. They moved to their own page — a picker with six-plus cards on it is
+ * a long look for a screen that also holds light/dark, language and text size —
+ * and this keeps one row: the theme that is ON, and where to change it.
  */
-import { View } from 'react-native'
-
 import { strings } from '../../i18n/strings'
 import { type Appearance, useSettingsStore } from '../../store/settings'
-import { InsetButtonRow, InsetGroup, Text } from '../../ui/primitives'
-import { SegmentedRow } from '../../ui/sheets'
-import { useTheme } from '../../ui/theme'
+import { InsetGroup } from '../../ui/primitives'
+import { DisclosureRow, SegmentedRow } from '../../ui/sheets'
 import { TEXT_SIZE_ORDER, type TextSize } from '../../store/text-size'
 import { chatStrings } from '../../chat-ui/strings'
-import { THEME_PRESET_ORDER } from '../../ui/themes'
+import { type ThemeChoice, type UserTheme } from '../../ui/themes'
 import { LanguageGroup } from './LanguageGroup'
-import { ThemeCard } from './ThemeCard'
+
+/**
+ * What the reader would call the theme that is on: the preset's own name, or
+ * the name they gave a theme of their own.
+ */
+function themeChoiceLabel(choice: ThemeChoice, userThemes: readonly UserTheme[]): string {
+  if (choice.kind === 'preset') {
+    return strings.settings.presetOptions[choice.name]
+  }
+
+  return userThemes.find(entry => entry.id === choice.id)?.name || strings.settings.themes.untitled
+}
 
 /*
  * Built on CALL rather than at import.
@@ -53,14 +66,12 @@ export interface AppearanceSectionProps {
 }
 
 export function AppearanceSection({ onOpenAdvanced }: AppearanceSectionProps) {
-  const theme = useTheme()
   const appearance = useSettingsStore(state => state.appearance)
   const setAppearance = useSettingsStore(state => state.setAppearance)
   const textSize = useSettingsStore(state => state.textSize)
   const setTextSize = useSettingsStore(state => state.setTextSize)
   const themeChoice = useSettingsStore(state => state.themeChoice)
   const userThemes = useSettingsStore(state => state.userThemes)
-  const setThemeChoice = useSettingsStore(state => state.setThemeChoice)
 
   return (
     <>
@@ -100,55 +111,16 @@ export function AppearanceSection({ onOpenAdvanced }: AppearanceSectionProps) {
       </InsetGroup>
 
       {/*
-        The themes, as cards rather than as a segmented control of names.
-
-        A segment reading "Graphite" is a promise a reader cannot check, and the
-        only question in front of a theme picker is what the window will look
-        like. Each card paints its own floor, its own panel and a bubble pair in
-        its own accent, resolved through the same function the app resolves the
-        live theme with — see `ThemeCard`.
+        HERM-107: one row, not the gallery of cards that used to sit here. The
+        preset cards and the reader's own themes moved to the `Theme` page this
+        opens — see `ThemesScreen` — and this row says only which one is on.
       */}
-      <View style={{ gap: theme.space.md }}>
-        <Text color="textMuted" style={{ letterSpacing: 0.6, marginLeft: theme.space.lg }} variant="meta">
-          {strings.settings.preset}
-        </Text>
-        <View accessibilityRole="radiogroup" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.space.md }}>
-          {THEME_PRESET_ORDER.map(name => (
-            <ThemeCard
-              choice={{ kind: 'preset', name }}
-              key={name}
-              label={strings.settings.presetOptions[name]}
-              onPress={() => setThemeChoice({ kind: 'preset', name })}
-              scheme={theme.scheme}
-              selected={themeChoice.kind === 'preset' && themeChoice.name === name}
-              testID={`theme-card-${name}`}
-              userThemes={userThemes}
-            />
-          ))}
-          {userThemes.map(entry => (
-            <ThemeCard
-              choice={{ kind: 'user', id: entry.id }}
-              key={entry.id}
-              label={entry.name || strings.settings.themes.untitled}
-              onPress={() => setThemeChoice({ kind: 'user', id: entry.id })}
-              scheme={theme.scheme}
-              selected={themeChoice.kind === 'user' && themeChoice.id === entry.id}
-              testID={`theme-card-user-${entry.id}`}
-              userThemes={userThemes}
-            />
-          ))}
-        </View>
-        <Text color="textMuted" style={{ marginHorizontal: theme.space.lg }} variant="meta">
-          {strings.settings.presetHint}
-        </Text>
-      </View>
-
       <InsetGroup>
-        <InsetButtonRow
-          detail={strings.settings.themes.advancedHint}
+        <DisclosureRow
+          label={strings.settings.theme}
           onPress={onOpenAdvanced}
-          testID="settings-themes-advanced"
-          title={strings.settings.themes.advanced}
+          testID="settings-theme"
+          value={themeChoiceLabel(themeChoice, userThemes)}
         />
       </InsetGroup>
     </>
