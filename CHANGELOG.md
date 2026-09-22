@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Slash completion works against a gateway from before `session_id`.** Hermes 0.21.3's
+  own contract for `complete.slash` takes `text` alone and validates its parameters
+  strictly, so the session the app started naming for project-local skills made the older
+  gateway refuse the whole call — every keystroke after `/` drew the popover's failure row on
+  a phone while the same build completed fine against a newer gateway. The first refusal of
+  that exact shape now turns the field off for the rest of the connection and the call is
+  repeated without it; the only thing the older gateway loses is a list of project-local
+  skills it never had.
+
 ## [0.1.3] - 2026-09-22
 
 ### Added

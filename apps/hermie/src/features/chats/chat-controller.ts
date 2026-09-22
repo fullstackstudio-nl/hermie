@@ -44,7 +44,8 @@ import type {
   SessionLiveInfo,
   SessionResumeResult,
   SlashExecResult,
-  Usage
+  Usage,
+  CompleteSlashResult
 } from '@hermes/shared/gateway-contract'
 import type { ServerRequest as GatewayServerRequest } from '@hermes/shared/json-rpc-channel'
 import { parseCommandDispatch, parseSlashCommand } from '@hermes/shared/slash'
@@ -202,6 +203,16 @@ export interface ChatControllerOptions {
 const WANTS_DISPATCH_RE = /command\.dispatch/u
 
 /**
+ * The refusal an older gateway gives `complete.slash` for a `session_id` it does
+ * not know: pydantic's "Extra inputs are not permitted", naming the field.
+ */
+function refusesSessionId(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+
+  return /session_id/u.test(message) && /Extra inputs are not permitted/u.test(message)
+}
+
+/**
  * The commands that start a fresh conversation, which this client runs ITSELF.
  *
  * `slash.exec` cannot do it. Upstream runs a worker command in a separate CLI
@@ -316,6 +327,18 @@ export class ChatController {
    * painted by.
    */
   private readonly slashCatalogLoads = new Map<string, Promise<SlashFailure | null>>()
+  /**
+   * Whether `complete.slash` may be told which session is asking.
+   *
+   * Upstream added `session_id` to `CompleteSlashParams` so the popup can offer
+   * a session's project-local skills; a gateway from before that (Hermes
+   * 0.21.3's own contract has `text` alone) validates params with
+   * `extra="forbid"` and refuses the whole call with 4000 "Extra inputs are not
+   * permitted". So the first refusal of that exact shape turns the field off for
+   * the rest of this connection and the call is repeated without it — which
+   * costs the older gateway only the project-local skills it never had.
+   */
+  private slashSessionParam = true
   private sessionsChangedTimer: ReturnType<typeof setTimeout> | undefined
   private approvalPollTimer: ReturnType<typeof setInterval> | undefined
   private subagentPollTimer: ReturnType<typeof setInterval> | undefined
@@ -373,6 +396,7 @@ export class ChatController {
     this.opening.clear()
     this.slashCatalogs.clear()
     this.slashCatalogLoads.clear()
+    this.slashSessionParam = true
   }
 
   // ── opening a chat ─────────────────────────────────────────────────────────
@@ -1905,7 +1929,7 @@ export class ChatController {
     }
 
     try {
-      const result = await this.gateway.request('complete.slash', { text: typed, session_id: sessionId })
+      const result = await this.completeSlash(typed, sessionId)
 
       return {
         items: result?.items ?? [],
@@ -1932,6 +1956,24 @@ export class ChatController {
       // to fill this popover, and naming the catalogue instead would point a
       // reader at the call that did not fail last.
       return { items: [], failure: reported }
+    }
+  }
+
+  /** `complete.slash`, with the session named only where the gateway takes it. */
+  private async completeSlash(typed: string, sessionId: string): Promise<CompleteSlashResult> {
+    const params = this.slashSessionParam ? { text: typed, session_id: sessionId } : { text: typed }
+
+    try {
+      return await this.gateway.request('complete.slash', params)
+    } catch (error) {
+      if (!this.slashSessionParam || !refusesSessionId(error)) {
+        throw error
+      }
+
+      this.slashSessionParam = false
+      this.noteRpcFailure('complete.slash', error)
+
+      return await this.gateway.request('complete.slash', { text: typed })
     }
   }
 

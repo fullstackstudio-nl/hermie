@@ -1199,6 +1199,35 @@ describe('slash commands', () => {
    * no commands — so the app had recorded the refusal in the developer
    * screen's ring and told the reader nothing at all.
    */
+  it('drops session_id from complete.slash after an older gateway refuses it, and stays without', async () => {
+    const { gateway, controller } = setup()
+    const refusal =
+      '{"code":4000,"message":"invalid params for complete.slash: session_id: Extra inputs are not permitted — the client and the Hermes backend are out of sync (different versions); run `hermes update` and restart both"}'
+
+    gateway.reply('commands.catalog', { pairs: [['/new', 'Start a new session']] }).reply('complete.slash', params => {
+      // Hermes 0.21.3: `CompleteSlashParams` is `text` alone, validated with extra="forbid".
+      if ('session_id' in params) {
+        throw new Error(refusal)
+      }
+
+      return { items: [{ text: 'new', meta: 'Start a new session' }], replace_from: 1 }
+    })
+
+    await controller.openChat(RESEARCHER)
+
+    expect(await controller.querySlash('researcher', '/ne')).toEqual({
+      items: [{ text: 'new', meta: 'Start a new session' }],
+      replaceFrom: 1
+    })
+    // Refused once, answered once — and the second query never names the session again.
+    await controller.querySlash('researcher', '/new')
+
+    const calls = gateway.calls.filter(call => call.method === 'complete.slash')
+
+    expect(calls).toHaveLength(3)
+    expect(calls.map(call => 'session_id' in call.params)).toEqual([true, false, false])
+  })
+
   it('reports a refused complete.slash as a failure rather than an empty list', async () => {
     const { gateway, controller } = setup()
 
