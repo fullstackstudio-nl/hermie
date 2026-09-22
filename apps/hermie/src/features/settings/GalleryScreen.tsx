@@ -28,8 +28,7 @@ import {
   AgentsSheet,
   AssistantBubble,
   AttachMenu,
-  BotDmInBubble,
-  BotDmOutLine,
+  BotDmAside,
   BotDmRollup,
   ChatHeader,
   Composer,
@@ -115,7 +114,7 @@ import {
 import { Button, InsetButtonRow, InsetGroup, Screen, Text } from '../../ui/primitives'
 import { ApprovalSheet, ChatOptionsSheet, ClarifySheet } from '../../ui/sheets'
 import { useTheme } from '../../ui/theme'
-import type { AccentName } from '../../ui/tokens'
+import { DM_LINE_GAP, type AccentName } from '../../ui/tokens'
 import { AppearanceSection } from './AppearanceSection'
 
 export interface GalleryScreenProps {
@@ -499,7 +498,7 @@ const SECTIONS: readonly GallerySection[] = [
   {
     id: 'bubbles',
     title: 'Bubbles',
-    render: ctx => (
+    render: () => (
       <>
         <DateSeparator label="Yesterday" />
         {/* Grouping: three own bubbles in a run, only the last with a tail. */}
@@ -508,12 +507,6 @@ const SECTIONS: readonly GallerySection[] = [
         <UserBubble grouped item={{ ...userItem, id: 'u1c', text: 'Thanks.' }} receipt="read" tail />
         <AssistantBubble item={assistantItem} presentation="full" showFooter />
         <AssistantBubble item={interimAssistantItem} presentation="full" />
-        <BotDmInBubble
-          answered
-          item={botDmInItem}
-          onOpenBot={handle => ctx.say(`Open bot @${handle}`)}
-          selfHandle="researcher"
-        />
         <TypingIndicator />
       </>
     )
@@ -637,17 +630,23 @@ const SECTIONS: readonly GallerySection[] = [
   { id: 'diff', title: 'Diff', render: () => <DiffView diff={sampleDiff} /> },
   {
     id: 'dm-lines',
-    title: 'Bot-to-bot lines',
+    title: 'Bot-to-bot asides',
     render: ctx => (
       <ExpandedProvider>
-        <View style={{ gap: ctx.theme.space.sm + 1 }}>
-          <BotDmOutLine
+        <View style={{ gap: DM_LINE_GAP }}>
+          <BotDmAside
             item={botDmOutItem}
             onOpenBot={handle => ctx.say(`Open bot @${handle}`)}
             presentation="collapsed"
           />
-          <BotDmOutLine item={pendingDmOutItem} presentation="collapsed" />
-          <BotDmOutLine item={failedDmOutItem} presentation="collapsed" />
+          <BotDmAside item={pendingDmOutItem} presentation="collapsed" />
+          <BotDmAside item={failedDmOutItem} presentation="collapsed" />
+          <BotDmAside
+            answered
+            item={botDmInItem}
+            onOpenBot={handle => ctx.say(`Open bot @${handle}`)}
+            presentation="collapsed"
+          />
         </View>
       </ExpandedProvider>
     )
@@ -893,7 +892,6 @@ const SECTIONS: readonly GallerySection[] = [
           onOpenTranscript={id => ctx.say(`Open transcript ${id}`)}
           onRetry={id => ctx.say(`Retry ${id}`)}
           receipt="delivered"
-          selfHandle="researcher"
           testID="gallery-typing-after-own-list"
           typing
         />
@@ -1209,7 +1207,6 @@ export function GalleryScreen({ onClose, section }: GalleryScreenProps) {
         onOpenTranscript={id => setLastAction(`Open transcript ${id}`)}
         onRetry={id => setLastAction(`Retry ${id}`)}
         receipt="delivered"
-        selfHandle="researcher"
         subagents={subagentMap}
         testID="gallery-transcript"
         typing={running}

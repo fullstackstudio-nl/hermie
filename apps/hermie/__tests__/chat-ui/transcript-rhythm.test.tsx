@@ -10,14 +10,16 @@ import { screen } from '@testing-library/react-native'
 import { StyleSheet } from 'react-native'
 
 import { TranscriptList } from '../../src/chat-ui'
-import { assistantItem, botDmOutItem, subagentMap, userItem } from '../../src/chat-ui/fixtures'
-import { layoutRows } from '../../src/chat-ui/grouping'
+import { assistantItem, botDmInItem, botDmOutItem, subagentMap, userItem } from '../../src/chat-ui/fixtures'
+import { layoutRows, speakerKey } from '../../src/chat-ui/grouping'
 import type { AssistantItem, BotDmOutItem, VisibleItem } from '../../src/chat-ui/types'
 import { BUBBLE_GAP } from '../../src/ui/tokens'
 import { renderScreen, withProviders } from '../support/render'
 
 /** §6.6's own number, restated here so a change to it has to be deliberate. */
 const DM_LINE_GAP = 9
+
+const AT = botDmOutItem.ts ?? 0
 
 const dmRun = (count: number): BotDmOutItem[] =>
   Array.from({ length: count }, (_, index) => ({
@@ -43,6 +45,32 @@ describe('the gap a row opens above itself', () => {
     expect(layout.dm3?.ledgerRun).toBe(true)
     // The reply AFTER the run starts a turn; it is not part of the ledger.
     expect(layout[assistantItem.id]?.ledgerRun).toBe(false)
+  })
+
+  /**
+   * The run is about the PAIR, not merely about two rows being adjacent.
+   *
+   * A message out and the teammate's answer coming back in are the two halves of
+   * one exchange, and the owner asked for them to sit tight. A dispatch to a
+   * DIFFERENT teammate is a second errand, and running the two together would
+   * read as one conversation that never happened.
+   */
+  it('runs a dispatch and the answer to it together, and breaks on a different teammate', () => {
+    const outbound = { ...botDmOutItem, id: 'out1', seq: 10, ts: AT }
+    const inbound = { ...botDmInItem, id: 'in1', seq: 11, ts: AT + 1 }
+    const elsewhere = { ...botDmOutItem, id: 'out2', seq: 12, target: 'Builder', targetHandle: 'builder', ts: AT + 2 }
+    const layout = layoutRows(visible([outbound, inbound, elsewhere]))
+
+    expect(layout.out1?.ledgerRun).toBe(false)
+    expect(layout.in1?.ledgerRun).toBe(true)
+    expect(layout.out2?.ledgerRun).toBe(false)
+  })
+
+  it('leaves an inbound DM out of the speech runs, so it has no tail to draw', () => {
+    // It used to key on `dm:<handle>`, which grouped consecutive inbound DMs
+    // into a run of bubbles — right while it WAS a bubble, wrong now it is an
+    // aside.
+    expect(speakerKey({ ...botDmInItem, id: 'in1' })).toBeNull()
   })
 
   it('gives consecutive bot-to-bot lines nine points and the turn after them the full gap', () => {

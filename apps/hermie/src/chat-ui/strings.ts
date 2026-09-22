@@ -53,8 +53,16 @@ const chatStringsEn = {
   },
   botDm: {
     to: (target: string) => `→ ${target}`,
-    /** The collapsed line's own label: `Message to @writer`. */
-    lineTo: (handle: string) => `Message to @${handle}`,
+    /**
+     * The aside's header, both directions.
+     *
+     * Short on purpose. The row holds a preview, a clock, a marker and a
+     * chevron beside it, and the header is the one part that may not truncate —
+     * an aside whose heading has collapsed to `To…` has lost the only thing it
+     * was certainly saying.
+     */
+    asideTo: (handle: string) => `To @${handle}`,
+    asideFrom: (handle: string) => `From @${handle}`,
     replied: (name: string) => `${name} replied`,
     sending: 'Sending…',
     queued: 'Queued · waiting for the current task',
@@ -84,11 +92,8 @@ const chatStringsEn = {
       `${count} messages · ${replies} ${replies === 1 ? 'reply' : 'replies'}`,
     /** The one place a DM line is allowed to navigate away from this chat. */
     openChat: (handle: string) => `Open @${handle}’s chat`,
-    sent: 'Sent',
     reply: 'Reply',
     answered: '↩︎ answered',
-    senderChip: (name: string) => `${name} · bot`,
-    header: (from: string, to: string) => `@${from} → @${to}`,
     chip: (target: string) => `Message to ${target}`,
     inChip: (name: string) => `Message from ${name}`,
     /** Shown under a pending dispatch while the recipient's turn is running. */

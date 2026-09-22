@@ -17,8 +17,7 @@ export {
   type AttachmentGalleryProps,
   type GalleryAttachment
 } from './AttachmentGallery'
-export { BotDmInBubble, type BotDmInBubbleProps } from './BotDmInBubble'
-export { BotDmOutLine, markerFor, type BotDmOutLineProps } from './BotDmOutLine'
+export { BotDmAside, dmHandleOf, markerFor, type BotDmAsideProps, type BotDmItem } from './BotDmAside'
 export { BotDmRollup, useRollupExpanded, type BotDmRollupProps } from './BotDmRollup'
 export { ChatHeader, SidebarToggleButton, type ChatHeaderProps } from './ChatHeader'
 export { Composer, type ComposerProps } from './Composer'

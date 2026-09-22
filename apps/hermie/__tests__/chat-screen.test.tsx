@@ -886,7 +886,7 @@ describe('following a DM across chats', () => {
    * suite mounts the screen without one — so there is nothing left to race and
    * the override can simply be set.
    */
-  function showFullDmLines() {
+  function showDmAsides() {
     act(() => {
       useSettingsStore.getState().setChatView('researcher', { level: 'normal' })
     })
@@ -902,16 +902,16 @@ describe('following a DM across chats', () => {
     })
 
     renderScreen(<ChatScreen bot="researcher" onOpenBot={onOpenBot} />)
-    showFullDmLines()
+    showDmAsides()
 
-    // Tapping the LINE expands it in place and navigates nowhere (§6.6); the
-    // explicit link inside is what opens the other chat, and it still lands on
-    // the matching inbound row rather than at the bottom.
-    await waitFor(() => expect(screen.getByTestId('bot-dm-out-line-t:call_dm_1')).toBeTruthy())
-    fireEvent.press(screen.getByTestId('bot-dm-out-line-t:call_dm_1'))
+    // Tapping the ASIDE expands it in place and navigates nowhere; the explicit
+    // link inside is what opens the other chat, and it still lands on the
+    // matching inbound row rather than at the bottom.
+    await waitFor(() => expect(screen.getByTestId('bot-dm-aside-t:call_dm_1-toggle')).toBeTruthy())
+    fireEvent.press(screen.getByTestId('bot-dm-aside-t:call_dm_1-toggle'))
     expect(onOpenBot).not.toHaveBeenCalled()
 
-    fireEvent.press(screen.getByTestId('bot-dm-out-open-t:call_dm_1'))
+    fireEvent.press(screen.getByTestId('bot-dm-aside-open-t:call_dm_1'))
 
     expect(onOpenBot).toHaveBeenCalledWith('writer', { focusItemId: 'w:1' })
   })
@@ -925,16 +925,16 @@ describe('following a DM across chats', () => {
     })
 
     renderScreen(<ChatScreen bot="researcher" onOpenBot={onOpenBot} />)
-    showFullDmLines()
+    showDmAsides()
 
-    // Tapping the LINE expands it in place and navigates nowhere (§6.6); the
-    // explicit link inside is what opens the other chat, and it still lands on
-    // the matching inbound row rather than at the bottom.
-    await waitFor(() => expect(screen.getByTestId('bot-dm-out-line-t:call_dm_1')).toBeTruthy())
-    fireEvent.press(screen.getByTestId('bot-dm-out-line-t:call_dm_1'))
+    // Tapping the ASIDE expands it in place and navigates nowhere; the explicit
+    // link inside is what opens the other chat, and it still lands on the
+    // matching inbound row rather than at the bottom.
+    await waitFor(() => expect(screen.getByTestId('bot-dm-aside-t:call_dm_1-toggle')).toBeTruthy())
+    fireEvent.press(screen.getByTestId('bot-dm-aside-t:call_dm_1-toggle'))
     expect(onOpenBot).not.toHaveBeenCalled()
 
-    fireEvent.press(screen.getByTestId('bot-dm-out-open-t:call_dm_1'))
+    fireEvent.press(screen.getByTestId('bot-dm-aside-open-t:call_dm_1'))
 
     // No focus target rather than a wrong one: the chat opens at its bottom.
     expect(onOpenBot).toHaveBeenCalledWith('writer', undefined)

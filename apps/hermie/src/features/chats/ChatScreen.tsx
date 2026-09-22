@@ -2132,7 +2132,6 @@ function Conversation({
                 onOpenTranscript={openTranscript}
                 onScrolledAwayFromBottom={onScrolledAway}
                 ref={listRef}
-                selfHandle={botName}
                 subagents={subagents}
                 // The TURN is running and nothing has been said yet: three dots. Not
                 // `busy` — that also covers a tool or a child still working, and dots

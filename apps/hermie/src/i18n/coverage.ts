@@ -123,8 +123,6 @@ export const UNTRANSLATED_KEYS: Record<TranslatedLocale, readonly string[]> = {
 
     'chat.assistant.footer',
     'chat.botDm.to',
-    'chat.botDm.senderChip',
-    'chat.botDm.header',
     'chat.subagents.title',
     'chat.subagents.stop',
     'chat.subagents.transcriptTitle',
@@ -263,8 +261,6 @@ export const UNTRANSLATED_KEYS: Record<TranslatedLocale, readonly string[]> = {
 
     'chat.assistant.footer',
     'chat.botDm.to',
-    'chat.botDm.senderChip',
-    'chat.botDm.header',
     'chat.cron.eyebrow',
     'chat.header.idle',
     'chat.header.offline',
