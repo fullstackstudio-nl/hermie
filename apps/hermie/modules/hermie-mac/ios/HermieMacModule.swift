@@ -274,6 +274,39 @@ public class HermieMacModule: Module {
     }
 
     /**
+     Preview a file the way the platform previews files.
+
+     `QLPreviewController`, presented over whatever is on screen — see `HermieQuickLook` for why it
+     is presented from here rather than handed over as a view, and for what happens to a remote URL.
+
+     Answers whether it was actually shown, so the caller can fall back to the share sheet for the
+     refusals that are expected rather than exceptional: an unreadable path, a type with no
+     previewer, a fetch that failed. It never throws, for the same reason — a rejected promise would
+     make the caller tell those apart by reading a message.
+
+     iOS API, not a Mac one: the phones and the iPad get the same previewer, which is what they
+     should have had instead of a share sheet all along. The Mac is only what made it obvious.
+     */
+    AsyncFunction("previewFile") { (uri: String, name: String?) async -> Bool in
+      // No `.runOnQueue(.main)`: an `async` closure builds a `ConcurrentFunctionDefinition`, which
+      // has no such modifier at all — it runs on Swift's own executor. The main-thread hop happens
+      // inside instead, because `HermieQuickLook` is `@MainActor`, which is the stronger guarantee:
+      // the isolation is on the type that touches UIKit rather than on the call site.
+      await HermieQuickLook.present(uri: uri, title: name)
+    }
+
+    /**
+     Whether this binary can preview a file at all.
+
+     The same kind of probe `supportsSelectableText` is, added in the same change as the function it
+     answers for: an older binary under a newer bundle would otherwise have `previewFile` reject as
+     a missing function, and the caller cannot tell that from a file it could not show.
+     */
+    Function("supportsQuickLook") { () -> Bool in
+      true
+    }
+
+    /**
      Is this app's window the one the reader is working in?
 
      Read once for the first render, because the event only fires on a CHANGE and a bundle that

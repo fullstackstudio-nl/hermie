@@ -49,7 +49,6 @@ import {
   TranscriptList,
   type TranscriptListHandle
 } from '../../chat-ui'
-import { shareFile } from '../../platform/share-file'
 import { shareText } from '../../platform/share-text'
 import { lastMessageAt, prettyModelName } from '@hermie/transcript'
 import type { ConnectionStatus } from '@hermie/gateway-client'
@@ -97,6 +96,7 @@ import { useChatRuntime } from './ChatRuntime'
 import { findMatchingItem } from '../search'
 import { connectionNotice, RETRY_OFFER_MS } from './connection-notice'
 import { countsAsRead, readWatermark } from './read-watermark'
+import { openAttachmentFile } from './open-attachment'
 import { regenerateLastTurn } from './regenerate'
 import { useComposerDictation } from '../voice/useComposerDictation'
 import { useDictationLanguages } from '../voice/useDictationLanguages'
@@ -620,15 +620,13 @@ function Conversation({
   /**
    * A non-picture attachment, opened.
    *
-   * The share sheet on a phone or a Mac, a download in a browser — the verb is
-   * the platform's, and `share-file.ts` picks it. A reference with no local URI
-   * has nothing to hand over, so the tap does nothing rather than opening an
+   * Quick Look first and the share sheet only if that cannot show it — see
+   * `open-attachment.ts`, which owns that ordering. A reference with no local
+   * URI has nothing to open, so the tap does nothing rather than putting up an
    * empty sheet.
    */
   const openAttachment = useCallback((attachment: { name: string; uri?: string }) => {
-    if (attachment.uri) {
-      void shareFile(attachment.uri, attachment.name)
-    }
+    void openAttachmentFile(attachment)
   }, [])
 
   const images = useMemo(

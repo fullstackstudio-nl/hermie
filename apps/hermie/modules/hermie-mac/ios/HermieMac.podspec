@@ -21,7 +21,10 @@ Pod::Spec.new do |s|
   # GameController is what answers "is Shift down" and "was Escape pressed" below the responder
   # chain. Its own header says it is available to an application that links the framework; nothing
   # else — no entitlement, no Info.plist key.
-  s.frameworks = 'GameController', 'UIKit'
+  #
+  # QuickLook is `QLPreviewController`, which is how a file attachment is opened. Also entitlement
+  # free, and iOS API rather than Mac API — see `HermieQuickLook`.
+  s.frameworks = 'GameController', 'QuickLook', 'UIKit'
 
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',

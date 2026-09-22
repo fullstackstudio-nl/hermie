@@ -89,6 +89,44 @@ which of the two it was.
 material actually reaches the transparency of the Messages search field on this
 Mac is a question for that Mac.
 
+## Opening an attachment previews it (2026-09-22)
+
+`QLPreviewController`, from `modules/hermie-mac/ios/HermieQuickLook.swift`, behind
+`src/platform/quick-look.ts`. The ordering lives in
+`src/features/chats/open-attachment.ts`: preview first, share sheet second, and the
+share sheet only because a browser downloads, Android has no previewer and some
+types have none either.
+
+It is in `hermie-mac` and it is **not** Mac-only. `QLPreviewController` is iOS API;
+the phones and the iPad get the same previewer. The module was the right home only
+because it is already the app's Apple-side lever and a second local module for one
+view controller is a second podspec, a second autolink entry and a second thing to
+keep out of an EAS archive. `QuickLook` was added to the podspec's `frameworks`;
+like GameController it needs no entitlement and no `Info.plist` key.
+
+Three things about it that are decisions rather than details:
+
+- **It is presented from Swift, over the topmost presented controller.** React
+  Native cannot host a `UIViewController` that owns its own chrome, and presenting
+  from the root while a sheet is up throws "which is already presenting".
+- **The data source is held in a static.** `QLPreviewController` holds its data
+  source weakly; without the reference the preview comes up and blanks on the first
+  re-query.
+- **A remote URL is fetched to the temporary directory first, unauthenticated.**
+  Nothing in the app produces one today — the gateway stores an upload on its own
+  disk and serves nothing back, so every URI the app has is a local `file://` from
+  its own picker. The branch exists because handing a remote URL straight to the
+  previewer shows an empty sheet, and because it is the half that would otherwise
+  be written under time pressure the day a serve route appears. A gateway needing
+  an `Authorization` header is one this cannot preview, and the answer there is
+  `false` and the share sheet.
+
+**What needs a real Mac.** The presentation itself. Nothing here launches the app,
+so "it compiles and the seam is unit tested" is the whole of the claim: whether the
+previewer appears over a bottom sheet rather than behind it, whether the title bar
+of the preview reads the filename the app passed, and what a `.md` or a `.log`
+actually previews as, are all unwatched.
+
 ## An inactive Mac window (2026-09-22) — settled, half of it unwatched
 
 The 2026-09-20 note below left one thing open: whether UIKit dims a native

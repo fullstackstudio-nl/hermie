@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Attachments open in Quick Look.** Tapping a file in a conversation previews it — the system's
+  own previewer, the one Space opens in the Finder — instead of putting up a share sheet and asking
+  which app you would like to read it in. On the Mac, the iPhone and the iPad alike: `QLPreviewController`
+  is iOS API, and the Mac only made the old behaviour obvious. Anything Quick Look has no previewer
+  for still goes to the share sheet, and a browser still downloads.
+
 - **A map of a bot's memory.** A **Graph** tab beside the entries draws what the plugin's `graph`
   answer holds: the bot at the centre, an entry per memory, and the topics they share — a
   capitalised phrase, an `@handle`, a `#hashtag`, a date — with a line wherever two entries mention
