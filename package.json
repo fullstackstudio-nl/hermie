@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
-  "description": "Hermie \u2014 a mobile and desktop client for Hermes Agent",
+  "description": "Hermie — a mobile and desktop client for Hermes Agent",
   "homepage": "https://hermie.dev",
   "workspaces": [
     "apps/*",
@@ -37,7 +37,8 @@
     "android": "npm run android --workspace @hermie/app",
     "android:release": "npm run android:release --workspace @hermie/app --",
     "mac": "npm run mac --workspace @hermie/app --",
-    "prepare": "husky"
+    "prepare": "husky",
+    "screenshots:ios": "node scripts/screenshots-ios.mjs"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.6.1",

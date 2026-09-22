@@ -7,8 +7,10 @@ real gateway, a real bot or a person's name — the same rule
 matters more here because a store listing is the most-read surface the project
 has.
 
-There is no iOS set yet. App Store Connect wants its own sizes and this round did
-not produce them; `docs/release.md` says so in the TestFlight section.
+The iOS set lives beside this one, in
+[screenshots/ios/](screenshots/ios/), with its own README: App Store Connect
+wants its own sizes, and the simulators that produce them natively are not
+emulators with a `wm size` to override.
 
 ## What Play accepts, and what these are
 
