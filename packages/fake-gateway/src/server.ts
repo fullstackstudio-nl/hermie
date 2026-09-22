@@ -191,6 +191,25 @@ export interface FakeGatewayOptions {
    */
   plugin?: Record<string, unknown> | false
   /**
+   * What the plugin's display-name route does.
+   *
+   * `PATCH /api/plugins/hermie/profiles/{name}` is the plugin's answer to a
+   * display name a client can actually write — core's own route renames the
+   * profile instead — and the app has to cope with three gateways rather than
+   * one, so all three are stageable:
+   *
+   *  - `on` (the default): the capability is advertised and the route writes.
+   *  - `forbidden`: advertised, and the route answers 403. A gateway whose
+   *    signed-in user may read profiles and not edit them.
+   *  - `absent`: NOT advertised, and the route answers 404. A plugin older than
+   *    the route, which is the state every gateway is in until it is updated.
+   *
+   * It is one option with three values rather than two booleans because the
+   * three answers are what the app branches on, and a combination like
+   * "unadvertised but writable" is not a gateway anybody has.
+   */
+  profileDisplayName?: 'on' | 'forbidden' | 'absent'
+  /**
    * Answer every request with a 301 to this origin instead of serving it.
    *
    * Staged because of a cache, not because a gateway does this. The iOS URL
@@ -931,6 +950,15 @@ const LAUNCH_PROFILE = 'default'
 const PROFILE_NAME_LIMIT = 64
 
 /**
+ * The plugin's own cap on a display name, which is NOT core's 64.
+ *
+ * Deliberately a different number from the line above: the two limits are set
+ * by two different pieces of software, and a fake that gave them the same value
+ * would let a client that only ever checked one of them look correct.
+ */
+const DISPLAY_NAME_LIMIT = 60
+
+/**
  * What a memory file joins its entries with, and what the store spends on it.
  *
  * Defined by Hermes' own `MemoryStore`; repeated in the plugin as
@@ -1149,6 +1177,7 @@ export const PLUGIN_ADVERT: Record<string, unknown> = {
     'memory.edit',
     'push.type.turn_failed',
     'push.webpush',
+    'profiles.display_name',
     'ui_meta.per_user'
   ],
   modules: {
@@ -1156,6 +1185,7 @@ export const PLUGIN_ADVERT: Record<string, unknown> = {
     context: 'on',
     memory: 'on',
     presence: 'planned',
+    profiles: 'on',
     push: 'on',
     search: 'planned',
     sessions: 'planned',
@@ -1164,6 +1194,38 @@ export const PLUGIN_ADVERT: Record<string, unknown> = {
   },
   limits: { payloadBytes: 3500, contextChars: 1200 },
   updatedAt: 1_790_001_453
+}
+
+/** `profiles.display_name`, which `--profile-display-name absent` takes away. */
+const DISPLAY_NAME_CAPABILITY = 'profiles.display_name'
+
+/**
+ * The advert this gateway serves, or `null` when it has no plugin.
+ *
+ * One reader for the `ui_meta` key and for the plugin's own routes, so a
+ * capability a route refuses to honour cannot also be advertised by accident —
+ * which is the one inconsistency a fake can have that a real gateway cannot.
+ * `profileDisplayName: 'absent'` filters the string out of whichever advert is
+ * in play, including one a test passed in itself: a plugin that does not have
+ * the route does not advertise it, whoever wrote the rest of the advert.
+ */
+function advertOf(options: FakeGatewayOptions): Record<string, unknown> | null {
+  if (options.plugin === false) {
+    return null
+  }
+
+  const advert = (options.plugin ?? PLUGIN_ADVERT) as Record<string, unknown>
+
+  if (options.profileDisplayName !== 'absent') {
+    return advert
+  }
+
+  return {
+    ...advert,
+    capabilities: (Array.isArray(advert.capabilities) ? advert.capabilities : []).filter(
+      entry => entry !== DISPLAY_NAME_CAPABILITY
+    )
+  }
 }
 
 /**
@@ -2170,6 +2232,9 @@ function initialState(options: FakeGatewayOptions): FakeGatewayState {
    */
   const hasAvatar = (profile: string): boolean => profile !== 'writer'
 
+  /** Read once: every profile row carries the same answer. */
+  const advert = advertOf(options)
+
   /**
    * `is_default` marks the profile `hermes serve` is running as.
    *
@@ -2220,9 +2285,7 @@ function initialState(options: FakeGatewayOptions): FakeGatewayState {
         point of it being a separate key: a write from behind `hermie-app`
         would make the app's next settings write fail.
       */
-      ...(session.profile === researcher.profile && options.plugin !== false
-        ? { 'hermie-plugin': options.plugin ?? PLUGIN_ADVERT }
-        : {})
+      ...(session.profile === researcher.profile && advert ? { 'hermie-plugin': advert } : {})
     }
   })
 
@@ -3561,6 +3624,14 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       return
     }
 
+    const displayNameMatch = /^\/api\/plugins\/hermie\/profiles\/([^/]+)$/.exec(path)
+
+    if (displayNameMatch && method === 'PATCH') {
+      await handleProfileDisplayName(req, res, decodeURIComponent(displayNameMatch[1] as string))
+
+      return
+    }
+
     if (path.startsWith('/api/plugins/')) {
       await handleMemory(req, res, path, method, url.searchParams)
 
@@ -4154,7 +4225,7 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     method: string,
     query: URLSearchParams
   ): Promise<void> {
-    const advert = options.plugin === false ? null : ((options.plugin ?? PLUGIN_ADVERT) as Record<string, unknown>)
+    const advert = advertOf(options)
     const capabilities = Array.isArray(advert?.capabilities) ? (advert.capabilities as string[]) : []
 
     // No plugin means no router mounted, which is a 404 and not a 403: core
@@ -4494,6 +4565,88 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     }
 
     json(res, 200, { ok: true, name: wanted, path: profile.path })
+  }
+
+  /**
+   * `PATCH /api/plugins/hermie/profiles/{name}` — a display name a client can write.
+   *
+   * The route core does not have. Core's `PATCH /api/profiles/{name}` renames
+   * the profile on every profile but `default` — directory, wrapper script,
+   * service, active-profile pointer — so an app that wanted to change what a
+   * bot is CALLED had nowhere to send it and kept the name to itself, where no
+   * other client on the gateway could see it. The plugin writes `display_name`
+   * into the profile's own file, which is where `profiles.list` reads it from,
+   * and answers the pair it wrote.
+   *
+   * Four answers, and which one this gateway gives is `profileDisplayName`:
+   *
+   *  - **200** `{"name": …, "display_name": …}` — written. Not core's shape:
+   *    there is no `ok` and no `path`, because this route neither renames
+   *    anything nor moves a directory to report the new location of.
+   *  - **400** on an empty name or one over 60 characters. Shorter than core's
+   *    64 on purpose — the plugin's own limit, and the app has to respect the
+   *    route's rather than assume the two agree.
+   *  - **403** when the signed-in gateway user may read profiles and not write
+   *    them.
+   *  - **404** when the plugin is absent or predates the route, which is the
+   *    same 404 core answers for a prefix it never mounted.
+   */
+  async function handleProfileDisplayName(req: IncomingMessage, res: ServerResponse, name: string): Promise<void> {
+    const advert = advertOf(options)
+    const mode = options.profileDisplayName ?? 'on'
+
+    // No plugin, or a plugin without the route: core never mounted the prefix.
+    if (!advert || mode === 'absent') {
+      json(res, 404, { detail: `No route for PATCH /api/plugins/hermie/profiles/${name}` })
+
+      return
+    }
+
+    if (mode === 'forbidden') {
+      json(res, 403, { detail: 'This account may not edit profiles on this gateway.' })
+
+      return
+    }
+
+    const body = await readBody(req)
+    const profile = state.profiles.find(entry => entry.name === name)
+
+    if (!profile) {
+      json(res, 404, { detail: `Profile '${name}' does not exist.` })
+
+      return
+    }
+
+    const wanted = String(body.display_name ?? '').trim()
+
+    if (!wanted) {
+      json(res, 400, { detail: 'display_name is required.' })
+
+      return
+    }
+
+    if (wanted.length > DISPLAY_NAME_LIMIT) {
+      json(res, 400, { detail: `A display name may be at most ${DISPLAY_NAME_LIMIT} characters.` })
+
+      return
+    }
+
+    // eslint-disable-next-line no-control-regex -- the range IS the point: C0 controls plus DEL.
+    if (/[ -]/.test(wanted)) {
+      json(res, 400, { detail: 'A display name may not contain control characters.' })
+
+      return
+    }
+
+    /*
+      `default` is written like any other profile. Core refuses to RENAME it
+      because its home is the installation root, which is a fact about the
+      directory and not about the label — and a display name that could be set
+      on every bot except the one most gateways only have would be a worse
+      answer than the one this round replaced.
+    */
+    profile.display_name = wanted
+    json(res, 200, { name: profile.name, display_name: wanted })
   }
 
   async function handleFileUpload(req: IncomingMessage, res: ServerResponse): Promise<void> {

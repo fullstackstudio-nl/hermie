@@ -85,6 +85,135 @@ describe('GET /api/profiles — profiles.py::_list_profiles', () => {
   })
 })
 
+/**
+ * `PATCH /api/plugins/hermie/profiles/{name}` — the plugin's display-name route.
+ *
+ * Not an upstream shape: this one is the PLUGIN's, and it exists because core's
+ * answer is the wrong one. `PATCH /api/profiles/{name}` renames the profile on
+ * every profile but `default` — directory, wrapper script, service, the
+ * active-profile pointer — so a client that wanted to change what a bot is
+ * CALLED had nowhere to send it and kept the name to itself, where no other
+ * client on the gateway could see it.
+ *
+ * What is worth pinning here is the difference from core's route, because a
+ * client that assumed the two agreed is the failure this fixture is for: the
+ * answer carries no `ok` and no `path`, the limit is 60 and not 64, and the
+ * three refusals are three different app behaviours.
+ */
+describe('/api/plugins/hermie/profiles — the plugin’s display-name route', () => {
+  let own: FakeGateway
+
+  afterEach(async () => {
+    await own.close()
+  })
+
+  const patch = async (name: string, body: Record<string, unknown>): Promise<Response> =>
+    fetch(`${own.url}/api/plugins/hermie/profiles/${name}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+
+  const advertOf = async (): Promise<{ capabilities?: string[] } | undefined> => {
+    const roster = (await fetch(`${own.url}/api/profiles`).then(response => response.json())) as {
+      profiles: { ui_meta?: Record<string, { capabilities?: string[] }> }[]
+    }
+
+    return roster.profiles.map(row => row.ui_meta?.['hermie-plugin']).find(Boolean)
+  }
+
+  const rosterNames = async (): Promise<{ name: string; display_name: string }[]> => {
+    const roster = (await fetch(`${own.url}/api/profiles`).then(response => response.json())) as {
+      profiles: { name: string; display_name: string }[]
+    }
+
+    return roster.profiles
+  }
+
+  it('answers the pair it wrote, and nothing core would have sent', async () => {
+    own = await startFakeGateway({ port: 0 })
+
+    const response = await patch('researcher', { display_name: 'De Onderzoeker' })
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ name: 'researcher', display_name: 'De Onderzoeker' })
+  })
+
+  /** The point of the route: `profiles.list` reads the name back. */
+  it('puts the name where the roster reads one from, without moving the id', async () => {
+    own = await startFakeGateway({ port: 0 })
+
+    await patch('researcher', { display_name: 'De Onderzoeker' })
+
+    const rows = await rosterNames()
+
+    expect(rows.find(row => row.name === 'researcher')?.display_name).toBe('De Onderzoeker')
+    // The identifier does not move. That is the whole difference from core.
+    expect(rows.map(row => row.name)).toContain('researcher')
+  })
+
+  /** `default` is a label like any other: its home is a directory, not its name. */
+  it('names the default profile too', async () => {
+    own = await startFakeGateway({ port: 0 })
+
+    expect((await patch('researcher', { display_name: 'Jurist' })).status).toBe(200)
+  })
+
+  it('refuses an empty name and one over its own 60', async () => {
+    own = await startFakeGateway({ port: 0 })
+
+    expect((await patch('researcher', { display_name: '   ' })).status).toBe(400)
+    expect((await patch('researcher', {})).status).toBe(400)
+    expect((await patch('researcher', { display_name: 'x'.repeat(60) })).status).toBe(200)
+    expect((await patch('researcher', { display_name: 'x'.repeat(61) })).status).toBe(400)
+  })
+
+  /** A control character is not something a client could have composed by typing. */
+  it('refuses a control character, which no field could carry anyway', async () => {
+    own = await startFakeGateway({ port: 0 })
+
+    expect((await patch('researcher', { display_name: 'DeOnderzoeker' })).status).toBe(400)
+  })
+
+  it('answers 404 for a profile it does not have', async () => {
+    own = await startFakeGateway({ port: 0 })
+
+    expect((await patch('nobody', { display_name: 'Nobody' })).status).toBe(404)
+  })
+
+  /** A gateway whose signed-in account may read profiles and not write them. */
+  it('answers 403 where the account may not edit profiles', async () => {
+    own = await startFakeGateway({ port: 0, profileDisplayName: 'forbidden' })
+
+    expect((await patch('researcher', { display_name: 'De Onderzoeker' })).status).toBe(403)
+    expect((await advertOf())?.capabilities).toContain('profiles.display_name')
+  })
+
+  /**
+   * A plugin older than the route: 404, and the capability is not advertised.
+   *
+   * Both halves, because a fixture that took the route away while still
+   * advertising it would be a gateway nobody has.
+   */
+  it('answers 404 and advertises nothing when the plugin predates the route', async () => {
+    own = await startFakeGateway({ port: 0, profileDisplayName: 'absent' })
+
+    expect((await patch('researcher', { display_name: 'De Onderzoeker' })).status).toBe(404)
+
+    const advert = await advertOf()
+
+    expect(advert?.capabilities).not.toContain('profiles.display_name')
+    // The rest of the advert is untouched: only this one string goes.
+    expect(advert?.capabilities).toContain('memory.browse')
+  })
+
+  it('advertises the capability on a gateway that has the route', async () => {
+    own = await startFakeGateway({ port: 0 })
+
+    expect((await advertOf())?.capabilities).toContain('profiles.display_name')
+  })
+})
+
 describe('/api/plugins/hermie/memory — the plugin’s dashboard/plugin_api.py', () => {
   /*
     Pinned against the PLUGIN's own tests (`tests/test_memory.py`,

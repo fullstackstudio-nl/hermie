@@ -15,6 +15,7 @@ const { values } = parseArgs({
     'stream-delay': { type: 'string' },
     'history-rows': { type: 'string' },
     'no-plugin': { type: 'boolean', default: false },
+    'profile-display-name': { type: 'string' },
     host: { type: 'string', default: '127.0.0.1' },
     help: { type: 'boolean', default: false }
   }
@@ -37,6 +38,9 @@ if (values.help) {
       '                          (mixed prose, code and tool calls; for measuring a long list)',
       '  --no-plugin             omit the `hermie-plugin` advert from ui_meta, staging a',
       '                          gateway with no Hermie plugin installed',
+      '  --profile-display-name on|forbidden|absent  what the plugin’s display-name route does',
+      '                          (default on). `absent` also drops the capability, staging a',
+      '                          plugin older than the route; `forbidden` answers 403',
       '',
       'Prompts steer the built-in scenario: "approve" raises an approval request,',
       '"delegate" fans out subagent events, anything else streams a reply with a tool call.',
@@ -57,6 +61,13 @@ if (!['none', 'token', 'native', 'cookie'].includes(auth)) {
   process.exit(1)
 }
 
+const displayName = values['profile-display-name'] as 'on' | 'forbidden' | 'absent' | undefined
+
+if (displayName && !['on', 'forbidden', 'absent'].includes(displayName)) {
+  console.error(`--profile-display-name must be on, forbidden or absent (got ${displayName}).`)
+  process.exit(1)
+}
+
 let scenario: Scenario | undefined
 
 if (values.scenario) {
@@ -73,7 +84,8 @@ const gateway = await startFakeGateway({
   ...(values['stream-delay'] ? { streamDelayMs: Number.parseInt(values['stream-delay'], 10) } : {}),
   ...(values['history-rows'] ? { historyRows: Number.parseInt(values['history-rows'], 10) } : {}),
   ...(scenario ? { scenario } : {}),
-  ...(values['no-plugin'] ? { plugin: false as const } : {})
+  ...(values['no-plugin'] ? { plugin: false as const } : {}),
+  ...(displayName ? { profileDisplayName: displayName } : {})
 })
 
 console.log(`fake gateway listening on ${gateway.url} (auth: ${auth})`)
