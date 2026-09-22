@@ -328,6 +328,36 @@ export function modelRowLabel(options: readonly PickerOption[], value: string): 
   return options.find(option => option.value === value)?.label ?? prettyModelName(value)
 }
 
+/**
+ * The picker's rows, from the gateway's inventory and the chat's own model.
+ *
+ * Beside `modelRowLabel` rather than inside the screen, because the two are one
+ * decision seen from two ends: this builds the labels and that reads one of them
+ * back out. Splitting them is what let them disagree — the row's fallback
+ * formatted a wire id, and the option list did not, so the ONE model guaranteed
+ * to be in the list was the one whose label was raw.
+ *
+ * Two rules, both of them the owner's:
+ *
+ *  - **The name on top, the wire id underneath.** The id has to stay readable —
+ *    it is what goes into a config or a `--model` flag — and the picker's search
+ *    matches on it, because `value` is one of the three fields it looks in.
+ *  - **The chat's own model always appears**, even when the inventory is empty or
+ *    no longer lists it. A picker that cannot show what you are on is a lie.
+ */
+export function modelPickerOptions(
+  models: readonly { id: string }[],
+  current: string | undefined | null
+): PickerOption[] {
+  const options = models.map(model => ({ value: model.id, label: prettyModelName(model.id), detail: model.id }))
+
+  if (current && !options.some(option => option.value === current)) {
+    return [{ value: current, label: prettyModelName(current), detail: current }, ...options]
+  }
+
+  return options
+}
+
 /** The mute row, which says the STATE — a deadline — rather than the action. */
 export function muteRowLabel(mutedUntil: number | null, now: number): string {
   if (mutedUntil === null) {

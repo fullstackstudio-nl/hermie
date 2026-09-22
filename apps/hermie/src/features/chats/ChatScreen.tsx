@@ -50,7 +50,7 @@ import {
   type TranscriptListHandle
 } from '../../chat-ui'
 import { shareText } from '../../platform/share-text'
-import { lastMessageAt, prettyModelName } from '@hermie/transcript'
+import { lastMessageAt } from '@hermie/transcript'
 import type { ConnectionStatus } from '@hermie/gateway-client'
 import { looksLikeSlashCommand, parseSlashCommand } from '@hermes/shared/slash'
 
@@ -80,6 +80,7 @@ import { TypeScaleProvider, useTheme } from '../../ui/theme'
 import {
   CHAT_POPOVER_MIN_WIDTH,
   ChatOptionsPopover,
+  modelPickerOptions,
   modelRowLabel,
   muteRowLabel,
   optionRowLabel,
@@ -1488,24 +1489,17 @@ function Conversation({
     [chat]
   )
 
-  const modelOptions = useMemo<PickerOption[]>(() => {
-    /*
-      The name on top, the wire id underneath. The id is what a reader has to be
-      able to paste into a config or a `--model` flag, so it is never replaced —
-      and the picker's own search still matches on it, because `option.value` is
-      one of the three fields it looks in.
-    */
-    const options = models.map(model => ({ value: model.id, label: prettyModelName(model.id), detail: model.id }))
-    const current = chat.info?.model
-
-    // The chat's own model always appears, even when the inventory is empty or
-    // does not list it: a picker that cannot show what you are on is a lie.
-    if (current && !options.some(option => option.value === current)) {
-      return [{ value: current, label: current }, ...options]
-    }
-
-    return options
-  }, [chat.info?.model, models])
+  /*
+    Built by `modelPickerOptions`, which sits beside the function that reads a
+    label back off this list. They used to be two places and they disagreed: the
+    chat's own model was appended with the WIRE ID as its label, so the one model
+    certain to be in the list was the one whose row said
+    `anthropic/claude-opus-4-1-20250805` while every row under it said a name.
+  */
+  const modelOptions = useMemo<PickerOption[]>(
+    () => modelPickerOptions(models, chat.info?.model),
+    [chat.info?.model, models]
+  )
 
   const composerAttachments = useMemo<ComposerAttachment[]>(
     () => [

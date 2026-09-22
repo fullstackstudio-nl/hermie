@@ -13,7 +13,7 @@
  * and Escape both close it, and a row that leads to a page hands over to the
  * sheet already on that page rather than dropping the reader at the root.
  */
-import { act, fireEvent, screen, waitFor } from '@testing-library/react-native'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react-native'
 import { Keyboard } from 'react-native'
 
 import { ChatScreen } from '../src/features/chats/ChatScreen'
@@ -21,7 +21,7 @@ import { type Bot, useBotsStore } from '../src/store/bots'
 import { useChatsStore } from '../src/store/chats'
 import { usePushStore } from '../src/store/push'
 import { useSettingsStore } from '../src/store/settings'
-import { nextFocus, popoverRows } from '../src/ui/sheets'
+import { modelPickerOptions, modelRowLabel, nextFocus, popoverRows } from '../src/ui/sheets'
 import { renderScreen } from './support/render'
 
 /**
@@ -250,6 +250,61 @@ describe('the options menu is a popover in the chat', () => {
     // field and the root has no field at all.
     expect(screen.getByTestId('picker-search')).toBeTruthy()
     expect(screen.queryByTestId('chat-options-backdrop', HIDDEN)).toBeNull()
+  })
+
+  /**
+   * The row that says which model you are on reads a NAME, not a wire id.
+   *
+   * The controller here answers an empty inventory, which is the case that used
+   * to show the id through: the chat's own model is appended to the picker so
+   * that the list can show what you are on, and that appended option carried the
+   * raw id as its label — so the row matched it and printed it. The gateway is
+   * allowed to answer nothing, and the row has to read the same either way.
+   */
+  it('says the model’s name on the row, not its wire id', async () => {
+    await openChat()
+
+    fireEvent.press(screen.getByTestId('chat-header-options'))
+    await waitFor(() => expect(screen.getByTestId('chat-options-popover')).toBeTruthy())
+
+    const row = screen.getByTestId('option-model')
+
+    expect(within(row).getByText('Example Model')).toBeTruthy()
+    expect(within(row).queryByText('example-provider/example-model')).toBeNull()
+  })
+})
+
+/**
+ * The list and the row, as one function.
+ *
+ * They were two, and that is how they disagreed: `modelRowLabel` formatted an id
+ * it could not find an option for, and the one option the list always has — the
+ * chat's own model — was built with the id as its label, so the fallback never
+ * ran for the one row that needed it.
+ */
+describe('the models a picker offers', () => {
+  it('names every row, including the chat’s own model', () => {
+    const options = modelPickerOptions([{ id: 'anthropic/claude-haiku-4-5-20251001' }], 'openai/gpt-5-2025-08-07')
+
+    expect(options.map(option => option.label)).toEqual(['GPT-5', 'Claude Haiku 4.5'])
+    // The id stays readable: it is what goes into a config or a `--model` flag,
+    // and the picker's search matches on it.
+    expect(options.map(option => option.detail)).toEqual([
+      'openai/gpt-5-2025-08-07',
+      'anthropic/claude-haiku-4-5-20251001'
+    ])
+  })
+
+  it('does not list the chat’s model twice when the inventory has it', () => {
+    const options = modelPickerOptions([{ id: 'openai/gpt-5-2025-08-07' }], 'openai/gpt-5-2025-08-07')
+
+    expect(options).toHaveLength(1)
+  })
+
+  it('reads the row’s label back off the list it built', () => {
+    const current = 'openai/gpt-5-2025-08-07'
+
+    expect(modelRowLabel(modelPickerOptions([], current), current)).toBe('GPT-5')
   })
 })
 

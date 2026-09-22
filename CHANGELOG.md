@@ -203,6 +203,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now gets what is LEFT of those forty-five seconds, so the app stops a moment before Shortcuts
   does rather than writing an answer nobody is still reading.
 
+- **The line that says which model a chat is on prints the model's name.** The picker under
+  it listed **Claude Opus 4.1** and **GPT-5**, and the row above said
+  `anthropic/claude-opus-4-1-20250805`. The reason was one option: a chat's own model is
+  always added to the list so the picker can show what you are on, and that one option was
+  added with the wire id as its label — so the row found it and printed it, and the fallback
+  that exists for exactly this never ran. The id is still there, under the name, where every
+  other row keeps it and where the picker's search can still match it. The **New bot** form's
+  model list reads the same way now.
+
 - **The chat list no longer shows a raw `[IMPORTANT: …` or `[System: …` line.** The gateway's
   preview for a chat is its newest user or assistant row squashed onto one line and cut at eighty
   characters, so an injected wrapper reached the list without its newlines and, often, without its

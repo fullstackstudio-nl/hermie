@@ -2,6 +2,7 @@
 export { ApprovalSheet, type ApprovalSheetProps } from './ApprovalSheet'
 export {
   ChatOptionsSheet,
+  modelPickerOptions,
   modelRowLabel,
   muteRowLabel,
   optionRowLabel,

@@ -13,6 +13,7 @@
  * is where they will look for it — so Settings passes nothing and the sheet
  * simply closes.
  */
+import { prettyModelName } from '@hermie/transcript'
 import { useEffect, useMemo, useState } from 'react'
 
 import { useChatRuntime } from '../chats/ChatRuntime'
@@ -80,7 +81,11 @@ export function NewBotFlow({ visible, onClose, onOpened }: NewBotFlowProps) {
         setModels(
           (options.providers ?? []).flatMap(provider =>
             (provider.models ?? []).map(model => ({
-              label: `${provider.name} · ${model}`,
+              // The same formatter the chat's own model picker uses. The
+              // inventory writes wire ids, and a reader choosing a model for a
+              // brand-new bot should be reading the same words here as in the
+              // chat they will open next.
+              label: `${provider.name} · ${prettyModelName(model)}`,
               model: `${provider.slug}/${model}`,
               provider: provider.slug
             }))
