@@ -99,11 +99,12 @@ describe('the harness itself', () => {
   })
 
   it('notices a gap in a tree a language claims', () => {
-    // The mechanism, proved against a tree nobody claims yet rather than
-    // against the real claim: `catalogueFor` answers `{}` for it, so every
-    // English key in it is missing, and that is exactly what the check above
-    // would report if somebody claimed it without translating it.
-    const gaps = missingKeys(ENGLISH_TREES.logs, catalogueFor('nl', 'logs'))
+    // An empty catalogue stands in for a language that claimed a tree and then
+    // translated none of it. Every English leaf comes back as a gap, which is
+    // exactly what the check above reports — and the fixture is empty rather
+    // than a real catalogue so that this keeps proving the mechanism as the
+    // catalogues fill up.
+    const gaps = missingKeys(ENGLISH_TREES.logs, {})
 
     expect(gaps.length).toBeGreaterThan(0)
     expect(gaps).toContain('title')
