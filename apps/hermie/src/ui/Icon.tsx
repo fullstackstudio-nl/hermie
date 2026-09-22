@@ -58,7 +58,7 @@ export type IconName =
   | 'arrowRight'
   | 'arrowUp'
   | 'queue'
-  | 'bellSlash'
+  | 'bellMuted'
   | 'pin'
   | 'grip'
   | 'mic'
@@ -83,8 +83,14 @@ export interface IconProps {
  * `tab` is the mark in the bottom strip and `tabSlot` the box around it; the two
  * differ, which is the whole point of the pair. `control` is the mark inside a
  * round glass button, `inline` a caret or a marker sitting in a line of text.
+ *
+ * `listMark` is a mark that describes a whole list ROW rather than a word in it
+ * — the muted bell on a chat. It is bigger than `marker` on purpose: the owner
+ * reported the bell as "small and not clear", and the reason was that a 13pt
+ * marker is sized to sit beside metadata type, while this one has to be read
+ * against the row's name at a glance from a scrolling list.
  */
-export const ICON_SIZE = { tab: 20, tabSlot: 24, control: 19, inline: 15, marker: 13 } as const
+export const ICON_SIZE = { tab: 20, tabSlot: 24, control: 19, listMark: 17, inline: 15, marker: 13 } as const
 
 /** The default weight, as a fraction of the drawn size. 1.7 at 20pt, 1.3 at 15. */
 function weightFor(size: number): number {
@@ -198,19 +204,29 @@ function Glyph({ color, name, stroke }: { color: string; name: IconName; stroke:
     /**
      * A bell with a stroke through it: the chat is quiet on purpose.
      *
-     * The bell is drawn small and the slash runs the full diagonal, because at
-     * the 13pt marker size the two have to be told apart at a glance and a
-     * slash that stops at the bell's edge disappears into it. The clapper is
-     * left off for the same reason — three marks in thirteen points is a smudge.
+     * It used to be a rounded-top box under a diagonal, drawn at the 13pt marker
+     * size, and the owner read it as what it was — "small and not clear". A box
+     * is not a bell. What makes one legible is the SKIRT: the walls flare out at
+     * the bottom and the base is wider than the dome, and that outline is what
+     * the eye recognises before it has resolved anything inside it. The clapper
+     * below the base is the second half of that reading, and it is affordable
+     * now the mark is drawn at `listMark` rather than at `marker` — three marks
+     * in thirteen points was a smudge, which is why the old one had two.
+     *
+     * The slash still runs the full diagonal. A slash that stops at the bell's
+     * edge disappears into it.
      */
-    case 'bellSlash':
+    case 'bellMuted':
       return (
         <>
+          {/* Dome, walls, flared skirt, base — one closed outline. */}
           <Line
             color={color}
-            d="M7.2 16.2V11.4A4.8 4.8 0 0 1 12 6.6A4.8 4.8 0 0 1 16.8 11.4V16.2H7.2Z"
+            d="M6.7 16.5V11.4A5.3 5.3 0 0 1 12 6.1A5.3 5.3 0 0 1 17.3 11.4V16.5L18.8 18.3H5.2Z"
             stroke={stroke}
           />
+          {/* The clapper, hanging under the base. */}
+          <Line color={color} d="M10.3 18.3A1.8 1.8 0 0 0 13.7 18.3" stroke={stroke} />
           <Line color={color} d="M4.6 4.6L19.4 19.4" stroke={stroke} />
         </>
       )
@@ -222,7 +238,8 @@ function Glyph({ color, name, stroke }: { color: string; name: IconName; stroke:
      * because this one sits in a row of marks that are all square to the text —
      * the bell beside it, the chevrons, the unread pill — and one glyph leaning
      * over reads as a rendering fault rather than as a style. Three marks is the
-     * budget at the 13pt marker size, the same budget `bellSlash` works to.
+     * budget at the 13pt marker size, which is a tighter one than the muted
+     * bell next to it works to.
      */
     case 'pin':
       return (

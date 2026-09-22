@@ -274,9 +274,35 @@ export const BotRow = memo(function BotRow({
 
       <View style={{ flex: 1, minWidth: 0 }}>
         <View style={{ alignItems: 'baseline', flexDirection: 'row', gap: theme.space.sm }}>
-          <Text numberOfLines={1} style={{ flex: 1, fontWeight: unread ? '700' : '600' }} variant="name">
+          <Text numberOfLines={1} style={{ flexShrink: 1, fontWeight: unread ? '700' : '600' }} variant="name">
             {names.primary}
           </Text>
+
+          {/*
+            The muted bell, on the NAME line and directly after the name.
+
+            It used to sit in the trailing group beside the time, at the 13pt
+            marker size and in `textFaint`, and the owner reported it as "small
+            and not clear". Two separate reasons, and the placement is the one
+            that mattered more: a mark in the stamp corner reads as something
+            about the stamp, while mute is a state of the ROW — so it belongs
+            against the thing it is a state of, which is the name. Bigger and in
+            `textMuted` for the rest of it.
+
+            `flexSpacer` below takes the remaining width, so the name still
+            truncates before the stamp rather than pushing it off the row.
+          */}
+          {mutedUntil === null ? null : (
+            <Icon
+              color={theme.colors.textMuted}
+              name="bellMuted"
+              size={ICON_SIZE.listMark}
+              testID={`bot-muted-${bot.name}`}
+            />
+          )}
+
+          <View style={{ flexGrow: 1, flexShrink: 0 }} />
+
           {stamp ? (
             <Text color="textFaint" variant="meta">
               {stamp}
@@ -310,21 +336,6 @@ export const BotRow = memo(function BotRow({
       </View>
 
       {/*
-        The bell sits BEFORE the unread pill and does not replace it. A muted
-        chat still counts on its own row — what mute stops is the buzzing and
-        the totals, not the reader's ability to see that four things arrived
-        while they were not listening.
-      */}
-      {mutedUntil === null ? null : (
-        <Icon
-          color={theme.colors.textFaint}
-          name="bellSlash"
-          size={ICON_SIZE.marker}
-          testID={`bot-muted-${bot.name}`}
-        />
-      )}
-
-      {/*
         A share that has arrived for this chat and has not gone out yet.
 
         The accent rather than `textFaint`, unlike the bell: a muted chat is a
@@ -338,10 +349,14 @@ export const BotRow = memo(function BotRow({
       ) : null}
 
       {/*
-        And the pin, after the bell and still before the unread pill, for the
-        same reason the bell is: the marks describe the ROW and the pill
-        describes what arrived in it, so the pill stays nearest the edge where
-        the eye already looks for a count.
+        And the pin, still before the unread pill: the mark describes the ROW
+        and the pill describes what arrived in it, so the pill stays nearest the
+        edge where the eye already looks for a count. The bell used to stand
+        here too and has moved up to the name line — see the note there.
+
+        A muted chat still counts on its own row. What mute stops is the buzzing
+        and the totals, not the reader's ability to see that four things arrived
+        while they were not listening.
       */}
       {pinned ? (
         <Icon color={theme.colors.textFaint} name="pin" size={ICON_SIZE.marker} testID={`bot-pinned-${bot.name}`} />
