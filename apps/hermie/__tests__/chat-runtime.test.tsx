@@ -20,8 +20,12 @@ const mockOnBackground = jest.fn()
 const mockPersistAll = jest.fn(async () => undefined)
 
 jest.mock('../src/platform/runs-on-mac', () => ({ RUNS_ON_MAC: false }))
+jest.mock('../src/platform/desktop-shell', () => ({ RUNS_IN_DESKTOP_SHELL: false }))
 
 const runsOnMac = jest.requireMock('../src/platform/runs-on-mac') as { RUNS_ON_MAC: boolean }
+const desktopShell = jest.requireMock('../src/platform/desktop-shell') as {
+  RUNS_IN_DESKTOP_SHELL: boolean
+}
 
 let mockStatus = 'connecting'
 let mockConnection: object | null = { id: 'connection-1' }
@@ -69,6 +73,7 @@ beforeEach(() => {
   mockStatus = 'connecting'
   mockConnection = { id: 'connection-1' }
   runsOnMac.RUNS_ON_MAC = false
+  desktopShell.RUNS_IN_DESKTOP_SHELL = false
 })
 
 afterEach(() => jest.restoreAllMocks())
@@ -129,7 +134,7 @@ describe('ChatRuntimeProvider', () => {
 })
 
 /**
- * The chat side of the app lifecycle, and the one place a Mac differs.
+ * The chat side of the app lifecycle, and the one place a desktop window differs.
  *
  * `onBackground()` stops the approval and subagent polls. That is right where
  * the socket goes down with it, and wrong on a Mac: a hidden window keeps its
@@ -137,6 +142,12 @@ describe('ChatRuntimeProvider', () => {
  * would leave an agent's question unanswered while the window sat one Cmd+Tab
  * away. `foregrounded` starts true in the controller, so not calling it is
  * exactly what the deleted native macOS target did by ignoring AppState.
+ *
+ * The Tauri desktop shell is the same window with a different answer to "am I
+ * a desktop window": a global the shell injects rather than a native module.
+ * Its socket stays up for the same reason, so its polls must too — and it
+ * arrives here far more often than a Mac does, because this is the browser
+ * build and react-native-web reports `background` on `document.hidden`.
  */
 describe('ChatRuntimeProvider and AppState', () => {
   function subscribe() {
@@ -176,7 +187,17 @@ describe('ChatRuntimeProvider and AppState', () => {
     expect(mockPersistAll).toHaveBeenCalledTimes(1)
   })
 
-  it('re-reads what the agent is waiting on when the window comes forward, on both', async () => {
+  it('keeps polling in the background in the desktop shell, and still persists', async () => {
+    desktopShell.RUNS_IN_DESKTOP_SHELL = true
+    const send = subscribe()
+
+    await act(async () => send('background'))
+
+    expect(mockOnBackground).not.toHaveBeenCalled()
+    expect(mockPersistAll).toHaveBeenCalledTimes(1)
+  })
+
+  it('re-reads what the agent is waiting on when the window comes forward, on all three', async () => {
     runsOnMac.RUNS_ON_MAC = true
     const send = subscribe()
 

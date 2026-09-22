@@ -14,8 +14,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   build a Hermie Web already serves, unmodified, with the Edit menu's native roles present so
   drag-select and ⌘C/⌘V reach the webview. `npm run desktop` / `npm run desktop:build`. See
   [ADR-0027](docs/adr/0027-desktop-is-a-webview-over-hermie-web.md) and `docs/desktop.md`. The
-  gateway list, the bridge, sign-in, notifications, the full menu, files and platform packaging are
-  not built yet.
+  gateway list, sign-in, notifications, the full menu, files and platform packaging are not built
+  yet.
+- **The desktop bridge: the marker, six commands and the origin guard.** The shell tells the page it
+  is there (`window.__HERMIE_DESKTOP__`, top frame only) and offers exactly six commands —
+  `hermie_shell_info`, `hermie_set_menu`, `hermie_notify`, `hermie_set_badge`,
+  `hermie_open_gateways`, `hermie_close_handled` — of which the first is implemented and the rest
+  answer `{ ok: true }` until the tasks that fill them. The app detects all of it at run time
+  through `platform/desktop-shell.ts` and imports nothing Tauri, so a browser tab's bundle is
+  unchanged and every call is optional in both directions.
+
+  The security of it is two layers. A page the shell loaded from the network can reach the six
+  commands and event listening and **nothing else** — no file, shell, dialog, opener or window
+  permission — and then every command re-checks the calling window's current origin against the
+  configured Hermie Web and answers `{ ok: false, reason: 'origin' }` to anything else, so an
+  identity provider's page passed through mid-sign-in gets none of it. `docs/desktop.md` has the
+  contract and the verification.
+- **The desktop shell never drops its connection when its window is hidden**, exactly as the Mac
+  build does not. This is the browser build, which reports "background" whenever the document is
+  hidden, so without it a ⌘Tab or a minimise would tear the socket down and stop the approval polls.
+  A browser tab is unaffected and still pauses.
 - **See, open, start, rename and delete a bot's conversations from a list.** A round "conversations"
   button in the chat header — left of `(…)`, shown only on a gateway that knows who you are — opens a
   sheet with the shared group chat first, then your own chats (most recently used first, with a

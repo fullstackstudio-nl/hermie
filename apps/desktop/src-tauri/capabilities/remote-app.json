@@ -1,0 +1,20 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "remote-app",
+  "description": "What a page the shell loaded from the network may reach, and the whole of it: the bridge's six commands, plus listening for the shell's four events. No core window, webview, opener, fs, path, dialog or notification permission is here, and none may be added — the shell's own commands wrap what the app needs. Reachability is only half the boundary: capabilities are static URL patterns, so every command re-checks the calling webview's CURRENT origin against the configured Hermie Web list (src/bridge.rs::guard) and refuses anything else with { ok: false, reason: 'origin' }. That is what keeps an identity provider's page, reached mid-sign-in by a navigation the shell legitimately allows, from using any of this. The urls below are any http(s) origin, because the reader's Hermie Web address is not known at build time and a capability cannot be written at run time; breadth costs nothing the guard does not take back. The trailing ':*' is load-bearing — a URLPattern with no port component matches the scheme's DEFAULT port only, so a bare 'https://*' would silently exclude every Hermie Web on :9443 or :8443 (verified against tauri-utils 2.9.3's RemoteUrlPattern).",
+  "windows": ["main"],
+  "local": false,
+  "remote": {
+    "urls": ["https://*:*", "http://*:*"]
+  },
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-hermie-shell-info",
+    "allow-hermie-set-menu",
+    "allow-hermie-notify",
+    "allow-hermie-set-badge",
+    "allow-hermie-open-gateways",
+    "allow-hermie-close-handled"
+  ]
+}

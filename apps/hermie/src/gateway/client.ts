@@ -14,6 +14,7 @@ import {
 } from '@hermie/gateway-client'
 import { AppState } from 'react-native'
 
+import { RUNS_IN_DESKTOP_SHELL } from '../platform/desktop-shell'
 import { networkWatcher } from '../platform/net-info'
 import { RUNS_ON_MAC } from '../platform/runs-on-mac'
 import { secretStore } from '../platform/secret-store'
@@ -290,6 +291,19 @@ export function createGatewayConnection(options: CreateConnectionOptions): Gatew
  * actual cause — so this change is justified on its own terms rather than as a
  * fix for that report.
  *
+ * **Nor does the desktop shell**, for the same reason and with a sharper edge.
+ * The shell (`apps/desktop`, ADR-0027) is a Tauri window over Hermie Web, so this
+ * is the browser build — and React Native Web reports `background` whenever
+ * `document.hidden`, which a desktop window is every time it is minimised, hidden
+ * with ⌘H or simply covered. A phone's AppState is about an OS that is going to
+ * kill the socket; a hidden window's is about nothing at all. Without this the
+ * shell would drop its connection on every ⌘Tab, and the shell is also the one
+ * place where a live socket while hidden has a job to do: it is what raises
+ * notifications (plan D4), since a webview has no Push API.
+ *
+ * This does NOT change a browser tab. A tab that goes to the background is a tab
+ * the browser may throttle to a stop, and pausing is still right there.
+ *
  * `resume()` is still wired on a Mac, and cheaply: it returns immediately unless
  * the connection is actually paused or stopped, so on a window coming forward it
  * is a no-op — and if anything else did pause it, this is the recovery.
@@ -303,7 +317,7 @@ export function attachLifecycle(connection: GatewayConnection): () => void {
   const appState = AppState.addEventListener('change', next => {
     if (next === 'active') {
       connection.resume()
-    } else if (next === 'background' && !RUNS_ON_MAC) {
+    } else if (next === 'background' && !RUNS_ON_MAC && !RUNS_IN_DESKTOP_SHELL) {
       connection.pause()
     }
   })

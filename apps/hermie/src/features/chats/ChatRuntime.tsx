@@ -16,6 +16,7 @@ import { loadHermieWebConfig, type HermieWebConfig } from '../../gateway/web-con
 import { useConnectionStore } from '../../gateway/store'
 import { namespace } from '../../gateway/namespace'
 import { chatCacheFor } from '../../platform/chat-cache'
+import { RUNS_IN_DESKTOP_SHELL } from '../../platform/desktop-shell'
 import { intentQueue } from '../../platform/intent-queue'
 import { RUNS_ON_MAC } from '../../platform/runs-on-mac'
 import { shareInbox } from '../../platform/share-inbox'
@@ -741,7 +742,8 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
   }, [value])
 
   /**
-   * The chat side of the app lifecycle, and the one place a Mac differs.
+   * The chat side of the app lifecycle, and the one place a desktop window
+   * differs from a phone.
    *
    * `onBackground()` clears `foregrounded`, which stops the approval and
    * subagent polls — right on a phone, where a backgrounded app has no socket
@@ -750,6 +752,14 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
    * one Cmd+Tab away. The native macOS target ignored AppState outright for
    * this; `foregrounded` starts `true`, so simply not calling it keeps a Mac in
    * the state that target was always in.
+   *
+   * The desktop shell (`apps/desktop`) is the same window in a different
+   * wrapper: `attachLifecycle` keeps its socket for the same reason, and it must
+   * keep its polls for the same reason. It gets there by a different route
+   * though — this is the browser build, and React Native Web reports
+   * `background` on `document.hidden`, so the window being merely covered is
+   * enough to arrive here. A browser TAB is not covered by this and still stops
+   * its polls, which is right: a background tab may be throttled to a halt.
    *
    * `persistAll()` runs either way. Writing the cache when the window is hidden
    * costs nothing and is the one moment worth writing at.
@@ -806,7 +816,7 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
         // four grey beads that cost.
         runtime.widgets.pause()
 
-        if (!RUNS_ON_MAC) {
+        if (!RUNS_ON_MAC && !RUNS_IN_DESKTOP_SHELL) {
           runtime.controller.onBackground()
         }
 
