@@ -37,6 +37,8 @@
     "android": "npm run android --workspace @hermie/app",
     "android:release": "npm run android:release --workspace @hermie/app --",
     "mac": "npm run mac --workspace @hermie/app --",
+    "desktop": "npm run tauri --workspace @hermie/desktop -- dev",
+    "desktop:build": "npm run tauri --workspace @hermie/desktop -- build --",
     "prepare": "husky",
     "screenshots:ios": "node scripts/screenshots-ios.mjs"
   },

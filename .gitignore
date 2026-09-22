@@ -21,6 +21,13 @@ apps/hermie/modules/*/android/.cxx/
 DerivedData/
 apps/hermie/build/
 
+# Rust build output for the desktop shell (`apps/desktop/dist` is covered by
+# the generic `dist/` rule above).
+apps/desktop/src-tauri/target/
+# The capability JSON schema Tauri writes next to `capabilities/` on every
+# build, for editor autocomplete; regenerated, not authored.
+apps/desktop/src-tauri/gen/
+
 # Screenshots from a simulator QA walk. Evidence for one round, not a fixture:
 # they are named after the device and the day, they go stale the moment a
 # surface changes, and a repository is not where a hundred PNGs of the same

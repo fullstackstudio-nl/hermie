@@ -1,0 +1,32 @@
+[package]
+name = "hermie-desktop"
+version = "0.1.0"
+description = "Hermie desktop shell — a webview over a Hermie Web instance"
+edition = "2021"
+rust-version = "1.77.2"
+license = "MIT"
+repository = "https://github.com/fullstackstudio-nl/hermie"
+
+[lib]
+# The library name Tauri's mobile bindings would look for; unused on desktop
+# targets but kept so this Cargo.toml matches the shape every Tauri 2 app
+# ships and needs no changes if mobile is ever added.
+name = "hermie_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-window-state = "2"
+tauri-plugin-store = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# The single-instance plugin only makes sense on desktop; it does not build
+# for the mobile targets Tauri also supports, so it is scoped out of them
+# rather than behind a feature flag nobody would remember to set.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = "2"

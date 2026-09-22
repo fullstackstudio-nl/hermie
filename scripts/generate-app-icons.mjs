@@ -16,7 +16,16 @@ import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { boundsOf, createEmitter, encodePng, readSvg, render, shapePolygons } from './lib/svg-raster.mjs'
+import {
+  boundsOf,
+  createEmitter,
+  encodeIcns,
+  encodeIco,
+  encodePng,
+  readSvg,
+  render,
+  shapePolygons
+} from './lib/svg-raster.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(here, '..')
@@ -38,6 +47,19 @@ const assetsDir = resolve(repoRoot, 'apps/hermie/assets')
  * icon inside somebody else's badge.
  */
 const webIconsDir = resolve(repoRoot, 'apps/hermie/public/icons')
+
+/**
+ * The desktop shell's icons (Tauri, `apps/desktop`).
+ *
+ * The flat PNGs (`32x32.png`, `128x128.png`, `128x128@2x.png`, `icon.png`)
+ * keep the artwork's own rounded corners and alpha, like the web icons above
+ * — nothing on Windows or Linux masks a top-level icon the way macOS does.
+ * `icon.icns` is the one macOS actually shows in the Dock and Finder, so it
+ * gets the opaque, square-cornered treatment `icon.png` above uses, for the
+ * same reason: the OS applies its own mask and shadow, and a rounded corner
+ * or a hole in the alpha channel underneath that mask is a visible seam.
+ */
+const desktopIconsDir = resolve(repoRoot, 'apps/desktop/src-tauri/icons')
 
 /**
  * How much of the canvas the mark may fill in an Android adaptive foreground.
@@ -142,5 +164,34 @@ const masked = maskable(
   markShapes
 )
 emit(resolve(webIconsDir, 'icon-maskable-512.png'), encodePng(render(masked.shapes, masked.options)))
+
+// The desktop shell's flat PNGs — shaped artwork, alpha kept, no masking done
+// for it.
+const flatPng = size => encodePng(render(allShapes, fullBleed(size, false)))
+emit(resolve(desktopIconsDir, '32x32.png'), flatPng(32))
+emit(resolve(desktopIconsDir, '128x128.png'), flatPng(128))
+emit(resolve(desktopIconsDir, '128x128@2x.png'), flatPng(256))
+emit(resolve(desktopIconsDir, 'icon.png'), flatPng(1024))
+
+// icon.icns — opaque, square-cornered renders at the sizes macOS actually
+// asks for, packed by our own container writer (see encodeIcns).
+const squaredPng = size => encodePng(render(allShapes, { ...fullBleed(size, true), opaque: true }))
+emit(
+  resolve(desktopIconsDir, 'icon.icns'),
+  encodeIcns([
+    { type: 'ic07', png: squaredPng(128) }, // 128x128
+    { type: 'ic08', png: squaredPng(256) }, // 256x256
+    { type: 'ic13', png: squaredPng(256) }, // 128x128@2x
+    { type: 'ic09', png: squaredPng(512) }, // 512x512
+    { type: 'ic14', png: squaredPng(512) }, // 256x256@2x
+    { type: 'ic10', png: squaredPng(1024) }, // 512x512@2x / 1024x1024
+    { type: 'ic11', png: squaredPng(32) }, // 16x16@2x
+    { type: 'ic12', png: squaredPng(64) } // 32x32@2x
+  ])
+)
+
+// icon.ico — the shaped PNGs Windows will actually show, packed by our own
+// container writer (see encodeIco).
+emit(resolve(desktopIconsDir, 'icon.ico'), encodeIco([16, 32, 48, 256].map(size => ({ size, png: flatPng(size) }))))
 
 finish({ subject: 'Icons', source: 'design/icon.svg', command: 'node scripts/generate-app-icons.mjs' })

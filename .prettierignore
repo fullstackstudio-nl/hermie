@@ -11,6 +11,8 @@ coverage
 apps/hermie/ios
 apps/hermie/android
 apps/hermie/modules/*/android/build
+# Rust build output; not JS/TS/JSON/CSS at all.
+apps/desktop/src-tauri/target
 CHANGELOG.md
 packages/hermes-shared/src
 design/*.html

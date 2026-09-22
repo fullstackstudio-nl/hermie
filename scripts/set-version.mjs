@@ -5,15 +5,18 @@
  *   node scripts/set-version.mjs 0.2.0
  *   node scripts/set-version.mjs 0.2.0 --check    # report, change nothing
  *
- * Three places, and they drift because two of them are easy to forget: the root
- * package.json, the app's package.json, and `version` in app.config.ts, which
- * is the marketing version every platform ships — iOS, Android, and the Mac,
- * which is the iOS build (ADR-0011). There used to be a fourth, and a `--build`
- * flag to go with it: the hand-maintained macOS project's Info.plist carried
- * both numbers because nothing generated them. Nothing carries them by hand any
- * more — the build number is EAS's, raised per build by `autoIncrement` on the
- * `production` profile — so there is no longer anywhere for this script to put
- * one.
+ * Six places now, and they drift because most of them are easy to forget: the
+ * root package.json, the app's package.json, `version` in app.config.ts — the
+ * marketing version every platform ships: iOS, Android, and the Mac, which is
+ * the iOS build (ADR-0011) — and, since the desktop shell (ADR-0027), its own
+ * package.json, `tauri.conf.json`'s `version`, and `Cargo.toml`'s
+ * `[package].version`, which is what CI's `cargo check`/`tauri build` embed in
+ * the shell binary and the platform installers read. There used to be a
+ * seventh, and a `--build` flag to go with it: the hand-maintained macOS
+ * project's Info.plist carried both numbers because nothing generated them.
+ * Nothing carries them by hand any more — the build number is EAS's, raised
+ * per build by `autoIncrement` on the `production` profile — so there is no
+ * longer anywhere for this script to put one.
  *
  * Run it from a clean tree, read the diff, then tag. docs/release.md is the
  * surrounding process.
@@ -64,6 +67,9 @@ function edit(path, description, pattern, replace) {
 edit('package.json', 'the version field', /"version":\s*"[^"]+"/, `"version": "${version}"`)
 edit('apps/hermie/package.json', 'the version field', /"version":\s*"[^"]+"/, `"version": "${version}"`)
 edit('apps/hermie/app.config.ts', 'the Expo version', /version:\s*'[^']+'/, `version: '${version}'`)
+edit('apps/desktop/package.json', 'the version field', /"version":\s*"[^"]+"/, `"version": "${version}"`)
+edit('apps/desktop/src-tauri/tauri.conf.json', 'the version field', /"version":\s*"[^"]+"/, `"version": "${version}"`)
+edit('apps/desktop/src-tauri/Cargo.toml', 'the package version', /^version = "[^"]+"/m, `version = "${version}"`)
 
 for (const change of changes) {
   console.log(change)

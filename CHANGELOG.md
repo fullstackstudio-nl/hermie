@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The desktop shell scaffold (`apps/desktop`, Tauri 2).** A window opens on a Hermie Web address
+  passed through `HERMIE_WEB_URL` in dev, or on a placeholder page otherwise — the same browser
+  build a Hermie Web already serves, unmodified, with the Edit menu's native roles present so
+  drag-select and ⌘C/⌘V reach the webview. `npm run desktop` / `npm run desktop:build`. See
+  [ADR-0027](docs/adr/0027-desktop-is-a-webview-over-hermie-web.md) and `docs/desktop.md`. The
+  gateway list, the bridge, sign-in, notifications, the full menu, files and platform packaging are
+  not built yet.
+
 ## [0.1.6] - 2026-09-22
 
 ### Added

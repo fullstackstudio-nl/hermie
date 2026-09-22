@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "local-pages",
+  "description": "The shell's own pages (connect.html, offline.html). Full local API; never granted to a remote Hermie Web origin — that is capabilities/remote-app.json, added in Task 2.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

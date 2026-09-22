@@ -556,6 +556,74 @@ export function encodePng({ pixels, channels, width, height }) {
 // Writing, and the --check mode that makes CI able to catch drift
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Desktop icon containers (ICNS, ICO)
+// ---------------------------------------------------------------------------
+
+/**
+ * Packs already-encoded PNGs into an Apple `.icns` container.
+ *
+ * Only the modern, PNG-carrying OSTypes are written (`ic07` and up — 128 px
+ * and larger, plus the two "@2x of a smaller size" codes that share a pixel
+ * size with a plain entry, `ic11`/`ic12`). The legacy pre-10.7 types
+ * (`ic04`/`ic05`, 16 px and 32 px as raw, PackBits-compressed ARGB, no PNG)
+ * exist for OS releases this app does not target (`minimumSystemVersion`
+ * 12.0) and are left out rather than reimplementing PackBits for bytes
+ * nothing reads. Confirmed against `iconutil`'s own output on this machine:
+ * `entries` here reproduces the TLV list a `.iconset` of the same sizes
+ * produces, minus the legacy pair and the `info` bookkeeping entry (which
+ * `iconutil` writes for its own use and which macOS does not require).
+ */
+export function encodeIcns(entries) {
+  const parts = entries.map(({ type, png }) => {
+    if (type.length !== 4) {
+      throw new Error(`icns type code must be 4 characters: ${type}`)
+    }
+    const header = Buffer.alloc(8)
+    header.write(type, 0, 'ascii')
+    header.writeUInt32BE(8 + png.length, 4)
+    return Buffer.concat([header, png])
+  })
+  const body = Buffer.concat(parts)
+  const fileHeader = Buffer.alloc(8)
+  fileHeader.write('icns', 0, 'ascii')
+  fileHeader.writeUInt32BE(8 + body.length, 4)
+  return Buffer.concat([fileHeader, body])
+}
+
+/**
+ * Packs already-encoded PNGs into a Windows `.ico` container.
+ *
+ * Every modern Windows release (Vista and later) accepts a PNG-compressed
+ * frame in place of the classic uncompressed DIB, which is all this writes:
+ * one `ICONDIRENTRY` per image pointing at that image's raw PNG bytes.
+ */
+export function encodeIco(images) {
+  const header = Buffer.alloc(6)
+  header.writeUInt16LE(0, 0) // reserved
+  header.writeUInt16LE(1, 2) // type: icon
+  header.writeUInt16LE(images.length, 4)
+
+  let offset = 6 + images.length * 16
+  const entries = []
+  const data = []
+  for (const { size, png } of images) {
+    const entry = Buffer.alloc(16)
+    entry.writeUInt8(size >= 256 ? 0 : size, 0) // width, 0 means 256
+    entry.writeUInt8(size >= 256 ? 0 : size, 1) // height, 0 means 256
+    entry.writeUInt8(0, 2) // colour palette: none
+    entry.writeUInt8(0, 3) // reserved
+    entry.writeUInt16LE(1, 4) // colour planes
+    entry.writeUInt16LE(32, 6) // bits per pixel
+    entry.writeUInt32LE(png.length, 8)
+    entry.writeUInt32LE(offset, 12)
+    entries.push(entry)
+    data.push(png)
+    offset += png.length
+  }
+  return Buffer.concat([header, ...entries, ...data])
+}
+
 /**
  * Collects the files a generator produces. In `--check` mode nothing is written
  * and anything that differs from what is on disk is reported at the end.

@@ -18,6 +18,8 @@ export default config(
       '**/.expo/**',
       'apps/hermie/ios/**',
       'apps/hermie/android/**',
+      // Rust build output; not JS/TS at all.
+      'apps/desktop/src-tauri/target/**',
       // Vendored upstream sources are linted by their own project, not by ours.
       'packages/hermes-shared/src/**'
     ]
