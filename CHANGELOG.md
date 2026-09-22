@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Paste an image or a file straight into the composer.** In a browser tab, pasting takes any
+  file on the clipboard the same way a drop already does, resizing an image through the existing
+  photo pipeline and uploading anything else through the existing file pipeline — plain text still
+  lands in the field untouched. On the Mac, and on an iPad or iPhone with a hardware keyboard, ⌘V
+  reads the general pasteboard for an image or a file the same way, without touching the ordinary
+  text paste a software or on-screen keyboard already does. Several files in one paste become
+  several attachments, and the existing size and type limits apply exactly as they do for a picked
+  or dropped file.
+
 - **The app tells the plugin which bot is sending, right before its turn starts.** A plugin
   watching a shared gateway's transcript from the outside never sees `prompt.submit`'s own
   profile field, so it had no way to say who was actually speaking. Where the plugin offers a

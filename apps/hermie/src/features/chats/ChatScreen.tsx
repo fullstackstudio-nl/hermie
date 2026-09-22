@@ -91,9 +91,10 @@ import { useShortcut } from '../../ui/useShortcut'
 import { DropZone } from '../../chat-ui/DropZone'
 import { messageText } from '../../chat-ui/message-menu'
 import type { DroppedFile } from '../../platform/file-drop'
-import { openAppSettings, pickAttachment, type PickedAttachment } from './attachments'
+import { imageDimensions, openAppSettings, pickAttachment, resizeToBase64, type PickedAttachment } from './attachments'
 import { droppedFile, pickFile, type PickedFile } from './file-attachments'
 import { FileUploadError, MAX_UPLOAD_BYTES } from './file-upload'
+import { splitPastedFiles } from './paste-attachments'
 import { ChatSheetHost, type RequestItem } from './ChatSheetHost'
 import { SLASH_NO_ANSWER, type AttachmentInput, type ModelChoice } from './chat-controller'
 import type { ManualSheet } from './sheet-host'
@@ -1402,6 +1403,48 @@ function Conversation({
   )
 
   /**
+   * One pasted image, resized and staged exactly as the "+" menu's photo option
+   * stages one — the same tray, the same thumbnail, the same remove control.
+   *
+   * `imageDimensions` is asked first because neither side of a paste hands over
+   * pixel dimensions the way an `ImagePicker` asset does: the pasteboard is bytes
+   * and a URI, on the Mac and in a browser alike. Without it `resizeToBase64`
+   * cannot tell whether the image is already under the cap, and a pasted photo
+   * from a 6K display would be re-encoded at full size instead of scaled down.
+   */
+  const attachPastedImage = useCallback(async (file: DroppedFile) => {
+    try {
+      const { height, width } = await imageDimensions(file.uri)
+      const picked = await resizeToBase64(file.uri, file.name, width, height)
+
+      setAttachments(current => [...current, picked])
+    } catch (error) {
+      setNotice(openFailed(strings.chat.attach.failed(messageOf(error))))
+    }
+  }, [])
+
+  /**
+   * A paste's files, sorted onto the two roads a chat already takes one on —
+   * images through the resize-and-attach pipeline, everything else through the
+   * upload `stageFile` already gives a drop. Several files in one paste is
+   * several attachments, the same rule `dropFiles` follows for a multi-file drag.
+   */
+  const pasteFiles = useCallback(
+    (files: DroppedFile[]) => {
+      const { files: rest, images } = splitPastedFiles(files)
+
+      for (const image of images) {
+        void attachPastedImage(image)
+      }
+
+      for (const file of rest) {
+        void stageFile(droppedFile(file))
+      }
+    },
+    [attachPastedImage, stageFile]
+  )
+
+  /**
    * Candidates for the line being typed, and what accepting one puts in the field.
    *
    * `replace_from` is the column the gateway's answer stands for, and it is what
@@ -2340,6 +2383,7 @@ function Conversation({
             // The `+` menu's second entry. Both pickers exist on every target this
             // builds for, so neither is conditional.
             onAttachFile={() => void attachFile()}
+            onPasteFiles={pasteFiles}
             dictation={dictation}
             onChangeText={chat.setDraft}
             onQuerySlash={querySlash}

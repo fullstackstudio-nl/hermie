@@ -15,6 +15,7 @@ import { FlatList } from 'react-native'
 import type * as ReactNativeModule from 'react-native'
 
 import { ChatScreen } from '../src/features/chats/ChatScreen'
+import { FileUploadError } from '../src/features/chats/file-upload'
 import { haptic } from '../src/platform/haptics'
 import { type Bot, useBotsStore } from '../src/store/bots'
 import { useChatsStore } from '../src/store/chats'
@@ -82,14 +83,39 @@ jest.mock('../src/features/memory', () => {
 // ever awaits what it returns.
 jest.mock('../src/features/chats/attachments', () => ({
   MAX_ATTACHMENT_EDGE: 1568,
+  imageDimensions: jest.fn(async () => ({ height: 100, width: 100 })),
   openAppSettings: jest.fn(),
-  pickAttachment: jest.fn(async () => null)
+  pickAttachment: jest.fn(async () => null),
+  resizeToBase64: jest.fn(async (uri: string, filename: string) => ({
+    id: 'pasted-1',
+    filename,
+    base64: 'AAAA',
+    uri
+  }))
 }))
 
 const attachments = jest.requireMock('../src/features/chats/attachments') as {
+  imageDimensions: jest.Mock
   openAppSettings: jest.Mock
   pickAttachment: jest.Mock
+  resizeToBase64: jest.Mock
 }
+
+/*
+  ⌘V's second half — see `composer.test.tsx` for the same mock and the reason
+  it needs a `get`: `native-paste.ts` reads the registry once, at its own
+  module load, so a captured reference would answer for the value it had at
+  import time rather than whatever a test sets afterwards.
+*/
+let mockHasNativePasteboard = false
+const mockReadPasteboardAttachment = jest.fn()
+
+jest.mock('../src/platform/native-paste', () => ({
+  get HAS_NATIVE_PASTEBOARD() {
+    return mockHasNativePasteboard
+  },
+  readPasteboardAttachment: () => mockReadPasteboardAttachment()
+}))
 
 const BOT: Bot = {
   name: 'researcher',
@@ -131,7 +157,13 @@ function makeController() {
     setOption: jest.fn(async () => ({})),
     refreshOptions: jest.fn(async () => null),
     refreshUsage: jest.fn(async () => null),
-    modelOptions: jest.fn(async () => [{ id: 'example-provider/other', label: 'other', provider: 'Example' }])
+    modelOptions: jest.fn(async () => [{ id: 'example-provider/other', label: 'other', provider: 'Example' }]),
+    uploadFile: jest.fn(async (_botName: string, file: { name: string }) => ({
+      path: `/work/project/uploads/hermie/2026-09-22/tok-${file.name}`,
+      reference: `@file:/work/project/uploads/hermie/2026-09-22/tok-${file.name}`,
+      filename: file.name,
+      size: 10
+    }))
   }
 }
 
@@ -159,8 +191,26 @@ beforeEach(() => {
   mockRuntime = { bots: {}, controller: mockController, push: { setOpenChat: jest.fn() } }
   attachments.openAppSettings.mockClear()
   attachments.pickAttachment.mockReset().mockResolvedValue(null)
+  attachments.imageDimensions.mockReset().mockResolvedValue({ height: 100, width: 100 })
+  attachments.resizeToBase64.mockReset().mockImplementation(async (uri: string, filename: string) => ({
+    id: 'pasted-1',
+    filename,
+    base64: 'AAAA',
+    uri
+  }))
+  mockHasNativePasteboard = true
+  mockReadPasteboardAttachment.mockReset().mockResolvedValue([])
   seedChat()
 })
+
+/** ⌘V, as `desktop-shortcuts.ts` delivers it. */
+function pressPaste() {
+  act(() => {
+    for (const listener of [...mockShortcutListeners]) {
+      listener({ action: 'paste', typing: true })
+    }
+  })
+}
 
 describe('ChatScreen', () => {
   it('opens the chat and shows the bot in its header', async () => {
@@ -264,6 +314,83 @@ describe('ChatScreen', () => {
     // And it does go once a send lands, so the tray is not simply sticky.
     fireEvent.press(screen.getByTestId('composer-send'))
     await waitFor(() => expect(screen.queryByTestId('composer-attachments')).toBeNull())
+  })
+
+  it('stages a pasted image the same way the photo picker does', async () => {
+    mockReadPasteboardAttachment.mockResolvedValue([
+      {
+        uri: 'file:///tmp/hermie-paste/1/pasted-image.png',
+        name: 'pasted-image.png',
+        size: 4096,
+        mimeType: 'image/png'
+      }
+    ])
+    renderChat()
+
+    fireEvent(screen.getByTestId('composer-input'), 'focus')
+    pressPaste()
+
+    await waitFor(() => expect(screen.getByTestId('composer-attachments')).toBeTruthy())
+    expect(attachments.imageDimensions).toHaveBeenCalledWith('file:///tmp/hermie-paste/1/pasted-image.png')
+    expect(attachments.resizeToBase64).toHaveBeenCalledWith(
+      'file:///tmp/hermie-paste/1/pasted-image.png',
+      'pasted-image.png',
+      100,
+      100
+    )
+
+    fireEvent.changeText(screen.getByTestId('composer-input'), 'look')
+    fireEvent.press(screen.getByTestId('composer-send'))
+
+    await waitFor(() => expect(mockController.send).toHaveBeenCalled())
+  })
+
+  it('stages a pasted file through the same upload the "+" menu uses, and shows the existing error when it is too large', async () => {
+    mockReadPasteboardAttachment.mockResolvedValue([
+      { uri: 'file:///tmp/hermie-paste/2/report.pdf', name: 'report.pdf', size: 4096, mimeType: 'application/pdf' }
+    ])
+    mockController.uploadFile.mockRejectedValueOnce(
+      new FileUploadError('too-large', 'report.pdf is 200.0 MB. The gateway accepts up to 100.0 MB.')
+    )
+    renderChat()
+
+    fireEvent(screen.getByTestId('composer-input'), 'focus')
+    pressPaste()
+
+    // The existing chip error, unchanged by which door the file came through —
+    // `uploadChipError` reads `FileUploadError.reason`, not how `stageFile` was
+    // reached. The chip stays on screen with the error rather than vanishing:
+    // `stageFile` marks it `'error'`, it does not remove it.
+    await waitFor(() => expect(screen.getByText(/100 MB max/u)).toBeTruthy())
+    expect(screen.getByTestId('composer-attachments-pending')).toBeTruthy()
+  })
+
+  it('adds every file from one paste, sorted onto the right road each', async () => {
+    mockReadPasteboardAttachment.mockResolvedValue([
+      { uri: 'file:///tmp/a.png', name: 'a.png', size: 10, mimeType: 'image/png' },
+      { uri: 'file:///tmp/b.pdf', name: 'b.pdf', size: 20, mimeType: 'application/pdf' }
+    ])
+    renderChat()
+
+    fireEvent(screen.getByTestId('composer-input'), 'focus')
+    pressPaste()
+
+    await waitFor(() => expect(attachments.resizeToBase64).toHaveBeenCalled())
+    await waitFor(() => expect(mockController.uploadFile).toHaveBeenCalled())
+  })
+
+  it('leaves the field alone for a plain-text paste: no attachment, no upload', async () => {
+    mockReadPasteboardAttachment.mockResolvedValue([])
+    renderChat()
+
+    fireEvent(screen.getByTestId('composer-input'), 'focus')
+    fireEvent.changeText(screen.getByTestId('composer-input'), 'copied words')
+    pressPaste()
+
+    await waitFor(() => expect(mockReadPasteboardAttachment).toHaveBeenCalled())
+    expect(attachments.resizeToBase64).not.toHaveBeenCalled()
+    expect(mockController.uploadFile).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('composer-attachments')).toBeNull()
   })
 
   it('buzzes once when a reply lands and not when a turn merely runs', async () => {

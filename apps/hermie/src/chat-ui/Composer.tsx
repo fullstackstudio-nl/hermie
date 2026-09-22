@@ -26,7 +26,10 @@ import {
   View
 } from 'react-native'
 
+import { attachPasteListener } from '../platform/composer-paste'
+import type { DroppedFile } from '../platform/file-drop'
 import { hasHardwareKeyboard, isShiftDown } from '../platform/keyboard-modifiers'
+import { HAS_NATIVE_PASTEBOARD, readPasteboardAttachment } from '../platform/native-paste'
 import { RUNS_ON_MAC } from '../platform/runs-on-mac'
 import { growToContent, ONE_ROW } from '../platform/text-field-web'
 import { GlassGroup, GlassSurface } from '../ui/glass'
@@ -78,6 +81,17 @@ export interface ComposerProps {
    * versus base64 over the socket) look like one control with a secret.
    */
   onAttachFile?: () => void
+  /**
+   * An image or a file arrived on the general pasteboard while the field held
+   * the caret — ⌘V in a browser tab, or the same chord read off the hardware
+   * keyboard's HID state on the Mac and on an iPad in a case. Absent leaves both
+   * seams wired to nothing, which is the honest state for a caller with nowhere
+   * to put an attachment.
+   *
+   * Never fired for a plain-text paste: both platforms decide that BEFORE this
+   * would run, and text lands in the field the ordinary way either time.
+   */
+  onPasteFiles?: (files: DroppedFile[]) => void
   /**
    * The system picker is being presented.
    *
@@ -324,6 +338,7 @@ export function Composer({
   onStop,
   onAttach,
   onAttachFile,
+  onPasteFiles,
   attachBusy = null,
   attachments = [],
   onRemoveAttachment,
@@ -350,6 +365,23 @@ export function Composer({
     halves are no-ops on iOS and Android.
   */
   const fieldFocus = useFocusRing()
+
+  /*
+    A browser's own paste event, bound straight to the field's DOM node.
+
+    A no-op everywhere else — `attachPasteListener` is `composer-paste.ts`'s
+    native half there, which has no node to bind to — so this runs unconditionally
+    rather than behind a platform check of its own. `[onPasteFiles]` rather than
+    `[]`: a caller that has not wired an attachment handler gets no listener at
+    all, which matters on the platforms where binding one is not free.
+  */
+  useEffect(() => {
+    if (!onPasteFiles) {
+      return
+    }
+
+    return attachPasteListener(inputRef.current, onPasteFiles)
+  }, [onPasteFiles])
 
   /*
     The field grows with what is in it, on the platform that will not do it.
@@ -833,6 +865,36 @@ export function Composer({
   // neither the popover nor the running turn sees the key. Esc goes back exactly
   // one level.
   useEscapeKey(() => setMenuOpen(false), menuOpen)
+
+  /**
+   * ⌘V on the Mac and on an iPad in a case: the same chord `keyboard-modifiers.ts`
+   * reads Shift and Escape off, reported below the responder chain and therefore
+   * never intercepting anything — the field's own `UITextView` still runs the
+   * ordinary paste for plain text, which is why this never checks `showSuggestions`
+   * or any other "is something else open" gate the way the list keys do.
+   *
+   * `fieldFocus.focused` rather than the event's own `typing`, which only says
+   * SOME field has the caret: pasting into a rename dialog or a search box must
+   * not pull an image into a different chat's draft. `HAS_NATIVE_PASTEBOARD`
+   * keeps this from ever firing on the web, where `attachPasteListener` above is
+   * the whole story and a second read of a pasteboard that does not exist here
+   * would only be wasted work.
+   */
+  useShortcut(
+    'paste',
+    () => {
+      if (!onPasteFiles) {
+        return
+      }
+
+      void readPasteboardAttachment().then(files => {
+        if (files.length) {
+          onPasteFiles(files)
+        }
+      })
+    },
+    HAS_NATIVE_PASTEBOARD && fieldFocus.focused
+  )
 
   /**
    * What a bare Return does, decided one layer below `onKeyPress`.

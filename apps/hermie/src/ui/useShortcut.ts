@@ -48,13 +48,17 @@ export type RegistrableShortcut = Exclude<ShortcutAction, 'close'>
  * The three list keys are the composer's own — they are bare ↑, ↓ and Tab, they
  * exist FOR a focused field, and they are ignored unless a suggestion list is
  * open. `close` is here because ⌘W means "one level" and the level a reader wants
- * to leave is often the sheet whose field they are typing in.
+ * to leave is often the sheet whose field they are typing in. `paste` belongs here
+ * for the same reason as the list keys: it exists FOR a focused field — there is
+ * no other reason to ask the pasteboard for an image — so a gate written for
+ * everything ELSE on the table would refuse the one field it is for.
  */
 const DELIVERED_WHILE_TYPING: readonly ShortcutAction[] = [
   'suggestionUp',
   'suggestionDown',
   'suggestionAccept',
-  'close'
+  'close',
+  'paste'
 ]
 
 /**

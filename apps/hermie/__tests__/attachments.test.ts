@@ -8,9 +8,9 @@
  * and a "Limited" answer came back as `granted: false`, which refused a picker
  * that would have worked.
  */
-import { Linking } from 'react-native'
+import { Image, Linking } from 'react-native'
 
-import { openAppSettings, pickAttachment } from '../src/features/chats/attachments'
+import { imageDimensions, openAppSettings, pickAttachment } from '../src/features/chats/attachments'
 
 const mockLaunch = jest.fn()
 const mockRequestPermission = jest.fn()
@@ -71,6 +71,30 @@ describe('pickAttachment', () => {
       expect(openSettings).toHaveBeenCalled()
     } finally {
       openSettings.mockRestore()
+    }
+  })
+})
+
+describe('imageDimensions', () => {
+  it('answers the pixel size Image.getSize reports', async () => {
+    const getSize = jest.spyOn(Image, 'getSize').mockImplementation((_uri, success) => success(1600, 1200))
+
+    try {
+      await expect(imageDimensions('blob:pasted')).resolves.toEqual({ width: 1600, height: 1200 })
+    } finally {
+      getSize.mockRestore()
+    }
+  })
+
+  it('answers an empty object rather than rejecting when the size cannot be read', async () => {
+    const getSize = jest
+      .spyOn(Image, 'getSize')
+      .mockImplementation((_uri, _success, failure) => failure?.(new Error('decode failed')))
+
+    try {
+      await expect(imageDimensions('blob:broken')).resolves.toEqual({})
+    } finally {
+      getSize.mockRestore()
     }
   })
 })

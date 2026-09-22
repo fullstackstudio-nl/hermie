@@ -45,6 +45,13 @@ import UIKit
    `src/ui/useShortcut.ts` decides. The menu bar's own path reports `typing: false`, because a
    `UIKeyCommand` IS in the responder chain and the focused view has already declined it.
 
+ **`readPasteboardAttachment`** answers the one thing ⌘V's report cannot carry: what is actually on
+ `UIPasteboard.general`. It is a second step rather than part of `onShortcut` itself, because reading
+ an image off the pasteboard only means something to the one caller that has somewhere to put one —
+ see `HermiePasteboard` for the reasoning and `src/platform/native-paste.ts` for the JavaScript side.
+ It never intercepts the paste itself: a plain-text ⌘V has already landed in the focused `UITextView`
+ through the ordinary responder chain by the time this runs.
+
  **`devLaunchArguments`** is the last thing, and the only one that is not about keyboards. It is
  this process's own `ProcessInfo.processInfo.arguments`, which is how `xcrun simctl launch` can tell a
  running app to open on a particular screen — see `src/dev/launch-intent.ts` and the "Driving a
@@ -354,6 +361,19 @@ public class HermieMacModule: Module {
     }
 
     /**
+     What the general pasteboard is holding, as an image or a file — never as text.
+
+     Called from JavaScript after `onShortcut` reports ⌘V, not instead of the ordinary paste: see
+     `HermiePasteboard` for why nothing here needs to intercept anything, and `src/platform/native-paste.ts`
+     for the seam this answers. Each item is copied into the app's own tmp directory first, because the
+     upload this feeds starts several turns later than the keystroke that produced it.
+     */
+    AsyncFunction("readPasteboardAttachment") { () -> [[String: Any]] in
+      HermiePasteboard.attachments()
+    }
+    .runOnQueue(.main)
+
+    /**
      Stop a MOUSE drag from scrolling the scroll view behind `viewTag`, without touching the wheel.
 
      On a Mac the owner drags across the transcript expecting to select text, and the list pans
@@ -644,6 +664,8 @@ public class HermieMacModule: Module {
       return "chat8"
     case .nine:
       return "chat9"
+    case .keyV:
+      return "paste"
     default:
       return nil
     }

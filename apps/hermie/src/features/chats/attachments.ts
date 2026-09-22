@@ -15,7 +15,7 @@
  */
 import * as ImageManipulator from 'expo-image-manipulator'
 import * as ImagePicker from 'expo-image-picker'
-import { Linking } from 'react-native'
+import { Image, Linking } from 'react-native'
 
 import { strings } from '../../i18n/strings'
 
@@ -133,4 +133,27 @@ export async function resizeToBase64(
     base64: result.base64 ?? '',
     uri: result.uri
   }
+}
+
+/**
+ * The pixel size of an image at `uri`, for a caller that has no asset object to
+ * read `width`/`height` off — a pasted image, native or web, is exactly that:
+ * the pasteboard hands back bytes and a URI, never dimensions.
+ *
+ * `Image.getSize` rather than a second image-decoding library, because React
+ * Native already ships one that works on every platform this app runs on,
+ * including the web build through React Native Web's own `ImageLoader`.
+ *
+ * Resolves to an empty object rather than rejecting: a size this function could
+ * not read is not a reason to refuse the paste, only a reason `resizeToBase64`
+ * skips the resize step and encodes the image at whatever size it already is.
+ */
+export function imageDimensions(uri: string): Promise<{ width?: number; height?: number }> {
+  return new Promise(resolve => {
+    Image.getSize(
+      uri,
+      (width, height) => resolve({ height, width }),
+      () => resolve({})
+    )
+  })
 }

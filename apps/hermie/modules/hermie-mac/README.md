@@ -2,12 +2,14 @@
 
 Three things about a desktop keyboard that JavaScript cannot find out for itself.
 
-| Export                  | Kind     | Answers                                              |
-| ----------------------- | -------- | ---------------------------------------------------- |
-| `isMac`                 | constant | Is this the iOS app running on an Apple Silicon Mac? |
-| `isShiftDown()`         | function | Is either Shift key down right now?                  |
-| `hasHardwareKeyboard()` | function | Is a hardware keyboard attached at all?              |
-| `onEscape`              | event    | Escape was pressed, while this app was in front.     |
+| Export                       | Kind     | Answers                                                                    |
+| ---------------------------- | -------- | -------------------------------------------------------------------------- |
+| `isMac`                      | constant | Is this the iOS app running on an Apple Silicon Mac?                       |
+| `isShiftDown()`              | function | Is either Shift key down right now?                                        |
+| `hasHardwareKeyboard()`      | function | Is a hardware keyboard attached at all?                                    |
+| `onEscape`                   | event    | Escape was pressed, while this app was in front.                           |
+| `onShortcut`                 | event    | A desktop chord was pressed — ⌘K, ⌘V, ⌘1…9 and the rest of the allow-list. |
+| `readPasteboardAttachment()` | function | What `UIPasteboard.general` is holding, as an image or a file.             |
 
 ## `isMac`
 
@@ -49,6 +51,19 @@ Info.plist key. The podspec declares the framework.
 reasoned from the SDK, not watched. If it is nil, everything here degrades to "no keyboard": `false`,
 and an event that never fires. `docs/platform-notes.md` tracks it.
 
+## ⌘V is two steps, not one
+
+`onShortcut` reports the chord — the same GameController handler `onEscape` uses, widened to an
+allow-list of desktop shortcuts (see `src/platform/desktop-shortcuts.shared.ts`) — for every text
+field in the app, and it never intercepts anything: a plain-text ⌘V has already landed in the
+focused `UITextView` through the ordinary responder chain by the time JavaScript hears about it.
+
+`readPasteboardAttachment()` is the second step, called only by the composer and only while its own
+field has the caret. It asks `HermiePasteboard` what `UIPasteboard.general` is actually holding — an
+image, written out fresh because there is no file behind one; a file URL, copied into the app's own
+tmp directory the way `hermie-drop` copies a dropped one — and answers an empty list for a
+pasteboard holding only text, which a plain `UITextView` already pastes on its own.
+
 ## Shape
 
 The module is Apple-only on purpose. `expo-module.config.json` declares no Android platform, so
@@ -59,6 +74,10 @@ Jest environment all get the honest answer with no second implementation. Two se
 - `apps/hermie/src/platform/runs-on-mac.ts` — `RUNS_ON_MAC`
 - `apps/hermie/src/platform/keyboard-modifiers.ts` — the keyboard three, with `useEscapeKey` in
   `apps/hermie/src/ui/` deciding which open thing an Escape belongs to
+- `apps/hermie/src/platform/desktop-shortcuts.ts` — `onShortcut`, including ⌘V, with `useShortcut`
+  deciding which registered screen a chord belongs to
+- `apps/hermie/src/platform/native-paste.ts` — `readPasteboardAttachment()`, read by the composer
+  once ⌘V has been delivered to it
 
 It is a local module under `apps/hermie/modules/`, which Expo's autolinking scans by default, so `ios/`
 stays fully generated and nothing there is edited by hand. One trap worth knowing: a module's `ios/`

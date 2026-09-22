@@ -83,6 +83,13 @@ export type ShortcutAction =
   | 'suggestionUp'
   | 'suggestionDown'
   | 'suggestionAccept'
+  /**
+   * ⌘V, reported so the composer can ask the pasteboard whether it is holding
+   * an image or a file. It is not itself an interception — see
+   * `platform/native-paste.ts` — and it carries no more of a leak than ⌘K does:
+   * the key that TYPES the letter `v` never reaches here, only the chord.
+   */
+  | 'paste'
 
 /**
  * Which modifier a chord needs, spelled as a rule rather than as three booleans.
@@ -198,7 +205,13 @@ export const SHORTCUTS: readonly ShortcutChord[] = [
   */
   { action: 'suggestionUp', keys: ['ArrowUp'], modifier: 'none' },
   { action: 'suggestionDown', keys: ['ArrowDown'], modifier: 'none' },
-  { action: 'suggestionAccept', keys: ['Tab'], modifier: 'none' }
+  { action: 'suggestionAccept', keys: ['Tab'], modifier: 'none' },
+  /*
+    No `menu` entry: pasting is not a thing the Hermie menu offers, the way Edit
+    menus don't reinvent ⌘C either. It still needs Command alone, like every
+    other letter on this table, so a bare `v` typed anywhere never reaches here.
+  */
+  { action: 'paste', keys: ['v'], modifier: 'command' }
 ]
 
 /** The entries the Mac's menu bar draws, in the order it draws them. */

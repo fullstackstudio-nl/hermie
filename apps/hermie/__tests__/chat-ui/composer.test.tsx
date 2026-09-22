@@ -1,7 +1,7 @@
 /**
  * The composer: send, stop, the slash popover, and the attachment tray.
  */
-import { act, fireEvent, screen } from '@testing-library/react-native'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react-native'
 import { AccessibilityInfo, Platform, ScrollView, StyleSheet } from 'react-native'
 
 import { Composer } from '../../src/chat-ui'
@@ -24,6 +24,8 @@ const mockEscapeListeners = new Set<() => void>()
 const mockShortcutListeners = new Set<(action: string) => void>()
 let mockShiftDown = false
 let mockHardwareKeyboard = false
+let mockHasNativePasteboard = false
+const mockReadPasteboardAttachment = jest.fn()
 
 // A Mac is the iOS build on Apple Silicon, and this file needs to render as
 // both. `COMPOSER_ROUND_SIZE` is read at import time and is therefore fixed at
@@ -55,10 +57,22 @@ jest.mock('../../src/platform/keyboard-modifiers', () => ({
   }
 }))
 
+// The pasteboard read ⌘V triggers. `get` so a test can flip `mockHasNativePasteboard`
+// after the module has already been imported once — see the same trap noted in
+// `quick-look.test.ts`.
+jest.mock('../../src/platform/native-paste', () => ({
+  get HAS_NATIVE_PASTEBOARD() {
+    return mockHasNativePasteboard
+  },
+  readPasteboardAttachment: () => mockReadPasteboardAttachment()
+}))
+
 beforeEach(() => {
   mockEscapeListeners.clear()
   mockShortcutListeners.clear()
   mockShiftDown = false
+  mockHasNativePasteboard = false
+  mockReadPasteboardAttachment.mockReset().mockResolvedValue([])
 })
 
 /** One press of ↑, ↓ or Tab, as the seam delivers it. */
@@ -68,6 +82,15 @@ function pressKey(action: 'suggestionUp' | 'suggestionDown' | 'suggestionAccept'
       // Typing: false — these arrive from the menu bar's own key equivalents, or
       // from a keyboard with nothing focused. The typing gate has its own tests.
       listener({ action, typing: false })
+    }
+  })
+}
+
+/** ⌘V, as the same seam delivers it — genuinely `typing: true`, unlike the list keys above. */
+function pressPaste() {
+  act(() => {
+    for (const listener of [...mockShortcutListeners]) {
+      listener({ action: 'paste', typing: true })
     }
   })
 }
@@ -92,6 +115,7 @@ function renderComposer(props: Record<string, unknown> = {}) {
     onAttach: jest.fn(),
     onAttachFile: jest.fn(),
     onChangeText: jest.fn(),
+    onPasteFiles: jest.fn(),
     onQuerySlash: jest.fn(),
     onRemoveAttachment: jest.fn(),
     onSend: jest.fn(),
@@ -1273,5 +1297,59 @@ describe('the Composer pending tray', () => {
 
     expect(screen.queryByTestId('composer-send-badge')).toBeNull()
     expect(screen.getByTestId('composer-send').props.accessibilityLabel).toBe('Send message')
+  })
+})
+
+describe('pasting from the general pasteboard', () => {
+  it('reads the pasteboard on ⌘V while the field is focused, and hands over what it finds', async () => {
+    mockHasNativePasteboard = true
+    mockReadPasteboardAttachment.mockResolvedValue([
+      { uri: 'file:///tmp/pasted.png', name: 'pasted.png', size: 10, mimeType: 'image/png' }
+    ])
+
+    const handlers = renderComposer()
+
+    fireEvent(screen.getByTestId('composer-input'), 'focus')
+    pressPaste()
+
+    await waitFor(() =>
+      expect(handlers.onPasteFiles).toHaveBeenCalledWith([
+        { uri: 'file:///tmp/pasted.png', name: 'pasted.png', size: 10, mimeType: 'image/png' }
+      ])
+    )
+    expect(mockReadPasteboardAttachment).toHaveBeenCalled()
+  })
+
+  it('does not ask the pasteboard when the field is unfocused', () => {
+    mockHasNativePasteboard = true
+    renderComposer()
+
+    // No `fireEvent(..., 'focus')`: the field never took the caret.
+    pressPaste()
+
+    expect(mockReadPasteboardAttachment).not.toHaveBeenCalled()
+  })
+
+  it('does not ask on a build with no native pasteboard reader', () => {
+    mockHasNativePasteboard = false
+    renderComposer()
+
+    fireEvent(screen.getByTestId('composer-input'), 'focus')
+    pressPaste()
+
+    expect(mockReadPasteboardAttachment).not.toHaveBeenCalled()
+  })
+
+  it('reports nothing when the pasteboard held only text', async () => {
+    mockHasNativePasteboard = true
+    mockReadPasteboardAttachment.mockResolvedValue([])
+
+    const handlers = renderComposer()
+
+    fireEvent(screen.getByTestId('composer-input'), 'focus')
+    pressPaste()
+
+    await waitFor(() => expect(mockReadPasteboardAttachment).toHaveBeenCalled())
+    expect(handlers.onPasteFiles).not.toHaveBeenCalled()
   })
 })
