@@ -104,7 +104,7 @@ describe('the harness itself', () => {
     // exactly what the check above reports — and the fixture is empty rather
     // than a real catalogue so that this keeps proving the mechanism as the
     // catalogues fill up.
-    const gaps = missingKeys(ENGLISH_TREES.logs, {})
+    const gaps = missingKeys(ENGLISH_TREES.mcp, {})
 
     expect(gaps.length).toBeGreaterThan(0)
     expect(gaps).toContain('title')

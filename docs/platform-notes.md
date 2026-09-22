@@ -9083,6 +9083,8 @@ assume.
 
 ### The gateway's logs are REST, and there is no tail
 
+Removed in 0.1.7 (HERM-103): the app no longer has a Logs page or client for this route. History below.
+
 There is no socket method for logs anywhere. `tui_gateway/methods_*.py` registers none, and the two
 whose names come close are about something else — `groups.log` is a hosted room's event log,
 `subagent.tail` is a child's transcript. What exists is `GET /api/logs` in

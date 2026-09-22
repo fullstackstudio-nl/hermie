@@ -220,12 +220,6 @@ no third-party network call. The only address Hermie knows is the one you typed.
   opens the provider's page in your browser. It is per chat, because that is how
   the gateway scopes it. Signing one out is done where the account lives — the
   gateway deliberately offers no way to do it from a client, and the page says so.
-- **The gateway's logs.** The six files `hermes logs` knows, with a level, a
-  component, a search that runs on the gateway, and a copy. Follow re-reads every
-  few seconds: there is no live stream to subscribe to, and the page does not
-  pretend otherwise. A reply the page cannot make sense of is said out loud,
-  with what came back and the command that settles it, rather than shown as an
-  empty file.
 - **Boards.** The gateway's Kanban boards, their columns and their cards — make
   one, edit it, move it, archive it, comment on it. The same store the Hermes
   desktop app uses, so both show the same boards. Running, Review and Scheduled

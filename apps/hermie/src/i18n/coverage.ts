@@ -167,15 +167,7 @@ export const UNTRANSLATED_KEYS: Record<TranslatedLocale, readonly string[]> = {
     'kanban.moveRefused',
     'kanban.card.back',
 
-    'logs.settings.row',
-    'logs.command',
     'memory.raw.missingCommand',
-    'logs.unexpectedCommand',
-    'logs.files.agent',
-    'logs.files.gateway',
-    'logs.files.gui',
-    'logs.files.desktop',
-    'logs.component',
 
     'mcp.settings.row',
     'mcp.title',
@@ -308,15 +300,7 @@ export const UNTRANSLATED_KEYS: Record<TranslatedLocale, readonly string[]> = {
     'kanban.moveRefused',
     'kanban.card.back',
 
-    'logs.settings.row',
-    'logs.command',
     'memory.raw.missingCommand',
-    'logs.unexpectedCommand',
-    'logs.files.agent',
-    'logs.files.gateway',
-    'logs.files.gui',
-    'logs.files.desktop',
-    'logs.level',
 
     'mcp.settings.row',
     'mcp.title',

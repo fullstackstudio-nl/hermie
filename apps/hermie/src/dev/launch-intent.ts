@@ -96,7 +96,7 @@ import { type Scheme } from '../ui/tokens'
 export type DevOverlaySection = 'activity' | 'cron' | 'settings'
 
 /** A page Settings opens over itself; the wide layout has no navigator for it. */
-export type DevSettingsPage = 'connection' | 'gallery' | 'licences' | 'logs' | 'memory' | 'themes'
+export type DevSettingsPage = 'connection' | 'gallery' | 'licences' | 'memory' | 'themes'
 
 export type DevOpenTarget =
   | { kind: 'gallery'; section: string }
@@ -148,10 +148,10 @@ const OVERLAY_SECTIONS: Record<string, DevOverlaySection> = {
 }
 
 /*
-  Logs and Memory are here for the reason the whole file is: both were rejected
-  after a build, and both are behind taps a simulator on this machine cannot
-  make. A page nobody can open is a page nobody photographs, which is how the
-  screenshots went stale through three design passes.
+  Memory is here for the reason the whole file is: it was rejected after a
+  build, and it is behind taps a simulator on this machine cannot make. A page
+  nobody can open is a page nobody photographs, which is how the screenshots
+  went stale through three design passes.
 */
 const SETTINGS_PAGES: Record<string, DevSettingsPage> = {
   connection: 'connection',
@@ -159,7 +159,6 @@ const SETTINGS_PAGES: Record<string, DevSettingsPage> = {
   gallery: 'gallery',
   licences: 'licences',
   licenses: 'licences',
-  logs: 'logs',
   memory: 'memory',
   themes: 'themes'
 }

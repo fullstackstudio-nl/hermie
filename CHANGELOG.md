@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under "Branch from here…". The old switch between the shared chat and "My chat" keeps working
   exactly as it did; this list is a second way in, not a replacement yet.
 
+### Removed
+
+- **The gateway's logs page (HERM-103).** Settings no longer has a "gateway's logs" row, and the
+  client no longer calls `GET /api/logs`. See `docs/platform-notes.md` for the surface it used to read.
+
 ## [0.1.6] - 2026-09-22
 
 ### Added

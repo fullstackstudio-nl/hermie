@@ -26,7 +26,6 @@ import { useHardwareBack } from '../../ui/useHardwareBack'
 import { FORM_MAX_WIDTH } from '../../ui/tokens'
 import { ConnectorsScreen, connectorStrings } from '../connectors'
 import { KanbanScreen, kanbanStrings, useBoardsOpener } from '../kanban'
-import { LogsScreen, logStrings } from '../logs'
 import { McpScreen, mcpStrings } from '../mcp'
 import { NewBotFlow, profileStrings } from '../profiles'
 import { SkillsScreen, skillStrings } from '../skills'
@@ -62,7 +61,7 @@ export interface SettingsScreenProps {
    * Development only (`--hermieOpen overlay:settings/licences`). Each of these
    * is behind a tap, and a simulator this machine can only launch cannot tap.
    */
-  initialPage?: 'connection' | 'gallery' | 'gateways' | 'licences' | 'logs' | 'memory' | 'themes'
+  initialPage?: 'connection' | 'gallery' | 'gateways' | 'licences' | 'memory' | 'themes'
 }
 
 export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
@@ -89,7 +88,6 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
   const [showSkills, setShowSkills] = useState(false)
   const [showMcp, setShowMcp] = useState(false)
   const [showConnectors, setShowConnectors] = useState(false)
-  const [showLogs, setShowLogs] = useState(initialPage === 'logs')
   const [showBoards, setShowBoards] = useState(false)
   const [showNewBot, setShowNewBot] = useState(false)
   /*
@@ -112,7 +110,6 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
       setShowSkills(false)
       setShowMcp(false)
       setShowConnectors(false)
-      setShowLogs(false)
       setShowBoards(false)
     },
     // The gateways page is deliberately absent from both lists: it owns its own
@@ -126,7 +123,6 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
       showSkills ||
       showMcp ||
       showConnectors ||
-      showLogs ||
       showBoards
   )
 
@@ -145,7 +141,6 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
       setShowSkills(false)
       setShowMcp(false)
       setShowConnectors(false)
-      setShowLogs(false)
       setShowBoards(false)
     },
     // The gateways page is deliberately absent from both lists: it owns its own
@@ -159,7 +154,6 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
       showSkills ||
       showMcp ||
       showConnectors ||
-      showLogs ||
       showBoards
   )
 
@@ -197,10 +191,6 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
 
   if (showConnectors) {
     return <ConnectorsScreen onClose={() => setShowConnectors(false)} />
-  }
-
-  if (showLogs) {
-    return <LogsScreen onClose={() => setShowLogs(false)} />
   }
 
   if (showBoards) {
@@ -306,17 +296,6 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
                   ? strings.settings.pluginInstalled(advert?.version ?? '')
                   : strings.settings.pluginAbsent
             }
-          />
-          {/*
-            The gateway's own log files, over `GET /api/logs`. It is the only
-            surface a client has for them — there is no socket method — and a
-            gateway that does not serve the route gets the command instead of
-            an empty page.
-          */}
-          <InsetButtonRow
-            detail={logStrings.settings.hint}
-            onPress={() => setShowLogs(true)}
-            title={logStrings.settings.row}
           />
         </InsetGroup>
 

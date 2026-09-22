@@ -12,7 +12,6 @@ import { chat } from './chat'
 import { connectors } from './connectors'
 import { cron } from './cron'
 import { kanban } from './kanban'
-import { logs } from './logs'
 import { mcp } from './mcp'
 import { memory } from './memory'
 import { profiles } from './profiles'
@@ -26,7 +25,6 @@ export const de = {
   connectors,
   cron,
   kanban,
-  logs,
   mcp,
   memory,
   profiles,

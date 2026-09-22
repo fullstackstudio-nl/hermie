@@ -14,7 +14,6 @@ import { renameStrings } from '../features/bot-rename/strings'
 import { connectorStrings } from '../features/connectors/strings'
 import { cronStrings } from '../features/cron/strings'
 import { kanbanStrings } from '../features/kanban/strings'
-import { logStrings } from '../features/logs/strings'
 import { mcpStrings } from '../features/mcp/strings'
 import { memoryStrings } from '../features/memory/strings'
 import { profileStrings } from '../features/profiles/strings'
@@ -30,7 +29,6 @@ export const ENGLISH_TREES: Record<TreeName, object> = {
   connectors: connectorStrings,
   cron: cronStrings,
   kanban: kanbanStrings,
-  logs: logStrings,
   mcp: mcpStrings,
   memory: memoryStrings,
   profiles: profileStrings,

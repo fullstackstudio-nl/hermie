@@ -32,7 +32,7 @@ import { SOURCE_LOCALE, type Locale } from './locales'
  * and where a feature's file moves the tree name does not have to.
  */
 export type TreeName =
-  'app' | 'chat' | 'botRename' | 'connectors' | 'cron' | 'kanban' | 'logs' | 'mcp' | 'memory' | 'profiles' | 'skills'
+  'app' | 'chat' | 'botRename' | 'connectors' | 'cron' | 'kanban' | 'mcp' | 'memory' | 'profiles' | 'skills'
 
 /** A branch of a catalogue: whatever shape the English tree has at that path. */
 type Branch = Record<string, unknown>
