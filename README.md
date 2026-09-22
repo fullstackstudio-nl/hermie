@@ -60,14 +60,15 @@ no third-party network call. The only address Hermie knows is the one you typed.
   and — if you ask for it — the arguments and the result. Three verbosity levels
   decide how much of that is on screen, and it is a view setting, so switching it
   never changes what the gateway does.
-- **Diagrams and mathematics in the reply.** A ` ```mermaid ` flowchart is
-  drawn as a picture in the bubble, and `$…$` / `$$…$$` is set as mathematics
-  rather than printed as LaTeX. Both are drawn in the app itself — no web view,
-  no fonts to download — so a diagram never resizes its own row after you have
-  started reading around it. A diagram type or a command outside the supported
-  subset falls back to the source in a code block, which is still readable and
-  still copyable. [ADR-0020](docs/adr/0020-diagrams-and-math-without-a-webview.md)
-  says which subset, and why it is one.
+- **Diagrams and mathematics in the reply.** A ` ```mermaid ` fence holding a
+  flowchart, a sequence diagram or a pie chart is drawn as a picture in the
+  bubble, and `$…$` / `$$…$$` is set as mathematics rather than printed as
+  LaTeX. Both are drawn in the app itself — no web view, no fonts to download —
+  so a diagram never resizes its own row after you have started reading around
+  it. A diagram type or a command outside the supported subset falls back to
+  the source in a code block, which is still readable and still copyable.
+  [ADR-0020](docs/adr/0020-diagrams-and-math-without-a-webview.md) says which
+  subset, and why it is one.
 - **Bot-to-bot, visible and quiet.** A message one bot sends another shows up in
   both conversations, the reply folded into the message that caused it, and
   **Activity** is one timeline of all of it across every bot. It is drawn as an
@@ -88,13 +89,20 @@ no third-party network call. The only address Hermie knows is the one you typed.
 - **Files and images.** Anything the picker will give you goes up to the gateway
   and into the conversation — a photo, a PDF, a spreadsheet — as its own chip,
   which says while it is uploading and says so on the chip if it is refused.
+  Dropping one works the same way, and so does pasting: an image or a file on
+  the clipboard lands the same way a drop does, plain text still lands in the
+  composer untouched, and several files pasted at once become several
+  attachments.
 - **Who is busy, at a glance.** Every chat carries a bead: offline, needs input,
   working, online, in that order of urgency. It is the only thing in the app that
   animates, and only for the one state that is waiting on a person.
-- **Your list, arranged your way.** Rows reorder, folders group them — and the
-  folders reorder too, held by the same grip and dropped among the chats — chats
-  archive, and each one can carry its own colour. The arrangement is yours and it
-  is per gateway, because a different machine's bots are a different list.
+- **Your list, arranged your way.** Press and hold a row and it lifts, the way
+  an icon does on the Home Screen — drop it between two chats to reorder, onto
+  a folder to put it in one, or at the bottom of the list to take it back out;
+  folders move the same way. Chats archive, and each one can carry its own
+  colour. The arrangement is yours and it is per gateway, because a different
+  machine's bots are a different list — and it follows you between your own
+  devices on that gateway.
 - **More than one gateway, one at a time.** A machine at home and one at work,
   or a gateway you run and one you are testing: Settings → Gateways keeps them
   all, names them what you like, and switches between them with a tap. Hermie
@@ -169,15 +177,24 @@ no third-party network call. The only address Hermie knows is the one you typed.
   runs on the gateway, and add / edit / remove. It needs the `hermie` plugin on
   the gateway; without it the page says so and gives you the install command
   rather than showing an empty list. A provider like mem0 is named and marked
-  not browsable — it offers no way to list what it holds.
+  not browsable — it offers no way to list what it holds. A third tab, **Raw**,
+  shows a memory the way the gateway actually stores it — delimiters, blank
+  lines, the real order — rather than as the parsed list of entries the Browse
+  tab shows.
 - **A map of what a bot remembers.** The memory page has a Graph tab: the bot,
   its entries, and the topics they share. Pan, zoom, tap a node to read the
   whole entry and jump to it in the list. Drawn in the app, so the same memory
-  draws the same map every time.
+  draws the same map every time. A button opens it full screen — the window on
+  a phone, a large panel over the page on an iPad or a Mac — with the same
+  pinch, pan and tap-to-select, and the selected node's detail alongside it.
 - **Rename a bot.** The profile sheet's name is editable. On the default profile
   that sets a display name and the profile keeps its id; on any other profile it
   renames the profile itself, which the field says out loud before you press
   Save — that name is the handle crons, `@`-mentions and the gateway's logs use.
+  Where the gateway's plugin offers a route for it, a display name is saved
+  there too, so every other client on the gateway sees it and not just this
+  device; an older plugin keeps the name on this device alone, and says so
+  under the field.
   A rename carries your colour, folder, mute, note and cached conversation over
   with it.
 - **Make a bot, from the app.** New bot… in the chat list or in Settings: a
@@ -206,7 +223,9 @@ no third-party network call. The only address Hermie knows is the one you typed.
 - **The gateway's logs.** The six files `hermes logs` knows, with a level, a
   component, a search that runs on the gateway, and a copy. Follow re-reads every
   few seconds: there is no live stream to subscribe to, and the page does not
-  pretend otherwise.
+  pretend otherwise. A reply the page cannot make sense of is said out loud,
+  with what came back and the command that settles it, rather than shown as an
+  empty file.
 - **Boards.** The gateway's Kanban boards, their columns and their cards — make
   one, edit it, move it, archive it, comment on it. The same store the Hermes
   desktop app uses, so both show the same boards. Running, Review and Scheduled
@@ -228,11 +247,14 @@ no third-party network call. The only address Hermie knows is the one you typed.
   There is no push and nothing polls your gateway in the background.
 - **Share to Hermie.** An image, a file, a link or some text from any app goes
   straight into a chat. On iPhone, iPad and Mac a small sheet inside the other
-  app lists your bots and takes a note; on Android the system's own chooser
-  starts Hermie and it asks which chat once it is up. Nothing is sent by the
-  share sheet itself — it writes the share down, and the app delivers it when it
-  next has a gateway, so a share made on a train arrives when you are back on
-  the network.
+  app lists your bots and takes a note, and sends it itself — without opening
+  Hermie — telling you **Sent to &lt;bot&gt;** or **Will send when Hermie
+  opens** if it could not; a photograph and a gateway whose sign-in has expired
+  are the two things still left for the app to finish. On Android the system's
+  own chooser starts Hermie and it asks which chat once it is up, and the share
+  is sent from there. Either way, nothing made on a train is lost: what the
+  sheet cannot deliver on the spot, the app delivers once it next has a
+  gateway.
 - **Shortcuts and Siri.** _Ask a bot_ sends a message and hands the reply back to
   the next step of a Shortcut, _Send to a bot_ fires and forgets, _Open a chat_
   is a Home Screen button, and _Bots needing input_ answers without opening

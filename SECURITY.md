@@ -122,6 +122,45 @@ token, the sign-in and every message are readable by anyone on the path, and Her
 exactly that case rather than refusing it. Hermie does not pin certificates and does not ship a trust
 store of its own; a self-signed certificate has to be trusted by the device.
 
+## Hermie Web
+
+`packages/hermie-web` is part of this repository and carries its own attack surface, beyond what the
+app itself does. It authenticates nobody — the gateway's own session cookie does that — but it holds
+secrets of its own in its state directory (`0700`, files `0600`):
+
+- the service login (a session or refresh token) it spends on push and on the message cache;
+- the VAPID key pair, once `--push` is used;
+- an **administrator secret**, stored as a scrypt hash and never shown back, for a gateway with no
+  accounts of its own to gate `/admin` with;
+- and, only where its built-in identity provider is turned on, every account's password hash, its
+  own OIDC signing key, and refresh tokens for the people it has signed in.
+
+**`/admin` is gated by a gateway user id on this service's own list**, or by the administrator
+secret above when the gateway has none. It issues no session of its own: every request is checked
+fresh against the gateway's `/api/auth/me`.
+
+**`/admin/danger` → Run setup again** clears the stored gateway address, the administrator list and
+secret, the branding, the feature switches, the push policy, the cache retention, the per-person
+options, and the service login — asking a second time first, on a page that lists all of it. It
+never clears the built-in identity provider's accounts, signing key or client id: discarding that
+key on a re-run would sign out every account on the gateway, and turning the provider off is a
+separate, explicit action on `/admin/oidc`. The cached messages and the VAPID key are kept unless a
+box is ticked for each.
+
+**The built-in OpenID Provider, when turned on, is the identity root of that gateway.** Whoever can
+read the state directory can mint any account on it, not merely read what is stored — there is no
+setting that reduces this, because that is what an identity provider is. It refuses to enable on a
+plain-`http` origin that is not loopback, because the gateway itself refuses a non-`https` issuer
+outside `localhost`/`127.0.0.1`/`::1`.
+
+**The message cache holds transcript content on disk**, in the same state directory, scoped so that
+a private chat is cached only for the person who read it and a shared Bot Chat is cached for
+everybody; `--cache-max-mb 0` turns it off.
+
+None of this changes the app's own trust model above: the app still speaks only to the gateway it is
+configured with, and a Hermie Web instance is exactly that — a gateway address, reached the way any
+other gateway is.
+
 ## Supported versions
 
 | Version            | Supported                         |
