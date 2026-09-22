@@ -238,6 +238,58 @@ export function cronStatusLabel(status: CronStatus): string {
   return cronStrings.status[status]
 }
 
+/** The row's WHEN column: a micro label over a value (HERM-109). */
+export interface CronRowWhen {
+  label: string
+  value: string
+}
+
+/**
+ * What a row says about when a job runs, given what it actually is.
+ *
+ * Three cases, in order, because they answer three different questions and the
+ * old single fallback chain (`nextRun ?? lastRun ?? "Not scheduled"`) answered
+ * only one of them:
+ *
+ *  - **Paused.** A paused job is not going anywhere, so "next" is not a
+ *    question this row answers for it — even where the gateway still carries a
+ *    stale `next_run_at` from before it was paused, which is exactly the bug
+ *    report: a paused row reading "NEXT 14h ago". What is left to say is what
+ *    it last did, or nothing at all if it never ran.
+ *  - **Overdue.** An active job whose `next_run_at` has slipped into the past
+ *    is not lying about the future — the scheduler is simply behind — so this
+ *    says `overdue` in one word rather than the signed relative time's
+ *    confusing "in -14h", which `relativeTime` would otherwise print as "14h
+ *    ago" under a label that says NEXT.
+ *  - **Otherwise**, unchanged: the next run if the job has one, the last run
+ *    if it does not, and "Not scheduled" if it has done neither.
+ */
+export function cronRowWhen(job: CronJob, now: number = Date.now()): CronRowWhen {
+  const lastRun = relativeTime(job.lastRunAt, now)
+
+  if (cronStatusOf(job) === 'paused') {
+    return { label: cronStrings.list.lastLabel, value: lastRun ?? cronStrings.detail.unknown }
+  }
+
+  const nextAt = job.nextRunAt ? Date.parse(job.nextRunAt) : NaN
+
+  if (Number.isFinite(nextAt) && nextAt < now) {
+    return { label: cronStrings.list.nextLabel, value: cronStrings.list.overdue }
+  }
+
+  const nextRun = relativeTime(job.nextRunAt, now)
+
+  if (nextRun) {
+    return { label: cronStrings.list.nextLabel, value: nextRun }
+  }
+
+  if (lastRun) {
+    return { label: cronStrings.list.lastLabel, value: lastRun }
+  }
+
+  return { label: cronStrings.list.nextLabel, value: cronStrings.list.noNextRun }
+}
+
 /**
  * The job one id names, or nothing.
  *

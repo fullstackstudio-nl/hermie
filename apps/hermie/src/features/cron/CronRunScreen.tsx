@@ -15,10 +15,10 @@ import { useCallback, useEffect, useState } from 'react'
 import { ActivityIndicator, View } from 'react-native'
 
 import { TranscriptList } from '../../chat-ui'
+import { PageChrome } from '../../ui/chrome'
 import { Screen, Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import type { CronController } from './cron-controller'
-import { ScreenHeader } from './ScreenHeader'
 import type { CronJob, CronRun } from './model'
 import { relativeEpoch } from './model'
 import { cronStrings } from './strings'
@@ -34,6 +34,7 @@ export function CronRunScreen({ controller, job, run, onClose }: CronRunScreenPr
   const theme = useTheme()
   const [items, setItems] = useState<VisibleItem[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [chromeHeight, setChromeHeight] = useState(0)
 
   const load = useCallback(async () => {
     if (!controller) {
@@ -66,9 +67,11 @@ export function CronRunScreen({ controller, job, run, onClose }: CronRunScreenPr
 
   return (
     <Screen padded={false}>
-      <ScreenHeader back={cronStrings.run.back} onBack={onClose} title={title} subtitle={subtitle} />
-
-      <Text color="textMuted" variant="meta" style={{ paddingHorizontal: theme.space.lg }}>
+      <Text
+        color="textMuted"
+        variant="meta"
+        style={{ paddingHorizontal: theme.space.lg, paddingTop: chromeHeight + theme.space.sm }}
+      >
         {cronStrings.run.readOnly}
       </Text>
 
@@ -88,6 +91,13 @@ export function CronRunScreen({ controller, job, run, onClose }: CronRunScreenPr
       ) : (
         <TranscriptList items={items} testID="cron-run-transcript" />
       )}
+
+      <PageChrome
+        back={{ label: job.name, onPress: onClose }}
+        onHeightChange={setChromeHeight}
+        subtitle={subtitle}
+        title={title}
+      />
     </Screen>
   )
 }

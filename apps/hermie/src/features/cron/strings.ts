@@ -28,6 +28,8 @@ const cronStringsEn = {
     /** The micro label over a row's relative time. §6.11 writes it lower case. */
     nextLabel: 'next',
     lastLabel: 'last',
+    /** An active job whose next run has slipped into the past (HERM-109). */
+    overdue: 'Overdue',
     neverRun: 'Never run',
     noNextRun: 'Not scheduled',
     lastRun: (when: string) => `Last run ${when}`,

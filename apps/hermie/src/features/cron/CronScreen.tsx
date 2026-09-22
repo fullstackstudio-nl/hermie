@@ -21,9 +21,8 @@ import { directTouchPanRef } from '../../platform/pointer-drag'
 import { useBotsStore } from '../../store/bots'
 import { useCronStore } from '../../store/cron'
 import { BottomSheet, SheetEyebrow } from '../../ui/BottomSheet'
+import { PageChrome, usePageScroll, type PageChromeBack } from '../../ui/chrome'
 import { Button, Screen, Text } from '../../ui/primitives'
-import { useEscapeKey } from '../../ui/useEscapeKey'
-import { useHardwareBack } from '../../ui/useHardwareBack'
 import { useTheme } from '../../ui/theme'
 import { CONTROL_MIN_HEIGHT, withAlpha } from '../../ui/tokens'
 import type { CronJobInput } from './cron-controller'
@@ -34,9 +33,9 @@ import {
   type CronJob,
   cronJobFor,
   type CronRun,
+  cronRowWhen,
   cronStatusOf,
   lastErrorSummary,
-  relativeTime,
   scheduleText
 } from './model'
 import { StatusDot } from './StatusDot'
@@ -64,15 +63,21 @@ export interface CronScreenProps {
    * again at the bottom of the list.
    */
   initialCreate?: boolean
+  /** Absent on a tab root — both shells mount this as one, so neither passes it. */
+  back?: PageChromeBack
 }
 
-export function CronScreen({ initialCreate, initialJobId }: CronScreenProps = {}) {
+export function CronScreen({ back, initialCreate, initialJobId }: CronScreenProps = {}) {
   const controller = useCronController()
   const jobs = useCronStore(state => state.jobs)
   const loading = useCronStore(state => state.loading)
   const error = useCronStore(state => state.error)
   const gatewayRunning = useCronStore(state => state.gatewayRunning)
   const targets = useCronStore(state => state.deliveryTargets)
+  const [chromeHeight, setChromeHeight] = useState(0)
+  // Called unconditionally, ahead of the early returns below (rules-of-hooks) —
+  // only the list root's own SectionList spreads what it returns.
+  const pageScroll = usePageScroll(chromeHeight)
   const bots = useBotsStore(state => state.bots)
 
   // The roster IS the profile list — a bot is a Hermes profile — and a gateway
@@ -200,23 +205,12 @@ export function CronScreen({ initialCreate, initialJobId }: CronScreenProps = {}
 
   const selected = view.screen === 'list' ? null : cronJobFor(jobs, view.jobId)
 
-  // Escape goes back ONE level. A sub page registers on top of whatever is
-  // already holding the key — the overlay panel on the wide layout — so the
-  // first Escape returns to the list here and only the second closes the panel
-  // around it. Mount order does the ordering; see `useEscapeKey`.
-  useEscapeKey(
-    () =>
-      setView(current => (current.screen === 'run' ? { screen: 'detail', jobId: current.jobId } : { screen: 'list' })),
-    view.screen !== 'list'
-  )
-
-  // And the same one level for Android's back button, which is a separate stack
-  // from Escape for the reason `useHardwareBack` gives.
-  useHardwareBack(
-    () =>
-      setView(current => (current.screen === 'run' ? { screen: 'detail', jobId: current.jobId } : { screen: 'list' })),
-    view.screen !== 'list'
-  )
+  // Escape and Android back, one level at a time, used to be wired HERE — a
+  // handler shared by both sub-screens that could not tell PageChrome's own
+  // back apart from a page that forgot one. Each of `CronDetailScreen` and
+  // `CronRunScreen` now carries its own `PageChrome`, which registers both by
+  // itself off the same `back.onPress` this file already hands it below,
+  // so a second registration here would only double up the stack.
 
   if (view.screen === 'run' && selected) {
     return (
@@ -279,6 +273,7 @@ export function CronScreen({ initialCreate, initialJobId }: CronScreenProps = {}
         sections={sections}
         stickySectionHeadersEnabled={false}
         testID="cron-list"
+        {...pageScroll}
       />
 
       <CronEditorSheet
@@ -313,6 +308,8 @@ export function CronScreen({ initialCreate, initialJobId }: CronScreenProps = {}
           )
         }}
       />
+
+      <PageChrome back={back} onHeightChange={setChromeHeight} title={cronStrings.title} />
     </Screen>
   )
 }
@@ -398,10 +395,10 @@ function ListHeader({ gatewayRunning, onCreate }: { gatewayRunning: boolean | nu
   return (
     <View style={{ gap: theme.space.sm, paddingHorizontal: theme.space.lg, paddingTop: theme.space.sm }}>
       {/*
-        No title here. Both shells already put one above this screen — the
-        overlay panel's header on the wide layout, the stack's own title bar on
-        the phone — so printing "Crons" again made the panel say its own name
-        twice in two sizes, the same stutter the cron editor's eyebrow had.
+        No title here: `PageChrome` already draws "Crons" in its own header,
+        floating over this list — printing it again here would say the
+        screen's own name twice in two sizes, the same stutter the cron
+        editor's eyebrow had.
       */}
       <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.md }}>
         <Text color="textMuted" style={{ flex: 1 }} variant="preview">
@@ -481,7 +478,11 @@ function EmptyState({ loading, error }: { loading: boolean; error: string | null
  * gave a reader no way to scan one column.
  *
  * `next_run_at` is shown as a relative phrase on purpose: the scheduler's
- * timezone is not the phone's (see `relativeTime`).
+ * timezone is not the phone's (see `relativeTime`). Which label wins — NEXT,
+ * LAST, or NEXT overdue — is `cronRowWhen` (HERM-109), not this component: a
+ * paused row that still carries a stale `next_run_at` must not read "NEXT 14h
+ * ago", and an active row whose next run has slipped into the past says so in
+ * one word rather than the same confusing phrase.
  */
 function RoutineRow({
   job,
@@ -497,8 +498,6 @@ function RoutineRow({
   const theme = useTheme()
   const status = cronStatusOf(job)
   const paused = status === 'paused'
-  const nextRun = relativeTime(job.nextRunAt)
-  const lastRun = relativeTime(job.lastRunAt)
   const summary = lastErrorSummary(job.lastError)
 
   // Two profiles may hold a cron of the same name, so the name alone does not
@@ -506,16 +505,7 @@ function RoutineRow({
   const owner = showProfile && job.profile ? job.profile : null
   const label = owner ? `${job.name}, ${cronStrings.list.profile(owner)}` : job.name
 
-  // "next in 2h" while it is scheduled, otherwise what it last did. A row that
-  // said only "Not scheduled" left the reader with nothing to go on.
-  // The fallback keeps the `next` label rather than repeating the status: a row
-  // sitting under a `PAUSED` divider that also says PAUSED is the same stutter
-  // the cron editor's eyebrow had.
-  const when = nextRun
-    ? { label: cronStrings.list.nextLabel, value: nextRun }
-    : lastRun
-      ? { label: cronStrings.list.lastLabel, value: lastRun }
-      : { label: cronStrings.list.nextLabel, value: cronStrings.list.noNextRun }
+  const when = cronRowWhen(job)
 
   const menu = [
     paused

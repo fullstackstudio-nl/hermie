@@ -29,6 +29,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **The gateway's logs page (HERM-103).** Settings no longer has a "gateway's logs" row, and the
   client no longer calls `GET /api/logs`. See `docs/platform-notes.md` for the surface it used to read.
+### Changed
+
+- **Activity, Crons and a bot's conversations now share the app's one page chrome.** Each of these
+  pages draws the same translucent glass header `PageChrome` introduced for Settings, with a single
+  round back control where there is somewhere to go back to and none at all on a tab root — Crons'
+  own detail and run screens, and a bot's conversation list and a single branch, all lost their
+  bespoke back buttons for it. Activity's sticky "Today" divider is drawn in the page's own glass
+  material instead of a flat fill, so it no longer reads as an opaque band across the screen.
+
+### Fixed
+
+- **A paused cron no longer reads "NEXT 14h ago".** The list row's NEXT/LAST label is now a single
+  helper: a paused cron always shows when it last ran (or nothing at all if it never has), and an
+  active cron whose next run has slipped into the past says "Overdue" instead of a confusing
+  negative relative time.
 
 ## [0.1.6] - 2026-09-22
 

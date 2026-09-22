@@ -18,12 +18,12 @@ import { prettyModelName } from '@hermie/transcript'
 import { humaniseStatus } from '../../i18n/humanise'
 import { directTouchPanRef } from '../../platform/pointer-drag'
 import { BottomSheet, SheetEyebrow } from '../../ui/BottomSheet'
+import { PageChrome, usePageScroll } from '../../ui/chrome'
 import { Button, InsetGroup, InsetRow, InsetValueRow, Screen, Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import type { CronController } from './cron-controller'
 import { useCronStore } from '../../store/cron'
 import { StatusDot } from './StatusDot'
-import { ScreenHeader } from './ScreenHeader'
 import {
   type CronJob,
   type CronRun,
@@ -54,6 +54,7 @@ export function CronDetailScreen({ controller, job, onClose, onOpenRun, onEdit, 
   const [runsError, setRunsError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [chromeHeight, setChromeHeight] = useState(0)
 
   const load = useCallback(async () => {
     if (!controller) {
@@ -90,19 +91,15 @@ export function CronDetailScreen({ controller, job, onClose, onOpenRun, onEdit, 
   const lastRun = relativeTime(detail.lastRunAt)
   const error = lastErrorSummary(detail.lastError)
 
+  const pageScroll = usePageScroll(chromeHeight)
+
   return (
     <Screen padded={false}>
-      <ScreenHeader
-        back={cronStrings.detail.back}
-        onBack={onClose}
-        title={detail.name}
-        subtitle={scheduleText(detail.schedule)}
-      />
-
       <ScrollView
         ref={directTouchPanRef}
-        contentContainerStyle={{ gap: theme.space.xl, padding: theme.space.lg }}
         refreshControl={<RefreshControl onRefresh={refresh} refreshing={refreshing} />}
+        {...pageScroll}
+        contentContainerStyle={[{ gap: theme.space.xl, padding: theme.space.lg }, pageScroll.contentContainerStyle]}
       >
         <View
           style={{
@@ -279,6 +276,13 @@ export function CronDetailScreen({ controller, job, onClose, onOpenRun, onEdit, 
           />
         </View>
       </BottomSheet>
+
+      <PageChrome
+        back={{ label: cronStrings.title, onPress: onClose }}
+        onHeightChange={setChromeHeight}
+        subtitle={scheduleText(detail.schedule)}
+        title={detail.name}
+      />
     </Screen>
   )
 }

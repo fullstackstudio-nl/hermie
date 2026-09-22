@@ -62,6 +62,19 @@ beforeEach(() => {
   useCronStore.getState().reset()
 })
 
+it('carries one back control, labelled with the Crons list it returns to', async () => {
+  const controller = fakeController()
+  const onClose = jest.fn()
+  render(controller, job(), { onClose })
+
+  const back = screen.getByTestId('page-back')
+
+  expect(back.props.accessibilityLabel).toBe('Crons')
+
+  fireEvent.press(back)
+  expect(onClose).toHaveBeenCalledTimes(1)
+})
+
 it('reads the full job and its runs when it opens', async () => {
   const controller = fakeController()
   render(controller)

@@ -67,18 +67,24 @@ it('says so when the run has no transcript', async () => {
 })
 
 /**
- * A run session is titled with its job's name, so the header used to print that
- * name twice in two sizes — the same stutter the crons list and Activity were
- * cured of. The subtitle earns its line only where the run calls itself
+ * A run session is titled with its job's name, so the SUBTITLE used to print
+ * that name twice in two sizes — the same stutter the crons list and Activity
+ * were cured of. The subtitle earns its line only where the run calls itself
  * something else.
+ *
+ * `PageChrome`'s own back control is a second, expected place the name shows
+ * up now (HERM-105/109): it always names the page one level up — the job's
+ * detail screen, titled with the job's name — regardless of what the run
+ * itself is called, so it is not the stutter this test is about.
  */
 it('does not print the job’s name under a run that is already called that', async () => {
   renderScreen(<CronRunScreen controller={controllerWith(ROWS)} job={JOB} onClose={jest.fn()} run={RUN} />)
 
   await screen.findByText('Check the VM and report.')
 
-  // Once, as the title. A run with a title of its own still names its job.
-  expect(screen.getAllByText(JOB.name)).toHaveLength(1)
+  // Twice: once as the title, once as the back control's label — and no third
+  // time as a subtitle repeating what the title already says.
+  expect(screen.getAllByText(JOB.name)).toHaveLength(2)
 
   renderScreen(
     <CronRunScreen
@@ -89,5 +95,7 @@ it('does not print the job’s name under a run that is already called that', as
     />
   )
 
-  await waitFor(() => expect(screen.getByText(new RegExp(JOB.name, 'u'))).toBeTruthy())
+  // The back label, plus the subtitle earning its line because the run is
+  // called something else now.
+  await waitFor(() => expect(screen.getAllByText(new RegExp(JOB.name, 'u')).length).toBe(2))
 })

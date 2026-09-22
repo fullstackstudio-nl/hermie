@@ -8,12 +8,23 @@
  * calls they are supposed to come from, and a tap carries the item id that lets
  * the chat land on the right message.
  */
-import { act, fireEvent, screen, waitFor } from '@testing-library/react-native'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native'
+import { StyleSheet } from 'react-native'
 
 import { ActivityScreen } from '../src/features/activity'
 import { type Bot, useBotsStore } from '../src/store/bots'
 import { useChatsStore } from '../src/store/chats'
+import { type Theme, useTheme } from '../src/ui/theme'
 import { renderScreen, withProviders } from './support/render'
+
+/** The theme the provider actually resolved — see `chat-header-pill.test.tsx`. */
+let seenTheme: Theme | undefined
+
+function ThemeProbe() {
+  seenTheme = useTheme()
+
+  return null
+}
 
 let mockController: Record<string, jest.Mock>
 let mockBots: Record<string, jest.Mock>
@@ -177,6 +188,53 @@ describe('ActivityScreen', () => {
     renderScreen(<ActivityScreen />)
 
     await waitFor(() => expect(screen.getByTestId('activity-empty')).toBeTruthy())
+  })
+})
+
+/**
+ * HERM-105: the tab root's own chrome. A root has nowhere to go back to —
+ * both shells mount this as one of their tabs — so it takes no `back` and
+ * `PageChrome` draws no back control at all rather than a special case per
+ * shell.
+ */
+describe('ActivityScreen — the root has no back control', () => {
+  it('renders no page-back when back is not given', async () => {
+    renderScreen(<ActivityScreen />)
+
+    await waitFor(() => expect(screen.getByText('Researcher → Writer')).toBeTruthy())
+    expect(screen.queryByTestId('page-back')).toBeNull()
+  })
+})
+
+/**
+ * HERM-105's other half: the sticky "TODAY" section header used to paint a
+ * flat `elevation.e1` fill — the one thing on the screen at that depth — which
+ * read as an opaque band. It is a `GlassSurface` at the page's own `panel`
+ * material now, so it carries no `elevation.e1` background at all.
+ */
+describe('ActivityScreen — the sticky section header is glass, not a band', () => {
+  it('paints no flat elevation.e1 fill behind "Today"', async () => {
+    render(
+      withProviders(
+        <>
+          <ThemeProbe />
+          <ActivityScreen />
+        </>
+      )
+    )
+
+    await waitFor(() => expect(screen.getByText('Researcher → Writer')).toBeTruthy())
+
+    const headers = screen.getAllByTestId('activity-section-header')
+
+    expect(headers.length).toBeGreaterThan(0)
+    expect(seenTheme).toBeDefined()
+
+    for (const header of headers) {
+      const flat = StyleSheet.flatten(header.props.style)
+
+      expect(flat.backgroundColor).not.toBe(seenTheme?.elevation.e1)
+    }
   })
 })
 

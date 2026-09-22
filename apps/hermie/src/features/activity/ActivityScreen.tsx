@@ -17,7 +17,7 @@
  *    when it is not; a number nobody is looking at is not worth a round trip.
  */
 import type { ActivityEntry } from '@hermie/transcript'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { RefreshControl, SectionList, Pressable, View } from 'react-native'
 
 import { formatClock } from '../../chat-ui'
@@ -26,6 +26,7 @@ import { humaniseStatus } from '../../i18n/humanise'
 import { strings } from '../../i18n/strings'
 import { directTouchPanRef } from '../../platform/pointer-drag'
 import { useBotsStore } from '../../store/bots'
+import { PageChrome, usePageScroll, type PageChromeBack } from '../../ui/chrome'
 import { GlassSurface } from '../../ui/glass'
 import { Screen, Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
@@ -34,6 +35,8 @@ import { useActivity } from './useActivity'
 export interface ActivityScreenProps {
   /** Open the chat a row came from, scrolled to that row's item. */
   onOpenBot?: (botName: string, options?: { focusItemId?: string }) => void
+  /** Absent on a tab root — both shells mount this as one, so neither passes it. */
+  back?: PageChromeBack
 }
 
 interface DaySection {
@@ -87,11 +90,12 @@ function groupByDay(entries: readonly ActivityEntry[], now: number): DaySection[
   return sections
 }
 
-export function ActivityScreen({ onOpenBot }: ActivityScreenProps) {
+export function ActivityScreen({ onOpenBot, back }: ActivityScreenProps) {
   const theme = useTheme()
   const { status } = useGateway()
   const { entries, counters, loading, refreshing, error, refresh } = useActivity()
   const byName = useBotsStore(state => state.byName)
+  const [chromeHeight, setChromeHeight] = useState(0)
 
   const sections = useMemo(() => groupByDay(entries, Date.now()), [entries])
 
@@ -122,29 +126,38 @@ export function ActivityScreen({ onOpenBot }: ActivityScreenProps) {
         )}
         renderSectionHeader={({ section }) => (
           // The day label plus a rule, the same divider the crons list uses. It
-          // is sticky, so it carries a panel-coloured background of its own: over
-          // glass a transparent sticky header lets the rows scroll through it.
-          <View
-            style={{
+          // is sticky, so it needs a background of its own: over glass a
+          // transparent sticky header would let the rows scroll through it. A
+          // `GlassSurface` at the same `panel` material as the page, rather than
+          // a flat `elevation.e1` fill, is what stops it reading as an opaque
+          // band painted at a depth nothing else on the screen uses (HERM-105).
+          <GlassSurface
+            contentStyle={{
               alignItems: 'center',
-              backgroundColor: theme.elevation.e1,
               flexDirection: 'row',
               gap: theme.space.md,
               paddingBottom: theme.space.xs,
               paddingHorizontal: theme.space.lg,
               paddingTop: theme.space.md
             }}
+            contentTestID="activity-section-header"
+            radius={0}
+            shadow="none"
+            variant="panel"
           >
             <Text color="textFaint" variant="micro">
               {section.title.toUpperCase()}
             </Text>
             <View style={{ backgroundColor: theme.hairlineSoft, flex: 1, height: 1 }} />
-          </View>
+          </GlassSurface>
         )}
         sections={sections}
         stickySectionHeadersEnabled
         testID="activity-list"
+        {...usePageScroll(chromeHeight)}
       />
+
+      <PageChrome back={back} onHeightChange={setChromeHeight} title={strings.activity.title} />
     </Screen>
   )
 }
@@ -154,7 +167,7 @@ function Header({ counters }: { counters: ReturnType<typeof useActivity>['counte
 
   return (
     <View style={{ gap: theme.space.md, paddingHorizontal: theme.space.lg, paddingTop: theme.space.sm }}>
-      {/* The panel header and the stack's title bar already name this screen. */}
+      {/* `PageChrome` already names this screen, floating over the list. */}
       <Text color="textMuted" variant="preview">
         {strings.activity.subtitle}
       </Text>

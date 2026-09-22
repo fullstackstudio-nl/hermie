@@ -14,7 +14,7 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react-native'
 
 import { renderScreen } from './support/render'
-import { type CronJob, cronJobFor, cronJobName, CronScreen } from '../src/features/cron'
+import { type CronJob, cronJobFor, cronJobFromRow, cronJobName, cronRowWhen, CronScreen } from '../src/features/cron'
 import { useBotsStore } from '../src/store/bots'
 import { useCronStore } from '../src/store/cron'
 
@@ -386,5 +386,82 @@ describe('opening the crons screen on a new job', () => {
     renderScreen(<CronScreen />)
 
     expect(screen.queryByTestId('cron-editor')).toBeNull()
+  })
+})
+
+/**
+ * HERM-109: which of NEXT and LAST a row shows, and the word for a next run
+ * that has already slipped by. Pure, against `cronRowWhen` directly — the
+ * fixtures above already prove the row PAINTS whatever this returns.
+ */
+describe('cronRowWhen — the row’s NEXT/LAST label (HERM-109)', () => {
+  const NOW = Date.parse('2026-09-22T12:00:00Z')
+
+  it('shows LAST for a paused job, never NEXT … ago off a stale next_run_at', () => {
+    const paused = cronJobFromRow(
+      storedJob({
+        id: 'job-paused',
+        name: 'Paused job',
+        enabled: false,
+        state: 'paused',
+        // Stale: the gateway left this populated from before the pause.
+        next_run_at: new Date(NOW - 3_600_000).toISOString(),
+        last_run_at: new Date(NOW - 7 * 3_600_000).toISOString()
+      })
+    )
+
+    expect(cronRowWhen(paused, NOW)).toEqual({ label: 'last', value: '7h ago' })
+  })
+
+  it('falls back to — for a paused job that has never run', () => {
+    const paused = cronJobFromRow(
+      storedJob({
+        id: 'job-paused-fresh',
+        name: 'Paused, never run',
+        enabled: false,
+        state: 'paused',
+        next_run_at: null,
+        last_run_at: null
+      })
+    )
+
+    expect(cronRowWhen(paused, NOW)).toEqual({ label: 'last', value: '—' })
+  })
+
+  it('says Overdue for an active job whose next run has slipped into the past', () => {
+    const late = cronJobFromRow(
+      storedJob({
+        id: 'job-late',
+        name: 'Running late',
+        next_run_at: new Date(NOW - 60_000).toISOString()
+      })
+    )
+
+    expect(cronRowWhen(late, NOW)).toEqual({ label: 'next', value: 'Overdue' })
+  })
+
+  it('is unchanged for an active job with a future next run', () => {
+    const scheduled = cronJobFromRow(
+      storedJob({
+        id: 'job-scheduled',
+        name: 'On time',
+        next_run_at: new Date(NOW + 7_200_000).toISOString()
+      })
+    )
+
+    expect(cronRowWhen(scheduled, NOW)).toEqual({ label: 'next', value: 'in 2h' })
+  })
+
+  it('is unchanged for an active job with no next run but a past one', () => {
+    const ranOnce = cronJobFromRow(
+      storedJob({
+        id: 'job-ran-once',
+        name: 'Ran once',
+        next_run_at: null,
+        last_run_at: new Date(NOW - 2 * 3_600_000).toISOString()
+      })
+    )
+
+    expect(cronRowWhen(ranOnce, NOW)).toEqual({ label: 'last', value: '2h ago' })
   })
 })

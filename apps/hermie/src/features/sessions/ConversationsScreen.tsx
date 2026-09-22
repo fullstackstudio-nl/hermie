@@ -41,9 +41,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { Pressable, ScrollView, View } from 'react-native'
 
 import { chatStrings } from '../../chat-ui/strings'
-import { strings } from '../../i18n/strings'
 import { useBotsStore, useBotDisplayName } from '../../store/bots'
 import { useMyChat } from '../../store/chat-layout'
+import { PageChrome, usePageScroll } from '../../ui/chrome'
 import { Button, Screen, Text, TextField } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { CONTROL_MIN_HEIGHT } from '../../ui/tokens'
@@ -75,6 +75,7 @@ export function ConversationsScreen({ botName, onBack, onOpenConversation }: Con
   const [state, setState] = useState<LoadState>({ kind: 'loading' })
   const [mode, setMode] = useState<RowMode>(null)
   const [notice, setNotice] = useState<string>('')
+  const [chromeHeight, setChromeHeight] = useState(0)
   const controller = runtime?.controller
   const userChats = runtime?.userChats ?? null
 
@@ -120,19 +121,14 @@ export function ConversationsScreen({ botName, onBack, onOpenConversation }: Con
   )
 
   const groups = state.kind === 'ready' ? state.groups : null
+  const pageScroll = usePageScroll(chromeHeight)
 
   return (
     <Screen testID="conversations-screen">
-      <ScrollView contentContainerStyle={{ gap: theme.space.lg, padding: theme.space.lg }}>
-        {onBack ? (
-          <Pressable accessibilityRole="button" onPress={onBack} testID="conversations-back">
-            <Text color="accentText" variant="preview">
-              {strings.common.back}
-            </Text>
-          </Pressable>
-        ) : null}
-
-        <Text variant="title">{chatStrings.sessions.conversations}</Text>
+      <ScrollView
+        {...pageScroll}
+        contentContainerStyle={[{ gap: theme.space.lg, padding: theme.space.lg }, pageScroll.contentContainerStyle]}
+      >
         <Text color="textMuted" variant="preview">
           {display}
         </Text>
@@ -271,6 +267,12 @@ export function ConversationsScreen({ botName, onBack, onOpenConversation }: Con
           </Group>
         ) : null}
       </ScrollView>
+
+      <PageChrome
+        {...(onBack ? { back: { label: display ?? botName, onPress: onBack } } : {})}
+        onHeightChange={setChromeHeight}
+        title={chatStrings.sessions.conversations}
+      />
     </Screen>
   )
 }

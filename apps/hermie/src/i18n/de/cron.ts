@@ -26,6 +26,7 @@ export const cron: Translation<typeof cronStrings> = {
     // Both micro labels stand for „Lauf“ and stay lower case, as the English does.
     nextLabel: 'nächster',
     lastLabel: 'letzter',
+    overdue: 'Überfällig',
     neverRun: 'Nie gelaufen',
     noNextRun: 'Nicht geplant',
     lastRun: (when: string) => `Zuletzt gelaufen ${when}`,

@@ -56,6 +56,18 @@ export interface PageChromeProps {
   /** The trailing slot — a close (X), a menu, a page-specific action. */
   trailing?: ReactNode
   testID?: string
+  /**
+   * The chrome's measured height, on every change.
+   *
+   * `usePageChromeHeight`'s context only reaches a descendant of THIS
+   * component's own returned tree — the `trailing` slot, in practice — and a
+   * page's scrolling content is a sibling, not a descendant (see the module
+   * doc). This is how that sibling gets the number without a page reaching
+   * into `PageChrome`'s internals or re-measuring the same header itself:
+   * `onLayout` on this component's own header feeds it straight out, and the
+   * caller hands it to `usePageScroll(height)`.
+   */
+  onHeightChange?: (height: number) => void
 }
 
 /** How tall the chrome measured itself, so a scrolling sibling knows how much to clear. */
@@ -73,7 +85,14 @@ export function usePageChromeHeight(): number {
   return useContext(PageChromeHeightContext)
 }
 
-export function PageChrome({ title, subtitle, back, trailing, testID = 'page-chrome' }: PageChromeProps) {
+export function PageChrome({
+  title,
+  subtitle,
+  back,
+  trailing,
+  testID = 'page-chrome',
+  onHeightChange
+}: PageChromeProps) {
   const theme = useTheme()
   const [height, setHeight] = useState(0)
 
@@ -93,7 +112,12 @@ export function PageChrome({ title, subtitle, back, trailing, testID = 'page-chr
         because the row's height depends on whether a subtitle is showing.
       */}
       <View
-        onLayout={event => setHeight(event.nativeEvent.layout.height)}
+        onLayout={event => {
+          const measured = event.nativeEvent.layout.height
+
+          setHeight(measured)
+          onHeightChange?.(measured)
+        }}
         pointerEvents="box-none"
         style={{ left: 0, position: 'absolute', right: 0, top: 0 }}
         testID={testID}

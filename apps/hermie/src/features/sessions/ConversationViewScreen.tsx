@@ -34,9 +34,10 @@ import { Pressable, View } from 'react-native'
 import { chatStrings } from '../../chat-ui/strings'
 import { TranscriptList } from '../../chat-ui'
 import { CANONICAL_CHAT_TITLE } from '../bots/bots-controller'
-import { useBotsStore } from '../../store/bots'
+import { useBotsStore, useBotDisplayName } from '../../store/bots'
 import { useChatsStore } from '../../store/chats'
 import { useChatView } from '../../store/settings'
+import { PageChrome } from '../../ui/chrome'
 import { Screen, Text } from '../../ui/primitives'
 import { useTheme } from '../../ui/theme'
 import { CONTROL_MIN_HEIGHT } from '../../ui/tokens'
@@ -57,10 +58,12 @@ export function ConversationViewScreen({ botName, onBack, onOpenChat, storedId }
   const theme = useTheme()
   const runtime = useChatRuntime()
   const bot = useBotsStore(state => state.byName[botName])
+  const display = useBotDisplayName(botName)
   const view = useChatView(botName)
   const key = conversationKey(botName, storedId)
   const chat = useChatsStore(state => state.chats[key])
   const [failed, setFailed] = useState('')
+  const [chromeHeight, setChromeHeight] = useState(0)
   const controller = runtime?.controller
 
   useEffect(() => {
@@ -87,6 +90,9 @@ export function ConversationViewScreen({ botName, onBack, onOpenChat, storedId }
 
   return (
     <Screen testID="conversation-view">
+      {/* Clears `PageChrome`, which is absolutely positioned and a sibling. */}
+      <View style={{ height: chromeHeight }} />
+
       {/*
         The banner, and it is a ROW rather than a title: the two halves are a
         statement and a way out, and putting the way out anywhere else would
@@ -130,6 +136,12 @@ export function ConversationViewScreen({ botName, onBack, onOpenChat, storedId }
       ) : null}
 
       <TranscriptList items={items} />
+
+      <PageChrome
+        {...(onBack ? { back: { label: chatStrings.sessions.conversations, onPress: onBack } } : {})}
+        onHeightChange={setChromeHeight}
+        title={display ?? botName}
+      />
     </Screen>
   )
 }

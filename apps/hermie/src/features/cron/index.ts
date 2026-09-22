@@ -18,6 +18,8 @@ export {
   cronJobFor,
   cronJobFromRow,
   cronJobName,
+  type CronRowWhen,
+  cronRowWhen,
   type CronRun,
   cronRunFromRow,
   cronStatusLabel,

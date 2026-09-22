@@ -27,6 +27,7 @@ export const cron: Translation<typeof cronStrings> = {
     nextRun: (when: string) => `Volgende: ${when}`,
     nextLabel: 'volgende',
     lastLabel: 'laatste',
+    overdue: 'Te laat',
     neverRun: 'Nooit uitgevoerd',
     noNextRun: 'Niet ingepland',
     lastRun: (when: string) => `Laatst uitgevoerd ${when}`,
