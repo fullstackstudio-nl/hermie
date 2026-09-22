@@ -12,6 +12,35 @@ by Hermie Web (ADR-0015), and it is the only one nobody installs. Sections dated
 that talk about a native macOS target described a platform that no longer exists — they were removed
 rather than rewritten, and git history has them.
 
+## Settings navigation (2026-09-23)
+
+Settings is a native stack over a category list now (HERM-75/101/102/105/108), and every non-chat
+page shares one chrome, `PageChrome` — a floating glass header with a single round back button,
+never a platform one. Two things about it are platform-shaped rather than decorative.
+
+### A sticky section header stops under the glass on iOS and Mac, and slides under it elsewhere
+
+`usePageScroll` gives a page's list `contentInset` on iOS and Mac (the Mac build is the same iOS
+binary) and `contentContainerStyle.paddingTop` on Android and web — see the hook's own comment in
+`src/ui/chrome/usePageScroll.ts`. `contentInset` is what makes `ScrollView` offset a sticky header's
+own animated value, which is the only way to keep something like Activity's "TODAY" pinned at the
+bottom edge of the glass instead of drawing behind it. Android and web have no equivalent lever, so
+padding the content is the honest choice there: a sticky header on those platforms scrolls up and
+under the header rather than stopping at it. Content is never actually hidden — the header is
+translucent — but the stop-at-the-edge behaviour is iOS/Mac only, and that is a platform limit, not a
+bug to chase.
+
+### The Settings stack is nested on a phone and its own tree everywhere else
+
+The compact shell mounts Settings as a tab, inside its own tab and root stack navigators; the wide
+shell has no navigator at all and draws Settings in the content column. `SettingsHost` tells the two
+apart by whether a `NavigationContext` already exists above it (`useContext(NavigationContext)`
+in `src/features/settings/navigation/SettingsHost.tsx`) and either reuses that tree or wraps itself
+in a `NavigationIndependentTree` of its own. Neither host hands the Settings root a `rootBack`: a tab
+root and a content-column root both have nowhere to go back to, so the root draws no back control in
+either shape — `__tests__/settings-routes.test.tsx` walks every route in both configurations to keep
+it that way.
+
 ## Three languages over one English source (2026-09-22)
 
 [docs/i18n.md](i18n.md) is how the layer works and how to add a language. This is what the platforms

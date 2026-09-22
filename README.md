@@ -133,6 +133,17 @@ no third-party network call. The only address Hermie knows is the one you typed.
   again, decided by measuring the column rather than by asking which device this
   is.
 
+- **Settings, as a proper settings app.** A list of categories — Account,
+  Gateways, Chats & messages, Notifications, Context, Memory, Appearance,
+  Privacy & security, Voice, Bots & capabilities, Advanced, About — each
+  opening its own page, with a one-line summary of where it stands right on the
+  category row. Every page but the list carries exactly one round back button,
+  labelled with the page it returns to, and Escape or the hardware back key does
+  what that button does. On an iPhone the four destinations — Chats, Activity,
+  Crons, Settings — are tabs; on an iPad or a Mac wide enough, the category list
+  stays on screen beside the open page instead of covering it, and picking
+  another category swaps what is beside it rather than pushing a new page over
+  the old one.
 - **Text the size you read at.** Settings › Appearance and the chat's own menu
   carry Small / Default / Large / Extra large, and it changes the size of the
   conversation — the bubbles, the Markdown, the code — and of nothing else. It

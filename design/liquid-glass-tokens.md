@@ -151,19 +151,19 @@ clear 4.5 : 1 on a **reading bubble**, the lightest surface they ever sit on
 Glass is a stack: a blur, one or two translucent gradients, an inner highlight
 stroke and a drop shadow. Alphas are what makes it legible, so they are tokens.
 
-| Surface                                  | Light                           | Dark (over the rung below)                |
-| ---------------------------------------- | ------------------------------- | ----------------------------------------- |
-| `glassPanel` (sidebar/chat)              | white 0.74 → 0.48 → 0.60, 155°  | `#1C2A45` 0.80 + white 0.10 → 0.03 → 0.07 |
-| `glassFloat` (header, composer, popover) | white 0.80 → 0.58, 170°         | `#425A88` 0.74 + white 0.12 → 0.05        |
-| `glassSheet`                             | white 0.86 → 0.72               | `#334670` 0.92 + white 0.11 → 0.04        |
-| `glassCard` (tool, cron, DM thread)      | white 0.70 → 0.52               | `#2F4066` 0.86 + white 0.09 → 0.035       |
-| `bubbleIn` (frosted)                     | white 0.76 → `#F4F8FF` 0.64     | `#3E5480` 0.82 + white 0.10 → 0.035       |
-| `bubbleInRead` (tint layer)              | white 0.93 → `#F3F7FF` 0.88     | `#3E5480` 0.94 + white 0.08 → 0.03        |
-| `bubbleDm` (incoming bot)                | `#F3EEFF` 0.88 → `#EBE5FD` 0.80 | `#413470` 0.88 + violet 0.16 → 0.08       |
-| `tint1` (level-3 chip)                   | white 0.52                      | white 0.12                                |
-| `tintSunk` (field, code well)            | `#0E2040` 0.055                 | `#060C18` 0.44                            |
-| `hairline`                               | `#10264E` 0.13                  | `#BED4FF` 0.22                            |
-| `hairlineSoft`                           | `#10264E` 0.08                  | `#BED4FF` 0.13                            |
+| Surface                                                     | Light                           | Dark (over the rung below)                |
+| ----------------------------------------------------------- | ------------------------------- | ----------------------------------------- |
+| `glassPanel` (sidebar/chat)                                 | white 0.74 → 0.48 → 0.60, 155°  | `#1C2A45` 0.80 + white 0.10 → 0.03 → 0.07 |
+| `glassFloat` (chat header, `PageChrome`, composer, popover) | white 0.80 → 0.58, 170°         | `#425A88` 0.74 + white 0.12 → 0.05        |
+| `glassSheet`                                                | white 0.86 → 0.72               | `#334670` 0.92 + white 0.11 → 0.04        |
+| `glassCard` (tool, cron, DM thread)                         | white 0.70 → 0.52               | `#2F4066` 0.86 + white 0.09 → 0.035       |
+| `bubbleIn` (frosted)                                        | white 0.76 → `#F4F8FF` 0.64     | `#3E5480` 0.82 + white 0.10 → 0.035       |
+| `bubbleInRead` (tint layer)                                 | white 0.93 → `#F3F7FF` 0.88     | `#3E5480` 0.94 + white 0.08 → 0.03        |
+| `bubbleDm` (incoming bot)                                   | `#F3EEFF` 0.88 → `#EBE5FD` 0.80 | `#413470` 0.88 + violet 0.16 → 0.08       |
+| `tint1` (level-3 chip)                                      | white 0.52                      | white 0.12                                |
+| `tintSunk` (field, code well)                               | `#0E2040` 0.055                 | `#060C18` 0.44                            |
+| `hairline`                                                  | `#10264E` 0.13                  | `#BED4FF` 0.22                            |
+| `hairlineSoft`                                              | `#10264E` 0.08                  | `#BED4FF` 0.13                            |
 
 Edge highlights (the specular 1px stroke):
 

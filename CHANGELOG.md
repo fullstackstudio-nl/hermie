@@ -53,73 +53,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Settings is a settings app (HERM-108).** It opens on a list of twelve categories — Account,
-  Gateways, Chats & messages, Notifications, Context about you, Memory, Appearance, Privacy &
-  security, Voice, Bots & capabilities, Advanced, About — each with a line saying where it stands
-  (the gateway you are on and how many you have, the default verbosity, Dark · English), and each
-  opening a page of its own. Every page is a ROUTE in one stack now, so every one of them has
-  exactly one back button, labelled with the page it returns to, and Escape and Android's back
-  both walk one level per press. The bot-name order moved from Appearance to Chats & messages, the
-  theme editor is a page under Appearance, and the global voice settings — speaking rate, dictation
-  language, confirm before sending, stop when the app closes — are reachable outside a chat's
-  options sheet for the first time. Development builds keep the connection test and the component
-  gallery, under Advanced.
+- **Settings is a real settings app, not one long scrolling page.** It opens on a list of twelve
+  categories — Account, Gateways, Chats & messages, Notifications, Context about you, Memory,
+  Appearance, Privacy & security, Voice, Bots & capabilities, Advanced, About — each with a line
+  saying where it stands (the gateway you are on and how many you have, the default verbosity,
+  Dark · English), and each opening a page of its own. Every one of those pages — and, sharing the
+  same glass header, Activity, Crons and a bot's conversations too — now carries exactly one back
+  button, labelled with the page it returns to, and Escape or Android's back does what that button
+  does, one level per press. On an iPad or a Mac wide enough, Settings shows the category list
+  beside the open page in the main window instead of hiding both behind a panel, the same way
+  Boards already did; Activity and Crons still open as a panel over the chat. On the phone, Chats,
+  Activity, Crons and Settings are four tabs along the bottom instead of pages pushed over the chat
+  list, so none of them is more than a tap away and none of them carries a back button of its own —
+  the stray "‹ Bots" is gone, and a cron card opened from a chat still returns to that chat when you
+  go back. The bot-name order moved from Appearance to Chats & messages, the theme editor is a page
+  under Appearance → Theme now rather than a row of preset cards on the Appearance page itself, and
+  the global voice settings — speaking rate, dictation language, confirm before sending, stop when
+  the app closes — are reachable outside a chat's options sheet for the first time. Development
+  builds keep the connection test and the component gallery, under Advanced.
 
-- **The theme picker moved under Appearance → Theme (HERM-107).** Appearance itself now shows one
-  row — "Theme", naming whichever preset or theme of your own is on — instead of the row of preset
-  cards. Opening it lands on the preset cards, your own themes below them, and the rows that start
-  a new one from a preset; picking a card there applies it immediately, the same as before. Editing
-  a theme's colours is a page of its own again, `ThemeEdit`, reached from a card or a "from a
-  preset" row, so it has its own one back control rather than swapping in beside the cards it was
-  reached from.
+- **Require unlock is a picker, not a row of five segments.** Privacy & security shows a single
+  disclosure row naming the current option; opening it pushes a page listing Off, Now, 1 min, 5 min
+  and 15 min with a tick on the one in force, the same list style the model picker uses. Choosing a
+  value — Off included — asks Face ID, Touch ID or the device passcode first: the pick only takes
+  once that succeeds, and a refused, failed or cancelled prompt leaves the stored value, the lock
+  itself and the row exactly as they were, with the reason underneath the list. Choosing the value
+  already in force costs no prompt at all. Web keeps its own notice, since there is nothing there to
+  ask.
 
-- **The phone has a tab bar (HERM-75, HERM-101, HERM-102, HERM-105).** Chats, Activity, Crons and
-  Settings are four tabs along the bottom of the window rather than three pages pushed over the
-  chat list, so each of them is a root you can reach from anywhere and none of them carries a back
-  button any more — the stray "‹ Bots" is gone, and so is the tab strip that used to sit inside the
-  chat list. The platform's own title bar is switched off everywhere: every page draws the app's
-  glass header, which means one title and one back control per page instead of two, and that back
-  now names the page it actually returns to. A chat takes the whole window, without the bar. A cron
-  card in a transcript opens that cron over the chat it was in, and Back returns to the chat.
-
-- **Activity, Crons and a bot's conversations now share the app's one page chrome.** Each of these
-  pages draws the same translucent glass header `PageChrome` introduced for Settings, with a single
-  round back control where there is somewhere to go back to and none at all on a tab root — Crons'
-  own detail and run screens, and a bot's conversation list and a single branch, all lost their
-  bespoke back buttons for it. Activity's sticky "Today" divider is drawn in the page's own glass
-  material instead of a flat fill, so it no longer reads as an opaque band across the screen.
-
-- **On an iPad or a Mac, Settings opens in the content column, the way Boards already does, instead
-  of the 520pt panel Activity and Crons still slide in as (HERM-102, HERM-108).** A panel that size
-  could never hold a category list beside the page it opens, so the split layout — categories on the
-  left, the chosen page on the right — was code nobody's window was ever wide enough to reach. It
-  closes on a round close (X) instead of a back, since there is nothing under its root to return to;
-  Escape and Android's back still close it one level at a time, a page first and Settings itself on
-  the next press. Activity and Crons keep their panel, and it no longer draws its own title row —
-  the title and the close both come from the page's own chrome now, the same as everywhere else.
-
-- **Require unlock is a picker, not a row of five segments (HERM-106).** Privacy & security shows a
-  single disclosure row naming the current option; opening it pushes a page listing Off, Now, 1 min,
-  5 min and 15 min with a tick on the one in force, the same list style the model picker uses.
-  Choosing a value — Off included — asks Face ID, Touch ID or the device passcode first: the pick
-  only takes once that succeeds, and a refused, failed or cancelled prompt leaves the stored value,
-  the lock itself and the row exactly as they were, with the reason underneath the list. Choosing the
-  value already in force costs no prompt at all. Web keeps its own notice, since there is nothing
-  there to ask.
-
-- **A bot with a display name can hide its profile name everywhere it used to show beside it
-  (HERM-110).** Chats & messages has a new "Hide profile name" switch, on by default: a bot that
-  has a real display name leads with it alone — in the chat list, the chat header, the profile
-  sheet's header, memory's bot list and picker, the share sheet and a widget — whichever way the
-  Bot names order below is set. That order row is only in effect while the switch is off, and says
-  so while it is on. A bot with no display name has one name either way, and the rename field and
-  the profile's own "Profile name" fact keep showing and editing the handle regardless — the switch
-  only ever hides a SECOND name, never the only one a bot has.
+- **A bot with a display name can hide its profile name everywhere it used to show beside it.**
+  Chats & messages has a new "Hide profile name" switch, on by default: a bot that has a real
+  display name leads with it alone — in the chat list, the chat header, the profile sheet's header,
+  memory's bot list and picker, the share sheet and a widget — whichever way the Bot names order
+  below is set. That order row is only in effect while the switch is off, and says so while it is on.
+  A bot with no display name has one name either way, and the rename field and the profile's own
+  "Profile name" fact keep showing and editing the handle regardless — the switch only ever hides a
+  SECOND name, never the only one a bot has.
 
 ### Removed
 
-- **The gateway's logs page (HERM-103).** Settings no longer has a "gateway's logs" row, and the
-  client no longer calls `GET /api/logs`. See `docs/platform-notes.md` for the surface it used to read.
+- **The gateway's logs page.** Settings no longer has a "gateway's logs" row, and the client no
+  longer calls `GET /api/logs`. See `docs/platform-notes.md` for the surface it used to read.
 
 ### Fixed
 

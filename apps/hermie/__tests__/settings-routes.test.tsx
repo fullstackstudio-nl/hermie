@@ -117,9 +117,48 @@ const PARAMS: Partial<Record<SettingsRouteName, object>> = {
 
 const page = (name: SettingsRouteName) => screen.getByTestId(`settings-page-${name}`)
 
-/** Open Settings straight on one route, with its ancestors under it. */
+/**
+ * The two ways Settings is ever mounted, reduced to the one thing that
+ * changes its behaviour: whether a `NavigationContext` is already above it.
+ *
+ * `'independent'` is the wide shell (`RegularShell`): Settings sits in the
+ * content column with no navigator over it, so `SettingsHost` wraps itself in
+ * one of its own. `'nested'` is the compact shell's Settings TAB: an ambient
+ * stack is already there (`CompactTabs` inside `CompactShell`'s root stack),
+ * so `SettingsHost` reuses it instead — and, being a tab root, the shell hands
+ * it no `rootBack` either, which this mirrors.
+ */
+type Host = 'independent' | 'nested'
+
+const HostStack = createNativeStackNavigator()
+
+function renderHost(host: Host, name: SettingsRouteName) {
+  const props = { initialRoute: name, ...(PARAMS[name] ? { initialParams: PARAMS[name] } : {}) }
+
+  if (host === 'independent') {
+    renderScreen(<SettingsScreen {...props} />)
+
+    return
+  }
+
+  renderScreen(
+    <NavigationContainer>
+      <HostStack.Navigator initialRouteName="Settings" screenOptions={{ headerShown: false }}>
+        <HostStack.Screen name="Bots">{() => <Text>the chat list</Text>}</HostStack.Screen>
+        <HostStack.Screen name="Settings">{() => <SettingsScreen {...props} />}</HostStack.Screen>
+      </HostStack.Navigator>
+    </NavigationContainer>
+  )
+}
+
+/** Open Settings straight on one route, with its ancestors under it, on the independent host. */
 async function open(name: SettingsRouteName) {
-  renderScreen(<SettingsScreen initialRoute={name} {...(PARAMS[name] ? { initialParams: PARAMS[name] } : {})} />)
+  await openOn('independent', name)
+}
+
+/** As `open`, but on either host — what the dual-host walk below drives. */
+async function openOn(host: Host, name: SettingsRouteName) {
+  renderHost(host, name)
 
   await waitFor(() => expect(page(name)).toBeTruthy())
 }
@@ -145,11 +184,16 @@ describe('the route registry', () => {
 })
 
 describe('the root', () => {
-  it('has no back control of its own', async () => {
-    await open('Root')
+  it.each(['independent', 'nested'] as const)(
+    'has no back control of its own anywhere on screen, on the %s host',
+    async host => {
+      await openOn(host, 'Root')
 
-    expect(within(page('Root')).queryByTestId('page-back')).toBeNull()
-  })
+      // Whole screen, not `within(page('Root'))`: a back drawn by the SHELL
+      // rather than the page would be invisible to a page-scoped query.
+      expect(screen.queryAllByTestId('page-back')).toHaveLength(0)
+    }
+  )
 
   it('lists the categories, each with a line of its own state', async () => {
     await open('Root')
@@ -160,41 +204,53 @@ describe('the root', () => {
 })
 
 /*
-  The walk. One `it` per route, generated: a failure names the page that lost
-  its back rather than a list that stopped halfway.
+  The walk, on both hosts. A route whose back only works nested in the phone's
+  tabs, or only as the wide shell's independent tree, is exactly the defect
+  HERM-101 left behind — back as a per-screen convention rather than a
+  property of the route — so a route that only passes on one host is a
+  finding, not a pass. One `it` per route per host, generated: a failure names
+  the page AND the host that lost its back rather than a list that stopped
+  halfway.
+
+  The count is taken over the WHOLE render, not `within(page(name))`: an
+  earlier review found a second back drawn by the shell that a page-scoped
+  query could not see.
 */
-describe.each(SETTINGS_ROUTE_NAMES.filter(name => SETTINGS_ROUTES[name].parent !== null))('%s', name => {
-  const parent = SETTINGS_ROUTES[name].parent as SettingsRouteName
+describe.each(['independent', 'nested'] as const)('the %s host', host => {
+  describe.each(SETTINGS_ROUTE_NAMES.filter(name => SETTINGS_ROUTES[name].parent !== null))('%s', name => {
+    const parent = SETTINGS_ROUTES[name].parent as SettingsRouteName
 
-  it('has exactly one back control, labelled with the page it returns to', async () => {
-    await open(name)
+    it('has exactly one back control anywhere on screen, inside the page, labelled with the page it returns to', async () => {
+      await openOn(host, name)
 
-    const backs = within(page(name)).getAllByTestId('page-back')
+      const backs = screen.queryAllByTestId('page-back')
 
-    expect(backs).toHaveLength(1)
-    expect(backs[0]?.props.accessibilityLabel).toBe(SETTINGS_ROUTES[parent].title())
-  })
-
-  it('goes back to its parent when that control is pressed', async () => {
-    await open(name)
-
-    fireEvent.press(within(page(name)).getByTestId('page-back'))
-
-    await waitForGone(() => screen.queryByTestId(`settings-page-${name}`), `the ${name} page`)
-    expect(page(parent)).toBeTruthy()
-  })
-
-  it('answers Escape the same way', async () => {
-    await open(name)
-
-    act(() => {
-      for (const listener of [...mockEscapeListeners]) {
-        listener()
-      }
+      expect(backs).toHaveLength(1)
+      expect(within(page(name)).getByTestId('page-back')).toBe(backs[0])
+      expect(backs[0]?.props.accessibilityLabel).toBe(SETTINGS_ROUTES[parent].title())
     })
 
-    await waitForGone(() => screen.queryByTestId(`settings-page-${name}`), `the ${name} page`)
-    expect(page(parent)).toBeTruthy()
+    it('goes back to its parent when that control is pressed', async () => {
+      await openOn(host, name)
+
+      fireEvent.press(within(page(name)).getByTestId('page-back'))
+
+      await waitForGone(() => screen.queryByTestId(`settings-page-${name}`), `the ${name} page`)
+      expect(page(parent)).toBeTruthy()
+    })
+
+    it('answers Escape the same way', async () => {
+      await openOn(host, name)
+
+      act(() => {
+        for (const listener of [...mockEscapeListeners]) {
+          listener()
+        }
+      })
+
+      await waitForGone(() => screen.queryByTestId(`settings-page-${name}`), `the ${name} page`)
+      expect(page(parent)).toBeTruthy()
+    })
   })
 })
 
