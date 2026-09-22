@@ -24,6 +24,7 @@
  * view means the view.
  */
 import { Modal, Pressable, View, useWindowDimensions } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { useLayoutMode } from '../../app/useLayoutMode'
 import { Icon, ICON_SIZE } from '../../ui/Icon'
@@ -69,6 +70,7 @@ export function MemoryGraphFullScreen({
 }: MemoryGraphFullScreenProps) {
   const theme = useTheme()
   const window = useWindowDimensions()
+  const insets = useSafeAreaInsets()
   const regular = useLayoutMode() === 'regular'
 
   useEscapeKey(onClose, visible)
@@ -114,6 +116,9 @@ export function MemoryGraphFullScreen({
             borderWidth: regular ? 1 : 0,
             flex: 1,
             overflow: 'hidden',
+            // Same reason as the top: full screen the panel owns the home
+            // indicator's strip and has to keep its own content off it.
+            paddingBottom: regular ? 0 : insets.bottom,
             ...(regular ? theme.shadows.card : {})
           }}
           testID={testID}
@@ -126,9 +131,14 @@ export function MemoryGraphFullScreen({
               flexDirection: 'row',
               gap: theme.space.sm,
               paddingHorizontal: theme.space.lg,
-              // A phone has a status bar over this; a panel inset from the
-              // window's edge does not.
-              paddingTop: regular ? theme.space.md : theme.space.xxl,
+              /*
+                The real inset, not a constant. A full-screen `Modal` with
+                `statusBarTranslucent` starts at the physical top of the
+                display, so a fixed padding put the title under the clock on
+                every phone whose sensor housing is deeper than the guess —
+                which is all of them.
+              */
+              paddingTop: regular ? theme.space.md : insets.top + theme.space.xs,
               paddingBottom: theme.space.md
             }}
           >

@@ -144,7 +144,7 @@ const memoryStringsEn = {
   raw: {
     loading: 'Reading what each backend holds…',
     /** The one sentence that makes the tab safe to leave open. */
-    readOnly: 'Read-only. Entries are edited on the Browse tab.',
+    readOnly: 'Read-only. Entries are edited on the Entries tab.',
     /** One document that exists and has nothing in it. */
     emptyDocument: 'This one is empty.',
     /** The gateway cut the content; said rather than shown as the whole of it. */

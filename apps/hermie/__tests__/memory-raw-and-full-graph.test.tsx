@@ -25,6 +25,19 @@ import { useMemoryStore } from '../src/store/memory'
 import { usePluginStore } from '../src/store/plugin'
 import { renderScreen } from './support/render'
 
+/** Escape, delivered the way the native keyboard seam delivers it. */
+const mockEscapeListeners = new Set<() => void>()
+
+jest.mock('../src/platform/keyboard-modifiers', () => ({
+  isShiftDown: jest.fn(() => false),
+  hasHardwareKeyboard: jest.fn(() => false),
+  subscribeToEscape: (handler: () => void) => {
+    mockEscapeListeners.add(handler)
+
+    return () => mockEscapeListeners.delete(handler)
+  }
+}))
+
 /** `MEMORY.md` as the store writes it: entries joined by its own delimiter. */
 const MEMORY_FILE = 'Max signs off on invoices.\n§\nPrefers footnotes.'
 const USER_FILE = 'Works from Utrecht.'
@@ -306,6 +319,47 @@ describe('the graph, full screen', () => {
 
     await waitFor(() => expect(screen.getByTestId('memory-graph-full-detail')).toBeTruthy())
     expect(screen.getByTestId('memory-graph-full-detail-text')).toHaveTextContent('Max signs off on invoices.')
+  })
+
+  /**
+   * The ordering that is not obvious and is the whole reason the page's own
+   * handlers are scoped.
+   *
+   * `useEscapeKey` delivers to whoever registered LAST and effects flush
+   * child-first, so the full-screen view — mounted below the screen — registers
+   * FIRST and would lose the key to the screen's own "close the page" handler.
+   * One press would then have closed the whole memory page and left the
+   * picture's own state behind it.
+   */
+  it('gives Escape to the picture, not to the page under it', async () => {
+    const onClose = jest.fn()
+
+    renderScreen(<MemoryScreen onClose={onClose} profile="researcher" title="Researcher" />)
+    await act(async () => undefined)
+    await waitFor(() => expect(screen.getByTestId('memory-tab-graph')).toBeTruthy())
+
+    fireEvent.press(screen.getByTestId('memory-tab-graph'))
+    await waitFor(() => expect(screen.getByTestId('memory-graph')).toBeTruthy())
+    fireEvent.press(screen.getByTestId('memory-graph-open-full'))
+    await waitFor(() => expect(screen.getByTestId('memory-graph-full')).toBeTruthy())
+
+    act(() => {
+      for (const listener of [...mockEscapeListeners]) {
+        listener()
+      }
+    })
+
+    await waitFor(() => expect(screen.queryByTestId('memory-graph-full')).toBeNull())
+    expect(onClose).not.toHaveBeenCalled()
+
+    // And the key goes back to the page once the picture has gone.
+    act(() => {
+      for (const listener of [...mockEscapeListeners]) {
+        listener()
+      }
+    })
+
+    expect(onClose).toHaveBeenCalled()
   })
 
   it('closes on its own control and leaves the page where it was', async () => {
