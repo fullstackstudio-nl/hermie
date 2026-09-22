@@ -41,6 +41,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A message to another bot stops appearing twice and wandering between the other
+  messages.** A dispatch is a tool call, and the only thing tying the row you saw go out
+  to the row the gateway stored was the call's own id. When the gateway hands back a
+  different id for it — or no id at all, which its history can do — the two had nothing in
+  common, so the same errand stood in the chat twice. The copies then drifted apart as the
+  turn went on: only one of them has a place in the stored conversation, so the other was
+  positioned relative to whatever row happened to be above it, and moved whenever that
+  changed. The two are now matched on the message and the teammate it went to, so they
+  collapse into one row that stays where it was sent — while one message sent to two
+  teammates, and the same message sent twice, still count as two.
+
 - **A teammate's answer no longer arrives as a message you appear to have typed.** The reply
   to a message one bot sends another does not come back as a message; it comes back as a
   report from the background job that delivered it, on the same channel your own messages

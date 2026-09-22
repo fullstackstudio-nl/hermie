@@ -822,7 +822,25 @@ export function normalizedItemText(item: TranscriptItem): string {
             // row instead of letting the row land as a second card.
             item.kind === 'cron_delivery'
             ? `${item.jobName}\n${item.body}`
-            : ''
+            : /*
+                 The message that was dispatched.
+
+                 A dispatch used to have no text key at all, so the ONLY thing
+                 that could pair the live row with the persisted one was the tool
+                 id — and a gateway that re-keys a call on the way to its
+                 database, or drops the id from the history projection (where
+                 `rows-to-items` falls back to `row-<index>`), leaves the two with
+                 no id in common. The reader then had the same errand twice, and
+                 the copies MOVED apart: only one of them has a row id, so
+                 `inRowOrder` sorts the other by whatever row happens to be above
+                 it, and that changes as the turn goes on.
+
+                 The target is not in here but in `itemMatchKey`, for the reason
+                 the attachments are: it has to be able to disagree on its own.
+              */
+              item.kind === 'bot_dm_out'
+              ? item.message
+              : ''
 
   return normalizeMatchText(text)
 }
@@ -839,9 +857,17 @@ export function normalizedItemText(item: TranscriptItem): string {
  * text alone would have called them one.
  */
 export function itemMatchKey(item: TranscriptItem): string {
-  const attachments = item.kind === 'user' ? attachmentsMatchKey(item.attachments) : ''
+  const carried =
+    item.kind === 'user'
+      ? attachmentsMatchKey(item.attachments)
+      : // The teammate a dispatch went to. Two errands worded the same way but
+        // sent to two different bots are two rows, and a key made of the message
+        // alone would have called them one.
+        item.kind === 'bot_dm_out'
+        ? item.targetHandle || item.target.toLowerCase()
+        : ''
 
-  return `${normalizedItemText(item)}\n${attachments}`
+  return `${normalizedItemText(item)}\n${carried}`
 }
 
 /** Whether an item says or carries enough to be paired on at all. */

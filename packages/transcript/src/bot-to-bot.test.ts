@@ -28,7 +28,7 @@ import { describe, expect, it } from 'vitest'
 
 import { isBotToBotItem } from './bot-dm'
 import { DM_DELIVERY_COMMAND, dmReplyProcessText, LEGACY_DELIVERY_COMMAND } from './__fixtures__/rows'
-import { reconcileTail } from './reconcile'
+import { reconcile, reconcileTail } from './reconcile'
 import { applyEvent, applyResumeSnapshot } from './reducer'
 import { classifyUserRow, rowsToItems, type TranscriptRow } from './rows-to-items'
 import { visibleItems } from './selectors'
@@ -276,6 +276,181 @@ describe('the reply the delivery runner reports back', () => {
 
     expect(items.map(item => item.kind)).toEqual(['notice'])
     expect(items[0]).toMatchObject({ kind: 'notice', noticeKind: 'process_complete' })
+  })
+})
+
+describe('one dispatch is one row, wherever its id came from', () => {
+  /*
+    The second half of the same report: a message to another bot "sometimes
+    duplicates itself and shifts between the messages".
+
+    A dispatch is a TOOL row, and until this it could only be paired by its tool
+    id — a dispatch had no text key at all, so `isMatchable` refused it. That
+    holds only as long as the id the stream saw is the id the row is persisted
+    under. A gateway that re-keys the call, or a history projection that ships no
+    `tool_id` (where this module falls back to `row-<index>`), leaves the live row
+    and the persisted one with nothing in common, and the tail appends a second
+    one.
+
+    The SHIFT is the same fact seen from the list: only one of the two copies has
+    a row id, so `inRowOrder` sorts the other by whatever row happens to sit above
+    it — which changes as the turn goes on, so the copy wanders between the
+    messages instead of standing still beside its twin.
+  */
+  const MESSAGE = 'Can you draft the announcement?'
+
+  const liveDispatch = (): ChatState => {
+    const args = { target: '@writer', message: MESSAGE }
+    let state = applyEvent(fresh(), { type: 'message.start', seq: 1 }, NOW)
+
+    state = applyEvent(
+      state,
+      { type: 'tool.start', seq: 2, payload: { tool_id: 'call_live_1', name: 'message_agent', args } },
+      NOW + 100
+    )
+    state = applyEvent(
+      state,
+      {
+        type: 'tool.complete',
+        seq: 3,
+        payload: {
+          tool_id: 'call_live_1',
+          name: 'message_agent',
+          args,
+          result: { status: 'queued', process_id: 'p-1' }
+        }
+      },
+      NOW + 200
+    )
+    state = applyEvent(state, { type: 'message.delta', seq: 4, payload: { text: 'Asked the writer.' } }, NOW + 300)
+
+    return applyEvent(
+      state,
+      { type: 'message.complete', seq: 5, payload: { text: 'Asked the writer.', status: 'ok' } },
+      NOW + 400
+    )
+  }
+
+  /** The turn as the gateway persisted it, with the dispatch keyed however. */
+  const persistedTurn = (toolRow: TranscriptRow) =>
+    rowsToItems(
+      [
+        { role: 'user', row_id: 1, text: 'Ask the writer for the announcement.', timestamp: 1_700_000_000 },
+        toolRow,
+        { role: 'assistant', row_id: 3, text: 'Asked the writer.', timestamp: 1_700_000_010 }
+      ],
+      'rpc'
+    )
+
+  const dispatchRow = (toolId?: string): TranscriptRow => ({
+    role: 'tool',
+    row_id: 2,
+    name: 'message_agent',
+    ...(toolId ? { tool_id: toolId } : {}),
+    args: { target: '@writer', message: MESSAGE }
+  })
+
+  const ids = ['call_live_1', 'srv_9f21', undefined] as const
+
+  for (const toolId of ids) {
+    const name = toolId === 'call_live_1' ? 'the same tool id' : toolId ? 'a different tool id' : 'no tool id at all'
+
+    it(`collapses onto the live row when the persisted one arrives with ${name}`, () => {
+      const state = reconcileTail(liveDispatch(), persistedTurn(dispatchRow(toolId)))
+      const items = list(state)
+
+      expect(items.map(item => item.kind)).toEqual(['user', 'bot_dm_out', 'assistant'])
+      // Between the prompt and the reply, which is where it happened — not
+      // appended behind the turn, and not adrift.
+      expect(items[1]).toMatchObject({ kind: 'bot_dm_out', rowId: 2, message: MESSAGE })
+      // The live moment survives the merge: a tool row carries no timestamp.
+      expect(items[1]?.ts).toBe((NOW + 100) / 1000)
+    })
+
+    it(`stays one row across a second sweep with ${name}`, () => {
+      const rows = persistedTurn(dispatchRow(toolId))
+      let state = reconcileTail(liveDispatch(), rows)
+
+      state = reconcileTail(state, rows)
+      expect(list(state).filter(item => item.kind === 'bot_dm_out')).toHaveLength(1)
+    })
+
+    it(`collapses on a full re-hydration with ${name}`, () => {
+      const state = reconcile(liveDispatch(), persistedTurn(dispatchRow(toolId)))
+
+      expect(list(state).filter(item => item.kind === 'bot_dm_out')).toHaveLength(1)
+    })
+  }
+
+  it('keeps two errands apart when they differ only in who they went to', () => {
+    // The pairing key has to be able to disagree, or one message sent to two
+    // teammates collapses into one row.
+    const args = { message: MESSAGE }
+    let state = applyEvent(
+      fresh(),
+      {
+        type: 'tool.start',
+        seq: 1,
+        payload: { tool_id: 'c1', name: 'message_agent', args: { ...args, target: '@writer' } }
+      },
+      NOW
+    )
+
+    state = applyEvent(
+      state,
+      {
+        type: 'tool.start',
+        seq: 2,
+        payload: { tool_id: 'c2', name: 'message_agent', args: { ...args, target: '@builder' } }
+      },
+      NOW + 100
+    )
+
+    state = reconcileTail(
+      state,
+      rowsToItems(
+        [
+          { role: 'tool', row_id: 1, name: 'message_agent', args: { ...args, target: '@writer' } },
+          { role: 'tool', row_id: 2, name: 'message_agent', args: { ...args, target: '@builder' } }
+        ],
+        'rpc'
+      )
+    )
+
+    const dispatches = list(state).filter(item => item.kind === 'bot_dm_out')
+
+    expect(dispatches).toHaveLength(2)
+    expect(dispatches.map(item => (item.kind === 'bot_dm_out' ? item.targetHandle : ''))).toEqual(['writer', 'builder'])
+  })
+
+  it('keeps the same errand sent twice as two rows', () => {
+    const args = { target: '@writer', message: MESSAGE }
+    let state = applyEvent(
+      fresh(),
+      { type: 'tool.start', seq: 1, payload: { tool_id: 'c1', name: 'message_agent', args } },
+      NOW
+    )
+
+    state = applyEvent(
+      state,
+      { type: 'tool.start', seq: 2, payload: { tool_id: 'c2', name: 'message_agent', args } },
+      NOW + 100
+    )
+
+    state = reconcileTail(
+      state,
+      rowsToItems(
+        [
+          { role: 'tool', row_id: 1, name: 'message_agent', args },
+          { role: 'tool', row_id: 2, name: 'message_agent', args }
+        ],
+        'rpc'
+      )
+    )
+
+    // Each persisted row pairs with a distinct live row, in order, exactly as two
+    // identical prompts do.
+    expect(list(state).filter(item => item.kind === 'bot_dm_out')).toHaveLength(2)
   })
 })
 

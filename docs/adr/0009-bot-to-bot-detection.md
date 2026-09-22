@@ -161,3 +161,28 @@ answered it — against every wire shape this traffic has, and fails if any of t
 or `assistant` item carrying a delivery signature, a process header or the runner's command line. A
 new path has to add itself to that table; the suite also refuses a third module in the package that
 builds a `user` item at all, which is the shape the leak had.
+
+### The dispatch that appeared twice
+
+Reported in the same breath as the leak: a message to another bot _"sometimes duplicates
+itself and shifts between the messages"_.
+
+A dispatch is a TOOL row, and reconciliation pairs a live item with the persisted one on
+`rowId`, then `toolId`, then `itemMatchKey`. A `bot_dm_out` had no text key at all —
+`normalizedItemText` returned the empty string for it, so `isMatchable` refused it — which
+left the tool id as the only thing the two descriptions could share. That holds exactly as
+long as the id the stream saw survives into the database. It does not always: a gateway may
+re-key the call, and a history projection that ships no `tool_id` lands on this module's
+`row-<index>` fallback. With no id in common, `reconcileTail` appends the persisted row
+beside the live one and the reader has the errand twice.
+
+The SHIFT is the same fact seen from the list. Only one of the two copies carries a `rowId`,
+and `inRowOrder` sorts a row without one by the newest row id ABOVE it — which changes as
+the turn writes more rows, so the copy moves between the messages while its twin stands
+still.
+
+A dispatch is now matchable by what it says: `normalizedItemText` returns its message, and
+`itemMatchKey` puts the TARGET HANDLE in the slot the attachments occupy for a user turn, so
+one message sent to two teammates stays two rows while two descriptions of one dispatch
+collapse. The merge also keeps the live timestamp, because a tool row carries none and the
+moment the message went out is known only to the stream that watched it leave.

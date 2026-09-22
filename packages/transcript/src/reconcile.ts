@@ -161,6 +161,10 @@ function mergeWithLive(fresh: TranscriptItem, current: TranscriptItem): Transcri
     }
 
     carried.reply = carried.reply ?? current.reply
+    // A tool row carries no timestamp, so the moment the dispatch went out is
+    // known only to the stream that watched it leave. Losing it on the merge
+    // would take the row's date stamp with it.
+    carried.ts = carried.ts ?? current.ts
 
     return merged
   }
