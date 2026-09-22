@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-09-22
+
 ### Added
 
 - **Sequence diagrams and pie charts are drawn.** A ` ```mermaid ` fence holding a
