@@ -81,7 +81,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on a first sign-in — before the arrangement has come down from the gateway. It counted as six
   chats you had just dragged into place, and being the newest thing anybody had "chosen" it won.
   That housekeeping still happens and is still sent, because a new chat does belong in the list,
-  but it no longer claims that you arranged anything.
+  but it no longer claims that you arranged anything. The same goes for the tidy-up that forgets
+  mutes which have already run out, which happens every time you bring the app back to the front.
 
 - **Your theme, your text size and your chat defaults follow you between devices again.** Pick
   Graphite on the Mac, open the phone, and the phone went back to whatever colour it had been

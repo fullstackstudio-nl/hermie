@@ -502,8 +502,8 @@ export class UiMetaBridge {
   private unsubscribe: (() => void)[] = []
   private readonly ready: (() => Promise<unknown>) | undefined
   private stopped = false
-  /** The roster folds this bridge has already accounted for; see `onStoreChanged`. */
-  private folds = 0
+  /** The layout store's chores this bridge has accounted for; see `onStoreChanged`. */
+  private chores = 0
 
   constructor(options: UiMetaBridgeOptions) {
     this.debounceMs = options.debounceMs ?? UI_META_DEBOUNCE_MS
@@ -571,7 +571,7 @@ export class UiMetaBridge {
   }
 
   private watch(): void {
-    this.folds = useChatLayoutStore.getState().rosterFolds
+    this.chores = useChatLayoutStore.getState().chores
     this.remember(snapshotFromStores())
 
     const watch = (): void => this.onStoreChanged()
@@ -655,17 +655,19 @@ export class UiMetaBridge {
     }
 
     /*
-      Whether the roster folding itself in is what moved the list.
+      Whether what moved the list is the list's own housekeeping.
 
-      Read before anything else, and per notification rather than per batch, which
-      is what makes it exact: zustand notifies on each `set`, and the fold is a
-      `set` of its own. So this is true for the fold's own notification and for
-      nothing else.
+      The roster folding itself in, and the sweep of mutes that have already
+      lapsed: both change the section, both have to be sent, and neither is
+      anybody deciding anything. Read before anything else, and per notification
+      rather than per batch, which is what makes it exact — zustand notifies on
+      each `set` and each chore is a `set` of its own, so a rearrangement made in
+      the next breath is dated like any other.
     */
-    const folds = useChatLayoutStore.getState().rosterFolds
-    const folded = folds > this.folds
+    const chores = useChatLayoutStore.getState().chores
+    const chore = chores > this.chores
 
-    this.folds = folds
+    this.chores = chores
 
     let snapshot = snapshotFromStores()
     let dirty = false
@@ -707,7 +709,7 @@ export class UiMetaBridge {
       the one taken before the touch would leave this device one notification
       behind for ever.
     */
-    if (!folded && this.seen.get(CHOICES) !== choiceFingerprint(snapshot.app)) {
+    if (!chore && this.seen.get(CHOICES) !== choiceFingerprint(snapshot.app)) {
       useAppStampStore.getState().touch()
       snapshot = snapshotFromStores()
       dirty = true

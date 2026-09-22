@@ -194,6 +194,38 @@ describe('the roster folding itself in', () => {
     device.stop()
   })
 
+  it('does not date the sweep of mutes that have already lapsed either', async () => {
+    // The same housekeeping, on the same store, and it runs on every foreground.
+    // A deadline that has passed had already stopped silencing anything, so
+    // forgetting it is not a decision — and a device that dated it would become
+    // the one that chose last and win an argument about a theme it had nothing
+    // to say about.
+    const gateway = holdingGateway()
+
+    await newDevice()
+
+    const device = openApp(gateway)
+
+    await device.watching
+    await device.bridge.reconcile()
+    useChatLayoutStore.getState().setMute('researcher', 1_000)
+    await settled()
+
+    const chosenAt = useAppStampStore.getState().updatedAt
+
+    expect(chosenAt).toBeGreaterThan(0)
+
+    useChatLayoutStore.getState().dropExpiredMutes(2_000)
+    await settled()
+
+    expect(useChatLayoutStore.getState().mutes).toEqual({})
+    expect(useAppStampStore.getState().updatedAt).toBe(chosenAt)
+    // Still sent, so that the section stops collecting last spring's deadlines.
+    expect(gateway.app()?.mutes).toEqual({})
+
+    device.stop()
+  })
+
   it('leaves a drag straight after it dated, which is the case next to it', async () => {
     const gateway = holdingGateway()
 

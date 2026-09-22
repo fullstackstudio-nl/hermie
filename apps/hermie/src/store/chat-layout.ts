@@ -156,20 +156,24 @@ export interface ChatLayoutState {
   /** False until the disk read finishes; the list paints the roster order meanwhile. */
   loaded: boolean
   /**
-   * How many times the LIVE ROSTER has been folded into the arrangement.
+   * How many writes this store has made that NOBODY ASKED FOR.
    *
-   * `store/ui-meta-bridge.ts` reads it, and it exists because a fold looks
-   * exactly like a rearrangement from outside this store and is not one. The
+   * Two of them: the live roster being folded into the arrangement, and the
+   * sweep that forgets mutes which have already lapsed. Both change the section
+   * and both must be sent, and neither is a decision anybody made — from outside
+   * this store they look exactly like a rearrangement.
+   *
+   * `store/ui-meta-bridge.ts` reads the counter to tell them apart. The
    * arrangement is one person's, shared by all their devices, and the newest
-   * CHOICE has to win on every one of them — so the bridge dates a change the
-   * reader made and pointedly does not date this, which is the roster arriving.
+   * CHOICE has to win on every one of them, so the bridge dates a change the
+   * reader made and pointedly does not date these.
    *
    * It was: a second device folded a roster of six bots into an arrangement it
    * had not read yet, that fold was dated as though somebody had just dragged
    * six rows, and it won. The folders the person had made on their desktop were
    * then gone from the gateway as well, for every device.
    */
-  rosterFolds: number
+  chores: number
 
   load: (gatewayKey: string) => Promise<void>
   reconcile: (botNames: readonly string[]) => void
@@ -257,7 +261,7 @@ const INITIAL = {
   mutes: {} as Mutes,
   sidebarCollapsed: undefined as boolean | undefined,
   loaded: false,
-  rosterFolds: 0
+  chores: 0
 }
 
 let writeQueue: Promise<void> = Promise.resolve()
@@ -450,9 +454,9 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
 
         It is persisted and sent like any other change — a bot that has appeared
         belongs in the list, and the gateway should hear about it — but it is not
-        a choice anybody made, and the bridge dates choices. See `rosterFolds`.
+        a choice anybody made, and the bridge dates choices. See `chores`.
       */
-      set({ entries: next.entries, folders: next.folders, rosterFolds: get().rosterFolds + 1 })
+      set({ entries: next.entries, folders: next.folders, chores: get().chores + 1 })
       save()
     },
 
@@ -694,7 +698,12 @@ export const useChatLayoutStore = create<ChatLayoutState>((set, get) => {
         return
       }
 
-      set({ mutes: swept })
+      // A CHORE, like the roster's fold above: the deadlines it forgets had
+      // already stopped silencing anything, so the section changed without
+      // anybody deciding that it should. Dating it would make this device the
+      // one that chose last, on a foreground, and win an argument about a theme
+      // it had nothing to say about. See `chores`.
+      set({ mutes: swept, chores: get().chores + 1 })
       save()
     },
 

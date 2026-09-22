@@ -371,9 +371,10 @@ additive and the section version stays at 1, by the rule this record already sta
 
 **The date moves for choices only.** It is taken in the bridge's own diff — one place, every field,
 nothing to forget when the next field is added — over the section MINUS `push`, `context` and the
-date itself. And the roster's fold is COUNTED (`rosterFolds`) rather than dated: it is still
-persisted and still sent, because a bot that has appeared belongs in the list, but it does not claim
-that anybody arranged anything.
+date itself. And the chat list's own housekeeping — the roster's fold, and the sweep of mutes that
+have already lapsed — is COUNTED (`chores`) rather than dated: both are still persisted and still
+sent, because a bot that has appeared belongs in the list and the section should not collect last
+spring's deadlines, but neither claims that anybody arranged anything.
 
 **Nothing is watched or compared until the disk has answered.** `UiMetaBridgeOptions.ready` holds
 both the subscription and the reconcile behind this gateway's reads, so the baseline the diff works
@@ -407,4 +408,4 @@ kept, a dated section beating an undated one, and a gateway with no section stil
 drive the real stores against a gateway that remembers: the theme and the folders arriving on a
 second device in both connect orders, neither device writing back over the other, the date adopted
 rather than re-taken, an offline change landing on the next connect, a relaunch reading the arriving
-copy rather than the replaced one, and the roster's fold being sent without being dated.
+copy rather than the replaced one, and the list's housekeeping being sent without being dated.
