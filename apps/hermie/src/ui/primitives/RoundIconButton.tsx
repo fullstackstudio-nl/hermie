@@ -45,6 +45,17 @@ export interface RoundIconButtonProps {
   color?: string
   /** The mark's colour. Defaults to the accent ink on glass, `onAccent` on solid. */
   tint?: string
+  /**
+   * Lay the control's solid rung under the glass, for a button that floats
+   * over CONTENT rather than sitting on a panel.
+   *
+   * The chat's chrome is the case that needs it: the transcript scrolls
+   * underneath, so the backdrop is whichever bubble is passing behind the
+   * button at that moment, and at the control wash's own alpha that bubble's
+   * words come through the circle. Same rule, same reason, as the header pill
+   * and `AttachMenu`. Ignored by `solid`, which paints its own colour.
+   */
+  opaque?: boolean
   disabled?: boolean
   /** Announced on the button; a menu button is `expanded`. */
   expanded?: boolean
@@ -59,6 +70,7 @@ export function RoundIconButton({
   fill = 'glass',
   color,
   tint,
+  opaque = false,
   disabled = false,
   expanded,
   testID
@@ -106,7 +118,15 @@ export function RoundIconButton({
 
   if (!solid) {
     return (
-      <GlassSurface interactive radius={size / 2} shadow="card" style={{ height: size, width: size }} variant="control">
+      <GlassSurface
+        interactive
+        opaque={opaque}
+        radius={size / 2}
+        shadow="card"
+        style={{ height: size, width: size }}
+        contentTestID={testID ? `${testID}-surface` : undefined}
+        variant="control"
+      >
         {button}
       </GlassSurface>
     )

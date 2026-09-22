@@ -72,7 +72,7 @@ import { Animated, Pressable, View } from 'react-native'
 import { GlassGroup, GlassSurface } from '../ui/glass'
 import { durationFor, easing, NATIVE_DRIVER } from '../ui/motion'
 import { PresenceBead } from '../ui/PresenceBead'
-import { RoundIconButton, Text } from '../ui/primitives'
+import { RoundIconButton, Text, type RoundIconButtonProps } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
 import { AVATAR_SIZE, BEAD_SIZE, CONTROL_SIZE, type PresenceState } from '../ui/tokens'
 import { Avatar } from './primitives/Avatar'
@@ -155,6 +155,11 @@ function stateLabel(presence: PresenceState, lastSeenAt?: number): string {
 /**
  * The header's round buttons, which are the shared ones.
  *
+ * They are `opaque` for the reason the pill is, and it has to be all three or
+ * none: these are the same row of floating controls over the same scrolling
+ * transcript, and a row where one element hides what is behind it and two do
+ * not reads as three different materials rather than as one chrome.
+ *
  * `RoundIconButton` used to be a copy living here. It moved to `ui/primitives`
  * when the composer's `+` and send turned out to be the same control drawn a
  * fourth and a fifth way — with a CHARACTER in the middle instead of a path,
@@ -165,7 +170,9 @@ function stateLabel(presence: PresenceState, lastSeenAt?: number): string {
  * one blue per scheme whatever preset was on, so under Lime a chevron was the
  * only blue thing on the screen. It is derived from the theme's accent now.
  */
-const RoundButton = RoundIconButton
+function RoundButton(props: RoundIconButtonProps) {
+  return <RoundIconButton opaque {...props} />
+}
 
 /**
  * The sidebar control on its own, for a column that has no header to put it in.

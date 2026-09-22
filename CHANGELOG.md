@@ -246,6 +246,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rather than the window, so in a narrow panel it stacks the way it does on a phone, and its
   explanatory lines wrap instead of scrolling sideways with the columns.
 
+- **The chat header's Back and (…) buttons no longer have a message printed through them.** The
+  same thing the pill did, on the two circles beside it: a reply scrolling under the chrome came
+  through the glass with the chevron drawn on top of it. All three now hide what passes behind
+  them, which is also what makes the header read as one piece of chrome rather than three.
+
 - **The bot's name in the chat header no longer has a message printed through it.** The transcript
   scrolls underneath the header, so whatever bubble happens to be passing behind the pill was its
   backdrop — and at the glass control's own transparency that bubble's words came through the name

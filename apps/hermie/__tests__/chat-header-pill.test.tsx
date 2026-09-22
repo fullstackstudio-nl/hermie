@@ -118,6 +118,23 @@ describe('the pill does not let the transcript read through it', () => {
     expect(flattened.backgroundColor).not.toBe('transparent')
   })
 
+  it.each([['chat-header-back-surface'], ['chat-header-options-surface']])(
+    'gives %s the same rung, because one row is one material',
+    testID => {
+      const tree = render(
+        <ThemeProvider>
+          <ThemeProbe />
+          <ChatHeader name="Researcher" onBack={() => undefined} onOpenOptions={() => undefined} subtitle="Online" />
+        </ThemeProvider>
+      )
+      const surface = tree.getByTestId(testID, { includeHiddenElements: true })
+      const style = surface.props.style as Record<string, unknown>[]
+      const flattened = Object.assign({}, ...style.filter(Boolean)) as Record<string, unknown>
+
+      expect(flattened.backgroundColor).toBe(seen?.glass.control.solid)
+    }
+  )
+
   it('gives the presence bead the same colour its ring already assumed', () => {
     const tree = header('Online', 'online')
     const surface = tree.getByTestId('chat-header-pill-surface', { includeHiddenElements: true })
