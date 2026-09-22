@@ -120,9 +120,10 @@ export interface BotsScreenProps {
    * Open one of the other three destinations.
    *
    * `options.create` is the difference between "show me the crons" and "make
-   * me a cron". The `+` in this screen's own header is labelled New cron and
-   * used to do the first, which is a button that promises a thing and delivers
-   * the page that thing lives on.
+   * me a cron". This screen only ever asks for the first: the header's `+`,
+   * which asked for the second, is gone — a cron is made on the Crons tab,
+   * with that tab's own button. The option stays in the signature because the
+   * shells still honour it on the way in from elsewhere.
    */
   onOpenSection?: (section: BotsSection, options?: { create?: boolean }) => void
   /**
@@ -1047,7 +1048,6 @@ export function BotsScreen({
         sidebar={sidebar}
         onBoards={openBoards}
         onNewBot={() => setCreatingBot(true)}
-        {...(onOpenSection ? { onNewCron: () => onOpenSection('cron', { create: true }) } : {})}
       />
 
       {/*
@@ -1377,58 +1377,50 @@ export function BotsScreenOrSignedOut(props: BotsScreenProps) {
 }
 
 /**
- * The width at or above which the header's actions stay on one row.
+ * The secondary actions, behind one `…`, at every width.
  *
- * Four incompressible controls sit beside a `flex: 1` title — Boards, New bot,
- * `+`, Edit — and three of them are WORDS, which do not shrink. At the narrow
- * sidebar's 300pt the title had nothing left: "Chats" wrapped to one character
- * per line and "New bot…" truncated mid-word. Measured against the header's own
- * width rather than the window's or the platform's, because the thing that runs
- * out of room is this row: the same 300pt happens on an iPad in portrait, on a
- * Mac window dragged narrow, and in the gallery's mimic of the sidebar, and
- * `Platform.OS` answers none of them.
+ * The owner's report was about the Mac sidebar — this row was "all very
+ * cramped", under a screenshot of `Boards  Nieuwe bot…  ⊕  Bewerken` pressed
+ * into one line above the search field. Four controls beside a `flex: 1` title,
+ * three of them WORDS that do not shrink, and in Dutch and German those words
+ * are longer than the English they were measured in.
  *
- * 330 sits between the two widths that exist — `SIDEBAR_WIDTH_NARROW` at 300,
- * which must collapse, and `SIDEBAR_WIDTH` at 340, which comfortably does not.
- */
-export const BOTS_HEAD_INLINE_MIN_WIDTH = 330
-
-/**
- * The secondary actions, behind one `…` when the row cannot hold them.
+ * The previous answer folded them away below a measured width and kept all four
+ * inline above it. That fixed the narrow sidebar and left the cramped one
+ * exactly as it was: 340pt is wide enough to FIT four controls and not wide
+ * enough to make them read as four separate things. So the fold is gone and the
+ * menu is unconditional — one arrangement at 300pt, at 900pt and everywhere
+ * between, which is also one arrangement to hold in mind.
  *
- * `+` deliberately stays out of it and stays visible: it is the one control here
- * that makes something rather than navigating, it is a glyph and therefore costs
- * a fixed 38pt whatever the width, and burying the primary action of a screen
- * inside an overflow menu to save room for a title is the wrong trade.
+ * Edit stays out of it: it is the header's only MODE, a reader toggles it and
+ * toggles it back, and a two-tap round trip through a menu for that is the
+ * trade the fold got wrong in the other direction.
  *
  * Drawn the way every other floating menu in the app is drawn — an opaque glass
  * surface, absolutely positioned so that opening it lays nothing out, arriving
- * from above because that is where the button is. It is not `ContextMenuHost`:
- * that one is a long-press and secondary-click host backed by a native Mac view,
- * so on an iPad it would render no menu at all and the actions would simply be
- * gone.
+ * from above because that is where the button is, Escape closing one level.
+ * That is the same host `ChatOptionsPopover` uses, for the reasons it gives. It
+ * is NOT `ContextMenuHost`, which the row menu uses: that one is a long-press
+ * and secondary-click host backed by a native Mac view, it cannot be opened by
+ * a tap at all, and on an iPad it would render no menu, so the actions would
+ * simply be gone.
  */
-function HeadOverflowMenu({
-  editing,
-  onBoards,
-  onNewBot,
-  onToggleEdit
-}: {
-  editing: boolean
-  onBoards?: () => void
-  onNewBot?: () => void
-  onToggleEdit: () => void
-}) {
+function HeadOverflowMenu({ onBoards, onNewBot }: { onBoards?: () => void; onNewBot?: () => void }) {
   const theme = useTheme()
   const [open, setOpen] = useState(false)
 
   useEscapeKey(() => setOpen(false), open)
 
   const rows: { id: string; label: string; onPress: () => void }[] = [
-    ...(onBoards ? [{ id: 'boards', label: kanbanStrings.menu, onPress: onBoards }] : []),
     ...(onNewBot ? [{ id: 'new-bot', label: profileStrings.settings.newBot, onPress: onNewBot }] : []),
-    { id: 'edit', label: editing ? strings.layout.done : strings.layout.edit, onPress: onToggleEdit }
+    ...(onBoards ? [{ id: 'boards', label: kanbanStrings.menu, onPress: onBoards }] : [])
   ]
+
+  // A `…` that opens an empty surface is worse than no `…` at all. This screen
+  // hands over both actions; the guard is for a shell that hands over neither.
+  if (!rows.length) {
+    return null
+  }
 
   return (
     <View>
@@ -1440,7 +1432,10 @@ function HeadOverflowMenu({
         aria-expanded={open}
         hitSlop={TAP_SLOP}
         onPress={() => setOpen(current => !current)}
-        style={{ cursor: 'pointer' }}
+        // The search field's note applies here too: on the web a `cursor:
+        // pointer` is only as big as the box under it, and the box under this
+        // one is a 19pt glyph. `hitSlop` answers a finger, not a mouse.
+        style={{ cursor: 'pointer', justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT }}
         testID="bots-head-overflow"
       >
         <Icon color={theme.colors.accentText} name="ellipsis" size={ICON_SIZE.control} />
@@ -1451,10 +1446,10 @@ function HeadOverflowMenu({
         style={{
           position: 'absolute',
           right: 0,
-          // Clear of the button rather than measured off it: the row's height is
-          // the 38pt control beside it, and a menu that overlapped the thing
-          // that opened it would take its own next tap.
-          top: theme.space.xl,
+          // Clear of the button rather than measured off it: the button's box
+          // IS `CONTROL_MIN_HEIGHT` (see its style), and a menu that overlapped
+          // the thing that opened it would take its own next tap.
+          top: CONTROL_MIN_HEIGHT,
           zIndex: 2
         }}
         visible={open}
@@ -1468,8 +1463,8 @@ function HeadOverflowMenu({
           the solid rung under its wash, so its contrast is a fixed number
           rather than a function of whatever is behind it. Without it this menu
           floats over the chat list at the wash's own alpha, and the simulator
-          showed "Edit" printed across the name of the chat underneath — two
-          strings at the same weight in the same place.
+          showed a menu line printed across the name of the chat underneath —
+          two strings at the same weight in the same place.
         */}
         <GlassSurface contentStyle={{ minWidth: 168, paddingVertical: theme.space.xxs }} opaque variant="float">
           {rows.map(row => (
@@ -1500,47 +1495,55 @@ function HeadOverflowMenu({
   )
 }
 
+/**
+ * The chat list's head row: the screen's name, and two controls.
+ *
+ * ## Two, and always the same two
+ *
+ * `…` and Edit. Everything else this row used to offer is behind the `…` (see
+ * `HeadOverflowMenu`), and the `+` that used to sit between them is GONE rather
+ * than moved: it was labelled New cron, it made a cron, and a cron is made on
+ * the Crons tab — which has its own `cron-create` button for exactly that. A
+ * second door to one screen's primary action, parked in another screen's
+ * header, is a door that has to be kept in step with the room behind it.
+ *
+ * ## The air
+ *
+ * Taken from the search field directly below, so the two rows read as one stack
+ * rather than as a tight row above a comfortable one:
+ *
+ *  - the row's horizontal padding is `space.lg`, the search pill's own
+ *    `marginHorizontal`, so the title's left edge and Edit's right edge sit on
+ *    that pill's edges;
+ *  - the two actions sit `space.md` apart, the pill's own `paddingHorizontal` —
+ *    the measure that field keeps between its edge and what is inside it;
+ *  - the title is `space.lg` from them, one step MORE than they are from each
+ *    other, so the pair reads as a group rather than as the tail of the title;
+ *  - and each control is at least `CONTROL_MIN_HEIGHT` tall, the pill's own
+ *    minimum, so a pointer has the same target a finger already had. That also
+ *    gives the row back the height the 38pt `+` used to give it.
+ */
 function Head({
   editing,
   onBoards,
   onNewBot,
-  onNewCron,
   onToggleEdit,
   sidebar
 }: {
   editing: boolean
   onBoards?: () => void
   onNewBot?: () => void
-  onNewCron?: () => void
   onToggleEdit: () => void
   sidebar: boolean
 }) {
   const theme = useTheme()
-  /*
-    `null` until the row has been laid out once, and the inline row is what it
-    draws meanwhile.
-
-    Deliberately optimistic: every width except the narrow sidebar's keeps the
-    actions inline, so guessing that way means one arrangement on the common
-    path and a single swap on the narrow one. Guessing the other way would flash
-    a `…` into every phone header for a frame.
-  */
-  const [width, setWidth] = useState<number | null>(null)
-  const inline = width === null || width >= BOTS_HEAD_INLINE_MIN_WIDTH
 
   return (
     <View
-      onLayout={event => {
-        const measured = event.nativeEvent.layout.width
-
-        // Only on a real change: `onLayout` fires for every pass, and setting
-        // state from each one is a render loop on a row that also holds a menu.
-        setWidth(current => (current !== null && Math.abs(current - measured) < 1 ? current : measured))
-      }}
       style={{
         alignItems: 'center',
         flexDirection: 'row',
-        gap: theme.space.md,
+        gap: theme.space.lg,
         paddingBottom: theme.space.md,
         paddingHorizontal: theme.space.lg,
         paddingTop: theme.space.panel,
@@ -1553,7 +1556,7 @@ function Head({
       <View style={{ flex: 1 }}>
         {/*
           One line, always. Without it the title is a `flex: 1` column next to
-          four things that do not compress, and at the narrow sidebar's width
+          controls that do not compress, and at the narrow sidebar's width
           "Chats" wrapped to one character per line — six rows of one letter.
           Eliding is the honest failure here: the word is the screen's name and
           a reader who sees "Cha…" has still been told which screen this is.
@@ -1566,87 +1569,21 @@ function Head({
         <GatewayNameLine />
       </View>
 
-      {/*
-        Its own control rather than a second meaning for the `+`. That button
-        says New cron and makes a cron; a menu behind it would take a
-        one-tap action away from the thing it is for, and two `+` glyphs side by
-        side would say nothing about which is which. This one is a word.
-      */}
-      {/*
-        The chat list's way into the boards. A word rather than a glyph, for the
-        same reason New bot is one: there is no mark that reads as "kanban", and
-        the `+` beside it already means New cron.
-      */}
-      {inline && onBoards ? (
-        <Pressable
-          accessibilityLabel={kanbanStrings.menu}
-          accessibilityRole="button"
-          hitSlop={TAP_SLOP}
-          onPress={onBoards}
-          style={{ cursor: 'pointer' }}
-          testID="bots-boards"
-        >
-          <Text color="accentText" style={{ fontWeight: '600' }} variant="preview">
-            {kanbanStrings.menu}
-          </Text>
-        </Pressable>
-      ) : null}
+      <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.md }}>
+        <HeadOverflowMenu {...(onBoards ? { onBoards } : {})} {...(onNewBot ? { onNewBot } : {})} />
 
-      {inline && onNewBot ? (
-        <Pressable
-          accessibilityLabel={profileStrings.settings.newBot}
-          accessibilityRole="button"
-          hitSlop={TAP_SLOP}
-          onPress={onNewBot}
-          style={{ cursor: 'pointer' }}
-          testID="bots-new-bot"
-        >
-          <Text color="accentText" style={{ fontWeight: '600' }} variant="preview">
-            {profileStrings.settings.newBot}
-          </Text>
-        </Pressable>
-      ) : null}
-
-      {onNewCron ? (
-        <Pressable
-          accessibilityLabel={strings.bots.newCron}
-          accessibilityRole="button"
-          hitSlop={TAP_SLOP}
-          onPress={onNewCron}
-          style={{ cursor: 'pointer' }}
-          testID="bots-new-cron"
-        >
-          <GlassSurface
-            contentStyle={{ alignItems: 'center', height: 38, justifyContent: 'center', width: 38 }}
-            variant="control"
-          >
-            <Icon color={theme.colors.textMuted} name="plus" size={ICON_SIZE.control} />
-          </GlassSurface>
-        </Pressable>
-      ) : null}
-
-      {inline ? null : (
-        <HeadOverflowMenu
-          editing={editing}
-          onToggleEdit={onToggleEdit}
-          {...(onBoards ? { onBoards } : {})}
-          {...(onNewBot ? { onNewBot } : {})}
-        />
-      )}
-
-      {inline ? (
         <Pressable
           accessibilityRole="button"
           hitSlop={TAP_SLOP}
           onPress={onToggleEdit}
-          style={{ cursor: 'pointer' }}
+          style={{ cursor: 'pointer', justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT }}
           testID="bots-edit"
         >
           <Text color="accentText" style={{ fontWeight: '600' }} variant="preview">
             {editing ? strings.layout.done : strings.layout.edit}
           </Text>
         </Pressable>
-      ) : null}
+      </View>
     </View>
   )
 }

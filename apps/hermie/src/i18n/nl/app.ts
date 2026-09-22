@@ -241,7 +241,6 @@ export const app: Translation<typeof strings> = {
     unreadLabel: (count: number) => (count === 1 ? '1 ongelezen bericht' : `${count} ongelezen berichten`),
     offline: 'Offline — de laatst bewaarde lijst wordt getoond.',
     footnote: 'Je gesprekken blijven bij je gateway.',
-    newCron: 'Nieuwe cron',
     moreActions: 'Meer',
 
     sharePending: (count: number) =>

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The chat list's header has room to breathe.** It held four controls beside the title —
+  Boards, New bot…, a `+` and Edit — pressed into one line above the search field, and in
+  Dutch and German those words are longer still. It is now the title, one `…` holding
+  **New bot…** and **Boards**, and **Edit**, with the spacing the search field below it
+  already has. The same two controls at every width: the old arrangement folded only below
+  a measured width, which left the Mac sidebar — wide enough to fit four controls, not wide
+  enough to tell them apart — exactly as cramped as it was.
+
+  The `+` is gone rather than moved. It was labelled New cron and it made a cron; a cron is
+  made on the **Crons** tab, with that tab's own button, and a second door into one screen's
+  primary action parked in another screen's header is a door that has to be kept in step
+  with the room behind it.
+
 ### Fixed
 
 - **A chat opened the next morning no longer shows yesterday twice.** An approval you

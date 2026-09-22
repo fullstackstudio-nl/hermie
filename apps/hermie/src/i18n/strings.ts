@@ -360,9 +360,8 @@ const stringsEn = {
     offline: 'Offline — showing the last saved list.',
     footnote: 'Your conversations stay with your gateway.',
     sidebarHeader: 'CHATS',
-    newCron: 'New cron',
     /**
-     * The `…` that holds Boards, New bot and Edit on a narrow sidebar.
+     * The `…` that holds New bot and Boards, at every width.
      *
      * A label rather than a name for what is behind it, because what IS behind
      * it changes with the shell: a compact list has no Boards entry to offer.

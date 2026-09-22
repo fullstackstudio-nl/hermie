@@ -245,7 +245,6 @@ export const app: Translation<typeof strings> = {
     unreadLabel: (count: number) => (count === 1 ? '1 ungelesene Nachricht' : `${count} ungelesene Nachrichten`),
     offline: 'Offline — zeigt die zuletzt gespeicherte Liste.',
     footnote: 'Deine Unterhaltungen bleiben bei deinem Gateway.',
-    newCron: 'Neuer Cron',
     moreActions: 'Mehr',
 
     sharePending: (count: number) =>

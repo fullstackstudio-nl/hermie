@@ -81,11 +81,23 @@ beforeEach(() => {
 /** The board's own header line, which only the Boards screen paints. */
 const board = () => kanbanStrings.subtitle
 
+/**
+ * The chat list's door to Boards, which is a menu entry rather than a button.
+ *
+ * R23 took the head row down to a `…` and Edit at every width, so Boards is one
+ * level in. The door is what this file is about, not where it is drawn, so the
+ * two presses live here rather than in every case.
+ */
+function openBoardsFromChatList() {
+  fireEvent.press(screen.getByTestId('bots-head-overflow'))
+  fireEvent.press(screen.getByTestId('bots-head-overflow-boards'))
+}
+
 describe('Boards on a wide window', () => {
   it('lands in the content column and not in the sidebar it was opened from', () => {
     renderScreen(<RegularShell />)
 
-    fireEvent.press(screen.getByTestId('bots-boards'))
+    openBoardsFromChatList()
 
     expect(within(screen.getByTestId('shell-content')).getByText(board())).toBeTruthy()
     expect(within(screen.getByTestId('shell-sidebar-content')).queryByText(board())).toBeNull()
@@ -94,7 +106,7 @@ describe('Boards on a wide window', () => {
   it('leaves the chat list mounted beside it, the way a chat does', () => {
     renderScreen(<RegularShell />)
 
-    fireEvent.press(screen.getByTestId('bots-boards'))
+    openBoardsFromChatList()
 
     expect(screen.getByTestId('bot-row-researcher')).toBeTruthy()
     expect(screen.getByTestId('bot-row-writer')).toBeTruthy()
@@ -130,7 +142,7 @@ describe('Boards on a wide window', () => {
   it('goes back to the chat column when the chat list was the door', () => {
     renderScreen(<RegularShell />)
 
-    fireEvent.press(screen.getByTestId('bots-boards'))
+    openBoardsFromChatList()
     fireEvent.press(within(screen.getByTestId('shell-content')).getByLabelText(strings.tabs.chats))
 
     expect(screen.queryByText(board())).toBeNull()
@@ -141,7 +153,7 @@ describe('Boards on a wide window', () => {
   it('hands the column back as soon as a chat is picked', () => {
     renderScreen(<RegularShell />)
 
-    fireEvent.press(screen.getByTestId('bots-boards'))
+    openBoardsFromChatList()
     fireEvent.press(screen.getByTestId('bot-row-researcher'))
 
     expect(screen.queryByText(board())).toBeNull()
@@ -154,7 +166,7 @@ describe('Boards with no shell to host it', () => {
     // above it, because `CompactShell` provides none.
     renderScreen(<BotsScreen currentTab="chats" onOpenBot={jest.fn()} />)
 
-    fireEvent.press(screen.getByTestId('bots-boards'))
+    openBoardsFromChatList()
 
     expect(screen.getByText(board())).toBeTruthy()
     expect(screen.queryByTestId('bot-row-researcher')).toBeNull()
