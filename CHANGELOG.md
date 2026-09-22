@@ -22,6 +22,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nothing: the app probes for itself exactly as it did before. Everything this page can do, it can
   only do while no gateway is set; afterwards those addresses do not exist.
 
+- **In a browser, a chat opens with the conversation already in it.** Hermie Web now keeps a copy of
+  each Bot Chat's tail, filled from the gateway connection it already holds for notifications and
+  from the transcript reads it already passes along. The app asks for that copy before it dials, so
+  a chat opened on a laptop, a borrowed machine or a phone that has never seen it draws immediately
+  and stays still while the rest loads, instead of showing a spinner and then jumping. Nothing is
+  lost when the copy is not there — the chat opens the way it always did. It lives on the server's
+  own disk, it is capped (`--cache-max-mb`, 64 MB by default, `0` to turn it off), the least
+  recently opened chat is the first to go, and reading it needs the same gateway sign-in the rest of
+  the app does. It is a copy per gateway rather than per person, for the plain reason that the
+  gateway does not say who owns a session and the Bot Chat is shared anyway — which the
+  documentation says out loud rather than implying a privacy it does not have.
+
 - **A map of a bot's memory.** A **Graph** tab beside the entries draws what the plugin's `graph`
   answer holds: the bot at the centre, an entry per memory, and the topics they share — a
   capitalised phrase, an `@handle`, a `#hashtag`, a date — with a line wherever two entries mention

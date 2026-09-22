@@ -46,6 +46,39 @@ imports `probeFromWebConfig` from it, and a mock that only supplies `loadHermieW
 step calling `undefined()`. That is what it looks like when it happens: the step never leaves
 `probing` and the test times out rather than failing.
 
+### The message cache stores ROWS, and the seam does the rest
+
+`packages/hermie-web` ships as a self-contained `dist/server` with no `node_modules` beside it — the
+same packaging constraint `link.ts` and `credentials.ts` already carry — so it cannot import
+`@hermie/transcript` to build items. It stores the gateway's rows untransformed, with the SHAPE they
+came off (`rest` or `rpc`) beside them, and `service-chat-cache.web.ts` runs `rowsToItems`.
+
+**The shape is not decoration.** The REST transcript and `session.history` name the same fields
+differently, and a tail read under the wrong one projects to items with no row ids on them — which
+is exactly what would make the reconcile hand out fresh ids and move the thread on open.
+
+Two more things that are easy to get wrong in the same file:
+
+- **The snapshot carries no `lastSeqSessionId`, deliberately.** `stateFromCache` only adopts a
+  cached watermark when a session id comes with it, so leaving it out makes the snapshot read as
+  COLD: the chat paints, and the hydration adopts the gateway's own `latest_seq` instead of
+  trusting a number the service keeps on a different path from its rows. A watermark ahead of its
+  rows drops a turn in silence.
+- **The fallback wrapper goes inside, not outside.** `new ServiceChatCache(new FallbackChatCache(…))`
+  — a `FallbackChatCache` wrapped around the pair would downgrade the service read too, the first
+  time a private window refused IndexedDB, which is precisely the case the service copy exists for.
+
+The proxy tee attaches its `data` listener **before** `upstream.pipe(response)` and in the same
+synchronous block. A `data` listener switches the stream to flowing mode on the next tick, so both
+receive every chunk as long as nothing awaits between them; attaching after an `await` would feed
+the pipe alone and cache a truncated entry.
+
+`hasGatewaySession` short-circuits to `false` when the request carries no cookie, so the cache read
+cannot simply demand it: on an UNGATED gateway there is no cookie to have and
+`/api/sessions/<id>/messages` is proxied to anyone who can reach the port anyway. The route asks the
+bootstrap probe first and only requires a session when the gateway is gated, or when it could not be
+read at all.
+
 ### The `/setup` window, and the loopback rule that constrains it
 
 `/setup` is served only while the gateway is unconfigured — no `--gateway`, no `HERMIE_GATEWAY_URL`,

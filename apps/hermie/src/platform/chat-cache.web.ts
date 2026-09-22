@@ -18,6 +18,7 @@
  * downgrade to memory, so the failure costs a cold paint, never a chat.
  */
 import { type CachedBotRow, type CachedTranscriptRow, type ChatCache, FallbackChatCache } from './chat-cache-core'
+import { ServiceChatCache } from './service-chat-cache.web'
 
 export {
   type CachedBotRow,
@@ -157,5 +158,19 @@ export class IndexedDbChatCache implements ChatCache {
   }
 }
 
-/** The app's cache. One instance for the page; it holds one database handle. */
-export const chatCache: ChatCache = new FallbackChatCache(new IndexedDbChatCache())
+/**
+ * The app's cache. One instance for the page; it holds one database handle.
+ *
+ * Two stores, in this order: the browser's own, and then Hermie Web's
+ * ([ADR-0024](../../../../docs/adr/0024-hermie-web-is-a-service-layer.md)).
+ * IndexedDB is per browser and per device, so it has nothing at all on a first
+ * visit, on a new laptop, in a private window or after site data is cleared —
+ * which is exactly when a chat used to open on a spinner. The service's copy
+ * covers precisely that gap and nothing else; `service-chat-cache.web.ts` says
+ * why it is consulted second rather than first.
+ *
+ * The fallback wrapper goes INSIDE. A browser that refuses IndexedDB should
+ * still be able to read the service's copy, and a `FallbackChatCache` wrapped
+ * around the pair would downgrade both on the first local failure.
+ */
+export const chatCache: ChatCache = new ServiceChatCache(new FallbackChatCache(new IndexedDbChatCache()))

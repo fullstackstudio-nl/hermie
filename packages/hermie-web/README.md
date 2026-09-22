@@ -57,6 +57,7 @@ Flags beat environment variables beat defaults.
 | `--install-root`     | `HERMIE_INSTALL_ROOT`  | the package's parent     | Where self-update unpacks releases and keeps the `current` link.                                        |
 | `--no-self-update`   | `HERMIE_SELF_UPDATE=0` | on                       | Turns `/hermie/update` into a refusal.                                                                  |
 | `--rollback`         |                        |                          | Point `current` at the previous release and exit.                                                       |
+| `--cache-max-mb <n>` | `HERMIE_CACHE_MAX_MB`  | `64`                     | Disk the message cache may take. `0` turns it off.                                                      |
 | `--help`             |                        |                          |                                                                                                         |
 
 It answers `GET /healthz`, `GET /hermie/config.json` and `GET|POST /hermie/update` itself, plus
@@ -66,6 +67,29 @@ It answers `GET /healthz`, `GET /hermie/config.json` and `GET|POST /hermie/updat
 `GET /hermie/config.json` is the browser build's bootstrap: the gateway host and origin, which auth
 kinds that gateway offers, whether a setup is still needed, what this service is running, and the
 version. It is what lets the app skip the address step and the probe.
+
+## The message cache
+
+Hermie Web keeps a per-session transcript tail in its state directory, and the app reads it from
+`GET /hermie/cache/<id>` **before the socket answers** — so a chat opened on a laptop that has never
+seen it paints at once instead of spinning, and then does not move. It is filled from two places
+that were already carrying the same bytes: the gateway link `--push` holds, and proxied
+`GET /api/sessions/<id>/messages` answers.
+
+What that means for an operator:
+
+- **This is transcript content on your disk**, not just a credential. The state directory is `0700`
+  with `0600` files, and `--cache-max-mb 0` turns the whole thing off.
+- **Entries are per gateway, not per person.** The gateway offers no field saying who owns a
+  session, so there is nothing to key on — and by ADR-0007 the canonical Bot Chat is shared among
+  everyone who can reach that bot anyway. The read route still demands the caller's own gateway
+  session on a gated gateway.
+- **Eviction is least-recently-read**, up to `--cache-max-mb`, default 64.
+- **Without `--push` it still works**, filled by proxied reads alone: a chat somebody has opened is
+  a chat the next person opens instantly.
+
+[ADR-0024](https://github.com/fullstackstudio-nl/hermie/blob/main/docs/adr/0024-hermie-web-is-a-service-layer.md)
+has the reasoning.
 
 ## Documentation
 

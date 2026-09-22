@@ -187,6 +187,20 @@ function agentFor(url: URL) {
 }
 
 /**
+ * A look at one proxied answer on its way past, for the message cache
+ * ([ADR-0024](../../../docs/adr/0024-hermie-web-is-a-service-layer.md)).
+ *
+ * Called with the upstream response as soon as its head arrives; returning a
+ * sink asks for the body bytes too, and the sink is called once more with
+ * `null` when the body ends. Returning `null` costs nothing at all.
+ *
+ * The proxy still pipes exactly what it received — the observer is a copy, not
+ * a filter — so an observer that throws, hangs or fills its buffer can never
+ * change what the browser is served.
+ */
+export type ProxyObserver = (upstream: IncomingMessage) => ((chunk: Buffer | null) => void) | null
+
+/**
  * Proxy one ordinary HTTP request, streaming both bodies.
  *
  * Redirects are NOT followed: the sign-in flow is a chain of 302s that the
@@ -194,7 +208,12 @@ function agentFor(url: URL) {
  * the last one lands back on Hermie Web's own `/`. Following them here would
  * collapse the chain into one response and strand every cookie on the way.
  */
-export function proxyHttp(request: IncomingMessage, response: ServerResponse, target: ProxyTarget): void {
+export function proxyHttp(
+  request: IncomingMessage,
+  response: ServerResponse,
+  target: ProxyTarget,
+  observe?: ProxyObserver
+): void {
   const gateway = new URL(target.gatewayUrl)
   const upstreamUrl = new URL(request.url ?? '/', gateway)
   // The gateway's own path prefix, when it is served under one, is part of the
@@ -212,6 +231,45 @@ export function proxyHttp(request: IncomingMessage, response: ServerResponse, ta
     },
     upstream => {
       response.writeHead(upstream.statusCode ?? 502, downstreamHeaders(upstream, isSecureRequest(request)))
+
+      let sink: ((chunk: Buffer | null) => void) | null = null
+
+      try {
+        sink = observe?.(upstream) ?? null
+      } catch {
+        // An observer that throws on the head is an observer that gets nothing.
+        // It must not cost the response it was watching.
+        sink = null
+      }
+
+      if (sink) {
+        const feed = sink
+        /*
+          Attached BEFORE the pipe, and in the same synchronous block.
+
+          A `data` listener switches the stream to flowing mode, and flowing
+          starts on the next tick — so as long as `pipe` is attached in this
+          same block, both receive every chunk and the browser is served
+          exactly what arrived. Attaching it after an `await` would drop the
+          first chunks into the pipe alone, which reads as a truncated cache
+          entry and nothing else.
+        */
+        upstream.on('data', (chunk: Buffer) => {
+          try {
+            feed(chunk)
+          } catch {
+            // Same rule as above: the copy fails, the response does not.
+          }
+        })
+        upstream.on('end', () => {
+          try {
+            feed(null)
+          } catch {
+            // Same rule again.
+          }
+        })
+      }
+
       upstream.pipe(response)
     }
   )

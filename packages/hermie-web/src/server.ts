@@ -24,6 +24,14 @@ import type { AddressInfo } from 'node:net'
 import type { Duplex } from 'node:stream'
 
 import {
+  cacheDir,
+  isCapturableAnswer,
+  MAX_CAPTURE_BYTES,
+  rowsOfMessagesBody,
+  sessionIdOfMessagesPath,
+  TranscriptCache
+} from './cache'
+import {
   type HermieWebOptions,
   isGatewayPath,
   PUSH_PUBLIC_KEY_PATH,
@@ -34,7 +42,7 @@ import { type PushDaemon, startPushDaemon } from './push/daemon'
 import { buildAuthorizeUrl, createPkce, exchangeCode, type Pkce } from './push/login'
 import { sameGateway } from './push/credentials'
 import { loadPushState, savePushState } from './push/state'
-import { proxyHttp, proxyUpgrade } from './proxy'
+import { proxyHttp, type ProxyObserver, proxyUpgrade } from './proxy'
 import {
   normalizeGatewayInput,
   ownOrigin,
@@ -63,6 +71,8 @@ export interface HermieWebServer {
   options: HermieWebOptions
   /** The push daemon, when `--push` asked for one. */
   push: PushDaemon | null
+  /** The message cache. Always present; `enabled` is false at `--cache-max-mb 0`. */
+  cache: TranscriptCache
   close(): Promise<void>
 }
 
@@ -163,6 +173,10 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
   /** The operator's in-flight service sign-in, minted by `/hermie/setup/login`. */
   let pendingLogin: (Pkce & { gatewayUrl: string; redirectUri: string }) | null = null
   let probeCache: { at: number; probe: SetupProbe } | null = null
+  const cache = new TranscriptCache({
+    dir: cacheDir(options.stateDir),
+    maxBytes: Math.round(options.cacheMaxMb * 1024 * 1024)
+  })
   let updating = false
   // Assigned once the listener is up; the handler reads it, so it is declared
   // here rather than beside the `await` that fills it.
@@ -204,6 +218,12 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
 
     if (url.pathname === '/hermie/update') {
       await handleUpdate(request, response, method, url)
+
+      return
+    }
+
+    if (url.pathname.startsWith('/hermie/cache/')) {
+      await handleCacheRead(request, response, method, url)
 
       return
     }
@@ -252,7 +272,7 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
     }
 
     if (isGatewayPath(url.pathname)) {
-      proxyHttp(request, response, target)
+      proxyHttp(request, response, target, observeForCache(method, url))
 
       return
     }
@@ -341,9 +361,162 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
         /** A stored service sign-in, which is what push and the cache are spent on. */
         login: Boolean(push?.credentials.mode === 'oidc' || options.gatewayToken),
         push: Boolean(push),
-        cache: false
+        cache: cache.enabled
       }
     })
+  }
+
+  /**
+   * One session's cached tail, for the seam that paints a chat before the
+   * socket has answered (ADR-0024).
+   *
+   * **It requires the caller's own gateway session**, checked the same way
+   * `POST /hermie/update` checks it: by putting their cookies to
+   * `/api/auth/me`. The cache is gateway-wide rather than per person — there is
+   * no ownership field to key it on — but "shared among everyone signed in to
+   * this gateway" is a long way from "readable by anything that can reach this
+   * port", and this is the check that keeps those two apart.
+   *
+   * The key may be the runtime session id, the stored session id or the bot's
+   * profile name. All three name one chat, because by ADR-0007 there is one
+   * canonical Bot Chat per bot — and the seam in the browser holds the bot's
+   * name, not a session id, at the moment it has to ask.
+   */
+  async function handleCacheRead(
+    request: IncomingMessage,
+    response: ServerResponse,
+    method: string,
+    url: URL
+  ): Promise<void> {
+    if (method !== 'GET') {
+      json(response, 405, { error: 'method_not_allowed' })
+
+      return
+    }
+
+    if (!cache.enabled) {
+      json(response, 404, { error: 'cache_disabled' })
+
+      return
+    }
+
+    if (!configured) {
+      json(response, 503, { error: 'setup_required' })
+
+      return
+    }
+
+    /*
+      The session check applies to a gateway that HAS sessions.
+
+      On an ungated one there is no cookie to present and no identity to check:
+      `/api/sessions/<id>/messages` is proxied to anyone who can reach this
+      port, so refusing the cached copy of the same rows would protect nothing
+      and turn the cache off for every ungated deployment. A gateway we could
+      not read is treated as gated, because the safe reading of "unknown" is the
+      one that asks for a credential.
+    */
+    const probe = await gatewayProbe()
+
+    if (
+      probe?.authRequired !== false &&
+      !(await hasGatewaySession({ gatewayUrl: target.gatewayUrl, cookie: request.headers.cookie }))
+    ) {
+      json(response, 401, { error: 'unauthorized' })
+
+      return
+    }
+
+    const key = decodeURIComponent(url.pathname.slice('/hermie/cache/'.length))
+    const entry = await cache.get(key)
+
+    if (!entry) {
+      json(response, 404, { error: 'not_cached' })
+
+      return
+    }
+
+    json(response, 200, {
+      sessionId: entry.sessionId,
+      bot: entry.bot,
+      storedId: entry.storedId,
+      // The transport the rows came off. `rowsToItems` needs it, and reading a
+      // REST tail as an RPC one loses every row id — which is precisely what
+      // would make the reconcile hand out new ids and move the view.
+      shape: entry.shape,
+      updatedAt: entry.updatedAt,
+      rows: entry.rows
+    })
+  }
+
+  /**
+   * Copy a proxied transcript read into the cache on its way past.
+   *
+   * This is the half of the feed that works with no `--push` at all: the app
+   * asks for a long chat's tail, the gateway answers it, and the same bytes
+   * that paint this browser's chat become the thing that paints the next one's.
+   * Nothing is added to the request and nothing is changed in the answer.
+   */
+  function observeForCache(method: string, url: URL): ProxyObserver | undefined {
+    if (!cache.enabled || method !== 'GET') {
+      return undefined
+    }
+
+    const sessionId = sessionIdOfMessagesPath(url.pathname)
+
+    if (!sessionId) {
+      return undefined
+    }
+
+    return upstream => {
+      if (
+        !isCapturableAnswer({
+          statusCode: upstream.statusCode,
+          contentType: String(upstream.headers['content-type'] ?? ''),
+          contentEncoding: String(upstream.headers['content-encoding'] ?? '')
+        })
+      ) {
+        return null
+      }
+
+      const chunks: Buffer[] = []
+      let size = 0
+      let abandoned = false
+
+      return chunk => {
+        if (abandoned) {
+          return
+        }
+
+        if (chunk) {
+          size += chunk.length
+
+          if (size > MAX_CAPTURE_BYTES) {
+            // A transcript larger than the cap is a transcript this cache has
+            // no business holding. Drop the copy and keep the buffers.
+            abandoned = true
+            chunks.length = 0
+
+            return
+          }
+
+          chunks.push(chunk)
+
+          return
+        }
+
+        try {
+          const rows = rowsOfMessagesBody(JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown)
+
+          void cache.put({ sessionId, bot: '', storedId: '', shape: 'rest', rows, updatedAt: 0 }).catch(() => undefined)
+        } catch {
+          // Not the answer we thought it was. Nothing is stored, and the
+          // browser already has the bytes.
+        }
+
+        chunks.length = 0
+      }
+    }
   }
 
   /**
@@ -653,6 +826,7 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
           vapidSubject: options.vapidSubject,
           version: options.version,
           serverRequests: options.pushServerRequests,
+          cache,
           ...(input.socketFactory ? { socketFactory: input.socketFactory } : {})
         }).catch((error: unknown) => {
           console.error(`hermie-web: push did not start — ${String(error)}`)
@@ -666,6 +840,7 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
     port,
     options,
     push,
+    cache,
     close: async () => {
       await push?.stop().catch(() => undefined)
       await closeServer(server)

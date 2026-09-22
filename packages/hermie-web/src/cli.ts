@@ -6,6 +6,7 @@
  */
 import { parseArgs } from 'node:util'
 
+import { DEFAULT_CACHE_MAX_MB } from './cache'
 import { DEFAULT_GATEWAY_URL, DEFAULT_HOST, DEFAULT_PORT, describeHost, resolveOptions } from './options'
 import { login } from './push/login'
 import { rollback } from './update'
@@ -27,6 +28,10 @@ const HELP = [
   '  --install-root <dir> where releases are unpacked and the `current` link lives',
   '  --no-self-update     refuse the self-update endpoints (env HERMIE_SELF_UPDATE=0)',
   '  --rollback           switch `current` back to the previous release and exit',
+  `  --cache-max-mb <n>   disk the message cache may take (default ${String(DEFAULT_CACHE_MAX_MB)}, env HERMIE_CACHE_MAX_MB).`,
+  '                       0 turns it off. The cache holds Bot Chat TAILS on this',
+  '                       machine, which is what makes a chat paint the moment it',
+  '                       opens on a device that has never seen it. ADR-0024.',
   '  --help',
   '',
   'Push (ADR-0017 \u2014 docs/web.md has the whole of it):',
@@ -66,6 +71,7 @@ async function main(): Promise<void> {
       push: { type: 'boolean', default: false },
       'gateway-token': { type: 'string' },
       'state-dir': { type: 'string' },
+      'cache-max-mb': { type: 'string' },
       'vapid-subject': { type: 'string' },
       'push-server-requests': { type: 'boolean', default: false },
       provider: { type: 'string' },
@@ -91,6 +97,7 @@ async function main(): Promise<void> {
     installRoot: values['install-root'],
     gatewayToken: values['gateway-token'],
     stateDir: values['state-dir'],
+    cacheMaxMb: values['cache-max-mb'],
     vapidSubject: values['vapid-subject'],
     ...(values.push ? { push: true } : {}),
     ...(values['push-server-requests'] ? { pushServerRequests: true } : {}),
@@ -135,6 +142,7 @@ async function main(): Promise<void> {
     push: options.push,
     gatewayToken: options.gatewayToken,
     stateDir: options.stateDir,
+    cacheMaxMb: options.cacheMaxMb,
     vapidSubject: options.vapidSubject,
     pushServerRequests: options.pushServerRequests
   })
@@ -152,6 +160,11 @@ async function main(): Promise<void> {
   console.warn(`  public url ${options.publicUrl} (sent as Host and Origin)`)
   console.warn(`  static     ${options.staticDir}`)
   console.warn(`  login ret  ${options.loginReturn} (the app’s next= on /auth/login)`)
+  console.warn(
+    options.cacheMaxMb > 0
+      ? `  cache      ${String(options.cacheMaxMb)} MB in ${options.stateDir}`
+      : '  cache      off (--cache-max-mb 0)'
+  )
 
   if (options.push) {
     console.warn(`  push       on, state in ${options.stateDir}`)
