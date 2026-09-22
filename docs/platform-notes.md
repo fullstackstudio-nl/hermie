@@ -8661,3 +8661,80 @@ branch that rejects an unparseable address.
 
 **What needed a device: nothing.** The step is the test renderer's; the probe is
 a mocked resolver.
+
+### The memory graph: a pinch, and what the layout actually costs
+
+**The pinch is one `PanResponder`, still.** `react-native-gesture-handler` is
+still not a dependency and was not added, because a pinch turns out to be two
+subtractions and a ratio. Three things about the wiring are not obvious:
+
+- **Two touches claim the gesture with no slop.** One finger has to travel past
+  `DRAG_SLOP` so a tap reaches the node under it. Nobody taps a node with two
+  fingers, so there is no tap to protect — and making a pinch travel a slop
+  first eats the beginning of every zoom.
+- **The scale is a RATIO against where the fingers went down**, not an
+  increment, and the anchor stores the scale at that moment. So a pinch that
+  starts after the buttons or the wheel have been used carries on from there
+  instead of snapping back to 1.
+- **Lifting one finger re-anchors the pan.** `PanResponder` accumulates `dx`
+  from the centroid across the whole gesture, so the frame a pinch becomes a
+  drag is a frame where `dx` has already absorbed everything the centroid did
+  while two fingers were down. Without re-anchoring, the drawing leaps by
+  exactly that. There is deliberately **no `onPanResponderEnd` handler**: it
+  fires when ANY finger lifts, including the second of a pinch, and clearing the
+  anchor there would skip the one re-anchor that needs to happen. `Grant` resets
+  all three refs, so nothing survives into the next gesture.
+
+**The arithmetic is in `graph-gestures.ts` rather than in the component**, and
+that is a testability decision worth recording: driving a `PanResponder` from a
+test means hand-building React Native's internal `touchHistory`, an undocumented
+shape with no compatibility promise. A suite that did it would be pinning the
+framework rather than the app. So the component keeps the refs and the module
+keeps everything a reader can get wrong.
+
+One bug was found by writing those tests: `clampScale` guarded with
+`!Number.isFinite`, which sent `Infinity` to the MINIMUM zoom. Only `NaN` needs
+that guard — an infinity clamps to a limit like any other out-of-range number —
+and a pinch that hit an infinity would have zoomed all the way out.
+
+#### The layout cost, measured
+
+Fruchterman-Reingold with every pair repelling: each pass is O(n²), so a fixed
+240 passes costs sixteen times as much at 400 nodes as at 100. Median of five,
+`layoutMemoryGraph` alone, development Mac:
+
+| Nodes | Passes, before | Before  | Passes, after | After     |
+| ----- | -------------- | ------- | ------------- | --------- |
+| 50    | 240            | 4.1 ms  | 240           | 3.4 ms    |
+| 100   | 240            | 11.9 ms | 240           | 11.3 ms   |
+| 150   | 240            | 24.9 ms | 240           | 24.1 ms   |
+| 200   | 240            | 43.4 ms | 180           | 31.7 ms   |
+| 300   | 240            | 94.7 ms | 120           | 50.8 ms   |
+| 400   | 240            | 174 ms  | 90            | **62 ms** |
+
+Past 150 nodes the pass count is scaled by `150 / n`, which turns the total work
+from quadratic into linear in the node count. Determinism is untouched and that
+matters more than the milliseconds: the count is a pure function of the node
+count, so the same memory draws the same picture on every run and every
+platform.
+
+**Three numbers that are easy to conflate, so they are written out.**
+
+| Where                   | 400 nodes, 240 passes | 400 nodes, 90 passes |
+| ----------------------- | --------------------- | -------------------- |
+| Node 22, plain          | 174 ms                | 62 ms                |
+| jest-expo, same machine | 1271 ms               | 476 ms               |
+| a phone                 | **not measured**      | **not measured**     |
+
+jest-expo is **7.7× slower** than plain Node here, because it runs the
+Babel-transformed source. That is why `memory-graph-budget.test.ts` states a
+budget of 800 ms rather than 150: 800 sits between the two jest figures with
+about a 1.7× margin on each side. The test carries a second, unflakeable
+assertion beside the clock — pass count times pairs, which is arithmetic and
+identical on every machine — because that is the one that actually fails when
+somebody makes the layout quadratic again.
+
+**What needs a device:** the phone column. Hermes' own engine is neither of the
+two measured here, and nobody has watched the Graph tab open on a real 400-node
+memory. The pinch has likewise never been performed by a hand: the arithmetic is
+tested, the `PanResponder` wiring is read.

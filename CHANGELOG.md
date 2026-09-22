@@ -99,6 +99,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The memory map takes a pinch.** Two fingers zoom it, one finger still pans it, and the buttons
+  and the mouse wheel still do what they did. The buttons are not a fallback for the pinch: a pinch
+  is unavailable to anybody on a pointer, on a keyboard or using a switch control, so both exist
+  because each is somebody's only way in. Lifting one finger of a pinch re-anchors the pan, so the
+  drawing does not leap when a zoom turns back into a drag.
+
+- **A big memory map stops blocking the tab for as long.** The layout is force-directed and every
+  pass compares every pair of nodes, so a fixed pass count cost sixteen times as much at the
+  400-node cap as at a hundred. Past 150 nodes the pass count now comes down with the node count,
+  which makes the total work grow with the number of nodes rather than with its square: at the cap,
+  174 ms became 62 ms under Node on the development Mac. It is still deterministic — the count is a
+  pure function of how many nodes there are, so the same memory still draws the same picture every
+  time, which is what stops a cluster somebody has learned the position of from moving on them.
+  **Not measured on a device**, and `docs/platform-notes.md` says so.
+
 - **The profile sheet offers Memory wherever it is opened from.** The row was there when the sheet
   came from the chat list's menu and absent when the same sheet came from the chat header's pill,
   because the browser is a full page rather than a modal — it needs the screen underneath it to
