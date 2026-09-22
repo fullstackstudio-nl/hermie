@@ -99,6 +99,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Reduce Motion, checked over every surface that moves.** Eighteen of them, against three rules:
+  the duration collapses to zero rather than the animation being skipped — a skipped animation is a
+  skipped completion callback, which is how a reader ends up with a panel that never goes away —
+  nothing on its way out keeps eating taps, and nothing animates in for content that was already on
+  screen. No surface was found breaking any of them. Two pieces of code that happened to be right
+  were made to say why: one duration that read as "never reduce", and the rule that a LOOP must
+  never be collapsed to zero, because a loop of zero-length animations restarts on every frame for
+  ever. `docs/platform-notes.md` has the table, and the account of how the test that checks all this
+  very nearly proved nothing at all.
+
 - **A widget tap says which gateway it came from.** The home-screen widgets build
   `hermie://chat/<bot>?gateway=<key>` now, on iOS and on Android. On a device with one gateway
   nothing changes; on a device with two it is the difference between opening the chat you were

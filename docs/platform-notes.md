@@ -8821,3 +8821,85 @@ a real server, and what is tested is the seam: which headers are asked for,
 which of them reach the downloader, and what the answer is used for. The first
 time it meets a real route, the thing most likely to be wrong is the filename —
 whether the app's name or a `Content-Disposition` should win.
+
+### The Reduce Motion audit: thirteen surfaces, no misses, and a test that nearly proved nothing
+
+Every surface in the app that moves was walked against three rules: the
+duration collapses to zero under Reduce Motion, nothing leaves a `pointerEvents`
+trap behind it, and nothing animates on mount for content that is already on
+screen when a surface opens.
+
+| Surface                     | Where                           | Collapses                             | No pointer trap        | Arrival rule                |
+| --------------------------- | ------------------------------- | ------------------------------------- | ---------------------- | --------------------------- |
+| `Appear` (all nine uses)    | `ui/Appear.tsx`                 | `usePresence`                         | forced `none` on exit  | value starts at 0           |
+| the jump-to-latest pill     | `TranscriptList`                | via `Appear`                          | via `Appear`           | via `Appear`                |
+| the attach menu, slash list | `Composer`                      | via `Appear`                          | `exit="cut"`           | via `Appear`                |
+| the drop overlay            | `DropZone`                      | via `Appear`                          | `exit="cut"`           | via `Appear`                |
+| the queued strip            | `QueuedStrip`                   | via `Appear`                          | via `Appear`           | `onExited` unmounts         |
+| the chat options popover    | `ChatOptionsPopover`            | via `Appear`                          | via `Appear`           | via `Appear`                |
+| the bottom sheet            | `ui/BottomSheet.tsx`            | `usePresence`, JS driver              | `onClosed` unmounts    | value starts at 0           |
+| the panel scrim             | `app/PanelScrim.tsx`            | `usePresence`                         | inert while leaving    | value starts at 0           |
+| the overlay panel           | `app/OverlayPanel.tsx`          | `usePresence`                         | unmounts on exit       | value starts at 0           |
+| the sidebar slide-over      | `app/SidebarOverlay.tsx`        | `usePresence`                         | unmounts on exit       | value starts at 0           |
+| the lock plate              | `features/lock`                 | nothing animates                      | n/a                    | n/a                         |
+| the voice overlay           | `features/voice`                | guarded loop + `animationType="none"` | `Modal`                | ring assigned, not animated |
+| the memory graph settle     | `MemoryGraphView`               | guarded, value assigned               | not interactive        | value starts at 1           |
+| the typing dots             | `TypingIndicator`               | guarded loop, value assigned          | n/a                    | n/a                         |
+| the needs-input pulse       | `ui/PresenceBead.tsx`           | loop not built at all                 | `pointerEvents="none"` | n/a                         |
+| the switch knob             | `ui/sheets/controls.tsx`        | `durationFor('control', …)`           | n/a                    | n/a                         |
+| the drag lift and settle    | `features/bots/use-row-drag.ts` | spring becomes a 0 ms timing          | released on commit     | n/a                         |
+| the image viewer            | `chat-ui/ImageViewer.tsx`       | spring becomes an assignment          | `Modal`                | reset on every open         |
+
+**No behavioural misses were found**, which is the honest result and not a
+foregone one — the suite was written expecting to find some. Two things were
+changed anyway, both where the code read as though the rule were being followed
+by accident:
+
+- `MemoryGraphView` wrote `durationFor('panel', false)`, a hard-coded "never
+  reduce" five lines below the guard that is actually doing the work. It says
+  `motion.panel` now, with the reason.
+- `motion.ts` gained the rule the audit confirmed all three loops already
+  follow, because it is the one place the collapse-to-zero rule inverts:
+  **a loop must never be collapsed.** `Animated.loop` restarts its child the
+  moment it finishes, so a loop of zero-duration timings finishes and restarts
+  on the same frame for ever. The only correct answer for a loop is not to build
+  it and to assign the resting value instead.
+
+#### The test that nearly proved nothing
+
+Worth recording in full, because it is a trap any Reduce Motion test in a React
+Native codebase will fall into.
+
+`AccessibilityInfo.isReduceMotionEnabled()` is a promise, so the FIRST render of
+any tree has `reduceMotion: false`. A surface mounted straight under the
+provider therefore animates once, correctly, under the default — and only then
+learns the preference.
+
+The first version of the suite handled that by clearing the record of started
+animations once the preference landed. That defeated the entire thing: the
+re-render the preference TRIGGERS is precisely the one worth watching, and it
+happens inside the same flush that was being cleared. Deleting
+`MemoryGraphView`'s Reduce Motion guard outright left all eighteen tests green.
+
+The fix is a gate — a component that renders its children only once
+`theme.reduceMotion` is true — so nothing is ever mounted under the default and
+nothing has to be cleared. With it, removing that same guard fails the suite.
+**Every assertion here was checked against a deliberately broken guard**, which
+is the only way to know a test of an absence is a test at all.
+
+Two smaller things the spy taught:
+
+- **It records on `start()`, not on construction.** `Animated.sequence`,
+  `parallel` and `loop` all start their children, so nesting is caught by the
+  same spy; an animation built and never started is not motion.
+- **`Appear`'s `onExited` cannot be observed in jest.** It animates opacity and
+  a transform, so it asks for the native driver, and a native-driven
+  animation's completion comes back from a module the test environment does not
+  have. The callback is therefore proven on the bottom sheet, which drives
+  layout and so runs on the JS driver — same hook, same code path, one of them
+  observable. This is a limit of the environment and not of the app.
+
+**What needs a device:** whether any of it FEELS right with the setting on.
+Everything here is a measurement of what was started, and "no animation ran" is
+not the same claim as "the app is comfortable to use at Reduce Motion". Nobody
+has switched the setting on and used the app.

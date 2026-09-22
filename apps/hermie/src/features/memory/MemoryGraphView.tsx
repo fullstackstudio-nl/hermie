@@ -47,7 +47,7 @@ import { Animated, PanResponder, Platform, View } from 'react-native'
 import Svg, { Circle, G, Line, Text as SvgText } from 'react-native-svg'
 
 import { Button } from '../../ui/primitives'
-import { durationFor } from '../../ui/motion'
+import { motion } from '../../ui/motion'
 import { useTheme } from '../../ui/theme'
 import { claimsGesture, clampScale, type PinchAnchor, pinchSpan, scaleFromPinch, ZOOM_STEP } from './graph-gestures'
 import type { MemoryGraph, MemoryGraphNode } from './graph-model'
@@ -91,7 +91,11 @@ export function MemoryGraphView({ graph, selectedId, onSelect, size, testID = 'm
 
     settle.setValue(0)
     Animated.timing(settle, {
-      duration: durationFor('panel', false),
+      // `motion.panel`, not `durationFor('panel', theme.reduceMotion)`: the
+      // guard above is this surface's Reduce Motion path, and a `durationFor`
+      // here would read as though the guard were belt and braces rather than
+      // the thing doing the work.
+      duration: motion.panel,
       toValue: 1,
       useNativeDriver: true
     }).start()

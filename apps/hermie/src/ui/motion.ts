@@ -97,6 +97,20 @@ export const spring = { settle: { bounciness: 0 } } as const
 export const durationFor = (token: MotionToken, reduceMotion: boolean): number => (reduceMotion ? 0 : motion[token])
 
 /**
+ * A LOOP is the one thing this must never be used for.
+ *
+ * `Animated.loop` restarts its child the moment the child finishes, so a loop
+ * built out of zero-duration timings finishes and restarts on the same frame,
+ * for ever. The collapse-to-zero rule is right for an animation that has an
+ * end; a loop has none, so the only correct Reduce Motion answer for one is not
+ * to build it at all and to assign the resting value instead.
+ *
+ * All three loops in the app do exactly that and say so at the point of the
+ * guard: the typing dots, the "needs input" ring, and the voice overlay's
+ * pulse. `reduce-motion-audit.test.tsx` holds every one of them still.
+ */
+
+/**
  * Whether `Animated` can hand an animation to the platform.
  *
  * The native driver moves a value on the UI thread, which is why every
