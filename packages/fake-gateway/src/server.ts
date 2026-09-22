@@ -2254,17 +2254,26 @@ function initialState(options: FakeGatewayOptions): FakeGatewayState {
       cluster on: the capitalised phrases, the `@handle` and the ISO date are
       the four kinds of topic the plugin mints, and two entries deliberately
       share one so an edge between entries exists.
+
+      **Every proper noun here is invented.** These entries used to name this
+      repository's owner, his company, his city and a colleague, and the memory
+      graph draws each of them as a labelled node — which made the one fixture
+      in the project that cannot be shown to anybody. It is the screen a store
+      listing most wants (`design/store/screenshots/ios/`), and the reason
+      `docs/CONTRIBUTING.md` says a published capture must contain no real
+      gateway, bot or person. Keep the SHAPE when editing: one capitalised
+      organisation, one `@handle`, one ISO date, one place, one person.
     */
     memory: new Map([
       [
         researcher.profile,
         {
           memory: [
-            'FullStack Studio invoices on the first of the month.',
-            'The tailnet address is the one to use from outside; @max set it up on 2026-09-21.',
+            'Northwind Trading invoices on the first of the month.',
+            'The tailnet address is the one to use from outside; @dana set it up on 2026-09-21.',
             'Prefers footnotes to parentheses.'
           ],
-          user: ['Sebas works from Utrecht and answers fastest in the morning.', 'Reads Dutch and English.']
+          user: ['Robin works from Lisbon and answers fastest in the morning.', 'Reads Dutch and English.']
         }
       ],
       [writer.profile, { memory: ['Drafts open with the verb, never with the subject.'], user: [] }]
