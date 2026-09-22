@@ -7,6 +7,7 @@ import { BotsScreen, requestRevealFolder, type BotsSection } from '../features/b
 import { ChatScreen, type OpenChatOptions } from '../features/chats'
 import { ConversationsScreen, ConversationViewScreen } from '../features/sessions'
 import { CronScreen } from '../features/cron'
+import { BoardsHost, KanbanScreen } from '../features/kanban'
 import { SettingsScreen } from '../features/settings'
 import { requestIntentRun } from '../features/intents'
 import { requestShareDelivery } from '../features/share'
@@ -117,6 +118,22 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
    * means the list beside it never moves.
    */
   const [conversations, setConversations] = useState<{ bot: string; id?: string } | null>(null)
+  /**
+   * Boards, in the CONTENT column, and which door it was opened from.
+   *
+   * R18 measured the board's problem: `WIDE_BOARD_PX` is 700 and every door in
+   * the app rendered the board in place — inside the 520pt settings overlay, or
+   * inside the 300–340pt sidebar — so the side-by-side layout and the card drag
+   * built for it were correct code the app could not reach. The content column
+   * is the one box on this layout that is reliably wider than 700, and it is
+   * where a chat and the Conversations detour already live.
+   *
+   * `from` is what the reader came through, because the way out has to be one
+   * level and not two: a board opened from Settings puts Settings back when it
+   * closes, which is what the phone's native stack does with the same two
+   * screens. `null` means the chat list, and the chat column is what returns.
+   */
+  const [boards, setBoards] = useState<{ from: BotsSection | null } | null>(null)
   const [cronJobId, setCronJobId] = useState<string | undefined>(undefined)
   /** Set by the chats list's `+`: open the crons screen on a new job. */
   const [cronCreate, setCronCreate] = useState(false)
@@ -142,8 +159,10 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
 
   const openBot = useCallback((name: string, options?: OpenChatOptions) => {
     setSelectedBot(name)
-    // Picking a chat is leaving the detour, whichever way it is picked.
+    // Picking a chat is leaving the detour, whichever way it is picked — and a
+    // board is a detour in the same column, so it goes the same way.
     setConversations(null)
+    setBoards(null)
     // A new focus target every time, even for the same item: the chat screen
     // only scrolls when the id it is handed changes, and following the same DM
     // twice should work twice.
@@ -225,6 +244,26 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
     setSection('cron')
   }, [])
 
+  /**
+   * A door to Boards, from either the chat list's (…) or Settings' own row.
+   *
+   * Whatever panel the door was in is closed on the way in, because the point
+   * of the move is that the board gets the whole column — leaving Settings up
+   * would put the 520pt overlay straight back over it. The section is
+   * remembered rather than forgotten so that closing the board is one step
+   * back rather than two.
+   */
+  const openBoards = useCallback(() => {
+    setBoards({ from: section })
+    setSection(null)
+    setListOverlay(false)
+  }, [section])
+
+  const closeBoards = useCallback(() => {
+    setSection(boards?.from ?? null)
+    setBoards(null)
+  }, [boards])
+
   const openSection = useCallback((next: BotsSection, options?: { create?: boolean }) => {
     setCronJobId(undefined)
     setCronCreate(options?.create === true)
@@ -289,58 +328,65 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
   )
 
   return (
-    <View
-      style={{
-        backgroundColor: theme.elevation.e0,
-        flex: 1,
-        flexDirection: 'row'
-      }}
-      testID="shell-window"
-    >
-      {/*
+    /*
+      Both doors to Boards are inside this tree — the (…) in the sidebar and the
+      row in Settings' overlay — and both ask the host rather than rendering a
+      board in whichever narrow box they happen to occupy. The compact shell
+      provides no host, which is how a phone keeps the stacked page it had.
+    */
+    <BoardsHost open={openBoards}>
+      <View
+        style={{
+          backgroundColor: theme.elevation.e0,
+          flex: 1,
+          flexDirection: 'row'
+        }}
+        testID="shell-window"
+      >
+        {/*
         The rail and the sidebar are the same pane at two widths, and the same
         `BotsScreen` in two variants — see `SidebarRail` for why the rail is a
         variant rather than a component of its own. Flush left, full height, no
         rounding and no border of its own: the divider below is the only edge it
         has, which is what the reference draws.
       */}
-      <GlassSurface
-        contentStyle={{
-          borderWidth: 0,
-          flex: 1,
-          paddingBottom: insets.bottom,
-          paddingLeft: insets.left,
-          paddingTop: insets.top
-        }}
-        contentTestID="shell-sidebar-content"
-        radius={0}
-        shadow="none"
-        style={{ width: collapsed ? SIDEBAR_RAIL_WIDTH : sidebar }}
-        testID="shell-sidebar"
-        variant="panel"
-      >
-        {collapsed ? (
-          /*
+        <GlassSurface
+          contentStyle={{
+            borderWidth: 0,
+            flex: 1,
+            paddingBottom: insets.bottom,
+            paddingLeft: insets.left,
+            paddingTop: insets.top
+          }}
+          contentTestID="shell-sidebar-content"
+          radius={0}
+          shadow="none"
+          style={{ width: collapsed ? SIDEBAR_RAIL_WIDTH : sidebar }}
+          testID="shell-sidebar"
+          variant="panel"
+        >
+          {collapsed ? (
+            /*
             `onOpenBot` and `selectedBot` are handed to the rail as well, and they
             are not decoration: ⌘1…9 and ⌘↑/↓ are registered by this component in
             either variant, and without somewhere to send the chat they would fire
             into nothing. A shortcut that reports success and does nothing is the
             worst of the three possible behaviours.
           */
-          <BotsScreen
-            currentTab={section ?? 'chats'}
-            onOpenBot={(bot, options) => openBot(bot.name, options)}
-            onOpenConversations={bot => setConversations({ bot })}
-            onOpenSection={openSection}
-            onShowList={showList}
-            selectedBot={section === null ? selectedBot : undefined}
-            variant="rail"
-          />
-        ) : (
-          list
-        )}
+            <BotsScreen
+              currentTab={section ?? 'chats'}
+              onOpenBot={(bot, options) => openBot(bot.name, options)}
+              onOpenConversations={bot => setConversations({ bot })}
+              onOpenSection={openSection}
+              onShowList={showList}
+              selectedBot={section === null ? selectedBot : undefined}
+              variant="rail"
+            />
+          ) : (
+            list
+          )}
 
-        {/*
+          {/*
           The sidebar is dimmed too, and not interactive while an overlay is up.
 
           It used to be deliberately outside the scrim — "a different chat is one
@@ -349,41 +395,41 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
           nothing at all. Consulting Settings is one errand; the list is where you
           go when it is finished, which is one Escape away.
         */}
-        <PanelScrim onPress={() => setSection(null)} open={overlayOpen} radius={0} testID="overlay-scrim-sidebar" />
-      </GlassSurface>
+          <PanelScrim onPress={() => setSection(null)} open={overlayOpen} radius={0} testID="overlay-scrim-sidebar" />
+        </GlassSurface>
 
-      {/*
+        {/*
         The whole boundary between the two columns: one hairline, at the device's
         own smallest drawable width. Not a border on either pane — a border
         belongs to a shape, and neither of these is a shape any more.
       */}
-      <View style={{ backgroundColor: theme.hairline, width: StyleSheet.hairlineWidth }} testID="shell-divider" />
+        <View style={{ backgroundColor: theme.hairline, width: StyleSheet.hairlineWidth }} testID="shell-divider" />
 
-      <View style={{ flex: 1, minWidth: 0 }} testID="shell-content">
-        {/*
+        <View style={{ flex: 1, minWidth: 0 }} testID="shell-content">
+          {/*
           The chat column IS the wallpaper. Everything inside it reads a glass
           depth of 1, exactly as it did while this was a floating panel: without
           that the header and composer drop to a level-3 tint and `Screen` paints
           the wallpaper's own rung over the wallpaper.
         */}
-        <Wallpaper
-          /*
+          <Wallpaper
+            /*
             Measured for the overlay, which has to be this column's frame and not
             an arithmetic guess at it from the window's insets. See `OverlayPanel`
             — the guess was visibly wrong at the bottom of a Mac window.
           */
-          onLayout={event => setContentFrame(event.nativeEvent.layout)}
-          style={{ flex: 1 }}
-          testID="wallpaper"
-        >
-          <GlassDepthProvider value={1}>
-            {/*
+            onLayout={event => setContentFrame(event.nativeEvent.layout)}
+            style={{ flex: 1 }}
+            testID="wallpaper"
+          >
+            <GlassDepthProvider value={1}>
+              {/*
               A dead session is not a chat problem and must not read as one, so
               it takes the whole column rather than sitting under a chat error.
               `ChatScreen` does that itself now, on both layouts, so there is no
               second copy of the rule here to disagree with it.
             */}
-            {/*
+              {/*
               The chat column's sidebar control exists only while the list is
               SHOWING, and that is a decision rather than an oversight.
 
@@ -394,89 +440,102 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
               also settles the label: the header's is always Hide, the rail's is
               always Show, and neither has to describe a state the other is in.
             */}
-            <View
-              style={{
-                flex: 1,
-                paddingBottom: insets.bottom,
-                paddingRight: insets.right,
-                paddingTop: insets.top
-              }}
-              testID="shell-content-panel"
-            >
-              {/*
+              <View
+                style={{
+                  flex: 1,
+                  paddingBottom: insets.bottom,
+                  paddingRight: insets.right,
+                  paddingTop: insets.top
+                }}
+                testID="shell-content-panel"
+              >
+                {/*
                 One of the three, and the chat is the default. Early returns
                 rather than a navigator, which is the shape this shell already
                 uses for its panels: both columns stay mounted, so a stack would
                 have to be told twice what "back" means.
               */}
-              {conversations?.id ? (
-                <ConversationViewScreen
-                  botName={conversations.bot}
-                  onBack={() => setConversations({ bot: conversations.bot })}
-                  onOpenChat={openBot}
-                  storedId={conversations.id}
-                />
-              ) : conversations ? (
-                <ConversationsScreen
-                  botName={conversations.bot}
-                  onBack={() => setConversations(null)}
-                  onOpenConversation={(bot, id) => setConversations({ bot, id })}
-                />
-              ) : (
-                <ChatScreen
-                  bot={selectedBot}
-                  findText={findText}
-                  focusItemId={focusItemId}
-                  onOpenBot={openBot}
-                  onOpenConversation={(bot, id) => setConversations({ bot, id })}
-                  onOpenConversations={bot => setConversations({ bot })}
-                  onOpenCron={openCron}
-                  onToggleSidebar={collapsed ? undefined : toggleSidebar}
-                />
-              )}
-            </View>
+                {boards ? (
+                  /*
+                  Edge to edge in the column, which is 684pt on an 11" iPad in
+                  landscape beside a collapsed rail and more than 1000 on a Mac
+                  — past `WIDE_BOARD_PX` wherever the sidebar is not taking an
+                  unusual share of a small window. Below it the board stacks, as
+                  it always did, because the board asks its own `onLayout` and
+                  not the window.
+                */
+                  <KanbanScreen backLabel={titleFor(boards.from) || strings.tabs.chats} onClose={closeBoards} />
+                ) : conversations?.id ? (
+                  <ConversationViewScreen
+                    botName={conversations.bot}
+                    onBack={() => setConversations({ bot: conversations.bot })}
+                    onOpenChat={openBot}
+                    storedId={conversations.id}
+                  />
+                ) : conversations ? (
+                  <ConversationsScreen
+                    botName={conversations.bot}
+                    onBack={() => setConversations(null)}
+                    onOpenConversation={(bot, id) => setConversations({ bot, id })}
+                  />
+                ) : (
+                  <ChatScreen
+                    bot={selectedBot}
+                    findText={findText}
+                    focusItemId={focusItemId}
+                    onOpenBot={openBot}
+                    onOpenConversation={(bot, id) => setConversations({ bot, id })}
+                    onOpenConversations={bot => setConversations({ bot })}
+                    onOpenCron={openCron}
+                    onToggleSidebar={collapsed ? undefined : toggleSidebar}
+                  />
+                )}
+              </View>
 
-            {/*
+              {/*
               The chat's own dim, the last child of the chat column so it covers
               the header too. Tapping it closes one level, which is the answer
               Escape gives — `overlay-scrim` keeps its name because it is still the
               scrim a reader taps to dismiss the panel.
             */}
-            <PanelScrim onPress={() => setSection(null)} open={overlayOpen} radius={0} testID="overlay-scrim" />
-          </GlassDepthProvider>
-        </Wallpaper>
+              <PanelScrim onPress={() => setSection(null)} open={overlayOpen} radius={0} testID="overlay-scrim" />
+            </GlassDepthProvider>
+          </Wallpaper>
 
-        <OverlayPanel
-          {...(contentFrame ? { frame: contentFrame } : {})}
-          onClose={() => setSection(null)}
-          title={titleFor(section)}
-          visible={overlayOpen}
-        >
-          {section === 'activity' ? <ActivityScreen onOpenBot={openBot} /> : null}
-          {section === 'cron' ? (
-            <CronScreen
-              {...(cronJobId ? { initialJobId: cronJobId } : {})}
-              {...(cronCreate ? { initialCreate: true } : {})}
-              // Remounted per intent, so opening `+` twice opens the editor
-              // twice: the screen decides on its first render whether the
-              // editor is up, and a live screen would ignore the second press.
-              key={cronCreate ? 'cron-create' : 'cron'}
-            />
-          ) : null}
-          {section === 'settings' ? <SettingsScreen {...(initial?.page ? { initialPage: initial.page } : {})} /> : null}
-        </OverlayPanel>
-      </View>
+          <OverlayPanel
+            {...(contentFrame ? { frame: contentFrame } : {})}
+            onClose={() => setSection(null)}
+            title={titleFor(section)}
+            visible={overlayOpen}
+          >
+            {section === 'activity' ? <ActivityScreen onOpenBot={openBot} /> : null}
+            {section === 'cron' ? (
+              <CronScreen
+                {...(cronJobId ? { initialJobId: cronJobId } : {})}
+                {...(cronCreate ? { initialCreate: true } : {})}
+                // Remounted per intent, so opening `+` twice opens the editor
+                // twice: the screen decides on its first render whether the
+                // editor is up, and a live screen would ignore the second press.
+                key={cronCreate ? 'cron-create' : 'cron'}
+              />
+            ) : null}
+            {section === 'settings' ? (
+              <SettingsScreen {...(initial?.page ? { initialPage: initial.page } : {})} />
+            ) : null}
+          </OverlayPanel>
+        </View>
 
-      {/*
+        {/*
         Over BOTH columns rather than inside the content one, because it stands in
         for the sidebar and therefore starts at the window's own leading edge. It
         is the last child so that Escape reaches it before the destination panel
         when both are up — the stack delivers to whatever registered last.
       */}
-      <SidebarOverlay onClose={() => setListOverlay(false)} visible={listOverlay} width={sidebar}>
-        {listOverlay ? list : null}
-      </SidebarOverlay>
-    </View>
+        <SidebarOverlay onClose={() => setListOverlay(false)} visible={listOverlay} width={sidebar}>
+          {listOverlay ? list : null}
+        </SidebarOverlay>
+      </View>
+    </BoardsHost>
   )
 }
 
