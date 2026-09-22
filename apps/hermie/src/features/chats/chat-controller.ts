@@ -21,6 +21,7 @@
  * cron job delivering into it.
  */
 import { assertDesktopContract, type ConnectionStatus, type GatewayHttp } from '@hermie/gateway-client'
+import { hasPluginCapability, PLUGIN_CAPABILITIES } from '@hermie/gateway-client/plugin'
 import {
   applySubagentSnapshot,
   type ChatState,
@@ -56,6 +57,7 @@ import type { ChatCache } from '../../platform/chat-cache'
 import type { Bot, BotCanonicalSession, BotsState } from '../../store/bots'
 import type { ChatsState, QueuedMessage } from '../../store/chats'
 import { liveChatNames } from '../../store/chats'
+import { usePluginStore } from '../../store/plugin'
 import {
   type BotsController,
   CANONICAL_CHAT_TITLE,
@@ -79,6 +81,7 @@ import {
   type UploadedFile,
   withFileReferences
 } from './file-upload'
+import { claimTurn } from './turn-claim'
 
 /** Above this many rows, `session.history` is a download; the REST tail is not. */
 export const REST_HISTORY_THRESHOLD = 400
@@ -1407,6 +1410,16 @@ export class ChatController {
    * which needs a fixed point in the transcript to tell the reply to its own
    * prompt apart from the reply that was already there — see
    * `features/intents/await-reply.ts`.
+   *
+   * ## The turn claim
+   *
+   * This is also the ONLY road to `prompt.submit` — a slash command goes to
+   * `slash.exec` from the screen directly and never reaches this method, and a
+   * steer folds into a turn already running through `steerQueued` — so it is the
+   * one place a claim belongs. When the plugin advertises `context.turn_claim`,
+   * `claimTurn` is awaited right before the submit it is claiming, on the exact
+   * runtime id that submit is about to carry; see `turn-claim.ts` for why it can
+   * never fail the send that follows it.
    */
   async send(
     botName: string,
@@ -1454,6 +1467,10 @@ export class ChatController {
           content_base64: file.base64,
           filename: file.filename
         })
+      }
+
+      if (this.http && hasPluginCapability(usePluginStore.getState().advert, PLUGIN_CAPABILITIES.contextTurnClaim)) {
+        await claimTurn(this.http, sessionId)
       }
 
       const result = await this.gateway.request('prompt.submit', {

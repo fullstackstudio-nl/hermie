@@ -210,6 +210,18 @@ export interface FakeGatewayOptions {
    */
   profileDisplayName?: 'on' | 'forbidden' | 'absent'
   /**
+   * Whether the plugin's turn-claim route is there.
+   *
+   * `POST /api/plugins/hermie/context/turn` is the courtesy call the app makes
+   * right before `prompt.submit` starts a turn, naming which bot is about to
+   * speak on a gateway a plugin watches from the outside. Default true — the
+   * capability is advertised and the route claims a live runtime session.
+   * `false` drops the capability from the advert AND answers 404, staging a
+   * plugin that predates the route, the same shape `profileDisplayName:
+   * 'absent'` stages for the display-name route.
+   */
+  turnClaim?: boolean
+  /**
    * Answer every request with a 301 to this origin instead of serving it.
    *
    * Staged because of a cache, not because a gateway does this. The iOS URL
@@ -1168,6 +1180,7 @@ export const PLUGIN_ADVERT: Record<string, unknown> = {
   capabilities: [
     'context.per_bot',
     'context.system_prompt',
+    'context.turn_claim',
     'push.expo',
     'push.mute',
     'push.preview',
@@ -1199,15 +1212,19 @@ export const PLUGIN_ADVERT: Record<string, unknown> = {
 /** `profiles.display_name`, which `--profile-display-name absent` takes away. */
 const DISPLAY_NAME_CAPABILITY = 'profiles.display_name'
 
+/** `context.turn_claim`, which `turnClaim: false` takes away. */
+const TURN_CLAIM_CAPABILITY = 'context.turn_claim'
+
 /**
  * The advert this gateway serves, or `null` when it has no plugin.
  *
  * One reader for the `ui_meta` key and for the plugin's own routes, so a
  * capability a route refuses to honour cannot also be advertised by accident —
  * which is the one inconsistency a fake can have that a real gateway cannot.
- * `profileDisplayName: 'absent'` filters the string out of whichever advert is
- * in play, including one a test passed in itself: a plugin that does not have
- * the route does not advertise it, whoever wrote the rest of the advert.
+ * `profileDisplayName: 'absent'` and `turnClaim: false` each filter their own
+ * string out of whichever advert is in play, including one a test passed in
+ * itself: a plugin that does not have a route does not advertise it, whoever
+ * wrote the rest of the advert.
  */
 function advertOf(options: FakeGatewayOptions): Record<string, unknown> | null {
   if (options.plugin === false) {
@@ -1215,15 +1232,24 @@ function advertOf(options: FakeGatewayOptions): Record<string, unknown> | null {
   }
 
   const advert = (options.plugin ?? PLUGIN_ADVERT) as Record<string, unknown>
+  const drop = new Set<string>()
 
-  if (options.profileDisplayName !== 'absent') {
+  if (options.profileDisplayName === 'absent') {
+    drop.add(DISPLAY_NAME_CAPABILITY)
+  }
+
+  if (options.turnClaim === false) {
+    drop.add(TURN_CLAIM_CAPABILITY)
+  }
+
+  if (drop.size === 0) {
     return advert
   }
 
   return {
     ...advert,
     capabilities: (Array.isArray(advert.capabilities) ? advert.capabilities : []).filter(
-      entry => entry !== DISPLAY_NAME_CAPABILITY
+      entry => typeof entry !== 'string' || !drop.has(entry)
     )
   }
 }
@@ -3632,6 +3658,12 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       return
     }
 
+    if (path === '/api/plugins/hermie/context/turn' && method === 'POST') {
+      await handleTurnClaim(req, res)
+
+      return
+    }
+
     if (path.startsWith('/api/plugins/')) {
       await handleMemory(req, res, path, method, url.searchParams)
 
@@ -4647,6 +4679,56 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
     */
     profile.display_name = wanted
     json(res, 200, { name: profile.name, display_name: wanted })
+  }
+
+  /**
+   * `POST /api/plugins/hermie/context/turn` — which bot is about to speak.
+   *
+   * `context.turn_claim`'s whole job: the app calls this right before
+   * `prompt.submit` starts a turn, naming the RUNTIME session id that call is
+   * about to carry, so a plugin watching a shared gateway from the outside can
+   * tag whatever comes next with the sender it was told rather than guessing.
+   * A slash command and a steer never reach this — see `chat-controller.ts`'s
+   * `send` — so this route has no opinion about either.
+   *
+   * Three answers:
+   *
+   *  - **204** — claimed. No body: there is nothing to report back.
+   *  - **404** — the plugin predates the route (`turnClaim: false`), or
+   *    `session_id` does not name a live runtime session. The same status for
+   *    both, deliberately: a client that gets this is meant to submit anyway
+   *    rather than treat a claim as a precondition of the turn it names.
+   *  - **415** — the body was not sent as JSON.
+   */
+  async function handleTurnClaim(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const advert = advertOf(options)
+
+    if (!advert || options.turnClaim === false) {
+      json(res, 404, { detail: 'No route for POST /api/plugins/hermie/context/turn' })
+
+      return
+    }
+
+    const contentType = String(req.headers['content-type'] ?? '').toLowerCase()
+
+    if (!contentType.includes('application/json')) {
+      json(res, 415, { detail: 'Content-Type must be application/json.' })
+
+      return
+    }
+
+    const body = await readBody(req)
+    const sessionId = String(body.session_id ?? '').trim()
+    const session = sessionId ? findByRuntimeId(sessionId) : undefined
+
+    if (!session) {
+      json(res, 404, { detail: `No live session '${sessionId}'.` })
+
+      return
+    }
+
+    res.writeHead(204)
+    res.end()
   }
 
   async function handleFileUpload(req: IncomingMessage, res: ServerResponse): Promise<void> {

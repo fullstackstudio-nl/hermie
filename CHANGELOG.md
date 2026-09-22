@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The app tells the plugin which bot is sending, right before its turn starts.** A plugin
+  watching a shared gateway's transcript from the outside never sees `prompt.submit`'s own
+  profile field, so it had no way to say who was actually speaking. Where the plugin offers a
+  route for it, a normal message and a queued message drained behind a finished turn each name
+  the runtime session first; a slash command and a message steered into a turn already running
+  never do, since neither one opens a turn of its own. A claim that does not land — an older
+  plugin, a slow one, anything short of success — never delays or blocks the send: the turn goes
+  out either way.
+
 - **A bot's display name reaches the gateway, where the plugin offers a route for it.** Core's own
   `PATCH /api/profiles/{name}` renames the profile instead of writing a display name, so the name
   used to stay on this device alone and every other client on the gateway kept seeing the old one.

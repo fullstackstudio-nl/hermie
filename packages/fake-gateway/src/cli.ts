@@ -16,6 +16,7 @@ const { values } = parseArgs({
     'history-rows': { type: 'string' },
     'no-plugin': { type: 'boolean', default: false },
     'profile-display-name': { type: 'string' },
+    'no-turn-claim': { type: 'boolean', default: false },
     host: { type: 'string', default: '127.0.0.1' },
     help: { type: 'boolean', default: false }
   }
@@ -41,6 +42,8 @@ if (values.help) {
       '  --profile-display-name on|forbidden|absent  what the plugin’s display-name route does',
       '                          (default on). `absent` also drops the capability, staging a',
       '                          plugin older than the route; `forbidden` answers 403',
+      '  --no-turn-claim         drop the `context.turn_claim` capability and answer 404 on its',
+      '                          route, staging a plugin older than turn claims',
       '',
       'Prompts steer the built-in scenario: "approve" raises an approval request,',
       '"delegate" fans out subagent events, anything else streams a reply with a tool call.',
@@ -85,7 +88,8 @@ const gateway = await startFakeGateway({
   ...(values['history-rows'] ? { historyRows: Number.parseInt(values['history-rows'], 10) } : {}),
   ...(scenario ? { scenario } : {}),
   ...(values['no-plugin'] ? { plugin: false as const } : {}),
-  ...(displayName ? { profileDisplayName: displayName } : {})
+  ...(displayName ? { profileDisplayName: displayName } : {}),
+  ...(values['no-turn-claim'] ? { turnClaim: false as const } : {})
 })
 
 console.log(`fake gateway listening on ${gateway.url} (auth: ${auth})`)

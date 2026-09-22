@@ -214,6 +214,142 @@ describe('/api/plugins/hermie/profiles — the plugin’s display-name route', (
   })
 })
 
+/**
+ * `POST /api/plugins/hermie/context/turn` — the plugin's turn-claim route.
+ *
+ * Not an upstream shape either: like the display-name route, this one belongs
+ * to the plugin and exists to fill a gap core leaves open. `prompt.submit`
+ * carries a `profile` on the socket, but a plugin watching a shared gateway's
+ * transcript from the OUTSIDE never sees that field, so it had no way to say
+ * which bot was actually sending. The app calls this route right before the
+ * `prompt.submit` it is claiming, naming the RUNTIME session id that call is
+ * about to carry.
+ */
+describe('/api/plugins/hermie/context/turn — the plugin’s turn-claim route', () => {
+  let live: FakeGateway
+  let socket: WebSocket
+  let nextId = 0
+
+  const pending = new Map<number, (value: Record<string, unknown>) => void>()
+
+  const call = (method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> => {
+    const id = ++nextId
+
+    return new Promise(resolve => {
+      pending.set(id, resolve)
+      socket.send(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`)
+    })
+  }
+
+  const claim = async (
+    body: unknown,
+    headers: Record<string, string> = { 'content-type': 'application/json' }
+  ): Promise<Response> =>
+    fetch(`${live.url}/api/plugins/hermie/context/turn`, {
+      method: 'POST',
+      headers,
+      ...(body === undefined ? {} : { body: JSON.stringify(body) })
+    })
+
+  const advertOf = async (gateway: FakeGateway): Promise<{ capabilities?: string[] } | undefined> => {
+    const roster = (await fetch(`${gateway.url}/api/profiles`).then(response => response.json())) as {
+      profiles: { ui_meta?: Record<string, { capabilities?: string[] }> }[]
+    }
+
+    return roster.profiles.map(row => row.ui_meta?.['hermie-plugin']).find(Boolean)
+  }
+
+  /** A real runtime session id, the same shape `session.resume` hands the app. */
+  const liveRuntimeId = async (profile: string): Promise<string> => {
+    const listed = await call('session.list', { profile, title: 'Bot Chat', include_hidden: true })
+    const chat = ((listed.result as { sessions: Record<string, unknown>[] }).sessions[0] ?? {}) as Record<
+      string,
+      unknown
+    >
+    const resumed = await call('session.resume', { session_id: String(chat.id), omit_messages: true })
+
+    return String((resumed.result as { session_id: string }).session_id)
+  }
+
+  beforeAll(async () => {
+    live = await startFakeGateway({ port: 0 })
+    socket = new WebSocket(live.wsUrl, ['hermes-gateway-v1'])
+
+    socket.on('message', data => {
+      for (const line of String(data).split('\n')) {
+        if (!line.trim()) {
+          continue
+        }
+
+        const frame = JSON.parse(line) as Record<string, unknown>
+        const id = typeof frame.id === 'number' ? frame.id : null
+        const waiter = id === null ? undefined : pending.get(id)
+
+        if (waiter && id !== null) {
+          pending.delete(id)
+          waiter(frame)
+        }
+      }
+    })
+
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', () => resolve())
+      socket.once('error', reject)
+    })
+  })
+
+  afterAll(async () => {
+    socket.close()
+    await live.close()
+  })
+
+  it('claims a live runtime session with a bare 204', async () => {
+    const runtime = await liveRuntimeId('researcher')
+    const response = await claim({ session_id: runtime })
+
+    expect(response.status).toBe(204)
+    expect(await response.text()).toBe('')
+  })
+
+  it('answers 404 for a session id nobody holds', async () => {
+    const response = await claim({ session_id: 'not-a-live-runtime-id' })
+
+    expect(response.status).toBe(404)
+  })
+
+  it('answers 415 when the body is not sent as JSON', async () => {
+    const response = await claim({ session_id: 'whatever' }, { 'content-type': 'text/plain' })
+
+    expect(response.status).toBe(415)
+  })
+
+  it('advertises the capability on a gateway that has the route', async () => {
+    expect((await advertOf(live))?.capabilities).toContain('context.turn_claim')
+  })
+
+  it('answers 404 and advertises nothing when the plugin predates turn claims', async () => {
+    const absent = await startFakeGateway({ port: 0, turnClaim: false })
+
+    try {
+      const response = await fetch(`${absent.url}/api/plugins/hermie/context/turn`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ session_id: 'whatever' })
+      })
+
+      expect(response.status).toBe(404)
+
+      const advert = await advertOf(absent)
+
+      expect(advert?.capabilities).not.toContain('context.turn_claim')
+      // The rest of the advert is untouched: only this one string goes.
+      expect(advert?.capabilities).toContain('memory.browse')
+    } finally {
+      await absent.close()
+    }
+  })
+})
+
 describe('/api/plugins/hermie/memory — the plugin’s dashboard/plugin_api.py', () => {
   /*
     Pinned against the PLUGIN's own tests (`tests/test_memory.py`,

@@ -56,6 +56,18 @@ export const PLUGIN_CAPABILITIES = {
   contextPrompt: 'context.system_prompt',
   contextPerBot: 'context.per_bot',
   /**
+   * The plugin will take a claim naming which bot is about to submit a turn.
+   *
+   * `POST /api/plugins/hermie/context/turn` exists for a gateway shared by more
+   * than one client: the socket carries a `profile` on `prompt.submit` already,
+   * but a plugin watching the transcript from the OUTSIDE has no way to read
+   * that field, so a shared chat's bot could not say who was actually sending.
+   * The claim is a courtesy call the app makes right before the turn starts —
+   * never for a slash command, which is not a turn, and never for a steer,
+   * which folds into a turn already claimed.
+   */
+  contextTurnClaim: 'context.turn_claim',
+  /**
    * The plugin reads `hermie-app:<user_id>` as well as the bare key.
    *
    * It gates only the PUSH half. The arrangement moves to the per-person key
